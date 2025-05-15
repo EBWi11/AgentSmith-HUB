@@ -1,101 +1,106 @@
 package common
 
 import (
-	"bytes"
 	"github.com/bytedance/sonic"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
-func StringsJoin(strList []string) string {
-	var buffer bytes.Buffer
-
-	strListLen := len(strList)
-
-	for i := 0; i < strListLen; i++ {
-		buffer.WriteString(strList[i])
+// StringToList splits a string by '.' and returns a string slice.
+// If the input is empty, returns an empty slice.
+func StringToList(str string) []string {
+	if str == "" {
+		return []string{}
 	}
-
-	return buffer.String()
+	return strings.Split(str, ".")
 }
 
+// UrlValueToMap converts url.Values (map[string][]string) to map[string]interface{}.
+// Joins multiple values into a single string.
 func UrlValueToMap(data map[string][]string) map[string]interface{} {
-	res := make(map[string]interface{})
+	res := make(map[string]interface{}, len(data))
 	for k, v := range data {
-		tmpV := StringsJoin(v)
-		res[k] = tmpV
+		res[k] = strings.Join(v, "")
 	}
 	return res
 }
 
+// AnyToString converts various types to their string representation.
+// Supports string, int, bool, float64, int64, and falls back to JSON for others.
 func AnyToString(tmp interface{}) string {
-	res := ""
-	if value, ok := tmp.(string); ok {
-		res = value
-	} else if value, ok := tmp.(int); ok {
-		res = strconv.Itoa(value)
-	} else if value, ok := tmp.(bool); ok {
-		res = strconv.FormatBool(value)
-	} else if value, ok := tmp.(float64); ok {
-		res = strconv.FormatFloat(value, 'f', -1, 64)
-	} else if value, ok := tmp.(int64); ok {
-		res = strconv.FormatInt(value, 10)
-	} else {
+	switch value := tmp.(type) {
+	case string:
+		return value
+	case int:
+		return strconv.Itoa(value)
+	case bool:
+		return strconv.FormatBool(value)
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case int64:
+		return strconv.FormatInt(value, 10)
+	default:
+		// Marshal to JSON string for unsupported types
 		resBytes, _ := sonic.Marshal(tmp)
-		res = string(resBytes)
+		return string(resBytes)
 	}
-
-	return res
 }
 
+// GetCheckData traverses a nested map[string]interface{} using a key path (checkKeyList).
+// Returns the string value and whether it exists.
+// Handles map, slice, JSON string, and URL query string as intermediate nodes.
 func GetCheckData(data map[string]interface{}, checkKeyList []string) (res string, exist bool) {
 	tmp := data
 	res = ""
 	keyListLen := len(checkKeyList) - 1
 	for i, k := range checkKeyList {
 		tmpRes, ok := tmp[k]
-		if tmpRes != nil {
-			if keyListLen != i {
-				if value, ok := tmpRes.(map[string]interface{}); ok {
-					tmp = value
-				} else if value, ok := tmpRes.([]interface{}); ok {
-					tmp_map_for_list := make(map[string]interface{})
-					for i, v := range value {
-						tmp_key := "#_" + strconv.Itoa(i)
-						tmp_map_for_list[tmp_key] = v
-					}
-					tmp = tmp_map_for_list
-				} else if value, ok := tmpRes.(string); ok {
-					jsonFlage := false
-					if strings.Contains(value, ":") || strings.Contains(value, "{") || strings.Contains(value, "[") {
-						tmpValue := make(map[string]interface{})
-						err := sonic.Unmarshal([]byte(value), &tmpValue)
-						if err == nil {
-							tmp = tmpValue
-							jsonFlage = true
-						}
-					}
-					if !jsonFlage {
-						tmpValue, err := url.ParseQuery(value)
-						if err == nil {
-							tmp = UrlValueToMap(tmpValue)
-						}
+		if !ok || tmpRes == nil {
+			// Key not found or value is nil
+			return "", false
+		}
+		if i != keyListLen {
+			switch value := tmpRes.(type) {
+			case map[string]interface{}:
+				// Continue traversing nested map
+				tmp = value
+			case []interface{}:
+				// Convert slice to map with index keys
+				tmpMapForList := make(map[string]interface{}, len(value))
+				for idx, v := range value {
+					tmpKey := "#_" + strconv.Itoa(idx)
+					tmpMapForList[tmpKey] = v
+				}
+				tmp = tmpMapForList
+			case string:
+				// Try to parse as JSON if it looks like JSON
+				if (strings.Contains(value, ":") || strings.Contains(value, "{") || strings.Contains(value, "[")) && len(value) > 2 {
+					tmpValue := make(map[string]interface{})
+					if err := sonic.Unmarshal([]byte(value), &tmpValue); err == nil {
+						tmp = tmpValue
+						continue
 					}
 				}
-			} else if keyListLen == i {
-				res = AnyToString(tmpRes)
-				exist = true
+				// Try to parse as URL query string
+				if tmpValue, err := url.ParseQuery(value); err == nil {
+					tmp = UrlValueToMap(tmpValue)
+					continue
+				}
+				// Not a traversable structure
+				return "", false
+			default:
+				// Unsupported type for traversal
+				return "", false
 			}
-		} else if ok {
-			return "", true
 		} else {
-			return "", false
+			// Last key, convert value to string
+			res = AnyToString(tmpRes)
+			exist = true
 		}
 	}
 	if res == "" {
 		return "", exist
-	} else {
-		return res, exist
 	}
+	return res, exist
 }

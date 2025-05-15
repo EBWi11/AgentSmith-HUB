@@ -5,212 +5,209 @@ import (
 	"strings"
 )
 
-func END(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func END(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return strings.HasSuffix(ori_data, check_data), check_data
+	return strings.HasSuffix(data, ruleData), ruleData
 }
 
-func START(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func START(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return strings.HasPrefix(ori_data, check_data), check_data
+	return strings.HasPrefix(data, ruleData), ruleData
 }
 
-func NEND(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NEND(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return !strings.HasSuffix(ori_data, check_data), check_data
+	return !strings.HasSuffix(data, ruleData), ruleData
 }
 
-func NSTART(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NSTART(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return !strings.HasPrefix(ori_data, check_data), check_data
+	return !strings.HasPrefix(data, ruleData), ruleData
 }
 
-func INCL(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func INCL(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
-	return strings.Contains(ori_data, check_data), check_data
+	return strings.Contains(data, ruleData), ruleData
 }
 
-func NI(ori_data string, check_data string) (res bool, hitData string) {
-	if ori_data == "" {
+func NI(data string, ruleData string) (res bool, hitData string) {
+	if data == "" {
 		return true, ""
 	}
-	return !strings.Contains(ori_data, check_data), check_data
+	return !strings.Contains(data, ruleData), ruleData
 }
 
-func NCS_END(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NCS_END(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return strings.HasSuffix(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return strings.HasSuffix(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-func NCS_START(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NCS_START(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return strings.HasPrefix(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return strings.HasPrefix(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-func NCS_NEND(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NCS_NEND(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return !strings.HasSuffix(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return !strings.HasSuffix(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-func NCS_NSTART(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NCS_NSTART(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
 
-	return !strings.HasPrefix(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return !strings.HasPrefix(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-func NCS_INCL(ori_data string, check_data string) (res bool, hitData string) {
-	if check_data == "" {
-		return true, check_data
+func NCS_INCL(data string, ruleData string) (res bool, hitData string) {
+	if ruleData == "" {
+		return true, ruleData
 	}
 
-	if ori_data == "" {
+	if data == "" {
 		return false, ""
 	}
-	return strings.Contains(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return strings.Contains(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-// NI Not Include，判断是否不包含特定字符
-func NCS_NI(ori_data string, check_data string) (res bool, hitData string) {
-	if ori_data == "" {
+func NCS_NI(data string, ruleData string) (res bool, hitData string) {
+	if data == "" {
 		return true, ""
 	}
-	return !strings.Contains(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+	return !strings.Contains(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }
 
-// MT More than，判断是否大于
-func MT(ori_data string, check_data string) (res bool, hitData string) {
-	ori_int, err := strconv.ParseFloat(ori_data, 64)
+func MT(data string, ruleData string) (res bool, hitData string) {
+	ori_int, err := strconv.ParseFloat(data, 64)
 	if err != nil {
 		return false, ""
 	}
-	check_int, err := strconv.ParseFloat(check_data, 64)
+	check_int, err := strconv.ParseFloat(ruleData, 64)
 	if err != nil {
 		return false, ""
 	}
 
 	if ori_int > check_int {
-		return true, check_data
+		return true, ruleData
 	} else {
 		return false, ""
 	}
 }
 
-// LT Less than，判断是否小于
-func LT(ori_data string, check_data string) (res bool, hitData string) {
-	ori_int, err := strconv.ParseFloat(ori_data, 64)
+func LT(data string, ruleData string) (res bool, hitData string) {
+	ori_int, err := strconv.ParseFloat(data, 64)
 	if err != nil {
 		return false, ""
 	}
-	check_int, err := strconv.ParseFloat(check_data, 64)
+	check_int, err := strconv.ParseFloat(ruleData, 64)
 	if err != nil {
 		return false, ""
 	}
 
 	if ori_int < check_int {
-		return true, check_data
+		return true, ruleData
 	} else {
 		return false, ""
 	}
 }
 
-func REGEX(ori_data string, regexCompile *regexp.Regex) (res bool, hitData string) {
-	start, end, tmp_res := regexCompile.Find(ori_data)
-	if tmp_res {
-		return true, ori_data[start:end]
+//func REGEX(data string, regexCompile *regexp.Regex) (res bool, hitData string) {
+//	start, end, tmp_res := regexCompile.Find(data)
+//	if tmp_res {
+//		return true, data[start:end]
+//	} else {
+//		return false, ""
+//	}
+//}
+
+func ISNULL(data string) (res bool, hitData string) {
+	if data == "" {
+		return true, data
 	} else {
 		return false, ""
 	}
 }
 
-func ISNULL(ori_data string) (res bool, hitData string) {
-	if ori_data == "" {
-		return true, ori_data
-	} else {
+func NOTNULL(data string) (res bool, hitData string) {
+	if strings.TrimSpace(data) == "" {
 		return false, ""
+	} else {
+		return true, data
 	}
 }
 
-func NOTNULL(ori_data string) (res bool, hitData string) {
-	if strings.TrimSpace(ori_data) == "" {
-		return false, ""
-	} else {
-		return true, ori_data
-	}
+func EQU(data string, ruleData string) (res bool, hitData string) {
+	return strings.EqualFold(data, ruleData), data
 }
 
-func EQU(ori_data string, check_data string) (res bool, hitData string) {
-	return strings.EqualFold(ori_data, check_data), ori_data
+func NEQ(data string, ruleData string) (res bool, hitData string) {
+	return !strings.EqualFold(data, ruleData), ruleData
 }
 
-func NEQ(ori_data string, check_data string) (res bool, hitData string) {
-	return !strings.EqualFold(ori_data, check_data), check_data
+func NCS_EQU(data string, ruleData string) (res bool, hitData string) {
+	return strings.EqualFold(strings.ToLower(data), strings.ToLower(ruleData)), data
 }
 
-func NCS_EQU(ori_data string, check_data string) (res bool, hitData string) {
-	return strings.EqualFold(strings.ToLower(ori_data), strings.ToLower(check_data)), ori_data
-}
-
-func NCS_NEQ(ori_data string, check_data string) (res bool, hitData string) {
-	return !strings.EqualFold(strings.ToLower(ori_data), strings.ToLower(check_data)), check_data
+func NCS_NEQ(data string, ruleData string) (res bool, hitData string) {
+	return !strings.EqualFold(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
 }

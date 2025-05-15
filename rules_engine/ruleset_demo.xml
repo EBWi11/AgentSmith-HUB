@@ -1,6 +1,6 @@
 <root ruleset_id="test1" ruleset_name="test1" type="C">
     <rule id="reverse_shell_01" name="反弹shell检测" author="test">
-        <filter field="data_type">42</filter>
+        <filter field="data_type">59</filter>
         <checklist condition="node1 and node2">
             <node id="a" type="INCL" field="data" logic="or" delimiter="|">
                 <![CDATA[_$test1|test2]]>
