@@ -24,16 +24,17 @@ type Ruleset struct {
 
 // Rule represents a single rule with its logic and metadata.
 type Rule struct {
-	ID           string    `xml:"id,attr"`
-	Name         string    `xml:"name,attr"`
-	Author       string    `xml:"author,attr"`
-	Filter       Filter    `xml:"filter"`
-	Checklist    Checklist `xml:"checklist"`
-	ChecklistLen int
-	Threshold    Threshold  `xml:"threshold"`
-	Appends      []Append   `xml:"append"`
-	Del          string     `xml:"del"`
-	DelList      [][]string // parsed field path
+	ID             string    `xml:"id,attr"`
+	Name           string    `xml:"name,attr"`
+	Author         string    `xml:"author,attr"`
+	Filter         Filter    `xml:"filter"`
+	Checklist      Checklist `xml:"checklist"`
+	ChecklistLen   int
+	ThresholdCheck bool
+	Threshold      Threshold  `xml:"threshold"`
+	Appends        []Append   `xml:"append"`
+	Del            string     `xml:"del"`
+	DelList        [][]string // parsed field path
 }
 
 // Filter defines the field and value for rule filtering.
@@ -64,7 +65,8 @@ type CheckNodes struct {
 
 // Threshold defines aggregation and counting logic for a rule.
 type Threshold struct {
-	GroupBy        string   `xml:"group_by,attr"`
+	GroupBy        string `xml:"group_by,attr"`
+	GroupByList    map[string][]string
 	Range          string   `xml:"range,attr"`
 	LocalCache     string   `xml:"local_cache,attr"`
 	CountType      string   `xml:"count_type,attr"`
@@ -122,13 +124,48 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 		}
 
+		if rule.Threshold.GroupBy == "" && rule.Threshold.Range == "" && rule.Threshold.Value == 0 {
+			rule.ThresholdCheck = false
+		} else {
+			if rule.Threshold.GroupBy == "" {
+				return errors.New("THRESHOLD GROUPBY CANNOT BE EMPTY")
+			}
+			if rule.Threshold.Range == "" {
+				return errors.New("THRESHOLD RANGE CANNOT BE EMPTY")
+			}
+			if rule.Threshold.Value == 0 {
+				return errors.New("THRESHOLD RANGE CANNOT BE EMPTY")
+			}
+
+			if !(rule.Threshold.CountType == "" || rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY") {
+				return errors.New("THRESHOLD COUNT TYPE MUST BE SUM OR CLASSIFY")
+			}
+
+			if rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY" {
+				if rule.Threshold.CountField == "" {
+					return errors.New("THRESHOLD COUNT FIELD CANNOT BE EMPTY")
+				} else {
+					// Parse threshold count field path
+					rule.Threshold.CountFieldList = common.StringToList(strings.TrimSpace(rule.Threshold.CountField))
+				}
+			}
+
+			rule.ThresholdCheck = true
+		}
+
+		thresholdGroupBYList := strings.Split(strings.TrimSpace(rule.Threshold.GroupBy), ",")
+		rule.Threshold.GroupByList = make(map[string][]string, len(thresholdGroupBYList))
+		for i := range thresholdGroupBYList {
+			tmpList := common.StringToList(thresholdGroupBYList[i])
+			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = make([]string, len(tmpList))
+			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = tmpList
+		}
+
 		// Precompute checklist length for fast access
 		rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1
 
 		// Parse filter field path
-		rule.Filter.FieldList = common.StringToList(rule.Filter.Field)
-		// Parse threshold count field path
-		rule.Threshold.CountFieldList = common.StringToList(rule.Threshold.CountField)
+		rule.Filter.FieldList = common.StringToList(strings.TrimSpace(rule.Filter.Field))
 
 		// Parse each node's field path and assign check function
 		for j := range rule.Checklist.CheckNodes {
@@ -192,7 +229,8 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 		}
 
-		delList := strings.Split(rule.Del, ",")
+		delList := strings.Split(strings.TrimSpace(rule.Del), ",")
+
 		rule.DelList = make([][]string, len(delList))
 		for i := range delList {
 			tmpList := common.StringToList(delList[i])

@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
+	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
@@ -45,7 +46,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 				checkNodeValueFromRaw = true
 			}
 
-			if "REGEX" == rule.Checklist.CheckNodes[checkIndex].Type {
+			switch rule.Checklist.CheckNodes[checkIndex].Type {
+			case "REGEX":
 				if !checkNodeValueFromRaw {
 					checkListFlag, _ = REGEX(needCheckData, rule.Checklist.CheckNodes[checkIndex].Regex)
 				} else {
@@ -56,7 +58,9 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 					}
 					checkListFlag, _ = REGEX(needCheckData, regex)
 				}
-			} else {
+			case "PLUGIN":
+				//todo
+			default:
 				checkListFlag, _ = rule.Checklist.CheckNodes[checkIndex].CheckFunc(needCheckData, checkNodeValue)
 			}
 
@@ -84,6 +88,17 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 			break
 		}
 
+		//threshold process
+		if rule.ThresholdCheck {
+			var groupByKey = ""
+			for k, v := range rule.Threshold.GroupByList {
+				tmpData, _ := GetCheckDataFromCache(engineCache, k, data, v)
+				groupByKey = groupByKey + tmpData
+			}
+			groupByKey = "FQ_" + b64.StdEncoding.EncodeToString([]byte(groupByKey))
+			fmt.Println(groupByKey)
+		}
+
 		//append process
 		for i := range rule.Appends {
 			tmpAppend := rule.Appends[i]
@@ -107,8 +122,4 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 		dataStr, _ := json.Marshal(data)
 		fmt.Println(string(dataStr))
 	}
-}
-
-func (r *Ruleset) checkListRun() {
-	// TODO: implement checklist logic
 }
