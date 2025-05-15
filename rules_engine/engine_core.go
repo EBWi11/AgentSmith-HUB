@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
+	"encoding/json"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
 	"strings"
@@ -29,6 +30,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 
 		//checklist process
 		checkIndex := 0
+		checkListRes := false
 		for checkIndex = range rule.Checklist.CheckNodes {
 			var checkListFlag = false
 			var needCheckData string
@@ -65,18 +67,45 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 		}
 
 		if rule.ChecklistLen == 0 {
-			fmt.Println("BINGO", rule.ID)
+			checkListRes = true
 		} else {
 			if r.IsDetection {
 				if checkIndex == rule.ChecklistLen {
-					fmt.Println("BINGO", rule.ID)
+					checkListRes = true
 				}
 			} else {
 				if checkIndex != rule.ChecklistLen {
-					fmt.Println("BINGO", rule.ID)
+					checkListRes = true
 				}
 			}
 		}
+
+		if !checkListRes {
+			break
+		}
+
+		//append process
+		for i := range rule.Appends {
+			tmpAppend := rule.Appends[i]
+			if tmpAppend.Type == "" {
+				appendData := tmpAppend.Value
+				if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
+					appendData = GetRuleValueFromRawFromCache(engineCache, tmpAppend.Value, data)
+				}
+
+				data[tmpAppend.FieldName] = appendData
+			} else {
+				//plugin
+			}
+		}
+
+		//del process
+		for i := range rule.DelList {
+			common.MapDel(data, rule.DelList[i])
+		}
+
+		dataStr, _ := json.Marshal(data)
+		fmt.Println(string(dataStr))
 	}
 }
 

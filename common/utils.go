@@ -3,14 +3,27 @@ package common
 import (
 	"github.com/bytedance/sonic"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
 )
 
-func GetPkgName() string {
-	type em struct{}
-	return reflect.TypeOf(em{}).PkgPath()
+func MapDel(data map[string]interface{}, key []string) {
+	tmpKey := []string{}
+	l := len(key) - 1
+	for i := range key {
+		if l != i {
+			if value, ok := data[key[i]].(map[string]interface{}); ok {
+				tmpKey = append(tmpKey, key[i])
+				data = value
+			} else {
+				delete(data, key[i])
+				break
+			}
+		} else {
+			delete(data, key[i])
+			break
+		}
+	}
 }
 
 func StringToList(checkKey string) []string {

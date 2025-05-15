@@ -12,7 +12,7 @@ func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkK
 	if ok {
 		return tmpRes.Data
 	} else {
-		checkKeyList := common.StringToList(checkKey[FROM_RAW_SYMBOL_LEN:])
+		checkKeyList := common.StringToList(checkKey[FromRawSymbolLen:])
 		res, exist := common.GetCheckData(data, checkKeyList)
 		cache[checkKey] = common.CheckCoreCache{
 			Exist: exist,
@@ -211,7 +211,7 @@ func REGEX(data string, regexCompile *regexp.Regex) (res bool, hitData string) {
 	}
 }
 
-func ISNULL(data string, ruleData string) (res bool, hitData string) {
+func ISNULL(data string, _ string) (res bool, hitData string) {
 	if data == "" {
 		return true, data
 	} else {
@@ -219,7 +219,7 @@ func ISNULL(data string, ruleData string) (res bool, hitData string) {
 	}
 }
 
-func NOTNULL(data string, ruleData string) (res bool, hitData string) {
+func NOTNULL(data string, _ string) (res bool, hitData string) {
 	if strings.TrimSpace(data) == "" {
 		return false, ""
 	} else {

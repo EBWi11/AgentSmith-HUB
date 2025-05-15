@@ -5,11 +5,14 @@ import (
 	"encoding/xml"
 	"errors"
 	regexp "github.com/BurntSushi/rure-go"
+	"strings"
 )
 
+// FromRawSymbol is the prefix indicating a value should be fetched from raw data.
 const FromRawSymbol = "_$"
-const FROM_RAW_SYMBOL_LEN = len(FromRawSymbol)
+const FromRawSymbolLen = len(FromRawSymbol)
 
+// Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
 	XMLName     xml.Name `xml:"root"`
 	RulesetID   string   `xml:"ruleset_id,attr"`
@@ -19,6 +22,7 @@ type Ruleset struct {
 	Rules       []Rule `xml:"rule"`
 }
 
+// Rule represents a single rule with its logic and metadata.
 type Rule struct {
 	ID           string    `xml:"id,attr"`
 	Name         string    `xml:"name,attr"`
@@ -26,57 +30,68 @@ type Rule struct {
 	Filter       Filter    `xml:"filter"`
 	Checklist    Checklist `xml:"checklist"`
 	ChecklistLen int
-	Threshold    Threshold `xml:"threshold"`
-	Appends      []Append  `xml:"append"`
-	Del          string    `xml:"del"`
+	Threshold    Threshold  `xml:"threshold"`
+	Appends      []Append   `xml:"append"`
+	Del          string     `xml:"del"`
+	DelList      [][]string // parsed field path
 }
 
+// Filter defines the field and value for rule filtering.
 type Filter struct {
 	Field     string   `xml:"field,attr"`
-	FieldList []string // 导出字段
+	FieldList []string // parsed field path
 	Value     string   `xml:",chardata"`
 }
 
+// Checklist contains the logical condition and nodes to check.
 type Checklist struct {
 	Condition  string       `xml:"condition,attr"`
 	CheckNodes []CheckNodes `xml:"node"`
 }
 
-type T interface{ string | *regexp.Regex }
-
+// CheckNodes represents a single check operation in a checklist.
 type CheckNodes struct {
-	ID   string `xml:"id,attr"`
-	Type string `xml:"type,attr"`
-	//not include REGEX
-	CheckFunc func(string, string) (bool, string)
-	Field     string   `xml:"field,attr"`
-	FieldList []string // 导出字段
-	Logic     string   `xml:"logic,attr"`
-	Delimiter string   `xml:"delimiter,attr"`
-	Value     string   `xml:",chardata"`
+	ID        string                              `xml:"id,attr"`
+	Type      string                              `xml:"type,attr"`
+	CheckFunc func(string, string) (bool, string) // function pointer for check logic
+	Field     string                              `xml:"field,attr"`
+	FieldList []string                            // parsed field path
+	Logic     string                              `xml:"logic,attr"`
+	Delimiter string                              `xml:"delimiter,attr"`
+	Value     string                              `xml:",chardata"`
 	Regex     *regexp.Regex
 }
 
+// Threshold defines aggregation and counting logic for a rule.
 type Threshold struct {
 	GroupBy        string   `xml:"group_by,attr"`
 	Range          string   `xml:"range,attr"`
 	LocalCache     string   `xml:"local_cache,attr"`
 	CountType      string   `xml:"count_type,attr"`
 	CountField     string   `xml:"count_field,attr"`
-	CountFieldList []string // 导出字段
+	CountFieldList []string // parsed field path
 	Value          int      `xml:",chardata"`
 }
 
+// Append defines additional fields to append after rule matching.
 type Append struct {
-	Type          string   `xml:"type,attr"`
-	FieldName     string   `xml:"field_name,attr"`
-	FieldNameList []string // 导出字段
-	Value         string   `xml:",chardata"`
+	Type      string `xml:"type,attr"`
+	FieldName string `xml:"field_name,attr"`
+	Value     string `xml:",chardata"`
 }
 
+// rulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
 func rulesetBuild(ruleset *Ruleset) error {
-	var err error
-	switch ruleset.Type {
+	// Validate required fields for ruleset
+	if strings.TrimSpace(ruleset.RulesetID) == "" {
+		return errors.New("RulesetID cannot be empty")
+	}
+	if strings.TrimSpace(ruleset.RulesetName) == "" {
+		return errors.New("RulesetName cannot be empty")
+	}
+
+	// Set detection mode based on type
+	switch strings.ToLower(strings.TrimSpace(ruleset.Type)) {
 	case "":
 		ruleset.IsDetection = true
 	case "detection":
@@ -84,11 +99,30 @@ func rulesetBuild(ruleset *Ruleset) error {
 	case "whitelist":
 		ruleset.IsDetection = false
 	default:
-		return errors.New(common.GetPkgName() + ": UNKNOWN RULESET TYPE, " + ruleset.Type)
+		return errors.New("UNKNOWN RULESET TYPE, " + ruleset.Type)
 	}
 
 	for i := range ruleset.Rules {
 		rule := &ruleset.Rules[i]
+
+		// Validate required fields for rule
+		if strings.TrimSpace(rule.ID) == "" {
+			return errors.New("RuleID cannot be empty")
+		}
+		if strings.TrimSpace(rule.Name) == "" {
+			return errors.New("RuleName cannot be empty")
+		}
+		if strings.TrimSpace(rule.Author) == "" {
+			return errors.New("rule author cannot be empty")
+		}
+
+		for j := range rule.Appends {
+			if rule.Appends[j].Type != "" && rule.Appends[j].Type != "PLUGIN" {
+				return errors.New("APPEND TYPE OR FIELD_NAME CANNOT BE EMPTY")
+			}
+		}
+
+		// Precompute checklist length for fast access
 		rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1
 
 		// Parse filter field path
@@ -96,67 +130,74 @@ func rulesetBuild(ruleset *Ruleset) error {
 		// Parse threshold count field path
 		rule.Threshold.CountFieldList = common.StringToList(rule.Threshold.CountField)
 
-		// Parse each node's field path in checklist
+		// Parse each node's field path and assign check function
 		for j := range rule.Checklist.CheckNodes {
-			rule.Checklist.CheckNodes[j].FieldList = common.StringToList(rule.Checklist.CheckNodes[j].Field)
+			node := &rule.Checklist.CheckNodes[j]
+			node.FieldList = common.StringToList(node.Field)
 
-			switch rule.Checklist.CheckNodes[j].Type {
+			switch strings.TrimSpace(node.Type) {
 			case "END":
-				rule.Checklist.CheckNodes[j].CheckFunc = END
+				node.CheckFunc = END
 			case "START":
-				rule.Checklist.CheckNodes[j].CheckFunc = START
+				node.CheckFunc = START
 			case "NEND":
-				rule.Checklist.CheckNodes[j].CheckFunc = NEND
+				node.CheckFunc = NEND
 			case "NSTART":
-				rule.Checklist.CheckNodes[j].CheckFunc = NSTART
+				node.CheckFunc = NSTART
 			case "INCL":
-				rule.Checklist.CheckNodes[j].CheckFunc = INCL
+				node.CheckFunc = INCL
 			case "NI":
-				rule.Checklist.CheckNodes[j].CheckFunc = NI
+				node.CheckFunc = NI
 			case "NCS_END":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_END
+				node.CheckFunc = NCS_END
 			case "NCS_START":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_START
+				node.CheckFunc = NCS_START
 			case "NCS_NEND":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NEND
+				node.CheckFunc = NCS_NEND
 			case "NCS_NSTART":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NSTART
+				node.CheckFunc = NCS_NSTART
 			case "NCS_INCL":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_INCL
+				node.CheckFunc = NCS_INCL
 			case "NCS_NI":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NI
+				node.CheckFunc = NCS_NI
 			case "MT":
-				rule.Checklist.CheckNodes[j].CheckFunc = MT
+				node.CheckFunc = MT
 			case "LT":
-				rule.Checklist.CheckNodes[j].CheckFunc = LT
+				node.CheckFunc = LT
 			case "REGEX":
+				// REGEX handled below
 			case "ISNULL":
-				rule.Checklist.CheckNodes[j].CheckFunc = ISNULL
+				node.CheckFunc = ISNULL
 			case "NOTNULL":
-				rule.Checklist.CheckNodes[j].CheckFunc = NOTNULL
+				node.CheckFunc = NOTNULL
 			case "EQU":
-				rule.Checklist.CheckNodes[j].CheckFunc = EQU
+				node.CheckFunc = EQU
 			case "NEQ":
-				rule.Checklist.CheckNodes[j].CheckFunc = NEQ
+				node.CheckFunc = NEQ
 			case "NCS_EQU":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_EQU
+				node.CheckFunc = NCS_EQU
 			case "NCS_NEQ":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NEQ
+				node.CheckFunc = NCS_NEQ
 			default:
-				return errors.New(common.GetPkgName() + ": UNKNOWN CHECK NODE TYPE, " + common.AnyToString(j))
+				return errors.New("UNKNOWN CHECK NODE TYPE, " + common.AnyToString(j))
 			}
 
-			if "REGEX" == rule.Checklist.CheckNodes[j].Type {
-				rule.Checklist.CheckNodes[j].Regex, err = regexp.Compile(rule.Checklist.CheckNodes[j].Value)
+			// Compile regex if needed
+			if node.Type == "REGEX" {
+				var err error
+				node.Regex, err = regexp.Compile(node.Value)
 				if err != nil {
 					return err
 				}
 			}
 		}
 
-		// Parse each appends field name path
-		for j := range rule.Appends {
-			rule.Appends[j].FieldNameList = common.StringToList(rule.Appends[j].FieldName)
+		delList := strings.Split(rule.Del, ",")
+		rule.DelList = make([][]string, len(delList))
+		for i := range delList {
+			tmpList := common.StringToList(delList[i])
+			rule.DelList[i] = make([]string, len(tmpList))
+			rule.DelList[i] = tmpList
 		}
 	}
 	return nil

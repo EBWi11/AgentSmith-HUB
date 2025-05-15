@@ -7,5 +7,7 @@
             <node type="MT" field="sessionid">0</node>
             <node type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
+        <append field_name="abc">123</append>
+        <del>exe,argv</del>
     </rule>
 </root>

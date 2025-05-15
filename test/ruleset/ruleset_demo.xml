@@ -10,7 +10,7 @@
 
         <threshold group_by="ip,port" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
 
-        <append type="STATIC" field_name="data_type">10</append>
+        <append field_name="data_type">10</append>
         <append type="PLUGIN" field_name="data_type">plugin_name($_ORIDATA)</append>
         <append type="PLUGIN" field_name="data_type">plugin_name("test", 123 , _$pid)</append>
         <del>sport,dport</del>
