@@ -1,6 +1,7 @@
 package rules_engine
 
 import (
+	regexp "github.com/BurntSushi/rure-go"
 	"strconv"
 	"strings"
 )
@@ -171,16 +172,16 @@ func LT(data string, ruleData string) (res bool, hitData string) {
 	}
 }
 
-//func REGEX(data string, regexCompile *regexp.Regex) (res bool, hitData string) {
-//	start, end, tmp_res := regexCompile.Find(data)
-//	if tmp_res {
-//		return true, data[start:end]
-//	} else {
-//		return false, ""
-//	}
-//}
+func REGEX(data string, regexCompile *regexp.Regex) (res bool, hitData string) {
+	start, end, tmp_res := regexCompile.Find(data)
+	if tmp_res {
+		return true, data[start:end]
+	} else {
+		return false, ""
+	}
+}
 
-func ISNULL(data string) (res bool, hitData string) {
+func ISNULL(data string, ruleData string) (res bool, hitData string) {
 	if data == "" {
 		return true, data
 	} else {
@@ -188,7 +189,7 @@ func ISNULL(data string) (res bool, hitData string) {
 	}
 }
 
-func NOTNULL(data string) (res bool, hitData string) {
+func NOTNULL(data string, ruleData string) (res bool, hitData string) {
 	if strings.TrimSpace(data) == "" {
 		return false, ""
 	} else {

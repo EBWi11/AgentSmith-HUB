@@ -2,7 +2,10 @@ module AgentSmith-HUB
 
 go 1.24.3
 
-require github.com/bytedance/sonic v1.13.2
+require (
+	github.com/BurntSushi/rure-go v0.0.0-20231211185014-8a0f52724b91
+	github.com/bytedance/sonic v1.13.2
+)
 
 require (
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
