@@ -13,13 +13,27 @@ func GetPkgName() string {
 	return reflect.TypeOf(em{}).PkgPath()
 }
 
-// StringToList splits a string by '.' and returns a string slice.
-// If the input is empty, returns an empty slice.
-func StringToList(str string) []string {
-	if str == "" {
-		return []string{}
+func StringToList(checkKey string) []string {
+	if len(checkKey) == 0 {
+		return nil
 	}
-	return strings.Split(str, ".")
+	var res []string
+	var sb strings.Builder
+	for i := 0; i < len(checkKey); i++ {
+		if checkKey[i] == '\\' && i+1 < len(checkKey) && checkKey[i+1] == '.' {
+			sb.WriteByte('.')
+			i++
+		} else if checkKey[i] == '.' {
+			res = append(res, sb.String())
+			sb.Reset()
+		} else {
+			sb.WriteByte(checkKey[i])
+		}
+	}
+	if sb.Len() > 0 {
+		res = append(res, sb.String())
+	}
+	return res
 }
 
 // UrlValueToMap converts url.Values (map[string][]string) to map[string]interface{}.
@@ -50,20 +64,6 @@ func AnyToString(tmp interface{}) string {
 		// Marshal to JSON string for unsupported types
 		resBytes, _ := sonic.Marshal(tmp)
 		return string(resBytes)
-	}
-}
-
-func GetCheckDataFromCache(cache map[string]CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res string, exist bool) {
-	tmpRes, ok := cache[checkKey]
-	if ok {
-		return tmpRes.Data, tmpRes.Exist
-	} else {
-		res, exist := GetCheckData(data, checkKeyList)
-		cache[checkKey] = CheckCoreCache{
-			Exist: exist,
-			Data:  res,
-		}
-		return res, exist
 	}
 }
 

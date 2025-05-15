@@ -7,6 +7,9 @@ import (
 	regexp "github.com/BurntSushi/rure-go"
 )
 
+const FromRawSymbol = "_$"
+const FROM_RAW_SYMBOL_LEN = len(FromRawSymbol)
+
 type Ruleset struct {
 	XMLName     xml.Name `xml:"root"`
 	RulesetID   string   `xml:"ruleset_id,attr"`
@@ -74,6 +77,8 @@ type Append struct {
 func rulesetBuild(ruleset *Ruleset) error {
 	var err error
 	switch ruleset.Type {
+	case "":
+		ruleset.IsDetection = true
 	case "detection":
 		ruleset.IsDetection = true
 	case "whitelist":
@@ -115,7 +120,7 @@ func rulesetBuild(ruleset *Ruleset) error {
 			case "NCS_NEND":
 				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NEND
 			case "NCS_NSTART":
-				rule.Checklist.CheckNodes[j].CheckFunc = NCS_START
+				rule.Checklist.CheckNodes[j].CheckFunc = NCS_NSTART
 			case "NCS_INCL":
 				rule.Checklist.CheckNodes[j].CheckFunc = NCS_INCL
 			case "NCS_NI":

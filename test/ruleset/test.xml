@@ -1,9 +1,11 @@
 <root ruleset_id="test1" ruleset_name="test1" type="detection">
     <rule id="reverse_shell_01" name="测试" author="test">
-        <filter field="data_type">59</filter>
+        <filter field="data_type">_$data_type</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
             <node type="INCL" field="argv">gf26</node>
+            <node type="MT" field="sessionid">0</node>
+            <node type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
     </rule>
 </root>

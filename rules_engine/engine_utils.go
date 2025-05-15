@@ -1,10 +1,40 @@
 package rules_engine
 
 import (
+	"AgentSmith-HUB/common"
 	regexp "github.com/BurntSushi/rure-go"
 	"strconv"
 	"strings"
 )
+
+func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}) string {
+	tmpRes, ok := cache[checkKey]
+	if ok {
+		return tmpRes.Data
+	} else {
+		checkKeyList := common.StringToList(checkKey[FROM_RAW_SYMBOL_LEN:])
+		res, exist := common.GetCheckData(data, checkKeyList)
+		cache[checkKey] = common.CheckCoreCache{
+			Exist: exist,
+			Data:  res,
+		}
+		return res
+	}
+}
+
+func GetCheckDataFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res string, exist bool) {
+	tmpRes, ok := cache[checkKey]
+	if ok {
+		return tmpRes.Data, tmpRes.Exist
+	} else {
+		res, exist := common.GetCheckData(data, checkKeyList)
+		cache[checkKey] = common.CheckCoreCache{
+			Exist: exist,
+			Data:  res,
+		}
+		return res, exist
+	}
+}
 
 func END(data string, ruleData string) (res bool, hitData string) {
 	if ruleData == "" {
