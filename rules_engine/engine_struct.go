@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	regexp "github.com/BurntSushi/rure-go"
+	"strconv"
 	"strings"
 )
 
@@ -67,7 +68,8 @@ type CheckNodes struct {
 type Threshold struct {
 	GroupBy        string `xml:"group_by,attr"`
 	GroupByList    map[string][]string
-	Range          string   `xml:"range,attr"`
+	Range          string `xml:"range,attr"`
+	RangeInt       int
 	LocalCache     string   `xml:"local_cache,attr"`
 	CountType      string   `xml:"count_type,attr"`
 	CountField     string   `xml:"count_field,attr"`
@@ -84,6 +86,7 @@ type Append struct {
 
 // rulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
 func rulesetBuild(ruleset *Ruleset) error {
+	var err error
 	// Validate required fields for ruleset
 	if strings.TrimSpace(ruleset.RulesetID) == "" {
 		return errors.New("RulesetID cannot be empty")
@@ -148,6 +151,15 @@ func rulesetBuild(ruleset *Ruleset) error {
 					// Parse threshold count field path
 					rule.Threshold.CountFieldList = common.StringToList(strings.TrimSpace(rule.Threshold.CountField))
 				}
+			}
+
+			rule.Threshold.RangeInt, err = strconv.Atoi(rule.Threshold.Range)
+			if err != nil {
+				return errors.New("THRESHOLD RANGE CANNOT BE INT")
+			}
+
+			if !(rule.Threshold.Value > 1) {
+				return errors.New("THRESHOLD VALUE MUST BE GREATER THAN 1")
 			}
 
 			rule.ThresholdCheck = true

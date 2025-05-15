@@ -2,10 +2,16 @@ package common
 
 import (
 	"github.com/bytedance/sonic"
+	"github.com/cespare/xxhash/v2"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+func XXHash64(s string) string {
+	hash := xxhash.Sum64([]byte(s))
+	return strconv.FormatUint(hash, 10)
+}
 
 func MapDel(data map[string]interface{}, key []string) {
 	tmpKey := []string{}

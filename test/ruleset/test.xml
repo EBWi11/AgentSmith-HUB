@@ -7,7 +7,7 @@
             <node type="MT" field="sessionid">0</node>
             <node type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
-        <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
+        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>
         <append field_name="abc">123</append>
         <del>exe,argv</del>
     </rule>
