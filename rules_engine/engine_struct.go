@@ -53,15 +53,16 @@ type Checklist struct {
 
 // CheckNodes represents a single check operation in a checklist.
 type CheckNodes struct {
-	ID        string                              `xml:"id,attr"`
-	Type      string                              `xml:"type,attr"`
-	CheckFunc func(string, string) (bool, string) // function pointer for check logic
-	Field     string                              `xml:"field,attr"`
-	FieldList []string                            // parsed field path
-	Logic     string                              `xml:"logic,attr"`
-	Delimiter string                              `xml:"delimiter,attr"`
-	Value     string                              `xml:",chardata"`
-	Regex     *regexp.Regex
+	ID                 string                              `xml:"id,attr"`
+	Type               string                              `xml:"type,attr"`
+	CheckFunc          func(string, string) (bool, string) // function pointer for check logic
+	Field              string                              `xml:"field,attr"`
+	FieldList          []string                            // parsed field path
+	Logic              string                              `xml:"logic,attr"`
+	Delimiter          string                              `xml:"delimiter,attr"`
+	DelimiterFieldList []string
+	Value              string `xml:",chardata"`
+	Regex              *regexp.Regex
 }
 
 // Threshold defines aggregation and counting logic for a rule.
@@ -87,24 +88,21 @@ type Append struct {
 // rulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
 func rulesetBuild(ruleset *Ruleset) error {
 	var err error
-	// Validate required fields for ruleset
+
 	if strings.TrimSpace(ruleset.RulesetID) == "" {
 		return errors.New("RulesetID cannot be empty")
 	}
+
 	if strings.TrimSpace(ruleset.RulesetName) == "" {
 		return errors.New("RulesetName cannot be empty")
 	}
 
-	// Set detection mode based on type
-	switch strings.ToLower(strings.TrimSpace(ruleset.Type)) {
-	case "":
+	if strings.TrimSpace(ruleset.Type) == "" || strings.TrimSpace(ruleset.Type) == "DETECTION" {
 		ruleset.IsDetection = true
-	case "detection":
-		ruleset.IsDetection = true
-	case "whitelist":
+	} else if strings.TrimSpace(ruleset.Type) == "WHITELIST" {
 		ruleset.IsDetection = false
-	default:
-		return errors.New("UNKNOWN RULESET TYPE, " + ruleset.Type)
+	} else {
+		return errors.New("ruleset Type Only SUPPORT WHITELIST OR DETECTION")
 	}
 
 	for i := range ruleset.Rules {
@@ -141,7 +139,7 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 
 			if !(rule.Threshold.CountType == "" || rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY") {
-				return errors.New("THRESHOLD COUNT TYPE MUST BE SUM OR CLASSIFY")
+				return errors.New("THRESHOLD COUNT TYPE MUST BE 'SUM' OR 'CLASSIFY'")
 			}
 
 			if rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY" {
@@ -172,9 +170,6 @@ func rulesetBuild(ruleset *Ruleset) error {
 			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = make([]string, len(tmpList))
 			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = tmpList
 		}
-
-		// Precompute checklist length for fast access
-		rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1
 
 		// Parse filter field path
 		rule.Filter.FieldList = common.StringToList(strings.TrimSpace(rule.Filter.Field))
@@ -238,6 +233,33 @@ func rulesetBuild(ruleset *Ruleset) error {
 				if err != nil {
 					return err
 				}
+			}
+
+			if node.Logic != "" || node.Delimiter != "" {
+				if node.Logic == "" {
+					return errors.New("LOGIC CANNOT BE EMPTY")
+				}
+
+				if node.Logic != "AND" && node.Logic != "OR" {
+					return errors.New("THRESHOLD COUNT TYPE MUST BE 'AND' OR 'OR'")
+				}
+
+				if node.Delimiter == "" {
+					return errors.New("DELIMITER CANNOT BE EMPTY")
+				}
+
+				if strings.Contains(strings.TrimSpace(node.Value), node.Delimiter) {
+					node.DelimiterFieldList = strings.Split(strings.TrimSpace(node.Value), node.Delimiter)
+					if node.Logic == "OR" {
+						rule.ChecklistLen = len(rule.Checklist.CheckNodes)
+					} else {
+						rule.ChecklistLen = len(rule.Checklist.CheckNodes) + len(node.DelimiterFieldList) - 1
+					}
+				} else {
+					return errors.New("CHECK NODE VALUE DOES NOT EXIST IN DELIMITER")
+				}
+			} else {
+				rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1
 			}
 		}
 

@@ -9,6 +9,32 @@ import (
 	"strings"
 )
 
+func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool) bool {
+	var checkListFlag = false
+
+	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
+
+	switch checkNode.Type {
+	case "REGEX":
+		if !checkNodeValueFromRaw {
+			checkListFlag, _ = REGEX(needCheckData, checkNode.Regex)
+		} else {
+			regex, err := regexp.Compile(checkNodeValue)
+			if err != nil {
+				fmt.Println("REGEX compile error", err)
+				break
+			}
+			checkListFlag, _ = REGEX(needCheckData, regex)
+		}
+	case "PLUGIN":
+		//todo
+	default:
+		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+	}
+
+	return checkListFlag
+}
+
 // EngineCheck executes all rules in the ruleset on the provided data.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 	ruleCache := make(map[string]common.CheckCoreCache)
@@ -30,42 +56,43 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 		}
 
 		//checklist process
-		checkIndex := 0
+		checkListRes := false
 		ruleCheckRes := false
-		for checkIndex, checkNode := range rule.Checklist.CheckNodes {
-			var checkListFlag = false
-			var needCheckData string
-			var checkNodeValue string
+		for _, checkNode := range rule.Checklist.CheckNodes {
+			var checkNodeValue = checkNode.Value
 			var checkNodeValueFromRaw = false
 
-			needCheckData, _ = common.GetCheckData(data, checkNode.FieldList)
-			checkNodeValue = checkNode.Value
-
-			if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
-				checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
-				checkNodeValueFromRaw = true
-			}
-
-			switch checkNode.Type {
-			case "REGEX":
-				if !checkNodeValueFromRaw {
-					checkListFlag, _ = REGEX(needCheckData, checkNode.Regex)
-				} else {
-					regex, err := regexp.Compile(checkNodeValue)
-					if err != nil {
-						fmt.Println("REGEX compile error", err)
+			switch checkNode.Logic {
+			case "":
+				if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
+					checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
+					checkNodeValueFromRaw = true
+				}
+				checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw)
+			case "AND":
+				for _, v := range checkNode.DelimiterFieldList {
+					if strings.HasPrefix(v, FromRawSymbol) {
+						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+						checkNodeValueFromRaw = true
+					}
+					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw); !checkListRes {
 						break
 					}
-					checkListFlag, _ = REGEX(needCheckData, regex)
 				}
-			case "PLUGIN":
-				//todo
-			default:
-				checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+			case "OR":
+				for _, v := range checkNode.DelimiterFieldList {
+					if strings.HasPrefix(v, FromRawSymbol) {
+						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+						checkNodeValueFromRaw = true
+					}
+
+					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw); checkListRes {
+						break
+					}
+				}
 			}
 
-			if !checkListFlag {
-				checkIndex = checkIndex - 1
+			if !checkListRes {
 				break
 			}
 		}
@@ -73,15 +100,15 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 		if rule.ChecklistLen == 0 {
 			ruleCheckRes = true
 		} else {
-			if r.IsDetection {
-				if checkIndex == rule.ChecklistLen {
-					ruleCheckRes = true
-				}
-			} else {
-				if checkIndex != rule.ChecklistLen {
-					ruleCheckRes = true
-				}
+			if r.IsDetection && checkListRes {
+				ruleCheckRes = true
+			} else if !r.IsDetection && !checkListRes {
+				ruleCheckRes = true
 			}
+		}
+
+		if !ruleCheckRes {
+			continue
 		}
 
 		//threshold process
@@ -114,8 +141,6 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 						}
 					}
 				}
-
-				ruleCheckRes = false
 			case "SUM":
 				groupByKey = "FS_" + groupByKey
 

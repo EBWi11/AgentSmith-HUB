@@ -1,13 +1,13 @@
-<root ruleset_id="test1" ruleset_name="test1" type="detection">
+<root ruleset_id="test1" ruleset_name="test1" type="DETECTION">
     <rule id="reverse_shell_01" name="测试" author="test">
         <filter field="data_type">_$data_type</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
             <node type="INCL" field="argv">gf26</node>
-            <node type="MT" field="sessionid">0</node>
+            <node type="INCL" field="exe" logic="AND" delimiter="|">opt|ltp</node>
             <node type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
-        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>
+<!--        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>-->
         <append field_name="abc">123</append>
         <del>exe,argv</del>
     </rule>
