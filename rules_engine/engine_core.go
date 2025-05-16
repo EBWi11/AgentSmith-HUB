@@ -92,13 +92,21 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 				}
 			}
 
-			if !checkListRes {
-				break
+			if rule.Checklist.ConditionFlag {
+				rule.Checklist.ConditionMap[checkNode.ID] = checkListRes
+			} else {
+				if !checkListRes {
+					break
+				}
 			}
 		}
 
 		if rule.ChecklistLen == 0 {
 			ruleCheckRes = true
+		}
+
+		if rule.Checklist.ConditionFlag {
+			ruleCheckRes = rule.Checklist.ConditionAST.ExprASTResult(rule.Checklist.ConditionAST.ExprAST, rule.Checklist.ConditionMap)
 		} else {
 			if r.IsDetection && checkListRes {
 				ruleCheckRes = true

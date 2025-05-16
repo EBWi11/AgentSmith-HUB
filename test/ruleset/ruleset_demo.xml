@@ -1,7 +1,7 @@
 <root ruleset_id="test1" ruleset_name="test1" type="detection">
     <rule id="reverse_shell_01" name="反弹shell检测" author="test">
         <filter field="data_typedd">59</filter>
-        <checklist condition="node1 and node2">
+        <checklist condition="a and (b or c) ">
             <node id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</node>
             <node id="b" type="INCL" field="data" logic="or" delimiter="|">test1|test2</node>
             <node id="b" type="REGEX" field="data">abc</node>

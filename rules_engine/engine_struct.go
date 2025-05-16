@@ -13,6 +13,8 @@ import (
 const FromRawSymbol = "_$"
 const FromRawSymbolLen = len(FromRawSymbol)
 
+var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
+
 // Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
 	XMLName     xml.Name `xml:"root"`
@@ -47,8 +49,11 @@ type Filter struct {
 
 // Checklist contains the logical condition and nodes to check.
 type Checklist struct {
-	Condition  string       `xml:"condition,attr"`
-	CheckNodes []CheckNodes `xml:"node"`
+	Condition     string       `xml:"condition,attr"`
+	CheckNodes    []CheckNodes `xml:"node"`
+	ConditionAST  *ReCepAST
+	ConditionFlag bool
+	ConditionMap  map[string]bool
 }
 
 // CheckNodes represents a single check operation in a checklist.
@@ -119,6 +124,16 @@ func rulesetBuild(ruleset *Ruleset) error {
 			return errors.New("rule author cannot be empty")
 		}
 
+		if strings.TrimSpace(rule.Checklist.Condition) != "" {
+			if _, _, ok := ConditionRegex.Find(strings.TrimSpace(rule.Checklist.Condition)); ok {
+				rule.Checklist.ConditionAST = GetAST(strings.TrimSpace(rule.Checklist.Condition))
+				rule.Checklist.ConditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
+				rule.Checklist.ConditionFlag = true
+			} else {
+				return errors.New("checklist condition is not a valid expression")
+			}
+		}
+
 		for j := range rule.Appends {
 			if rule.Appends[j].Type != "" && rule.Appends[j].Type != "PLUGIN" {
 				return errors.New("APPEND TYPE OR FIELD_NAME CANNOT BE EMPTY")
@@ -177,7 +192,22 @@ func rulesetBuild(ruleset *Ruleset) error {
 		// Parse each node's field path and assign check function
 		for j := range rule.Checklist.CheckNodes {
 			node := &rule.Checklist.CheckNodes[j]
-			node.FieldList = common.StringToList(node.Field)
+			node.FieldList = common.StringToList(strings.TrimSpace(node.Field))
+
+			if rule.Checklist.ConditionFlag {
+				id := strings.TrimSpace(node.ID)
+				node.ID = id
+
+				if id == "" {
+					return errors.New("CHECK NODE ID CANNOT BE EMPTY")
+				}
+
+				if _, ok := rule.Checklist.ConditionMap[id]; ok {
+					return errors.New("CHECK NODE ID CANNOT BE REPEATED")
+				} else {
+					rule.Checklist.ConditionMap[id] = false
+				}
+			}
 
 			switch strings.TrimSpace(node.Type) {
 			case "END":
