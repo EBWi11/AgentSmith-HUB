@@ -187,6 +187,7 @@ func rulesetBuild(ruleset *Ruleset) error {
 		}
 
 		// Parse filter field path
+		rule.Filter.Field = strings.TrimSpace(rule.Filter.Field)
 		rule.Filter.FieldList = common.StringToList(strings.TrimSpace(rule.Filter.Field))
 
 		// Parse each node's field path and assign check function

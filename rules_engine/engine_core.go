@@ -37,7 +37,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 
 // EngineCheck executes all rules in the ruleset on the provided data.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) {
-	ruleCache := make(map[string]common.CheckCoreCache)
+	ruleCache := make(map[string]common.CheckCoreCache, 10)
 	for _, rule := range r.Rules {
 		//filter check process
 		if len(rule.Filter.FieldList) > 0 {
