@@ -2,9 +2,9 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
-	"encoding/json"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
+	json "github.com/bytedance/sonic"
 	"strconv"
 	"strings"
 )
