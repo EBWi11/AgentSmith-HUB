@@ -13,12 +13,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer rb.Close()
 	rand.Seed(time.Now().UnixNano())
 	for {
 		r := rand.Intn(10000)
 		msg := map[string]interface{}{
 			"type":    "greeting",
-			"content": "hello from plugin.go!",
+			"content": "hello from plugin_test.go!",
 			"rand":    r,
 			"ts":      time.Now().Format(time.RFC3339Nano),
 		}
@@ -28,10 +29,10 @@ func main() {
 			continue
 		}
 		if rb.WriteMsg(jsonData) {
-			fmt.Println("[plugin.go] 写入 JSON:", string(jsonData))
+			fmt.Println("[plugin_test.go] 写入 JSON:", string(jsonData))
 		} else {
-			fmt.Println("[plugin.go] ringbuffer 满，写入失败")
+			fmt.Println("[plugin_test.go] ringbuffer 满，写入失败")
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Millisecond * 5)
 	}
 }

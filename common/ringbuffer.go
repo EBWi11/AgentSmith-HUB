@@ -3,20 +3,82 @@ package common
 import (
 	"encoding/binary"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 )
 
 const (
 	RingBufferSize = 40960
-	HeaderSize     = 16 // 8字节head+8字节tail
+	HeaderSize     = 16
 	RMmapFileName  = "/tmp/go_plugin_ringbuffer.mmap"
 )
 
 type RingBuffer struct {
-	buf  []byte
-	size int
-	mu   sync.Mutex // 只对写加锁，读不加锁
+	buf     []byte
+	size    int
+	mu      sync.Mutex // Only lock for writing, not for reading
+	eventfd int        // eventfd file descriptor (Linux), or pipe read fd (macOS)
+	writefd int        // pipe write fd (macOS only)
+}
+
+// Eventfd returns the eventfd or pipe read fd for external event wait.
+func (r *RingBuffer) Eventfd() int {
+	return r.eventfd
+}
+
+// Close releases mmap and closes file descriptors.
+func (r *RingBuffer) Close() error {
+	var err1, err2, err3 error
+	if r.buf != nil {
+		err1 = syscall.Munmap(r.buf)
+	}
+	if r.eventfd > 0 {
+		err2 = syscall.Close(r.eventfd)
+	}
+	if r.writefd > 0 {
+		err3 = syscall.Close(r.writefd)
+	}
+	if err1 != nil {
+		return err1
+	}
+	if err2 != nil {
+		return err2
+	}
+	if err3 != nil {
+		return err3
+	}
+	return nil
+}
+
+func newEventfd() (int, int, error) {
+	if runtime.GOOS == "linux" {
+		// On Linux, use eventfd
+		fd, err := unixEventfd()
+		if err != nil {
+			return 0, 0, err
+		}
+		return fd, 0, nil
+	} else {
+		// On macOS, use pipe to simulate eventfd
+		var fds [2]int
+		if err := syscall.Pipe(fds[:]); err != nil {
+			return 0, 0, err
+		}
+		return fds[0], fds[1], nil // readfd, writefd
+	}
+}
+
+func unixEventfd() (int, error) {
+	if runtime.GOOS == "linux" {
+		// Use syscall.Syscall to avoid missing symbol on macOS
+		fd, _, errno := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
+		if errno != 0 {
+			return -1, errno
+		}
+		return int(fd), nil
+	}
+	return -1, syscall.ENOSYS
 }
 
 func NewRingBuffer(size int) (*RingBuffer, error) {
@@ -29,7 +91,7 @@ func NewRingBuffer(size int) (*RingBuffer, error) {
 		return nil, err
 	}
 	if stat.Size() == 0 {
-		// 新建文件，初始化前16字节为0
+		// New file, initialize the first 16 bytes to 0
 		zero := make([]byte, HeaderSize)
 		if _, err := file.WriteAt(zero, 0); err != nil {
 			return nil, err
@@ -42,7 +104,11 @@ func NewRingBuffer(size int) (*RingBuffer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RingBuffer{buf: buf, size: size}, nil
+	efd, wfd, err := newEventfd()
+	if err != nil {
+		return nil, err
+	}
+	return &RingBuffer{buf: buf, size: size, eventfd: efd, writefd: wfd}, nil
 }
 
 func (r *RingBuffer) getHeadTail() (head, tail int64) {
@@ -56,9 +122,28 @@ func (r *RingBuffer) setHeadTail(head, tail int64) {
 	binary.LittleEndian.PutUint64(r.buf[8:16], uint64(tail))
 }
 
-// 导出GetHeadTail方法，便于外部调试
+// Exported GetHeadTail method for external debugging
 func (r *RingBuffer) GetHeadTail() (int64, int64) {
 	return r.getHeadTail()
+}
+
+// notifyEvent uses eventfd on Linux, pipe on macOS (local conditional compilation)
+func (r *RingBuffer) notifyEvent() {
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], 1)
+	if runtime.GOOS == "darwin" {
+		if r.writefd > 0 {
+			_, err := syscall.Write(r.writefd, buf[:])
+			// 可选：写入失败时打印日志
+			_ = err
+		}
+	} else {
+		if r.eventfd > 0 {
+			_, err := syscall.Write(r.eventfd, buf[:])
+			// 可选：写入失败时打印日志
+			_ = err
+		}
+	}
 }
 
 func (r *RingBuffer) WriteMsg(msg []byte) bool {
@@ -74,13 +159,17 @@ func (r *RingBuffer) WriteMsg(msg []byte) bool {
 	used := int((tail + int64(bufCap) - head) % int64(bufCap))
 	free := bufCap - used
 	need := 4 + int(msgLen)
-	// 关键修正：ringbuffer 必须至少留一个字节空闲，避免 head==tail 时无法区分满/空
+	// Key correction: ringbuffer must leave at least one byte free to avoid head==tail when full/empty
 	if need >= free {
 		return false
 	}
 	writePos := dataStart + int(tail%int64(bufCap))
 	if writePos+4 > r.size {
 		writePos = dataStart
+	}
+	// Ensure not to write out of bounds
+	if writePos+4 > r.size {
+		return false
 	}
 	binary.LittleEndian.PutUint32(r.buf[writePos:writePos+4], uint32(msgLen))
 	if writePos+4+int(msgLen) <= r.size {
@@ -92,9 +181,11 @@ func (r *RingBuffer) WriteMsg(msg []byte) bool {
 	}
 	tail += int64(4 + msgLen)
 	r.setHeadTail(head, tail)
+	r.notifyEvent() // Notify eventfd after write
 	return true
 }
 
+// ReadMsg is single-threaded, no lock needed.
 func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 	head, tail := r.getHeadTail()
 	if head == tail {
@@ -105,6 +196,9 @@ func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 	readPos := dataStart + int(head%int64(bufCap))
 	if readPos+4 > r.size {
 		readPos = dataStart
+	}
+	if readPos+4 > r.size {
+		return nil, false
 	}
 	msgLen := int(binary.LittleEndian.Uint32(r.buf[readPos : readPos+4]))
 	if msgLen <= 0 || msgLen > bufCap-4 {
@@ -124,4 +218,23 @@ func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 	}
 	r.setHeadTail(head, tail)
 	return msg, true
+}
+
+// WaitForEvent blocks until eventfd/pipe is readable and drains all pending notifications.
+func (r *RingBuffer) WaitForEvent() error {
+	var buf [8]byte
+	for {
+		n, err := syscall.Read(r.eventfd, buf[:])
+		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
+			return err
+		}
+		// eventfd/pipe 可能累积多次通知，需全部读完
+		if n == 8 {
+			break
+		}
+	}
+	return nil
 }
