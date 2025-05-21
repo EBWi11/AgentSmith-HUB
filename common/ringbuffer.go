@@ -57,23 +57,23 @@ func newEventfd() (eventfd int, writefd int, err error) {
 		}
 		return fds[0], fds[1], nil
 	} else if runtime.GOOS == "linux" {
-		// // Linux 下使用 eventfd2 系统调用
-		// fd, _, errno := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
-		// if errno != 0 {
-		// 	return -1, -1, errno
-		// }
-		// // 设置非阻塞模式
-		// flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
-		// if errno != 0 {
-		// 	syscall.Close(int(fd))
-		// 	return -1, -1, errno
-		// }
-		// _, _, errno = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, flags|syscall.O_NONBLOCK)
-		// if errno != 0 {
-		// 	syscall.Close(int(fd))
-		// 	return -1, -1, errno
-		// }
-		// return int(fd), -1, nil
+		// Linux 下使用 eventfd2 系统调用
+		fd, _, errno := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
+		if errno != 0 {
+			return -1, -1, errno
+		}
+		// 设置非阻塞模式
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+		if errno != 0 {
+			syscall.Close(int(fd))
+			return -1, -1, errno
+		}
+		_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, flags|syscall.O_NONBLOCK)
+		if errno != 0 {
+			syscall.Close(int(fd))
+			return -1, -1, errno
+		}
+		return int(fd), -1, nil
 	}
 	return -1, -1, syscall.EINVAL
 }
