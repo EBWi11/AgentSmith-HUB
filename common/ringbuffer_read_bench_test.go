@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkRingBufferConcurrentWriteSingleRead(b *testing.B) {
-	rb, err := NewRingBuffer(RingBufferSize)
+	rb, err := NewRingBuffer("/tmp/bench_test.mmap")
 	if err != nil {
 		b.Fatalf("NewRingBuffer error: %v", err)
 	}
