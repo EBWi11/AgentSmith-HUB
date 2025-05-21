@@ -19,7 +19,7 @@ func BenchmarkRingBufferConcurrentWriteSingleRead(b *testing.B) {
 	perWriter := writeCount / writerNum
 	start := make(chan struct{})
 
-	// 启动并发写goroutine
+	// Start concurrent write goroutines
 	for w := 0; w < writerNum; w++ {
 		wg.Add(1)
 		go func(id int) {
@@ -37,7 +37,7 @@ func BenchmarkRingBufferConcurrentWriteSingleRead(b *testing.B) {
 					b.Fatalf("json.Marshal error: %v", err)
 				}
 				for !rb.WriteMsg(jsonData) {
-					// busy wait until buffer有空位
+					// busy wait until buffer has space
 				}
 			}
 		}(w)
@@ -55,9 +55,9 @@ func BenchmarkRingBufferConcurrentWriteSingleRead(b *testing.B) {
 		readWg.Done()
 	}()
 
-	close(start) // 所有写goroutine同时开始
+	close(start) // All write goroutines start at the same time
 	wg.Wait()
-	// 等待读goroutine完成，避免主线程提前退出
+	// Wait for read goroutine to finish to avoid main thread exiting early
 	readWg.Wait()
 	b.Logf("All %d messages written and read", writeCount)
 }

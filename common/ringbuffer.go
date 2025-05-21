@@ -14,7 +14,7 @@ import (
 const (
 	DefaultRingBufferSize = 16384
 	headerSize            = 8          // 4 bytes for head, 4 bytes for tail
-	magicNumber           = 0x12345678 // 用于验证缓冲区完整性
+	magicNumber           = 0x12345678 // Used to verify buffer integrity
 )
 
 var (
@@ -24,14 +24,14 @@ var (
 	ErrInvalidPointer = errors.New("invalid pointer position")
 )
 
-// RingBuffer 实现了一个基于内存映射的环形缓冲区
-// 内存布局:
+// RingBuffer implements a memory-mapped ring buffer.
+// Memory layout:
 // [magic(4)][head(4)][tail(4)][data...]
 type RingBuffer struct {
 	buf        []byte
 	size       int
-	writeMu    sync.Mutex // 写入锁
-	readMu     sync.Mutex // 读取锁
+	writeMu    sync.Mutex // Write lock
+	readMu     sync.Mutex // Read lock
 	eventfd    int
 	writefd    int
 	writeCount uint64
@@ -44,7 +44,7 @@ func newEventfd() (eventfd int, writefd int, err error) {
 		if err := syscall.Pipe(fds[:]); err != nil {
 			return -1, -1, err
 		}
-		// 设置非阻塞模式
+		// Set non-blocking mode
 		if err := syscall.SetNonblock(fds[0], true); err != nil {
 			syscall.Close(fds[0])
 			syscall.Close(fds[1])
@@ -57,12 +57,12 @@ func newEventfd() (eventfd int, writefd int, err error) {
 		}
 		return fds[0], fds[1], nil
 	} else if runtime.GOOS == "linux" {
-		// Linux 下使用 eventfd2 系统调用
+		// On Linux, use eventfd2 syscall
 		fd, _, errno := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
 		if errno != 0 {
 			return -1, -1, errno
 		}
-		// 设置非阻塞模式
+		// Set non-blocking mode
 		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
 		if errno != 0 {
 			syscall.Close(int(fd))
@@ -86,7 +86,7 @@ func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 	}
 	defer file.Close()
 
-	// 确保文件大小正确
+	// Ensure file size is correct
 	if err := file.Truncate(int64(DefaultRingBufferSize)); err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 		return nil, err
 	}
 
-	// 清零整个缓冲区
+	// Zero out the entire buffer
 	for i := range buf {
 		buf[i] = 0
 	}
@@ -114,7 +114,7 @@ func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 		writefd: wfd,
 	}
 
-	// 初始化缓冲区
+	// Initialize the buffer
 	rb.initialize()
 
 	return rb, nil
@@ -122,9 +122,9 @@ func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 
 // initialize initializes the ring buffer
 func (r *RingBuffer) initialize() {
-	// 写入魔数
+	// Write magic number
 	binary.LittleEndian.PutUint32(r.buf[0:4], magicNumber)
-	// 初始化 head 和 tail
+	// Initialize head and tail
 	r.setHead(headerSize)
 	r.setTail(headerSize)
 }
@@ -170,10 +170,10 @@ func (r *RingBuffer) notifyEvent() {
 	binary.LittleEndian.PutUint64(buf[:], 1)
 	if runtime.GOOS == "darwin" {
 		if r.writefd > 0 {
-			// 使用非阻塞写入
+			// Use non-blocking write
 			_, err := syscall.Write(r.writefd, buf[:])
 			if err == syscall.EAGAIN {
-				// 如果管道满，清空管道
+				// If pipe is full, drain it
 				var tmp [8]byte
 				for {
 					_, err := syscall.Read(r.eventfd, tmp[:])
@@ -181,7 +181,7 @@ func (r *RingBuffer) notifyEvent() {
 						break
 					}
 				}
-				// 重新写入
+				// Retry write
 				_, _ = syscall.Write(r.writefd, buf[:])
 			}
 		}
@@ -208,36 +208,36 @@ func (r *RingBuffer) WriteMsg(msg []byte) bool {
 	tail := r.getTail()
 	dataCap := uint32(r.size)
 
-	// 计算可用空间
+	// Calculate available space
 	var free uint32
 	if head >= tail {
-		// head 在 tail 后面，可用空间是 tail 到 head 之间的空间
+		// head is after tail, available space is from tail to head
 		free = dataCap - head + tail - headerSize
 	} else {
-		// head 在 tail 前面，可用空间是 head 到 tail 之间的空间
+		// head is before tail, available space is from head to tail
 		free = tail - head - 1
 	}
 
-	// 需要空间：消息长度(4) + 消息内容
+	// Required space: message length(4) + message content
 	need := 4 + msgLen
 	if free < need {
 		fmt.Printf("[RingBuffer] Buffer full: head=%d, tail=%d, free=%d, need=%d\n", head, tail, free, need)
 		return false
 	}
 
-	// 写入消息长度
+	// Write message length
 	if head+4 > dataCap {
 		head = headerSize
 	}
 	binary.LittleEndian.PutUint32(r.buf[head:head+4], msgLen)
 
-	// 写入消息内容
+	// Write message content
 	writeEnd := head + 4 + msgLen
 	if writeEnd <= dataCap {
-		// 消息可以连续写入
+		// Message can be written continuously
 		copy(r.buf[head+4:writeEnd], msg)
 	} else {
-		// 消息需要分两段写入
+		// Message needs to be written in two parts
 		firstPart := dataCap - head - 4
 		if firstPart > 0 {
 			copy(r.buf[head+4:dataCap], msg[:firstPart])
@@ -249,13 +249,13 @@ func (r *RingBuffer) WriteMsg(msg []byte) bool {
 		writeEnd = headerSize + secondPart
 	}
 
-	// 更新head指针
+	// Update head pointer
 	r.setHead(writeEnd)
 
-	// 更新写入计数
+	// Update write count
 	atomic.AddUint64(&r.writeCount, 1)
 
-	// 确保通知发送成功
+	// Ensure notification is sent
 	r.notifyEvent()
 	return true
 }
@@ -267,27 +267,21 @@ func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 	tail := r.getTail()
 	dataCap := uint32(r.size)
 
-	// 检查是否有数据可读
+	// Check if there is data to read
 	if head == tail {
 		return nil, false
 	}
 
-	// 读取消息长度
+	// Read message length
 	if tail+4 > dataCap {
 		tail = headerSize
 	}
 
-	// 读取并验证消息长度
-	msgLenBytes := r.buf[tail : tail+4]
-	msgLen := binary.LittleEndian.Uint32(msgLenBytes)
+	msgLen := binary.LittleEndian.Uint32(r.buf[tail : tail+4])
 
-	// 验证消息长度
+	// Validate message length
 	if msgLen == 0 || msgLen > uint32(r.size-headerSize-4) {
-		fmt.Printf("[RingBuffer] Invalid message length in buffer: %d (max: %d)\n", msgLen, r.size-headerSize-4)
-		fmt.Printf("[RingBuffer] Raw length bytes: %x\n", msgLenBytes)
-		fmt.Printf("[RingBuffer] Buffer state: head=%d, tail=%d\n", head, tail)
-
-		// 尝试恢复：跳过当前消息
+		// Skip current message
 		if tail+4 < dataCap {
 			r.setTail(tail + 4)
 		} else {
@@ -296,30 +290,14 @@ func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 		return nil, false
 	}
 
-	// 检查消息是否会超出缓冲区
 	readEnd := tail + 4 + msgLen
-	if readEnd > dataCap {
-		// 检查环绕后的空间是否足够
-		if headerSize+(readEnd-dataCap) > head {
-			fmt.Printf("[RingBuffer] Message would overlap: readEnd=%d, head=%d\n", readEnd, head)
-			// 尝试恢复：跳过当前消息
-			if tail+4 < dataCap {
-				r.setTail(tail + 4)
-			} else {
-				r.setTail(headerSize)
-			}
-			return nil, false
-		}
-	}
-
-	// 读取消息内容
 	var msg []byte
 	if readEnd <= dataCap {
-		// 消息可以连续读取
+		// Message can be read continuously
 		msg = make([]byte, msgLen)
 		copy(msg, r.buf[tail+4:readEnd])
 	} else {
-		// 消息需要分两段读取
+		// Message needs to be read in two parts
 		firstPart := dataCap - tail - 4
 		secondPart := msgLen - firstPart
 		msg = make([]byte, msgLen)
@@ -332,7 +310,7 @@ func (r *RingBuffer) ReadMsg() ([]byte, bool) {
 		readEnd = headerSize + secondPart
 	}
 
-	// 更新tail指针
+	// Update tail pointer
 	r.setTail(readEnd)
 
 	return msg, true
