@@ -4,9 +4,10 @@ import (
 	"AgentSmith-HUB/common"
 	"encoding/xml"
 	"errors"
-	regexp "github.com/BurntSushi/rure-go"
 	"strconv"
 	"strings"
+
+	regexp "github.com/BurntSushi/rure-go"
 )
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.

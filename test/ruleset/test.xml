@@ -7,7 +7,7 @@
             <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">optddd|ltp</node>
             <node id="d" type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
-<!--        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>-->
+        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>
         <append field_name="abc">123</append>
         <del>exe,argv</del>
     </rule>
