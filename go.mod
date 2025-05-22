@@ -6,6 +6,7 @@ require (
 	github.com/BurntSushi/rure-go v0.0.0-20231211185014-8a0f52724b91
 	github.com/EBWi11/mmap_ringbuffer v0.1.1
 	github.com/aliyun/aliyun-log-go-sdk v0.1.101
+	github.com/bwmarrin/snowflake v0.3.0
 	github.com/bytedance/sonic v1.13.2
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/elastic/go-elasticsearch/v8 v8.18.0
