@@ -37,47 +37,6 @@ type RingBuffer struct {
 	writeCount uint64
 }
 
-// newEventfd creates an event notification fd (Linux: eventfd, macOS: pipe)
-func newEventfd() (eventfd int, writefd int, err error) {
-	if runtime.GOOS == "darwin" {
-		var fds [2]int
-		if err := syscall.Pipe(fds[:]); err != nil {
-			return -1, -1, err
-		}
-		// Set non-blocking mode
-		if err := syscall.SetNonblock(fds[0], true); err != nil {
-			syscall.Close(fds[0])
-			syscall.Close(fds[1])
-			return -1, -1, err
-		}
-		if err := syscall.SetNonblock(fds[1], true); err != nil {
-			syscall.Close(fds[0])
-			syscall.Close(fds[1])
-			return -1, -1, err
-		}
-		return fds[0], fds[1], nil
-	} else if runtime.GOOS == "linux" {
-		// On Linux, use eventfd2 syscall
-		fd, _, errno := syscall.Syscall(syscall.SYS_EVENTFD2, 0, 0, 0)
-		if errno != 0 {
-			return -1, -1, errno
-		}
-		// Set non-blocking mode
-		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
-		if errno != 0 {
-			syscall.Close(int(fd))
-			return -1, -1, errno
-		}
-		_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, flags|syscall.O_NONBLOCK)
-		if errno != 0 {
-			syscall.Close(int(fd))
-			return -1, -1, errno
-		}
-		return int(fd), -1, nil
-	}
-	return -1, -1, syscall.EINVAL
-}
-
 // NewRingBuffer creates a new mmap-backed ring buffer file
 func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 	file, err := os.OpenFile(mmapFileName, os.O_RDWR|os.O_CREATE, 0644)
@@ -101,7 +60,7 @@ func NewRingBuffer(mmapFileName string) (*RingBuffer, error) {
 		buf[i] = 0
 	}
 
-	efd, wfd, err := newEventfd()
+	efd, wfd, err := NewEventfd()
 	if err != nil {
 		syscall.Munmap(buf)
 		return nil, err
@@ -348,11 +307,11 @@ func (r *RingBuffer) Close() error {
 		r.buf = nil
 	}
 	if r.eventfd > 0 {
-		syscall.Close(r.eventfd)
+		_ = syscall.Close(r.eventfd)
 		r.eventfd = -1
 	}
 	if r.writefd > 0 {
-		syscall.Close(r.writefd)
+		_ = syscall.Close(r.writefd)
 		r.writefd = -1
 	}
 	return err
