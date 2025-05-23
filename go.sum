@@ -38,6 +38,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/EBWi11/mmap_ringbuffer v0.1.1 h1:iSOOAP3sbbh2DOpo3HU9OMFMI2lob3ji3f5fYTHh6EY=
 github.com/EBWi11/mmap_ringbuffer v0.1.1/go.mod h1:EzX2U62jk3xOFrcLyP43MLmvvkozZVaDTc6qnKs9Xd8=
+github.com/EBWi11/mmap_ringbuffer v0.1.2 h1:k7j/mxXO6+ulpV5eABi46B4dTU95cKUACyMf2bVZvMs=
+github.com/EBWi11/mmap_ringbuffer v0.1.2/go.mod h1:EzX2U62jk3xOFrcLyP43MLmvvkozZVaDTc6qnKs9Xd8=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/Netflix/go-env v0.0.0-20220526054621-78278af1949d h1:wvStE9wLpws31NiWUx+38wny1msZ/tm+eL5xmm4Y7So=
 github.com/Netflix/go-env v0.0.0-20220526054621-78278af1949d/go.mod h1:9XMFaCeRyW7fC9XJOWQ+NdAv8VLG7ys7l3x4ozEGLUQ=
