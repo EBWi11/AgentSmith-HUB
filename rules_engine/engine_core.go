@@ -232,9 +232,15 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 
 				data[tmpAppend.FieldName] = appendData
 			} else {
-				//plugin_test
+				//plugin
+				args := GetPluginRealArgs(tmpAppend.PluginArgs, data, ruleCache)
+				res := tmpAppend.Plugin.FuncEval(args)
+				data[tmpAppend.FieldName] = res
 			}
 		}
+
+		//add rule info
+		data["_HUB_HIT_RULE_ID"] = rule.ID
 
 		//del process
 		for i := range rule.DelList {

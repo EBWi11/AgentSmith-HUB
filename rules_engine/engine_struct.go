@@ -13,6 +13,7 @@ import (
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.
 const FromRawSymbol = "_$"
+const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
@@ -79,6 +80,7 @@ type CheckNodes struct {
 type PluginArg struct {
 	//0 Value == RealValue
 	//1 RealValue == GetCheckData(Value)
+	//2 RealValue == ORI DATA
 	Type      int
 	Value     interface{}
 	RealValue interface{}
@@ -102,6 +104,9 @@ type Append struct {
 	Type      string `xml:"type,attr"`
 	FieldName string `xml:"field_name,attr"`
 	Value     string `xml:",chardata"`
+
+	Plugin     *common.Plugin
+	PluginArgs []*PluginArg
 }
 
 func ParseFunctionCall(input string) (string, []*PluginArg, error) {
@@ -187,8 +192,15 @@ func parseValue(s string) (*PluginArg, error) {
 	var res PluginArg
 	res.Type = 0
 
+	if PluginArgFromRawSymbol == s {
+		res.Value = s
+		res.Type = 2
+		return &res, nil
+	}
+
 	if (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`)) || (strings.HasPrefix(s, `'`) && strings.HasSuffix(s, `'`)) {
-		value := s[1 : len(s)-2]
+		//need check
+		value := s[1 : len(s)-1]
 		res.Value = value
 		res.RealValue = res.Value
 		return &res, nil
@@ -273,6 +285,22 @@ func rulesetBuild(ruleset *Ruleset) error {
 		for j := range rule.Appends {
 			if rule.Appends[j].Type != "" && rule.Appends[j].Type != "PLUGIN" {
 				return errors.New("APPEND TYPE OR FIELD_NAME CANNOT BE EMPTY")
+			}
+
+			if rule.Appends[j].Type == "PLUGIN" {
+				appendNode := rule.Appends[j]
+				pluginName, args, err := ParseFunctionCall(appendNode.Value)
+				if err != nil {
+					return err
+				}
+
+				if p, ok := common.Plugins[pluginName]; ok {
+					appendNode.Plugin = p
+				} else {
+					return errors.New("NOT FUND THIS PLUGIN")
+				}
+
+				appendNode.PluginArgs = args
 			}
 		}
 

@@ -9,6 +9,7 @@
         </checklist>
 <!--        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>-->
         <append field_name="abc">123</append>
+        <append type="PLUGIN" field_name="data_type">plugin_name(ORIDATA)</append>
         <del>exe,argv</del>
     </rule>
 </root>

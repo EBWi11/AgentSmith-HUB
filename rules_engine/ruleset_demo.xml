@@ -13,6 +13,8 @@
         <append field_name="data_type">10</append>
         <append type="PLUGIN" field_name="data_type">plugin_name(ORIDATA)</append>
         <append type="PLUGIN" field_name="data_type">plugin_name("test", 123 , pid)</append>
+        
+        <plugin>plugin_name(ORIDATA)</plugin>>
         <del>sport,dport</del>
     </rule>
 </root>

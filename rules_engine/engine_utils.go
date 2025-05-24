@@ -11,7 +11,10 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 	var ok bool
 	res := make([]interface{}, len(args))
 	for i, v := range args {
-		if v.Type == 1 {
+		switch v.Type {
+		case 0:
+			res[i] = v.Value
+		case 1:
 			key := v.Value.(string)
 			keyList := common.StringToList(strings.TrimSpace(key))
 			if v.RealValue, ok = GetCheckDataFromCache(cache, key, data, keyList); !ok {
@@ -19,8 +22,8 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 			} else {
 				res[i] = v.RealValue
 			}
-		} else {
-			res[i] = v.Value
+		case 2:
+			res[i] = data
 		}
 	}
 	return res
