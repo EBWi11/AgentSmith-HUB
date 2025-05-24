@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool) bool {
+func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
 	var checkListFlag = false
 
 	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
@@ -27,7 +27,14 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 			checkListFlag, _ = REGEX(needCheckData, regex)
 		}
 	case "PLUGIN":
-		//todo
+		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
+		res := checkNode.Plugin.FuncEval(args)
+		if res[0].(bool) {
+			return true
+		} else {
+			return false
+		}
+
 	default:
 		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
 	}
@@ -68,14 +75,14 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 					checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
 					checkNodeValueFromRaw = true
 				}
-				checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw)
+				checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
 			case "AND":
 				for _, v := range checkNode.DelimiterFieldList {
 					if strings.HasPrefix(v, FromRawSymbol) {
 						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
 						checkNodeValueFromRaw = true
 					}
-					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw); !checkListRes {
+					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); !checkListRes {
 						break
 					}
 				}
@@ -86,7 +93,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 						checkNodeValueFromRaw = true
 					}
 
-					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw); checkListRes {
+					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); checkListRes {
 						break
 					}
 				}

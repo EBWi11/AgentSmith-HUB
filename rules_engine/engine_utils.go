@@ -7,6 +7,25 @@ import (
 	"strings"
 )
 
+func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map[string]common.CheckCoreCache) []interface{} {
+	var ok bool
+	res := make([]interface{}, len(args))
+	for i, v := range args {
+		if v.Type == 1 {
+			key := v.Value.(string)
+			keyList := common.StringToList(strings.TrimSpace(key))
+			if v.RealValue, ok = GetCheckDataFromCache(cache, key, data, keyList); !ok {
+				res[i] = nil
+			} else {
+				res[i] = v.RealValue
+			}
+		} else {
+			res[i] = v.Value
+		}
+	}
+	return res
+}
+
 func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}) string {
 	tmpRes, ok := cache[checkKey]
 	if ok {

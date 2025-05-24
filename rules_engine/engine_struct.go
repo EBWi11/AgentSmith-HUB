@@ -4,10 +4,11 @@ import (
 	"AgentSmith-HUB/common"
 	"encoding/xml"
 	"errors"
+	"fmt"
+	regexp "github.com/BurntSushi/rure-go"
+	regexpgo "regexp"
 	"strconv"
 	"strings"
-
-	regexp "github.com/BurntSushi/rure-go"
 )
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.
@@ -59,16 +60,28 @@ type Checklist struct {
 
 // CheckNodes represents a single check operation in a checklist.
 type CheckNodes struct {
-	ID                 string                              `xml:"id,attr"`
-	Type               string                              `xml:"type,attr"`
-	CheckFunc          func(string, string) (bool, string) // function pointer for check logic
-	Field              string                              `xml:"field,attr"`
-	FieldList          []string                            // parsed field path
-	Logic              string                              `xml:"logic,attr"`
-	Delimiter          string                              `xml:"delimiter,attr"`
+	ID        string                              `xml:"id,attr"`
+	Type      string                              `xml:"type,attr"`
+	CheckFunc func(string, string) (bool, string) // function pointer for check logic
+	Field     string                              `xml:"field,attr"`
+	FieldList []string                            // parsed field path
+	Logic     string                              `xml:"logic,attr"`
+	Delimiter string                              `xml:"delimiter,attr"`
+
 	DelimiterFieldList []string
 	Value              string `xml:",chardata"`
 	Regex              *regexp.Regex
+
+	Plugin     *common.Plugin
+	PluginArgs []*PluginArg
+}
+
+type PluginArg struct {
+	//0 Value == RealValue
+	//1 RealValue == GetCheckData(Value)
+	Type      int
+	Value     interface{}
+	RealValue interface{}
 }
 
 // Threshold defines aggregation and counting logic for a rule.
@@ -89,6 +102,128 @@ type Append struct {
 	Type      string `xml:"type,attr"`
 	FieldName string `xml:"field_name,attr"`
 	Value     string `xml:",chardata"`
+}
+
+func ParseFunctionCall(input string) (string, []*PluginArg, error) {
+	input = strings.TrimSpace(input)
+
+	re := regexpgo.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)$`)
+	matches := re.FindStringSubmatch(input)
+	if len(matches) != 3 {
+		return "", nil, errors.New("invalid function call syntax: must be in the form func(arg1, arg2, ...)")
+	}
+
+	funcName := matches[1]
+	argStr := matches[2]
+
+	args, err := parseArgs(argStr)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return funcName, args, nil
+}
+
+func parseArgs(s string) ([]*PluginArg, error) {
+	var args []*PluginArg
+	var current strings.Builder
+	inQuotes := false
+	escaped := false
+
+	for i, ch := range s {
+		switch ch {
+		case '"':
+			if escaped {
+				current.WriteRune(ch)
+				escaped = false
+			} else {
+				inQuotes = !inQuotes
+				current.WriteRune(ch)
+			}
+		case '\\':
+			if inQuotes {
+				escaped = true
+			} else {
+				current.WriteRune(ch)
+			}
+		case ',':
+			if inQuotes {
+				current.WriteRune(ch)
+			} else {
+				arg := strings.TrimSpace(current.String())
+				if arg != "" {
+					val, err := parseValue(arg)
+					if err != nil {
+						return nil, err
+					}
+					args = append(args, val)
+				}
+				current.Reset()
+			}
+		default:
+			current.WriteRune(ch)
+		}
+
+		if i == len(s)-1 {
+			arg := strings.TrimSpace(current.String())
+			if arg != "" {
+				val, err := parseValue(arg)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, val)
+			}
+		}
+	}
+
+	if inQuotes {
+		return nil, errors.New("unterminated string in arguments")
+	}
+
+	return args, nil
+}
+
+func parseValue(s string) (*PluginArg, error) {
+	var res PluginArg
+	res.Type = 0
+
+	if (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`)) || (strings.HasPrefix(s, `'`) && strings.HasSuffix(s, `'`)) {
+		value := s[1 : len(s)-2]
+		res.Value = value
+		res.RealValue = res.Value
+		return &res, nil
+	}
+
+	if s == "true" {
+		res.Value = true
+		res.RealValue = true
+		return &res, nil
+	}
+	if s == "false" {
+		res.Value = false
+		res.RealValue = false
+		return &res, nil
+	}
+
+	if i, err := strconv.Atoi(s); err == nil {
+		res.Value = i
+		res.RealValue = i
+		return &res, nil
+	}
+
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		res.Value = f
+		res.RealValue = f
+		return &res, nil
+	}
+
+	if matched, _ := regexpgo.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, s); matched {
+		res.Value = s
+		res.Type = 1
+		return &res, nil
+	}
+
+	return nil, fmt.Errorf("unsupported argument: %s", s)
 }
 
 // rulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
@@ -212,6 +347,20 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 
 			switch strings.TrimSpace(node.Type) {
+			case "PLUGIN":
+				pluginName, args, err := ParseFunctionCall(node.Value)
+				if err != nil {
+					return err
+				}
+
+				if p, ok := common.Plugins[pluginName]; ok {
+					node.Plugin = p
+				} else {
+					return errors.New("NOT FUND THIS PLUGIN")
+				}
+
+				node.PluginArgs = args
+
 			case "END":
 				node.CheckFunc = END
 			case "START":

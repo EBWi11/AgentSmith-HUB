@@ -1,13 +1,13 @@
 <root ruleset_id="test1" ruleset_name="test1" type="DETECTION">
     <rule id="reverse_shell_01" name="测试" author="test">
         <filter field="data_type">_$data_type</filter>
-        <checklist condition="a and (b or c)">
+        <checklist condition="a and c and d and e">
             <node id="a" type="REGEX" field="exe">testcases</node>
-            <node id="b" type="INCL" field="argv">gfddd26</node>
             <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">optddd|ltp</node>
             <node id="d" type="EQU" field="sessionid">_$sessionid</node>
+            <node id="e" type="PLUGIN">isLocalIP(dip)</node>
         </checklist>
-        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>
+<!--        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>-->
         <append field_name="abc">123</append>
         <del>exe,argv</del>
     </rule>

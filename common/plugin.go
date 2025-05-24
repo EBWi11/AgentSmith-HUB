@@ -2,13 +2,37 @@ package common
 
 import (
 	"errors"
+	"io/fs"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
 )
+
+const PluginsPath = "plugins/"
+
+var Plugins = make(map[string]*Plugin)
+
+func init() {
+	_ = filepath.WalkDir(PluginsPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			panic(err)
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".plugin") {
+			p, err := NewPlugin(path, "Yaegi")
+			if err != nil {
+				panic(err)
+			}
+			p.setName(d.Name()[:len(d.Name())-7])
+			Plugins[p.Name] = p
+		}
+		return nil
+	})
+}
 
 func (p *Plugin) yaegiLoad() error {
 	p.YaegiIntp = interp.New(interp.Options{})
@@ -32,7 +56,7 @@ func (p *Plugin) yaegiLoad() error {
 	return nil
 }
 
-func (p *Plugin) FuncEval(funcArgs map[int]interface{}) []interface{} {
+func (p *Plugin) FuncEval(funcArgs []interface{}) []interface{} {
 	switch p.Type {
 	case "Yaegi":
 		var realArgs []reflect.Value
@@ -51,6 +75,10 @@ func (p *Plugin) FuncEval(funcArgs map[int]interface{}) []interface{} {
 	default:
 		return nil
 	}
+}
+
+func (p *Plugin) setName(name string) {
+	p.Name = name
 }
 
 func NewPlugin(path string, pluginType string) (*Plugin, error) {
