@@ -5,38 +5,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
 )
 
-// ElasticsearchProducer 高性能ES批量写入
+// ElasticsearchProducer wraps the Elasticsearch client with a channel-based interface
 type ElasticsearchProducer struct {
-	Client    *elasticsearch.Client
-	Index     string
-	MsgChan   chan map[string]interface{}
-	batchSize int
-	flushDur  time.Duration
+	Client     *elasticsearch.Client
+	MsgChan    chan map[string]interface{}
+	Index      string
+	batchSize  int
+	flushDur   time.Duration
+	maxRetries int
+	retryDelay time.Duration
 }
 
-// NewElasticsearchProducer 创建ES Producer
-func NewElasticsearchProducer(addresses []string, index string, msgChan chan map[string]interface{}, batchSize int, flushDur time.Duration) (*ElasticsearchProducer, error) {
+// NewElasticsearchProducer creates a new Elasticsearch producer
+func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[string]interface{}, batchSize int, flushDur time.Duration) (*ElasticsearchProducer, error) {
 	cfg := elasticsearch.Config{
-		Addresses: addresses,
+		Addresses:     hosts,
+		MaxRetries:    3,
+		RetryOnStatus: []int{502, 503, 504, 429},
 	}
+
 	client, err := elasticsearch.NewClient(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create ES client: %v", err)
 	}
+
 	prod := &ElasticsearchProducer{
-		Client:    client,
-		Index:     index,
-		MsgChan:   msgChan,
-		batchSize: batchSize,
-		flushDur:  flushDur,
+		Client:     client,
+		MsgChan:    msgChan,
+		Index:      index,
+		batchSize:  batchSize,
+		flushDur:   flushDur,
+		maxRetries: 3,
+		retryDelay: 1 * time.Second,
 	}
+
 	go prod.run()
 	return prod, nil
 }
@@ -45,6 +53,8 @@ func NewElasticsearchProducer(addresses []string, index string, msgChan chan map
 func (p *ElasticsearchProducer) run() {
 	batch := make([]map[string]interface{}, 0, p.batchSize)
 	timer := time.NewTimer(p.flushDur)
+	defer timer.Stop()
+
 	for {
 		select {
 		case msg, ok := <-p.MsgChan:
@@ -71,38 +81,61 @@ func (p *ElasticsearchProducer) run() {
 	}
 }
 
-// flush 批量写入ES
-func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
+// sendBatch sends a batch of documents to Elasticsearch with retry logic
+func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 	if len(batch) == 0 {
 		return
 	}
+
 	var buf bytes.Buffer
 	for _, doc := range batch {
+		// Add index action
 		meta := map[string]interface{}{
 			"index": map[string]interface{}{
 				"_index": p.Index,
 			},
 		}
-		metaLine, _ := json.Marshal(meta)
-		docLine, _ := json.Marshal(doc)
-		buf.Write(metaLine)
-		buf.WriteByte('\n')
-		buf.Write(docLine)
-		buf.WriteByte('\n')
+		if err := json.NewEncoder(&buf).Encode(meta); err != nil {
+			fmt.Printf("Failed to encode meta: %v\n", err)
+			continue
+		}
+		// Add document
+		if err := json.NewEncoder(&buf).Encode(doc); err != nil {
+			fmt.Printf("Failed to encode document: %v\n", err)
+			continue
+		}
 	}
-	req := esapi.BulkRequest{
-		Body: bytes.NewReader(buf.Bytes()),
-	}
-	resp, err := req.Do(context.Background(), p.Client)
-	if err != nil {
-		fmt.Printf("ES bulk error: %v\n", err)
+
+	// Try to send with retries
+	for i := 0; i <= p.maxRetries; i++ {
+		res, err := p.Client.Bulk(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			if i == p.maxRetries {
+				fmt.Printf("Failed to send batch to ES after %d retries: %v\n", p.maxRetries, err)
+				return
+			}
+			time.Sleep(p.retryDelay)
+			continue
+		}
+		defer res.Body.Close()
+
+		if res.IsError() {
+			if i == p.maxRetries {
+				fmt.Printf("ES returned error after %d retries: %s\n", p.maxRetries, res.String())
+				return
+			}
+			time.Sleep(p.retryDelay)
+			continue
+		}
+
+		// Success
 		return
 	}
-	defer resp.Body.Close()
-	if resp.IsError() {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("ES bulk response error: %s\n", body)
-	}
+}
+
+// flush 批量写入ES
+func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
+	p.sendBatch(batch)
 }
 
 // Close 关闭producer

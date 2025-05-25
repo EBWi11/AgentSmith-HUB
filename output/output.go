@@ -11,29 +11,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// OutputType defines the type of output target.
+// OutputType defines the type of output destination.
 type OutputType string
 
 const (
 	OutputTypeKafka         OutputType = "kafka"
-	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
-)
-
-// KafkaCompressionType and KafkaSASLType should be consistent with input.go
-type KafkaCompressionType string
-type KafkaSASLType string
-
-const (
-	KafkaCompressionNone   KafkaCompressionType = "none"
-	KafkaCompressionSnappy KafkaCompressionType = "snappy"
-	KafkaCompressionGzip   KafkaCompressionType = "gzip"
-	KafkaCompressionLz4    KafkaCompressionType = "lz4"
-	KafkaCompressionZstd   KafkaCompressionType = "zstd"
-
-	KafkaSASLNone  KafkaSASLType = "none"
-	KafkaSASLPlain KafkaSASLType = "plain"
-	KafkaSASLSCRAM KafkaSASLType = "scram"
+	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
 )
 
 // OutputConfig is the YAML config for an output.
@@ -42,24 +26,24 @@ type OutputConfig struct {
 	Id            string                     `yaml:"id"`
 	Type          OutputType                 `yaml:"type"`
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
-	AliyunSLS     *AliyunSLSOutputConfig     `yaml:"aliyun_sls,omitempty"`
 	Elasticsearch *ElasticsearchOutputConfig `yaml:"elasticsearch,omitempty"`
+	AliyunSLS     *AliyunSLSOutputConfig     `yaml:"aliyun_sls,omitempty"`
 }
 
 // KafkaOutputConfig holds Kafka-specific config.
 type KafkaOutputConfig struct {
-	Brokers     []string             `yaml:"brokers"`
-	Topic       string               `yaml:"topic"`
-	Compression KafkaCompressionType `yaml:"compression,omitempty"`
-	SASL        *KafkaSASLConfig     `yaml:"sasl,omitempty"`
+	Brokers     []string                    `yaml:"brokers"`
+	Topic       string                      `yaml:"topic"`
+	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
+	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
 }
 
-// KafkaSASLConfig holds Kafka SASL authentication config.
-type KafkaSASLConfig struct {
-	Enable    bool          `yaml:"enable"`
-	Mechanism KafkaSASLType `yaml:"mechanism"`
-	Username  string        `yaml:"username"`
-	Password  string        `yaml:"password"`
+// ElasticsearchOutputConfig holds Elasticsearch-specific config.
+type ElasticsearchOutputConfig struct {
+	Hosts     []string `yaml:"hosts"`
+	Index     string   `yaml:"index"`
+	BatchSize int      `yaml:"batch_size,omitempty"`
+	FlushDur  string   `yaml:"flush_dur,omitempty"`
 }
 
 // AliyunSLSOutputConfig holds Aliyun SLS-specific config.
@@ -69,16 +53,6 @@ type AliyunSLSOutputConfig struct {
 	AccessKeySecret string `yaml:"access_key_secret"`
 	Project         string `yaml:"project"`
 	Logstore        string `yaml:"logstore"`
-	Topic           string `yaml:"topic"`
-	Source          string `yaml:"source"`
-}
-
-// ElasticsearchOutputConfig holds Elasticsearch-specific config.
-type ElasticsearchOutputConfig struct {
-	Addresses []string      `yaml:"addresses"`
-	Index     string        `yaml:"index"`
-	BatchSize int           `yaml:"batch_size"`
-	FlushDur  time.Duration `yaml:"flush_dur"`
 }
 
 // Output is the runtime output instance.
@@ -89,16 +63,15 @@ type Output struct {
 	UpStream []*chan map[string]interface{}
 
 	// runtime
-	kafkaProducer *common.KafkaProducer
-	slsProducer   func() // placeholder for SLS producer, can be extended
-	esProducer    *common.ElasticsearchProducer
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
+	kafkaProducer         *common.KafkaProducer
+	elasticsearchProducer *common.ElasticsearchProducer
+	aliyunProducer        *common.AliyunSLSProducer
+	wg                    sync.WaitGroup
 
 	// config cache
 	kafkaCfg         *KafkaOutputConfig
-	aliyunSLSCfg     *AliyunSLSOutputConfig
 	elasticsearchCfg *ElasticsearchOutputConfig
+	aliyunSLSCfg     *AliyunSLSOutputConfig
 
 	// metrics
 	produceTotal uint64
@@ -127,14 +100,15 @@ func NewOutput(cfg *OutputConfig, upstream []*chan map[string]interface{}) (*Out
 		Type:             cfg.Type,
 		UpStream:         upstream,
 		kafkaCfg:         cfg.Kafka,
-		aliyunSLSCfg:     cfg.AliyunSLS,
 		elasticsearchCfg: cfg.Elasticsearch,
+		aliyunSLSCfg:     cfg.AliyunSLS,
 	}
 	return out, nil
 }
 
-// Start launches the output producer and pulls data from upstream.
+// Start launches the output producer and consumes data from upstream.
 func (out *Output) Start() error {
+	// Start metric goroutine
 	out.metricStop = make(chan struct{})
 	go out.metricLoop()
 
@@ -150,6 +124,8 @@ func (out *Output) Start() error {
 		prod, err := common.NewKafkaProducer(
 			out.kafkaCfg.Brokers,
 			out.kafkaCfg.Topic,
+			out.kafkaCfg.Compression,
+			out.kafkaCfg.SASL,
 			msgChan,
 		)
 		if err != nil {
@@ -159,65 +135,82 @@ func (out *Output) Start() error {
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
-			for {
-				select {
-				case <-out.stopChan:
-					close(msgChan)
-					return
-				default:
-					for _, up := range out.UpStream {
-						select {
-						case msg := <-*up:
-							msgChan <- msg
-							atomic.AddUint64(&out.produceTotal, 1)
-						default:
-							// no data, continue
-						}
-					}
-					time.Sleep(1 * time.Millisecond)
+			for _, up := range out.UpStream {
+				for msg := range *up {
+					msgChan <- msg
+					atomic.AddUint64(&out.produceTotal, 1)
 				}
 			}
 		}()
 	case OutputTypeElasticsearch:
+		if out.elasticsearchProducer != nil {
+			return fmt.Errorf("elasticsearch producer already started")
+		}
 		if out.elasticsearchCfg == nil {
 			return fmt.Errorf("elasticsearch config missing")
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
+		batchSize := 1000
+		if out.elasticsearchCfg.BatchSize > 0 {
+			batchSize = out.elasticsearchCfg.BatchSize
+		}
+		flushDur := 5 * time.Second
+		if out.elasticsearchCfg.FlushDur != "" {
+			if d, err := time.ParseDuration(out.elasticsearchCfg.FlushDur); err == nil {
+				flushDur = d
+			}
+		}
 		prod, err := common.NewElasticsearchProducer(
-			out.elasticsearchCfg.Addresses,
+			out.elasticsearchCfg.Hosts,
 			out.elasticsearchCfg.Index,
 			msgChan,
-			out.elasticsearchCfg.BatchSize,
-			out.elasticsearchCfg.FlushDur,
+			batchSize,
+			flushDur,
 		)
 		if err != nil {
 			return err
 		}
-		out.esProducer = prod
+		out.elasticsearchProducer = prod
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
-			for {
-				select {
-				case <-out.stopChan:
-					close(msgChan)
-					return
-				default:
-					for _, up := range out.UpStream {
-						select {
-						case msg := <-*up:
-							msgChan <- msg
-							atomic.AddUint64(&out.produceTotal, 1)
-						default:
-						}
-					}
-					time.Sleep(1 * time.Millisecond)
+			for _, up := range out.UpStream {
+				for msg := range *up {
+					msgChan <- msg
+					atomic.AddUint64(&out.produceTotal, 1)
 				}
 			}
 		}()
 	case OutputTypeAliyunSLS:
-		// TODO: Implement SLS producer integration, similar to above
-		return fmt.Errorf("aliyun_sls output not implemented yet")
+		if out.aliyunProducer != nil {
+			return fmt.Errorf("aliyun_sls producer already started")
+		}
+		if out.aliyunSLSCfg == nil {
+			return fmt.Errorf("aliyun_sls config missing")
+		}
+		msgChan := make(chan map[string]interface{}, 1024)
+		prod, err := common.NewAliyunSLSProducer(
+			out.aliyunSLSCfg.Endpoint,
+			out.aliyunSLSCfg.AccessKeyID,
+			out.aliyunSLSCfg.AccessKeySecret,
+			out.aliyunSLSCfg.Project,
+			out.aliyunSLSCfg.Logstore,
+			msgChan,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create SLS producer: %v", err)
+		}
+		out.aliyunProducer = prod
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			for _, up := range out.UpStream {
+				for msg := range *up {
+					msgChan <- msg
+					atomic.AddUint64(&out.produceTotal, 1)
+				}
+			}
+		}()
 	default:
 		return fmt.Errorf("unsupported output type: %s", out.Type)
 	}
@@ -225,18 +218,65 @@ func (out *Output) Start() error {
 }
 
 // Stop stops the output producer and waits for all routines to finish.
+// It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
-	if out.stopChan != nil {
-		close(out.stopChan)
+	// Wait for all upstream channels to be empty before closing producers
+waitUpstream:
+	for {
+		allEmpty := true
+		for _, up := range out.UpStream {
+			if len(*up) > 0 {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			break waitUpstream
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Wait for all internal msgChan to be empty (for each output type)
+	switch out.Type {
+	case OutputTypeKafka:
+		if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
+		waitKafkaMsgChan:
+			for {
+				if len(out.kafkaProducer.MsgChan) == 0 {
+					break waitKafkaMsgChan
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			out.kafkaProducer.Close()
+			out.kafkaProducer = nil
+		}
+	case OutputTypeElasticsearch:
+		if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
+		waitESMsgChan:
+			for {
+				if len(out.elasticsearchProducer.MsgChan) == 0 {
+					break waitESMsgChan
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			out.elasticsearchProducer.Close()
+			out.elasticsearchProducer = nil
+		}
+	case OutputTypeAliyunSLS:
+		if out.aliyunProducer != nil && out.aliyunProducer.MsgChan != nil {
+		waitSLSMsgChan:
+			for {
+				if len(out.aliyunProducer.MsgChan) == 0 {
+					break waitSLSMsgChan
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			out.aliyunProducer.Close()
+			out.aliyunProducer = nil
+		}
 	}
 	if out.metricStop != nil {
 		close(out.metricStop)
-	}
-	if out.kafkaProducer != nil {
-		out.kafkaProducer.Close()
-	}
-	if out.esProducer != nil {
-		out.esProducer.Close()
 	}
 	out.wg.Wait()
 	return nil

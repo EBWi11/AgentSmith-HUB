@@ -19,26 +19,6 @@ const (
 	InputTypeAliyunSLS InputType = "aliyun_sls"
 )
 
-// KafkaCompressionType defines supported compression types.
-type KafkaCompressionType string
-
-const (
-	KafkaCompressionNone   KafkaCompressionType = "none"
-	KafkaCompressionSnappy KafkaCompressionType = "snappy"
-	KafkaCompressionGzip   KafkaCompressionType = "gzip"
-	KafkaCompressionLz4    KafkaCompressionType = "lz4"
-	KafkaCompressionZstd   KafkaCompressionType = "zstd"
-)
-
-// KafkaSASLType defines supported SASL mechanisms.
-type KafkaSASLType string
-
-const (
-	KafkaSASLNone  KafkaSASLType = "none"
-	KafkaSASLPlain KafkaSASLType = "plain"
-	KafkaSASLSCRAM KafkaSASLType = "scram"
-)
-
 // InputConfig is the YAML config for an input.
 type InputConfig struct {
 	Name      string                `yaml:"name"`
@@ -50,19 +30,11 @@ type InputConfig struct {
 
 // KafkaInputConfig holds Kafka-specific config.
 type KafkaInputConfig struct {
-	Brokers     []string             `yaml:"brokers"`
-	Group       string               `yaml:"group"`
-	Topic       string               `yaml:"topic"`
-	Compression KafkaCompressionType `yaml:"compression,omitempty"`
-	SASL        *KafkaSASLConfig     `yaml:"sasl,omitempty"`
-}
-
-// KafkaSASLConfig holds Kafka SASL authentication config.
-type KafkaSASLConfig struct {
-	Enable    bool          `yaml:"enable"`
-	Mechanism KafkaSASLType `yaml:"mechanism"`
-	Username  string        `yaml:"username"`
-	Password  string        `yaml:"password"`
+	Brokers     []string                    `yaml:"brokers"`
+	Group       string                      `yaml:"group"`
+	Topic       string                      `yaml:"topic"`
+	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
+	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
 }
 
 // AliyunSLSInputConfig holds Aliyun SLS-specific config.
@@ -139,11 +111,12 @@ func (in *Input) Start() error {
 			return fmt.Errorf("kafka config missing")
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
-		// TODO: Pass compression and SASL config to NewKafkaConsumer if supported by common.NewKafkaConsumer
 		cons, err := common.NewKafkaConsumer(
 			in.kafkaCfg.Brokers,
 			in.kafkaCfg.Group,
 			in.kafkaCfg.Topic,
+			in.kafkaCfg.Compression,
+			in.kafkaCfg.SASL,
 			msgChan,
 		)
 		if err != nil {
