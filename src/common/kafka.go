@@ -92,7 +92,8 @@ func NewKafkaProducer(
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
 		kgo.RecordPartitioner(kgo.RoundRobinPartitioner()),
-		kgo.ProducerLinger(100 * time.Millisecond),
+		kgo.ProducerBatchMaxBytes(1_000_000),
+		kgo.ProducerLinger(50 * time.Millisecond),
 	}
 
 	// Add compression if specified
@@ -155,10 +156,7 @@ func (p *KafkaProducer) run() {
 			}
 		}
 
-		err = p.Client.ProduceSync(context.Background(), rec).FirstErr()
-		if err != nil {
-			fmt.Println(err)
-		}
+		p.Client.Produce(context.Background(), rec, nil)
 	}
 }
 
