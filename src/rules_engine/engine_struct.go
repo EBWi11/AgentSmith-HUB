@@ -5,12 +5,15 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	regexp "github.com/BurntSushi/rure-go"
-	"github.com/panjf2000/ants/v2"
+	"io"
+	"os"
 	regexpgo "regexp"
 	"strconv"
 	"strings"
 	"sync"
+
+	regexp "github.com/BurntSushi/rure-go"
+	"github.com/panjf2000/ants/v2"
 )
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.
@@ -26,9 +29,9 @@ var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 // Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
 	XMLName     xml.Name `xml:"root"`
-	RulesetID   string   `xml:"ruleset_id,attr"`
-	RulesetName string   `xml:"ruleset_name,attr"`
-	Type        string   `xml:"type,attr"`
+	RulesetID   string
+	RulesetName string `xml:"name,attr"`
+	Type        string `xml:"type,attr"`
 
 	IsDetection bool
 	Rules       []Rule `xml:"rule"`
@@ -128,6 +131,30 @@ type Plugin struct {
 	Value      string `xml:",chardata"`
 	Plugin     *common.Plugin
 	PluginArgs []*PluginArg
+}
+
+func NewRuleset(path string, id string) (*Ruleset, error) {
+	xmlFile, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	defer xmlFile.Close()
+
+	rawRuleset, err := io.ReadAll(xmlFile)
+	if err != nil {
+		panic(err)
+	}
+
+	ruleset, err := ParseRulesetFromByte(rawRuleset)
+	if err != nil {
+		return nil, err
+	}
+
+	ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
+	ruleset.DownStream = make(map[string]*chan map[string]interface{}, 0)
+
+	ruleset.RulesetID = id
+	return ruleset, nil
 }
 
 func ParseFunctionCall(input string) (string, []*PluginArg, error) {
@@ -259,14 +286,9 @@ func parseValue(s string) (*PluginArg, error) {
 	return nil, fmt.Errorf("unsupported argument: %s", s)
 }
 
-// rulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
-func rulesetBuild(ruleset *Ruleset) error {
+// RulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
+func RulesetBuild(ruleset *Ruleset) error {
 	var err error
-
-	if strings.TrimSpace(ruleset.RulesetID) == "" {
-		return errors.New("RulesetID cannot be empty")
-	}
-
 	if strings.TrimSpace(ruleset.RulesetName) == "" {
 		return errors.New("RulesetName cannot be empty")
 	}
@@ -538,7 +560,7 @@ func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
 		return nil, err
 	}
-	err := rulesetBuild(&ruleset)
+	err := RulesetBuild(&ruleset)
 	if err != nil {
 		return nil, err
 	}

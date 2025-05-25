@@ -31,7 +31,7 @@ func initRuleset(filePath string) *rules_engine.Ruleset {
 }
 
 func main() {
-	ruleset := initRuleset("test/test.xml")
+	ruleset := initRuleset("../config_demo/ruleset/test.xml")
 
 	data := make(map[string]interface{}, 10)
 	_ = sonic.Unmarshal([]byte(testData), &data)

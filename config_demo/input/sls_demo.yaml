@@ -1,5 +1,4 @@
-name: aliyun_sls_output_demo
-id: sls_demo_1
+name: aliyun_sls_input_demo
 type: aliyun_sls
 aliyun_sls:
   endpoint: "cn-hangzhou.log.aliyuncs.com"
@@ -7,5 +6,5 @@ aliyun_sls:
   access_key_secret: "your-access-key-secret"
   project: "your-project"
   logstore: "your-logstore"
-  topic: "your-topic"
-  source: "your-source"
+  consumer_group_name: "your-consumer-group"
+  consumer_name: "your-consumer-name"

@@ -1,0 +1,6 @@
+name: kafka_output_demo
+type: kafka
+kafka:
+  brokers:
+    - "172.26.0.19:9092"
+  topic: "demo-output-topic"

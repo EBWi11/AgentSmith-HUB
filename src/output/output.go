@@ -22,8 +22,8 @@ const (
 
 // OutputConfig is the YAML config for an output.
 type OutputConfig struct {
-	Name          string                     `yaml:"name"`
-	Id            string                     `yaml:"id"`
+	Name          string `yaml:"name"`
+	Id            string
 	Type          OutputType                 `yaml:"type"`
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
 	Elasticsearch *ElasticsearchOutputConfig `yaml:"elasticsearch,omitempty"`
@@ -93,12 +93,17 @@ func LoadOutputConfig(path string) (*OutputConfig, error) {
 }
 
 // NewOutput creates an Output from config and upstreams.
-func NewOutput(cfg *OutputConfig, upstream []*chan map[string]interface{}) (*Output, error) {
+func NewOutput(path string, id string) (*Output, error) {
+	cfg, err := LoadOutputConfig(path)
+	if err != nil {
+		return nil, err
+	}
+
 	out := &Output{
 		Name:             cfg.Name,
-		Id:               cfg.Id,
+		Id:               id,
 		Type:             cfg.Type,
-		UpStream:         upstream,
+		UpStream:         make([]*chan map[string]interface{}, 0),
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,

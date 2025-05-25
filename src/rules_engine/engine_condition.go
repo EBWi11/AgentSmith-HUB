@@ -125,10 +125,10 @@ func (a *ReCepAST) parsePrimary() ExprAST {
 	}
 }
 
-func (a *ReCepAST) parseBinOpRHS(execPrec int, lhs ExprAST) ExprAST {
+func (a *ReCepAST) parseBinOpRHS(execPrev int, lhs ExprAST) ExprAST {
 	for {
-		tokPrec := a.getTokPrecedence()
-		if tokPrec < execPrec {
+		tokPrev := a.getTokPrecedence()
+		if tokPrev < execPrev {
 			return lhs
 		}
 		binOp := a.currTok.Data
@@ -139,9 +139,9 @@ func (a *ReCepAST) parseBinOpRHS(execPrec int, lhs ExprAST) ExprAST {
 		if rhs == nil {
 			return nil
 		}
-		nextPrec := a.getTokPrecedence()
-		if tokPrec < nextPrec {
-			rhs = a.parseBinOpRHS(tokPrec+1, rhs)
+		nextPrev := a.getTokPrecedence()
+		if tokPrev < nextPrev {
+			rhs = a.parseBinOpRHS(tokPrev+1, rhs)
 			if rhs == nil {
 				return nil
 			}

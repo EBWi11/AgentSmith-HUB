@@ -4,9 +4,21 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/cespare/xxhash/v2"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 )
+
+func DirExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false, nil // 不存在
+	}
+	if err != nil {
+		return false, err // 其他错误
+	}
+	return info.IsDir(), nil
+}
 
 func MapDeepCopy(m map[string]interface{}) map[string]interface{} {
 	return MapDeepCopyAction(m).(map[string]interface{})

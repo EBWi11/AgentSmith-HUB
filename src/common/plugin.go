@@ -13,12 +13,11 @@ import (
 	"github.com/traefik/yaegi/stdlib"
 )
 
-const PluginsPath = "plugins/"
 const PluginEnding = "_plugin.go"
 
 var Plugins = make(map[string]*Plugin)
 
-func init() {
+func PluginInit(PluginsPath string) {
 	_ = filepath.WalkDir(PluginsPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			panic(err)

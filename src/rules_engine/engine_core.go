@@ -12,16 +12,6 @@ import (
 
 const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
 
-// Add an upstream channel to the ruleset.
-func (r *Ruleset) AddUpStream(id string, ch *chan map[string]interface{}) {
-	r.UpStream[id] = ch
-}
-
-// Add a downstream channel to the ruleset.
-func (r *Ruleset) AddDownStream(id string, ch *chan map[string]interface{}) {
-	r.DownStream[id] = ch
-}
-
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
 	if r.stopChan != nil {
@@ -324,7 +314,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			continue
 		}
 
-		dataCopy := common.MapDeepCopyAction(data).(map[string]interface{})
+		dataCopy := common.MapDeepCopy(data)
 
 		// Add rule info
 		addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)

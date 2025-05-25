@@ -1,0 +1,409 @@
+package project
+
+import (
+	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/output"
+	"AgentSmith-HUB/rules_engine"
+	"errors"
+	"fmt"
+	"os"
+	"path"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+var ConfigRoot = ""
+
+func SetConfigRoot(p string) error {
+	flag, _ := common.DirExists(p)
+	if !flag {
+		return errors.New(p + ": dir is not exist")
+	}
+	ConfigRoot = p
+
+	//plugin init
+	common.PluginInit(path.Join(ConfigRoot, "plugin"))
+
+	return nil
+}
+
+// NewProject creates a new project instance
+func NewProject(pp string) (*Project, error) {
+	projectPath := path.Join(ConfigRoot, "project", pp)
+
+	data, err := os.ReadFile(projectPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg ProjectConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(cfg.Id) == "" {
+		return nil, fmt.Errorf("project id cannot be empty")
+	}
+	if strings.TrimSpace(cfg.Name) == "" {
+		return nil, fmt.Errorf("project name cannot be empty")
+	}
+	if strings.TrimSpace(cfg.Content) == "" {
+		return nil, fmt.Errorf("project content cannot be empty")
+	}
+
+	p := &Project{
+		Name:      cfg.Name,
+		Id:        cfg.Id,
+		Status:    ProjectStatusStopped,
+		Config:    &cfg,
+		Inputs:    make(map[string]*input.Input),
+		Outputs:   make(map[string]*output.Output),
+		Rulesets:  make(map[string]*rules_engine.Ruleset),
+		msgChans:  make(map[string]chan map[string]interface{}),
+		stopChan:  make(chan struct{}),
+		errorChan: make(chan error, 100),
+		metrics: &ProjectMetrics{
+			InputQPS:  make(map[string]uint64),
+			OutputQPS: make(map[string]uint64),
+		},
+	}
+
+	// Initialize components
+	if err := p.initComponents(); err != nil {
+		return nil, fmt.Errorf("failed to initialize components: %v", err)
+	}
+
+	return p, nil
+}
+
+func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
+	var err error
+	for _, v := range inputNames {
+		p.Inputs[v], err = input.NewInput(path.Join(ConfigRoot, "input", v+".yaml"), v)
+		if err != nil {
+			return err
+		}
+	}
+	for _, v := range outputNames {
+		p.Outputs[v], err = output.NewOutput(path.Join(ConfigRoot, "output", v+".yaml"), v)
+		if err != nil {
+			return err
+		}
+	}
+	for _, v := range rulesetNames {
+		p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(ConfigRoot, "ruleset", v+".xml"), v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// initComponents initializes all project components and their connections
+func (p *Project) initComponents() error {
+	// Parse project content to build the data flow graph
+	flowGraph, err := p.parseContent()
+	if err != nil {
+		return fmt.Errorf("failed to parse project content: %v", err)
+	}
+
+	// Collect all input/output/ruleset names from flowGraph
+	inputNames := []string{}
+	outputNames := []string{}
+	rulesetNames := []string{}
+
+	nameExists := func(list []string, name string) bool {
+		for _, n := range list {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		if len(fromParts) == 2 {
+			switch strings.ToUpper(fromParts[0]) {
+			case "INPUT":
+				if !nameExists(inputNames, fromParts[1]) {
+					inputNames = append(inputNames, fromParts[1])
+				}
+			case "OUTPUT":
+				if !nameExists(outputNames, fromParts[1]) {
+					outputNames = append(outputNames, fromParts[1])
+				}
+			case "RULESET":
+				if !nameExists(rulesetNames, fromParts[1]) {
+					rulesetNames = append(rulesetNames, fromParts[1])
+				}
+			}
+		}
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			if len(toParts) == 2 {
+				switch strings.ToUpper(toParts[0]) {
+				case "INPUT":
+					if !nameExists(inputNames, toParts[1]) {
+						inputNames = append(inputNames, toParts[1])
+					}
+				case "OUTPUT":
+					if !nameExists(outputNames, toParts[1]) {
+						outputNames = append(outputNames, toParts[1])
+					}
+				case "RULESET":
+					if !nameExists(rulesetNames, toParts[1]) {
+						rulesetNames = append(rulesetNames, toParts[1])
+					}
+				}
+			}
+		}
+	}
+
+	// load input/output/ruleset
+	err = p.loadComponents(inputNames, outputNames, rulesetNames)
+	if err != nil {
+		return err
+	}
+
+	// Connect components according to the flow graph
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		fromType := fromParts[0]
+		fromId := fromParts[1]
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			toType := toParts[0]
+			toId := toParts[1]
+
+			// Create a channel for this connection
+			msgChan := make(chan map[string]interface{}, 1024)
+			p.msgChans[fmt.Sprintf("%s->%s", from, to)] = msgChan
+
+			// Connect based on component types
+			switch fromType {
+			case "INPUT":
+				if in, ok := p.Inputs[fromId]; ok {
+					in.DownStream = append(in.DownStream, &msgChan)
+				}
+			case "RULESET":
+				if rs, ok := p.Rulesets[fromId]; ok {
+					rs.DownStream[to] = &msgChan
+				}
+			}
+
+			switch toType {
+			case "RULESET":
+				if rs, ok := p.Rulesets[toId]; ok {
+					rs.UpStream[from] = &msgChan
+				}
+			case "OUTPUT":
+				if out, ok := p.Outputs[toId]; ok {
+					out.UpStream = append(out.UpStream, &msgChan)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// parseContent parses the project content to build the data flow graph
+func (p *Project) parseContent() (map[string][]string, error) {
+	flowGraph := make(map[string][]string)
+	lines := strings.Split(p.Config.Content, "\n")
+	edgeSet := make(map[string]struct{}) // 用于检测重复流向
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid line: %q", line)
+		}
+
+		from := strings.TrimSpace(parts[0])
+		to := strings.TrimSpace(parts[1])
+
+		// Validate node types
+		fromType, _ := parseNode(from)
+		toType, _ := parseNode(to)
+
+		if fromType == "" || toType == "" {
+			return nil, fmt.Errorf("invalid node format: %s -> %s", from, to)
+		}
+
+		// Validate flow rules
+		if toType == "INPUT" {
+			return nil, fmt.Errorf("INPUT node %q cannot be a destination", to)
+		}
+		if fromType == "OUTPUT" {
+			return nil, fmt.Errorf("OUTPUT node %q cannot be a source", from)
+		}
+
+		// 检查是否有重复的流向
+		edgeKey := from + "->" + to
+		if _, exists := edgeSet[edgeKey]; exists {
+			return nil, fmt.Errorf("duplicate data flow detected: %s", edgeKey)
+		}
+		edgeSet[edgeKey] = struct{}{}
+
+		// Add to flow graph
+		flowGraph[from] = append(flowGraph[from], to)
+	}
+
+	return flowGraph, nil
+}
+
+// parseNode splits "TYPE.name" into ("TYPE", "name")
+func parseNode(s string) (string, string) {
+	parts := strings.SplitN(s, ".", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.ToUpper(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
+}
+
+// Start starts the project and all its components
+func (p *Project) Start() error {
+	if p.Status == ProjectStatusRunning {
+		return fmt.Errorf("project is already running")
+	}
+
+	// Start inputs
+	for _, in := range p.Inputs {
+		if err := in.Start(); err != nil {
+			return fmt.Errorf("failed to start input %s: %v", in.Name, err)
+		}
+	}
+
+	// Start rulesets
+	for _, rs := range p.Rulesets {
+		if err := rs.Start(); err != nil {
+			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+		}
+	}
+
+	// Start outputs
+	for _, out := range p.Outputs {
+		if err := out.Start(); err != nil {
+			return fmt.Errorf("failed to start output %s: %v", out.Name, err)
+		}
+	}
+
+	// Start metrics collection
+	p.metricsStop = make(chan struct{})
+	go p.collectMetrics()
+
+	// Start error monitoring
+	go p.monitorErrors()
+
+	p.Status = ProjectStatusRunning
+	p.startTime = time.Now()
+	return nil
+}
+
+// Stop stops the project and all its components
+func (p *Project) Stop() error {
+	if p.Status != ProjectStatusRunning {
+		return fmt.Errorf("project is not running")
+	}
+
+	// Stop all components
+	for _, in := range p.Inputs {
+		if err := in.Stop(); err != nil {
+			return fmt.Errorf("failed to stop input %s: %v", in.Name, err)
+		}
+	}
+
+	for _, rs := range p.Rulesets {
+		if err := rs.Stop(); err != nil {
+			return fmt.Errorf("failed to stop ruleset %s: %v", rs.RulesetID, err)
+		}
+	}
+
+	for _, out := range p.Outputs {
+		if err := out.Stop(); err != nil {
+			return fmt.Errorf("failed to stop output %s: %v", out.Name, err)
+		}
+	}
+
+	// Stop metrics collection
+	if p.metricsStop != nil {
+		close(p.metricsStop)
+	}
+
+	// Close all channels
+	close(p.stopChan)
+	close(p.errorChan)
+
+	// Wait for all goroutines to finish
+	p.wg.Wait()
+
+	p.Status = ProjectStatusStopped
+	return nil
+}
+
+// collectMetrics collects runtime metrics
+func (p *Project) collectMetrics() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.metricsStop:
+			return
+		case <-ticker.C:
+			p.metrics.mu.Lock()
+			// Update input metrics
+			for id, in := range p.Inputs {
+				p.metrics.InputQPS[id] = in.GetConsumeQPS()
+			}
+			// Update output metrics
+			for id, out := range p.Outputs {
+				p.metrics.OutputQPS[id] = out.GetProduceQPS()
+			}
+			p.metrics.mu.Unlock()
+		}
+	}
+}
+
+// monitorErrors monitors and handles errors
+func (p *Project) monitorErrors() {
+	for err := range p.errorChan {
+		p.lastErrorMu.Lock()
+		p.lastError = err
+		p.lastErrorMu.Unlock()
+		p.Status = ProjectStatusError
+	}
+}
+
+// GetMetrics returns the current project metrics
+func (p *Project) GetMetrics() *ProjectMetrics {
+	p.metrics.mu.RLock()
+	defer p.metrics.mu.RUnlock()
+	return p.metrics
+}
+
+// GetLastError returns the last error that occurred
+func (p *Project) GetLastError() error {
+	p.lastErrorMu.RLock()
+	defer p.lastErrorMu.RUnlock()
+	return p.lastError
+}
+
+// GetUptime returns the project uptime
+func (p *Project) GetUptime() time.Duration {
+	if p.Status != ProjectStatusRunning {
+		return 0
+	}
+	return time.Since(p.startTime)
+}

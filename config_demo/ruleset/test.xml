@@ -1,4 +1,4 @@
-<root ruleset_id="test1" ruleset_name="test1" type="DETECTION">
+<root name="test1" type="DETECTION">
     <rule id="reverse_shell_01" name="测试" author="test">
         <filter field="data_type">_$data_type</filter>
         <checklist condition="a and c and d and e">
