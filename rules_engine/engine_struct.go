@@ -504,6 +504,8 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 		}
 
+		rule.Checklist.CheckNodes = sortCheckNodes(rule.Checklist.CheckNodes)
+
 		delList := strings.Split(strings.TrimSpace(rule.Del), ",")
 
 		rule.DelList = make([][]string, len(delList))
@@ -527,4 +529,48 @@ func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 		return nil, err
 	}
 	return &ruleset, nil
+}
+
+func sortCheckNodes(checkNodes []CheckNodes) []CheckNodes {
+	sortedIndex := 0
+	sorted := make([]CheckNodes, len(checkNodes))
+
+	tier1 := make([]int, 0)
+	tier2 := make([]int, 0)
+	tier3 := make([]int, 0)
+	tier4 := make([]int, 0)
+
+	for i, v := range checkNodes {
+		if v.Type == "ISNULL" || v.Type == "NOTNULL" {
+			tier1 = append(tier1, i)
+		} else if v.Type == "REGEX" {
+			tier3 = append(tier3, i)
+		} else if v.Type == "PLUGIN" {
+			tier4 = append(tier4, i)
+		} else {
+			tier2 = append(tier2, i)
+		}
+	}
+
+	for _, i := range tier1 {
+		sorted[sortedIndex] = checkNodes[i]
+		sortedIndex = sortedIndex + 1
+	}
+
+	for _, i := range tier2 {
+		sorted[sortedIndex] = checkNodes[i]
+		sortedIndex = sortedIndex + 1
+	}
+
+	for _, i := range tier3 {
+		sorted[sortedIndex] = checkNodes[i]
+		sortedIndex = sortedIndex + 1
+	}
+
+	for _, i := range tier4 {
+		sorted[sortedIndex] = checkNodes[i]
+		sortedIndex = sortedIndex + 1
+	}
+
+	return sorted
 }

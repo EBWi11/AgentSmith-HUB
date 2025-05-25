@@ -16,4 +16,20 @@
         <plugin>pluginTest(_$ORIDATA)</plugin>
         <del>exe,argv</del>
     </rule>
+
+    <rule id="reverse_shell_02" name="测试" author="test">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="REGEX" field="exe">testcases</node>
+            <node type="INCL" field="argv">6400</node>
+        </checklist>
+    </rule>
+
+    <rule id="reverse_shell_03" name="测试" author="test">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="REGEX" field="exe">testcases</node>
+            <node type="INCL" field="argv">8400</node>
+        </checklist>
+    </rule>
 </root>

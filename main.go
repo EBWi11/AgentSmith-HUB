@@ -36,5 +36,8 @@ func main() {
 	data := make(map[string]interface{}, 10)
 	_ = sonic.Unmarshal([]byte(testData), &data)
 
-	ruleset.EngineCheck(data)
+	for _, v := range ruleset.EngineCheck(data) {
+		str, _ := sonic.Marshal(v)
+		fmt.Println(v["_HUB_HIT_RULE_ID"], string(str))
+	}
 }

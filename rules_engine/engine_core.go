@@ -4,10 +4,11 @@ import (
 	"AgentSmith-HUB/common"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
-	json "github.com/bytedance/sonic"
 	"strconv"
 	"strings"
 )
+
+const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
 
 func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
 	var checkListFlag = false
@@ -43,7 +44,9 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 }
 
 // EngineCheck executes all rules in the ruleset on the provided data.
-func (r *Ruleset) EngineCheck(data map[string]interface{}) {
+func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
+	finalRes := make([]map[string]interface{}, 0)
+
 	ruleCache := make(map[string]common.CheckCoreCache, 10)
 	for _, rule := range r.Rules {
 		//filter check process
@@ -221,38 +224,40 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 			continue
 		}
 
+		dataCopy := common.MapDeepCopyAction(data).(map[string]interface{})
+
+		//add rule info
+		addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
+
 		//append process
 		for i := range rule.Appends {
 			tmpAppend := rule.Appends[i]
 			if tmpAppend.Type == "" {
 				appendData := tmpAppend.Value
 				if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
-					appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, data)
+					appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
 				}
 
-				data[tmpAppend.FieldName] = appendData
+				dataCopy[tmpAppend.FieldName] = appendData
 			} else {
 				//plugin
-				args := GetPluginRealArgs(tmpAppend.PluginArgs, data, ruleCache)
+				args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
 				res := tmpAppend.Plugin.FuncEval(args)[0]
-				data[tmpAppend.FieldName] = res
+				dataCopy[tmpAppend.FieldName] = res
 			}
 		}
-
-		//add rule info
-		addHitRuleID(data, r.RulesetID+"."+rule.ID)
 
 		//plugin process
 		for i := range rule.Plugins {
 			p := rule.Plugins[i]
-			args := GetPluginRealArgs(p.PluginArgs, data, ruleCache)
+			args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
 			resList := p.Plugin.FuncEval(args)
 			pluginRes := resList[0]
 			err := resList[1]
 
 			if err == nil {
-				data = pluginRes.(map[string]interface{})
+				dataCopy = pluginRes.(map[string]interface{})
 			} else {
 				//todo
 			}
@@ -260,12 +265,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 
 		//del process
 		for i := range rule.DelList {
-			common.MapDel(data, rule.DelList[i])
+			common.MapDel(dataCopy, rule.DelList[i])
 		}
 
-		dataStr, _ := json.Marshal(data)
-		fmt.Println(string(dataStr))
+		// add to final result
+		finalRes = append(finalRes, dataCopy)
 	}
+	return finalRes
 }
 
 func addHitRuleID(data map[string]interface{}, ruleID string) {
@@ -273,9 +279,9 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 		data = make(map[string]interface{})
 	}
 
-	if _, ok := data["_HUB_HIT_RULE_ID"]; !ok {
-		data["_HUB_HIT_RULE_ID"] = ruleID
+	if _, ok := data[HitRuleIdFieldName]; !ok {
+		data[HitRuleIdFieldName] = ruleID
 	} else {
-		data["_HUB_HIT_RULE_ID"] = data["_HUB_HIT_RULE_ID"].(string) + "," + ruleID
+		data[HitRuleIdFieldName] = data[HitRuleIdFieldName].(string) + "," + ruleID
 	}
 }
