@@ -158,6 +158,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 		// Checklist process
 		checkListRes := false
 		ruleCheckRes := false
+
+		var conditionMap map[string]bool
+
+		if rule.Checklist.ConditionFlag {
+			conditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
+		}
+
 		for _, checkNode := range rule.Checklist.CheckNodes {
 			var checkNodeValue = checkNode.Value
 			var checkNodeValueFromRaw = false
@@ -193,7 +200,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			}
 
 			if rule.Checklist.ConditionFlag {
-				rule.Checklist.ConditionMap[checkNode.ID] = checkListRes
+				conditionMap[checkNode.ID] = checkListRes
 			} else {
 				if !checkListRes {
 					break

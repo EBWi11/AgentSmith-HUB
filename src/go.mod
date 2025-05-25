@@ -14,6 +14,7 @@ require (
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/traefik/yaegi v0.16.1
 	github.com/twmb/franz-go v1.19.3
+	github.com/twmb/franz-go/pkg/kadm v1.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

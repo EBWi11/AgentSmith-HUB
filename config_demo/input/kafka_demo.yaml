@@ -3,5 +3,5 @@ type: kafka
 kafka:
   brokers:
     - "172.26.0.19:9092"
-  group: "demo-group"
+  group: "demo-group-1"
   topic: "winlogbeat"

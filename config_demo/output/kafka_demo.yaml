@@ -2,5 +2,5 @@ name: kafka_output_demo
 type: kafka
 kafka:
   brokers:
-    - "172.26.0.19:9092"
-  topic: "demo-output-topic"
+    - "192.168.27.130:9092"
+  topic: "kafka_output_demo"

@@ -5,15 +5,8 @@
             <node id="a" type="REGEX" field="exe">testcases</node>
             <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">optddd|ltp</node>
             <node id="d" type="EQU" field="sessionid">_$sessionid</node>
-            <node id="e" type="PLUGIN">isLocalIP(dip)</node>
         </checklist>
-<!--        <threshold group_by="data_type" count_type="CLASSIFY" count_field="exe" range="90">2</threshold>-->
         <append field_name="abc">123</append>
-        <append type="PLUGIN" field_name="appendTest">appendTest(_$ORIDATA)</append>
-        <append type="PLUGIN" field_name="appendTest2">appendTest2("abc", 123)</append>
-        <append type="PLUGIN" field_name="appendTest3">appendTest3()</append>
-
-        <plugin>pluginTest(_$ORIDATA)</plugin>
         <del>exe,argv</del>
     </rule>
 

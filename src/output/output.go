@@ -2,6 +2,7 @@ package output
 
 import (
 	"AgentSmith-HUB/common"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -18,6 +19,7 @@ const (
 	OutputTypeKafka         OutputType = "kafka"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
 	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
+	OutputTypePrint         OutputType = "print"
 )
 
 // OutputConfig is the YAML config for an output.
@@ -28,6 +30,7 @@ type OutputConfig struct {
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
 	Elasticsearch *ElasticsearchOutputConfig `yaml:"elasticsearch,omitempty"`
 	AliyunSLS     *AliyunSLSOutputConfig     `yaml:"aliyun_sls,omitempty"`
+	// No config needed for print
 }
 
 // KafkaOutputConfig holds Kafka-specific config.
@@ -36,6 +39,7 @@ type KafkaOutputConfig struct {
 	Topic       string                      `yaml:"topic"`
 	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
 	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
+	Key         string                      `yaml:"key"`
 }
 
 // ElasticsearchOutputConfig holds Elasticsearch-specific config.
@@ -77,6 +81,9 @@ type Output struct {
 	produceTotal uint64
 	produceQPS   uint64
 	metricStop   chan struct{}
+
+	// for print output
+	printStop chan struct{}
 }
 
 // LoadOutputConfig loads output config from a YAML file.
@@ -132,6 +139,7 @@ func (out *Output) Start() error {
 			out.kafkaCfg.Compression,
 			out.kafkaCfg.SASL,
 			msgChan,
+			out.kafkaCfg.Key,
 		)
 		if err != nil {
 			return err
@@ -216,6 +224,31 @@ func (out *Output) Start() error {
 				}
 			}
 		}()
+	case OutputTypePrint:
+		out.printStop = make(chan struct{})
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			for _, up := range out.UpStream {
+				for {
+					select {
+					case <-out.printStop:
+						return
+					case msg, ok := <-*up:
+						if !ok {
+							return
+						}
+						b, err := json.Marshal(msg)
+						if err != nil {
+							fmt.Printf("[PRINT OUTPUT] marshal error: %v\n", err)
+							continue
+						}
+						fmt.Println(string(b))
+						atomic.AddUint64(&out.produceTotal, 1)
+					}
+				}
+			}
+		}()
 	default:
 		return fmt.Errorf("unsupported output type: %s", out.Type)
 	}
@@ -278,6 +311,10 @@ waitUpstream:
 			}
 			out.aliyunProducer.Close()
 			out.aliyunProducer = nil
+		}
+	case OutputTypePrint:
+		if out.printStop != nil {
+			close(out.printStop)
 		}
 	}
 	if out.metricStop != nil {

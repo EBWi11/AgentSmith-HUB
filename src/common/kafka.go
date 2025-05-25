@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sasl"
 	"github.com/twmb/franz-go/pkg/sasl/plain"
@@ -27,11 +28,9 @@ const (
 type KafkaSASLType string
 
 const (
-	KafkaSASLNone        KafkaSASLType = "none"
 	KafkaSASLPlain       KafkaSASLType = "plain"
 	KafkaSASLSCRAMSHA256 KafkaSASLType = "scram-sha256"
 	KafkaSASLSCRAMSHA512 KafkaSASLType = "scram-sha512"
-	KafkaSASLGSSAPI      KafkaSASLType = "gssapi"
 	KafkaSASLOAuth       KafkaSASLType = "oauth"
 )
 
@@ -58,22 +57,46 @@ type KafkaProducer struct {
 	Client       *kgo.Client
 	MsgChan      chan map[string]interface{}
 	Topic        string
+	KeyField     string
+	KeyFieldList []string // List of fields to use as keys
 	BatchSize    int
 	BatchTimeout time.Duration
 }
 
-// NewKafkaProducer creates a new high-performance Kafka producer with compression and SASL support.
-func NewKafkaProducer(brokers []string, topic string, compression KafkaCompressionType, saslCfg *KafkaSASLConfig, msgChan chan map[string]interface{}) (*KafkaProducer, error) {
+func EnsureTopicExists(cl *kgo.Client, topic string) (bool, error) {
+	admin := kadm.NewClient(cl)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	metadata, err := admin.ListTopics(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to list topics: %w", err)
+	}
+	if _, exists := metadata[topic]; exists {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("don't exist this topic: %w", err)
+}
+
+// NewKafkaProducer creates a new high-performance Kafka producer with compression, SASL, and key support.
+func NewKafkaProducer(
+	brokers []string,
+	topic string,
+	compression KafkaCompressionType,
+	saslCfg *KafkaSASLConfig,
+	msgChan chan map[string]interface{},
+	keyField string,
+) (*KafkaProducer, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
 		kgo.RecordPartitioner(kgo.RoundRobinPartitioner()),
-		kgo.ProducerBatchMaxBytes(1024 * 1024), // 1MB
 		kgo.ProducerLinger(100 * time.Millisecond),
 	}
 
 	// Add compression if specified
-	if compression != KafkaCompressionNone {
+	if compression != KafkaCompressionNone && compression != "" {
 		opts = append(opts, kgo.ProducerBatchCompression(getCompression(compression)))
 	}
 
@@ -97,70 +120,45 @@ func NewKafkaProducer(brokers []string, topic string, compression KafkaCompressi
 		Client:       cl,
 		MsgChan:      msgChan,
 		Topic:        topic,
+		KeyField:     keyField,
+		KeyFieldList: StringToList(keyField),
 		BatchSize:    1000,
 		BatchTimeout: 100 * time.Millisecond,
 	}
+
+	_, err = EnsureTopicExists(cl, topic)
+	if err != nil {
+		return nil, err
+	}
+
 	go prod.run()
 	return prod, nil
 }
 
-// run reads from MsgChan, serializes map to JSON, and produces to Kafka asynchronously.
+// run reads from MsgChan, serializes map to JSON, and produces to Kafka one by one.
 func (p *KafkaProducer) run() {
-	batch := make([]*kgo.Record, 0, p.BatchSize)
-	ticker := time.NewTicker(p.BatchTimeout)
-	defer ticker.Stop()
+	for msg := range p.MsgChan {
+		value, err := sonic.Marshal(msg)
+		if err != nil {
+			fmt.Printf("[KafkaProducer] marshal error: %v\n", err)
+			continue // skip invalid message
+		}
 
-	for {
-		select {
-		case msg, ok := <-p.MsgChan:
-			if !ok {
-				// Channel closed, send remaining batch
-				if len(batch) > 0 {
-					p.sendBatch(batch)
-				}
-				return
-			}
+		rec := &kgo.Record{
+			Topic: p.Topic,
+			Value: value,
+		}
 
-			value, err := sonic.Marshal(msg)
-			if err != nil {
-				continue // skip invalid message
-			}
-
-			batch = append(batch, &kgo.Record{
-				Topic: p.Topic,
-				Value: value,
-			})
-
-			if len(batch) >= p.BatchSize {
-				p.sendBatch(batch)
-				batch = batch[:0]
-			}
-
-		case <-ticker.C:
-			if len(batch) > 0 {
-				p.sendBatch(batch)
-				batch = batch[:0]
+		if p.KeyField != "" {
+			if tmp, ok := GetCheckData(msg, p.KeyFieldList); ok {
+				rec.Key = []byte(tmp)
 			}
 		}
-	}
-}
 
-// sendBatch sends a batch of records to Kafka
-func (p *KafkaProducer) sendBatch(batch []*kgo.Record) {
-	if len(batch) == 0 {
-		return
-	}
-
-	// Use a buffered channel to avoid blocking
-	done := make(chan error, 1)
-	p.Client.Produce(context.Background(), batch[0], func(r *kgo.Record, err error) {
-		done <- err
-	})
-
-	// Wait for the first record to be acknowledged
-	if err := <-done; err != nil {
-		// Log error but continue processing
-		fmt.Printf("Failed to send batch to Kafka: %v\n", err)
+		err = p.Client.ProduceSync(context.Background(), rec).FirstErr()
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
 }
 
@@ -285,7 +283,7 @@ func (c *KafkaConsumer) run() {
 				}
 			})
 			// manual commit for batch performance
-			c.Client.CommitUncommittedOffsets(context.Background())
+			_ = c.Client.CommitUncommittedOffsets(context.Background())
 		}
 	}
 }
