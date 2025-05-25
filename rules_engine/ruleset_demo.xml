@@ -5,16 +5,16 @@
             <node id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</node>
             <node id="b" type="INCL" field="data" logic="or" delimiter="|">test1|test2</node>
             <node id="b" type="REGEX" field="data">abc</node>
-            <node id="c" type="PLUGIN">plugin_name(ORIDATA)</node>
+            <node id="c" type="PLUGIN">plugin_name(_$ORIDATA)</node>
         </checklist>
 
         <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
 
         <append field_name="data_type">10</append>
-        <append type="PLUGIN" field_name="data_type">plugin_name(ORIDATA)</append>
+        <append type="PLUGIN" field_name="data_type">plugin_name(_$ORIDATA)</append>
         <append type="PLUGIN" field_name="data_type">plugin_name("test", 123 , pid)</append>
         
-        <plugin>plugin_name(ORIDATA)</plugin>>
+        <plugin>plugin_name(_$ORIDATA)</plugin>>
         <del>sport,dport</del>
     </rule>
 </root>

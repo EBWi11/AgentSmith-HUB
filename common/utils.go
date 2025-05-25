@@ -8,6 +8,42 @@ import (
 	"strings"
 )
 
+func MapDeepCopy(m map[string]interface{}) map[string]interface{} {
+	return MapDeepCopyAction(m).(map[string]interface{})
+}
+
+func MapDeepCopyAction(m interface{}) interface{} {
+	vm, ok := m.(map[string]interface{})
+	if ok {
+		cp := map[string]interface{}{}
+		for k, v := range vm {
+			vm, ok := v.(map[string]interface{})
+			if ok {
+				cp[k] = MapDeepCopyAction(vm)
+			} else {
+				vm, ok := v.([]interface{})
+				if ok {
+					cp[k] = MapDeepCopyAction(vm)
+				} else {
+					cp[k] = v
+				}
+			}
+		}
+		return cp
+	} else {
+		vm, ok := m.([]interface{})
+		if ok {
+			cp := []interface{}{}
+			for _, v := range vm {
+				cp = append(cp, MapDeepCopyAction(v))
+			}
+			return cp
+		} else {
+			return m
+		}
+	}
+}
+
 func XXHash64(s string) string {
 	hash := xxhash.Sum64([]byte(s))
 	return strconv.FormatUint(hash, 10)

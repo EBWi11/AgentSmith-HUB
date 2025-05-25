@@ -14,6 +14,7 @@ import (
 )
 
 const PluginsPath = "plugins/"
+const PluginEnding = "_plugin.go"
 
 var Plugins = make(map[string]*Plugin)
 
@@ -22,12 +23,12 @@ func init() {
 		if err != nil {
 			panic(err)
 		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".plugin") {
+		if !d.IsDir() && strings.HasSuffix(d.Name(), PluginEnding) {
 			p, err := NewPlugin(path, "Yaegi")
 			if err != nil {
 				panic(err)
 			}
-			p.setName(d.Name()[:len(d.Name())-7])
+			p.setName(d.Name()[:len(d.Name())-len(PluginEnding)])
 			Plugins[p.Name] = p
 		}
 		return nil
@@ -57,6 +58,8 @@ func (p *Plugin) yaegiLoad() error {
 }
 
 func (p *Plugin) FuncEval(funcArgs []interface{}) []interface{} {
+	var out []reflect.Value
+
 	switch p.Type {
 	case "Yaegi":
 		var realArgs []reflect.Value
@@ -66,7 +69,12 @@ func (p *Plugin) FuncEval(funcArgs []interface{}) []interface{} {
 			realArgs = append(realArgs, reflect.ValueOf(v))
 		}
 
-		out := p.YaegiFunc.Call(realArgs)
+		if len(realArgs) == 0 {
+			out = p.YaegiFunc.Call(nil)
+		} else {
+			out = p.YaegiFunc.Call(realArgs)
+		}
+
 		for _, v := range out {
 			result = append(result, v.Interface())
 		}

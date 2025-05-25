@@ -39,6 +39,7 @@ type Rule struct {
 	ThresholdCheck bool
 	Threshold      Threshold  `xml:"threshold"`
 	Appends        []Append   `xml:"append"`
+	Plugins        []Plugin   `xml:"plugin"`
 	Del            string     `xml:"del"`
 	DelList        [][]string // parsed field path
 }
@@ -105,6 +106,12 @@ type Append struct {
 	FieldName string `xml:"field_name,attr"`
 	Value     string `xml:",chardata"`
 
+	Plugin     *common.Plugin
+	PluginArgs []*PluginArg
+}
+
+type Plugin struct {
+	Value      string `xml:",chardata"`
 	Plugin     *common.Plugin
 	PluginArgs []*PluginArg
 }
@@ -282,14 +289,17 @@ func rulesetBuild(ruleset *Ruleset) error {
 			}
 		}
 
-		for j := range rule.Appends {
-			if rule.Appends[j].Type != "" && rule.Appends[j].Type != "PLUGIN" {
+		for i := range rule.Appends {
+			appendNode := &rule.Appends[i]
+			appendType := strings.TrimSpace(appendNode.Type)
+			appendValue := strings.TrimSpace(appendNode.Value)
+
+			if appendType != "" && appendType != "PLUGIN" {
 				return errors.New("APPEND TYPE OR FIELD_NAME CANNOT BE EMPTY")
 			}
 
-			if rule.Appends[j].Type == "PLUGIN" {
-				appendNode := rule.Appends[j]
-				pluginName, args, err := ParseFunctionCall(appendNode.Value)
+			if appendNode.Type == "PLUGIN" {
+				pluginName, args, err := ParseFunctionCall(appendValue)
 				if err != nil {
 					return err
 				}
@@ -302,6 +312,28 @@ func rulesetBuild(ruleset *Ruleset) error {
 
 				appendNode.PluginArgs = args
 			}
+		}
+
+		for i := range rule.Plugins {
+			pluginNode := &rule.Plugins[i]
+			value := strings.TrimSpace(pluginNode.Value)
+
+			if value == "" {
+				return errors.New("PLUGIN VALUE CANNOT BE EMPTY")
+			}
+
+			pluginName, args, err := ParseFunctionCall(value)
+			if err != nil {
+				return err
+			}
+
+			if p, ok := common.Plugins[pluginName]; ok {
+				pluginNode.Plugin = p
+			} else {
+				return errors.New("NOT FUND THIS PLUGIN")
+			}
+
+			pluginNode.PluginArgs = args
 		}
 
 		if rule.Threshold.GroupBy == "" && rule.Threshold.Range == "" && rule.Threshold.Value == 0 {

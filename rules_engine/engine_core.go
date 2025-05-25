@@ -234,13 +234,29 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 			} else {
 				//plugin
 				args := GetPluginRealArgs(tmpAppend.PluginArgs, data, ruleCache)
-				res := tmpAppend.Plugin.FuncEval(args)
+				res := tmpAppend.Plugin.FuncEval(args)[0]
 				data[tmpAppend.FieldName] = res
 			}
 		}
 
 		//add rule info
-		data["_HUB_HIT_RULE_ID"] = rule.ID
+		addHitRuleID(data, r.RulesetID+"."+rule.ID)
+
+		//plugin process
+		for i := range rule.Plugins {
+			p := rule.Plugins[i]
+			args := GetPluginRealArgs(p.PluginArgs, data, ruleCache)
+
+			resList := p.Plugin.FuncEval(args)
+			pluginRes := resList[0]
+			err := resList[1]
+
+			if err == nil {
+				data = pluginRes.(map[string]interface{})
+			} else {
+				//todo
+			}
+		}
 
 		//del process
 		for i := range rule.DelList {
@@ -249,5 +265,17 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) {
 
 		dataStr, _ := json.Marshal(data)
 		fmt.Println(string(dataStr))
+	}
+}
+
+func addHitRuleID(data map[string]interface{}, ruleID string) {
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+
+	if _, ok := data["_HUB_HIT_RULE_ID"]; !ok {
+		data["_HUB_HIT_RULE_ID"] = ruleID
+	} else {
+		data["_HUB_HIT_RULE_ID"] = data["_HUB_HIT_RULE_ID"].(string) + "," + ruleID
 	}
 }
