@@ -1,0 +1,13 @@
+name: kafka_output_demo
+id: kafka_demo_1
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "demo-output-topic"
+  compression: "snappy"   # none|snappy|gzip|lz4|zstd
+  sasl:
+    enable: true
+    mechanism: "plain"    # none|plain|scram
+    username: "your-username"
+    password: "your-password"

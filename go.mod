@@ -10,9 +10,11 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.18.0
 	github.com/go-kit/kit v0.10.0
 	github.com/gogo/protobuf v1.3.2
+	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/traefik/yaegi v0.16.1
 	github.com/twmb/franz-go v1.19.3
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -60,5 +62,4 @@ require (
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -1,0 +1,9 @@
+id: smith_dns
+name: smith_dns
+content: |
+  INPUT.dns -> RULESET.dnspre
+  RULESET.dnspre -> RULESET.dns
+  RULESET.dns -> RULESET.dnswhitelist
+  RULESET.dnswhitelist -> OUTPUT.es_dns_threat_intelligence
+  RULESET.dnswhitelist -> RULESET.dns_block
+  RULESET.dns_block -> OUTPUT.es_dns_block_record

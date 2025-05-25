@@ -4,43 +4,143 @@ import (
 	"AgentSmith-HUB/common"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
+	"github.com/panjf2000/ants/v2"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
 
-func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
-	var checkListFlag = false
+// Add an upstream channel to the ruleset.
+func (r *Ruleset) AddUpStream(id string, ch *chan map[string]interface{}) {
+	r.UpStream[id] = ch
+}
 
-	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
+// Add a downstream channel to the ruleset.
+func (r *Ruleset) AddDownStream(id string, ch *chan map[string]interface{}) {
+	r.DownStream[id] = ch
+}
 
-	switch checkNode.Type {
-	case "REGEX":
-		if !checkNodeValueFromRaw {
-			checkListFlag, _ = REGEX(needCheckData, checkNode.Regex)
-		} else {
-			regex, err := regexp.Compile(checkNodeValue)
-			if err != nil {
-				fmt.Println("REGEX compile error", err)
-				break
-			}
-			checkListFlag, _ = REGEX(needCheckData, regex)
-		}
-	case "PLUGIN":
-		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
-		res := checkNode.Plugin.FuncEval(args)
-		if res[0].(bool) {
-			return true
-		} else {
-			return false
-		}
+// Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
+func (r *Ruleset) Start() error {
+	if r.stopChan != nil {
+		return fmt.Errorf("already started")
+	}
+	r.stopChan = make(chan struct{})
 
-	default:
-		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+	var err error
+	r.antsPool, err = ants.NewPool(MinPoolSize)
+	if err != nil {
+		return fmt.Errorf("failed to create ants pool: %v", err)
 	}
 
-	return checkListFlag
+	// Auto-scaling goroutine
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.stopChan:
+				return
+			case <-ticker.C:
+				totalBacklog := 0
+				for _, upCh := range r.UpStream {
+					totalBacklog += len(*upCh)
+				}
+				targetSize := MinPoolSize
+				switch {
+				case totalBacklog > 1024:
+					targetSize = MaxPoolSize
+				case totalBacklog > 256:
+					targetSize = 128
+				case totalBacklog > 64:
+					targetSize = 96
+				case totalBacklog > 16:
+					targetSize = 64
+				default:
+					targetSize = MinPoolSize
+				}
+				if r.antsPool != nil {
+					r.antsPool.Tune(targetSize)
+				}
+			}
+		}
+	}()
+
+	for upID, upCh := range r.UpStream {
+		go func(id string, ch *chan map[string]interface{}) {
+			for {
+				select {
+				case <-r.stopChan:
+					return
+				case data, ok := <-*ch:
+					if !ok {
+						return
+					}
+
+					task := func() {
+						results := r.EngineCheck(data)
+						for _, res := range results {
+							for _, downCh := range r.DownStream {
+								// Block until data is written to downstream channel.
+								*downCh <- res
+							}
+						}
+					}
+					_ = r.antsPool.Submit(task)
+				}
+			}
+		}(upID, upCh)
+	}
+	return nil
+}
+
+// Stop the ruleset engine, waiting for all upstream and downstream data to be processed before shutdown.
+func (r *Ruleset) Stop() error {
+	if r.stopChan == nil {
+		return fmt.Errorf("not started")
+	}
+	close(r.stopChan)
+
+	// Wait for all upstream channels to be consumed.
+waitUpstream:
+	for {
+		allEmpty := true
+		for _, upCh := range r.UpStream {
+			if len(*upCh) > 0 {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			break waitUpstream
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Wait for all downstream channels to be consumed.
+waitDownstream:
+	for {
+		allEmpty := true
+		for _, downCh := range r.DownStream {
+			if len(*downCh) > 0 {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			break waitDownstream
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if r.antsPool != nil {
+		r.antsPool.Release()
+		r.antsPool = nil
+	}
+	r.stopChan = nil
+	return nil
 }
 
 // EngineCheck executes all rules in the ruleset on the provided data.
@@ -49,7 +149,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 	ruleCache := make(map[string]common.CheckCoreCache, 10)
 	for _, rule := range r.Rules {
-		//filter check process
+		// Filter check process
 		if len(rule.Filter.FieldList) > 0 {
 			checkData, exist := GetCheckDataFromCache(ruleCache, rule.Filter.Field, data, rule.Filter.FieldList)
 			if exist {
@@ -65,7 +165,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			}
 		}
 
-		//checklist process
+		// Checklist process
 		checkListRes := false
 		ruleCheckRes := false
 		for _, checkNode := range rule.Checklist.CheckNodes {
@@ -129,7 +229,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			continue
 		}
 
-		//threshold process
+		// Threshold process
 		if rule.ThresholdCheck {
 			ruleCheckRes = false
 
@@ -146,12 +246,12 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 				redisSetNXRes, err := common.RedisSetNX(groupByKey, 1, rule.Threshold.RangeInt)
 				if err != nil {
-					//todo
+					// TODO: handle error
 				}
 				if !redisSetNXRes {
 					groupByValue, err := common.RedisIncr(groupByKey)
 					if err != nil {
-						//todo
+						// TODO: handle error
 					} else {
 						if groupByValue > int64(rule.Threshold.Value) {
 							ruleCheckRes = true
@@ -168,20 +268,20 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				}
 				sumData, err := strconv.Atoi(sumDataStr)
 				if err != nil {
-					//todo
+					// TODO: handle error
 					break
 				}
 
 				redisSetNXRes, err := common.RedisSetNX(groupByKey, sumData, rule.Threshold.RangeInt)
 				if err != nil {
-					//todo
+					// TODO: handle error
 					break
 				}
 
 				if !redisSetNXRes {
 					groupByValue, err := common.RedisIncrby(groupByKey, int64(sumData))
 					if err != nil {
-						//todo
+						// TODO: handle error
 						break
 					} else {
 						if groupByValue > int64(rule.Threshold.Value) {
@@ -201,13 +301,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
 				_, err := common.RedisSet(tmpKey, 1, rule.Threshold.RangeInt)
 				if err != nil {
-					//todo
+					// TODO: handle error
 					break
 				}
 
 				tmpRes, err := common.RedisKeys(groupByKey + "*")
 				if err != nil {
-					//todo
+					// TODO: handle error
 					break
 				}
 
@@ -226,10 +326,10 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 		dataCopy := common.MapDeepCopyAction(data).(map[string]interface{})
 
-		//add rule info
+		// Add rule info
 		addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
 
-		//append process
+		// Append process
 		for i := range rule.Appends {
 			tmpAppend := rule.Appends[i]
 			if tmpAppend.Type == "" {
@@ -240,14 +340,14 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 				dataCopy[tmpAppend.FieldName] = appendData
 			} else {
-				//plugin
+				// Plugin
 				args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
 				res := tmpAppend.Plugin.FuncEval(args)[0]
 				dataCopy[tmpAppend.FieldName] = res
 			}
 		}
 
-		//plugin process
+		// Plugin process
 		for i := range rule.Plugins {
 			p := rule.Plugins[i]
 			args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
@@ -259,21 +359,56 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			if err == nil {
 				dataCopy = pluginRes.(map[string]interface{})
 			} else {
-				//todo
+				// TODO: handle error
 			}
 		}
 
-		//del process
+		// Delete process
 		for i := range rule.DelList {
 			common.MapDel(dataCopy, rule.DelList[i])
 		}
 
-		// add to final result
+		// Add to final result
 		finalRes = append(finalRes, dataCopy)
 	}
 	return finalRes
 }
 
+// checkNodeLogic executes the check logic for a single check node.
+func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
+	var checkListFlag = false
+
+	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
+
+	switch checkNode.Type {
+	case "REGEX":
+		if !checkNodeValueFromRaw {
+			checkListFlag, _ = REGEX(needCheckData, checkNode.Regex)
+		} else {
+			regex, err := regexp.Compile(checkNodeValue)
+			if err != nil {
+				fmt.Println("REGEX compile error", err)
+				break
+			}
+			checkListFlag, _ = REGEX(needCheckData, regex)
+		}
+	case "PLUGIN":
+		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
+		res := checkNode.Plugin.FuncEval(args)
+		if res[0].(bool) {
+			return true
+		} else {
+			return false
+		}
+
+	default:
+		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+	}
+
+	return checkListFlag
+}
+
+// addHitRuleID appends the hit rule ID to the data map.
 func addHitRuleID(data map[string]interface{}, ruleID string) {
 	if data == nil {
 		data = make(map[string]interface{})

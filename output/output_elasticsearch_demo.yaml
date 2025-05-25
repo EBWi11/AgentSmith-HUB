@@ -1,0 +1,9 @@
+name: elasticsearch_output_demo
+id: es_demo_1
+type: elasticsearch
+elasticsearch:
+  addresses:
+    - "http://localhost:9200"
+  index: "demo-index"
+  batch_size: 100
+  flush_dur: 2s

@@ -1,0 +1,8 @@
+name: kafka_input_demo
+id: kafka_demo_1
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+  group: "demo-group"
+  topic: "demo-topic"

@@ -6,15 +6,20 @@ import (
 	"errors"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
+	"github.com/panjf2000/ants/v2"
 	regexpgo "regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.
 const FromRawSymbol = "_$"
 const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
+
+const MinPoolSize = 4
+const MaxPoolSize = 512
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 
@@ -24,8 +29,17 @@ type Ruleset struct {
 	RulesetID   string   `xml:"ruleset_id,attr"`
 	RulesetName string   `xml:"ruleset_name,attr"`
 	Type        string   `xml:"type,attr"`
+
 	IsDetection bool
 	Rules       []Rule `xml:"rule"`
+
+	UpStream   map[string]*chan map[string]interface{}
+	DownStream map[string]*chan map[string]interface{}
+
+	stopChan chan struct{} // 用于Start/Stop的控制
+	antsPool *ants.Pool    // ants线程池
+
+	rulesMu sync.RWMutex // Mutex for hot update of rules
 }
 
 // Rule represents a single rule with its logic and metadata.
