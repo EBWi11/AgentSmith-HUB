@@ -66,9 +66,19 @@ func main() {
 		return
 	}
 
-	//init
-	common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
+	// init
+	err = common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	err = common.PluginInit(path.Join(project.ConfigRoot, "plugin"))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
+	// Load and start projects
 	projectList, err := traverseProject(path.Join(*configRoot, "project"))
 	if err != nil {
 		fmt.Println(err)

@@ -17,21 +17,23 @@ const PluginEnding = "_plugin.go"
 
 var Plugins = make(map[string]*Plugin)
 
-func PluginInit(PluginsPath string) {
+func PluginInit(PluginsPath string) error {
 	_ = filepath.WalkDir(PluginsPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			panic(err)
+			return err
 		}
+
 		if !d.IsDir() && strings.HasSuffix(d.Name(), PluginEnding) {
 			p, err := NewPlugin(path, "Yaegi")
 			if err != nil {
-				panic(err)
+				return err
 			}
 			p.setName(d.Name()[:len(d.Name())-len(PluginEnding)])
 			Plugins[p.Name] = p
 		}
 		return nil
 	})
+	return nil
 }
 
 func (p *Plugin) yaegiLoad() error {

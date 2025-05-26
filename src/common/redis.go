@@ -9,7 +9,7 @@ import (
 var ctx = context.Background()
 var rdb *redis.Client
 
-func RedisInit(addr string, passwd string) {
+func RedisInit(addr string, passwd string) error {
 	// Initialize Redis client
 	rdb = redis.NewClient(&redis.Options{
 		Addr:            addr,
@@ -24,6 +24,17 @@ func RedisInit(addr string, passwd string) {
 		WriteTimeout:    1 * time.Second,
 		MaxRetries:      2,
 	})
+
+	return RedisPing()
+}
+
+func RedisPing() error {
+	// Ping the Redis server to check connection
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func RedisGet(key string) (string, error) {

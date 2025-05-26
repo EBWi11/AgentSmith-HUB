@@ -23,10 +23,6 @@ func SetConfigRoot(p string) error {
 		return errors.New(p + ": dir is not exist")
 	}
 	ConfigRoot = p
-
-	//plugin init
-	common.PluginInit(path.Join(ConfigRoot, "plugin"))
-
 	return nil
 }
 
