@@ -1,14 +1,23 @@
 package main
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/project"
 	"flag"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 )
+
+var HubConfig *hubConfig
+
+type hubConfig struct {
+	Redis         string `yaml:"redis"`
+	RedisPassword string `yaml:"redis_password,omitempty"`
+}
 
 func traverseProject(dir string) ([]string, error) {
 	var files []string
@@ -26,6 +35,20 @@ func traverseProject(dir string) ([]string, error) {
 	return files, err
 }
 
+func loadHubConfig(configRoot string) error {
+	configPath := path.Join(configRoot, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read hub config: %w", err)
+	}
+
+	if err := yaml.Unmarshal(data, &HubConfig); err != nil {
+		return fmt.Errorf("failed to parse hub config: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	configRoot := flag.String("config", "./config", "agent smith hub config path, default is ./config")
 	flag.Parse()
@@ -34,11 +57,22 @@ func main() {
 	err := project.SetConfigRoot(*configRoot)
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
+
+	err = loadHubConfig(*configRoot)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	//init
+	common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
 
 	projectList, err := traverseProject(path.Join(*configRoot, "project"))
 	if err != nil {
 		fmt.Println(err)
+		return
 	}
 
 	for _, p := range projectList {
@@ -50,7 +84,7 @@ func main() {
 
 		err = p.Start()
 		if err != nil {
-			panic(err)
+			fmt.Println(err)
 		}
 
 		fmt.Printf("Project %s started successfully\n", p.Name)

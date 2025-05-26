@@ -130,6 +130,11 @@ waitDownstream:
 		r.antsPool = nil
 	}
 	r.stopChan = nil
+
+	if r.Cache != nil {
+		r.Cache.Close()
+	}
+
 	return nil
 }
 
@@ -137,10 +142,10 @@ waitDownstream:
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
 
-	ruleCache := make(map[string]common.CheckCoreCache, 10)
+	ruleCache := make(map[string]common.CheckCoreCache, 8)
 	for _, rule := range r.Rules {
 		// Filter check process
-		if len(rule.Filter.FieldList) > 0 {
+		if rule.Filter.Check {
 			checkData, exist := GetCheckDataFromCache(ruleCache, rule.Filter.Field, data, rule.Filter.FieldList)
 			if exist {
 				filterValue := rule.Filter.Value
@@ -228,9 +233,11 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 		// Threshold process
 		if rule.ThresholdCheck {
+			var err error
 			ruleCheckRes = false
 
-			var groupByKey = ""
+			// Isolate by ruleset ID and rule ID
+			var groupByKey = rule.Threshold.GroupByID
 			for k, v := range rule.Threshold.GroupByList {
 				tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
 				groupByKey = groupByKey + tmpData
@@ -241,21 +248,12 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			case "":
 				groupByKey = "F_" + groupByKey
 
-				redisSetNXRes, err := common.RedisSetNX(groupByKey, 1, rule.Threshold.RangeInt)
-				if err != nil {
-					// TODO: handle error
+				if rule.Threshold.LocalCache {
+					ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+				} else {
+					ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
 				}
-				if !redisSetNXRes {
-					groupByValue, err := common.RedisIncr(groupByKey)
-					if err != nil {
-						// TODO: handle error
-					} else {
-						if groupByValue > int64(rule.Threshold.Value) {
-							ruleCheckRes = true
-							_ = common.RedisDel(groupByKey)
-						}
-					}
-				}
+
 			case "SUM":
 				groupByKey = "FS_" + groupByKey
 
@@ -263,29 +261,16 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				if !ok {
 					break
 				}
+
 				sumData, err := strconv.Atoi(sumDataStr)
 				if err != nil {
-					// TODO: handle error
 					break
 				}
 
-				redisSetNXRes, err := common.RedisSetNX(groupByKey, sumData, rule.Threshold.RangeInt)
-				if err != nil {
-					// TODO: handle error
-					break
-				}
-
-				if !redisSetNXRes {
-					groupByValue, err := common.RedisIncrby(groupByKey, int64(sumData))
-					if err != nil {
-						// TODO: handle error
-						break
-					} else {
-						if groupByValue > int64(rule.Threshold.Value) {
-							ruleCheckRes = true
-							_ = common.RedisDel(groupByKey)
-						}
-					}
+				if rule.Threshold.LocalCache {
+					ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+				} else {
+					ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
 				}
 
 			case "CLASSIFY":
@@ -296,24 +281,16 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				}
 
 				tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
-				_, err := common.RedisSet(tmpKey, 1, rule.Threshold.RangeInt)
-				if err != nil {
-					// TODO: handle error
-					break
-				}
 
-				tmpRes, err := common.RedisKeys(groupByKey + "*")
-				if err != nil {
-					// TODO: handle error
-					break
+				if rule.Threshold.LocalCache {
+					ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+				} else {
+					ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
 				}
+			}
 
-				if len(tmpRes) > rule.Threshold.Value {
-					ruleCheckRes = true
-					for i := range tmpRes {
-						_ = common.RedisDel(tmpRes[i])
-					}
-				}
+			if err != nil {
+				fmt.Println(err)
 			}
 		}
 
@@ -368,6 +345,9 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 		// Add to final result
 		finalRes = append(finalRes, dataCopy)
 	}
+
+	ruleCache = nil
+
 	return finalRes
 }
 

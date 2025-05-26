@@ -9,17 +9,20 @@ import (
 var ctx = context.Background()
 var rdb *redis.Client
 
-func init() {
-	rdb = redis.NewClient(&redis.Options{
-		Addr: "127.0.0.1:6379", // Redis server address
-	})
-}
-
 func RedisInit(addr string, passwd string) {
 	// Initialize Redis client
 	rdb = redis.NewClient(&redis.Options{
-		Addr:     addr,   // Redis server address
-		Password: passwd, // No password set
+		Addr:            addr,
+		Password:        passwd,
+		PoolSize:        64,
+		MinIdleConns:    50,
+		ConnMaxIdleTime: 30 * time.Second,
+		ConnMaxLifetime: 5 * time.Minute,
+		PoolTimeout:     2 * time.Second,
+		DialTimeout:     2 * time.Second,
+		ReadTimeout:     1 * time.Second,
+		WriteTimeout:    1 * time.Second,
+		MaxRetries:      2,
 	})
 }
 

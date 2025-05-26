@@ -16,6 +16,7 @@
             <node type="REGEX" field="exe">testcases</node>
             <node type="INCL" field="argv">6400</node>
         </checklist>
+        <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
     </rule>
 
     <rule id="reverse_shell_03" name="测试" author="test">

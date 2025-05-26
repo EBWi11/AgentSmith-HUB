@@ -5,7 +5,103 @@ import (
 	regexp "github.com/BurntSushi/rure-go"
 	"strconv"
 	"strings"
+	"time"
 )
+
+func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
+	var res = false
+	redisSetNXRes, err := common.RedisSetNX(groupByKey, sumData, rangeInt)
+	if err != nil {
+		return false, err
+	}
+
+	if !redisSetNXRes {
+		groupByValue, err := common.RedisIncrby(groupByKey, int64(sumData))
+		if err != nil {
+			return false, err
+		} else {
+			if groupByValue > int64(threshold) {
+				res = true
+				_ = common.RedisDel(groupByKey)
+			}
+		}
+	}
+	return res, nil
+}
+
+// In concurrent situations, there are precision issues
+func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
+	if v, ok := r.Cache.Get(groupByKey); ok {
+		if v+sumData > threshold {
+			r.Cache.Del(groupByKey)
+			return true, nil
+		} else {
+			if tmpTtl, exist := r.Cache.GetTTL(groupByKey); exist {
+				r.Cache.SetWithTTL(groupByKey, v+sumData, 0, tmpTtl)
+			}
+			return false, nil
+		}
+	} else {
+		r.Cache.SetWithTTL(groupByKey, sumData, 0, time.Duration(rangeInt)*time.Second)
+		return false, nil
+	}
+}
+
+func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
+	var res = false
+	_, err := common.RedisSet(tmpKey, 1, rangeInt)
+	if err != nil {
+		return false, err
+	}
+
+	tmpRes, err := common.RedisKeys(groupByKey + "*")
+	if err != nil {
+		return false, err
+	}
+
+	if len(tmpRes) > threshold {
+		res = true
+		for i := range tmpRes {
+			_ = common.RedisDel(tmpRes[i])
+		}
+	}
+	return res, nil
+}
+
+func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
+	r.CacheMu.Lock()
+	defer r.CacheMu.Unlock()
+
+	if keys, ok := r.CacheForClassify.Get(groupByKey); ok {
+		count := len(keys) + 1
+		for key := range keys {
+			if _, okk := r.Cache.Get(key); !okk {
+				count = count - 1
+				delete(keys, key)
+			}
+		}
+
+		if count > threshold {
+			for key := range keys {
+				r.Cache.Del(key)
+			}
+			r.CacheForClassify.Del(groupByKey)
+			return true, nil
+		} else {
+			keys[tmpKey] = true
+			r.CacheForClassify.SetWithTTL(groupByKey, keys, 0, time.Duration(rangeInt*2)*time.Second)
+			r.Cache.SetWithTTL(tmpKey, 1, 0, time.Duration(rangeInt)*time.Second)
+			return false, nil
+		}
+	} else {
+		keys := map[string]bool{
+			tmpKey: true,
+		}
+		r.Cache.SetWithTTL(tmpKey, 1, 0, time.Duration(rangeInt)*time.Second)
+		r.CacheForClassify.SetWithTTL(groupByKey, keys, 0, time.Duration(rangeInt*2)*time.Second)
+		return false, nil
+	}
+}
 
 func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map[string]common.CheckCoreCache) []interface{} {
 	var ok bool

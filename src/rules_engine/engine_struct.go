@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	regexp "github.com/BurntSushi/rure-go"
+	"github.com/dgraph-io/ristretto/v2"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -43,6 +44,11 @@ type Ruleset struct {
 	antsPool *ants.Pool    // ants线程池
 
 	rulesMu sync.RWMutex // Mutex for hot update of rules
+
+	Cache            *ristretto.Cache[string, int]
+	CacheForClassify *ristretto.Cache[string, map[string]bool]
+	// only for classify local cache
+	CacheMu sync.RWMutex
 }
 
 // Rule represents a single rule with its logic and metadata.
@@ -66,6 +72,7 @@ type Filter struct {
 	Field     string   `xml:"field,attr"`
 	FieldList []string // parsed field path
 	Value     string   `xml:",chardata"`
+	Check     bool
 }
 
 // Checklist contains the logical condition and nodes to check.
@@ -110,11 +117,12 @@ type Threshold struct {
 	GroupByList    map[string][]string
 	Range          string `xml:"range,attr"`
 	RangeInt       int
-	LocalCache     string   `xml:"local_cache,attr"`
+	LocalCache     bool     `xml:"local_cache,attr"`
 	CountType      string   `xml:"count_type,attr"`
 	CountField     string   `xml:"count_field,attr"`
 	CountFieldList []string // parsed field path
 	Value          int      `xml:",chardata"`
+	GroupByID      string
 }
 
 // Append defines additional fields to append after rule matching.
@@ -289,6 +297,10 @@ func parseValue(s string) (*PluginArg, error) {
 // RulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
 func RulesetBuild(ruleset *Ruleset) error {
 	var err error
+	//for init local cache, local cache only work for threshold check
+	var createLocalCache = false
+	var createLocalCacheForClassify = false
+
 	if strings.TrimSpace(ruleset.RulesetName) == "" {
 		return errors.New("RulesetName cannot be empty")
 	}
@@ -398,7 +410,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 			}
 
-			rule.Threshold.RangeInt, err = strconv.Atoi(rule.Threshold.Range)
+			rule.Threshold.RangeInt, err = common.ParseDurationToSecondsInt(rule.Threshold.Range)
 			if err != nil {
 				return errors.New("THRESHOLD RANGE CANNOT BE INT")
 			}
@@ -408,6 +420,35 @@ func RulesetBuild(ruleset *Ruleset) error {
 			}
 
 			rule.ThresholdCheck = true
+			rule.Threshold.GroupByID = ruleset.RulesetID + rule.ID
+
+			if !createLocalCache {
+				ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+					NumCounters: 10_000_000,       // number of keys to track frequency of.
+					MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+					BufferItems: 32,               // number of keys per Get buffer.
+				})
+
+				if err != nil {
+					return fmt.Errorf("failed to create cache: %w", err)
+				}
+				createLocalCache = true
+			}
+
+			if rule.Threshold.CountType == "CLASSIFY" {
+				if !createLocalCacheForClassify {
+					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+						NumCounters: 10_000_000,       // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						BufferItems: 32,               // number of keys per Get buffer.
+					})
+
+					if err != nil {
+						return fmt.Errorf("failed to create classify cache: %w", err)
+					}
+					createLocalCacheForClassify = true
+				}
+			}
 		}
 
 		thresholdGroupBYList := strings.Split(strings.TrimSpace(rule.Threshold.GroupBy), ",")
@@ -421,6 +462,9 @@ func RulesetBuild(ruleset *Ruleset) error {
 		// Parse filter field path
 		rule.Filter.Field = strings.TrimSpace(rule.Filter.Field)
 		rule.Filter.FieldList = common.StringToList(strings.TrimSpace(rule.Filter.Field))
+		if len(rule.Filter.FieldList) > 0 {
+			rule.Filter.Check = true
+		}
 
 		// Parse each node's field path and assign check function
 		for j := range rule.Checklist.CheckNodes {

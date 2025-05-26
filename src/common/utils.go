@@ -1,13 +1,56 @@
 package common
 
 import (
+	"errors"
+	"fmt"
 	"github.com/bytedance/sonic"
 	"github.com/cespare/xxhash/v2"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+func ParseDurationToSecondsInt(input string) (int, error) {
+	input = strings.TrimSpace(strings.ToLower(input))
+	re := regexp.MustCompile(`^([\d.]+)\s*([smhd])$`)
+	matches := re.FindStringSubmatch(input)
+	if len(matches) != 3 {
+		return 0, errors.New("invalid format: expected number + unit (s, m, h, d)")
+	}
+
+	numStr, unit := matches[1], matches[2]
+
+	if unit == "s" && strings.Contains(numStr, ".") {
+		return 0, errors.New("seconds unit 's' must be an integer")
+	}
+
+	value, err := strconv.ParseFloat(numStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid number: %w", err)
+	}
+
+	var seconds float64
+	switch unit {
+	case "s":
+		seconds = value
+	case "m":
+		seconds = value * 60
+	case "h":
+		seconds = value * 3600
+	case "d":
+		seconds = value * 86400
+	default:
+		return 0, errors.New("unsupported unit")
+	}
+
+	if seconds <= 5 {
+		return 0, errors.New("duration must be greater than 5 seconds")
+	}
+
+	return int(seconds), nil
+}
 
 func DirExists(path string) (bool, error) {
 	info, err := os.Stat(path)
