@@ -149,10 +149,12 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for _, up := range out.UpStream {
-				for msg := range *up {
-					msgChan <- msg
-					atomic.AddUint64(&out.produceTotal, 1)
-				}
+				go func() {
+					for msg := range *up {
+						msgChan <- msg
+						atomic.AddUint64(&out.produceTotal, 1)
+					}
+				}()
 			}
 		}()
 	case OutputTypeElasticsearch:
@@ -188,10 +190,12 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for _, up := range out.UpStream {
-				for msg := range *up {
-					msgChan <- msg
-					atomic.AddUint64(&out.produceTotal, 1)
-				}
+				go func() {
+					for msg := range *up {
+						msgChan <- msg
+						atomic.AddUint64(&out.produceTotal, 1)
+					}
+				}()
 			}
 		}()
 	case OutputTypeAliyunSLS:
@@ -230,23 +234,25 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for _, up := range out.UpStream {
-				for {
-					select {
-					case <-out.printStop:
-						return
-					case msg, ok := <-*up:
-						if !ok {
+				go func() {
+					for {
+						select {
+						case <-out.printStop:
 							return
+						case msg, ok := <-*up:
+							if !ok {
+								return
+							}
+							b, err := json.Marshal(msg)
+							if err != nil {
+								fmt.Printf("[PRINT OUTPUT] marshal error: %v\n", err)
+								continue
+							}
+							fmt.Println(string(b))
+							atomic.AddUint64(&out.produceTotal, 1)
 						}
-						b, err := json.Marshal(msg)
-						if err != nil {
-							fmt.Printf("[PRINT OUTPUT] marshal error: %v\n", err)
-							continue
-						}
-						fmt.Println(string(b))
-						atomic.AddUint64(&out.produceTotal, 1)
 					}
-				}
+				}()
 			}
 		}()
 	default:
