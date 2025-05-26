@@ -46,6 +46,9 @@ type AliyunSLSInputConfig struct {
 	Logstore          string `yaml:"logstore"`
 	ConsumerGroupName string `yaml:"consumer_group_name"`
 	ConsumerName      string `yaml:"consumer_name"`
+	CursorPosition    string `yaml:"cursor_position,omitempty"`   // begin, end, or specific timestamp
+	CursorStartTime   int64  `yaml:"cursor_start_time,omitempty"` // Unix timestamp in milliseconds
+	Query             string `yaml:"query,omitempty"`             // Optional query for filtering logs
 }
 
 // Input is the runtime input instance.
@@ -56,9 +59,9 @@ type Input struct {
 	DownStream []*chan map[string]interface{}
 
 	// runtime
-	kafkaConsumer  *common.KafkaConsumer
-	aliyunStopChan chan struct{}
-	wg             sync.WaitGroup
+	kafkaConsumer *common.KafkaConsumer
+	slsConsumer   *common.AliyunSLSConsumer
+	wg            sync.WaitGroup
 
 	// config cache
 	kafkaCfg     *KafkaInputConfig
@@ -139,34 +142,25 @@ func (in *Input) Start() error {
 			}
 		}()
 	case InputTypeAliyunSLS:
-		if in.aliyunStopChan != nil {
-			return fmt.Errorf("aliyun_sls consumer already started")
+		if in.slsConsumer != nil {
+			return fmt.Errorf("sls consumer already started")
 		}
 		if in.aliyunSLSCfg == nil {
 			return fmt.Errorf("aliyun_sls config missing")
 		}
-		in.aliyunStopChan = make(chan struct{})
+
+		msgChan := make(chan map[string]interface{}, 1024)
+		consumerWorker := common.NewAliyunSLSConsumer(in.aliyunSLSCfg.Endpoint, in.aliyunSLSCfg.AccessKeyID, in.aliyunSLSCfg.AccessKeySecret, in.aliyunSLSCfg.Project, in.aliyunSLSCfg.Logstore, in.aliyunSLSCfg.ConsumerGroupName, in.aliyunSLSCfg.ConsumerName, in.aliyunSLSCfg.CursorPosition, in.aliyunSLSCfg.CursorStartTime, in.aliyunSLSCfg.Query, msgChan)
+
+		in.slsConsumer = consumerWorker
+		consumerWorker.Start()
 		in.wg.Add(1)
 		go func() {
 			defer in.wg.Done()
-			// NOTE: This is a simplified version. In production, use checkpoint, error handling, etc.
-			opt := in.aliyunSLSCfg
-			_ = opt // placeholder for real SDK usage
-			for {
-				select {
-				case <-in.aliyunStopChan:
-					return
-				default:
-					// Simulate a log event
-					msg := map[string]interface{}{
-						"content": "aliyun_sls_log",
-						"time":    time.Now().Unix(),
-					}
-					for _, down := range in.DownStream {
-						*down <- msg
-					}
+			for msg := range msgChan {
+				for _, down := range in.DownStream {
+					*down <- msg
 					atomic.AddUint64(&in.consumeTotal, 1)
-					time.Sleep(1 * time.Second)
 				}
 			}
 		}()
@@ -185,9 +179,9 @@ func (in *Input) Stop() error {
 			in.kafkaConsumer = nil
 		}
 	case InputTypeAliyunSLS:
-		if in.aliyunStopChan != nil {
-			close(in.aliyunStopChan)
-			in.aliyunStopChan = nil
+		if in.slsConsumer != nil {
+			in.slsConsumer.Close()
+			in.slsConsumer = nil
 		}
 	}
 	if in.metricStop != nil {
