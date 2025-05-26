@@ -156,7 +156,11 @@ func (p *KafkaProducer) run() {
 			}
 		}
 
-		p.Client.Produce(context.Background(), rec, nil)
+		p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
+			if err != nil {
+				fmt.Printf("[KafkaProducer] produce error: %v\n", err)
+			}
+		})
 	}
 }
 

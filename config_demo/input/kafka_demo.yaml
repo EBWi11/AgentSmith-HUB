@@ -2,6 +2,6 @@ name: kafka_input_demo
 type: kafka
 kafka:
   brokers:
-    - "172.26.0.19:9092"
+    - "192.168.27.130:9092"
   group: "demo-group-1"
-  topic: "winlogbeat"
+  topic: "test-topic"
