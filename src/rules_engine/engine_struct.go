@@ -336,6 +336,13 @@ func RulesetBuild(ruleset *Ruleset) error {
 		if strings.TrimSpace(rule.ID) == "" {
 			return errors.New("RuleID cannot be empty")
 		}
+
+		for i2 := range ruleset.Rules {
+			if strings.TrimSpace(ruleset.Rules[i2].ID) == strings.TrimSpace(rule.ID) {
+				return errors.New("Rule ID cannot be repeated")
+			}
+		}
+
 		if strings.TrimSpace(rule.Name) == "" {
 			return errors.New("RuleName cannot be empty")
 		}

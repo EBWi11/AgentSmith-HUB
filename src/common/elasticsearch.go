@@ -49,7 +49,6 @@ func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[str
 	return prod, nil
 }
 
-// run 批量消费channel并写入ES
 func (p *ElasticsearchProducer) run() {
 	batch := make([]map[string]interface{}, 0, p.batchSize)
 	timer := time.NewTimer(p.flushDur)
@@ -174,7 +173,6 @@ func NewElasticsearchConsumer(addresses []string, index string, msgChan chan map
 	return cons, nil
 }
 
-// run 批量拉取ES数据并写入channel
 func (c *ElasticsearchConsumer) run() {
 	scrollID := ""
 	for {
@@ -185,7 +183,6 @@ func (c *ElasticsearchConsumer) run() {
 			var res *esapi.Response
 			var err error
 			if scrollID == "" {
-				// 初次请求
 				query := map[string]interface{}{
 					"size": c.PageSize,
 					"query": map[string]interface{}{
@@ -224,11 +221,11 @@ func (c *ElasticsearchConsumer) run() {
 				} `json:"hits"`
 			}
 			if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
-				res.Body.Close()
+				_ = res.Body.Close()
 				time.Sleep(time.Second)
 				continue
 			}
-			res.Body.Close()
+			_ = res.Body.Close()
 			scrollID = r.ScrollID
 			if len(r.Hits.Hits) == 0 {
 				time.Sleep(time.Second)
@@ -241,7 +238,6 @@ func (c *ElasticsearchConsumer) run() {
 	}
 }
 
-// Close 关闭consumer
 func (c *ElasticsearchConsumer) Close() {
 	close(c.stopChan)
 }
