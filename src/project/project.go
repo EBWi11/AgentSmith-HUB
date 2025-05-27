@@ -16,6 +16,7 @@ import (
 )
 
 var ConfigRoot = ""
+var GlobalProject *GlobalProjectInfo
 
 func SetConfigRoot(p string) error {
 	flag, _ := common.DirExists(p)
@@ -23,6 +24,11 @@ func SetConfigRoot(p string) error {
 		return errors.New(p + ": dir is not exist")
 	}
 	ConfigRoot = p
+
+	GlobalProject = &GlobalProjectInfo{
+		msgChans:        make(map[string]chan map[string]interface{}),
+		msgChansCounter: make(map[string]int),
+	}
 	return nil
 }
 
@@ -51,16 +57,15 @@ func NewProject(pp string) (*Project, error) {
 	}
 
 	p := &Project{
-		Name:      cfg.Name,
-		Id:        cfg.Id,
-		Status:    ProjectStatusStopped,
-		Config:    &cfg,
-		Inputs:    make(map[string]*input.Input),
-		Outputs:   make(map[string]*output.Output),
-		Rulesets:  make(map[string]*rules_engine.Ruleset),
-		msgChans:  make(map[string]chan map[string]interface{}),
-		stopChan:  make(chan struct{}),
-		errorChan: make(chan error, 100),
+		Name:        cfg.Name,
+		Id:          cfg.Id,
+		Status:      ProjectStatusStopped,
+		Config:      &cfg,
+		Inputs:      make(map[string]*input.Input),
+		Outputs:     make(map[string]*output.Output),
+		Rulesets:    make(map[string]*rules_engine.Ruleset),
+		MsgChannels: make([]string, 0),
+		stopChan:    make(chan struct{}),
 		metrics: &ProjectMetrics{
 			InputQPS:  make(map[string]uint64),
 			OutputQPS: make(map[string]uint64),
@@ -166,6 +171,7 @@ func (p *Project) initComponents() error {
 		return err
 	}
 
+	projectNodeSequence := ""
 	// Connect components according to the flow graph
 	for from, tos := range flowGraph {
 		fromParts := strings.Split(from, ".")
@@ -178,18 +184,31 @@ func (p *Project) initComponents() error {
 			toId := toParts[1]
 
 			// Create a channel for this connection
-			msgChan := make(chan map[string]interface{}, 1024)
-			p.msgChans[fmt.Sprintf("%s->%s", from, to)] = msgChan
+			var msgChan chan map[string]interface{}
+			projectNodeSequence = projectNodeSequence + "-" + fmt.Sprintf("%s-%s", from, to)
+
+			if GlobalProject.msgChans[projectNodeSequence] != nil {
+				msgChan = GlobalProject.msgChans[projectNodeSequence]
+				GlobalProject.msgChansCounter[projectNodeSequence] = GlobalProject.msgChansCounter[projectNodeSequence] + 1
+			} else {
+				msgChan = make(chan map[string]interface{}, 1024)
+				GlobalProject.msgChans[projectNodeSequence] = msgChan
+				GlobalProject.msgChansCounter[projectNodeSequence] = 1
+			}
+
+			p.MsgChannels = append(p.MsgChannels, projectNodeSequence)
 
 			// Connect based on component types
 			switch fromType {
 			case "INPUT":
 				if in, ok := p.Inputs[fromId]; ok {
 					in.DownStream = append(in.DownStream, &msgChan)
+					in.ProjectNodeSequence = projectNodeSequence
 				}
 			case "RULESET":
 				if rs, ok := p.Rulesets[fromId]; ok {
 					rs.DownStream[to] = &msgChan
+					rs.ProjectNodeSequence = projectNodeSequence
 				}
 			}
 
@@ -197,10 +216,12 @@ func (p *Project) initComponents() error {
 			case "RULESET":
 				if rs, ok := p.Rulesets[toId]; ok {
 					rs.UpStream[from] = &msgChan
+					rs.ProjectNodeSequence = projectNodeSequence
 				}
 			case "OUTPUT":
 				if out, ok := p.Outputs[toId]; ok {
 					out.UpStream = append(out.UpStream, &msgChan)
+					out.ProjectNodeSequence = projectNodeSequence
 				}
 			}
 		}
@@ -299,9 +320,6 @@ func (p *Project) Start() error {
 	p.metricsStop = make(chan struct{})
 	go p.collectMetrics()
 
-	// Start error monitoring
-	go p.monitorErrors()
-
 	p.Status = ProjectStatusRunning
 	p.startTime = time.Now()
 	return nil
@@ -337,9 +355,18 @@ func (p *Project) Stop() error {
 		close(p.metricsStop)
 	}
 
+	for i, _ := range p.MsgChannels {
+		id := p.MsgChannels[i]
+		GlobalProject.msgChansCounter[id] = GlobalProject.msgChansCounter[id] - 1
+		if GlobalProject.msgChansCounter[id] == 0 {
+			close(GlobalProject.msgChans[id])
+			delete(GlobalProject.msgChans, id)
+			delete(GlobalProject.msgChansCounter, id)
+		}
+	}
+
 	// Close all channels
 	close(p.stopChan)
-	close(p.errorChan)
 
 	// Wait for all goroutines to finish
 	p.wg.Wait()
@@ -369,16 +396,6 @@ func (p *Project) collectMetrics() {
 			}
 			p.metrics.mu.Unlock()
 		}
-	}
-}
-
-// monitorErrors monitors and handles errors
-func (p *Project) monitorErrors() {
-	for err := range p.errorChan {
-		p.lastErrorMu.Lock()
-		p.lastError = err
-		p.lastErrorMu.Unlock()
-		p.Status = ProjectStatusError
 	}
 }
 

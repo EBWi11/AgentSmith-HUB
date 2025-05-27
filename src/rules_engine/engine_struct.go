@@ -29,10 +29,11 @@ var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 
 // Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
-	XMLName     xml.Name `xml:"root"`
-	RulesetID   string
-	RulesetName string `xml:"name,attr"`
-	Type        string `xml:"type,attr"`
+	XMLName             xml.Name `xml:"root"`
+	RulesetID           string
+	ProjectNodeSequence string
+	RulesetName         string `xml:"name,attr"`
+	Type                string `xml:"type,attr"`
 
 	IsDetection bool
 	Rules       []Rule `xml:"rule"`

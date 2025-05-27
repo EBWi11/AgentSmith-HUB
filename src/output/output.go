@@ -61,10 +61,11 @@ type AliyunSLSOutputConfig struct {
 
 // Output is the runtime output instance.
 type Output struct {
-	Name     string
-	Id       string
-	Type     OutputType
-	UpStream []*chan map[string]interface{}
+	Name                string
+	Id                  string
+	ProjectNodeSequence string
+	Type                OutputType
+	UpStream            []*chan map[string]interface{}
 
 	// runtime
 	kafkaProducer         *common.KafkaProducer

@@ -135,6 +135,10 @@ waitDownstream:
 		r.Cache.Close()
 	}
 
+	if r.CacheForClassify != nil {
+		r.CacheForClassify.Close()
+	}
+
 	return nil
 }
 

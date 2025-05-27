@@ -53,10 +53,11 @@ type AliyunSLSInputConfig struct {
 
 // Input is the runtime input instance.
 type Input struct {
-	Name       string
-	Id         string
-	Type       InputType
-	DownStream []*chan map[string]interface{}
+	Name                string
+	Id                  string
+	ProjectNodeSequence string
+	Type                InputType
+	DownStream          []*chan map[string]interface{}
 
 	// runtime
 	kafkaConsumer *common.KafkaConsumer
