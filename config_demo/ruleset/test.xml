@@ -15,6 +15,8 @@
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
             <node type="INCL" field="argv">6400</node>
+            <node type="PLUGIN">isLocalIP(dip)</node>
+            <node type="PLUGIN">isLocalIP2(dip)</node>
         </checklist>
         <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
     </rule>
@@ -23,7 +25,9 @@
         <filter field="data_type">59</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
-            <node type="INCL" field="argv">8400</node>
+            <node type="INCL" field="argv">6400</node>
+            <node type="PLUGIN">isLocalIP(dip)</node>
+            <node type="PLUGIN">isLocalIP2(dip)</node>
         </checklist>
     </rule>
 </root>

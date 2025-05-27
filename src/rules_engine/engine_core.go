@@ -324,8 +324,10 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				} else {
 					// Plugin
 					args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
-					res := tmpAppend.Plugin.FuncEval(args)[0]
-					dataCopy[tmpAppend.FieldName] = res
+					res, ok := tmpAppend.Plugin.FuncEvalOther(args...)
+					if ok {
+						dataCopy[tmpAppend.FieldName] = res
+					}
 				}
 			}
 
@@ -334,15 +336,11 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				p := rule.Plugins[i]
 				args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
-				resList := p.Plugin.FuncEval(args)
-				pluginRes := resList[0]
-				err := resList[1]
-
-				if err == nil {
-					dataCopy = pluginRes.(map[string]interface{})
-				} else {
-					logger.Error("Plugin execution error:", err, "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
-					continue
+				res, ok := p.Plugin.FuncEvalOther(args...)
+				if ok {
+					if dataCopy, ok = res.(map[string]interface{}); !ok {
+						logger.Error("Plugin execution error: expected map[string]interface{}, got", fmt.Sprintf("%T", res), "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
+					}
 				}
 			}
 
@@ -381,12 +379,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		}
 	case "PLUGIN":
 		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
-		res := checkNode.Plugin.FuncEval(args)
-		if res[0].(bool) {
-			return true
-		} else {
-			return false
-		}
+		return checkNode.Plugin.FuncEvalCheckNode(args...)
 
 	default:
 		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)

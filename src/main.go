@@ -3,6 +3,7 @@ package main
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"flag"
 	"fmt"
@@ -74,7 +75,7 @@ func main() {
 		logger.Error("redis init error", "error", err)
 		return
 	}
-	err = common.PluginInit(path.Join(project.ConfigRoot, "plugin"))
+	err = plugin.PluginInit(path.Join(project.ConfigRoot, "plugin"))
 	if err != nil {
 		logger.Error("plugin init error", "error", err)
 		return

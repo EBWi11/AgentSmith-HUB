@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/plugin"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -114,7 +115,7 @@ type CheckNodes struct {
 	Value              string `xml:",chardata"`
 	Regex              *regexp.Regex
 
-	Plugin     *common.Plugin
+	Plugin     *plugin.Plugin
 	PluginArgs []*PluginArg
 }
 
@@ -122,7 +123,8 @@ type PluginArg struct {
 	//0 Value == RealValue
 	//1 RealValue == GetCheckData(Value)
 	//2 RealValue == ORI DATA
-	Type      int
+	Type int
+
 	Value     interface{}
 	RealValue interface{}
 }
@@ -149,14 +151,14 @@ type Append struct {
 	FieldName string `xml:"field_name,attr"` // Name of field to append
 	Value     string `xml:",chardata"`       // Value to append
 
-	Plugin     *common.Plugin // Plugin instance if type is PLUGIN
+	Plugin     *plugin.Plugin // Plugin instance if type is PLUGIN
 	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
 // Plugin represents a plugin configuration with its execution parameters
 type Plugin struct {
 	Value      string         `xml:",chardata"` // Plugin value/configuration
-	Plugin     *common.Plugin // Plugin instance
+	Plugin     *plugin.Plugin // Plugin instance
 	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
@@ -384,7 +386,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 					return err
 				}
 
-				if p, ok := common.Plugins[pluginName]; ok {
+				if p, ok := plugin.Plugins[pluginName]; ok {
 					appendNode.Plugin = p
 				} else {
 					return errors.New("not found this plugin: " + pluginName)
@@ -407,7 +409,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				return err
 			}
 
-			if p, ok := common.Plugins[pluginName]; ok {
+			if p, ok := plugin.Plugins[pluginName]; ok {
 				pluginNode.Plugin = p
 			} else {
 				return errors.New("not fount this plugin: " + pluginName)
@@ -525,7 +527,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 					return err
 				}
 
-				if p, ok := common.Plugins[pluginName]; ok {
+				if p, ok := plugin.Plugins[pluginName]; ok {
 					node.Plugin = p
 				} else {
 					return errors.New("not found this plugin: " + pluginName + " rule id: " + rule.ID)

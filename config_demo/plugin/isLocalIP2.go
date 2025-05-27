@@ -4,30 +4,30 @@ import (
 	"net"
 )
 
-func Eval(ipStr string) bool {
+func Eval(ipStr string) (bool, error) {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
-		return false
+		return false, nil
 	}
 
 	if ip.IsLoopback() {
-		return true
+		return true, nil
 	}
 
 	for _, cidr := range []string{
 		"10.0.0.0/8",
 		"172.16.0.0/12",
 		"192.168.0.0/16",
-		"169.254.0.0/16", // 链路本地地址
-		"::1/128",        // IPv6 loopback
-		"fc00::/7",       // IPv6 本地地址（ULA）
-		"fe80::/10",      // IPv6 链路本地地址
+		"169.254.0.0/16",
+		"::1/128",
+		"fc00::/7",
+		"fe80::/10",
 	} {
 		_, subnet, _ := net.ParseCIDR(cidr)
 		if subnet.Contains(ip) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
