@@ -38,6 +38,8 @@ type Ruleset struct {
 	IsDetection bool
 	Rules       []Rule `xml:"rule"`
 
+	RulesByFilter map[string]*RulesByFilter
+
 	UpStream   map[string]*chan map[string]interface{}
 	DownStream map[string]*chan map[string]interface{}
 
@@ -50,6 +52,11 @@ type Ruleset struct {
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
 	// only for classify local cache
 	CacheMu sync.RWMutex
+}
+
+type RulesByFilter struct {
+	Filter Filter
+	Rules  []*Rule
 }
 
 // Rule represents a single rule with its logic and metadata.
@@ -74,6 +81,14 @@ type Filter struct {
 	FieldList []string // parsed field path
 	Value     string   `xml:",chardata"`
 	Check     bool
+}
+
+func (f *Filter) ToStr() string {
+	str := f.Field + ">>" + f.Value
+	if str == "" {
+		return "nil"
+	}
+	return str
 }
 
 // Checklist contains the logical condition and nodes to check.
@@ -595,6 +610,17 @@ func RulesetBuild(ruleset *Ruleset) error {
 			rule.DelList[i] = make([]string, len(tmpList))
 			rule.DelList[i] = tmpList
 		}
+
+		// Cluster rules by filter
+		filterStr := rule.Filter.ToStr()
+		if rulesByFilter, ok := ruleset.RulesByFilter[filterStr]; ok {
+			rulesByFilter.Rules = append(rulesByFilter.Rules, rule)
+		} else {
+			ruleset.RulesByFilter[filterStr] = &RulesByFilter{
+				Filter: rule.Filter,
+				Rules:  []*Rule{rule},
+			}
+		}
 	}
 	return nil
 }
@@ -602,6 +628,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 // ParseRulesetFromByte parses XML bytes into a Ruleset struct and processes field paths.
 func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 	var ruleset Ruleset
+	ruleset.RulesByFilter = make(map[string]*RulesByFilter, 0)
+
 	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
 		return nil, err
 	}

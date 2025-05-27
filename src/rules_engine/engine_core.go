@@ -145,16 +145,16 @@ waitDownstream:
 // EngineCheck executes all rules in the ruleset on the provided data.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
-
 	ruleCache := make(map[string]common.CheckCoreCache, 8)
-	for _, rule := range r.Rules {
+
+	for _, rf := range r.RulesByFilter {
 		// Filter check process
-		if rule.Filter.Check {
-			checkData, exist := GetCheckDataFromCache(ruleCache, rule.Filter.Field, data, rule.Filter.FieldList)
+		if rf.Filter.Check {
+			checkData, exist := GetCheckDataFromCache(ruleCache, rf.Filter.Field, data, rf.Filter.FieldList)
 			if exist {
-				filterValue := rule.Filter.Value
-				if strings.HasPrefix(rule.Filter.Value, FromRawSymbol) {
-					filterValue = GetRuleValueFromRawFromCache(ruleCache, rule.Filter.Value, data)
+				filterValue := rf.Filter.Value
+				if strings.HasPrefix(rf.Filter.Value, FromRawSymbol) {
+					filterValue = GetRuleValueFromRawFromCache(ruleCache, rf.Filter.Value, data)
 				}
 
 				filterCheckRes, _ := INCL(checkData, filterValue)
@@ -164,195 +164,199 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			}
 		}
 
-		// Checklist process
-		checkListRes := false
-		ruleCheckRes := false
+		for i := range rf.Rules {
+			rule := rf.Rules[i]
 
-		var conditionMap map[string]bool
+			// Checklist process
+			checkListRes := false
+			ruleCheckRes := false
 
-		if rule.Checklist.ConditionFlag {
-			conditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
-		}
+			var conditionMap map[string]bool
 
-		for _, checkNode := range rule.Checklist.CheckNodes {
-			var checkNodeValue = checkNode.Value
-			var checkNodeValueFromRaw = false
+			if rule.Checklist.ConditionFlag {
+				conditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
+			}
 
-			switch checkNode.Logic {
-			case "":
-				if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
-					checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
-					checkNodeValueFromRaw = true
-				}
-				checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
-			case "AND":
-				for _, v := range checkNode.DelimiterFieldList {
-					if strings.HasPrefix(v, FromRawSymbol) {
-						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+			for _, checkNode := range rule.Checklist.CheckNodes {
+				var checkNodeValue = checkNode.Value
+				var checkNodeValueFromRaw = false
+
+				switch checkNode.Logic {
+				case "":
+					if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
+						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
 						checkNodeValueFromRaw = true
 					}
-					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); !checkListRes {
+					checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
+				case "AND":
+					for _, v := range checkNode.DelimiterFieldList {
+						if strings.HasPrefix(v, FromRawSymbol) {
+							checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+							checkNodeValueFromRaw = true
+						}
+						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); !checkListRes {
+							break
+						}
+					}
+				case "OR":
+					for _, v := range checkNode.DelimiterFieldList {
+						if strings.HasPrefix(v, FromRawSymbol) {
+							checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+							checkNodeValueFromRaw = true
+						}
+
+						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); checkListRes {
+							break
+						}
+					}
+				}
+
+				if rule.Checklist.ConditionFlag {
+					conditionMap[checkNode.ID] = checkListRes
+				} else {
+					if !checkListRes {
 						break
 					}
 				}
-			case "OR":
-				for _, v := range checkNode.DelimiterFieldList {
-					if strings.HasPrefix(v, FromRawSymbol) {
-						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
-						checkNodeValueFromRaw = true
-					}
+			}
 
-					if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); checkListRes {
-						break
-					}
-				}
+			if rule.ChecklistLen == 0 {
+				ruleCheckRes = true
 			}
 
 			if rule.Checklist.ConditionFlag {
-				conditionMap[checkNode.ID] = checkListRes
+				ruleCheckRes = rule.Checklist.ConditionAST.ExprASTResult(rule.Checklist.ConditionAST.ExprAST, rule.Checklist.ConditionMap)
 			} else {
-				if !checkListRes {
-					break
+				if r.IsDetection && checkListRes {
+					ruleCheckRes = true
+				} else if !r.IsDetection && !checkListRes {
+					ruleCheckRes = true
 				}
 			}
-		}
 
-		if rule.ChecklistLen == 0 {
-			ruleCheckRes = true
-		}
-
-		if rule.Checklist.ConditionFlag {
-			ruleCheckRes = rule.Checklist.ConditionAST.ExprASTResult(rule.Checklist.ConditionAST.ExprAST, rule.Checklist.ConditionMap)
-		} else {
-			if r.IsDetection && checkListRes {
-				ruleCheckRes = true
-			} else if !r.IsDetection && !checkListRes {
-				ruleCheckRes = true
+			if !ruleCheckRes {
+				continue
 			}
-		}
 
-		if !ruleCheckRes {
-			continue
-		}
+			// Threshold process
+			if rule.ThresholdCheck {
+				var err error
+				ruleCheckRes = false
 
-		// Threshold process
-		if rule.ThresholdCheck {
-			var err error
-			ruleCheckRes = false
+				// Isolate by ruleset ID and rule ID
+				var groupByKey = rule.Threshold.GroupByID
+				for k, v := range rule.Threshold.GroupByList {
+					tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+					groupByKey = groupByKey + tmpData
+				}
+				groupByKey = common.XXHash64(groupByKey)
 
-			// Isolate by ruleset ID and rule ID
-			var groupByKey = rule.Threshold.GroupByID
-			for k, v := range rule.Threshold.GroupByList {
-				tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
-				groupByKey = groupByKey + tmpData
-			}
-			groupByKey = common.XXHash64(groupByKey)
+				switch rule.Threshold.CountType {
+				case "":
+					groupByKey = "F_" + groupByKey
 
-			switch rule.Threshold.CountType {
-			case "":
-				groupByKey = "F_" + groupByKey
+					if rule.Threshold.LocalCache {
+						ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+					} else {
+						ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+					}
 
-				if rule.Threshold.LocalCache {
-					ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
-				} else {
-					ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+				case "SUM":
+					groupByKey = "FS_" + groupByKey
+
+					sumDataStr, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
+					if !ok {
+						break
+					}
+
+					sumData, err := strconv.Atoi(sumDataStr)
+					if err != nil {
+						break
+					}
+
+					if rule.Threshold.LocalCache {
+						ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+					} else {
+						ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+					}
+
+				case "CLASSIFY":
+					groupByKey = "FC_" + groupByKey
+					classifyData, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
+					if !ok {
+						break
+					}
+
+					tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
+
+					if rule.Threshold.LocalCache {
+						ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+					} else {
+						ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+					}
 				}
 
-			case "SUM":
-				groupByKey = "FS_" + groupByKey
-
-				sumDataStr, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-				if !ok {
-					break
-				}
-
-				sumData, err := strconv.Atoi(sumDataStr)
 				if err != nil {
-					break
+					fmt.Println(err)
 				}
+			}
 
-				if rule.Threshold.LocalCache {
-					ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+			if !ruleCheckRes {
+				continue
+			}
+
+			dataCopy := common.MapDeepCopy(data)
+
+			// Add rule info
+			addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
+
+			// Append process
+			for i := range rule.Appends {
+				tmpAppend := rule.Appends[i]
+				if tmpAppend.Type == "" {
+					appendData := tmpAppend.Value
+					if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
+						appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
+					}
+
+					dataCopy[tmpAppend.FieldName] = appendData
 				} else {
-					ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+					// Plugin
+					args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
+					res := tmpAppend.Plugin.FuncEval(args)[0]
+					dataCopy[tmpAppend.FieldName] = res
 				}
+			}
 
-			case "CLASSIFY":
-				groupByKey = "FC_" + groupByKey
-				classifyData, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-				if !ok {
-					break
-				}
+			// Plugin process
+			for i := range rule.Plugins {
+				p := rule.Plugins[i]
+				args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
-				tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
+				resList := p.Plugin.FuncEval(args)
+				pluginRes := resList[0]
+				err := resList[1]
 
-				if rule.Threshold.LocalCache {
-					ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+				if err == nil {
+					dataCopy = pluginRes.(map[string]interface{})
 				} else {
-					ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+					// TODO: handle error
 				}
 			}
 
-			if err != nil {
-				fmt.Println(err)
+			// Delete process
+			for i := range rule.DelList {
+				common.MapDel(dataCopy, rule.DelList[i])
 			}
+
+			// Add to final result
+			finalRes = append(finalRes, dataCopy)
 		}
-
-		if !ruleCheckRes {
-			continue
-		}
-
-		dataCopy := common.MapDeepCopy(data)
-
-		// Add rule info
-		addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
-
-		// Append process
-		for i := range rule.Appends {
-			tmpAppend := rule.Appends[i]
-			if tmpAppend.Type == "" {
-				appendData := tmpAppend.Value
-				if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
-					appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
-				}
-
-				dataCopy[tmpAppend.FieldName] = appendData
-			} else {
-				// Plugin
-				args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
-				res := tmpAppend.Plugin.FuncEval(args)[0]
-				dataCopy[tmpAppend.FieldName] = res
-			}
-		}
-
-		// Plugin process
-		for i := range rule.Plugins {
-			p := rule.Plugins[i]
-			args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
-
-			resList := p.Plugin.FuncEval(args)
-			pluginRes := resList[0]
-			err := resList[1]
-
-			if err == nil {
-				dataCopy = pluginRes.(map[string]interface{})
-			} else {
-				// TODO: handle error
-			}
-		}
-
-		// Delete process
-		for i := range rule.DelList {
-			common.MapDel(dataCopy, rule.DelList[i])
-		}
-
-		// Add to final result
-		finalRes = append(finalRes, dataCopy)
 	}
 
 	ruleCache = nil
-
 	return finalRes
+
 }
 
 // checkNodeLogic executes the check logic for a single check node.
