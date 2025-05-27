@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
 	"github.com/panjf2000/ants/v2"
@@ -15,7 +16,7 @@ const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
 	if r.stopChan != nil {
-		return fmt.Errorf("already started")
+		return fmt.Errorf("already started: %v", r.RulesetID)
 	}
 	r.stopChan = make(chan struct{})
 
@@ -297,7 +298,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				}
 
 				if err != nil {
-					fmt.Println(err)
+					logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
 				}
 			}
 
@@ -340,7 +341,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				if err == nil {
 					dataCopy = pluginRes.(map[string]interface{})
 				} else {
-					// TODO: handle error
+					logger.Error("Plugin execution error:", err, "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
+					continue
 				}
 			}
 

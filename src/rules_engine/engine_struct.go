@@ -318,7 +318,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 	var createLocalCacheForClassify = false
 
 	if strings.TrimSpace(ruleset.RulesetName) == "" {
-		return errors.New("RulesetName cannot be empty")
+		return errors.New("ruleset name cannot be empty")
 	}
 
 	if strings.TrimSpace(ruleset.Type) == "" || strings.TrimSpace(ruleset.Type) == "DETECTION" {
@@ -326,7 +326,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 	} else if strings.TrimSpace(ruleset.Type) == "WHITELIST" {
 		ruleset.IsDetection = false
 	} else {
-		return errors.New("ruleset Type Only SUPPORT WHITELIST OR DETECTION")
+		return errors.New("ruleset type only support whitelist or detection")
 	}
 
 	for i := range ruleset.Rules {
@@ -334,17 +334,17 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 		// Validate required fields for rule
 		if strings.TrimSpace(rule.ID) == "" {
-			return errors.New("RuleID cannot be empty")
+			return errors.New("rule id cannot be empty")
 		}
 
 		for i2 := range ruleset.Rules {
-			if strings.TrimSpace(ruleset.Rules[i2].ID) == strings.TrimSpace(rule.ID) {
-				return errors.New("Rule ID cannot be repeated")
+			if strings.TrimSpace(ruleset.Rules[i2].ID) == strings.TrimSpace(rule.ID) && i != i2 {
+				return errors.New("rule id cannot be repeated")
 			}
 		}
 
 		if strings.TrimSpace(rule.Name) == "" {
-			return errors.New("RuleName cannot be empty")
+			return errors.New("rule name cannot be empty")
 		}
 		if strings.TrimSpace(rule.Author) == "" {
 			return errors.New("rule author cannot be empty")
@@ -366,7 +366,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			appendValue := strings.TrimSpace(appendNode.Value)
 
 			if appendType != "" && appendType != "PLUGIN" {
-				return errors.New("APPEND TYPE OR FIELD_NAME CANNOT BE EMPTY")
+				return errors.New("append type or field name cannot be empty")
 			}
 
 			if appendNode.Type == "PLUGIN" {
@@ -378,7 +378,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := common.Plugins[pluginName]; ok {
 					appendNode.Plugin = p
 				} else {
-					return errors.New("NOT FUND THIS PLUGIN")
+					return errors.New("not found this plugin: " + pluginName)
 				}
 
 				appendNode.PluginArgs = args
@@ -390,7 +390,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			value := strings.TrimSpace(pluginNode.Value)
 
 			if value == "" {
-				return errors.New("PLUGIN VALUE CANNOT BE EMPTY")
+				return errors.New("plugin value cannot be empty: " + pluginNode.Plugin.Name)
 			}
 
 			pluginName, args, err := ParseFunctionCall(value)
@@ -401,7 +401,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if p, ok := common.Plugins[pluginName]; ok {
 				pluginNode.Plugin = p
 			} else {
-				return errors.New("NOT FUND THIS PLUGIN")
+				return errors.New("not fount this plugin: " + pluginName)
 			}
 
 			pluginNode.PluginArgs = args
@@ -411,22 +411,22 @@ func RulesetBuild(ruleset *Ruleset) error {
 			rule.ThresholdCheck = false
 		} else {
 			if rule.Threshold.GroupBy == "" {
-				return errors.New("THRESHOLD GROUPBY CANNOT BE EMPTY")
+				return errors.New("threshold groupby cannot be empty: " + rule.ID)
 			}
 			if rule.Threshold.Range == "" {
-				return errors.New("THRESHOLD RANGE CANNOT BE EMPTY")
+				return errors.New("threshold range cannot be empty: " + rule.ID)
 			}
 			if rule.Threshold.Value == 0 {
-				return errors.New("THRESHOLD RANGE CANNOT BE EMPTY")
+				return errors.New("threshold vaule cannot be empty: " + rule.ID)
 			}
 
 			if !(rule.Threshold.CountType == "" || rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY") {
-				return errors.New("THRESHOLD COUNT TYPE MUST BE 'SUM' OR 'CLASSIFY'")
+				return errors.New("threshold count type must be 'SUM' or 'CLASSIFY': " + rule.ID)
 			}
 
 			if rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY" {
 				if rule.Threshold.CountField == "" {
-					return errors.New("THRESHOLD COUNT FIELD CANNOT BE EMPTY")
+					return errors.New("threshold count field cannot be empty: " + rule.ID)
 				} else {
 					// Parse threshold count field path
 					rule.Threshold.CountFieldList = common.StringToList(strings.TrimSpace(rule.Threshold.CountField))
@@ -435,11 +435,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 			rule.Threshold.RangeInt, err = common.ParseDurationToSecondsInt(rule.Threshold.Range)
 			if err != nil {
-				return errors.New("THRESHOLD RANGE CANNOT BE INT")
+				return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
 			}
 
 			if !(rule.Threshold.Value > 1) {
-				return errors.New("THRESHOLD VALUE MUST BE GREATER THAN 1")
+				return errors.New("threshold value must be greater than 1: " + rule.ID)
 			}
 
 			rule.ThresholdCheck = true
@@ -453,7 +453,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				})
 
 				if err != nil {
-					return fmt.Errorf("failed to create cache: %w", err)
+					return fmt.Errorf("failed to create local cache: %w", err)
 				}
 				createLocalCache = true
 			}
@@ -467,7 +467,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 					})
 
 					if err != nil {
-						return fmt.Errorf("failed to create classify cache: %w", err)
+						return fmt.Errorf("failed to create local cache: %w", err)
 					}
 					createLocalCacheForClassify = true
 				}
@@ -499,11 +499,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 				node.ID = id
 
 				if id == "" {
-					return errors.New("CHECK NODE ID CANNOT BE EMPTY")
+					return errors.New("check node id cannot be empty: " + rule.ID)
 				}
 
 				if _, ok := rule.Checklist.ConditionMap[id]; ok {
-					return errors.New("CHECK NODE ID CANNOT BE REPEATED")
+					return errors.New("check node id cannot be repeated: " + rule.ID)
 				} else {
 					rule.Checklist.ConditionMap[id] = false
 				}
@@ -519,7 +519,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := common.Plugins[pluginName]; ok {
 					node.Plugin = p
 				} else {
-					return errors.New("NOT FUND THIS PLUGIN")
+					return errors.New("not found this plugin: " + pluginName + " rule id: " + rule.ID)
 				}
 
 				node.PluginArgs = args
@@ -567,7 +567,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			case "NCS_NEQ":
 				node.CheckFunc = NCS_NEQ
 			default:
-				return errors.New("UNKNOWN CHECK NODE TYPE, " + common.AnyToString(j))
+				return errors.New("unknown check node type, " + common.AnyToString(j) + ", rule id: " + rule.ID)
 			}
 
 			// Compile regex if needed
@@ -581,15 +581,15 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 			if node.Logic != "" || node.Delimiter != "" {
 				if node.Logic == "" {
-					return errors.New("LOGIC CANNOT BE EMPTY")
+					return errors.New("logic cannot be empty: " + rule.ID)
 				}
 
 				if node.Logic != "AND" && node.Logic != "OR" {
-					return errors.New("THRESHOLD COUNT TYPE MUST BE 'AND' OR 'OR'")
+					return errors.New("threshold count type must be 'AND' or 'OR': " + rule.ID)
 				}
 
 				if node.Delimiter == "" {
-					return errors.New("DELIMITER CANNOT BE EMPTY")
+					return errors.New("delimiter cannot be empty: " + rule.ID)
 				}
 
 				if strings.Contains(strings.TrimSpace(node.Value), node.Delimiter) {
@@ -600,7 +600,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 						rule.ChecklistLen = len(rule.Checklist.CheckNodes) + len(node.DelimiterFieldList) - 1
 					}
 				} else {
-					return errors.New("CHECK NODE VALUE DOES NOT EXIST IN DELIMITER")
+					return errors.New("check node value does not exist in delimiter: " + rule.ID)
 				}
 			} else {
 				rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1

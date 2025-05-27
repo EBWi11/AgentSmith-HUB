@@ -2,6 +2,7 @@ package output
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -246,7 +247,7 @@ func (out *Output) Start() error {
 							}
 							b, err := json.Marshal(msg)
 							if err != nil {
-								fmt.Printf("[PRINT OUTPUT] marshal error: %v\n", err)
+								logger.Error("[PRINT OUTPUT] marshal error: %v\n", err)
 								continue
 							}
 							fmt.Println(string(b))

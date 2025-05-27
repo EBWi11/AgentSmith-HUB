@@ -2,6 +2,7 @@ package main
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
 	"flag"
 	"fmt"
@@ -52,52 +53,54 @@ func loadHubConfig(configRoot string) error {
 func main() {
 	configRoot := flag.String("config", "./config", "agent smith hub config path, default is ./config")
 	flag.Parse()
-	fmt.Printf("Config: %s\n", *configRoot)
+
+	logger.Info("hub_starting", "config_root", *configRoot)
 
 	err := project.SetConfigRoot(*configRoot)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error("set config root error", "error", err)
 		return
 	}
 
 	err = loadHubConfig(*configRoot)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error("load hub config error", "error", err)
 		return
 	}
 
 	// init
 	err = common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error("redis init error", "error", err)
 		return
 	}
 	err = common.PluginInit(path.Join(project.ConfigRoot, "plugin"))
 	if err != nil {
-		fmt.Println(err)
+		logger.Error("plugin init error", "error", err)
 		return
 	}
 
 	// Load and start projects
 	projectList, err := traverseProject(path.Join(*configRoot, "project"))
 	if err != nil {
-		fmt.Println(err)
+		logger.Error("travers project error", "error", err)
 		return
 	}
 
-	for _, p := range projectList {
-		fmt.Printf("Loading Project: %s\n", p)
+	for _, projectPath := range projectList {
 		p, err := project.NewProject("test.yaml")
 		if err != nil {
-			fmt.Println(err)
+			logger.Error("project init error", "err", err, "project_path", projectPath)
+			continue
 		}
 
 		err = p.Start()
 		if err != nil {
-			fmt.Println(err)
+			logger.Error("project start error", "error", err, "project_path", projectPath)
+			continue
 		}
 
-		fmt.Printf("Project %s started successfully\n", p.Name)
+		logger.Info("project start successful", "project_id", p.Id, "project_path", projectPath)
 	}
 
 	select {}

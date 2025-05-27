@@ -292,13 +292,13 @@ func parseNode(s string) (string, string) {
 // Start starts the project and all its components
 func (p *Project) Start() error {
 	if p.Status == ProjectStatusRunning {
-		return fmt.Errorf("project is already running")
+		return fmt.Errorf("project is already running %s", p.Id)
 	}
 
 	// Start inputs
 	for _, in := range p.Inputs {
 		if err := in.Start(); err != nil {
-			return fmt.Errorf("failed to start input %s: %v", in.Name, err)
+			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
 		}
 	}
 
@@ -312,7 +312,7 @@ func (p *Project) Start() error {
 	// Start outputs
 	for _, out := range p.Outputs {
 		if err := out.Start(); err != nil {
-			return fmt.Errorf("failed to start output %s: %v", out.Name, err)
+			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
 		}
 	}
 
@@ -328,13 +328,13 @@ func (p *Project) Start() error {
 // Stop stops the project and all its components
 func (p *Project) Stop() error {
 	if p.Status != ProjectStatusRunning {
-		return fmt.Errorf("project is not running")
+		return fmt.Errorf("project is not running ", p.Id)
 	}
 
 	// Stop all components
 	for _, in := range p.Inputs {
 		if err := in.Stop(); err != nil {
-			return fmt.Errorf("failed to stop input %s: %v", in.Name, err)
+			return fmt.Errorf("failed to stop input %s: %v", in.Id, err)
 		}
 	}
 
@@ -346,7 +346,7 @@ func (p *Project) Stop() error {
 
 	for _, out := range p.Outputs {
 		if err := out.Stop(); err != nil {
-			return fmt.Errorf("failed to stop output %s: %v", out.Name, err)
+			return fmt.Errorf("failed to stop output %s: %v", out.Id, err)
 		}
 	}
 

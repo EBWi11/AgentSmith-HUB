@@ -1,6 +1,7 @@
 package common
 
 import (
+	"AgentSmith-HUB/logger"
 	"context"
 	"fmt"
 	"time"
@@ -141,7 +142,7 @@ func (p *KafkaProducer) run() {
 	for msg := range p.MsgChan {
 		value, err := sonic.Marshal(msg)
 		if err != nil {
-			fmt.Printf("[KafkaProducer] marshal error: %v\n", err)
+			logger.Error("[KafkaProducer] marshal error: %v\n", err)
 			continue // skip invalid message
 		}
 
@@ -158,7 +159,7 @@ func (p *KafkaProducer) run() {
 
 		p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
 			if err != nil {
-				fmt.Printf("[KafkaProducer] produce error: %v\n", err)
+				logger.Error("[KafkaProducer] produce error: %v\n", err)
 			}
 		})
 	}
