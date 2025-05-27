@@ -1,7 +1,7 @@
 package common
 
 import (
-	"errors"
+	"fmt"
 	"io/fs"
 	"io/ioutil"
 	"os"
@@ -91,15 +91,13 @@ func (p *Plugin) setName(name string) {
 }
 
 func NewPlugin(path string, pluginType string) (*Plugin, error) {
-	var err error
-
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, errors.New("PLUGIN FILE IS NOT EXIST")
+		return nil, fmt.Errorf("plugin file not found at path: %s", path)
 	}
 
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read plugin file: %w", err)
 	}
 
 	p := &Plugin{Path: path, Payload: content}
@@ -108,7 +106,7 @@ func NewPlugin(path string, pluginType string) (*Plugin, error) {
 	case "Yaegi":
 		p.Type = pluginType
 	default:
-		return nil, errors.New("PLUGIN TYP ONLY ALLOW Yaegi")
+		return nil, fmt.Errorf("unsupported plugin type: %s, only Yaegi is supported", pluginType)
 	}
 
 	err = p.yaegiLoad()

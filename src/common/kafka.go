@@ -137,12 +137,13 @@ func NewKafkaProducer(
 	return prod, nil
 }
 
-// run reads from MsgChan, serializes map to JSON, and produces to Kafka one by one.
+// run processes messages from the input channel and sends them to Kafka
+// It handles message serialization and error reporting
 func (p *KafkaProducer) run() {
 	for msg := range p.MsgChan {
 		value, err := sonic.Marshal(msg)
 		if err != nil {
-			logger.Error("[KafkaProducer] marshal error: %v\n", err)
+			logger.Error("[KafkaProducer] failed to serialize message: %v", err)
 			continue // skip invalid message
 		}
 
@@ -159,13 +160,13 @@ func (p *KafkaProducer) run() {
 
 		p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
 			if err != nil {
-				logger.Error("[KafkaProducer] produce error: %v\n", err)
+				logger.Error("[KafkaProducer] failed to produce message to topic %s: %v", p.Topic, err)
 			}
 		})
 	}
 }
 
-// Close shuts down the producer.
+// Close gracefully shuts down the Kafka producer
 func (p *KafkaProducer) Close() {
 	p.Client.Close()
 }
@@ -178,6 +179,7 @@ type KafkaConsumer struct {
 }
 
 // getCompression returns the appropriate compression option based on the compression type
+// compression: The type of compression to use (Snappy, Gzip, Lz4, Zstd)
 func getCompression(compression KafkaCompressionType) kgo.CompressionCodec {
 	switch compression {
 	case KafkaCompressionSnappy:
@@ -268,7 +270,8 @@ func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCo
 	return cons, nil
 }
 
-// run polls Kafka, deserializes JSON to map, and sends messages to MsgChan.
+// run continuously polls for messages from Kafka and forwards them to the message channel
+// It handles message deserialization and error reporting
 func (c *KafkaConsumer) run() {
 	for {
 		select {
@@ -277,21 +280,28 @@ func (c *KafkaConsumer) run() {
 		default:
 			fetches := c.Client.PollFetches(context.Background())
 			if errs := fetches.Errors(); len(errs) > 0 {
+				for _, err := range errs {
+					logger.Error("[KafkaConsumer] fetch error: %v", err)
+				}
 				continue // skip errored fetches
 			}
 			fetches.EachRecord(func(rec *kgo.Record) {
 				var m map[string]interface{}
-				if err := sonic.Unmarshal(rec.Value, &m); err == nil {
-					c.MsgChan <- m
+				if err := sonic.Unmarshal(rec.Value, &m); err != nil {
+					logger.Error("[KafkaConsumer] failed to deserialize message: %v", err)
+					return
 				}
+				c.MsgChan <- m
 			})
 			// manual commit for batch performance
-			_ = c.Client.CommitUncommittedOffsets(context.Background())
+			if err := c.Client.CommitUncommittedOffsets(context.Background()); err != nil {
+				logger.Error("[KafkaConsumer] failed to commit offsets: %v", err)
+			}
 		}
 	}
 }
 
-// Close shuts down the consumer.
+// Close gracefully shuts down the Kafka consumer
 func (c *KafkaConsumer) Close() {
 	close(c.stopChan)
 	c.Client.Close()

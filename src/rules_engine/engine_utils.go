@@ -2,34 +2,51 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
-	regexp "github.com/BurntSushi/rure-go"
+	"AgentSmith-HUB/logger"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	regexp "github.com/BurntSushi/rure-go"
 )
 
+// RedisFRQSum performs frequency sum aggregation using Redis
+// groupByKey: Redis key for grouping
+// sumData: Value to add to the sum
+// rangeInt: Time range in seconds
+// threshold: Threshold value to trigger
+// Returns: true if threshold is exceeded, false otherwise
 func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
 	var res = false
 	redisSetNXRes, err := common.RedisSetNX(groupByKey, sumData, rangeInt)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to set Redis key %s: %w", groupByKey, err)
 	}
 
 	if !redisSetNXRes {
 		groupByValue, err := common.RedisIncrby(groupByKey, int64(sumData))
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("failed to increment Redis key %s: %w", groupByKey, err)
 		} else {
 			if groupByValue > int64(threshold) {
 				res = true
-				_ = common.RedisDel(groupByKey)
+				if err := common.RedisDel(groupByKey); err != nil {
+					logger.Error("failed to delete Redis key %s: %v", groupByKey, err)
+				}
 			}
 		}
 	}
 	return res, nil
 }
 
-// In concurrent situations, there are precision issues
+// LocalCacheFRQSum performs frequency sum aggregation using local cache
+// Note: In concurrent situations, there may be precision issues
+// groupByKey: Cache key for grouping
+// sumData: Value to add to the sum
+// rangeInt: Time range in seconds
+// threshold: Threshold value to trigger
+// Returns: true if threshold is exceeded, false otherwise
 func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
 	if v, ok := r.Cache.Get(groupByKey); ok {
 		if v+sumData > threshold {
@@ -47,22 +64,30 @@ func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int,
 	}
 }
 
+// RedisFRQClassify performs frequency classification using Redis
+// tmpKey: Temporary key for tracking
+// groupByKey: Base key for grouping
+// rangeInt: Time range in seconds
+// threshold: Threshold value to trigger
+// Returns: true if threshold is exceeded, false otherwise
 func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
 	var res = false
 	_, err := common.RedisSet(tmpKey, 1, rangeInt)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to set Redis key %s: %w", tmpKey, err)
 	}
 
 	tmpRes, err := common.RedisKeys(groupByKey + "*")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to get Redis keys matching %s*: %w", groupByKey, err)
 	}
 
 	if len(tmpRes) > threshold {
 		res = true
 		for i := range tmpRes {
-			_ = common.RedisDel(tmpRes[i])
+			if err := common.RedisDel(tmpRes[i]); err != nil {
+				logger.Error("failed to delete Redis key %s: %v", tmpRes[i], err)
+			}
 		}
 	}
 	return res, nil

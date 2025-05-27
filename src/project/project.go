@@ -5,7 +5,6 @@ import (
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -18,10 +17,12 @@ import (
 var ConfigRoot = ""
 var GlobalProject *GlobalProjectInfo
 
+// SetConfigRoot sets the root configuration directory for the project
+// p: Path to the configuration directory
 func SetConfigRoot(p string) error {
 	flag, _ := common.DirExists(p)
 	if !flag {
-		return errors.New(p + ": dir is not exist")
+		return fmt.Errorf("configuration directory not found: %s", p)
 	}
 	ConfigRoot = p
 
@@ -32,28 +33,29 @@ func SetConfigRoot(p string) error {
 	return nil
 }
 
-// NewProject creates a new project instance
+// NewProject creates a new project instance from a configuration file
+// pp: Path to the project configuration file
 func NewProject(pp string) (*Project, error) {
 	projectPath := path.Join(ConfigRoot, "project", pp)
 
 	data, err := os.ReadFile(projectPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read project configuration file: %w", err)
 	}
 
 	var cfg ProjectConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
 	}
 
 	if strings.TrimSpace(cfg.Id) == "" {
-		return nil, fmt.Errorf("project id cannot be empty")
+		return nil, fmt.Errorf("project ID cannot be empty in configuration file: %s", pp)
 	}
 	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("project name cannot be empty")
+		return nil, fmt.Errorf("project name cannot be empty in configuration file: %s", pp)
 	}
 	if strings.TrimSpace(cfg.Content) == "" {
-		return nil, fmt.Errorf("project content cannot be empty")
+		return nil, fmt.Errorf("project content cannot be empty in configuration file: %s", pp)
 	}
 
 	p := &Project{
@@ -74,30 +76,34 @@ func NewProject(pp string) (*Project, error) {
 
 	// Initialize components
 	if err := p.initComponents(); err != nil {
-		return nil, fmt.Errorf("failed to initialize components: %v", err)
+		return nil, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
 	return p, nil
 }
 
+// loadComponents loads and initializes all project components
+// inputNames: List of input component IDs
+// outputNames: List of output component IDs
+// rulesetNames: List of ruleset IDs
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
 	var err error
 	for _, v := range inputNames {
 		p.Inputs[v], err = input.NewInput(path.Join(ConfigRoot, "input", v+".yaml"), v)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize input component %s: %w", v, err)
 		}
 	}
 	for _, v := range outputNames {
 		p.Outputs[v], err = output.NewOutput(path.Join(ConfigRoot, "output", v+".yaml"), v)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize output component %s: %w", v, err)
 		}
 	}
 	for _, v := range rulesetNames {
 		p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(ConfigRoot, "ruleset", v+".xml"), v)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
 		}
 	}
 	return nil

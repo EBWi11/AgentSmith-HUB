@@ -120,7 +120,8 @@ func NewOutput(path string, id string) (*Output, error) {
 	return out, nil
 }
 
-// Start launches the output producer and consumes data from upstream.
+// Start initializes and starts the output component based on its type
+// Returns an error if the component is already running or if initialization fails
 func (out *Output) Start() error {
 	// Start metric goroutine
 	out.metricStop = make(chan struct{})
@@ -129,10 +130,10 @@ func (out *Output) Start() error {
 	switch out.Type {
 	case OutputTypeKafka:
 		if out.kafkaProducer != nil {
-			return fmt.Errorf("kafka producer already started")
+			return fmt.Errorf("kafka producer already running for output %s", out.Id)
 		}
 		if out.kafkaCfg == nil {
-			return fmt.Errorf("kafka config missing")
+			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
 		prod, err := common.NewKafkaProducer(
@@ -144,7 +145,7 @@ func (out *Output) Start() error {
 			out.kafkaCfg.Key,
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize kafka producer for output %s: %w", out.Id, err)
 		}
 		out.kafkaProducer = prod
 		out.wg.Add(1)
@@ -161,10 +162,10 @@ func (out *Output) Start() error {
 		}()
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
-			return fmt.Errorf("elasticsearch producer already started")
+			return fmt.Errorf("elasticsearch producer already running for output %s", out.Id)
 		}
 		if out.elasticsearchCfg == nil {
-			return fmt.Errorf("elasticsearch config missing")
+			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
 		batchSize := 1000
@@ -185,7 +186,7 @@ func (out *Output) Start() error {
 			flushDur,
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize elasticsearch producer for output %s: %w", out.Id, err)
 		}
 		out.elasticsearchProducer = prod
 		out.wg.Add(1)
@@ -258,7 +259,7 @@ func (out *Output) Start() error {
 			}
 		}()
 	default:
-		return fmt.Errorf("unsupported output type: %s", out.Type)
+		return fmt.Errorf("unsupported output type %s for output %s", out.Type, out.Id)
 	}
 	return nil
 }

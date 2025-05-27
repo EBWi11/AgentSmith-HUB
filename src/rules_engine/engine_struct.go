@@ -128,50 +128,56 @@ type PluginArg struct {
 }
 
 // Threshold defines aggregation and counting logic for a rule.
+// It supports grouping by fields, time-based ranges, and different counting methods.
 type Threshold struct {
-	GroupBy        string `xml:"group_by,attr"`
-	GroupByList    map[string][]string
-	Range          string `xml:"range,attr"`
-	RangeInt       int
-	LocalCache     bool     `xml:"local_cache,attr"`
-	CountType      string   `xml:"count_type,attr"`
-	CountField     string   `xml:"count_field,attr"`
-	CountFieldList []string // parsed field path
-	Value          int      `xml:",chardata"`
-	GroupByID      string
+	GroupBy        string              `xml:"group_by,attr"` // Field to group by
+	GroupByList    map[string][]string // Parsed group by fields
+	Range          string              `xml:"range,attr"` // Time range for aggregation
+	RangeInt       int                 // Parsed range in seconds
+	LocalCache     bool                `xml:"local_cache,attr"` // Whether to use local cache
+	CountType      string              `xml:"count_type,attr"`  // Type of counting (SUM/CLASSIFY)
+	CountField     string              `xml:"count_field,attr"` // Field to count
+	CountFieldList []string            // Parsed count field path
+	Value          int                 `xml:",chardata"` // Threshold value
+	GroupByID      string              // Unique identifier for grouping
 }
 
 // Append defines additional fields to append after rule matching.
+// It supports both static values and plugin-based dynamic values.
 type Append struct {
-	Type      string `xml:"type,attr"`
-	FieldName string `xml:"field_name,attr"`
-	Value     string `xml:",chardata"`
+	Type      string `xml:"type,attr"`       // Type of append (PLUGIN)
+	FieldName string `xml:"field_name,attr"` // Name of field to append
+	Value     string `xml:",chardata"`       // Value to append
 
-	Plugin     *common.Plugin
-	PluginArgs []*PluginArg
+	Plugin     *common.Plugin // Plugin instance if type is PLUGIN
+	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
+// Plugin represents a plugin configuration with its execution parameters
 type Plugin struct {
-	Value      string `xml:",chardata"`
-	Plugin     *common.Plugin
-	PluginArgs []*PluginArg
+	Value      string         `xml:",chardata"` // Plugin value/configuration
+	Plugin     *common.Plugin // Plugin instance
+	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
+// NewRuleset creates a new ruleset from an XML file
+// path: Path to the ruleset XML file
+// id: Unique identifier for the ruleset
 func NewRuleset(path string, id string) (*Ruleset, error) {
 	xmlFile, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ruleset file: %w", err)
+		return nil, fmt.Errorf("failed to open ruleset file at %s: %w", path, err)
 	}
 	defer xmlFile.Close()
 
 	rawRuleset, err := io.ReadAll(xmlFile)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to read ruleset file: %w", err)
 	}
 
 	ruleset, err := ParseRulesetFromByte(rawRuleset)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse ruleset: %w", err)
 	}
 
 	ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
@@ -181,13 +187,16 @@ func NewRuleset(path string, id string) (*Ruleset, error) {
 	return ruleset, nil
 }
 
+// ParseFunctionCall parses a function call string into its components
+// input: Function call string in format "func(arg1, arg2, ...)"
+// Returns: function name, arguments, and any error
 func ParseFunctionCall(input string) (string, []*PluginArg, error) {
 	input = strings.TrimSpace(input)
 
 	re := regexpgo.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)$`)
 	matches := re.FindStringSubmatch(input)
 	if len(matches) != 3 {
-		return "", nil, errors.New("invalid function call syntax: must be in the form func(arg1, arg2, ...)")
+		return "", nil, fmt.Errorf("invalid function call syntax: %s, must be in format func(arg1, arg2, ...)", input)
 	}
 
 	funcName := matches[1]
@@ -195,7 +204,7 @@ func ParseFunctionCall(input string) (string, []*PluginArg, error) {
 
 	args, err := parseArgs(argStr)
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("failed to parse function arguments: %w", err)
 	}
 
 	return funcName, args, nil

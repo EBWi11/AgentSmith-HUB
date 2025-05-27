@@ -105,7 +105,8 @@ func NewInput(path string, id string) (*Input, error) {
 	return in, nil
 }
 
-// Start launches the input consumer and pushes data to downstream.
+// Start initializes and starts the input component based on its type
+// Returns an error if the component is already running or if initialization fails
 func (in *Input) Start() error {
 	// Start metric goroutine
 	in.metricStop = make(chan struct{})
@@ -114,10 +115,10 @@ func (in *Input) Start() error {
 	switch in.Type {
 	case InputTypeKafka:
 		if in.kafkaConsumer != nil {
-			return fmt.Errorf("kafka consumer already started")
+			return fmt.Errorf("kafka consumer already running for input %s", in.Id)
 		}
 		if in.kafkaCfg == nil {
-			return fmt.Errorf("kafka config missing")
+			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
 		cons, err := common.NewKafkaConsumer(
@@ -129,7 +130,7 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize kafka consumer for input %s: %w", in.Id, err)
 		}
 		in.kafkaConsumer = cons
 		in.wg.Add(1)
@@ -144,14 +145,26 @@ func (in *Input) Start() error {
 		}()
 	case InputTypeAliyunSLS:
 		if in.slsConsumer != nil {
-			return fmt.Errorf("sls consumer already started")
+			return fmt.Errorf("aliyun SLS consumer already running for input %s", in.Id)
 		}
 		if in.aliyunSLSCfg == nil {
-			return fmt.Errorf("aliyun_sls config missing")
+			return fmt.Errorf("aliyun SLS configuration missing for input %s", in.Id)
 		}
 
 		msgChan := make(chan map[string]interface{}, 1024)
-		consumerWorker := common.NewAliyunSLSConsumer(in.aliyunSLSCfg.Endpoint, in.aliyunSLSCfg.AccessKeyID, in.aliyunSLSCfg.AccessKeySecret, in.aliyunSLSCfg.Project, in.aliyunSLSCfg.Logstore, in.aliyunSLSCfg.ConsumerGroupName, in.aliyunSLSCfg.ConsumerName, in.aliyunSLSCfg.CursorPosition, in.aliyunSLSCfg.CursorStartTime, in.aliyunSLSCfg.Query, msgChan)
+		consumerWorker := common.NewAliyunSLSConsumer(
+			in.aliyunSLSCfg.Endpoint,
+			in.aliyunSLSCfg.AccessKeyID,
+			in.aliyunSLSCfg.AccessKeySecret,
+			in.aliyunSLSCfg.Project,
+			in.aliyunSLSCfg.Logstore,
+			in.aliyunSLSCfg.ConsumerGroupName,
+			in.aliyunSLSCfg.ConsumerName,
+			in.aliyunSLSCfg.CursorPosition,
+			in.aliyunSLSCfg.CursorStartTime,
+			in.aliyunSLSCfg.Query,
+			msgChan,
+		)
 
 		in.slsConsumer = consumerWorker
 		consumerWorker.Start()
@@ -166,7 +179,7 @@ func (in *Input) Start() error {
 			}
 		}()
 	default:
-		return fmt.Errorf("unsupported input type: %s", in.Type)
+		return fmt.Errorf("unsupported input type %s for input %s", in.Type, in.Id)
 	}
 	return nil
 }
