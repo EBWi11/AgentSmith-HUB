@@ -1,8 +1,10 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/project"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -187,6 +189,58 @@ func getProjectMetrics(c echo.Context) error {
 	})
 }
 
+// getRedisMetrics returns Redis server metrics
+func getRedisMetrics(c echo.Context) error {
+	metrics, err := common.GetRedisMetrics()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to get Redis metrics: %v", err),
+		})
+	}
+	return c.JSON(http.StatusOK, metrics)
+}
+
+// handleHeartbeat handles incoming heartbeat requests from cluster nodes
+func handleHeartbeat(c echo.Context) error {
+	var payload struct {
+		NodeID    string `json:"node_id"`
+		NodeAddr  string `json:"node_addr"`
+		Timestamp string `json:"timestamp"`
+	}
+
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid heartbeat payload: %v", err),
+		})
+	}
+
+	cm := common.GetClusterManager()
+	if cm == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "cluster manager not initialized",
+		})
+	}
+
+	// Update node heartbeat
+	cm.UpdateNodeHeartbeat(payload.NodeID)
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "ok",
+	})
+}
+
+// getClusterStatus returns the current cluster status
+func getClusterStatus(c echo.Context) error {
+	cm := common.GetClusterManager()
+	if cm == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "cluster manager not initialized",
+		})
+	}
+
+	return c.JSON(http.StatusOK, cm.GetClusterStatus())
+}
+
 func ServerStart(listener string) error {
 	e := echo.New()
 	e.HideBanner = true
@@ -216,6 +270,13 @@ func ServerStart(listener string) error {
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)
 	e.GET("/metrics/:id", getProjectMetrics)
+
+	// Redis monitoring endpoints
+	e.GET("/redis/metrics", getRedisMetrics)
+
+	// Cluster endpoints
+	e.POST("/cluster/heartbeat", handleHeartbeat)
+	e.GET("/cluster/status", getClusterStatus)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

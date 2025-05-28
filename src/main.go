@@ -8,11 +8,12 @@ import (
 	"AgentSmith-HUB/project"
 	"flag"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var HubConfig *hubConfig
@@ -21,6 +22,7 @@ type hubConfig struct {
 	Redis         string `yaml:"redis"`
 	RedisPassword string `yaml:"redis_password,omitempty"`
 	Listen        string `yaml:"listen,omitempty"`
+	Leader        string `yaml:"leader"`
 }
 
 func traverseProject(dir string) ([]string, error) {
