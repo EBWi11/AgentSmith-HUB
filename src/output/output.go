@@ -19,7 +19,6 @@ type OutputType string
 const (
 	OutputTypeKafka         OutputType = "kafka"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
-	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
 	OutputTypePrint         OutputType = "print"
 )
 
@@ -71,7 +70,6 @@ type Output struct {
 	// runtime
 	kafkaProducer         *common.KafkaProducer
 	elasticsearchProducer *common.ElasticsearchProducer
-	aliyunProducer        *common.AliyunSLSProducer
 	wg                    sync.WaitGroup
 
 	// config cache
@@ -201,36 +199,6 @@ func (out *Output) Start() error {
 				}()
 			}
 		}()
-	case OutputTypeAliyunSLS:
-		if out.aliyunProducer != nil {
-			return fmt.Errorf("aliyun_sls producer already started")
-		}
-		if out.aliyunSLSCfg == nil {
-			return fmt.Errorf("aliyun_sls config missing")
-		}
-		msgChan := make(chan map[string]interface{}, 1024)
-		prod, err := common.NewAliyunSLSProducer(
-			out.aliyunSLSCfg.Endpoint,
-			out.aliyunSLSCfg.AccessKeyID,
-			out.aliyunSLSCfg.AccessKeySecret,
-			out.aliyunSLSCfg.Project,
-			out.aliyunSLSCfg.Logstore,
-			msgChan,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create SLS producer: %v", err)
-		}
-		out.aliyunProducer = prod
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			for _, up := range out.UpStream {
-				for msg := range *up {
-					msgChan <- msg
-					atomic.AddUint64(&out.produceTotal, 1)
-				}
-			}
-		}()
 	case OutputTypePrint:
 		out.printStop = make(chan struct{})
 		out.wg.Add(1)
@@ -308,18 +276,6 @@ waitUpstream:
 			}
 			out.elasticsearchProducer.Close()
 			out.elasticsearchProducer = nil
-		}
-	case OutputTypeAliyunSLS:
-		if out.aliyunProducer != nil && out.aliyunProducer.MsgChan != nil {
-		waitSLSMsgChan:
-			for {
-				if len(out.aliyunProducer.MsgChan) == 0 {
-					break waitSLSMsgChan
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-			out.aliyunProducer.Close()
-			out.aliyunProducer = nil
 		}
 	case OutputTypePrint:
 		if out.printStop != nil {

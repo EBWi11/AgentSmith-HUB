@@ -27,6 +27,7 @@ func SetConfigRoot(p string) error {
 	ConfigRoot = p
 
 	GlobalProject = &GlobalProjectInfo{
+		Projects:        make(map[string]*Project),
 		msgChans:        make(map[string]chan map[string]interface{}),
 		msgChansCounter: make(map[string]int),
 	}
@@ -78,6 +79,8 @@ func NewProject(pp string) (*Project, error) {
 	if err := p.initComponents(); err != nil {
 		return nil, fmt.Errorf("failed to initialize project components: %w", err)
 	}
+
+	GlobalProject.Projects[p.Name] = p
 
 	return p, nil
 }
@@ -396,10 +399,12 @@ func (p *Project) collectMetrics() {
 			for id, in := range p.Inputs {
 				p.metrics.InputQPS[id] = in.GetConsumeQPS()
 			}
+
 			// Update output metrics
 			for id, out := range p.Outputs {
 				p.metrics.OutputQPS[id] = out.GetProduceQPS()
 			}
+
 			p.metrics.mu.Unlock()
 		}
 	}
@@ -425,4 +430,26 @@ func (p *Project) GetUptime() time.Duration {
 		return 0
 	}
 	return time.Since(p.startTime)
+}
+
+// GetProjects returns a list of all projects
+func GetProjects() []*Project {
+	if GlobalProject == nil {
+		return []*Project{}
+	}
+
+	projects := make([]*Project, 0, len(GlobalProject.Projects))
+	for _, p := range GlobalProject.Projects {
+		projects = append(projects, p)
+	}
+	return projects
+}
+
+// GetProject returns a project by ID
+func GetProject(id string) *Project {
+	if GlobalProject == nil {
+		return nil
+	}
+
+	return GlobalProject.Projects[id]
 }

@@ -18,6 +18,7 @@ const (
 )
 
 type GlobalProjectInfo struct {
+	Projects        map[string]*Project
 	msgChans        map[string]chan map[string]interface{}
 	msgChansCounter map[string]int
 }
@@ -57,12 +58,9 @@ type Project struct {
 
 // ProjectMetrics holds runtime metrics for the project
 type ProjectMetrics struct {
-	InputQPS    map[string]uint64
-	OutputQPS   map[string]uint64
-	ProcessQPS  uint64
-	TotalInput  uint64
-	TotalOutput uint64
-	mu          sync.RWMutex
+	InputQPS  map[string]uint64
+	OutputQPS map[string]uint64
+	mu        sync.RWMutex
 }
 
 // ProjectNode interface

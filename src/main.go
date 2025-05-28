@@ -1,6 +1,7 @@
 package main
 
 import (
+	"AgentSmith-HUB/api"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/plugin"
@@ -19,6 +20,7 @@ var HubConfig *hubConfig
 type hubConfig struct {
 	Redis         string `yaml:"redis"`
 	RedisPassword string `yaml:"redis_password,omitempty"`
+	Listen        string `yaml:"listen,omitempty"`
 }
 
 func traverseProject(dir string) ([]string, error) {
@@ -46,6 +48,10 @@ func loadHubConfig(configRoot string) error {
 
 	if err := yaml.Unmarshal(data, &HubConfig); err != nil {
 		return fmt.Errorf("failed to parse hub config: %w", err)
+	}
+
+	if HubConfig.Listen == "" {
+		HubConfig.Listen = "0.0.0.0:8080"
 	}
 
 	return nil
@@ -102,6 +108,11 @@ func main() {
 		}
 
 		logger.Info("project start successful", "project_id", p.Id, "project_path", projectPath)
+	}
+
+	err = api.ServerStart(HubConfig.Listen)
+	if err != nil {
+		logger.Error("server start err", "error", err.Error())
 	}
 
 	select {}
