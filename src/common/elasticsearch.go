@@ -2,13 +2,11 @@ package common
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
 )
 
 // ElasticsearchProducer wraps the Elasticsearch client with a channel-based interface
@@ -140,104 +138,4 @@ func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
 // Close 关闭producer
 func (p *ElasticsearchProducer) Close() {
 	close(p.MsgChan)
-}
-
-// ElasticsearchConsumer 高性能ES批量消费
-type ElasticsearchConsumer struct {
-	Client   *elasticsearch.Client
-	Index    string
-	MsgChan  chan map[string]interface{}
-	PageSize int
-	Scroll   time.Duration
-	stopChan chan struct{}
-}
-
-// NewElasticsearchConsumer 创建ES Consumer
-func NewElasticsearchConsumer(addresses []string, index string, msgChan chan map[string]interface{}, pageSize int, scroll time.Duration) (*ElasticsearchConsumer, error) {
-	cfg := elasticsearch.Config{
-		Addresses: addresses,
-	}
-	client, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	cons := &ElasticsearchConsumer{
-		Client:   client,
-		Index:    index,
-		MsgChan:  msgChan,
-		PageSize: pageSize,
-		Scroll:   scroll,
-		stopChan: make(chan struct{}),
-	}
-	go cons.run()
-	return cons, nil
-}
-
-func (c *ElasticsearchConsumer) run() {
-	scrollID := ""
-	for {
-		select {
-		case <-c.stopChan:
-			return
-		default:
-			var res *esapi.Response
-			var err error
-			if scrollID == "" {
-				query := map[string]interface{}{
-					"size": c.PageSize,
-					"query": map[string]interface{}{
-						"match_all": map[string]interface{}{},
-					},
-				}
-				var buf bytes.Buffer
-				_ = json.NewEncoder(&buf).Encode(query)
-				res, err = c.Client.Search(
-					c.Client.Search.WithContext(context.Background()),
-					c.Client.Search.WithIndex(c.Index),
-					c.Client.Search.WithBody(&buf),
-					c.Client.Search.WithScroll(c.Scroll),
-				)
-			} else {
-				res, err = c.Client.Scroll(
-					c.Client.Scroll.WithContext(context.Background()),
-					c.Client.Scroll.WithScrollID(scrollID),
-					c.Client.Scroll.WithScroll(c.Scroll),
-				)
-			}
-			if err != nil {
-				time.Sleep(time.Second)
-				continue
-			}
-			if res == nil || res.Body == nil {
-				time.Sleep(time.Second)
-				continue
-			}
-			var r struct {
-				ScrollID string `json:"_scroll_id"`
-				Hits     struct {
-					Hits []struct {
-						Source map[string]interface{} `json:"_source"`
-					} `json:"hits"`
-				} `json:"hits"`
-			}
-			if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
-				_ = res.Body.Close()
-				time.Sleep(time.Second)
-				continue
-			}
-			_ = res.Body.Close()
-			scrollID = r.ScrollID
-			if len(r.Hits.Hits) == 0 {
-				time.Sleep(time.Second)
-				continue
-			}
-			for _, hit := range r.Hits.Hits {
-				c.MsgChan <- hit.Source
-			}
-		}
-	}
-}
-
-func (c *ElasticsearchConsumer) Close() {
-	close(c.stopChan)
 }
