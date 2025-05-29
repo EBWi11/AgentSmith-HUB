@@ -1,11 +1,18 @@
 package api
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/project"
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -214,7 +221,7 @@ func handleHeartbeat(c echo.Context) error {
 		})
 	}
 
-	cm := common.GetClusterManager()
+	cm := cluster.ClusterInstance
 	if cm == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "cluster manager not initialized",
@@ -231,7 +238,7 @@ func handleHeartbeat(c echo.Context) error {
 
 // getClusterStatus returns the current cluster status
 func getClusterStatus(c echo.Context) error {
-	cm := common.GetClusterManager()
+	cm := cluster.ClusterInstance
 	if cm == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "cluster manager not initialized",
@@ -239,6 +246,216 @@ func getClusterStatus(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, cm.GetClusterStatus())
+}
+
+// downloadConfig handles downloading the entire config directory
+func downloadConfig(c echo.Context) error {
+	configRoot := project.ConfigRoot
+	if configRoot == "" {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "config root not set",
+		})
+	}
+
+	// Create a zip file in memory
+	buf := new(bytes.Buffer)
+	zipWriter := zip.NewWriter(buf)
+
+	// Walk through the config directory
+	err := filepath.Walk(configRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Create a new file in the zip
+		relPath, err := filepath.Rel(configRoot, path)
+		if err != nil {
+			return err
+		}
+
+		writer, err := zipWriter.Create(relPath)
+		if err != nil {
+			return err
+		}
+
+		// Read and write file content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		_, err = writer.Write(content)
+		return err
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to create zip: %v", err),
+		})
+	}
+
+	// Close the zip writer
+	if err := zipWriter.Close(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to close zip: %v", err),
+		})
+	}
+
+	// Set response headers
+	c.Response().Header().Set(echo.HeaderContentType, "application/zip")
+	c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename=config.zip")
+
+	// Send the zip file
+	return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
+}
+
+// FileChecksum represents a file's checksum information
+type FileChecksum struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Checksum string `json:"checksum"`
+}
+
+// verifyConfig handles verification of downloaded config files
+func verifyConfig(c echo.Context) error {
+	// Get the uploaded zip file
+	file, err := c.FormFile("config")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("failed to get uploaded file: %v", err),
+		})
+	}
+
+	// Open the uploaded file
+	src, err := file.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to open uploaded file: %v", err),
+		})
+	}
+	defer src.Close()
+
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "config-verify-*")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to create temp directory: %v", err),
+		})
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Extract the zip file
+	zipReader, err := zip.NewReader(src, file.Size)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to read zip file: %v", err),
+		})
+	}
+
+	// Calculate checksums for all files
+	checksums := make([]FileChecksum, 0)
+	for _, f := range zipReader.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+
+		// Open the file in the zip
+		rc, err := f.Open()
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to open file in zip: %v", err),
+			})
+		}
+
+		// Calculate SHA-256 checksum
+		hash := sha256.New()
+		if _, err := io.Copy(hash, rc); err != nil {
+			rc.Close()
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to calculate checksum: %v", err),
+			})
+		}
+		rc.Close()
+
+		checksums = append(checksums, FileChecksum{
+			Path:     f.Name,
+			Size:     f.FileInfo().Size(),
+			Checksum: fmt.Sprintf("%x", hash.Sum(nil)),
+		})
+	}
+
+	// Compare with current config files
+	configRoot := project.ConfigRoot
+	if configRoot == "" {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "config root not set",
+		})
+	}
+
+	verificationResults := make(map[string]interface{})
+	for _, cs := range checksums {
+		currentPath := filepath.Join(configRoot, cs.Path)
+		currentInfo, err := os.Stat(currentPath)
+		if err != nil {
+			verificationResults[cs.Path] = map[string]string{
+				"status": "missing",
+				"error":  err.Error(),
+			}
+			continue
+		}
+
+		// Check file size
+		if currentInfo.Size() != cs.Size {
+			verificationResults[cs.Path] = map[string]string{
+				"status":   "size_mismatch",
+				"expected": fmt.Sprintf("%d", cs.Size),
+				"actual":   fmt.Sprintf("%d", currentInfo.Size()),
+			}
+			continue
+		}
+
+		// Calculate current file's checksum
+		currentFile, err := os.Open(currentPath)
+		if err != nil {
+			verificationResults[cs.Path] = map[string]string{
+				"status": "error",
+				"error":  err.Error(),
+			}
+			continue
+		}
+
+		hash := sha256.New()
+		if _, err := io.Copy(hash, currentFile); err != nil {
+			currentFile.Close()
+			verificationResults[cs.Path] = map[string]string{
+				"status": "error",
+				"error":  err.Error(),
+			}
+			continue
+		}
+		currentFile.Close()
+
+		currentChecksum := fmt.Sprintf("%x", hash.Sum(nil))
+		if currentChecksum != cs.Checksum {
+			verificationResults[cs.Path] = map[string]string{
+				"status":   "checksum_mismatch",
+				"expected": cs.Checksum,
+				"actual":   currentChecksum,
+			}
+			continue
+		}
+
+		verificationResults[cs.Path] = map[string]string{
+			"status": "ok",
+		}
+	}
+
+	return c.JSON(http.StatusOK, verificationResults)
 }
 
 func ServerStart(listener string) error {
@@ -277,6 +494,10 @@ func ServerStart(listener string) error {
 	// Cluster endpoints
 	e.POST("/cluster/heartbeat", handleHeartbeat)
 	e.GET("/cluster/status", getClusterStatus)
+
+	// Config endpoints
+	e.GET("/config/download", downloadConfig)
+	e.POST("/config/verify", verifyConfig)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

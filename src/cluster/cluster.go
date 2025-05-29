@@ -1,4 +1,4 @@
-package common
+package cluster
 
 import (
 	"bytes"
@@ -27,6 +27,16 @@ type NodeInfo struct {
 	IsHealthy bool       `json:"is_healthy"`
 	MissCount int        `json:"miss_count"` // Count of consecutive missed heartbeats
 }
+
+// HeartbeatMessage represents a heartbeat message sent to the leader
+type HeartbeatMessage struct {
+	NodeID    string    `json:"node_id"`
+	NodeAddr  string    `json:"node_addr"`
+	Timestamp time.Time `json:"timestamp"`
+	Status    string    `json:"status"`
+}
+
+var ClusterInstance *ClusterManager
 
 // ClusterManager manages the cluster state
 type ClusterManager struct {
@@ -58,26 +68,20 @@ var (
 )
 
 // InitClusterManager initializes the cluster manager
-func InitClusterManager(selfID, selfAddress string) *ClusterManager {
-	once.Do(func() {
-		clusterManager = &ClusterManager{
-			SelfID:            selfID,
-			SelfAddress:       selfAddress,
-			Status:            NodeStatusFollower,
-			Nodes:             make(map[string]*NodeInfo),
-			HeartbeatInterval: 5 * time.Second,
-			HeartbeatTimeout:  15 * time.Second,
-			CleanupInterval:   10 * time.Second,
-			MaxMissCount:      3, // Remove node after 3 consecutive missed heartbeats
-			stopChan:          make(chan struct{}),
-		}
-	})
-	return clusterManager
-}
+func ClusterInit(selfID, selfAddress string) *ClusterManager {
+	ClusterInstance = &ClusterManager{
+		SelfID:            selfID,
+		SelfAddress:       selfAddress,
+		Status:            NodeStatusFollower,
+		Nodes:             make(map[string]*NodeInfo),
+		HeartbeatInterval: 5 * time.Second,
+		HeartbeatTimeout:  15 * time.Second,
+		CleanupInterval:   10 * time.Second,
+		MaxMissCount:      3, // Remove node after 3 consecutive missed heartbeats
+		stopChan:          make(chan struct{}),
+	}
 
-// GetClusterManager returns the singleton cluster manager instance
-func GetClusterManager() *ClusterManager {
-	return clusterManager
+	return ClusterInstance
 }
 
 // RegisterNode registers a new node in the cluster
@@ -166,24 +170,29 @@ func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
 func (cm *ClusterManager) SendHeartbeat() error {
 	cm.mu.RLock()
 	leaderAddr := cm.LeaderAddress
+	selfID := cm.SelfID
+	selfAddr := cm.SelfAddress
 	cm.mu.RUnlock()
 
 	if leaderAddr == "" {
 		return fmt.Errorf("no leader address available")
 	}
 
-	heartbeatURL := fmt.Sprintf("http://%s/api/cluster/heartbeat", leaderAddr)
-	payload := map[string]string{
-		"node_id":   cm.SelfID,
-		"node_addr": cm.SelfAddress,
-		"timestamp": time.Now().Format(time.RFC3339),
+	// Prepare heartbeat message
+	msg := HeartbeatMessage{
+		NodeID:    selfID,
+		NodeAddr:  selfAddr,
+		Timestamp: time.Now(),
+		Status:    "active",
 	}
 
-	jsonData, err := json.Marshal(payload)
+	jsonData, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal heartbeat data: %w", err)
 	}
 
+	// Send heartbeat to leader
+	heartbeatURL := fmt.Sprintf("http://%s/cluster/heartbeat", leaderAddr)
 	resp, err := http.Post(heartbeatURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to send heartbeat: %w", err)
@@ -209,7 +218,19 @@ func (cm *ClusterManager) StartHeartbeatLoop() {
 				if err := cm.SendHeartbeat(); err != nil {
 					// Log error but continue
 					fmt.Printf("Failed to send heartbeat: %v\n", err)
+
+					// If we're a follower and can't reach the leader, we might need to start an election
+					cm.mu.RLock()
+					isFollower := cm.Status == NodeStatusFollower
+					cm.mu.RUnlock()
+
+					if isFollower {
+						// TODO: Implement leader election logic
+						fmt.Printf("Lost connection to leader, might need to start election\n")
+					}
 				}
+			case <-cm.stopChan:
+				return
 			}
 		}
 	}()

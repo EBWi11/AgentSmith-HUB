@@ -2,6 +2,7 @@ package main
 
 import (
 	"AgentSmith-HUB/api"
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/plugin"
@@ -23,6 +24,7 @@ type hubConfig struct {
 	RedisPassword string `yaml:"redis_password,omitempty"`
 	Listen        string `yaml:"listen,omitempty"`
 	Leader        string `yaml:"leader"`
+	LocalIP       string
 }
 
 func traverseProject(dir string) ([]string, error) {
@@ -88,6 +90,16 @@ func main() {
 		logger.Error("plugin init error", "error", err)
 		return
 	}
+
+	HubConfig.LocalIP, err = common.GetLocalIP()
+	if err != nil {
+		logger.Error("get local ip error", "error", err)
+	}
+
+	//todo create node id
+	cl := cluster.ClusterInit(HubConfig.LocalIP, HubConfig.LocalIP)
+	cl.SetLeader(HubConfig.Leader, HubConfig.Leader)
+	cl.StartHeartbeatLoop()
 
 	// Load and start projects
 	projectList, err := traverseProject(path.Join(*configRoot, "project"))

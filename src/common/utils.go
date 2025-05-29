@@ -5,12 +5,28 @@ import (
 	"fmt"
 	"github.com/bytedance/sonic"
 	"github.com/cespare/xxhash/v2"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+func GetLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ip4 := ipNet.IP.To4(); ip4 != nil {
+				return ip4.String(), nil
+			}
+		}
+	}
+	return "127.0.0.1", errors.New("not found local ip")
+}
 
 func ParseDurationToSecondsInt(input string) (int, error) {
 	input = strings.TrimSpace(strings.ToLower(input))
