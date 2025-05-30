@@ -61,6 +61,34 @@ func loadHubConfig(configRoot string) error {
 	return nil
 }
 
+func LoadLocalProject(configRoot string) {
+	projectList, err := traverseProject(path.Join(configRoot, "project"))
+	if err != nil {
+		logger.Error("travers project error", "error", err)
+		return
+	}
+
+	for _, projectPath := range projectList {
+		p, err := project.NewProject("test.yaml")
+		if err != nil {
+			logger.Error("project init error", "err", err, "project_path", projectPath)
+			continue
+		}
+
+		err = p.Start()
+		if err != nil {
+			logger.Error("project start error", "error", err, "project_path", projectPath)
+			continue
+		}
+
+		logger.Info("project start successful", "project_id", p.Id, "project_path", projectPath)
+	}
+}
+
+func LoadLeaderProject() {
+	//todo
+}
+
 func main() {
 	configRoot := flag.String("config", "./config", "agent smith hub config path, default is ./config")
 	flag.Parse()
@@ -102,28 +130,13 @@ func main() {
 	cl.StartHeartbeatLoop()
 
 	// Load and start projects
-	projectList, err := traverseProject(path.Join(*configRoot, "project"))
-	if err != nil {
-		logger.Error("travers project error", "error", err)
-		return
+	if cl.IsLeader() {
+		LoadLocalProject(*configRoot)
+	} else {
+		LoadLeaderProject()
 	}
 
-	for _, projectPath := range projectList {
-		p, err := project.NewProject("test.yaml")
-		if err != nil {
-			logger.Error("project init error", "err", err, "project_path", projectPath)
-			continue
-		}
-
-		err = p.Start()
-		if err != nil {
-			logger.Error("project start error", "error", err, "project_path", projectPath)
-			continue
-		}
-
-		logger.Info("project start successful", "project_id", p.Id, "project_path", projectPath)
-	}
-
+	// Start Api
 	err = api.ServerStart(HubConfig.Listen)
 	if err != nil {
 		logger.Error("server start err", "error", err.Error())

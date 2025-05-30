@@ -214,6 +214,10 @@ func (cm *ClusterManager) SendHeartbeat() error {
 
 // StartHeartbeatLoop starts the heartbeat sending loop
 func (cm *ClusterManager) StartHeartbeatLoop() {
+	if cm.IsLeader() {
+		return
+	}
+
 	go func() {
 		ticker := time.NewTicker(cm.HeartbeatInterval)
 		defer ticker.Stop()
