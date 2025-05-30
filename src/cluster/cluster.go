@@ -129,6 +129,12 @@ func (cm *ClusterManager) SetLeader(leaderID, leaderAddress string) {
 
 	cm.LeaderID = leaderID
 	cm.LeaderAddress = leaderAddress
+
+	if cm.LeaderID == cm.SelfID && cm.LeaderAddress == cm.SelfAddress {
+		cm.Status = NodeStatusLeader
+	} else {
+		cm.Status = NodeStatusFollower
+	}
 }
 
 // IsLeader checks if this node is the leader
