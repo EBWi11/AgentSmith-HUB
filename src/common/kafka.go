@@ -143,7 +143,7 @@ func (p *KafkaProducer) run() {
 	for msg := range p.MsgChan {
 		value, err := sonic.Marshal(msg)
 		if err != nil {
-			logger.Error("[KafkaProducer] failed to serialize message: %v", err)
+			logger.Error("[KafkaProducer] failed to serialize message", "error", err.Error())
 			continue // skip invalid message
 		}
 
@@ -160,7 +160,7 @@ func (p *KafkaProducer) run() {
 
 		p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
 			if err != nil {
-				logger.Error("[KafkaProducer] failed to produce message to topic %s: %v", p.Topic, err)
+				logger.Error("[KafkaProducer] failed to produce message to topic", "topic", p.Topic, "error", err)
 			}
 		})
 	}
@@ -281,21 +281,24 @@ func (c *KafkaConsumer) run() {
 			fetches := c.Client.PollFetches(context.Background())
 			if errs := fetches.Errors(); len(errs) > 0 {
 				for _, err := range errs {
-					logger.Error("[KafkaConsumer] fetch error: %v", err)
+					if err.Err.Error() == "client closed" {
+						return
+					}
+					logger.Error("[KafkaConsumer] fetch error", "error", err.Err)
 				}
 				continue // skip errored fetches
 			}
 			fetches.EachRecord(func(rec *kgo.Record) {
 				var m map[string]interface{}
 				if err := sonic.Unmarshal(rec.Value, &m); err != nil {
-					logger.Error("[KafkaConsumer] failed to deserialize message: %v", err)
+					logger.Error("[KafkaConsumer] failed to deserialize message", "error", err.Error())
 					return
 				}
 				c.MsgChan <- m
 			})
 			// manual commit for batch performance
 			if err := c.Client.CommitUncommittedOffsets(context.Background()); err != nil {
-				logger.Error("[KafkaConsumer] failed to commit offsets: %v", err)
+				logger.Error("[KafkaConsumer] failed to commit offsets", "err", err.Error())
 			}
 		}
 	}

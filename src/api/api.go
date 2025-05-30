@@ -458,6 +458,94 @@ func verifyConfig(c echo.Context) error {
 	return c.JSON(http.StatusOK, verificationResults)
 }
 
+type CtrlProjectRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+// StartProject starts a project with the given configuration
+func StartProject(c echo.Context) error {
+	var req CtrlProjectRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request format",
+		})
+	}
+
+	// Get project
+	p := project.GetProject(req.ProjectID)
+	if p == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Project not found",
+		})
+	}
+
+	// Check if project is already running
+	if p.Status == project.ProjectStatusRunning {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is already running",
+		})
+	}
+
+	// Start the project
+	if err := p.Start(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Failed to start project: %v", err),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Project started successfully",
+		"project": map[string]interface{}{
+			"id":     p.Id,
+			"name":   p.Name,
+			"status": p.Status,
+		},
+	})
+}
+
+// StopProject stops a running project
+func StopProject(c echo.Context) error {
+	var req CtrlProjectRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request format",
+		})
+	}
+
+	// Get project
+	p := project.GetProject(req.ProjectID)
+	if p == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Project not found",
+		})
+	}
+
+	// Check if project is running
+	if p.Status != project.ProjectStatusRunning {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is not running",
+		})
+	}
+
+	// Stop the project
+	if err := p.Stop(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Failed to stop project: %v", err),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Project stopped successfully",
+		"project": map[string]interface{}{
+			"id":     p.Id,
+			"name":   p.Name,
+			"status": p.Status,
+		},
+	})
+}
+
 func ServerStart(listener string) error {
 	e := echo.New()
 	e.HideBanner = true
@@ -471,6 +559,8 @@ func ServerStart(listener string) error {
 	// Project endpoints
 	e.GET("/project", getProjects)
 	e.GET("/project/:id", getProject)
+	e.POST("/project/start", StartProject)
+	e.POST("/project/stop", StopProject)
 
 	// Ruleset endpoints
 	e.GET("/ruleset", getRulesets)

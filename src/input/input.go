@@ -4,7 +4,6 @@ import (
 	"AgentSmith-HUB/common"
 	"fmt"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -62,7 +61,6 @@ type Input struct {
 	// runtime
 	kafkaConsumer *common.KafkaConsumer
 	slsConsumer   *common.AliyunSLSConsumer
-	wg            sync.WaitGroup
 
 	// config cache
 	kafkaCfg     *KafkaInputConfig
@@ -133,9 +131,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("failed to initialize kafka consumer for input %s: %w", in.Id, err)
 		}
 		in.kafkaConsumer = cons
-		in.wg.Add(1)
 		go func() {
-			defer in.wg.Done()
 			for msg := range msgChan {
 				for _, down := range in.DownStream {
 					*down <- msg
@@ -168,9 +164,7 @@ func (in *Input) Start() error {
 
 		in.slsConsumer = consumerWorker
 		consumerWorker.Start()
-		in.wg.Add(1)
 		go func() {
-			defer in.wg.Done()
 			for msg := range msgChan {
 				for _, down := range in.DownStream {
 					*down <- msg
@@ -201,7 +195,6 @@ func (in *Input) Stop() error {
 	if in.metricStop != nil {
 		close(in.metricStop)
 	}
-	in.wg.Wait()
 	return nil
 }
 

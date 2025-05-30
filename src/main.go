@@ -54,6 +54,14 @@ func loadHubConfig(configRoot string) error {
 		return fmt.Errorf("failed to parse hub config: %w", err)
 	}
 
+	if HubConfig.Redis == "" {
+		return fmt.Errorf("redis is null")
+	}
+
+	if HubConfig.Leader == "" {
+		return fmt.Errorf("leader is null")
+	}
+
 	if HubConfig.Listen == "" {
 		HubConfig.Listen = "0.0.0.0:8080"
 	}
