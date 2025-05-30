@@ -162,24 +162,24 @@ type Plugin struct {
 	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
-// NewRuleset creates a new ruleset from an XML file
-// path: Path to the ruleset XML file
-// id: Unique identifier for the ruleset
+// NewRuleset creates a new resource from an XML file
+// path: Path to the resource XML file
+// id: Unique identifier for the resource
 func NewRuleset(path string, id string) (*Ruleset, error) {
 	xmlFile, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ruleset file at %s: %w", path, err)
+		return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
 	}
 	defer xmlFile.Close()
 
 	rawRuleset, err := io.ReadAll(xmlFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read ruleset file: %w", err)
+		return nil, fmt.Errorf("failed to read resource file: %w", err)
 	}
 
 	ruleset, err := ParseRulesetFromByte(rawRuleset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse ruleset: %w", err)
+		return nil, fmt.Errorf("failed to parse resource: %w", err)
 	}
 
 	ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
@@ -329,7 +329,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 	var createLocalCacheForClassify = false
 
 	if strings.TrimSpace(ruleset.RulesetName) == "" {
-		return errors.New("ruleset name cannot be empty")
+		return errors.New("resource name cannot be empty")
 	}
 
 	if strings.TrimSpace(ruleset.Type) == "" || strings.TrimSpace(ruleset.Type) == "DETECTION" {
@@ -337,7 +337,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 	} else if strings.TrimSpace(ruleset.Type) == "WHITELIST" {
 		ruleset.IsDetection = false
 	} else {
-		return errors.New("ruleset type only support whitelist or detection")
+		return errors.New("resource type only support whitelist or detection")
 	}
 
 	for i := range ruleset.Rules {

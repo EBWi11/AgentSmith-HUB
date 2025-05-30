@@ -119,7 +119,7 @@ elasticsearch:
 2. **Start the System**
    ```go
    // Set configuration root
-   project.SetConfigRoot("path/to/config_demo")
+   project.SetConfigRoot("path/to/resource")
    
    // Create and start project
    p, err := project.NewProject("project.yaml")

@@ -24,6 +24,7 @@ type hubConfig struct {
 	RedisPassword string `yaml:"redis_password,omitempty"`
 	Listen        string `yaml:"listen,omitempty"`
 	Leader        string `yaml:"leader"`
+	Resource      string `yaml:"resource"`
 	LocalIP       string
 }
 
@@ -44,14 +45,17 @@ func traverseProject(dir string) ([]string, error) {
 }
 
 func loadHubConfig(configRoot string) error {
-	configPath := path.Join(configRoot, "config.yaml")
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configRoot)
 	if err != nil {
 		return fmt.Errorf("failed to read hub config: %w", err)
 	}
 
 	if err := yaml.Unmarshal(data, &HubConfig); err != nil {
 		return fmt.Errorf("failed to parse hub config: %w", err)
+	}
+
+	if HubConfig.Resource == "" {
+		return fmt.Errorf("resource is null")
 	}
 
 	if HubConfig.Redis == "" {
@@ -98,20 +102,20 @@ func LoadLeaderProject() {
 }
 
 func main() {
-	configRoot := flag.String("config", "./config", "agent smith hub config path, default is ./config")
+	configFile := flag.String("config", "./config.yaml", "agent smith hub config path, default is ./config.yaml")
 	flag.Parse()
 
-	logger.Info("hub_starting", "config_root", *configRoot)
+	logger.Info("hub_starting", "config_root", *configFile)
 
-	err := project.SetConfigRoot(*configRoot)
+	err := loadHubConfig(*configFile)
 	if err != nil {
-		logger.Error("set config root error", "error", err)
+		logger.Error("load hub config error", "error", err)
 		return
 	}
 
-	err = loadHubConfig(*configRoot)
+	err = project.SetConfigRoot(HubConfig.Resource)
 	if err != nil {
-		logger.Error("load hub config error", "error", err)
+		logger.Error("set config root error", "error", err)
 		return
 	}
 
@@ -139,7 +143,7 @@ func main() {
 
 	// Load and start projects
 	if cl.IsLeader() {
-		LoadLocalProject(*configRoot)
+		LoadLocalProject(HubConfig.Resource)
 	} else {
 		LoadLeaderProject()
 	}

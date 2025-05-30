@@ -1,3 +1,4 @@
 leader: 192.168.8.225
 redis: 127.0.0.1:6379
+resource: "/Users/g01d-01-1143/Code/AgentSmith-HUB/resource"
 redis_password: ""
