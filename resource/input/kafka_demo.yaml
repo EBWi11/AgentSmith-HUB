@@ -1,7 +1,0 @@
-name: kafka_input_demo
-type: kafka
-kafka:
-  brokers:
-    - "192.168.27.130:9092"
-  group: "demo-group-1"
-  topic: "test-topic"
