@@ -6,13 +6,8 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
-	"archive/zip"
-	"bytes"
 	"flag"
 	"fmt"
-	"io"
-	"mime/multipart"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -120,171 +115,23 @@ func LoadLocalProject(configRoot string) {
 }
 
 func LoadLeaderProject() error {
-	tmpDir := "/tmp"
-	configZipPath := filepath.Join(tmpDir, "config.zip")
-	configDir := filepath.Join(tmpDir, "config")
-
-	// Step 1: Download config from leader
-	resp, err := http.Get(fmt.Sprintf("http://%s/config/download", HubConfig.Leader))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return err
-	}
-
-	out, err := os.Create(configZipPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
+	// Download config.zip from leader
+	err := api.DownloadConfig()
 	if err != nil {
 		return err
 	}
 
-	// Step 2: Verify config using leader's verify API
-	file, err := os.Open(configZipPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	// Verify config using leader's verify API
 
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("config", filepath.Base(configZipPath))
-	if err != nil {
-		return err
-	}
+	// Get hub leader config root
 
-	_, err = io.Copy(part, file)
-	if err != nil {
-		return err
-	}
+	// Unzip config to tmp folder
 
-	err = writer.Close()
-	if err != nil {
-		return err
-	}
+	// Read config.yaml to get configRoot path
 
-	verifyResp, err := http.Post(fmt.Sprintf("http://%s/config/verify", HubConfig.Leader), writer.FormDataContentType(), body)
-	if err != nil {
-		return err
-	}
-	defer verifyResp.Body.Close()
-
-	if verifyResp.StatusCode != http.StatusOK {
-		return err
-	}
-
-	// Step 3: Unzip config to tmp folder
-	r, err := zip.OpenReader(configZipPath)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-		fPath := filepath.Join(tmpDir, f.Name)
-		if f.FileInfo().IsDir() {
-			err = os.MkdirAll(fPath, os.ModePerm)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-
-		err = os.MkdirAll(filepath.Dir(fPath), os.ModePerm)
-		if err != nil {
-			return err
-		}
-
-		outFile, err := os.OpenFile(fPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return err
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-
-		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
-
-		if err != nil {
-			return err
-		}
-	}
-
-	// Step 4: Read config.yaml to get configRoot path
-	configYamlPath := filepath.Join(configDir, "config.yaml")
-	data, err := os.ReadFile(configYamlPath)
-	if err != nil {
-		return err
-	}
-
-	var config struct {
-		ConfigRoot string `yaml:"config_root"`
-	}
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		return err
-	}
-
-	if config.ConfigRoot == "" {
-		return err
-	}
-
-	// Step 5: Move config folder to configRoot path
-	err = os.MkdirAll(config.ConfigRoot, os.ModePerm)
-	if err != nil {
-		return err
-	}
-
-	err = filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(configDir, path)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(config.ConfigRoot, relPath)
-		if info.IsDir() {
-			return os.MkdirAll(destPath, info.Mode())
-		}
-
-		srcFile, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close()
-
-		destFile, err := os.Create(destPath)
-		if err != nil {
-			return err
-		}
-		defer destFile.Close()
-
-		_, err = io.Copy(destFile, srcFile)
-		return err
-	})
-	if err != nil {
-		return err
-	}
+	// Move config folder to configRoot path
 
 	// Cleanup tmp folder
-	err = os.RemoveAll(tmpDir)
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -337,6 +184,13 @@ func main() {
 		HubConfig.Token, err = readToken(false)
 		if err != nil {
 			logger.Error("read token error", "error", err)
+			return
+		}
+
+		//init hub request
+		err = api.InitRequest(HubConfig.Leader, HubConfig.Token)
+		if err != nil {
+			logger.Error("hub init request error", "error", err)
 			return
 		}
 
