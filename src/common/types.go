@@ -5,3 +5,13 @@ type CheckCoreCache struct {
 	Exist bool
 	Data  string
 }
+
+type HubConfig struct {
+	Redis         string `yaml:"redis"`
+	RedisPassword string `yaml:"redis_password,omitempty"`
+	Listen        string `yaml:"listen,omitempty"`
+	ConfigRoot    string
+	Leader        string
+	LocalIP       string
+	Token         string
+}

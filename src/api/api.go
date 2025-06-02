@@ -18,6 +18,8 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
+var hubConfig *common.HubConfig
+
 func ping(c echo.Context) error {
 	return c.String(http.StatusOK, "pong")
 }
@@ -546,9 +548,36 @@ func StopProject(c echo.Context) error {
 	})
 }
 
-func ServerStart(listener string) error {
+func tokenCheck(c echo.Context) error {
+	token := c.Request().Header.Get("token")
+	if token == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "missing token",
+		})
+	}
+
+	if token == hubConfig.Token {
+		return c.JSON(http.StatusOK, map[string]string{
+			"status": "Authentication successful",
+		})
+	} else {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"status": "Authentication failed",
+		})
+	}
+}
+
+func configRoot(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"config_root": hubConfig.ConfigRoot,
+	})
+}
+
+func ServerStart(listener string, config *common.HubConfig) error {
 	e := echo.New()
 	e.HideBanner = true
+
+	hubConfig = config
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -557,22 +586,22 @@ func ServerStart(listener string) error {
 	e.GET("/ping", ping)
 
 	// Project endpoints
-	e.GET("/project", getProjects)
-	e.GET("/project/:id", getProject)
-	e.POST("/project/start", StartProject)
-	e.POST("/project/stop", StopProject)
+	e.GET("/project", getProjects, TokenAuthMiddleware)
+	e.GET("/project/:id", getProject, TokenAuthMiddleware)
+	e.POST("/project/start", StartProject, TokenAuthMiddleware)
+	e.POST("/project/stop", StopProject, TokenAuthMiddleware)
 
 	// Ruleset endpoints
-	e.GET("/ruleset", getRulesets)
-	e.GET("/ruleset/:id", getRuleset)
+	e.GET("/ruleset", getRulesets, TokenAuthMiddleware)
+	e.GET("/ruleset/:id", getRuleset, TokenAuthMiddleware)
 
 	// Input endpoints
-	e.GET("/input", getInputs)
-	e.GET("/input/:id", getInput)
+	e.GET("/input", getInputs, TokenAuthMiddleware)
+	e.GET("/input/:id", getInput, TokenAuthMiddleware)
 
 	// Output endpoints
-	e.GET("/output", getOutputs)
-	e.GET("/output/:id", getOutput)
+	e.GET("/output", getOutputs, TokenAuthMiddleware)
+	e.GET("/output/:id", getOutput, TokenAuthMiddleware)
 
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)
@@ -582,12 +611,18 @@ func ServerStart(listener string) error {
 	e.GET("/redis/metrics", getRedisMetrics)
 
 	// Cluster endpoints
-	e.POST("/cluster/heartbeat", handleHeartbeat)
-	e.GET("/cluster/status", getClusterStatus)
+	e.POST("/cluster/heartbeat", handleHeartbeat, TokenAuthMiddleware)
+	e.GET("/cluster/status", getClusterStatus, TokenAuthMiddleware)
 
 	// Config endpoints
-	e.GET("/config/download", downloadConfig)
-	e.POST("/config/verify", verifyConfig)
+	e.GET("/config/download", downloadConfig, TokenAuthMiddleware)
+	e.POST("/config/verify", verifyConfig, TokenAuthMiddleware)
+
+	// HubConfig
+	e.GET("config_root", configRoot, TokenAuthMiddleware)
+
+	// Token check
+	e.GET("/token/check", tokenCheck)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

@@ -21,16 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var HubConfig *hubConfig
-
-type hubConfig struct {
-	Redis         string `yaml:"redis"`
-	RedisPassword string `yaml:"redis_password,omitempty"`
-	Listen        string `yaml:"listen,omitempty"`
-	ConfigRoot    string
-	Leader        string
-	LocalIP       string
-}
+var HubConfig *common.HubConfig
 
 func traverseProject(dir string) ([]string, error) {
 	var files []string
@@ -46,6 +37,33 @@ func traverseProject(dir string) ([]string, error) {
 	})
 
 	return files, err
+}
+
+func readToken(create bool) (string, error) {
+	tokenPath := ".token"
+	data, err := os.ReadFile(tokenPath)
+	if err == nil {
+		return string(data), nil
+	}
+
+	//leader create new token
+	if create {
+		f, err := os.Create(tokenPath)
+		if err != nil {
+			return "", err
+		}
+
+		defer f.Close()
+
+		uuid := common.NewUUID() // 假设 common.NewUUID() 返回 uuid 字符串
+		_, err = f.WriteString(uuid)
+		if err != nil {
+			logger.Error("failed to write uuid to .token file", "error", err)
+		}
+		return uuid, nil
+	} else {
+		return "", err
+	}
 }
 
 func loadHubConfig(configRoot string) error {
@@ -101,7 +119,7 @@ func LoadLocalProject(configRoot string) {
 	}
 }
 
-func LoadLeaderProject() {
+func LoadLeaderProject() error {
 	tmpDir := "/tmp"
 	configZipPath := filepath.Join(tmpDir, "config.zip")
 	configDir := filepath.Join(tmpDir, "config")
@@ -109,34 +127,29 @@ func LoadLeaderProject() {
 	// Step 1: Download config from leader
 	resp, err := http.Get(fmt.Sprintf("http://%s/config/download", HubConfig.Leader))
 	if err != nil {
-		logger.Error("failed to download config from leader", "error", err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Error("failed to download config, status code", "code", resp.StatusCode)
-		return
+		return err
 	}
 
 	out, err := os.Create(configZipPath)
 	if err != nil {
-		logger.Error("failed to create config zip file", "error", err)
-		return
+		return err
 	}
 	defer out.Close()
 
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
-		logger.Error("failed to write config zip file", "error", err)
-		return
+		return err
 	}
 
 	// Step 2: Verify config using leader's verify API
 	file, err := os.Open(configZipPath)
 	if err != nil {
-		logger.Error("failed to open config zip file", "error", err)
-		return
+		return err
 	}
 	defer file.Close()
 
@@ -144,39 +157,33 @@ func LoadLeaderProject() {
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("config", filepath.Base(configZipPath))
 	if err != nil {
-		logger.Error("failed to create form file for verification", "error", err)
-		return
+		return err
 	}
 
 	_, err = io.Copy(part, file)
 	if err != nil {
-		logger.Error("failed to copy file content for verification", "error", err)
-		return
+		return err
 	}
 
 	err = writer.Close()
 	if err != nil {
-		logger.Error("failed to close multipart writer", "error", err)
-		return
+		return err
 	}
 
 	verifyResp, err := http.Post(fmt.Sprintf("http://%s/config/verify", HubConfig.Leader), writer.FormDataContentType(), body)
 	if err != nil {
-		logger.Error("failed to verify config with leader", "error", err)
-		return
+		return err
 	}
 	defer verifyResp.Body.Close()
 
 	if verifyResp.StatusCode != http.StatusOK {
-		logger.Error("config verification failed, status code", "code", verifyResp.StatusCode)
-		return
+		return err
 	}
 
 	// Step 3: Unzip config to tmp folder
 	r, err := zip.OpenReader(configZipPath)
 	if err != nil {
-		logger.Error("failed to open config zip file", "error", err)
-		return
+		return err
 	}
 	defer r.Close()
 
@@ -185,28 +192,24 @@ func LoadLeaderProject() {
 		if f.FileInfo().IsDir() {
 			err = os.MkdirAll(fPath, os.ModePerm)
 			if err != nil {
-				logger.Error("failed to create directory during unzip", "error", err)
-				return
+				return err
 			}
 			continue
 		}
 
 		err = os.MkdirAll(filepath.Dir(fPath), os.ModePerm)
 		if err != nil {
-			logger.Error("failed to create file directory during unzip", "error", err)
-			return
+			return err
 		}
 
 		outFile, err := os.OpenFile(fPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
-			logger.Error("failed to create file during unzip", "error", err)
-			return
+			return err
 		}
 
 		rc, err := f.Open()
 		if err != nil {
-			logger.Error("failed to open file in zip", "error", err)
-			return
+			return err
 		}
 
 		_, err = io.Copy(outFile, rc)
@@ -214,8 +217,7 @@ func LoadLeaderProject() {
 		rc.Close()
 
 		if err != nil {
-			logger.Error("failed to extract file from zip", "error", err)
-			return
+			return err
 		}
 	}
 
@@ -223,8 +225,7 @@ func LoadLeaderProject() {
 	configYamlPath := filepath.Join(configDir, "config.yaml")
 	data, err := os.ReadFile(configYamlPath)
 	if err != nil {
-		logger.Error("failed to read config.yaml", "error", err)
-		return
+		return err
 	}
 
 	var config struct {
@@ -232,20 +233,17 @@ func LoadLeaderProject() {
 	}
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		logger.Error("failed to parse config.yaml", "error", err)
-		return
+		return err
 	}
 
 	if config.ConfigRoot == "" {
-		logger.Error("configRoot is empty in config.yaml")
-		return
+		return err
 	}
 
 	// Step 5: Move config folder to configRoot path
 	err = os.MkdirAll(config.ConfigRoot, os.ModePerm)
 	if err != nil {
-		logger.Error("failed to create configRoot directory", "error", err)
-		return
+		return err
 	}
 
 	err = filepath.Walk(configDir, func(path string, info os.FileInfo, err error) error {
@@ -279,15 +277,16 @@ func LoadLeaderProject() {
 		return err
 	})
 	if err != nil {
-		logger.Error("failed to move config folder", "error", err)
-		return
+		return err
 	}
 
 	// Cleanup tmp folder
 	err = os.RemoveAll(tmpDir)
 	if err != nil {
-		logger.Error("failed to clean up tmp folder", "error", err)
+		return err
 	}
+
+	return nil
 }
 
 func main() {
@@ -322,12 +321,31 @@ func main() {
 			logger.Error("load hub config error", "error", err)
 			return
 		}
+
+		//leader creates or read token
+		HubConfig.Token, err = readToken(true)
+		if err != nil {
+			logger.Error("read or create token error", "error", err)
+			return
+		}
 	} else if *leaderAddr != "" {
 		HubConfig.Leader = *leaderAddr
 		//set leader
 		cl.SetLeader(HubConfig.Leader, HubConfig.Leader)
 
+		//read token
+		HubConfig.Token, err = readToken(false)
+		if err != nil {
+			logger.Error("read token error", "error", err)
+			return
+		}
+
 		//download leader config
+		err = LoadLeaderProject()
+		if err != nil {
+			logger.Error("load leader config error", "error", err)
+			return
+		}
 	}
 
 	//err = loadHubConfig(*configRoot)
@@ -360,7 +378,7 @@ func main() {
 	//}
 
 	// Start Api
-	err = api.ServerStart(HubConfig.Listen)
+	err = api.ServerStart(HubConfig.Listen, HubConfig)
 	if err != nil {
 		logger.Error("server start err", "error", err.Error())
 	}

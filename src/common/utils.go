@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/bytedance/sonic"
 	"github.com/cespare/xxhash/v2"
+	"github.com/google/uuid"
 	"net"
 	"net/url"
 	"os"
@@ -12,6 +13,11 @@ import (
 	"strconv"
 	"strings"
 )
+
+func NewUUID() string {
+	id := uuid.New()
+	return id.String()
+}
 
 func GetLocalIP() (string, error) {
 	addrs, err := net.InterfaceAddrs()
