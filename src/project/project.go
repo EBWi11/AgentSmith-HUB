@@ -1,7 +1,6 @@
 package project
 
 import (
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
@@ -16,23 +15,6 @@ import (
 
 var ConfigRoot = ""
 var GlobalProject *GlobalProjectInfo
-
-// SetConfigRoot sets the root configuration directory for the project
-// p: Path to the configuration directory
-func SetConfigRoot(p string) error {
-	flag, _ := common.DirExists(p)
-	if !flag {
-		return fmt.Errorf("configuration directory not found: %s", p)
-	}
-	ConfigRoot = p
-
-	GlobalProject = &GlobalProjectInfo{
-		Projects:        make(map[string]*Project),
-		msgChans:        make(map[string]chan map[string]interface{}),
-		msgChansCounter: make(map[string]int),
-	}
-	return nil
-}
 
 // NewProject creates a new project instance from a configuration file
 // pp: Path to the project configuration file

@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"flag"
 	"fmt"
@@ -98,19 +99,23 @@ func LoadLocalProject(configRoot string) {
 	}
 
 	for _, projectPath := range projectList {
-		p, err := project.NewProject("test.yaml")
+		_, err := project.NewProject("test.yaml")
 		if err != nil {
 			logger.Error("project init error", "err", err, "project_path", projectPath)
 			continue
 		}
+	}
+}
 
+func StartAllProject() {
+	var err error
+	for _, p := range project.GlobalProject.Projects {
 		err = p.Start()
 		if err != nil {
-			logger.Error("project start error", "error", err, "project_path", projectPath)
-			continue
+			logger.Error("project start error", "error", err, "project_id", p.Name)
+		} else {
+			logger.Info("project start successful", "project_id", p.Id)
 		}
-
-		logger.Info("project start successful", "project_id", p.Id, "project_path", projectPath)
 	}
 }
 
@@ -164,6 +169,7 @@ func main() {
 		//set self is leader
 		HubConfig.Leader = HubConfig.LocalIP
 		cl.SetLeader(HubConfig.LocalIP, HubConfig.LocalIP)
+		cl.StartHeartbeatLoop()
 
 		//leader read local config
 		err := loadHubConfig(*configRoot)
@@ -182,6 +188,7 @@ func main() {
 		HubConfig.Leader = *leaderAddr
 		//set leader
 		cl.SetLeader(HubConfig.Leader, HubConfig.Leader)
+		cl.StartHeartbeatLoop()
 
 		//read token
 		HubConfig.Token, err = readToken(false)
@@ -205,34 +212,22 @@ func main() {
 		}
 	}
 
-	//err = loadHubConfig(*configRoot)
-	//if err != nil {
-	//	logger.Error("load hub config error", "error", err)
-	//	return
-	//}
-	//
-	////todo create node id
-	//cl.SetLeader(HubConfig.Leader, HubConfig.Leader)
-	//cl.StartHeartbeatLoop()
-	//
-	//// Load and start projects
-	//if cl.IsLeader() {
-	//	LoadLocalProject(HubConfig.ConfigRoot)
-	//} else {
-	//	LoadLeaderProject()
-	//}
-	//
-	//// init
-	//err = common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
-	//if err != nil {
-	//	logger.Error("redis init error", "error", err)
-	//	return
-	//}
-	//err = plugin.PluginInit(path.Join(project.ConfigRoot, "plugin"))
-	//if err != nil {
-	//	logger.Error("plugin init error", "error", err)
-	//	return
-	//}
+	// project/plugin/redis init
+	LoadLocalProject(HubConfig.ConfigRoot)
+	err = common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
+	if err != nil {
+		logger.Error("redis init error", "error", err)
+		return
+	}
+
+	err = plugin.PluginInit(path.Join(project.ConfigRoot, "plugin"))
+	if err != nil {
+		logger.Error("plugin init error", "error", err)
+		return
+	}
+
+	// start all project
+	StartAllProject()
 
 	// Start Api
 	err = api.ServerStart(HubConfig.Listen, HubConfig)
