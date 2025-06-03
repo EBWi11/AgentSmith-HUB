@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -308,9 +307,20 @@ func downloadConfig(c echo.Context) error {
 		})
 	}
 
+	// Get zip sha256
+	hash := sha256.New()
+	_, err = hash.Write(buf.Bytes())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to calculate sha256: %v", err),
+		})
+	}
+	zipSha256 := fmt.Sprintf("%x", hash.Sum(nil))
+
 	// Set response headers
 	c.Response().Header().Set(echo.HeaderContentType, "application/zip")
 	c.Response().Header().Set(echo.HeaderContentDisposition, "attachment; filename=config.zip")
+	c.Response().Header().Set("X-Config-Sha256", zipSha256)
 
 	// Send the zip file
 	return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
@@ -321,143 +331,6 @@ type FileChecksum struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 	Checksum string `json:"checksum"`
-}
-
-// verifyConfig handles verification of downloaded config files
-func verifyConfig(c echo.Context) error {
-	// Get the uploaded zip file
-	file, err := c.FormFile("config")
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("failed to get uploaded file: %v", err),
-		})
-	}
-
-	// Open the uploaded file
-	src, err := file.Open()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("failed to open uploaded file: %v", err),
-		})
-	}
-	defer src.Close()
-
-	// Create a temporary directory
-	tempDir, err := os.MkdirTemp("", "config-verify-*")
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("failed to create temp directory: %v", err),
-		})
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Extract the zip file
-	zipReader, err := zip.NewReader(src, file.Size)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("failed to read zip file: %v", err),
-		})
-	}
-
-	// Calculate checksums for all files
-	checksums := make([]FileChecksum, 0)
-	for _, f := range zipReader.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-
-		// Open the file in the zip
-		rc, err := f.Open()
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("failed to open file in zip: %v", err),
-			})
-		}
-
-		// Calculate SHA-256 checksum
-		hash := sha256.New()
-		if _, err := io.Copy(hash, rc); err != nil {
-			rc.Close()
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("failed to calculate checksum: %v", err),
-			})
-		}
-		rc.Close()
-
-		checksums = append(checksums, FileChecksum{
-			Path:     f.Name,
-			Size:     f.FileInfo().Size(),
-			Checksum: fmt.Sprintf("%x", hash.Sum(nil)),
-		})
-	}
-
-	// Compare with current config files
-	configRoot := project.ConfigRoot
-	if configRoot == "" {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "config root not set",
-		})
-	}
-
-	verificationResults := make(map[string]interface{})
-	for _, cs := range checksums {
-		currentPath := filepath.Join(configRoot, cs.Path)
-		currentInfo, err := os.Stat(currentPath)
-		if err != nil {
-			verificationResults[cs.Path] = map[string]string{
-				"status": "missing",
-				"error":  err.Error(),
-			}
-			continue
-		}
-
-		// Check file size
-		if currentInfo.Size() != cs.Size {
-			verificationResults[cs.Path] = map[string]string{
-				"status":   "size_mismatch",
-				"expected": fmt.Sprintf("%d", cs.Size),
-				"actual":   fmt.Sprintf("%d", currentInfo.Size()),
-			}
-			continue
-		}
-
-		// Calculate current file's checksum
-		currentFile, err := os.Open(currentPath)
-		if err != nil {
-			verificationResults[cs.Path] = map[string]string{
-				"status": "error",
-				"error":  err.Error(),
-			}
-			continue
-		}
-
-		hash := sha256.New()
-		if _, err := io.Copy(hash, currentFile); err != nil {
-			currentFile.Close()
-			verificationResults[cs.Path] = map[string]string{
-				"status": "error",
-				"error":  err.Error(),
-			}
-			continue
-		}
-		currentFile.Close()
-
-		currentChecksum := fmt.Sprintf("%x", hash.Sum(nil))
-		if currentChecksum != cs.Checksum {
-			verificationResults[cs.Path] = map[string]string{
-				"status":   "checksum_mismatch",
-				"expected": cs.Checksum,
-				"actual":   currentChecksum,
-			}
-			continue
-		}
-
-		verificationResults[cs.Path] = map[string]string{
-			"status": "ok",
-		}
-	}
-
-	return c.JSON(http.StatusOK, verificationResults)
 }
 
 type CtrlProjectRequest struct {
@@ -616,7 +489,6 @@ func ServerStart(listener string, config *common.HubConfig) error {
 
 	// Config endpoints
 	e.GET("/config/download", downloadConfig, TokenAuthMiddleware)
-	e.POST("/config/verify", verifyConfig, TokenAuthMiddleware)
 
 	// HubConfig
 	e.GET("config_root", configRoot, TokenAuthMiddleware)

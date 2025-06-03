@@ -115,23 +115,26 @@ func LoadLocalProject(configRoot string) {
 }
 
 func LoadLeaderProject() error {
-	// Download config.zip from leader
-	err := api.DownloadConfig()
+	var err error
+	var confRoot string
+
+	// Get hub leader config root
+	confRoot, err = api.GetConfigRoot()
 	if err != nil {
 		return err
 	}
 
-	// Verify config using leader's verify API
-
-	// Get hub leader config root
-
-	// Unzip config to tmp folder
+	// Download config.zip from leader, and unzip to conf root
+	err = api.DownloadConfig(confRoot)
+	if err != nil {
+		return err
+	}
 
 	// Read config.yaml to get configRoot path
-
-	// Move config folder to configRoot path
-
-	// Cleanup tmp folder
+	err = loadHubConfig(confRoot)
+	if err != nil {
+		logger.Error("load hub config error", "error", err)
+	}
 
 	return nil
 }
