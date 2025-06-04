@@ -1,6 +1,7 @@
 package project
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
@@ -18,15 +19,22 @@ var GlobalProject *GlobalProjectInfo
 
 // NewProject creates a new project instance from a configuration file
 // pp: Path to the project configuration file
-func NewProject(pp string) (*Project, error) {
-	data, err := os.ReadFile(pp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read project configuration file: %w", err)
-	}
-
+func NewProject(pp string, raw string) (*Project, error) {
+	var err error
 	var cfg ProjectConfig
+	var data []byte
 
-	cfg.RawConfig = string(data)
+	if pp != "" {
+		data, err = os.ReadFile(pp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read project configuration file: %w", err)
+		}
+
+		cfg.RawConfig = string(data)
+	} else {
+		cfg.RawConfig = raw
+		data = []byte(raw)
+	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
@@ -74,22 +82,43 @@ func NewProject(pp string) (*Project, error) {
 // rulesetNames: List of ruleset IDs
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
 	var err error
-	for _, v := range inputNames {
-		p.Inputs[v], err = input.NewInput(path.Join(common.Config.ConfigRoot, "input", v+".yaml"), v)
-		if err != nil {
-			return fmt.Errorf("failed to initialize input component %s: %w", v, err)
+	if cluster.IsLeader {
+		for _, v := range inputNames {
+			p.Inputs[v], err = input.NewInput(path.Join(common.Config.ConfigRoot, "input", v+".yaml"), "", v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize input component %s: %w", v, err)
+			}
 		}
-	}
-	for _, v := range outputNames {
-		p.Outputs[v], err = output.NewOutput(path.Join(common.Config.ConfigRoot, "output", v+".yaml"), v)
-		if err != nil {
-			return fmt.Errorf("failed to initialize output component %s: %w", v, err)
+		for _, v := range outputNames {
+			p.Outputs[v], err = output.NewOutput(path.Join(common.Config.ConfigRoot, "output", v+".yaml"), "", v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize output component %s: %w", v, err)
+			}
 		}
-	}
-	for _, v := range rulesetNames {
-		p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(common.Config.ConfigRoot, "ruleset", v+".xml"), v)
-		if err != nil {
-			return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
+		for _, v := range rulesetNames {
+			p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(common.Config.ConfigRoot, "ruleset", v+".xml"), "", v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
+			}
+		}
+	} else {
+		for _, v := range inputNames {
+			p.Inputs[v], err = input.NewInput("", common.AllInputsRawConfig[v], v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize input component %s: %w", v, err)
+			}
+		}
+		for _, v := range outputNames {
+			p.Outputs[v], err = output.NewOutput("", common.AllOutputsRawConfig[v], v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize output component %s: %w", v, err)
+			}
+		}
+		for _, v := range rulesetNames {
+			p.Rulesets[v], err = rules_engine.NewRuleset("", common.AllRulesetsRawConfig[v], v)
+			if err != nil {
+				return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
+			}
 		}
 	}
 	return nil
@@ -346,7 +375,7 @@ func (p *Project) Stop() error {
 		close(p.metricsStop)
 	}
 
-	for i, _ := range p.MsgChannels {
+	for i := range p.MsgChannels {
 		id := p.MsgChannels[i]
 		GlobalProject.msgChansCounter[id] = GlobalProject.msgChansCounter[id] - 1
 		if GlobalProject.msgChansCounter[id] == 0 {

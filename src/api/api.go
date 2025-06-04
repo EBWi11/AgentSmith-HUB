@@ -151,7 +151,7 @@ func getPlugin(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"name":    p.Name,
 			"type":    p.Type,
-			"payload": p.Payload,
+			"payload": string(p.Payload),
 		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})

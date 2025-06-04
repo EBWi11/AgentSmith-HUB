@@ -76,25 +76,24 @@ type Input struct {
 	Config *InputConfig
 }
 
-// LoadInputConfig loads input config from a YAML file.
-func LoadInputConfig(path string) (*InputConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg InputConfig
-	cfg.RawConfig = string(data)
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
 // NewInput creates an Input from config and downstreams.
-func NewInput(path string, id string) (*Input, error) {
-	cfg, err := LoadInputConfig(path)
-	if err != nil {
-		return nil, err
+func NewInput(path string, raw string, id string) (*Input, error) {
+	var cfg InputConfig
+
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
+		cfg.RawConfig = string(data)
+	} else {
+		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+			return nil, err
+		}
+		cfg.RawConfig = raw
 	}
 
 	in := &Input{
@@ -104,7 +103,7 @@ func NewInput(path string, id string) (*Input, error) {
 		DownStream:   make([]*chan map[string]interface{}, 0),
 		kafkaCfg:     cfg.Kafka,
 		aliyunSLSCfg: cfg.AliyunSLS,
-		Config:       cfg,
+		Config:       &cfg,
 	}
 	return in, nil
 }

@@ -85,18 +85,28 @@ func loadHubConfig(configRoot string) error {
 	return nil
 }
 
-func LoadLocalProject(configRoot string) {
-	projectList, err := traverseProject(path.Join(configRoot, "project"))
-	if err != nil {
-		logger.Error("travers project error", "error", err)
-		return
-	}
-
-	for _, projectPath := range projectList {
-		_, err := project.NewProject(projectPath)
+func LoadLocalProject() {
+	if cluster.IsLeader {
+		projectList, err := traverseProject(path.Join(common.Config.ConfigRoot, "project"))
 		if err != nil {
-			logger.Error("project init error", "err", err, "project_path", projectPath)
-			continue
+			logger.Error("travers project error", "error", err)
+			return
+		}
+
+		for _, projectPath := range projectList {
+			_, err := project.NewProject(projectPath, "")
+			if err != nil {
+				logger.Error("project init error", "err", err, "project_path", projectPath)
+				continue
+			}
+		}
+	} else {
+		for id, raw := range common.AllProjectRawConfig {
+			_, err := project.NewProject("", raw)
+			if err != nil {
+				logger.Error("project init error", "err", err, "project_id", id)
+				continue
+			}
 		}
 	}
 }
@@ -116,7 +126,7 @@ func StartAllProject() {
 	}
 }
 
-func LoadLeaderProject() error {
+func LoadLeaderConfigAndComponents() error {
 	var err error
 	var leaderConfig map[string]string
 
@@ -129,7 +139,50 @@ func LoadLeaderProject() error {
 	common.Config.Redis = leaderConfig["redis"]
 	common.Config.Redis = leaderConfig["redis_password"]
 
-	api.GetAllComponents("")
+	plugins, err := api.GetAllComponents("plugin")
+	if err != nil {
+		logger.Error("load leader plugins error", "error", err.Error())
+	}
+	common.AllPluginsRawConfig = make(map[string]string, len(plugins))
+	for _, v := range plugins {
+		common.AllPluginsRawConfig[v["name"].(string)] = v["payload"].(string)
+	}
+
+	inputs, err := api.GetAllComponents("input")
+	if err != nil {
+		logger.Error("load leader inputs error", "error", err.Error())
+	}
+	common.AllInputsRawConfig = make(map[string]string, len(inputs))
+	for _, v := range inputs {
+		common.AllInputsRawConfig[v["id"].(string)] = v["raw"].(string)
+	}
+
+	outputs, err := api.GetAllComponents("output")
+	if err != nil {
+		logger.Error("load leader outputs error", "error", err.Error())
+	}
+	common.AllOutputsRawConfig = make(map[string]string, len(outputs))
+	for _, v := range outputs {
+		common.AllOutputsRawConfig[v["id"].(string)] = v["raw"].(string)
+	}
+
+	rulesets, err := api.GetAllComponents("ruleset")
+	if err != nil {
+		logger.Error("load leader rulesets error", "error", err.Error())
+	}
+	common.AllRulesetsRawConfig = make(map[string]string, len(rulesets))
+	for _, v := range rulesets {
+		common.AllRulesetsRawConfig[v["id"].(string)] = v["raw"].(string)
+	}
+
+	projects, err := api.GetAllComponents("project")
+	if err != nil {
+		logger.Error("load leader projects error", "error", err.Error())
+	}
+	common.AllProjectRawConfig = make(map[string]string, len(projects))
+	for _, v := range projects {
+		common.AllProjectRawConfig[v["id"].(string)] = v["raw"].(string)
+	}
 
 	return nil
 }
@@ -197,22 +250,25 @@ func main() {
 			return
 		}
 
-		//download leader config
-		err = LoadLeaderProject()
+		//load leader config, and init project/input/output/ruleset/plugin
+		err = LoadLeaderConfigAndComponents()
 		if err != nil {
-			logger.Error("load leader config error", "error", err)
+			logger.Error("load leader config or components error", "error", err)
 			return
 		}
 	}
 
 	// project/plugin/redis init
-	LoadLocalProject(common.Config.ConfigRoot)
 	err = common.RedisInit(common.Config.Redis, common.Config.RedisPassword)
 	if err != nil {
 		logger.Error("redis init error", "error", err)
 		return
 	}
 
+	// load project/input/output/ruleset
+	LoadLocalProject()
+
+	// load plugin
 	err = plugin.PluginInit(path.Join(common.Config.ConfigRoot, "plugin"))
 	if err != nil {
 		logger.Error("plugin init error", "error", err)

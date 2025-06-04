@@ -12,10 +12,11 @@ import (
 // NodeStatus represents the status of a cluster node
 type NodeStatus string
 
+var IsLeader bool
+
 const (
 	NodeStatusLeader   NodeStatus = "leader"
 	NodeStatusFollower NodeStatus = "follower"
-	NodeStatusUnknown  NodeStatus = "unknown"
 )
 
 // NodeInfo represents information about a cluster node
@@ -61,11 +62,6 @@ type ClusterManager struct {
 	MaxMissCount      int // Maximum allowed consecutive missed heartbeats
 	stopChan          chan struct{}
 }
-
-var (
-	clusterManager *ClusterManager
-	once           sync.Once
-)
 
 // InitClusterManager initializes the cluster manager
 func ClusterInit(selfID, selfAddress string) *ClusterManager {
@@ -132,8 +128,10 @@ func (cm *ClusterManager) SetLeader(leaderID, leaderAddress string) {
 
 	if cm.LeaderID == cm.SelfID && cm.LeaderAddress == cm.SelfAddress {
 		cm.Status = NodeStatusLeader
+		IsLeader = true
 	} else {
 		cm.Status = NodeStatusFollower
+		IsLeader = false
 	}
 }
 

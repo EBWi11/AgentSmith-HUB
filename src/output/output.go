@@ -89,25 +89,23 @@ type Output struct {
 	Config *OutputConfig
 }
 
-// LoadOutputConfig loads output config from a YAML file.
-func LoadOutputConfig(path string) (*OutputConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg OutputConfig
-	cfg.RawConfig = string(data)
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
 // NewOutput creates an Output from config and upstreams.
-func NewOutput(path string, id string) (*Output, error) {
-	cfg, err := LoadOutputConfig(path)
-	if err != nil {
-		return nil, err
+func NewOutput(path string, raw string, id string) (*Output, error) {
+	var cfg OutputConfig
+	if path == "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
+		cfg.RawConfig = string(data)
+	} else {
+		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+			return nil, err
+		}
+		cfg.RawConfig = raw
 	}
 
 	out := &Output{
@@ -118,7 +116,7 @@ func NewOutput(path string, id string) (*Output, error) {
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
-		Config:           cfg,
+		Config:           &cfg,
 	}
 	return out, nil
 }

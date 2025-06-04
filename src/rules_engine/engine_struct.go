@@ -167,16 +167,21 @@ type Plugin struct {
 // NewRuleset creates a new resource from an XML file
 // path: Path to the resource XML file
 // id: Unique identifier for the resource
-func NewRuleset(path string, id string) (*Ruleset, error) {
-	xmlFile, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
-	}
-	defer xmlFile.Close()
+func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
+	var rawRuleset []byte
+	if path != "" {
+		xmlFile, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
+		}
+		defer xmlFile.Close()
 
-	rawRuleset, err := io.ReadAll(xmlFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read resource file: %w", err)
+		rawRuleset, err = io.ReadAll(xmlFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read resource file: %w", err)
+		}
+	} else {
+		rawRuleset = []byte(raw)
 	}
 
 	ruleset, err := ParseRulesetFromByte(rawRuleset)
