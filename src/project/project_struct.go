@@ -24,8 +24,7 @@ type GlobalProjectInfo struct {
 
 // ProjectConfig holds the configuration for a project
 type ProjectConfig struct {
-	Name      string `yaml:"name"`
-	Id        string `yaml:"id"`
+	Id        string
 	Content   string `yaml:"content"`
 	RawConfig string
 }
@@ -33,7 +32,6 @@ type ProjectConfig struct {
 // Project represents a data processing project with inputs, outputs, and rules
 type Project struct {
 	// Basic info
-	Name   string
 	Id     string
 	Status ProjectStatus
 	Config *ProjectConfig

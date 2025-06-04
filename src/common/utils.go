@@ -17,6 +17,12 @@ import (
 	"strings"
 )
 
+func GetFileNameWithoutExt(path string) string {
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext)
+}
+
 func Unzip(src, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {

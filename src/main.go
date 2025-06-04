@@ -94,7 +94,7 @@ func LoadLocalProject() {
 		}
 
 		for _, projectPath := range projectList {
-			_, err := project.NewProject(projectPath, "")
+			_, err := project.NewProject(projectPath, "", "")
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_path", projectPath)
 				continue
@@ -102,7 +102,7 @@ func LoadLocalProject() {
 		}
 	} else {
 		for id, raw := range common.AllProjectRawConfig {
-			_, err := project.NewProject("", raw)
+			_, err := project.NewProject("", raw, id)
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_id", id)
 				continue
@@ -118,7 +118,7 @@ func StartAllProject() {
 		for _, p := range project.GlobalProject.Projects {
 			err = p.Start()
 			if err != nil {
-				logger.Error("project start error", "error", err, "project_id", p.Name)
+				logger.Error("project start error", "error", err, "project_id", p.Id)
 			} else {
 				logger.Info("project start successful", "project_id", p.Id)
 			}

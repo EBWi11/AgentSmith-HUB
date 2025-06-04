@@ -30,7 +30,6 @@ func getProjects(c echo.Context) error {
 	for _, p := range projects {
 		result = append(result, map[string]interface{}{
 			"id":     p.Id,
-			"name":   p.Name,
 			"status": p.Status,
 		})
 	}
@@ -46,13 +45,12 @@ func getProject(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"id":       p.Id,
-		"name":     p.Name,
-		"status":   p.Status,
-		"inputs":   p.Inputs,
-		"outputs":  p.Outputs,
-		"rulesets": p.Rulesets,
-		"raw":      p.Config.RawConfig,
+		"id":     p.Id,
+		"status": p.Status,
+		//"inputs":   p.Inputs,
+		//"outputs":  p.Outputs,
+		//"rulesets": p.Rulesets,
+		"raw": p.Config.RawConfig,
 	})
 }
 
@@ -65,7 +63,6 @@ func getRulesets(c echo.Context) error {
 		for _, rs := range p.Rulesets {
 			rulesets = append(rulesets, map[string]interface{}{
 				"id":   rs.RulesetID,
-				"name": rs.RulesetName,
 				"type": rs.Type,
 			})
 		}
@@ -81,10 +78,9 @@ func getRuleset(c echo.Context) error {
 	for _, p := range projects {
 		if rs, ok := p.Rulesets[id]; ok {
 			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id":           rs.RulesetID,
-				"name":         rs.RulesetName,
-				"type":         rs.Type,
-				"rules":        rs.Rules,
+				"id":   rs.RulesetID,
+				"type": rs.Type,
+				//"rules":        rs.Rules,
 				"is_detection": rs.IsDetection,
 				"raw":          rs.RawConfig,
 			})
@@ -102,7 +98,6 @@ func getInputs(c echo.Context) error {
 		for _, in := range p.Inputs {
 			inputs = append(inputs, map[string]interface{}{
 				"id":   in.Id,
-				"name": in.Name,
 				"type": in.Type,
 			})
 		}
@@ -119,7 +114,6 @@ func getInput(c echo.Context) error {
 		if in, ok := p.Inputs[id]; ok {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"id":            in.Id,
-				"name":          in.Name,
 				"type":          in.Type,
 				"consume_qps":   in.GetConsumeQPS(),
 				"consume_total": in.GetConsumeTotal(),
@@ -166,7 +160,6 @@ func getOutputs(c echo.Context) error {
 		for _, out := range p.Outputs {
 			outputs = append(outputs, map[string]interface{}{
 				"id":   out.Id,
-				"name": out.Name,
 				"type": out.Type,
 			})
 		}
@@ -183,7 +176,6 @@ func getOutput(c echo.Context) error {
 		if out, ok := p.Outputs[id]; ok {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"id":            out.Id,
-				"name":          out.Name,
 				"type":          out.Type,
 				"produce_qps":   out.GetProduceQPS(),
 				"produce_total": out.GetProduceTotal(),
@@ -400,7 +392,6 @@ func StartProject(c echo.Context) error {
 		"message": "Project started successfully",
 		"project": map[string]interface{}{
 			"id":     p.Id,
-			"name":   p.Name,
 			"status": p.Status,
 		},
 	})
@@ -442,7 +433,6 @@ func StopProject(c echo.Context) error {
 		"message": "Project stopped successfully",
 		"project": map[string]interface{}{
 			"id":     p.Id,
-			"name":   p.Name,
 			"status": p.Status,
 		},
 	})
@@ -468,10 +458,16 @@ func tokenCheck(c echo.Context) error {
 }
 
 func leaderConfig(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{
-		"redis":          common.Config.Redis,
-		"redis_password": common.Config.RedisPassword,
-	})
+	if cluster.IsLeader {
+		return c.JSON(http.StatusOK, map[string]string{
+			"redis":          common.Config.Redis,
+			"redis_password": common.Config.RedisPassword,
+		})
+	} else {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "no leader",
+		})
+	}
 }
 
 func ServerStart(listener string) error {

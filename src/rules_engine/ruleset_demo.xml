@@ -1,4 +1,4 @@
-<root name="test1" type="detection">
+<root type="detection">
     <rule id="reverse_shell_01" name="反弹shell检测" author="test">
         <filter field="data_typedd">59</filter>
         <checklist condition="a and (b or c) ">

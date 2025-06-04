@@ -1,4 +1,3 @@
-name: test
 type: kafka
 brokers: 192.168.27.130:9092
 topic: test-topic

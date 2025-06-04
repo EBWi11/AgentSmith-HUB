@@ -1,5 +1,3 @@
-id: demo_project
-name: demo_project
 content: |
   INPUT.kafka_demo -> RULESET.test
   RULESET.test -> OUTPUT.print_demo

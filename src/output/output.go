@@ -24,7 +24,6 @@ const (
 
 // OutputConfig is the YAML config for an output.
 type OutputConfig struct {
-	Name          string `yaml:"name"`
 	Id            string
 	Type          OutputType                 `yaml:"type"`
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
@@ -61,8 +60,7 @@ type AliyunSLSOutputConfig struct {
 
 // Output is the runtime output instance.
 type Output struct {
-	Name                string
-	Id                  string
+	Id                  string `json:"Id"`
 	ProjectNodeSequence string
 	Type                OutputType
 	UpStream            []*chan map[string]interface{}
@@ -92,7 +90,7 @@ type Output struct {
 // NewOutput creates an Output from config and upstreams.
 func NewOutput(path string, raw string, id string) (*Output, error) {
 	var cfg OutputConfig
-	if path == "" {
+	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -109,7 +107,6 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 	}
 
 	out := &Output{
-		Name:             cfg.Name,
 		Id:               id,
 		Type:             cfg.Type,
 		UpStream:         make([]*chan map[string]interface{}, 0),

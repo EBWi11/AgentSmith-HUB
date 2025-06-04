@@ -17,9 +17,16 @@ import (
 
 var GlobalProject *GlobalProjectInfo
 
+func init() {
+	GlobalProject = &GlobalProjectInfo{}
+	GlobalProject.Projects = make(map[string]*Project)
+	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
+	GlobalProject.msgChansCounter = make(map[string]int)
+}
+
 // NewProject creates a new project instance from a configuration file
 // pp: Path to the project configuration file
-func NewProject(pp string, raw string) (*Project, error) {
+func NewProject(pp string, raw string, id string) (*Project, error) {
 	var err error
 	var cfg ProjectConfig
 	var data []byte
@@ -31,8 +38,10 @@ func NewProject(pp string, raw string) (*Project, error) {
 		}
 
 		cfg.RawConfig = string(data)
+		cfg.Id = common.GetFileNameWithoutExt(pp)
 	} else {
 		cfg.RawConfig = raw
+		cfg.Id = id
 		data = []byte(raw)
 	}
 
@@ -43,15 +52,11 @@ func NewProject(pp string, raw string) (*Project, error) {
 	if strings.TrimSpace(cfg.Id) == "" {
 		return nil, fmt.Errorf("project ID cannot be empty in configuration file: %s", pp)
 	}
-	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("project name cannot be empty in configuration file: %s", pp)
-	}
 	if strings.TrimSpace(cfg.Content) == "" {
 		return nil, fmt.Errorf("project content cannot be empty in configuration file: %s", pp)
 	}
 
 	p := &Project{
-		Name:        cfg.Name,
 		Id:          cfg.Id,
 		Status:      ProjectStatusStopped,
 		Config:      &cfg,
@@ -71,7 +76,7 @@ func NewProject(pp string, raw string) (*Project, error) {
 		return nil, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
-	GlobalProject.Projects[p.Name] = p
+	GlobalProject.Projects[p.Id] = p
 
 	return p, nil
 }

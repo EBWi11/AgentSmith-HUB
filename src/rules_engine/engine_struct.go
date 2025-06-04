@@ -31,9 +31,8 @@ var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 // Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
 	XMLName             xml.Name `xml:"root"`
-	RulesetID           string
+	RulesetID           string   `json:"Id"`
 	ProjectNodeSequence string
-	RulesetName         string `xml:"name,attr"`
 	Type                string `xml:"type,attr"`
 
 	IsDetection bool
@@ -334,10 +333,6 @@ func RulesetBuild(ruleset *Ruleset) error {
 	//for init local cache, local cache only work for threshold check
 	var createLocalCache = false
 	var createLocalCacheForClassify = false
-
-	if strings.TrimSpace(ruleset.RulesetName) == "" {
-		return errors.New("resource name cannot be empty")
-	}
 
 	if strings.TrimSpace(ruleset.Type) == "" || strings.TrimSpace(ruleset.Type) == "DETECTION" {
 		ruleset.IsDetection = true

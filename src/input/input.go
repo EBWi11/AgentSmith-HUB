@@ -20,7 +20,6 @@ const (
 
 // InputConfig is the YAML config for an input.
 type InputConfig struct {
-	Name      string `yaml:"name"`
 	Id        string
 	Type      InputType             `yaml:"type"`
 	Kafka     *KafkaInputConfig     `yaml:"kafka,omitempty"`
@@ -53,8 +52,7 @@ type AliyunSLSInputConfig struct {
 
 // Input is the runtime input instance.
 type Input struct {
-	Name                string
-	Id                  string
+	Id                  string `json:"Id"`
 	ProjectNodeSequence string
 	Type                InputType
 	DownStream          []*chan map[string]interface{}
@@ -97,7 +95,6 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 	}
 
 	in := &Input{
-		Name:         cfg.Name,
 		Id:           id,
 		Type:         cfg.Type,
 		DownStream:   make([]*chan map[string]interface{}, 0),
