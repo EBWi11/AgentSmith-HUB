@@ -5,7 +5,6 @@ import (
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
-	"time"
 )
 
 // ProjectStatus represents the current status of a project
@@ -25,9 +24,10 @@ type GlobalProjectInfo struct {
 
 // ProjectConfig holds the configuration for a project
 type ProjectConfig struct {
-	Name    string `yaml:"name"`
-	Id      string `yaml:"id"`
-	Content string `yaml:"content"`
+	Name      string `yaml:"name"`
+	Id        string `yaml:"id"`
+	Content   string `yaml:"content"`
+	RawConfig string
 }
 
 // Project represents a data processing project with inputs, outputs, and rules
@@ -49,9 +49,6 @@ type Project struct {
 	stopChan    chan struct{}
 	wg          sync.WaitGroup
 	errorChan   chan error
-	lastError   error
-	lastErrorMu sync.RWMutex
-	startTime   time.Time
 	metrics     *ProjectMetrics
 	metricsStop chan struct{}
 }

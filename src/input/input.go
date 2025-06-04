@@ -25,6 +25,7 @@ type InputConfig struct {
 	Type      InputType             `yaml:"type"`
 	Kafka     *KafkaInputConfig     `yaml:"kafka,omitempty"`
 	AliyunSLS *AliyunSLSInputConfig `yaml:"aliyun_sls,omitempty"`
+	RawConfig string
 }
 
 // KafkaInputConfig holds Kafka-specific config.
@@ -70,6 +71,9 @@ type Input struct {
 	consumeTotal uint64
 	consumeQPS   uint64
 	metricStop   chan struct{}
+
+	// raw config
+	Config *InputConfig
 }
 
 // LoadInputConfig loads input config from a YAML file.
@@ -79,6 +83,7 @@ func LoadInputConfig(path string) (*InputConfig, error) {
 		return nil, err
 	}
 	var cfg InputConfig
+	cfg.RawConfig = string(data)
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -99,6 +104,7 @@ func NewInput(path string, id string) (*Input, error) {
 		DownStream:   make([]*chan map[string]interface{}, 0),
 		kafkaCfg:     cfg.Kafka,
 		aliyunSLSCfg: cfg.AliyunSLS,
+		Config:       cfg,
 	}
 	return in, nil
 }

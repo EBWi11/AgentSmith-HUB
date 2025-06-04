@@ -53,6 +53,8 @@ type Ruleset struct {
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
 	// only for classify local cache
 	CacheMu sync.RWMutex
+
+	RawConfig string
 }
 
 type RulesByFilter struct {
@@ -646,6 +648,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 // ParseRulesetFromByte parses XML bytes into a Ruleset struct and processes field paths.
 func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 	var ruleset Ruleset
+	ruleset.RawConfig = string(rawRuleset)
 	ruleset.RulesByFilter = make(map[string]*RulesByFilter, 0)
 
 	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {

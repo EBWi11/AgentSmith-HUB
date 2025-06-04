@@ -30,7 +30,7 @@ type OutputConfig struct {
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
 	Elasticsearch *ElasticsearchOutputConfig `yaml:"elasticsearch,omitempty"`
 	AliyunSLS     *AliyunSLSOutputConfig     `yaml:"aliyun_sls,omitempty"`
-	// No config needed for print
+	RawConfig     string
 }
 
 // KafkaOutputConfig holds Kafka-specific config.
@@ -84,6 +84,9 @@ type Output struct {
 
 	// for print output
 	printStop chan struct{}
+
+	// raw config
+	Config *OutputConfig
 }
 
 // LoadOutputConfig loads output config from a YAML file.
@@ -93,6 +96,7 @@ func LoadOutputConfig(path string) (*OutputConfig, error) {
 		return nil, err
 	}
 	var cfg OutputConfig
+	cfg.RawConfig = string(data)
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -114,6 +118,7 @@ func NewOutput(path string, id string) (*Output, error) {
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
+		Config:           cfg,
 	}
 	return out, nil
 }

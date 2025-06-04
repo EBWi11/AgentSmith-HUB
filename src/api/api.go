@@ -47,15 +47,13 @@ func getProject(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"id":         p.Id,
-		"name":       p.Name,
-		"status":     p.Status,
-		"inputs":     p.Inputs,
-		"outputs":    p.Outputs,
-		"rulesets":   p.Rulesets,
-		"uptime":     p.GetUptime().String(),
-		"metrics":    p.GetMetrics(),
-		"last_error": p.GetLastError(),
+		"id":       p.Id,
+		"name":     p.Name,
+		"status":   p.Status,
+		"inputs":   p.Inputs,
+		"outputs":  p.Outputs,
+		"rulesets": p.Rulesets,
+		"raw":      p.Config.RawConfig,
 	})
 }
 
@@ -89,6 +87,7 @@ func getRuleset(c echo.Context) error {
 				"type":         rs.Type,
 				"rules":        rs.Rules,
 				"is_detection": rs.IsDetection,
+				"raw":          rs.RawConfig,
 			})
 		}
 	}
@@ -125,6 +124,7 @@ func getInput(c echo.Context) error {
 				"type":          in.Type,
 				"consume_qps":   in.GetConsumeQPS(),
 				"consume_total": in.GetConsumeTotal(),
+				"raw":           in.Config.RawConfig,
 			})
 		}
 	}
@@ -161,6 +161,7 @@ func getOutput(c echo.Context) error {
 				"type":          out.Type,
 				"produce_qps":   out.GetProduceQPS(),
 				"produce_total": out.GetProduceTotal(),
+				"raw":           out.Config.RawConfig,
 			})
 		}
 	}

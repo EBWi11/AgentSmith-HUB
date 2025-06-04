@@ -1,7 +1,7 @@
 package api
 
 import (
-	"archive/zip"
+	"AgentSmith-HUB/common"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -130,12 +130,12 @@ func DownloadConfig(confRoot string) error {
 
 	unzipDir := filepath.Join(tmpDir, "config_unzip")
 	_ = os.RemoveAll(unzipDir)
-	err = unzip(configZipPath, unzipDir)
+	err = common.Unzip(configZipPath, unzipDir)
 	if err != nil {
 		return errors.New("unzip config.zip failed: " + err.Error())
 	}
 
-	err = copyDir(unzipDir, confRoot)
+	err = common.CopyDir(unzipDir, confRoot)
 	if err != nil {
 		return errors.New("copy config to confRoot failed: " + err.Error())
 	}
@@ -143,65 +143,98 @@ func DownloadConfig(confRoot string) error {
 	return nil
 }
 
-func unzip(src, dest string) error {
-	r, err := zip.OpenReader(src)
+func GetAllProject() ([]map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/project", hubRequest.Leader), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer r.Close()
+	req.Header.Set("token", hubRequest.Token)
 
-	for _, f := range r.File {
-		fpath := filepath.Join(dest, f.Name)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-			return err
-		}
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			outFile.Close()
-			return err
-		}
-		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
-		if err != nil {
-			return err
-		}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("get all project failed, status code: " + fmt.Sprint(resp.StatusCode))
+	}
+
+	var result []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
-func copyDir(src string, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		targetPath := filepath.Join(dst, relPath)
-		if info.IsDir() {
-			return os.MkdirAll(targetPath, info.Mode())
-		}
-		srcFile, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close()
-		dstFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
-		if err != nil {
-			return err
-		}
-		defer dstFile.Close()
-		_, err = io.Copy(dstFile, srcFile)
-		return err
-	})
+func GetAllRuleset() ([]map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/ruleset", hubRequest.Leader), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", hubRequest.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("get all ruleset failed, status code: " + fmt.Sprint(resp.StatusCode))
+	}
+
+	var result []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func GetAllInput() ([]map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/input", hubRequest.Leader), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", hubRequest.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("get all input failed, status code: " + fmt.Sprint(resp.StatusCode))
+	}
+
+	var result []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func GetAllOutput() ([]map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/output", hubRequest.Leader), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", hubRequest.Token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("get all output failed, status code: " + fmt.Sprint(resp.StatusCode))
+	}
+
+	var result []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

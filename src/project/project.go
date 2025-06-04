@@ -27,6 +27,9 @@ func NewProject(pp string) (*Project, error) {
 	}
 
 	var cfg ProjectConfig
+
+	cfg.RawConfig = string(data)
+
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
 	}
@@ -312,7 +315,6 @@ func (p *Project) Start() error {
 	go p.collectMetrics()
 
 	p.Status = ProjectStatusRunning
-	p.startTime = time.Now()
 	return nil
 }
 
@@ -397,21 +399,6 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	p.metrics.mu.RLock()
 	defer p.metrics.mu.RUnlock()
 	return p.metrics
-}
-
-// GetLastError returns the last error that occurred
-func (p *Project) GetLastError() error {
-	p.lastErrorMu.RLock()
-	defer p.lastErrorMu.RUnlock()
-	return p.lastError
-}
-
-// GetUptime returns the project uptime
-func (p *Project) GetUptime() time.Duration {
-	if p.Status != ProjectStatusRunning {
-		return 0
-	}
-	return time.Since(p.startTime)
 }
 
 // GetProjects returns a list of all projects
