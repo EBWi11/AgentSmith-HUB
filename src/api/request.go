@@ -57,8 +57,8 @@ func InitRequest(leader string, Token string) error {
 	return nil
 }
 
-func GetConfigRoot() (string, error) {
-	var configRoot string
+func GetLeaderConfig() (map[string]string, error) {
+	configRoot := make(map[string]string, 3)
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/config_root", hubRequest.Leader), nil)
 	if err != nil {
 		return configRoot, err
@@ -77,12 +77,8 @@ func GetConfigRoot() (string, error) {
 		return configRoot, fmt.Errorf("get config_root failed, status code: %d", resp.StatusCode)
 	}
 
-	var result struct {
-		ConfigRoot string `json:"config_root"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return configRoot, err
+	if err := json.NewDecoder(resp.Body).Decode(&configRoot); err != nil {
+		return nil, err
 	}
 
 	return configRoot, err
@@ -143,8 +139,8 @@ func DownloadConfig(confRoot string) error {
 	return nil
 }
 
-func GetAllProject() ([]map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/project", hubRequest.Leader), nil)
+func GetComponentDetail(componentType string, id string) (map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s/%s", hubRequest.Leader, componentType, id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -157,18 +153,19 @@ func GetAllProject() ([]map[string]interface{}, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("get all project failed, status code: " + fmt.Sprint(resp.StatusCode))
+		return nil, fmt.Errorf("get project failed, status code: %d", resp.StatusCode)
 	}
 
-	var result []map[string]interface{}
+	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func GetAllRuleset() ([]map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/ruleset", hubRequest.Leader), nil)
+func GetAllComponents(componentType string) ([]map[string]interface{}, error) {
+	realRes := make([]map[string]interface{}, 10)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s", hubRequest.Leader, componentType), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -181,60 +178,22 @@ func GetAllRuleset() ([]map[string]interface{}, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("get all ruleset failed, status code: " + fmt.Sprint(resp.StatusCode))
+		return nil, errors.New("get all components failed, status code: " + fmt.Sprint(resp.StatusCode))
 	}
 
 	var result []map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
-	return result, nil
-}
 
-func GetAllInput() ([]map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/input", hubRequest.Leader), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("token", hubRequest.Token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("get all input failed, status code: " + fmt.Sprint(resp.StatusCode))
+	for _, v := range result {
+		id := v["id"].(string)
+		tmp, err := GetComponentDetail(componentType, id)
+		if err != nil {
+			return nil, errors.New("get all project failed, err" + err.Error())
+		}
+		realRes = append(realRes, tmp)
 	}
 
-	var result []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func GetAllOutput() ([]map[string]interface{}, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/output", hubRequest.Leader), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("token", hubRequest.Token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("get all output failed, status code: " + fmt.Sprint(resp.StatusCode))
-	}
-
-	var result []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return realRes, nil
 }

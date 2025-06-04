@@ -1,6 +1,7 @@
 package project
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
@@ -13,15 +14,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var ConfigRoot = ""
 var GlobalProject *GlobalProjectInfo
 
 // NewProject creates a new project instance from a configuration file
 // pp: Path to the project configuration file
 func NewProject(pp string) (*Project, error) {
-	projectPath := path.Join(ConfigRoot, "project", pp)
-
-	data, err := os.ReadFile(projectPath)
+	data, err := os.ReadFile(pp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read project configuration file: %w", err)
 	}
@@ -77,19 +75,19 @@ func NewProject(pp string) (*Project, error) {
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
 	var err error
 	for _, v := range inputNames {
-		p.Inputs[v], err = input.NewInput(path.Join(ConfigRoot, "input", v+".yaml"), v)
+		p.Inputs[v], err = input.NewInput(path.Join(common.Config.ConfigRoot, "input", v+".yaml"), v)
 		if err != nil {
 			return fmt.Errorf("failed to initialize input component %s: %w", v, err)
 		}
 	}
 	for _, v := range outputNames {
-		p.Outputs[v], err = output.NewOutput(path.Join(ConfigRoot, "output", v+".yaml"), v)
+		p.Outputs[v], err = output.NewOutput(path.Join(common.Config.ConfigRoot, "output", v+".yaml"), v)
 		if err != nil {
 			return fmt.Errorf("failed to initialize output component %s: %w", v, err)
 		}
 	}
 	for _, v := range rulesetNames {
-		p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(ConfigRoot, "ruleset", v+".xml"), v)
+		p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(common.Config.ConfigRoot, "ruleset", v+".xml"), v)
 		if err != nil {
 			return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
 		}

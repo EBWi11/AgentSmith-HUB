@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"github.com/labstack/echo/v4"
 	"net/http"
 )
@@ -14,7 +15,7 @@ func TokenAuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			})
 		}
 
-		if token != hubConfig.Token {
+		if token != common.Config.Token {
 			return c.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "authentication failed",
 			})

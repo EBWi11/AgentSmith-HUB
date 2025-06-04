@@ -17,8 +17,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var HubConfig *common.HubConfig
-
 func traverseProject(dir string) ([]string, error) {
 	var files []string
 
@@ -70,22 +68,18 @@ func loadHubConfig(configRoot string) error {
 		return fmt.Errorf("failed to read hub config: %w", err)
 	}
 
-	if err := yaml.Unmarshal(data, &HubConfig); err != nil {
+	if err := yaml.Unmarshal(data, &common.Config); err != nil {
 		return fmt.Errorf("failed to parse hub config: %w", err)
 	}
 
-	if HubConfig.Redis == "" {
+	if common.Config.Redis == "" {
 		return fmt.Errorf("redis is null")
 	}
 
-	if HubConfig.Leader == "" {
-		return fmt.Errorf("leader is null")
-	}
+	common.Config.ConfigRoot = configRoot
 
-	HubConfig.ConfigRoot = configRoot
-
-	if HubConfig.Listen == "" {
-		HubConfig.Listen = "0.0.0.0:8080"
+	if common.Config.Listen == "" {
+		common.Config.Listen = "0.0.0.0:8080"
 	}
 
 	return nil
@@ -99,7 +93,7 @@ func LoadLocalProject(configRoot string) {
 	}
 
 	for _, projectPath := range projectList {
-		_, err := project.NewProject("test.yaml")
+		_, err := project.NewProject(projectPath)
 		if err != nil {
 			logger.Error("project init error", "err", err, "project_path", projectPath)
 			continue
@@ -109,43 +103,39 @@ func LoadLocalProject(configRoot string) {
 
 func StartAllProject() {
 	var err error
-	for _, p := range project.GlobalProject.Projects {
-		err = p.Start()
-		if err != nil {
-			logger.Error("project start error", "error", err, "project_id", p.Name)
-		} else {
-			logger.Info("project start successful", "project_id", p.Id)
+
+	if project.GlobalProject != nil {
+		for _, p := range project.GlobalProject.Projects {
+			err = p.Start()
+			if err != nil {
+				logger.Error("project start error", "error", err, "project_id", p.Name)
+			} else {
+				logger.Info("project start successful", "project_id", p.Id)
+			}
 		}
 	}
 }
 
 func LoadLeaderProject() error {
 	var err error
-	var confRoot string
+	var leaderConfig map[string]string
 
-	// Get hub leader config root
-	confRoot, err = api.GetConfigRoot()
+	// Get hub leader config
+	leaderConfig, err = api.GetLeaderConfig()
 	if err != nil {
 		return err
 	}
 
-	// Download config.zip from leader, and unzip to conf root
-	err = api.DownloadConfig(confRoot)
-	if err != nil {
-		return err
-	}
-
-	// Read config.yaml to get configRoot path
-	err = loadHubConfig(confRoot)
-	if err != nil {
-		logger.Error("load hub config error", "error", err)
-	}
+	common.Config.Redis = leaderConfig["redis"]
+	common.Config.Redis = leaderConfig["redis_password"]
 
 	return nil
 }
 
 func main() {
 	var err error
+	common.Config = &common.HubConfig{}
+
 	configRoot := flag.String("config_root", "", "agent smith hub config path, only leader need")
 	leaderAddr := flag.String("leader", "", "hub cluster leader address")
 
@@ -159,16 +149,16 @@ func main() {
 	}
 
 	// load self ip & init cluster
-	HubConfig.LocalIP, err = common.GetLocalIP()
+	common.Config.LocalIP, err = common.GetLocalIP()
 	if err != nil {
 		logger.Error("get local ip error", "error", err)
 	}
-	cl := cluster.ClusterInit(HubConfig.LocalIP, HubConfig.LocalIP)
+	cl := cluster.ClusterInit(common.Config.LocalIP, common.Config.LocalIP)
 
 	if *configRoot != "" {
 		//set self is leader
-		HubConfig.Leader = HubConfig.LocalIP
-		cl.SetLeader(HubConfig.LocalIP, HubConfig.LocalIP)
+		common.Config.Leader = common.Config.LocalIP
+		cl.SetLeader(common.Config.LocalIP, common.Config.LocalIP)
 		cl.StartHeartbeatLoop()
 
 		//leader read local config
@@ -179,26 +169,26 @@ func main() {
 		}
 
 		//leader creates or read token
-		HubConfig.Token, err = readToken(true)
+		common.Config.Token, err = readToken(true)
 		if err != nil {
 			logger.Error("read or create token error", "error", err)
 			return
 		}
 	} else if *leaderAddr != "" {
-		HubConfig.Leader = *leaderAddr
+		common.Config.Leader = *leaderAddr
 		//set leader
-		cl.SetLeader(HubConfig.Leader, HubConfig.Leader)
+		cl.SetLeader(common.Config.Leader, common.Config.Leader)
 		cl.StartHeartbeatLoop()
 
 		//read token
-		HubConfig.Token, err = readToken(false)
+		common.Config.Token, err = readToken(false)
 		if err != nil {
 			logger.Error("read token error", "error", err)
 			return
 		}
 
 		//init hub request
-		err = api.InitRequest(HubConfig.Leader, HubConfig.Token)
+		err = api.InitRequest(common.Config.Leader, common.Config.Token)
 		if err != nil {
 			logger.Error("hub init request error", "error", err)
 			return
@@ -213,14 +203,14 @@ func main() {
 	}
 
 	// project/plugin/redis init
-	LoadLocalProject(HubConfig.ConfigRoot)
-	err = common.RedisInit(HubConfig.Redis, HubConfig.RedisPassword)
+	LoadLocalProject(common.Config.ConfigRoot)
+	err = common.RedisInit(common.Config.Redis, common.Config.RedisPassword)
 	if err != nil {
 		logger.Error("redis init error", "error", err)
 		return
 	}
 
-	err = plugin.PluginInit(path.Join(project.ConfigRoot, "plugin"))
+	err = plugin.PluginInit(path.Join(common.Config.ConfigRoot, "plugin"))
 	if err != nil {
 		logger.Error("plugin init error", "error", err)
 		return
@@ -230,7 +220,7 @@ func main() {
 	StartAllProject()
 
 	// Start Api
-	err = api.ServerStart(HubConfig.Listen, HubConfig)
+	err = api.ServerStart(common.Config.Listen)
 	if err != nil {
 		logger.Error("server start err", "error", err.Error())
 	}

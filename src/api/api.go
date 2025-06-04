@@ -17,8 +17,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-var hubConfig *common.HubConfig
-
 func ping(c echo.Context) error {
 	return c.String(http.StatusOK, "pong")
 }
@@ -252,7 +250,7 @@ func getClusterStatus(c echo.Context) error {
 
 // downloadConfig handles downloading the entire config directory
 func downloadConfig(c echo.Context) error {
-	configRoot := project.ConfigRoot
+	configRoot := common.Config.ConfigRoot
 	if configRoot == "" {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "config root not set",
@@ -430,7 +428,7 @@ func tokenCheck(c echo.Context) error {
 		})
 	}
 
-	if token == hubConfig.Token {
+	if token == common.Config.Token {
 		return c.JSON(http.StatusOK, map[string]string{
 			"status": "Authentication successful",
 		})
@@ -441,17 +439,16 @@ func tokenCheck(c echo.Context) error {
 	}
 }
 
-func configRoot(c echo.Context) error {
+func leaderConfig(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
-		"config_root": hubConfig.ConfigRoot,
+		"redis":          common.Config.Redis,
+		"redis_password": common.Config.RedisPassword,
 	})
 }
 
-func ServerStart(listener string, config *common.HubConfig) error {
+func ServerStart(listener string) error {
 	e := echo.New()
 	e.HideBanner = true
-
-	hubConfig = config
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -492,7 +489,7 @@ func ServerStart(listener string, config *common.HubConfig) error {
 	e.GET("/config/download", downloadConfig, TokenAuthMiddleware)
 
 	// HubConfig
-	e.GET("config_root", configRoot, TokenAuthMiddleware)
+	e.GET("/leader_config", leaderConfig, TokenAuthMiddleware)
 
 	// Token check
 	e.GET("/token/check", tokenCheck)

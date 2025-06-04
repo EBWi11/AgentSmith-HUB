@@ -1,0 +1,28 @@
+<root name="test2" type="DETECTION">
+    <rule id="reverse_shell_01" name="测试" author="test">
+        <filter field="data_type">_$data_type</filter>
+        <checklist condition="a and c and d and e">
+            <node id="a" type="REGEX" field="exe">testcases</node>
+            <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">optddd|ltp</node>
+            <node id="d" type="EQU" field="sessionid">_$sessionid</node>
+        </checklist>
+        <append field_name="abc">123</append>
+        <del>exe,argv</del>
+    </rule>
+
+    <rule id="c2_connect_02" name="测试" author="test">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="REGEX" field="exe">testcases</node>
+            <node type="INCL" field="argv">6400</node>
+        </checklist>
+    </rule>
+
+    <rule id="reverse_shell_03" name="测试" author="test">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="REGEX" field="exe">testcases</node>
+            <node type="INCL" field="argv">8400</node>
+        </checklist>
+    </rule>
+</root>
