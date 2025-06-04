@@ -129,11 +129,14 @@ func LoadLeaderProject() error {
 	common.Config.Redis = leaderConfig["redis"]
 	common.Config.Redis = leaderConfig["redis_password"]
 
+	api.GetAllComponents("")
+
 	return nil
 }
 
 func main() {
 	var err error
+	// init global config
 	common.Config = &common.HubConfig{}
 
 	configRoot := flag.String("config_root", "", "agent smith hub config path, only leader need")
@@ -168,7 +171,7 @@ func main() {
 			return
 		}
 
-		//leader creates or read token
+		//leader creates or reads token
 		common.Config.Token, err = readToken(true)
 		if err != nil {
 			logger.Error("read or create token error", "error", err)
@@ -216,10 +219,10 @@ func main() {
 		return
 	}
 
-	// start all project
+	// start all projects
 	StartAllProject()
 
-	// Start Api
+	// start Api
 	err = api.ServerStart(common.Config.Listen)
 	if err != nil {
 		logger.Error("server start err", "error", err.Error())

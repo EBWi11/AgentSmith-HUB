@@ -5,7 +5,6 @@ import (
 	"AgentSmith-HUB/logger"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -88,7 +87,7 @@ func NewPlugin(path string, pluginType string) (*Plugin, error) {
 		return nil, fmt.Errorf("plugin file not found at path: %s", path)
 	}
 
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plugin file: %w", err)
 	}

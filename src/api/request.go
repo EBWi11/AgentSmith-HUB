@@ -187,7 +187,13 @@ func GetAllComponents(componentType string) ([]map[string]interface{}, error) {
 	}
 
 	for _, v := range result {
-		id := v["id"].(string)
+		var id string
+		if componentType == "plugin" {
+			id = v["name"].(string)
+		} else {
+			id = v["id"].(string)
+		}
+
 		tmp, err := GetComponentDetail(componentType, id)
 		if err != nil {
 			return nil, errors.New("get all project failed, err" + err.Error())

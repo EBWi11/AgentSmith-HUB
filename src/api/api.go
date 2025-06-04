@@ -3,6 +3,7 @@ package api
 import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"archive/zip"
 	"bytes"
@@ -127,6 +128,33 @@ func getInput(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
+}
+
+func getPlugins(c echo.Context) error {
+	plugins := make([]map[string]interface{}, 0)
+
+	for _, p := range plugin.Plugins {
+		if p.Type == 1 {
+			plugins = append(plugins, map[string]interface{}{
+				"type": p.Type,
+				"name": p.Name,
+			})
+		}
+	}
+	return c.JSON(http.StatusOK, plugins)
+}
+
+func getPlugin(c echo.Context) error {
+	name := c.Param("name")
+
+	if p, ok := plugin.Plugins[name]; ok {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"name":    p.Name,
+			"type":    p.Type,
+			"payload": p.Payload,
+		})
+	}
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 }
 
 // getOutputs returns a list of all output components
@@ -473,6 +501,10 @@ func ServerStart(listener string) error {
 	// Output endpoints
 	e.GET("/output", getOutputs, TokenAuthMiddleware)
 	e.GET("/output/:id", getOutput, TokenAuthMiddleware)
+
+	// Plugin endpoints
+	e.GET("/plugin", getPlugins, TokenAuthMiddleware)
+	e.GET("/plugin/:id", getPlugin, TokenAuthMiddleware)
 
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)
