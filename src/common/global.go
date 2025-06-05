@@ -1,5 +1,7 @@
 package common
 
+import "sync"
+
 var Config *HubConfig
 
 // for follower node
@@ -9,3 +11,5 @@ var AllOutputsRawConfig map[string]string
 var AllRulesetsRawConfig map[string]string
 var AllProjectRawConfig map[string]string
 var AllPluginsRawConfig map[string]string
+
+var GlobalMu sync.RWMutex

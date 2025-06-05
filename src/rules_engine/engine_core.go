@@ -3,6 +3,7 @@ package rules_engine
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"errors"
 	"fmt"
 	regexp "github.com/BurntSushi/rure-go"
 	"github.com/panjf2000/ants/v2"
@@ -141,6 +142,37 @@ waitDownstream:
 	}
 
 	return nil
+}
+
+func (r *Ruleset) HotUpdate(raw string, id string) (*Ruleset, error) {
+	newR, err := NewRuleset("", raw, id)
+	if err != nil {
+		return nil, errors.New("new ruleset parse error: " + err.Error())
+	}
+
+	err = r.Stop()
+	if err != nil {
+		return nil, errors.New("Hot update stop ruleset error: " + err.Error())
+	}
+
+	// init ruleset
+	r.Rules = make([]Rule, 0)
+	r.RulesByFilter = make(map[string]*RulesByFilter)
+	r.RawConfig = ""
+
+	for i := range r.DownStream {
+		newR.DownStream[i] = r.DownStream[i]
+	}
+
+	for i := range r.UpStream {
+		newR.UpStream[i] = r.UpStream[i]
+	}
+
+	err = newR.Start()
+	if err != nil {
+		return newR, errors.New("Hot update stop ruleset error: " + err.Error())
+	}
+	return newR, nil
 }
 
 // EngineCheck executes all rules in the ruleset on the provided data.

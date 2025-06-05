@@ -46,8 +46,6 @@ type Ruleset struct {
 	stopChan chan struct{} // 用于Start/Stop的控制
 	antsPool *ants.Pool    // ants线程池
 
-	rulesMu sync.RWMutex // Mutex for hot update of rules
-
 	Cache            *ristretto.Cache[string, int]
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
 	// only for classify local cache
@@ -165,7 +163,6 @@ type Plugin struct {
 
 // NewRuleset creates a new resource from an XML file
 // path: Path to the resource XML file
-// id: Unique identifier for the resource
 func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	var rawRuleset []byte
 	if path != "" {
@@ -188,8 +185,13 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 		return nil, fmt.Errorf("failed to parse resource: %w", err)
 	}
 
-	ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
-	ruleset.DownStream = make(map[string]*chan map[string]interface{}, 0)
+	if len(ruleset.UpStream) == 0 {
+		ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
+	}
+
+	if len(ruleset.DownStream) == 0 {
+		ruleset.DownStream = make(map[string]*chan map[string]interface{}, 0)
+	}
 
 	ruleset.RulesetID = id
 	return ruleset, nil
