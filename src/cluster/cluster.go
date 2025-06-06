@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -62,6 +64,15 @@ type ClusterManager struct {
 	MaxMissCount      int // Maximum allowed consecutive missed heartbeats
 	stopChan          chan struct{}
 }
+
+var (
+	// GlobalMu protects cluster-wide state
+	GlobalMu sync.RWMutex
+	// Nodes tracks all nodes in the cluster
+	Nodes = make(map[string]time.Time)
+	// Leader is the current leader node
+	Leader string
+)
 
 // InitClusterManager initializes the cluster manager
 func ClusterInit(selfID, selfAddress string) *ClusterManager {
@@ -299,4 +310,46 @@ func (cm *ClusterManager) Start() {
 
 	// Start cleanup loop
 	cm.StartCleanupLoop()
+}
+
+// NotifyFollowersComponentUpdate notifies all followers about a component update
+func NotifyFollowersComponentUpdate(componentType string, id string, raw string) error {
+	GlobalMu.RLock()
+	defer GlobalMu.RUnlock()
+
+	for node := range Nodes {
+		if node != Leader {
+			// Skip if the node is the leader itself
+			url := fmt.Sprintf("http://%s/component/sync", node)
+			payload := map[string]interface{}{
+				"type": componentType,
+				"id":   id,
+				"raw":  raw,
+			}
+
+			jsonData, err := json.Marshal(payload)
+			if err != nil {
+				logger.Error("failed to marshal component update payload", "error", err)
+				continue
+			}
+
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+			if err != nil {
+				logger.Error("failed to create request for follower sync", "error", err)
+				continue
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", common.Config.Token))
+
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				logger.Error("failed to sync with follower", "node", node, "error", err)
+				continue
+			}
+			_ = resp.Body.Close()
+		}
+	}
+	return nil
 }

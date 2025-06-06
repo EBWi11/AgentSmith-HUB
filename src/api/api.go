@@ -3,8 +3,12 @@ package api
 import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
@@ -13,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -470,6 +475,333 @@ func leaderConfig(c echo.Context) error {
 	}
 }
 
+// handleComponentSync handles component synchronization from leader to follower
+func handleComponentSync(c echo.Context) error {
+	var request struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Raw  string `json:"raw"`
+	}
+
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Handle deletion requests
+	if strings.HasSuffix(request.Type, "_delete") {
+		componentType := strings.TrimSuffix(request.Type, "_delete")
+		switch componentType {
+		case "ruleset":
+			delete(common.AllRulesetsRawConfig, request.ID)
+		case "input":
+			delete(common.AllInputsRawConfig, request.ID)
+		case "output":
+			delete(common.AllOutputsRawConfig, request.ID)
+		case "project":
+			delete(common.AllProjectRawConfig, request.ID)
+		}
+		return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
+	}
+
+	// Handle regular updates
+	switch request.Type {
+	case "ruleset":
+		common.AllRulesetsRawConfig[request.ID] = request.Raw
+		// Update running ruleset if it exists
+		for _, p := range project.GetProjects() {
+			if rs, ok := p.Rulesets[request.ID]; ok {
+				if updatedRuleset, err := rs.HotUpdate(request.Raw, request.ID); err != nil {
+					logger.Error("failed to hot update ruleset on follower", "error", err)
+				} else {
+					p.Rulesets[request.ID] = updatedRuleset
+				}
+				break
+			}
+		}
+	case "input":
+		common.AllInputsRawConfig[request.ID] = request.Raw
+		// Update running input if it exists
+		for _, p := range project.GetProjects() {
+			if in, ok := p.Inputs[request.ID]; ok {
+				if err := in.Stop(); err != nil {
+					logger.Error("failed to stop input on follower", "error", err)
+				}
+				if newInput, err := input.NewInput("", request.Raw, request.ID); err != nil {
+					logger.Error("failed to create new input on follower", "error", err)
+				} else {
+					p.Inputs[request.ID] = newInput
+					if err := newInput.Start(); err != nil {
+						logger.Error("failed to start new input on follower", "error", err)
+					}
+				}
+				break
+			}
+		}
+	case "output":
+		common.AllOutputsRawConfig[request.ID] = request.Raw
+		// Update running output if it exists
+		for _, p := range project.GetProjects() {
+			if out, ok := p.Outputs[request.ID]; ok {
+				if err := out.Stop(); err != nil {
+					logger.Error("failed to stop output on follower", "error", err)
+				}
+				if newOutput, err := output.NewOutput("", request.Raw, request.ID); err != nil {
+					logger.Error("failed to create new output on follower", "error", err)
+				} else {
+					p.Outputs[request.ID] = newOutput
+					if err := newOutput.Start(); err != nil {
+						logger.Error("failed to start new output on follower", "error", err)
+					}
+				}
+				break
+			}
+		}
+	case "project":
+		common.AllProjectRawConfig[request.ID] = request.Raw
+		// For projects, we don't automatically start them on followers
+		// They should be started explicitly through the start project API
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "synced"})
+}
+
+// updateRuleset handler function
+func updateRuleset(c echo.Context) error {
+	id := c.Param("id")
+	var requestBody struct {
+		Raw string `json:"raw"`
+	}
+
+	if err := c.Bind(&requestBody); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	if requestBody.Raw == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw ruleset content is required"})
+	}
+
+	projects := project.GetProjects()
+	var updatedRuleset *rules_engine.Ruleset
+	var err error
+
+	for _, p := range projects {
+		if rs, ok := p.Rulesets[id]; ok {
+			updatedRuleset, err = rs.HotUpdate(requestBody.Raw, id)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("failed to update ruleset: %v", err),
+				})
+			}
+
+			// Update the ruleset in the project and global config
+			p.Rulesets[id] = updatedRuleset
+			common.GlobalMu.Lock()
+			common.AllRulesetsRawConfig[id] = requestBody.Raw
+			common.GlobalMu.Unlock()
+
+			// If this is the leader node, notify all followers
+			if cluster.IsLeader {
+				if err := cluster.NotifyFollowersComponentUpdate("ruleset", id, requestBody.Raw); err != nil {
+					logger.Error("failed to notify followers of ruleset update", "error", err)
+				}
+			}
+
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"id":           updatedRuleset.RulesetID,
+				"type":         updatedRuleset.Type,
+				"is_detection": updatedRuleset.IsDetection,
+				"raw":          updatedRuleset.RawConfig,
+				"message":      "ruleset updated successfully",
+			})
+		}
+	}
+
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
+}
+
+// createComponent handles creation of new components
+func createComponent(componentType string, c echo.Context) error {
+	var request struct {
+		ID  string `json:"id"`
+		Raw string `json:"raw"`
+	}
+
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	if request.ID == "" || request.Raw == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw content are required"})
+	}
+
+	// Validate component configuration
+	var err error
+	switch componentType {
+	case "ruleset":
+		_, err = rules_engine.NewRuleset("", request.Raw, request.ID)
+	case "input":
+		_, err = input.NewInput("", request.Raw, request.ID)
+	case "output":
+		_, err = output.NewOutput("", request.Raw, request.ID)
+	case "project":
+		_, err = project.NewProject("", request.Raw, request.ID)
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
+	}
+
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid %s configuration: %v", componentType, err),
+		})
+	}
+
+	// If this is the leader node, write to config file and notify followers
+	if cluster.IsLeader {
+		if err := common.WriteConfigFile(componentType, request.ID, request.Raw); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to write configuration: %v", err),
+			})
+		}
+
+		// Notify followers
+		if err := cluster.NotifyFollowersComponentUpdate(componentType, request.ID, request.Raw); err != nil {
+			logger.Error("failed to notify followers of component creation", "error", err)
+		}
+	}
+
+	// Update global configuration
+	common.GlobalMu.Lock()
+	switch componentType {
+	case "ruleset":
+		common.AllRulesetsRawConfig[request.ID] = request.Raw
+	case "input":
+		common.AllInputsRawConfig[request.ID] = request.Raw
+	case "output":
+		common.AllOutputsRawConfig[request.ID] = request.Raw
+	case "project":
+		common.AllProjectRawConfig[request.ID] = request.Raw
+	}
+	common.GlobalMu.Unlock()
+
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"id":      request.ID,
+		"type":    componentType,
+		"message": fmt.Sprintf("%s created successfully", componentType),
+	})
+}
+
+// Component creation handlers
+func createRuleset(c echo.Context) error {
+	return createComponent("ruleset", c)
+}
+
+func createInput(c echo.Context) error {
+	return createComponent("input", c)
+}
+
+func createOutput(c echo.Context) error {
+	return createComponent("output", c)
+}
+
+func createProject(c echo.Context) error {
+	return createComponent("project", c)
+}
+
+// deleteComponent handles deletion of components
+func deleteComponent(componentType string, c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+	}
+
+	// Check if component is in use by any project
+	projects := project.GetProjects()
+	for _, p := range projects {
+		var inUse bool
+		switch componentType {
+		case "ruleset":
+			_, inUse = p.Rulesets[id]
+		case "input":
+			_, inUse = p.Inputs[id]
+		case "output":
+			_, inUse = p.Outputs[id]
+		}
+		if inUse {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
+			})
+		}
+	}
+
+	// If this is the leader node, delete config file and notify followers
+	if cluster.IsLeader {
+		if err := common.DeleteConfigFile(componentType, id); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to delete configuration: %v", err),
+			})
+		}
+
+		// Notify followers about deletion
+		if err := cluster.NotifyFollowersComponentUpdate(componentType+"_delete", id, ""); err != nil {
+			logger.Error("failed to notify followers of component deletion", "error", err)
+		}
+	}
+
+	// Remove from global configuration
+	common.GlobalMu.Lock()
+	switch componentType {
+	case "ruleset":
+		delete(common.AllRulesetsRawConfig, id)
+	case "input":
+		delete(common.AllInputsRawConfig, id)
+	case "output":
+		delete(common.AllOutputsRawConfig, id)
+	case "project":
+		delete(common.AllProjectRawConfig, id)
+	}
+	common.GlobalMu.Unlock()
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": fmt.Sprintf("%s deleted successfully", componentType),
+	})
+}
+
+// Component deletion handlers
+func deleteRuleset(c echo.Context) error {
+	return deleteComponent("ruleset", c)
+}
+
+func deleteInput(c echo.Context) error {
+	return deleteComponent("input", c)
+}
+
+func deleteOutput(c echo.Context) error {
+	return deleteComponent("output", c)
+}
+
+func deleteProject(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+	}
+
+	// Check if project is running
+	if p := project.GetProject(id); p != nil {
+		if p.Status == project.ProjectStatusRunning {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "cannot delete running project, stop it first",
+			})
+		}
+	}
+
+	return deleteComponent("project", c)
+}
+
 func ServerStart(listener string) error {
 	e := echo.New()
 	e.HideBanner = true
@@ -483,20 +815,29 @@ func ServerStart(listener string) error {
 	// Project endpoints
 	e.GET("/project", getProjects, TokenAuthMiddleware)
 	e.GET("/project/:id", getProject, TokenAuthMiddleware)
+	e.POST("/project", createProject, TokenAuthMiddleware)
+	e.DELETE("/project/:id", deleteProject, TokenAuthMiddleware)
 	e.POST("/project/start", StartProject, TokenAuthMiddleware)
 	e.POST("/project/stop", StopProject, TokenAuthMiddleware)
 
 	// Ruleset endpoints
 	e.GET("/ruleset", getRulesets, TokenAuthMiddleware)
 	e.GET("/ruleset/:id", getRuleset, TokenAuthMiddleware)
+	e.POST("/ruleset", createRuleset, TokenAuthMiddleware)
+	e.PUT("/ruleset/:id", updateRuleset, TokenAuthMiddleware)
+	e.DELETE("/ruleset/:id", deleteRuleset, TokenAuthMiddleware)
 
 	// Input endpoints
 	e.GET("/input", getInputs, TokenAuthMiddleware)
 	e.GET("/input/:id", getInput, TokenAuthMiddleware)
+	e.POST("/input", createInput, TokenAuthMiddleware)
+	e.DELETE("/input/:id", deleteInput, TokenAuthMiddleware)
 
 	// Output endpoints
 	e.GET("/output", getOutputs, TokenAuthMiddleware)
 	e.GET("/output/:id", getOutput, TokenAuthMiddleware)
+	e.POST("/output", createOutput, TokenAuthMiddleware)
+	e.DELETE("/output/:id", deleteOutput, TokenAuthMiddleware)
 
 	// Plugin endpoints
 	e.GET("/plugin", getPlugins, TokenAuthMiddleware)
@@ -521,6 +862,9 @@ func ServerStart(listener string) error {
 
 	// Token check
 	e.GET("/token/check", tokenCheck)
+
+	// Component sync endpoint
+	e.POST("/component/sync", handleComponentSync, TokenAuthMiddleware)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

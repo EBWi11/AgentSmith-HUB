@@ -4,17 +4,19 @@ import (
 	"archive/zip"
 	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
-	"github.com/cespare/xxhash/v2"
-	"github.com/google/uuid"
 	"io"
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/bytedance/sonic"
+	"github.com/cespare/xxhash/v2"
+	"github.com/google/uuid"
 )
 
 func GetFileNameWithoutExt(path string) string {
@@ -327,4 +329,60 @@ func GetCheckData(data map[string]interface{}, checkKeyList []string) (res strin
 		return "", exist
 	}
 	return res, exist
+}
+
+// WriteConfigFile writes a configuration file to the config root directory
+func WriteConfigFile(componentType string, id string, content string) error {
+	if Config.ConfigRoot == "" {
+		return fmt.Errorf("config root is not set")
+	}
+
+	var fileExt string
+	switch componentType {
+	case "ruleset":
+		fileExt = ".xml"
+	case "project", "input", "output":
+		fileExt = ".yaml"
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	dirPath := path.Join(Config.ConfigRoot, componentType)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+	}
+
+	filePath := path.Join(dirPath, id+fileExt)
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", filePath, err)
+	}
+
+	return nil
+}
+
+// DeleteConfigFile deletes a configuration file from the config root directory
+func DeleteConfigFile(componentType string, id string) error {
+	if Config.ConfigRoot == "" {
+		return fmt.Errorf("config root is not set")
+	}
+
+	var fileExt string
+	switch componentType {
+	case "ruleset":
+		fileExt = ".xml"
+	case "project", "input", "output":
+		fileExt = ".yaml"
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	filePath := path.Join(Config.ConfigRoot, componentType, id+fileExt)
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist, which is fine for deletion
+		}
+		return fmt.Errorf("failed to delete file %s: %w", filePath, err)
+	}
+
+	return nil
 }
