@@ -92,7 +92,7 @@ func NewPlugin(path string, pluginType string) (*Plugin, error) {
 		return nil, fmt.Errorf("failed to read plugin file: %w", err)
 	}
 
-	p := &Plugin{Path: path, Payload: content}
+	p := &Plugin{Path: path, Payload: content, Type: 1}
 
 	switch pluginType {
 	case "Yaegi":
