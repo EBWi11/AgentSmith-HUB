@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.rounded-button {
+  border-radius: 0.375rem;
+} 

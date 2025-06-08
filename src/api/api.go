@@ -133,12 +133,10 @@ func getPlugins(c echo.Context) error {
 	plugins := make([]map[string]interface{}, 0)
 
 	for _, p := range plugin.Plugins {
-		if p.Type == 1 {
-			plugins = append(plugins, map[string]interface{}{
-				"type": p.Type,
-				"name": p.Name,
-			})
-		}
+		plugins = append(plugins, map[string]interface{}{
+			"type": p.Type,
+			"name": p.Name,
+		})
 	}
 	return c.JSON(http.StatusOK, plugins)
 }
@@ -806,6 +804,16 @@ func ServerStart(listener string) error {
 	e := echo.New()
 	e.HideBanner = true
 
+	// Add CORS middleware with more permissive configuration
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     []string{"*"},          // Allow all origins
+		AllowHeaders:     []string{"*", "token"}, // Allow all headers and explicitly allow token
+		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete, http.MethodOptions},
+		AllowCredentials: true,                       // Allow credentials
+		ExposeHeaders:    []string{"Content-Length"}, // Expose these headers
+		MaxAge:           86400,                      // Cache preflight requests for 24 hours
+	}))
+
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
@@ -841,7 +849,7 @@ func ServerStart(listener string) error {
 
 	// Plugin endpoints
 	e.GET("/plugin", getPlugins, TokenAuthMiddleware)
-	e.GET("/plugin/:id", getPlugin, TokenAuthMiddleware)
+	e.GET("/plugin/:name", getPlugin, TokenAuthMiddleware)
 
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)
