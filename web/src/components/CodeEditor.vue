@@ -17,7 +17,7 @@ import { closeBrackets } from '@codemirror/autocomplete'
 
 const props = defineProps({
   value: String,
-  language: { type: String, default: 'json' },
+  language: { type: String, default: 'yaml' },
   readOnly: { type: Boolean, default: true },
 })
 
@@ -35,43 +35,51 @@ const duckDBTheme = EditorView.theme({
     color: '#34495e',
     backgroundColor: '#fff',
     height: '100%',
-    fontSize: '14px',
-    fontFamily: '"JetBrains Mono", "Menlo", "monospace"',
-    lineHeight: '1.7',
+    fontSize: '13px',
+    fontFamily: 'inherit',
+    lineHeight: 'normal',
   },
   '.cm-scroller': {
     overflow: 'hidden',
     fontFamily: 'inherit',
   },
   '.cm-content, .cm-gutters': {
-      paddingTop: '12px',
-      paddingBottom: '12px',
+    paddingTop: '0',
+    paddingBottom: '0',
   },
   '.cm-gutters': {
     backgroundColor: '#fff',
     color: '#adb5bd',
     border: 'none',
-    paddingLeft: '20px',
-    width: '55px',
+    paddingLeft: '10px',
+    width: '38px',
+    minWidth: 'unset',
+    fontFamily: 'inherit',
   },
   '.cm-gutterElement': {
-      textAlign: 'right',
-      paddingRight: '20px',
-      fontWeight: 'normal',
+    textAlign: 'right',
+    paddingRight: '6px',
+    marginLeft: '0',
+    fontFamily: 'inherit',
+    lineHeight: '20px',
+    height: '20px',
   },
-  '.cm-activeLine, .cm-activeLineGutter': {
-    backgroundColor: 'transparent'
+  '.cm-line': {
+    paddingLeft: '10px',
+    lineHeight: '20px',
+    height: '20px',
+    fontFamily: 'inherit',
   }
 }, { dark: false });
 
 // Final, pixel-perfect highlighting style to match DuckDB
 const duckDBHighlightStyle = HighlightStyle.define([
-  { tag: tags.tagName, color: '#1967d2' }, 
-  { tag: tags.attributeName, color: '#008073' },
-  { tag: tags.attributeValue, color: '#c41a1e' },
-  { tag: tags.string, color: '#c41a1e' },
-  { tag: tags.number, color: '#9b59b6' },
-  { tag: tags.bool, color: '#9b59b6' },
+  { tag: tags.tagName, color: '#3366ae' },
+  { tag: tags.attributeName, color: '#367719' },
+  { tag: tags.attributeValue, color: '#a63437' },
+  { tag: tags.string, color: '#a63437' },
+  { tag: tags.number, color: '#17572d' },
+  { tag: tags.bool, color: '#17572d' },
   { tag: tags.propertyName, color: '#008073' },
   { tag: tags.comment, color: '#95a5a6', fontStyle: 'italic' },
 ]);
@@ -118,22 +126,3 @@ onBeforeUnmount(() => {
   if (view) view.destroy()
 })
 </script>
-
-<style scoped>
-.duckdb-cm-simple {
-  border: 1.5px solid #E0E7EF;
-  border-radius: 12px;
-  background: #fff;
-  display: flex;
-  height: 100%;
-}
-.duckdb-cm-simple-container {
-  height: auto;
-  font-family: 'JetBrains Mono', 'Menlo', "monospace";
-  font-size: 14px;
-  line-height: 1.7;
-  background: #fff;
-  flex: 1;
-  overflow: hidden;
-}
-</style> 

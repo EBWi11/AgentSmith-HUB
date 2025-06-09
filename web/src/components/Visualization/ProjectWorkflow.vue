@@ -29,10 +29,10 @@ import yaml from 'js-yaml';
 import CustomNode from './CustomNode.vue';
 
 const props = defineProps({
-  projectContent: {
-    type: String,
-    required: true,
-  },
+    projectContent: {
+      type: String,
+      required: true,
+    },
 });
 
 const nodes = ref([]);
@@ -42,22 +42,22 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
   if (!rawProjectContent) {
     nodes.value = [];
     edges.value = [];
-    return;
-  }
+          return;
+        }
 
   try {
     const doc = yaml.load(rawProjectContent);
     const content = doc.content || '';
-    const lines = content.trim().split('\n');
+        const lines = content.trim().split('\n');
     
     const tempNodes = new Map();
     const tempEdges = [];
 
     lines.forEach((line, index) => {
       if (!line.trim() || !line.includes('->')) return;
-      const parts = line.split('->');
-      if (parts.length !== 2) return;
-
+          const parts = line.split('->');
+          if (parts.length !== 2) return;
+          
       const fromId = parts[0].trim();
       const toId = parts[1].trim();
       
@@ -70,7 +70,7 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
             type: 'custom',
             data: { nodeType: type.toUpperCase(), nodeName: name }
           });
-        }
+          }
       };
 
       addNode(fromId);
@@ -84,8 +84,8 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
         style: { stroke: '#a1a1aa', strokeWidth: 1.5 },
         markerEnd: { type: 'arrowclosed', color: '#a1a1aa' }
       });
-    });
-    
+        });
+
     const newNodes = Array.from(tempNodes.values());
     
     const g = new dagre.graphlib.Graph();
@@ -103,16 +103,16 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 
     nodes.value = newNodes.map(node => {
       const nodeWithPosition = g.node(node.id);
-      return {
+          return {
         ...node,
         position: { x: nodeWithPosition.x - 45, y: nodeWithPosition.y - 22.5 },
-      };
-    });
+          };
+        });
 
     edges.value = tempEdges;
 
-  } catch (e) {
-    console.error("Error parsing project workflow:", e);
+      } catch (e) {
+        console.error("Error parsing project workflow:", e);
     nodes.value = [];
     edges.value = [];
   }
@@ -121,7 +121,7 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 watch(() => props.projectContent, (newVal) => {
   parseAndLayoutWorkflow(newVal);
 }, { immediate: true, deep: true });
-</script>
+</script> 
 
 <style>
 @import '@vue-flow/core/dist/style.css';

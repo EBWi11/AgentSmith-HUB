@@ -14,7 +14,7 @@
 
   <!-- Default layout for other components -->
   <div v-else-if="detail && detail.raw" class="h-full">
-    <CodeEditor :value="detail.raw" :language="item.type === 'rulesets' ? 'xml' : 'json'" class="h-full" />
+    <CodeEditor :value="detail.raw" :language="item.type === 'rulesets' ? 'xml' : (item.type === 'plugin' ? 'go' : 'yaml')" class="h-full" />
   </div>
 
   <div v-else class="flex items-center justify-center h-full text-gray-400 text-lg">

@@ -178,5 +178,15 @@ export const hubApi = {
   async getPlugin(name) {
     const response = await api.get(`/plugin/${name}`);
     return response.data;
+  },
+
+  async fetchClusterStatus() {
+    const response = await api.get('/cluster/status');
+    return response.data;
+  },
+
+  async fetchClusterInfo() {
+    const response = await api.get('/cluster_info');
+    return response.data;
   }
 }; 
