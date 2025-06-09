@@ -12,6 +12,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -473,6 +474,11 @@ func leaderConfig(c echo.Context) error {
 	}
 }
 
+func getCluster(c echo.Context) error {
+	data, _ := json.Marshal(cluster.ClusterInstance)
+	return c.String(http.StatusOK, string(data))
+}
+
 // handleComponentSync handles component synchronization from leader to follower
 func handleComponentSync(c echo.Context) error {
 	var request struct {
@@ -873,6 +879,9 @@ func ServerStart(listener string) error {
 
 	// Component sync endpoint
 	e.POST("/component/sync", handleComponentSync, TokenAuthMiddleware)
+
+	// Hub cluster
+	e.GET("/cluster_info", getCluster, TokenAuthMiddleware)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
