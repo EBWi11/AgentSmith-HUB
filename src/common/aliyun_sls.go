@@ -34,10 +34,6 @@ func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logst
 		slsConsumer.LoghubConfig.CursorStartTime = cursorStartTime
 	}
 
-	if query != "" {
-		slsConsumer.LoghubConfig.Query = query
-	}
-
 	slsConsumer.MsgChan = msgChan
 
 	return slsConsumer
