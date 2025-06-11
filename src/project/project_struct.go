@@ -49,6 +49,8 @@ type Project struct {
 	errorChan   chan error
 	metrics     *ProjectMetrics
 	metricsStop chan struct{}
+
+	Err error
 }
 
 // ProjectMetrics holds runtime metrics for the project

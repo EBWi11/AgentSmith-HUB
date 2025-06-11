@@ -324,6 +324,8 @@ func (p *Project) Start() error {
 	// Start inputs
 	for _, in := range p.Inputs {
 		if err := in.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
 			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
 		}
 	}
@@ -331,6 +333,8 @@ func (p *Project) Start() error {
 	// Start rulesets
 	for _, rs := range p.Rulesets {
 		if err := rs.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
 			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 		}
 	}
@@ -338,6 +342,8 @@ func (p *Project) Start() error {
 	// Start outputs
 	for _, out := range p.Outputs {
 		if err := out.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
 			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
 		}
 	}

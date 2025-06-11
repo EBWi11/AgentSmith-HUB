@@ -34,6 +34,15 @@
             <div v-for="item in filteredItems(type)" :key="item.id || item.name" 
                  class="flex items-center py-1.5 px-2 rounded-md hover:bg-gray-200 cursor-pointer group"
                  @click="$emit('select-item', { type, id: item.id || item.name })">
+              <div v-if="type === 'projects'" class="relative mr-2">
+                <div class="w-2 h-2 rounded-full" 
+                     :class="{
+                       'bg-green-500 animate-pulse': item.status === 'running',
+                       'bg-red-500': item.status === 'stopped',
+                       'bg-yellow-500': item.status === 'error'
+                     }">
+                </div>
+              </div>
               <svg v-html="section.icon" class="w-4 h-4 mr-3 text-gray-500 group-hover:text-primary"></svg>
               <span class="text-sm text-gray-700 group-hover:text-primary">{{ item.id || item.name }}</span>
             </div>
@@ -126,14 +135,33 @@ export default {
       addType: '',
       addName: '',
       addRaw: '',
-      addError: ''
+      addError: '',
+      projectRefreshInterval: null
     };
   },
 
   async created() {
     await this.fetchAllItems();
+    // Start polling for project status updates
+    this.startProjectPolling();
   },
+
+  beforeUnmount() {
+    // Clean up polling interval when component is destroyed
+    if (this.projectRefreshInterval) {
+      clearInterval(this.projectRefreshInterval);
+    }
+  },
+
   methods: {
+    startProjectPolling() {
+      // Refresh project status every 5 seconds
+      this.projectRefreshInterval = setInterval(async () => {
+        if (!this.collapsed.projects) {
+          await this.fetchItems('projects');
+        }
+      }, 5000);
+    },
     toggleCollapse(type) {
         this.collapsed[type] = !this.collapsed[type];
     },
