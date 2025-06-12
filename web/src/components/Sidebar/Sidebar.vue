@@ -1,41 +1,55 @@
 <template>
-  <aside class="w-64 h-full bg-gray-50 border-r border-gray-200 flex flex-col">
-    <div class="p-4">
+  <aside class="w-72 h-full bg-white shadow-sm flex flex-col px-3 pt-5 pb-3 font-sans">
+    <div class="mb-4">
       <div class="relative">
-        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-        <input type="text" placeholder="Search" v-model="search" class="w-full pl-9 pr-4 py-2 rounded-md bg-white border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
+        <input
+          type="text"
+          placeholder="Search"
+          v-model="search"
+          class="w-full pl-7 pr-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+        />
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
       </div>
     </div>
-
-    <div class="flex-1 overflow-y-auto">
-      <div v-for="(section, type) in sections" :key="type" v-if="type !== 'cluster'">
-        <div class="flex items-center justify-between mb-2">
-          <button @click="toggleCollapse(type)" class="flex items-center text-sm font-semibold text-gray-600 hover:text-primary w-full">
-            <svg class="w-4 h-4 mr-2 transition-transform" :class="{ 'rotate-90': !collapsed[type] }" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-            <span>{{ section.title }}</span>
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      <div v-for="(section, type) in sections" :key="type" class="mb-4">
+        <div class="flex items-center justify-between mb-1.5">
+          <button
+            @click="toggleCollapse(type)"
+            class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+            style="min-width:0;"
+          >
+            <svg
+              class="w-4 h-4 mr-1.5 transition-transform duration-200"
+              :class="{ 'rotate-90': !collapsed[type] }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+            <span class="truncate">{{ section.title }}</span>
           </button>
-          <button v-if="!section.children" @click="openAddModal(type)" class="text-gray-400 hover:text-primary">
+          <button v-if="!section.children" @click="openAddModal(type)" class="rounded-full p-0.5 hover:bg-primary/10 text-primary transition flex items-center justify-center">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
           </button>
         </div>
-        <div v-if="!collapsed[type]" class="pl-4">
-          <!-- 渲染子项（如 Setting 下的 Cluster） -->
+        <div v-if="!collapsed[type]" class="space-y-0.5">
           <div v-if="section.children">
             <div v-for="child in section.children" :key="child.type"
-                 class="flex items-center py-1.5 px-2 rounded-md hover:bg-gray-200 cursor-pointer group"
-                 :class="{ 'bg-gray-200 font-bold': selected && selected.type === child.type }"
+                 class="flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all hover:bg-gray-100"
+                 :class="{ 'bg-primary/10 text-primary font-semibold border-l-2 border-primary': selected && selected.type === child.type, 'text-gray-800': !(selected && selected.type === child.type) }"
                  @click="$emit('select-item', { type: child.type })">
-              <svg v-html="child.icon" class="w-4 h-4 mr-3 text-gray-500 group-hover:text-primary"></svg>
-              <span class="text-sm text-gray-700 group-hover:text-primary">{{ child.title }}</span>
+              <svg v-html="child.icon" class="w-4 h-4 mr-1.5 text-gray-400 group-hover:text-primary"></svg>
+              <span class="flex-1 truncate">{{ child.title }}</span>
             </div>
           </div>
-          <!-- 原有普通子项渲染 -->
-          <div v-else-if="!loading[type] && !error[type]" class="space-y-1">
-            <div v-for="item in filteredItems(type)" :key="item.id || item.name" 
-                 class="flex items-center py-1.5 px-2 rounded-md hover:bg-gray-200 cursor-pointer group"
+          <div v-else-if="!loading[type] && !error[type]">
+            <div v-for="item in filteredItems(type)" :key="item.id || item.name"
+                 :class="['flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all', selected && selected.type === type && selected.id === (item.id || item.name) ? 'bg-primary/10 text-primary font-semibold border-l-2 border-primary' : 'text-gray-800 hover:bg-gray-100']"
                  @click="$emit('select-item', { type, id: item.id || item.name })">
-              <div v-if="type === 'projects'" class="relative mr-2">
-                <div class="w-2 h-2 rounded-full" 
+              <div v-if="type === 'projects'" class="relative mr-1.5">
+                <div class="w-2 h-2 rounded-full"
                      :class="{
                        'bg-green-500 animate-pulse': item.status === 'running',
                        'bg-red-500': item.status === 'stopped',
@@ -43,14 +57,31 @@
                      }">
                 </div>
               </div>
-              <svg v-html="section.icon" class="w-4 h-4 mr-3 text-gray-500 group-hover:text-primary"></svg>
-              <span class="text-sm text-gray-700 group-hover:text-primary">{{ item.id || item.name }}</span>
+              <svg v-html="section.icon" class="w-4 h-4 mr-1.5 text-gray-400 group-hover:text-primary"></svg>
+              <span class="flex-1 truncate">{{ item.id || item.name }}</span>
+              <div class="relative ml-0.5 flex items-center" @click.stop>
+                <button @click="item.menuOpen = !item.menuOpen"
+                  class="p-0.5 rounded-full focus:outline-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 text-gray-300 hover:text-gray-500 flex items-center justify-center"
+                  style="transform: scale(0.7); transform-origin: right;">
+                  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <circle cx="12" cy="5" r="1.5"/>
+                    <circle cx="12" cy="12" r="1.5"/>
+                    <circle cx="12" cy="19" r="1.5"/>
+                  </svg>
+                </button>
+                <div v-if="item.menuOpen" class="absolute right-0 z-50 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1 select-none"
+                  @mouseleave="item.menuOpen = false">
+                  <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="copyName(item)">Copy name</div>
+                  <div class="border-t border-gray-100 my-1"></div>
+                  <div class="px-3 py-1 text-xs text-red-600 hover:bg-red-50 cursor-pointer" @click.stop="deleteItem(type, item)">Delete</div>
+                </div>
+              </div>
             </div>
           </div>
-          <div v-if="loading[type]" class="py-2 text-center text-gray-400">
+          <div v-if="loading[type]" class="py-1 text-center text-gray-400">
             <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mx-auto"></div>
           </div>
-          <div v-else-if="error[type]" class="text-red-500 text-xs py-2">
+          <div v-else-if="error[type]" class="text-red-500 text-xs py-1">
             {{ error[type] }}
           </div>
         </div>
@@ -117,7 +148,8 @@ export default {
         rulesets: true,
         plugins: true,
         projects: true,
-        cluster: true
+        cluster: true,
+        settings: true
       },
       sections: {
         inputs: { title: 'Input', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 1C4.22386 1 4 1.22386 4 1.5C4 1.77614 4.22386 2 4.5 2H12V13H4.5C4.22386 13 4 13.2239 4 13.5C4 13.7761 4.22386 14 4.5 14H12C12.5523 14 13 13.5523 13 13V2C13 1.44772 12.5523 1 12 1H4.5ZM6.60355 4.89645C6.40829 4.70118 6.09171 4.70118 5.89645 4.89645C5.70118 5.09171 5.70118 5.40829 5.89645 5.60355L7.29289 7H0.5C0.223858 7 0 7.22386 0 7.5C0 7.77614 0.223858 8 0.5 8H7.29289L5.89645 9.39645C5.70118 9.59171 5.70118 9.90829 5.89645 10.1036C6.09171 10.2988 6.40829 10.2988 6.60355 10.1036L8.85355 7.85355C9.04882 7.65829 9.04882 7.34171 8.85355 7.14645L6.60355 4.89645Z"></path>' },
@@ -142,7 +174,6 @@ export default {
 
   async created() {
     await this.fetchAllItems();
-    // Start polling for project status updates
     this.startProjectPolling();
   },
 
@@ -298,7 +329,54 @@ flow:
       } catch (err) {
         this.addError = `创建失败: ${err.message || err}`;
       }
+    },
+    copyName(item) {
+      const text = item.id || item.name;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const input = document.createElement('input');
+        input.value = text;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      this.$message && this.$message.success('Copied!');
+      // 关闭所有菜单
+      this.closeAllMenus();
+    },
+    async deleteItem(type, item) {
+      this.closeAllMenus();
+      try {
+        if (type === 'inputs') await hubApi.deleteInput(item.id);
+        else if (type === 'outputs') await hubApi.deleteOutput(item.id);
+        else if (type === 'rulesets') await hubApi.deleteRuleset(item.id);
+        else if (type === 'projects') await hubApi.deleteProject(item.id);
+        else if (type === 'plugins') await hubApi.deletePlugin(item.id);
+        await this.fetchItems(type);
+      } catch (e) {
+        this.$message && this.$message.error('删除失败: ' + (e?.message || '未知错误'));
+      }
+    },
+    closeAllMenus() {
+      Object.values(this.items).forEach(arr => {
+        if (Array.isArray(arr)) {
+          arr.forEach(i => { if (i.menuOpen) i.menuOpen = false; });
+        }
+      });
     }
   }
 };
-</script> 
+</script>
+
+<style>
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 3px;
+}
+</style> 

@@ -43,7 +43,7 @@ var ClusterInstance *ClusterManager
 
 // ClusterManager manages the cluster state
 type ClusterManager struct {
-	mu sync.RWMutex
+	Mu sync.RWMutex
 
 	// Node information
 	SelfID      string
@@ -93,8 +93,8 @@ func ClusterInit(selfID, selfAddress string) *ClusterManager {
 
 // RegisterNode registers a new node in the cluster
 func (cm *ClusterManager) RegisterNode(nodeID, address string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Mu.RLock()
+	defer cm.Mu.Unlock()
 
 	cm.Nodes[nodeID] = &NodeInfo{
 		ID:        nodeID,
@@ -108,8 +108,8 @@ func (cm *ClusterManager) RegisterNode(nodeID, address string) {
 
 // UpdateNodeHeartbeat updates the last seen time for a node
 func (cm *ClusterManager) UpdateNodeHeartbeat(nodeID string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Mu.RLock()
+	defer cm.Mu.Unlock()
 
 	if node, exists := cm.Nodes[nodeID]; exists {
 		node.LastSeen = time.Now()
@@ -120,8 +120,8 @@ func (cm *ClusterManager) UpdateNodeHeartbeat(nodeID string) {
 
 // CheckNodeHealth checks if a node is healthy based on its last heartbeat
 func (cm *ClusterManager) CheckNodeHealth(nodeID string) bool {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.Mu.RLock()
+	defer cm.Mu.RUnlock()
 
 	if node, exists := cm.Nodes[nodeID]; exists {
 		return time.Since(node.LastSeen) < cm.HeartbeatTimeout
@@ -131,8 +131,8 @@ func (cm *ClusterManager) CheckNodeHealth(nodeID string) bool {
 
 // SetLeader sets the leader node
 func (cm *ClusterManager) SetLeader(leaderID, leaderAddress string) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Mu.Lock()
+	defer cm.Mu.Unlock()
 
 	cm.LeaderID = leaderID
 	cm.LeaderAddress = leaderAddress
@@ -148,15 +148,15 @@ func (cm *ClusterManager) SetLeader(leaderID, leaderAddress string) {
 
 // IsLeader checks if this node is the leader
 func (cm *ClusterManager) IsLeader() bool {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.Mu.RLock()
+	defer cm.Mu.RUnlock()
 	return cm.Status == NodeStatusLeader
 }
 
 // GetClusterStatus returns the current cluster status
 func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
-	cm.mu.RLock()
-	defer cm.mu.RUnlock()
+	cm.Mu.RLock()
+	defer cm.Mu.RUnlock()
 
 	status := make(map[string]interface{})
 	status["self_id"] = cm.SelfID
@@ -183,11 +183,11 @@ func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
 
 // SendHeartbeat sends a heartbeat to the leader
 func (cm *ClusterManager) SendHeartbeat() error {
-	cm.mu.RLock()
+	cm.Mu.Unlock()
 	leaderAddr := cm.LeaderAddress
 	selfID := cm.SelfID
 	selfAddr := cm.SelfAddress
-	cm.mu.RUnlock()
+	cm.Mu.RUnlock()
 
 	if leaderAddr == "" {
 		return fmt.Errorf("no leader address available")
@@ -239,9 +239,9 @@ func (cm *ClusterManager) StartHeartbeatLoop() {
 					fmt.Printf("Failed to send heartbeat: %v\n", err)
 
 					// If we're a follower and can't reach the leader, we might need to start an election
-					cm.mu.RLock()
+					cm.Mu.Lock()
 					isFollower := cm.Status == NodeStatusFollower
-					cm.mu.RUnlock()
+					cm.Mu.Unlock()
 
 					if isFollower {
 						// TODO: Implement leader election logic
@@ -257,8 +257,8 @@ func (cm *ClusterManager) StartHeartbeatLoop() {
 
 // cleanupUnhealthyNodes removes nodes that haven't sent heartbeats for too long
 func (cm *ClusterManager) cleanupUnhealthyNodes() {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	cm.Mu.Lock()
+	defer cm.Mu.Unlock()
 
 	now := time.Now()
 	for nodeID, node := range cm.Nodes {

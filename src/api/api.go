@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -684,19 +685,51 @@ func createComponent(componentType string, c echo.Context) error {
 
 // Component creation handlers
 func createRuleset(c echo.Context) error {
-	return createComponent("ruleset", c)
+	var req struct{ ID, Raw string }
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if cluster.IsLeader {
+		body, _ := json.Marshal(req)
+		go syncToFollowers("POST", "/ruleset", body)
+	}
+	return c.JSON(http.StatusCreated, map[string]string{"message": "ruleset created successfully"})
 }
 
 func createInput(c echo.Context) error {
-	return createComponent("input", c)
+	var req struct{ ID, Raw string }
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if cluster.IsLeader {
+		body, _ := json.Marshal(req)
+		go syncToFollowers("POST", "/input", body)
+	}
+	return c.JSON(http.StatusCreated, map[string]string{"message": "input created successfully"})
 }
 
 func createOutput(c echo.Context) error {
-	return createComponent("output", c)
+	var req struct{ ID, Raw string }
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if cluster.IsLeader {
+		body, _ := json.Marshal(req)
+		go syncToFollowers("POST", "/output", body)
+	}
+	return c.JSON(http.StatusCreated, map[string]string{"message": "output created successfully"})
 }
 
 func createProject(c echo.Context) error {
-	return createComponent("project", c)
+	var req struct{ ID, Raw string }
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if cluster.IsLeader {
+		body, _ := json.Marshal(req)
+		go syncToFollowers("POST", "/project", body)
+	}
+	return c.JSON(http.StatusCreated, map[string]string{"message": "project created successfully"})
 }
 
 // deleteComponent handles deletion of components
@@ -760,15 +793,36 @@ func deleteComponent(componentType string, c echo.Context) error {
 
 // Component deletion handlers
 func deleteRuleset(c echo.Context) error {
-	return deleteComponent("ruleset", c)
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+	}
+	if cluster.IsLeader {
+		go syncToFollowers("DELETE", "/ruleset/"+id, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "ruleset deleted successfully"})
 }
 
 func deleteInput(c echo.Context) error {
-	return deleteComponent("input", c)
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+	}
+	if cluster.IsLeader {
+		go syncToFollowers("DELETE", "/input/"+id, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "input deleted successfully"})
 }
 
 func deleteOutput(c echo.Context) error {
-	return deleteComponent("output", c)
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+	}
+	if cluster.IsLeader {
+		go syncToFollowers("DELETE", "/output/"+id, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "output deleted successfully"})
 }
 
 func deleteProject(c echo.Context) error {
@@ -776,17 +830,59 @@ func deleteProject(c echo.Context) error {
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
+	if cluster.IsLeader {
+		go syncToFollowers("DELETE", "/project/"+id, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "project deleted successfully"})
+}
 
-	// Check if project is running
-	if p := project.GetProject(id); p != nil {
-		if p.Status == project.ProjectStatusRunning {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"error": "cannot delete running project, stop it first",
-			})
-		}
+func deletePlugin(c echo.Context) error {
+	var p *plugin.Plugin
+	var ok bool
+
+	name := c.Param("name")
+	if name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required"})
+	}
+	if p, ok = plugin.Plugins[name]; !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is not found"})
 	}
 
-	return deleteComponent("project", c)
+	_ = os.Remove(p.Path)
+	delete(plugin.Plugins, name)
+
+	if cluster.IsLeader {
+		go syncToFollowers("DELETE", "/plugin/"+name, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "plugin deleted successfully"})
+}
+
+// 通用同步方法：只同步到健康的 follower 节点
+func syncToFollowers(method, path string, body []byte) {
+	cm := cluster.ClusterInstance
+	if cm == nil {
+		return
+	}
+	cm.Mu.Lock()
+	defer cm.Mu.Unlock()
+	for _, node := range cm.Nodes {
+		if node.Status != cluster.NodeStatusFollower || !node.IsHealthy || node.Address == cm.SelfAddress {
+			continue
+		}
+		url := "http://" + node.Address + path
+		for i := 0; i < 3; i++ {
+			req, _ := http.NewRequest(method, url, bytes.NewReader(body))
+			req.Header.Set("token", common.Config.Token)
+			if len(body) > 0 {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err == nil && resp.StatusCode < 300 {
+				break // 成功
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
 }
 
 func ServerStart(listener string) error {
@@ -839,6 +935,7 @@ func ServerStart(listener string) error {
 	// Plugin endpoints
 	e.GET("/plugin", getPlugins, TokenAuthMiddleware)
 	e.GET("/plugin/:name", getPlugin, TokenAuthMiddleware)
+	e.DELETE("/plugin/:name", deletePlugin, TokenAuthMiddleware)
 
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)

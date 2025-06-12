@@ -162,6 +162,11 @@ export const hubApi = {
     return response.data;
   },
 
+  async deletePlugin(id) {
+    const response = await api.delete(`/plugin/${id}`);
+    return response.data;
+  },
+
   async startProject(id) {
     const response = await api.post('/project/start', { project_id: id });
     return response.data;
