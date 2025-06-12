@@ -2,6 +2,18 @@
   <div v-if="loading" class="flex items-center justify-center h-full text-gray-400 text-lg">加载中...</div>
   <div v-else-if="error" class="flex items-center justify-center h-full text-red-400 text-lg">{{ error }}</div>
   
+  <!-- 新建模式 -->
+  <div v-else-if="item && item.isNew" class="h-full flex flex-col">
+    <CodeEditor v-model:value="editorValue" :language="item.type === 'rulesets' ? 'xml' : (item.type === 'plugins' ? 'go' : 'yaml')" :readOnly="false" class="flex-1" @save="saveNew" />
+    <div v-if="saveError" class="text-xs text-red-500 mt-2">{{ saveError }}</div>
+  </div>
+
+  <!-- 编辑模式 -->
+  <div v-else-if="item && item.isEdit && detail && detail.raw" class="h-full flex flex-col">
+    <CodeEditor v-model:value="editorValue" :language="item.type === 'rulesets' ? 'xml' : (item.type === 'plugins' ? 'go' : 'yaml')" :readOnly="false" class="flex-1" @save="saveEdit" />
+    <div v-if="saveError" class="text-xs text-red-500 mt-2">{{ saveError }}</div>
+  </div>
+
   <!-- Special layout for projects -->
   <div v-else-if="item && item.type === 'projects' && detail && detail.raw" class="flex h-full">
     <div class="w-1/2 h-full">
@@ -14,7 +26,7 @@
 
   <!-- Default layout for other components -->
   <div v-else-if="detail && detail.raw" class="h-full">
-    <CodeEditor :value="detail.raw" :language="item.type === 'rulesets' ? 'xml' : (item.type === 'plugin' ? 'go' : 'yaml')" class="h-full" />
+    <CodeEditor :value="detail.raw" :language="item.type === 'rulesets' ? 'xml' : (item.type === 'plugins' ? 'go' : 'yaml')" class="h-full" />
   </div>
 
   <div v-else class="flex items-center justify-center h-full text-gray-400 text-lg">
@@ -40,19 +52,28 @@ export default {
     return {
       loading: false,
       error: null,
-      detail: null
+      detail: null,
+      editorValue: '',
+      saveError: ''
     }
   },
   watch: {
     item: {
       immediate: true,
       handler(newVal) {
-        this.fetchDetail(newVal);
+        if (newVal && newVal.isNew) {
+          this.detail = null;
+          this.editorValue = this.getDefaultTemplate(newVal.type, newVal.id);
+        } else if (newVal && newVal.isEdit) {
+          this.fetchDetail(newVal, true);
+        } else {
+          this.fetchDetail(newVal);
+        }
       }
     }
   },
   methods: {
-    async fetchDetail(item) {
+    async fetchDetail(item, forEdit = false) {
       this.detail = null;
       this.error = null;
       if (!item || !item.id) return;
@@ -74,10 +95,97 @@ export default {
             data = null;
         }
         this.detail = data;
+        if (forEdit && data && data.raw) {
+          this.editorValue = data.raw;
+        }
       } catch (e) {
         this.error = '加载详情失败';
       } finally {
         this.loading = false;
+      }
+    },
+    getDefaultTemplate(type, id) {
+      switch (type) {
+        case 'inputs':
+          return `name: "${id}"
+type: "file"
+file:
+  path: "/path/to/input.json"
+  format: "json"`;
+        case 'outputs':
+          return `name: "${id}"
+type: "file"
+file:
+  path: "/path/to/output.json"
+  format: "json"`;
+        case 'rulesets':
+          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root type=\"DETECTION\" />`;
+        case 'projects':
+          return `name: "${id}"
+flow:
+  - from: "input.default"
+    to: "ruleset.default"
+  - from: "ruleset.default"
+    to: "output.default"`;
+        case 'plugins':
+          return `// 新插件代码`;
+        default:
+          return '';
+      }
+    },
+    async saveNew() {
+      this.saveError = '';
+      try {
+        const { type, id } = this.item;
+        const raw = this.editorValue;
+        let resp;
+        switch (type) {
+          case 'inputs':
+            resp = await hubApi.createInput(id, raw); break;
+          case 'outputs':
+            resp = await hubApi.createOutput(id, raw); break;
+          case 'rulesets':
+            resp = await hubApi.createRuleset(id, raw); break;
+          case 'projects':
+            resp = await hubApi.createProject(id, raw); break;
+          case 'plugins':
+            resp = await hubApi.createPlugin ? await hubApi.createPlugin(id, raw) : null; break;
+          default:
+            throw new Error('不支持的类型');
+        }
+        this.$emit('created', { type, id });
+        this.$message && this.$message.success('创建成功！');
+      } catch (e) {
+        this.saveError = '保存失败: ' + (e?.message || '未知错误');
+      }
+    },
+    async saveEdit() {
+      this.saveError = '';
+      this.saving = true;
+      try {
+        const { type, id } = this.item;
+        const raw = this.editorValue;
+        let resp;
+        switch (type) {
+          case 'inputs':
+            resp = await hubApi.updateInput(id, raw); break;
+          case 'outputs':
+            resp = await hubApi.updateOutput(id, raw); break;
+          case 'rulesets':
+            resp = await hubApi.updateRuleset(id, raw); break;
+          case 'projects':
+            resp = await hubApi.updateProject(id, raw); break;
+          case 'plugins':
+            resp = await hubApi.updatePlugin ? await hubApi.updatePlugin(id, raw) : null; break;
+          default:
+            throw new Error('不支持的类型');
+        }
+        this.$emit('updated', { type, id });
+        this.$message && this.$message.success('保存成功！');
+      } catch (e) {
+        this.saveError = '保存失败: ' + (e?.message || '未知错误');
+      } finally {
+        this.saving = false;
       }
     }
   }

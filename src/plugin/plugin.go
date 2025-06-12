@@ -4,16 +4,21 @@ import (
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
-	"os"
-	"reflect"
 )
 
 const (
 	LOCAL_PLUGIN = 0
 	YAEGI_PLUGIN = 1
 )
+
+// Directory where yaegi plugins are stored
+const PluginDir = "config/plugin"
 
 type Plugin struct {
 	Name    string
@@ -209,4 +214,26 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool) {
 		return out[0].Interface(), res2
 	}
 	return nil, false
+}
+
+// LoadPlugin loads a yaegi plugin from the given path
+func LoadPlugin(path string) (*Plugin, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	name := filepath.Base(path)
+	if len(name) > 3 && name[len(name)-3:] == ".go" {
+		name = name[:len(name)-3]
+	}
+	p := &Plugin{
+		Name:    name,
+		Path:    path,
+		Payload: content,
+		Type:    YAEGI_PLUGIN,
+	}
+	if err := p.yaegiLoad(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }

@@ -52,6 +52,10 @@ api.interceptors.response.use(
       localStorage.removeItem('auth_token');
       window.location.href = '/';
     }
+    if (typeof window !== 'undefined' && window.$toast) {
+      let msg = error.response?.data?.error || error.message || 'Unknown error';
+      window.$toast.show(msg);
+    }
     return Promise.reject(error);
   }
 );
@@ -184,6 +188,16 @@ export const hubApi = {
 
   async fetchClusterInfo() {
     const response = await api.get('/cluster_info');
+    return response.data;
+  },
+
+  async createPlugin(id, raw) {
+    const response = await api.post('/plugin', { id, raw });
+    return response.data;
+  },
+
+  async updatePlugin(id, raw) {
+    const response = await api.put(`/plugin/${id}`, { raw });
     return response.data;
   }
 }; 

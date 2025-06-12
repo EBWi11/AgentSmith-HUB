@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { EditorView, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, highlightActiveLine, keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { xml } from '@codemirror/lang-xml'
@@ -23,6 +23,7 @@ const props = defineProps({
 
 const editor = ref(null)
 let view = null
+const { emit } = getCurrentInstance();
 
 const getLang = () => {
   if (props.language === 'xml') return xml()
@@ -85,6 +86,13 @@ const duckDBHighlightStyle = HighlightStyle.define([
 ]);
 
 onMounted(() => {
+  const saveKeymap = keymap.of([{
+    key: 'Mod-Enter',
+    run() {
+      emit('save');
+      return true;
+    }
+  }]);
   const startState = EditorState.create({
     doc: props.value || '',
     extensions: [
@@ -105,6 +113,7 @@ onMounted(() => {
       duckDBTheme,
       syntaxHighlighting(duckDBHighlightStyle),
       EditorView.lineWrapping,
+      saveKeymap
     ],
   })
 

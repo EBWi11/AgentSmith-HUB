@@ -72,6 +72,7 @@
                 <div v-if="item.menuOpen" class="absolute right-0 z-50 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1 select-none"
                   @mouseleave="item.menuOpen = false">
                   <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="copyName(item)">Copy name</div>
+                  <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="$emit('open-editor', { type, id: item.id || item.name, isEdit: true })">Edit</div>
                   <div class="border-t border-gray-100 my-1"></div>
                   <div class="px-3 py-1 text-xs text-red-600 hover:bg-red-50 cursor-pointer" @click.stop="deleteItem(type, item)">Delete</div>
                 </div>
@@ -96,13 +97,9 @@
           <label class="block text-xs text-gray-500 mb-1">名称</label>
           <input v-model="addName" class="w-full border rounded px-2 py-1 text-sm" />
         </div>
-        <div class="mb-4">
-          <label class="block text-xs text-gray-500 mb-1">内容</label>
-          <textarea v-model="addRaw" class="w-full border rounded px-2 py-1 text-sm" rows="3"></textarea>
-        </div>
-        <div class="flex justify-end space-x-2">
+        <div class="flex justify-end space-x-2 mt-4">
           <button @click="showAddModal=false" class="px-3 py-1 text-sm text-gray-500">取消</button>
-          <button @click="confirmAdd" class="px-3 py-1 text-sm bg-blue-600 text-white rounded">确定</button>
+          <button @click="confirmAddName" class="px-3 py-1 text-sm bg-blue-600 text-white rounded">下一步</button>
         </div>
         <div v-if="addError" class="text-xs text-red-500 mt-2">{{ addError }}</div>
       </div>
@@ -304,31 +301,22 @@ flow:
     openAddModal(type) {
       this.addType = type;
       this.addName = '';
-      this.addRaw = '';
       this.addError = '';
       this.showAddModal = true;
     },
-    async confirmAdd() {
-      const type = this.addType;
+    async confirmAddName() {
       if (!this.addName) {
         this.addError = '名称不能为空';
         return;
       }
-      this.addError = '';
-      try {
-        const config = this.getDefaultConfig(type);
-        const createMethod = `create${type.charAt(0).toUpperCase() + type.slice(1, -1)}`;
-        if (typeof hubApi[createMethod] === 'function') {
-          await hubApi[createMethod](config.id, config.raw);
-        } else {
-          // plugins 没有后端API时，前端直接加一条
-          this.items[type].push({ id: config.id, raw: config.raw });
-        }
-        await this.fetchItems(type);
-        this.showAddModal = false;
-      } catch (err) {
-        this.addError = `创建失败: ${err.message || err}`;
+      // 校验重复
+      if (this.items[this.addType].some(item => item.id === this.addName || item.name === this.addName)) {
+        this.addError = '名称已存在';
+        return;
       }
+      this.showAddModal = false;
+      // 进入 editor，传递 type, id, isNew
+      this.$emit('open-editor', { type: this.addType, id: this.addName, isNew: true });
     },
     copyName(item) {
       const text = item.id || item.name;

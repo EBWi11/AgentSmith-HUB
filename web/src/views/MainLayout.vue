@@ -2,7 +2,7 @@
   <div class="flex flex-col h-screen bg-white">
     <Header />
     <div class="flex flex-1 overflow-hidden">
-      <Sidebar :selected="selected" @select-item="onSelectItem" />
+      <Sidebar :selected="selected" @select-item="onSelectItem" @open-editor="onOpenEditor" />
       <main class="flex-1 bg-gray-50">
         <ComponentDetail v-if="selected && selected.type !== 'cluster'" :item="selected" />
         <ClusterStatus v-else-if="selected && selected.type === 'cluster'" />
@@ -33,6 +33,9 @@ export default {
   methods: {
     onSelectItem(item) {
       this.selected = item;
+    },
+    onOpenEditor(payload) {
+      this.selected = payload;
     }
   }
 }
