@@ -75,23 +75,40 @@ type Input struct {
 	Config *InputConfig
 }
 
+func Verify(path string, raw string) error {
+	var cfg InputConfig
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return err
+		}
+	} else {
+		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // NewInput creates an Input from config and downstreams.
 func NewInput(path string, raw string, id string) (*Input, error) {
 	var cfg InputConfig
 
+	err := Verify(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("input verify error: %s %s", id, err.Error())
+	}
+
 	if path != "" {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, err
-		}
+		data, _ := os.ReadFile(path)
+		_ = yaml.Unmarshal(data, &cfg)
 		cfg.RawConfig = string(data)
 	} else {
-		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-			return nil, err
-		}
+		_ = yaml.Unmarshal([]byte(raw), &cfg)
 		cfg.RawConfig = raw
 	}
 

@@ -88,22 +88,40 @@ type Output struct {
 	Config *OutputConfig
 }
 
-// NewOutput creates an Output from config and upstreams.
-func NewOutput(path string, raw string, id string) (*Output, error) {
+func Verify(path string, raw string) error {
 	var cfg OutputConfig
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return nil, err
+			return err
 		}
-		cfg.RawConfig = string(data)
 	} else {
 		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-			return nil, err
+			return err
 		}
+	}
+
+	return nil
+}
+
+// NewOutput creates an Output from config and upstreams.
+func NewOutput(path string, raw string, id string) (*Output, error) {
+	var cfg OutputConfig
+
+	err := Verify(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("output verify error: %s %s", id, err.Error())
+	}
+
+	if path != "" {
+		data, _ := os.ReadFile(path)
+		_ = yaml.Unmarshal(data, &cfg)
+		cfg.RawConfig = string(data)
+	} else {
+		_ = yaml.Unmarshal([]byte(raw), &cfg)
 		cfg.RawConfig = raw
 	}
 

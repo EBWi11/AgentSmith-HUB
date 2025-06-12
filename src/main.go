@@ -197,7 +197,9 @@ func LoadProject() {
 				logger.Error("project init error", "err", err, "project_path", projectPath)
 			}
 
-			project.GlobalProject.Projects[id] = p
+			if p != nil {
+				project.GlobalProject.Projects[id] = p
+			}
 		}
 	} else {
 		for id, raw := range common.AllProjectRawConfig {

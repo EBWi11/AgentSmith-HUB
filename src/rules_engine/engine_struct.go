@@ -162,29 +162,51 @@ type Plugin struct {
 	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
-// NewRuleset creates a new resource from an XML file
-// path: Path to the resource XML file
-func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
+func Verify(path string, raw string) error {
 	var rawRuleset []byte
 	if path != "" {
 		xmlFile, err := os.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
+			return fmt.Errorf("failed to open resource file at %s: %w", path, err)
 		}
 		defer xmlFile.Close()
 
 		rawRuleset, err = io.ReadAll(xmlFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read resource file: %w", err)
+			return fmt.Errorf("failed to read resource file: %w", err)
 		}
 	} else {
 		rawRuleset = []byte(raw)
 	}
 
-	ruleset, err := ParseRulesetFromByte(rawRuleset)
+	_, err := ParseRulesetFromByte(rawRuleset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse resource: %w", err)
+		return fmt.Errorf("failed to parse resource: %w", err)
 	}
+	return nil
+}
+
+// NewRuleset creates a new resource from an XML file
+// path: Path to the resource XML file
+func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
+	var rawRuleset []byte
+
+	err := Verify(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("ruleset verify error: %s %w", id, err)
+	}
+
+	if path != "" {
+		xmlFile, _ := os.Open(path)
+		defer xmlFile.Close()
+
+		rawRuleset, _ = io.ReadAll(xmlFile)
+		return nil, fmt.Errorf("failed to read resource file: %w", err)
+	} else {
+		rawRuleset = []byte(raw)
+	}
+
+	ruleset, _ := ParseRulesetFromByte(rawRuleset)
 	ruleset.Path = path
 
 	if len(ruleset.UpStream) == 0 {

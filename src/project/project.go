@@ -25,37 +25,69 @@ func init() {
 	GlobalProject.msgChansCounter = make(map[string]int)
 }
 
-// NewProject creates a new project instance from a configuration file
-// pp: Path to the project configuration file
-func NewProject(pp string, raw string, id string) (*Project, error) {
+func Verify(path string, raw string) error {
 	var err error
 	var cfg ProjectConfig
 	var data []byte
+	var p *Project
 
-	if pp != "" {
-		data, err = os.ReadFile(pp)
+	if path != "" {
+		data, err = os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read project configuration file: %w", err)
+			return fmt.Errorf("failed to read project configuration file: %w", err)
 		}
 
 		cfg.RawConfig = string(data)
-		cfg.Path = pp
+	} else {
+		cfg.RawConfig = raw
+		data = []byte(raw)
+	}
+
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("failed to parse project configuration: %w", err)
+	}
+
+	if strings.TrimSpace(cfg.Content) == "" {
+		return fmt.Errorf("project content cannot be empty in configuration file: %s", path)
+	}
+
+	p = &Project{
+		Id:     cfg.Id,
+		Status: ProjectStatusStopped,
+		Config: &cfg,
+	}
+
+	_, err = p.parseContent()
+	if err != nil {
+		return fmt.Errorf("failed to parse project content: %v", err)
+	}
+
+	return nil
+}
+
+// NewProject creates a new project instance from a configuration file
+// pp: Path to the project configuration file
+func NewProject(path string, raw string, id string) (*Project, error) {
+	var cfg ProjectConfig
+	var data []byte
+	var err error
+
+	err = Verify(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("project config verify error: %s %s", id, err.Error())
+	}
+
+	if path != "" {
+		data, _ = os.ReadFile(path)
+		cfg.RawConfig = string(data)
+		cfg.Path = path
 	} else {
 		cfg.RawConfig = raw
 		data = []byte(raw)
 	}
 	cfg.Id = id
 
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
-	}
-
-	if strings.TrimSpace(cfg.Id) == "" {
-		return nil, fmt.Errorf("project ID cannot be empty in configuration file: %s", pp)
-	}
-	if strings.TrimSpace(cfg.Content) == "" {
-		return nil, fmt.Errorf("project content cannot be empty in configuration file: %s", pp)
-	}
+	_ = yaml.Unmarshal(data, &cfg)
 
 	p := &Project{
 		Id:          cfg.Id,

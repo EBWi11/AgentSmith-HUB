@@ -67,7 +67,7 @@ func init() {
 	logger.Info("plugin_init", "plugins_count", len(Plugins))
 }
 
-func NewPlugin(path string, raw string, name string, pluginType int) error {
+func Verify(path string, raw string, name string) error {
 	var err error
 	var content []byte
 
@@ -87,11 +87,32 @@ func NewPlugin(path string, raw string, name string, pluginType int) error {
 		content = []byte(raw)
 	}
 
+	p := &Plugin{Path: path, Payload: content}
+	err = p.yaegiLoad()
+	p = nil
+	return err
+}
+
+func NewPlugin(path string, raw string, name string, pluginType int) error {
+	var err error
+	var content []byte
+
+	err = Verify(path, raw, name)
+	if err != nil {
+		return fmt.Errorf("plugin verify err %s %s", name, err.Error())
+	}
+
+	if path != "" {
+		content, _ = os.ReadFile(path)
+	} else {
+		content = []byte(raw)
+	}
+
 	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
 
-	err = p.yaegiLoad()
+	_ = p.yaegiLoad()
 	Plugins[p.Name] = p
-	return err
+	return nil
 }
 
 func (p *Plugin) yaegiLoad() error {
