@@ -8,4 +8,4 @@ aliyun_sls:
   consumer_group_name: "xx"
   consumer_name: "xx"
   cursor_position: "BEGIN_CURSOR"
-  quert: "xx""
+  query: "xx"

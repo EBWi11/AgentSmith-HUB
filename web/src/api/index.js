@@ -16,10 +16,11 @@ api.interceptors.request.use(
     if (token) {
       config.headers.token = token;
     }
-    console.log('Request config:', {
+    console.log('Request:', {
       url: config.url,
       method: config.method,
-      headers: config.headers
+      headers: config.headers,
+      baseURL: config.baseURL
     });
     return config;
   },
@@ -33,6 +34,7 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     console.log('Response:', {
+      url: response.config.url,
       status: response.status,
       data: response.data,
       headers: response.headers
@@ -41,6 +43,7 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error('Response error:', {
+      url: error.config?.url,
       status: error.response?.status,
       data: error.response?.data,
       message: error.message
@@ -65,14 +68,8 @@ export const hubApi = {
   },
 
   async verifyToken() {
-    try {
-      // Use the dedicated token check endpoint
-      const response = await api.get('/token/check');
-      return response.data;
-    } catch (error) {
-      console.error('Token verification failed:', error);
-      throw error;
-    }
+    const response = await api.get('/token/check');
+    return response.data;
   },
 
   async fetchInputs() {
@@ -100,26 +97,6 @@ export const hubApi = {
     return response.data;
   },
 
-  async createInput(id, raw) {
-    const response = await api.post('/input', { id, raw });
-    return response.data;
-  },
-
-  async createOutput(id, raw) {
-    const response = await api.post('/output', { id, raw });
-    return response.data;
-  },
-
-  async createRuleset(id, raw) {
-    const response = await api.post('/ruleset', { id, raw });
-    return response.data;
-  },
-
-  async createProject(id, raw) {
-    const response = await api.post('/project', { id, raw });
-    return response.data;
-  },
-
   async getInput(id) {
     const response = await api.get(`/input/${id}`);
     return response.data;
@@ -137,6 +114,31 @@ export const hubApi = {
 
   async getProject(id) {
     const response = await api.get(`/project/${id}`);
+    return response.data;
+  },
+
+  async getPlugin(id) {
+    const response = await api.get(`/plugin/${id}`);
+    return response.data;
+  },
+
+  async createInput(id, raw) {
+    const response = await api.post('/input', { id, raw });
+    return response.data;
+  },
+
+  async createOutput(id, raw) {
+    const response = await api.post('/output', { id, raw });
+    return response.data;
+  },
+
+  async createRuleset(id, raw) {
+    const response = await api.post('/ruleset', { id, raw });
+    return response.data;
+  },
+
+  async createProject(id, raw) {
+    const response = await api.post('/project', { id, raw });
     return response.data;
   },
 
@@ -160,23 +162,13 @@ export const hubApi = {
     return response.data;
   },
 
-  async updateRuleset(id, raw) {
-    const response = await api.put(`/ruleset/${id}`, { raw });
-    return response.data;
-  },
-
   async startProject(id) {
-    const response = await api.post('/project/start', { id });
+    const response = await api.post('/project/start', { project_id: id });
     return response.data;
   },
 
   async stopProject(id) {
-    const response = await api.post('/project/stop', { id });
-    return response.data;
-  },
-
-  async getPlugin(name) {
-    const response = await api.get(`/plugin/${name}`);
+    const response = await api.post('/project/stop', { project_id: id });
     return response.data;
   },
 

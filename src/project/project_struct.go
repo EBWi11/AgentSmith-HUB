@@ -17,7 +17,11 @@ const (
 )
 
 type GlobalProjectInfo struct {
-	Projects        map[string]*Project
+	Projects map[string]*Project
+	Inputs   map[string]*input.Input
+	Outputs  map[string]*output.Output
+	Rulesets map[string]*rules_engine.Ruleset
+
 	msgChans        map[string]chan map[string]interface{}
 	msgChansCounter map[string]int
 }

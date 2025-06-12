@@ -30,10 +30,10 @@ func ping(c echo.Context) error {
 
 // getProjects returns a list of all projects
 func getProjects(c echo.Context) error {
-	projects := project.GetProjects()
-	result := make([]map[string]interface{}, 0, len(projects))
+	p := project.GlobalProject
+	result := make([]map[string]interface{}, 0, 0)
 
-	for _, p := range projects {
+	for _, p := range p.Projects {
 		result = append(result, map[string]interface{}{
 			"id":     p.Id,
 			"status": p.Status,
@@ -62,16 +62,14 @@ func getProject(c echo.Context) error {
 
 // getRulesets returns a list of all rulesets
 func getRulesets(c echo.Context) error {
-	projects := project.GetProjects()
+	p := project.GlobalProject
 	rulesets := make([]map[string]interface{}, 0)
 
-	for _, p := range projects {
-		for _, rs := range p.Rulesets {
-			rulesets = append(rulesets, map[string]interface{}{
-				"id":   rs.RulesetID,
-				"type": rs.Type,
-			})
-		}
+	for _, r := range p.Rulesets {
+		rulesets = append(rulesets, map[string]interface{}{
+			"id":   r.RulesetID,
+			"type": r.Type,
+		})
 	}
 	return c.JSON(http.StatusOK, rulesets)
 }
@@ -79,34 +77,29 @@ func getRulesets(c echo.Context) error {
 // getRuleset returns details of a specific ruleset
 func getRuleset(c echo.Context) error {
 	id := c.Param("id")
-	projects := project.GetProjects()
+	p := project.GlobalProject
 
-	for _, p := range projects {
-		if rs, ok := p.Rulesets[id]; ok {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id":   rs.RulesetID,
-				"type": rs.Type,
-				//"rules":        rs.Rules,
-				"is_detection": rs.IsDetection,
-				"raw":          rs.RawConfig,
-			})
-		}
+	if r, ok := p.Rulesets[id]; ok {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":           r.RulesetID,
+			"type":         r.Type,
+			"is_detection": r.IsDetection,
+			"raw":          r.RawConfig,
+		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
 }
 
 // getInputs returns a list of all input components
 func getInputs(c echo.Context) error {
-	projects := project.GetProjects()
+	p := project.GlobalProject
 	inputs := make([]map[string]interface{}, 0)
 
-	for _, p := range projects {
-		for _, in := range p.Inputs {
-			inputs = append(inputs, map[string]interface{}{
-				"id":   in.Id,
-				"type": in.Type,
-			})
-		}
+	for _, in := range p.Inputs {
+		inputs = append(inputs, map[string]interface{}{
+			"id":   in.Id,
+			"type": in.Type,
+		})
 	}
 	return c.JSON(http.StatusOK, inputs)
 }
@@ -114,18 +107,16 @@ func getInputs(c echo.Context) error {
 // getInput returns details of a specific input component
 func getInput(c echo.Context) error {
 	id := c.Param("id")
-	projects := project.GetProjects()
+	p := project.GlobalProject
 
-	for _, p := range projects {
-		if in, ok := p.Inputs[id]; ok {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id":            in.Id,
-				"type":          in.Type,
-				"consume_qps":   in.GetConsumeQPS(),
-				"consume_total": in.GetConsumeTotal(),
-				"raw":           in.Config.RawConfig,
-			})
-		}
+	if in, ok := p.Inputs[id]; ok {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":            in.Id,
+			"type":          in.Type,
+			"consume_qps":   in.GetConsumeQPS(),
+			"consume_total": in.GetConsumeTotal(),
+			"raw":           in.Config.RawConfig,
+		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
@@ -134,10 +125,12 @@ func getPlugins(c echo.Context) error {
 	plugins := make([]map[string]interface{}, 0)
 
 	for _, p := range plugin.Plugins {
-		plugins = append(plugins, map[string]interface{}{
-			"type": p.Type,
-			"name": p.Name,
-		})
+		if p.Type == plugin.YAEGI_PLUGIN {
+			plugins = append(plugins, map[string]interface{}{
+				"type": p.Type,
+				"name": p.Name,
+			})
+		}
 	}
 	return c.JSON(http.StatusOK, plugins)
 }
@@ -157,16 +150,14 @@ func getPlugin(c echo.Context) error {
 
 // getOutputs returns a list of all output components
 func getOutputs(c echo.Context) error {
-	projects := project.GetProjects()
+	p := project.GlobalProject
 	outputs := make([]map[string]interface{}, 0)
 
-	for _, p := range projects {
-		for _, out := range p.Outputs {
-			outputs = append(outputs, map[string]interface{}{
-				"id":   out.Id,
-				"type": out.Type,
-			})
-		}
+	for _, out := range p.Outputs {
+		outputs = append(outputs, map[string]interface{}{
+			"id":   out.Id,
+			"type": out.Type,
+		})
 	}
 	return c.JSON(http.StatusOK, outputs)
 }
@@ -174,28 +165,26 @@ func getOutputs(c echo.Context) error {
 // getOutput returns details of a specific output component
 func getOutput(c echo.Context) error {
 	id := c.Param("id")
-	projects := project.GetProjects()
+	p := project.GlobalProject
 
-	for _, p := range projects {
-		if out, ok := p.Outputs[id]; ok {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id":            out.Id,
-				"type":          out.Type,
-				"produce_qps":   out.GetProduceQPS(),
-				"produce_total": out.GetProduceTotal(),
-				"raw":           out.Config.RawConfig,
-			})
-		}
+	if out, ok := p.Outputs[id]; ok {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":            out.Id,
+			"type":          out.Type,
+			"produce_qps":   out.GetProduceQPS(),
+			"produce_total": out.GetProduceTotal(),
+			"raw":           out.Config.RawConfig,
+		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
 }
 
 // getMetrics returns metrics for all projects
 func getMetrics(c echo.Context) error {
-	projects := project.GetProjects()
+	p := project.GlobalProject
 	metrics := make(map[string]interface{})
 
-	for _, p := range projects {
+	for _, p := range p.Projects {
 		projectMetrics := p.GetMetrics()
 		metrics[p.Id] = map[string]interface{}{
 			"input_qps":  projectMetrics.InputQPS,
@@ -510,58 +499,54 @@ func handleComponentSync(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 	}
 
+	p := project.GlobalProject
+
 	// Handle regular updates
 	switch request.Type {
 	case "ruleset":
 		common.AllRulesetsRawConfig[request.ID] = request.Raw
 		// Update running ruleset if it exists
-		for _, p := range project.GetProjects() {
-			if rs, ok := p.Rulesets[request.ID]; ok {
-				if updatedRuleset, err := rs.HotUpdate(request.Raw, request.ID); err != nil {
-					logger.Error("failed to hot update ruleset on follower", "error", err)
-				} else {
-					p.Rulesets[request.ID] = updatedRuleset
-				}
-				break
+		if rs, ok := p.Rulesets[request.ID]; ok {
+			if updatedRuleset, err := rs.HotUpdate(request.Raw, request.ID); err != nil {
+				logger.Error("failed to hot update ruleset on follower", "error", err)
+			} else {
+				p.Rulesets[request.ID] = updatedRuleset
 			}
+			break
 		}
 	case "input":
 		common.AllInputsRawConfig[request.ID] = request.Raw
 		// Update running input if it exists
-		for _, p := range project.GetProjects() {
-			if in, ok := p.Inputs[request.ID]; ok {
-				if err := in.Stop(); err != nil {
-					logger.Error("failed to stop input on follower", "error", err)
-				}
-				if newInput, err := input.NewInput("", request.Raw, request.ID); err != nil {
-					logger.Error("failed to create new input on follower", "error", err)
-				} else {
-					p.Inputs[request.ID] = newInput
-					if err := newInput.Start(); err != nil {
-						logger.Error("failed to start new input on follower", "error", err)
-					}
-				}
-				break
+		if in, ok := p.Inputs[request.ID]; ok {
+			if err := in.Stop(); err != nil {
+				logger.Error("failed to stop input on follower", "error", err)
 			}
+			if newInput, err := input.NewInput("", request.Raw, request.ID); err != nil {
+				logger.Error("failed to create new input on follower", "error", err)
+			} else {
+				p.Inputs[request.ID] = newInput
+				if err := newInput.Start(); err != nil {
+					logger.Error("failed to start new input on follower", "error", err)
+				}
+			}
+			break
 		}
 	case "output":
 		common.AllOutputsRawConfig[request.ID] = request.Raw
 		// Update running output if it exists
-		for _, p := range project.GetProjects() {
-			if out, ok := p.Outputs[request.ID]; ok {
-				if err := out.Stop(); err != nil {
-					logger.Error("failed to stop output on follower", "error", err)
-				}
-				if newOutput, err := output.NewOutput("", request.Raw, request.ID); err != nil {
-					logger.Error("failed to create new output on follower", "error", err)
-				} else {
-					p.Outputs[request.ID] = newOutput
-					if err := newOutput.Start(); err != nil {
-						logger.Error("failed to start new output on follower", "error", err)
-					}
-				}
-				break
+		if out, ok := p.Outputs[request.ID]; ok {
+			if err := out.Stop(); err != nil {
+				logger.Error("failed to stop output on follower", "error", err)
 			}
+			if newOutput, err := output.NewOutput("", request.Raw, request.ID); err != nil {
+				logger.Error("failed to create new output on follower", "error", err)
+			} else {
+				p.Outputs[request.ID] = newOutput
+				if err := newOutput.Start(); err != nil {
+					logger.Error("failed to start new output on follower", "error", err)
+				}
+			}
+			break
 		}
 	case "project":
 		common.AllProjectRawConfig[request.ID] = request.Raw
@@ -589,40 +574,38 @@ func updateRuleset(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw ruleset content is required"})
 	}
 
-	projects := project.GetProjects()
+	p := project.GlobalProject
 	var updatedRuleset *rules_engine.Ruleset
 	var err error
 
-	for _, p := range projects {
-		if rs, ok := p.Rulesets[id]; ok {
-			updatedRuleset, err = rs.HotUpdate(requestBody.Raw, id)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]string{
-					"error": fmt.Sprintf("failed to update ruleset: %v", err),
-				})
-			}
-
-			// Update the ruleset in the project and global config
-			p.Rulesets[id] = updatedRuleset
-			common.GlobalMu.Lock()
-			common.AllRulesetsRawConfig[id] = requestBody.Raw
-			common.GlobalMu.Unlock()
-
-			// If this is the leader node, notify all followers
-			if cluster.IsLeader {
-				if err := cluster.NotifyFollowersComponentUpdate("ruleset", id, requestBody.Raw); err != nil {
-					logger.Error("failed to notify followers of ruleset update", "error", err)
-				}
-			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"id":           updatedRuleset.RulesetID,
-				"type":         updatedRuleset.Type,
-				"is_detection": updatedRuleset.IsDetection,
-				"raw":          updatedRuleset.RawConfig,
-				"message":      "ruleset updated successfully",
+	if rs, ok := p.Rulesets[id]; ok {
+		updatedRuleset, err = rs.HotUpdate(requestBody.Raw, id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to update ruleset: %v", err),
 			})
 		}
+
+		// Update the ruleset in the project and global config
+		p.Rulesets[id] = updatedRuleset
+		common.GlobalMu.Lock()
+		common.AllRulesetsRawConfig[id] = requestBody.Raw
+		common.GlobalMu.Unlock()
+
+		// If this is the leader node, notify all followers
+		if cluster.IsLeader {
+			if err := cluster.NotifyFollowersComponentUpdate("ruleset", id, requestBody.Raw); err != nil {
+				logger.Error("failed to notify followers of ruleset update", "error", err)
+			}
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":           updatedRuleset.RulesetID,
+			"type":         updatedRuleset.Type,
+			"is_detection": updatedRuleset.IsDetection,
+			"raw":          updatedRuleset.RawConfig,
+			"message":      "ruleset updated successfully",
+		})
 	}
 
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
@@ -724,7 +707,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 	}
 
 	// Check if component is in use by any project
-	projects := project.GetProjects()
+	projects := project.GlobalProject.Projects
 	for _, p := range projects {
 		var inUse bool
 		switch componentType {

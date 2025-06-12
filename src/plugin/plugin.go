@@ -4,14 +4,15 @@ import (
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
+	"os"
+	"reflect"
+)
+
+const (
+	LOCAL_PLUGIN = 0
+	YAEGI_PLUGIN = 1
 )
 
 type Plugin struct {
@@ -27,39 +28,20 @@ type Plugin struct {
 	Type int
 }
 
-const PluginEnding = ".go"
-
 var Plugins = make(map[string]*Plugin)
 
-func PluginInit(PluginsPath string) error {
-	// load yaegi plugins
-	_ = filepath.WalkDir(PluginsPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !d.IsDir() && strings.HasSuffix(d.Name(), PluginEnding) {
-			p, err := NewPlugin(path, "Yaegi")
-			if err != nil {
-				return err
-			}
-			p.setName(d.Name()[:len(d.Name())-len(PluginEnding)])
-			Plugins[p.Name] = p
-		}
-		return nil
-	})
-
+func init() {
 	for name, f := range local_plugin.LocalPluginBoolRes {
 		if _, ok := Plugins[name]; !ok {
 			p := &Plugin{
 				Name:    name,
-				Type:    0, // local plugin
+				Type:    LOCAL_PLUGIN,
 				Payload: nil,
 				f:       reflect.ValueOf(f),
 			}
 			Plugins[name] = p
 		} else {
-			return fmt.Errorf("plugin name conflict: %s already exists", name)
+			logger.Error("plugin_init error", "plugin name conflict: %s already exists", name)
 		}
 	}
 
@@ -67,42 +49,44 @@ func PluginInit(PluginsPath string) error {
 		if _, ok := Plugins[name]; !ok {
 			p := &Plugin{
 				Name:    name,
-				Type:    0, // local plugin
+				Type:    LOCAL_PLUGIN,
 				Payload: nil,
 				f:       reflect.ValueOf(f),
 			}
 			Plugins[name] = p
 		} else {
-			return fmt.Errorf("plugin name conflict: %s already exists", name)
+			logger.Error("plugin_init error", "plugin name conflict: %s already exists", name)
 		}
 	}
 
 	logger.Info("plugin_init", "plugins_count", len(Plugins))
-
-	return nil
 }
 
-func NewPlugin(path string, pluginType string) (*Plugin, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("plugin file not found at path: %s", path)
+func NewPlugin(path string, raw string, name string, pluginType int) error {
+	var err error
+	var content []byte
+
+	if _, ok := Plugins[name]; ok {
+		return fmt.Errorf("plugin name conflict: %s already exists", name)
 	}
 
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read plugin file: %w", err)
+	if path != "" {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return fmt.Errorf("plugin file not found at path: %s", path)
+		}
+		content, err = os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read plugin file: %w", err)
+		}
+	} else {
+		content = []byte(raw)
 	}
 
-	p := &Plugin{Path: path, Payload: content, Type: 1}
-
-	switch pluginType {
-	case "Yaegi":
-		p.Type = 1
-	default:
-		return nil, fmt.Errorf("unsupported plugin type: %s, only Yaegi is supported", pluginType)
-	}
+	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
 
 	err = p.yaegiLoad()
-	return p, err
+	Plugins[p.Name] = p
+	return err
 }
 
 func (p *Plugin) yaegiLoad() error {
@@ -125,10 +109,6 @@ func (p *Plugin) yaegiLoad() error {
 
 	p.f = reflect.ValueOf(v.Interface())
 	return nil
-}
-
-func (p *Plugin) setName(name string) {
-	p.Name = name
 }
 
 func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) bool {

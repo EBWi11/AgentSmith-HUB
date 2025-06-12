@@ -80,7 +80,7 @@
 </template>
 
 <script>
-import { hubApi } from '../../api/index.js';
+import { hubApi } from '@/api';
 
 export default {
   name: 'Sidebar',
@@ -182,12 +182,59 @@ export default {
       this.loading[type] = true;
       this.error[type] = null;
       try {
-        const fetchMethod = `fetch${type.charAt(0).toUpperCase() + type.slice(1, -1)}s`;
-        const response = await hubApi[fetchMethod]();
-        this.items[type] = response;
+        let response;
+        console.log(`Fetching ${type}...`);
+        switch (type) {
+          case 'inputs':
+            response = await hubApi.fetchInputs();
+            break;
+          case 'outputs':
+            response = await hubApi.fetchOutputs();
+            break;
+          case 'rulesets':
+            response = await hubApi.fetchRulesets();
+            break;
+          case 'plugins':
+            response = await hubApi.fetchPlugins();
+            break;
+          case 'projects':
+            response = await hubApi.fetchProjects();
+            break;
+          case 'cluster':
+            response = await hubApi.fetchClusterInfo();
+            break;
+          default:
+            response = [];
+        }
+        console.log(`${type} response:`, response);
+        
+        // Transform the response data to match the expected format
+        if (Array.isArray(response)) {
+          this.items[type] = response.map(item => {
+            if (type === 'plugins') {
+              return {
+                id: item.name,
+                type: item.type
+              };
+            } else {
+              return {
+                id: item.id,
+                type: item.type,
+                status: item.status
+              };
+            }
+          });
+        } else {
+          this.items[type] = [];
+        }
       } catch (err) {
-        this.error[type] = `Failed to load ${type}.`;
         console.error(`Error fetching ${type}:`, err);
+        console.error('Error details:', {
+          message: err.message,
+          response: err.response?.data,
+          status: err.response?.status
+        });
+        this.error[type] = `Failed to load ${type}: ${err.message}`;
       } finally {
         this.loading[type] = false;
       }

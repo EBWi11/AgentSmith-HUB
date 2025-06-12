@@ -4,9 +4,12 @@ import (
 	"AgentSmith-HUB/api"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"flag"
 	"fmt"
 	"os"
@@ -17,14 +20,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func traverseProject(dir string) ([]string, error) {
+func traverseComponents(dir string, suffix string) ([]string, error) {
 	var files []string
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".yaml") {
+		if !info.IsDir() && strings.HasSuffix(path, suffix) {
 			files = append(files, path)
 		}
 		return nil
@@ -85,28 +88,124 @@ func loadHubConfig(configRoot string) error {
 	return nil
 }
 
-func LoadLocalProject() {
+func LoadComponents() {
 	if cluster.IsLeader {
-		projectList, err := traverseProject(path.Join(common.Config.ConfigRoot, "project"))
+		pluginList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "plugin"), ".go")
+		if err != nil {
+			logger.Error("travers plugin error", "error", err)
+		}
+		for _, v := range pluginList {
+			name := common.GetFileNameWithoutExt(v)
+			err := plugin.NewPlugin(v, "", name, plugin.YAEGI_PLUGIN)
+			if err != nil {
+				logger.Error("failed to create input instance", "error", err, "path", v)
+			}
+		}
+
+		inputList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "input"), ".yaml")
+		if err != nil {
+			logger.Error("travers input error", "error", err)
+		}
+		for _, v := range inputList {
+			id := common.GetFileNameWithoutExt(v)
+			tmp, err := input.NewInput(v, "", id)
+			if err != nil {
+				logger.Error("failed to create input instance", "error", err, "path", v)
+			}
+			if tmp != nil {
+				project.GlobalProject.Inputs[id] = tmp
+			}
+		}
+
+		outputList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "output"), ".yaml")
+		if err != nil {
+			logger.Error("travers output error", "error", err)
+		}
+		for _, v := range outputList {
+			id := common.GetFileNameWithoutExt(v)
+			tmp, err := output.NewOutput(v, "", id)
+			if err != nil {
+				logger.Error("failed to create output instance", "error", err, "path", v)
+				continue
+			}
+			project.GlobalProject.Outputs[id] = tmp
+		}
+
+		rulesetList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "ruleset"), ".xml")
+		if err != nil {
+			logger.Error("travers ruleset error", "error", err)
+		}
+		for _, v := range rulesetList {
+			id := common.GetFileNameWithoutExt(v)
+			tmp, err := rules_engine.NewRuleset(v, "", id)
+			if err != nil {
+				logger.Error("failed to create ruleset instance", "error", err, "path", v)
+				continue
+			}
+			project.GlobalProject.Rulesets[id] = tmp
+		}
+	} else {
+		for name, raw := range common.AllPluginsRawConfig {
+			err := plugin.NewPlugin("", raw, name, plugin.YAEGI_PLUGIN)
+			if err != nil {
+				logger.Error("failed to new plugin", "error", err)
+				continue
+			}
+		}
+
+		for id, raw := range common.AllInputsRawConfig {
+			tmp, err := input.NewInput("", raw, id)
+			if err != nil {
+				logger.Error("failed to create input instance", "error", err, "id", id)
+				continue
+			}
+			project.GlobalProject.Inputs[id] = tmp
+		}
+
+		for id, raw := range common.AllOutputsRawConfig {
+			tmp, err := output.NewOutput("", raw, id)
+			if err != nil {
+				logger.Error("failed to create output instance", "error", err, "id", id)
+				continue
+			}
+			project.GlobalProject.Outputs[id] = tmp
+		}
+
+		for id, raw := range common.AllRulesetsRawConfig {
+			tmp, err := rules_engine.NewRuleset("", raw, id)
+			if err != nil {
+				logger.Error("failed to create ruleset instance", "error", err, "id", id)
+				continue
+			}
+			project.GlobalProject.Rulesets[id] = tmp
+		}
+	}
+}
+
+func LoadProject() {
+	if cluster.IsLeader {
+		projectList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "project"), ".yaml")
 		if err != nil {
 			logger.Error("travers project error", "error", err)
 			return
 		}
 
 		for _, projectPath := range projectList {
-			_, err := project.NewProject(projectPath, "", "")
+			id := common.GetFileNameWithoutExt(projectPath)
+			p, err := project.NewProject(projectPath, "", id)
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_path", projectPath)
-				continue
 			}
+
+			project.GlobalProject.Projects[id] = p
 		}
 	} else {
 		for id, raw := range common.AllProjectRawConfig {
-			_, err := project.NewProject("", raw, id)
+			p, err := project.NewProject("", raw, id)
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_id", id)
-				continue
 			}
+			project.GlobalProject.Projects[id] = p
 		}
 	}
 }
@@ -265,15 +364,9 @@ func main() {
 		return
 	}
 
-	// load project/input/output/ruleset
-	LoadLocalProject()
-
-	// load plugin
-	err = plugin.PluginInit(path.Join(common.Config.ConfigRoot, "plugin"))
-	if err != nil {
-		logger.Error("plugin init error", "error", err)
-		return
-	}
+	// load project/input/output/ruleset/plugin
+	LoadComponents()
+	LoadProject()
 
 	// start all projects
 	StartAllProject()

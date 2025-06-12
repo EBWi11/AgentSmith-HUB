@@ -1,14 +1,11 @@
 package project
 
 import (
-	"AgentSmith-HUB/cluster"
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -20,6 +17,10 @@ var GlobalProject *GlobalProjectInfo
 func init() {
 	GlobalProject = &GlobalProjectInfo{}
 	GlobalProject.Projects = make(map[string]*Project)
+	GlobalProject.Inputs = make(map[string]*input.Input)
+	GlobalProject.Outputs = make(map[string]*output.Output)
+	GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
+
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
 	GlobalProject.msgChansCounter = make(map[string]int)
 }
@@ -38,12 +39,11 @@ func NewProject(pp string, raw string, id string) (*Project, error) {
 		}
 
 		cfg.RawConfig = string(data)
-		cfg.Id = common.GetFileNameWithoutExt(pp)
 	} else {
 		cfg.RawConfig = raw
-		cfg.Id = id
 		data = []byte(raw)
 	}
+	cfg.Id = id
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
@@ -73,10 +73,10 @@ func NewProject(pp string, raw string, id string) (*Project, error) {
 
 	// Initialize components
 	if err := p.initComponents(); err != nil {
-		return nil, fmt.Errorf("failed to initialize project components: %w", err)
+		p.Status = ProjectStatusError
+		p.Err = err
+		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
-
-	GlobalProject.Projects[p.Id] = p
 
 	return p, nil
 }
@@ -86,44 +86,21 @@ func NewProject(pp string, raw string, id string) (*Project, error) {
 // outputNames: List of output component IDs
 // rulesetNames: List of ruleset IDs
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
-	var err error
-	if cluster.IsLeader {
-		for _, v := range inputNames {
-			p.Inputs[v], err = input.NewInput(path.Join(common.Config.ConfigRoot, "input", v+".yaml"), "", v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize input component %s: %w", v, err)
-			}
+	for _, v := range inputNames {
+		if _, ok := GlobalProject.Inputs[v]; !ok {
+			return fmt.Errorf("conn't find input %s", v)
 		}
-		for _, v := range outputNames {
-			p.Outputs[v], err = output.NewOutput(path.Join(common.Config.ConfigRoot, "output", v+".yaml"), "", v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize output component %s: %w", v, err)
-			}
+	}
+
+	for _, v := range outputNames {
+		if _, ok := GlobalProject.Outputs[v]; !ok {
+			return fmt.Errorf("conn't find output %s", v)
 		}
-		for _, v := range rulesetNames {
-			p.Rulesets[v], err = rules_engine.NewRuleset(path.Join(common.Config.ConfigRoot, "ruleset", v+".xml"), "", v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
-			}
-		}
-	} else {
-		for _, v := range inputNames {
-			p.Inputs[v], err = input.NewInput("", common.AllInputsRawConfig[v], v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize input component %s: %w", v, err)
-			}
-		}
-		for _, v := range outputNames {
-			p.Outputs[v], err = output.NewOutput("", common.AllOutputsRawConfig[v], v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize output component %s: %w", v, err)
-			}
-		}
-		for _, v := range rulesetNames {
-			p.Rulesets[v], err = rules_engine.NewRuleset("", common.AllRulesetsRawConfig[v], v)
-			if err != nil {
-				return fmt.Errorf("failed to initialize ruleset %s: %w", v, err)
-			}
+	}
+
+	for _, v := range rulesetNames {
+		if _, ok := GlobalProject.Rulesets[v]; !ok {
+			return fmt.Errorf("conn't find ruleset %s", v)
 		}
 	}
 	return nil
@@ -320,6 +297,9 @@ func (p *Project) Start() error {
 	if p.Status == ProjectStatusRunning {
 		return fmt.Errorf("project is already running %s", p.Id)
 	}
+	if p.Status == ProjectStatusError {
+		return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
+	}
 
 	// Start inputs
 	for _, in := range p.Inputs {
@@ -359,7 +339,10 @@ func (p *Project) Start() error {
 // Stop stops the project and all its components
 func (p *Project) Stop() error {
 	if p.Status != ProjectStatusRunning {
-		return fmt.Errorf("project is not running ", p.Id)
+		return fmt.Errorf("project is not running %s", p.Id)
+	}
+	if p.Status != ProjectStatusError {
+		return fmt.Errorf("project is error %s %s", p.Id, p.Err)
 	}
 
 	// Stop all components
@@ -437,19 +420,6 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	p.metrics.mu.RLock()
 	defer p.metrics.mu.RUnlock()
 	return p.metrics
-}
-
-// GetProjects returns a list of all projects
-func GetProjects() []*Project {
-	if GlobalProject == nil {
-		return []*Project{}
-	}
-
-	projects := make([]*Project, 0, len(GlobalProject.Projects))
-	for _, p := range GlobalProject.Projects {
-		projects = append(projects, p)
-	}
-	return projects
 }
 
 // GetProject returns a project by ID
