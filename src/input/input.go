@@ -53,6 +53,7 @@ type AliyunSLSInputConfig struct {
 // Input is the runtime input instance.
 type Input struct {
 	Id                  string `json:"Id"`
+	Path                string
 	ProjectNodeSequence string
 	Type                InputType
 	DownStream          []*chan map[string]interface{}
@@ -96,6 +97,7 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 
 	in := &Input{
 		Id:           id,
+		Path:         path,
 		Type:         cfg.Type,
 		DownStream:   make([]*chan map[string]interface{}, 0),
 		kafkaCfg:     cfg.Kafka,

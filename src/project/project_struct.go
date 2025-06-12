@@ -31,6 +31,7 @@ type ProjectConfig struct {
 	Id        string
 	Content   string `yaml:"content"`
 	RawConfig string
+	Path      string
 }
 
 // Project represents a data processing project with inputs, outputs, and rules

@@ -793,46 +793,98 @@ func deleteComponent(componentType string, c echo.Context) error {
 
 // Component deletion handlers
 func deleteRuleset(c echo.Context) error {
+	var r *rules_engine.Ruleset
+	var ok bool
 	id := c.Param("id")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
+
+	if r, ok = project.GlobalProject.Rulesets[id]; !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
+	}
+
+	delete(project.GlobalProject.Rulesets, id)
+
 	if cluster.IsLeader {
 		go syncToFollowers("DELETE", "/ruleset/"+id, nil)
+		_ = os.Remove(r.Path)
+	} else {
+		delete(common.AllRulesetsRawConfig, id)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "ruleset deleted successfully"})
 }
 
 func deleteInput(c echo.Context) error {
+	var i *input.Input
+	var ok bool
+
 	id := c.Param("id")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
+
+	if i, ok = project.GlobalProject.Inputs[id]; !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
+	}
+
+	delete(project.GlobalProject.Inputs, id)
+
 	if cluster.IsLeader {
 		go syncToFollowers("DELETE", "/input/"+id, nil)
+		_ = os.Remove(i.Path)
+	} else {
+		delete(common.AllInputsRawConfig, id)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "input deleted successfully"})
 }
 
 func deleteOutput(c echo.Context) error {
+	var o *output.Output
+	var ok bool
+
 	id := c.Param("id")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
+
+	if o, ok = project.GlobalProject.Outputs[id]; !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
+	}
+
+	delete(project.GlobalProject.Outputs, id)
+
 	if cluster.IsLeader {
 		go syncToFollowers("DELETE", "/output/"+id, nil)
+		_ = os.Remove(o.Path)
+	} else {
+		delete(common.AllOutputsRawConfig, id)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "output deleted successfully"})
 }
 
 func deleteProject(c echo.Context) error {
+	var p *project.Project
+	var ok bool
+
 	id := c.Param("id")
 	if id == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
-	if cluster.IsLeader {
-		go syncToFollowers("DELETE", "/project/"+id, nil)
+
+	if p, ok = project.GlobalProject.Projects[id]; !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
 	}
+
+	if cluster.IsLeader {
+		_ = os.Remove(p.Config.Path)
+		go syncToFollowers("DELETE", "/project/"+id, nil)
+	} else {
+		delete(common.AllProjectRawConfig, id)
+	}
+
+	delete(project.GlobalProject.Projects, id)
+
 	return c.JSON(http.StatusOK, map[string]string{"message": "project deleted successfully"})
 }
 
@@ -844,16 +896,20 @@ func deletePlugin(c echo.Context) error {
 	if name == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required"})
 	}
+
 	if p, ok = plugin.Plugins[name]; !ok {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is not found"})
 	}
 
-	_ = os.Remove(p.Path)
-	delete(plugin.Plugins, name)
-
 	if cluster.IsLeader {
 		go syncToFollowers("DELETE", "/plugin/"+name, nil)
+		_ = os.Remove(p.Path)
+	} else {
+		delete(common.AllPluginsRawConfig, name)
 	}
+
+	delete(plugin.Plugins, name)
+
 	return c.JSON(http.StatusOK, map[string]string{"message": "plugin deleted successfully"})
 }
 

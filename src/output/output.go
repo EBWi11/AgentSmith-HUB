@@ -61,6 +61,7 @@ type AliyunSLSOutputConfig struct {
 // Output is the runtime output instance.
 type Output struct {
 	Id                  string `json:"Id"`
+	Path                string
 	ProjectNodeSequence string
 	Type                OutputType
 	UpStream            []*chan map[string]interface{}
@@ -108,6 +109,7 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 
 	out := &Output{
 		Id:               id,
+		Path:             path,
 		Type:             cfg.Type,
 		UpStream:         make([]*chan map[string]interface{}, 0),
 		kafkaCfg:         cfg.Kafka,

@@ -39,6 +39,7 @@ func NewProject(pp string, raw string, id string) (*Project, error) {
 		}
 
 		cfg.RawConfig = string(data)
+		cfg.Path = pp
 	} else {
 		cfg.RawConfig = raw
 		data = []byte(raw)

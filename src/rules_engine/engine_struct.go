@@ -30,6 +30,7 @@ var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 
 // Ruleset represents a collection of rules and associated metadata.
 type Ruleset struct {
+	Path                string
 	XMLName             xml.Name `xml:"root"`
 	RulesetID           string   `json:"Id"`
 	ProjectNodeSequence string
@@ -184,6 +185,7 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse resource: %w", err)
 	}
+	ruleset.Path = path
 
 	if len(ruleset.UpStream) == 0 {
 		ruleset.UpStream = make(map[string]*chan map[string]interface{}, 0)
