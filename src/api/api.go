@@ -698,6 +698,19 @@ func createComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
 	}
 
+	switch componentType {
+	case "plugin":
+		request.Raw = NewPluginData
+	case "input":
+		request.Raw = NewInputData
+	case "output":
+		request.Raw = NewOutputData
+	case "ruleset":
+		request.Raw = NewRulesetData
+	case "project":
+		request.Raw = NewProjectData
+	}
+
 	err := WriteComponentFile(filtPath, request.Raw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
