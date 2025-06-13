@@ -40,12 +40,29 @@ func getProjects(c echo.Context) error {
 			"status": p.Status,
 		})
 	}
+
+	for id, _ := range p.ProjectsNew {
+		result = append(result, map[string]interface{}{
+			"id":     id,
+			"status": project.ProjectStatusStopped,
+		})
+	}
 	return c.JSON(http.StatusOK, result)
 }
 
 // getProject returns details of a specific project
 func getProject(c echo.Context) error {
 	id := c.Param("id")
+
+	p_raw := project.GetProjectNew(id)
+	if p_raw != "" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":     id,
+			"status": project.ProjectStatusStopped,
+			"raw":    p_raw,
+		})
+	}
+
 	p := project.GetProject(id)
 	if p == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
@@ -54,10 +71,7 @@ func getProject(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"id":     p.Id,
 		"status": p.Status,
-		//"inputs":   p.Inputs,
-		//"outputs":  p.Outputs,
-		//"rulesets": p.Rulesets,
-		"raw": p.Config.RawConfig,
+		"raw":    p.Config.RawConfig,
 	})
 }
 
@@ -68,8 +82,13 @@ func getRulesets(c echo.Context) error {
 
 	for _, r := range p.Rulesets {
 		rulesets = append(rulesets, map[string]interface{}{
-			"id":   r.RulesetID,
-			"type": r.Type,
+			"id": r.RulesetID,
+		})
+	}
+
+	for id, _ := range p.RulesetsNew {
+		rulesets = append(rulesets, map[string]interface{}{
+			"id": id,
 		})
 	}
 	return c.JSON(http.StatusOK, rulesets)
@@ -78,14 +97,20 @@ func getRulesets(c echo.Context) error {
 // getRuleset returns details of a specific ruleset
 func getRuleset(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GlobalProject
-
-	if r, ok := p.Rulesets[id]; ok {
+	r_raw := project.GetRulesetNew(id)
+	if r_raw != "" {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"id":           r.RulesetID,
-			"type":         r.Type,
-			"is_detection": r.IsDetection,
-			"raw":          r.RawConfig,
+			"id":  id,
+			"raw": r_raw,
+		})
+	}
+
+	r := project.GetRuleset(id)
+
+	if r != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":  r.RulesetID,
+			"raw": r.RawConfig,
 		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
@@ -98,8 +123,13 @@ func getInputs(c echo.Context) error {
 
 	for _, in := range p.Inputs {
 		inputs = append(inputs, map[string]interface{}{
-			"id":   in.Id,
-			"type": in.Type,
+			"id": in.Id,
+		})
+	}
+
+	for id, _ := range p.InputsNew {
+		inputs = append(inputs, map[string]interface{}{
+			"id": id,
 		})
 	}
 	return c.JSON(http.StatusOK, inputs)
@@ -108,16 +138,23 @@ func getInputs(c echo.Context) error {
 // getInput returns details of a specific input component
 func getInput(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GlobalProject
+	in_raw := project.GlobalProject.InputsNew[id]
 
-	if in, ok := p.Inputs[id]; ok {
+	if in_raw != "" {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"id":            in.Id,
-			"type":          in.Type,
-			"consume_qps":   in.GetConsumeQPS(),
-			"consume_total": in.GetConsumeTotal(),
-			"raw":           in.Config.RawConfig,
+			"id":  id,
+			"raw": in_raw,
 		})
+	}
+
+	in := project.GlobalProject.Inputs[id]
+
+	if in != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":  in.Id,
+			"raw": in.Config.RawConfig,
+		})
+
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
@@ -128,10 +165,15 @@ func getPlugins(c echo.Context) error {
 	for _, p := range plugin.Plugins {
 		if p.Type == plugin.YAEGI_PLUGIN {
 			plugins = append(plugins, map[string]interface{}{
-				"type": p.Type,
 				"name": p.Name,
 			})
 		}
+	}
+
+	for name, _ := range plugin.PluginsNew {
+		plugins = append(plugins, map[string]interface{}{
+			"name": name,
+		})
 	}
 	return c.JSON(http.StatusOK, plugins)
 }
@@ -139,10 +181,17 @@ func getPlugins(c echo.Context) error {
 func getPlugin(c echo.Context) error {
 	name := c.Param("name")
 
+	p_raw := plugin.PluginsNew[name]
+	if p_raw != "" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"name": name,
+			"raw":  p_raw,
+		})
+	}
+
 	if p, ok := plugin.Plugins[name]; ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"name": p.Name,
-			"type": p.Type,
 			"raw":  string(p.Payload),
 		})
 	}
@@ -156,8 +205,13 @@ func getOutputs(c echo.Context) error {
 
 	for _, out := range p.Outputs {
 		outputs = append(outputs, map[string]interface{}{
-			"id":   out.Id,
-			"type": out.Type,
+			"id": out.Id,
+		})
+	}
+
+	for id, _ := range p.OutputsNew {
+		outputs = append(outputs, map[string]interface{}{
+			"id": id,
 		})
 	}
 	return c.JSON(http.StatusOK, outputs)
@@ -166,15 +220,20 @@ func getOutputs(c echo.Context) error {
 // getOutput returns details of a specific output component
 func getOutput(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GlobalProject
-
-	if out, ok := p.Outputs[id]; ok {
+	out_raw := project.GlobalProject.ProjectsNew[id]
+	if out_raw != "" {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"id":            out.Id,
-			"type":          out.Type,
-			"produce_qps":   out.GetProduceQPS(),
-			"produce_total": out.GetProduceTotal(),
-			"raw":           out.Config.RawConfig,
+			"id":  id,
+			"raw": out_raw,
+		})
+	}
+
+	out := project.GlobalProject.Outputs[id]
+
+	if out != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"id":  out.Id,
+			"raw": out.Config.RawConfig,
 		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
@@ -643,6 +702,18 @@ func createComponent(componentType string, c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	} else {
+		switch componentType {
+		case "plugin":
+			plugin.PluginsNew[request.ID] = request.Raw
+		case "input":
+			project.GlobalProject.InputsNew[request.ID] = request.Raw
+		case "output":
+			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+		case "ruleset":
+			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+		case "project":
+			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+		}
 		return c.JSON(http.StatusCreated, map[string]string{"message": "created successfully"})
 	}
 }

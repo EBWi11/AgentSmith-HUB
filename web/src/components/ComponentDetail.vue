@@ -107,37 +107,24 @@ export default {
     getDefaultTemplate(type, id) {
       switch (type) {
         case 'inputs':
-          return `name: "${id}"
-type: "file"
-file:
-  path: "/path/to/input.json"
-  format: "json"`;
+          return ``;
         case 'outputs':
-          return `name: "${id}"
-type: "file"
-file:
-  path: "/path/to/output.json"
-  format: "json"`;
+          return ``;
         case 'rulesets':
-          return `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root type=\"DETECTION\" />`;
+          return ``;
         case 'projects':
-          return `name: "${id}"
-flow:
-  - from: "input.default"
-    to: "ruleset.default"
-  - from: "ruleset.default"
-    to: "output.default"`;
+          return ``;
         case 'plugins':
-          return `// 新插件代码`;
+          return ``;
         default:
-          return '';
+          return ``;
       }
     },
     async saveNew() {
       this.saveError = '';
       try {
         const { type, id } = this.item;
-        const raw = this.editorValue;
+        const raw = '';
         let resp;
         switch (type) {
           case 'inputs':

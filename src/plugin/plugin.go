@@ -34,6 +34,7 @@ type Plugin struct {
 }
 
 var Plugins = make(map[string]*Plugin)
+var PluginsNew = make(map[string]string)
 
 func init() {
 	for name, f := range local_plugin.LocalPluginBoolRes {

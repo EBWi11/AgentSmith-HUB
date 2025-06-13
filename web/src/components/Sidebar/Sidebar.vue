@@ -95,7 +95,7 @@
         <h3 class="font-bold mb-4">新建{{ sections[addType]?.title || addType }}</h3>
         <div class="mb-2">
           <label class="block text-xs text-gray-500 mb-1">名称</label>
-          <input v-model="addName" class="w-full border rounded px-2 py-1 text-sm" />
+          <input v-model="addName" class="w-full border rounded px-2 py-1 text-sm" @keyup.enter="confirmAddName" />
         </div>
         <div class="flex justify-end space-x-2 mt-4">
           <button @click="showAddModal=false" class="px-3 py-1 text-sm text-gray-500">取消</button>
@@ -278,11 +278,12 @@ file:
   path: "/path/to/input.json"
   format: "json"` };
         case 'outputs':
-          return { id, raw: this.addRaw || `name: "${id}"
-type: "file"
-file:
-  path: "/path/to/output.json"
-  format: "json"` };
+          return { id, raw: this.addRaw || `type: kafka
+kafka:
+  brokers:
+    - 127.0.0.1:9092
+  topic: test-topic
+  group: test` };
         case 'rulesets':
           return { id, raw: this.addRaw || `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root type=\"DETECTION\" />` };
         case 'projects':
@@ -314,9 +315,43 @@ flow:
         this.addError = '名称已存在';
         return;
       }
-      this.showAddModal = false;
-      // 进入 editor，传递 type, id, isNew
-      this.$emit('open-editor', { type: this.addType, id: this.addName, isNew: true });
+
+      try {
+        const raw = '';
+        switch (this.addType) {
+          case 'inputs':
+            await hubApi.createInput(this.addName, raw);
+            break;
+          case 'outputs':
+            await hubApi.createOutput(this.addName, raw);
+            break;
+          case 'rulesets':
+            await hubApi.createRuleset(this.addName, raw);
+            break;
+          case 'projects':
+            await hubApi.createProject(this.addName, raw);
+            break;
+          case 'plugins':
+            await hubApi.createPlugin(this.addName, raw);
+            break;
+          default:
+            throw new Error('不支持的类型');
+        }
+        
+        // 刷新列表
+        await this.fetchItems(this.addType);
+        
+        // 关闭弹窗
+        this.showAddModal = false;
+        
+        // 显示成功提示
+        this.$message && this.$message.success('创建成功！');
+        
+        // 选中新创建的项目
+        this.$emit('select-item', { type: this.addType, id: this.addName });
+      } catch (e) {
+        this.addError = '创建失败: ' + (e?.message || '未知错误');
+      }
     },
     copyName(item) {
       const text = item.id || item.name;

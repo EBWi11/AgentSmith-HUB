@@ -21,6 +21,9 @@ import (
 
 func GetFileNameWithoutExt(path string) string {
 	base := filepath.Base(path)
+	if strings.HasSuffix(base, ".new") {
+		base = base[0 : len(base)-len(".new")]
+	}
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext)
 }

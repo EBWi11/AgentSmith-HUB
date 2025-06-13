@@ -21,6 +21,11 @@ func init() {
 	GlobalProject.Outputs = make(map[string]*output.Output)
 	GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
 
+	GlobalProject.ProjectsNew = make(map[string]string, 0)
+	GlobalProject.InputsNew = make(map[string]string, 0)
+	GlobalProject.OutputsNew = make(map[string]string, 0)
+	GlobalProject.RulesetsNew = make(map[string]string, 0)
+
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
 	GlobalProject.msgChansCounter = make(map[string]int)
 }
@@ -457,9 +462,33 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 
 // GetProject returns a project by ID
 func GetProject(id string) *Project {
-	if GlobalProject == nil {
-		return nil
-	}
-
 	return GlobalProject.Projects[id]
+}
+
+func GetProjectNew(id string) string {
+	return GlobalProject.ProjectsNew[id]
+}
+
+func GetInput(id string) *input.Input {
+	return GlobalProject.Inputs[id]
+}
+
+func GetInputNew(id string) string {
+	return GlobalProject.InputsNew[id]
+}
+
+func GetOutput(id string) *output.Output {
+	return GlobalProject.Outputs[id]
+}
+
+func GetOutputNew(id string) string {
+	return GlobalProject.OutputsNew[id]
+}
+
+func GetRuleset(id string) *rules_engine.Ruleset {
+	return GlobalProject.Rulesets[id]
+}
+
+func GetRulesetNew(id string) string {
+	return GlobalProject.RulesetsNew[id]
 }

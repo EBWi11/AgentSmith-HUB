@@ -144,6 +144,63 @@ func LoadComponents() {
 			}
 			project.GlobalProject.Rulesets[id] = tmp
 		}
+
+		// read new components
+		pluginNewList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "plugin"), ".go.new")
+		if err != nil {
+			logger.Error("travers plugin new error", "error", err)
+		}
+		for _, v := range pluginNewList {
+			name := common.GetFileNameWithoutExt(v)
+			data, err := os.ReadFile(v)
+			if err != nil {
+				logger.Error("failed to read component", "error", err, "path", v)
+				continue
+			}
+			plugin.PluginsNew[name] = string(data)
+		}
+
+		inputListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "input"), ".yaml.new")
+		if err != nil {
+			logger.Error("travers input new error", "error", err)
+		}
+		for _, v := range inputListNew {
+			id := common.GetFileNameWithoutExt(v)
+			data, err := os.ReadFile(v)
+			if err != nil {
+				logger.Error("failed to read component", "error", err, "path", v)
+				continue
+			}
+			project.GlobalProject.InputsNew[id] = string(data)
+		}
+
+		outputListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "output"), ".yaml.new")
+		if err != nil {
+			logger.Error("travers output new error", "error", err)
+		}
+		for _, v := range outputListNew {
+			id := common.GetFileNameWithoutExt(v)
+			data, err := os.ReadFile(v)
+			if err != nil {
+				logger.Error("failed to read component", "error", err, "path", v)
+				continue
+			}
+			project.GlobalProject.OutputsNew[id] = string(data)
+		}
+
+		rulesetListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "ruleset"), ".xml,new")
+		if err != nil {
+			logger.Error("travers ruleset new error", "error", err)
+		}
+		for _, v := range rulesetListNew {
+			id := common.GetFileNameWithoutExt(v)
+			data, err := os.ReadFile(v)
+			if err != nil {
+				logger.Error("failed to read component", "error", err, "path", v)
+				continue
+			}
+			project.GlobalProject.RulesetsNew[id] = string(data)
+		}
 	} else {
 		for name, raw := range common.AllPluginsRawConfig {
 			err := plugin.NewPlugin("", raw, name, plugin.YAEGI_PLUGIN)
@@ -200,6 +257,23 @@ func LoadProject() {
 			if p != nil {
 				project.GlobalProject.Projects[id] = p
 			}
+		}
+
+		//read new project
+		projectListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "project"), ".yaml.new")
+		if err != nil {
+			logger.Error("travers project new error", "error", err)
+			return
+		}
+
+		for _, projectPath := range projectListNew {
+			id := common.GetFileNameWithoutExt(projectPath)
+			data, err := os.ReadFile(projectPath)
+			if err != nil {
+				logger.Error("failed to read component", "error", err, "path", projectPath)
+				continue
+			}
+			plugin.PluginsNew[id] = string(data)
 		}
 	} else {
 		for id, raw := range common.AllProjectRawConfig {

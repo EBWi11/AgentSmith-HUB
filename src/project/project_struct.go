@@ -22,6 +22,11 @@ type GlobalProjectInfo struct {
 	Outputs  map[string]*output.Output
 	Rulesets map[string]*rules_engine.Ruleset
 
+	ProjectsNew map[string]string
+	InputsNew   map[string]string
+	OutputsNew  map[string]string
+	RulesetsNew map[string]string
+
 	msgChans        map[string]chan map[string]interface{}
 	msgChansCounter map[string]int
 }
