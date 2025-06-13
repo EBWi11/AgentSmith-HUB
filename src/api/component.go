@@ -18,6 +18,66 @@ const (
 	EXT_NEW = ".yaml.new"
 )
 
+const NewPluginData = `package plugin
+
+import (
+	"errors"
+	"strings"
+)
+
+func Eval(data string) (bool, error) {
+	if data == "" {
+		return false, errors.New("")
+	}
+
+	if strings.HasSuffix(data, "something") {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}`
+const NewInputData = `type: kafka
+kafka:
+  brokers:
+    - 127.0.0.1:9092
+  topic: test-topic
+  group: test
+  
+#type: aliyun_sls
+#aliyun_sls:
+#  endpoint: "cn-beijing.log.aliyuncs.com"
+#  access_key_id: "xx"
+#  access_key_secret: "xx"
+#  project: "xx"
+#  logstore: "xx"
+#  consumer_group_name: "xx"
+#  consumer_name: "xx"
+#  cursor_position: "BEGIN_CURSOR"
+#  query: "xx"`
+
+const NewOutputData = `name: kafka_output_demo
+type: kafka
+kafka:
+  brokers:
+    - "192.168.27.130:9092"
+  topic: "kafka_output_demo"`
+
+const NewRulesetData = `<root name="test2" type="DETECTION">
+    <rule id="reverse_shell_01" name="测试" author="test">
+        <filter field="data_type">_$data_type</filter>
+        <checklist condition="a and c and d and e">
+            <node id="a" type="REGEX" field="exe">testcases</node>
+            <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>
+            <node id="d" type="EQU" field="sessionid">_$sessionid</node>
+        </checklist>
+        <append field_name="abc">123</append>
+        <del>exe,argv</del>
+    </rule>
+</root>`
+
+const NewProjectData = `content: |
+  INPUT.demo -> OUTPUT.demo`
+
 func GetExt(componentType string, new bool) string {
 	if componentType == "ruleset" {
 		if new {

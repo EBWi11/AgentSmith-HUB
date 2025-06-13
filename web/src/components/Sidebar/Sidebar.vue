@@ -190,8 +190,12 @@ export default {
         }
       }, 5000);
     },
-    toggleCollapse(type) {
+    async toggleCollapse(type) {
         this.collapsed[type] = !this.collapsed[type];
+        // 如果是展开操作，刷新列表
+        if (!this.collapsed[type]) {
+            await this.fetchItems(type);
+        }
     },
     filteredItems(type) {
       if (!this.search) return this.items[type];

@@ -704,15 +704,15 @@ func createComponent(componentType string, c echo.Context) error {
 	} else {
 		switch componentType {
 		case "plugin":
-			plugin.PluginsNew[request.ID] = request.Raw
+			plugin.PluginsNew[request.ID] = NewPluginData
 		case "input":
-			project.GlobalProject.InputsNew[request.ID] = request.Raw
+			project.GlobalProject.InputsNew[request.ID] = NewInputData
 		case "output":
-			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+			project.GlobalProject.OutputsNew[request.ID] = NewOutputData
 		case "ruleset":
-			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+			project.GlobalProject.RulesetsNew[request.ID] = NewRulesetData
 		case "project":
-			project.GlobalProject.OutputsNew[request.ID] = request.Raw
+			project.GlobalProject.ProjectsNew[request.ID] = NewProjectData
 		}
 		return c.JSON(http.StatusCreated, map[string]string{"message": "created successfully"})
 	}

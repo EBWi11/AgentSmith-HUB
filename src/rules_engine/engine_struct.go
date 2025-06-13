@@ -201,7 +201,6 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 		defer xmlFile.Close()
 
 		rawRuleset, _ = io.ReadAll(xmlFile)
-		return nil, fmt.Errorf("failed to read resource file: %w", err)
 	} else {
 		rawRuleset = []byte(raw)
 	}
