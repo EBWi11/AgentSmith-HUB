@@ -612,196 +612,60 @@ func updateRuleset(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
 }
 
-// createComponent handles creation of new components
 func createComponent(componentType string, c echo.Context) error {
 	var request struct {
 		ID  string `json:"id"`
 		Raw string `json:"raw"`
 	}
 
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
 	if err := c.Bind(&request); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	if request.ID == "" || request.Raw == "" {
+	if request.ID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw content are required"})
 	}
 
-	// Validate component configuration
-	var err error
-	switch componentType {
-	case "ruleset":
-		_, err = rules_engine.NewRuleset("", request.Raw, request.ID)
-	case "input":
-		_, err = input.NewInput("", request.Raw, request.ID)
-	case "output":
-		_, err = output.NewOutput("", request.Raw, request.ID)
-	case "project":
-		_, err = project.NewProject("", request.Raw, request.ID)
-	default:
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
+	filtPath, exist := GetComponentPath(componentType, request.ID, true)
+	if exist {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
 	}
 
+	_, exist = GetComponentPath(componentType, request.ID, false)
+	if exist {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+	}
+
+	err := WriteComponentFile(filtPath, request.Raw)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("invalid %s configuration: %v", componentType, err),
-		})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	} else {
+		return c.JSON(http.StatusCreated, map[string]string{"message": "created successfully"})
 	}
-
-	// If this is the leader node, write to config file and notify followers
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile(componentType, request.ID, request.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("failed to write configuration: %v", err),
-			})
-		}
-
-		// Notify followers
-		if err := cluster.NotifyFollowersComponentUpdate(componentType, request.ID, request.Raw); err != nil {
-			logger.Error("failed to notify followers of component creation", "error", err)
-		}
-	}
-
-	// Update global configuration
-	common.GlobalMu.Lock()
-	switch componentType {
-	case "ruleset":
-		common.AllRulesetsRawConfig[request.ID] = request.Raw
-	case "input":
-		common.AllInputsRawConfig[request.ID] = request.Raw
-	case "output":
-		common.AllOutputsRawConfig[request.ID] = request.Raw
-	case "project":
-		common.AllProjectRawConfig[request.ID] = request.Raw
-	}
-	common.GlobalMu.Unlock()
-
-	return c.JSON(http.StatusCreated, map[string]interface{}{
-		"id":      request.ID,
-		"type":    componentType,
-		"message": fmt.Sprintf("%s created successfully", componentType),
-	})
 }
 
 // Component creation handlers
 func createRuleset(c echo.Context) error {
-	var req struct{ ID, Raw string }
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-
-	if _, ok := project.GlobalProject.Rulesets[req.ID]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id already exists"})
-	}
-
-	if cluster.IsLeader {
-		body, _ := json.Marshal(req)
-		go syncToFollowers("POST", "/ruleset", body)
-	}
-	return c.JSON(http.StatusCreated, map[string]string{"message": "ruleset created successfully"})
+	return createComponent("ruleset", c)
 }
 
 func createInput(c echo.Context) error {
-	var req struct{ ID, Raw string }
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-
-	if req.ID == "" || req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw are required"})
-	}
-	if _, ok := project.GlobalProject.Inputs[req.ID]; ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id already exists"})
-	}
-
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("input", req.ID, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
-		}
-		body, _ := json.Marshal(req)
-		go syncToFollowers("POST", "/input", body)
-	}
-
-	// Register in memory and hot load
-	in, err := input.NewInput("", req.Raw, req.ID)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid input config: " + err.Error()})
-	}
-	project.GlobalProject.Inputs[req.ID] = in
-	common.GlobalMu.Lock()
-	common.AllInputsRawConfig[req.ID] = req.Raw
-	common.GlobalMu.Unlock()
-
-	return c.JSON(http.StatusCreated, map[string]string{"message": "input created successfully"})
+	return createComponent("input", c)
 }
 
 func createOutput(c echo.Context) error {
-	var req struct{ ID, Raw string }
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-
-	if req.ID == "" || req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw are required"})
-	}
-	if _, ok := project.GlobalProject.Outputs[req.ID]; ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id already exists"})
-	}
-
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("output", req.ID, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
-		}
-		body, _ := json.Marshal(req)
-		go syncToFollowers("POST", "/output", body)
-	}
-
-	// Register in memory and hot load
-	out, err := output.NewOutput("", req.Raw, req.ID)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid output config: " + err.Error()})
-	}
-	project.GlobalProject.Outputs[req.ID] = out
-	common.GlobalMu.Lock()
-	common.AllOutputsRawConfig[req.ID] = req.Raw
-	common.GlobalMu.Unlock()
-
-	return c.JSON(http.StatusCreated, map[string]string{"message": "output created successfully"})
+	return createComponent("output", c)
 }
 
 func createProject(c echo.Context) error {
-	var req struct{ ID, Raw string }
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
+	return createComponent("project", c)
+}
 
-	if req.ID == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id are required"})
-	}
-
-	if _, ok := project.GlobalProject.Projects[req.ID]; ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id already exists"})
-	}
-
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("project", req.ID, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
-		}
-		body, _ := json.Marshal(req)
-		go syncToFollowers("POST", "/project", body)
-	}
-
-	// Register in memory and hot load
-	prj, err := project.NewProject("", req.Raw, req.ID)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid project config: " + err.Error()})
-	}
-	project.GlobalProject.Projects[req.ID] = prj
-
-	return c.JSON(http.StatusCreated, map[string]string{"message": "project created successfully"})
+func createPlugin(c echo.Context) error {
+	return createComponent("plugin", c)
 }
 
 // deleteComponent handles deletion of components
@@ -1011,41 +875,6 @@ func syncToFollowers(method, path string, body []byte) {
 			time.Sleep(2 * time.Second)
 		}
 	}
-}
-
-// Create a new plugin
-func createPlugin(c echo.Context) error {
-	var req struct {
-		ID  string `json:"id"`
-		Raw string `json:"raw"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.ID == "" || req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw are required"})
-	}
-	if _, ok := plugin.Plugins[req.ID]; ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id already exists"})
-	}
-
-	pluginPath := filepath.Join(plugin.PluginDir, req.ID+".go")
-	if err := os.WriteFile(pluginPath, []byte(req.Raw), 0644); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write plugin file"})
-	}
-
-	p, err := plugin.LoadPlugin(pluginPath)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to load plugin: " + err.Error()})
-	}
-	plugin.Plugins[req.ID] = p
-
-	if cluster.IsLeader {
-		body, _ := json.Marshal(req)
-		go syncToFollowers("POST", "/plugin", body)
-	}
-
-	return c.JSON(http.StatusCreated, map[string]string{"message": "plugin created successfully"})
 }
 
 // Update an existing plugin

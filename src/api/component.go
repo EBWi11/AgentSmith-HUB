@@ -11,6 +11,9 @@ const (
 	RULESET_EXT     = ".xml"
 	RULESET_EXT_NEW = ".xml.new"
 
+	PLUGIN_EXT     = ".go"
+	PLUGIN_EXT_NEW = ".go.new"
+
 	EXT     = ".yaml"
 	EXT_NEW = ".yaml.new"
 )
@@ -21,6 +24,12 @@ func GetExt(componentType string, new bool) string {
 			return RULESET_EXT_NEW
 		} else {
 			return RULESET_EXT
+		}
+	} else if componentType == "plugin" {
+		if new {
+			return PLUGIN_EXT_NEW
+		} else {
+			return PLUGIN_EXT
 		}
 	} else {
 		if new {
