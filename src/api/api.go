@@ -4,6 +4,7 @@ import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
@@ -41,7 +42,7 @@ func getProjects(c echo.Context) error {
 		})
 	}
 
-	for id, _ := range p.ProjectsNew {
+	for id := range p.ProjectsNew {
 		result = append(result, map[string]interface{}{
 			"id":     id,
 			"status": project.ProjectStatusStopped,
@@ -54,8 +55,8 @@ func getProjects(c echo.Context) error {
 func getProject(c echo.Context) error {
 	id := c.Param("id")
 
-	p_raw := project.GetProjectNew(id)
-	if p_raw != "" {
+	p_raw, ok := project.GlobalProject.ProjectsNew[id]
+	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":     id,
 			"status": project.ProjectStatusStopped,
@@ -63,7 +64,7 @@ func getProject(c echo.Context) error {
 		})
 	}
 
-	p := project.GetProject(id)
+	p := project.GlobalProject.Projects[id]
 	if p == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
@@ -86,7 +87,7 @@ func getRulesets(c echo.Context) error {
 		})
 	}
 
-	for id, _ := range p.RulesetsNew {
+	for id := range p.RulesetsNew {
 		rulesets = append(rulesets, map[string]interface{}{
 			"id": id,
 		})
@@ -97,15 +98,16 @@ func getRulesets(c echo.Context) error {
 // getRuleset returns details of a specific ruleset
 func getRuleset(c echo.Context) error {
 	id := c.Param("id")
-	r_raw := project.GetRulesetNew(id)
-	if r_raw != "" {
+
+	r_raw, ok := project.GlobalProject.RulesetsNew[id]
+	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":  id,
 			"raw": r_raw,
 		})
 	}
 
-	r := project.GetRuleset(id)
+	r := project.GlobalProject.Rulesets[id]
 
 	if r != nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -127,7 +129,7 @@ func getInputs(c echo.Context) error {
 		})
 	}
 
-	for id, _ := range p.InputsNew {
+	for id := range p.InputsNew {
 		inputs = append(inputs, map[string]interface{}{
 			"id": id,
 		})
@@ -138,9 +140,8 @@ func getInputs(c echo.Context) error {
 // getInput returns details of a specific input component
 func getInput(c echo.Context) error {
 	id := c.Param("id")
-	in_raw := project.GlobalProject.InputsNew[id]
-
-	if in_raw != "" {
+	in_raw, ok := project.GlobalProject.InputsNew[id]
+	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":  id,
 			"raw": in_raw,
@@ -170,7 +171,7 @@ func getPlugins(c echo.Context) error {
 		}
 	}
 
-	for name, _ := range plugin.PluginsNew {
+	for name := range plugin.PluginsNew {
 		plugins = append(plugins, map[string]interface{}{
 			"name": name,
 		})
@@ -181,20 +182,46 @@ func getPlugins(c echo.Context) error {
 func getPlugin(c echo.Context) error {
 	name := c.Param("name")
 
-	p_raw := plugin.PluginsNew[name]
-	if p_raw != "" {
+	// 首先检查是否有临时文件
+	p_raw, ok := plugin.PluginsNew[name]
+	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"name": name,
 			"raw":  p_raw,
 		})
 	}
 
+	// 如果没有临时文件，检查正式文件
 	if p, ok := plugin.Plugins[name]; ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"name": p.Name,
 			"raw":  string(p.Payload),
 		})
 	}
+
+	// 如果内存中没有，尝试从文件系统直接读取
+	tempPath, tempExists := GetComponentPath("plugin", name, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"name": name,
+				"raw":  content,
+			})
+		}
+	}
+
+	formalPath, formalExists := GetComponentPath("plugin", name, false)
+	if formalExists {
+		content, err := ReadComponent(formalPath)
+		if err == nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"name": name,
+				"raw":  content,
+			})
+		}
+	}
+
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 }
 
@@ -209,7 +236,7 @@ func getOutputs(c echo.Context) error {
 		})
 	}
 
-	for id, _ := range p.OutputsNew {
+	for id := range p.OutputsNew {
 		outputs = append(outputs, map[string]interface{}{
 			"id": id,
 		})
@@ -220,8 +247,8 @@ func getOutputs(c echo.Context) error {
 // getOutput returns details of a specific output component
 func getOutput(c echo.Context) error {
 	id := c.Param("id")
-	out_raw := project.GlobalProject.ProjectsNew[id]
-	if out_raw != "" {
+	out_raw, ok := project.GlobalProject.ProjectsNew[id]
+	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":  id,
 			"raw": out_raw,
@@ -257,7 +284,7 @@ func getMetrics(c echo.Context) error {
 // getProjectMetrics returns metrics for a specific project
 func getProjectMetrics(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GetProject(id)
+	p := project.GlobalProject.Projects[id]
 	if p == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
@@ -419,7 +446,7 @@ func StartProject(c echo.Context) error {
 	}
 
 	// Get project
-	p := project.GetProject(req.ProjectID)
+	p := project.GlobalProject.Projects[req.ProjectID]
 	if p == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
@@ -460,7 +487,7 @@ func StopProject(c echo.Context) error {
 	}
 
 	// Get project
-	p := project.GetProject(req.ProjectID)
+	p := project.GlobalProject.Projects[req.ProjectID]
 	if p == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
@@ -619,58 +646,6 @@ func handleComponentSync(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "synced"})
 }
 
-// updateRuleset handler function
-func updateRuleset(c echo.Context) error {
-	id := c.Param("id")
-	var requestBody struct {
-		Raw string `json:"raw"`
-	}
-
-	if err := c.Bind(&requestBody); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-
-	if requestBody.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw ruleset content is required"})
-	}
-
-	p := project.GlobalProject
-	var updatedRuleset *rules_engine.Ruleset
-	var err error
-
-	if rs, ok := p.Rulesets[id]; ok {
-		updatedRuleset, err = rs.HotUpdate(requestBody.Raw, id)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("failed to update ruleset: %v", err),
-			})
-		}
-
-		// Update the ruleset in the project and global config
-		p.Rulesets[id] = updatedRuleset
-		common.GlobalMu.Lock()
-		common.AllRulesetsRawConfig[id] = requestBody.Raw
-		common.GlobalMu.Unlock()
-
-		// If this is the leader node, notify all followers
-		if cluster.IsLeader {
-			if err := cluster.NotifyFollowersComponentUpdate("ruleset", id, requestBody.Raw); err != nil {
-				logger.Error("failed to notify followers of ruleset update", "error", err)
-			}
-		}
-
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"id":           updatedRuleset.RulesetID,
-			"type":         updatedRuleset.Type,
-			"is_detection": updatedRuleset.IsDetection,
-			"raw":          updatedRuleset.RawConfig,
-			"message":      "ruleset updated successfully",
-		})
-	}
-
-	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
-}
-
 func createComponent(componentType string, c echo.Context) error {
 	var request struct {
 		ID  string `json:"id"`
@@ -684,9 +659,13 @@ func createComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 
-	if request.ID == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id and raw content are required"})
+	// 增强对ID的验证
+	if request.ID == "" || strings.TrimSpace(request.ID) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id cannot be empty"})
 	}
+
+	// 规范化ID，去除首尾空格
+	request.ID = strings.TrimSpace(request.ID)
 
 	filtPath, exist := GetComponentPath(componentType, request.ID, true)
 	if exist {
@@ -759,52 +738,96 @@ func deleteComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
 	}
 
-	// Check if component is in use by any project
-	projects := project.GlobalProject.Projects
-	for _, p := range projects {
-		var inUse bool
-		switch componentType {
-		case "ruleset":
-			_, inUse = p.Rulesets[id]
-		case "input":
-			_, inUse = p.Inputs[id]
-		case "output":
-			_, inUse = p.Outputs[id]
-		}
-		if inUse {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
-			})
-		}
-	}
+	// 检查组件是否存在
+	var componentExists bool
+	var componentPath string
+	var tempPath string
+	var globalMapToUpdate map[string]string
 
-	// If this is the leader node, delete config file and notify followers
-	if cluster.IsLeader {
-		if err := common.DeleteConfigFile(componentType, id); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("failed to delete configuration: %v", err),
-			})
-		}
+	// 检查是否存在临时文件或正式文件
+	tempPath, tempExists := GetComponentPath(componentType, id, true)         // .new 文件
+	componentPath, formalExists := GetComponentPath(componentType, id, false) // 正式文件
 
-		// Notify followers about deletion
-		if err := cluster.NotifyFollowersComponentUpdate(componentType+"_delete", id, ""); err != nil {
-			logger.Error("failed to notify followers of component deletion", "error", err)
-		}
-	}
-
-	// Remove from global configuration
-	common.GlobalMu.Lock()
+	// 根据组件类型获取相应的全局映射
 	switch componentType {
 	case "ruleset":
-		delete(common.AllRulesetsRawConfig, id)
+		_, componentExists = project.GlobalProject.Rulesets[id]
+		globalMapToUpdate = common.AllRulesetsRawConfig
 	case "input":
-		delete(common.AllInputsRawConfig, id)
+		_, componentExists = project.GlobalProject.Inputs[id]
+		globalMapToUpdate = common.AllInputsRawConfig
 	case "output":
-		delete(common.AllOutputsRawConfig, id)
+		_, componentExists = project.GlobalProject.Outputs[id]
+		globalMapToUpdate = common.AllOutputsRawConfig
 	case "project":
-		delete(common.AllProjectRawConfig, id)
+		_, componentExists = project.GlobalProject.Projects[id]
+		globalMapToUpdate = common.AllProjectRawConfig
+	case "plugin":
+		_, componentExists = plugin.Plugins[id]
+		globalMapToUpdate = common.AllPluginsRawConfig
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown component type"})
 	}
-	common.GlobalMu.Unlock()
+
+	// 如果是正式组件（非临时文件），检查是否在使用中
+	if componentExists {
+		// 检查组件是否被任何项目使用
+		projects := project.GlobalProject.Projects
+		for _, p := range projects {
+			var inUse bool
+			switch componentType {
+			case "ruleset":
+				_, inUse = p.Rulesets[id]
+			case "input":
+				_, inUse = p.Inputs[id]
+			case "output":
+				_, inUse = p.Outputs[id]
+			}
+			if inUse {
+				return c.JSON(http.StatusConflict, map[string]string{
+					"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
+				})
+			}
+		}
+
+		// 从全局映射中删除组件
+		switch componentType {
+		case "ruleset":
+			delete(project.GlobalProject.Rulesets, id)
+		case "input":
+			delete(project.GlobalProject.Inputs, id)
+		case "output":
+			delete(project.GlobalProject.Outputs, id)
+		case "project":
+			delete(project.GlobalProject.Projects, id)
+		case "plugin":
+			delete(plugin.Plugins, id)
+		}
+	}
+
+	// 如果是leader节点，删除文件并通知follower
+	if cluster.IsLeader {
+		// 删除临时文件（如果存在）
+		if tempExists {
+			if err := os.Remove(tempPath); err != nil {
+				logger.Error("failed to delete temp file", "path", tempPath, "error", err)
+			}
+		}
+
+		// 删除正式文件（如果存在）
+		if formalExists {
+			if err := os.Remove(componentPath); err != nil {
+				logger.Error("failed to delete component file", "path", componentPath, "error", err)
+			}
+			// 只有删除正式文件时才通知follower
+			go syncToFollowers("DELETE", "/"+componentType+"/"+id, nil)
+		}
+	} else {
+		// 如果是follower节点，只需要从内存中删除配置
+		common.GlobalMu.Lock()
+		delete(globalMapToUpdate, id)
+		common.GlobalMu.Unlock()
+	}
 
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("%s deleted successfully", componentType),
@@ -813,127 +836,36 @@ func deleteComponent(componentType string, c echo.Context) error {
 
 // Component deletion handlers
 func deleteRuleset(c echo.Context) error {
-	var r *rules_engine.Ruleset
-	var ok bool
-	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
-	}
-
-	if r, ok = project.GlobalProject.Rulesets[id]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
-	}
-
-	delete(project.GlobalProject.Rulesets, id)
-
-	if cluster.IsLeader {
-		go syncToFollowers("DELETE", "/ruleset/"+id, nil)
-		_ = os.Remove(r.Path)
-	} else {
-		delete(common.AllRulesetsRawConfig, id)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "ruleset deleted successfully"})
+	return deleteComponent("ruleset", c)
 }
 
 func deleteInput(c echo.Context) error {
-	var i *input.Input
-	var ok bool
-
-	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
-	}
-
-	if i, ok = project.GlobalProject.Inputs[id]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
-	}
-
-	delete(project.GlobalProject.Inputs, id)
-
-	if cluster.IsLeader {
-		go syncToFollowers("DELETE", "/input/"+id, nil)
-		_ = os.Remove(i.Path)
-	} else {
-		delete(common.AllInputsRawConfig, id)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "input deleted successfully"})
+	return deleteComponent("input", c)
 }
 
 func deleteOutput(c echo.Context) error {
-	var o *output.Output
-	var ok bool
-
-	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
-	}
-
-	if o, ok = project.GlobalProject.Outputs[id]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
-	}
-
-	delete(project.GlobalProject.Outputs, id)
-
-	if cluster.IsLeader {
-		go syncToFollowers("DELETE", "/output/"+id, nil)
-		_ = os.Remove(o.Path)
-	} else {
-		delete(common.AllOutputsRawConfig, id)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "output deleted successfully"})
+	return deleteComponent("output", c)
 }
 
 func deleteProject(c echo.Context) error {
-	var p *project.Project
-	var ok bool
-
-	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
-	}
-
-	if p, ok = project.GlobalProject.Projects[id]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id not found"})
-	}
-
-	if cluster.IsLeader {
-		_ = os.Remove(p.Config.Path)
-		go syncToFollowers("DELETE", "/project/"+id, nil)
-	} else {
-		delete(common.AllProjectRawConfig, id)
-	}
-
-	delete(project.GlobalProject.Projects, id)
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "project deleted successfully"})
+	return deleteComponent("project", c)
 }
 
 func deletePlugin(c echo.Context) error {
-	var p *plugin.Plugin
-	var ok bool
-
+	// Plugins use name instead of id as parameter
 	name := c.Param("name")
 	if name == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required"})
 	}
 
-	if p, ok = plugin.Plugins[name]; !ok {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is not found"})
-	}
+	// Set name parameter as id parameter to reuse deleteComponent function
+	c.SetParamNames("id")
+	c.SetParamValues(name)
 
-	if cluster.IsLeader {
-		go syncToFollowers("DELETE", "/plugin/"+name, nil)
-		_ = os.Remove(p.Path)
-	} else {
-		delete(common.AllPluginsRawConfig, name)
-	}
-
-	delete(plugin.Plugins, name)
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "plugin deleted successfully"})
+	return deleteComponent("plugin", c)
 }
 
-// 通用同步方法：只同步到健康的 follower 节点
+// Generic sync method: only sync to healthy follower nodes
 func syncToFollowers(method, path string, body []byte) {
 	cm := cluster.ClusterInstance
 	if cm == nil {
@@ -954,169 +886,613 @@ func syncToFollowers(method, path string, body []byte) {
 			}
 			resp, err := http.DefaultClient.Do(req)
 			if err == nil && resp.StatusCode < 300 {
-				break // 成功
+				break // Success
 			}
 			time.Sleep(2 * time.Second)
 		}
 	}
 }
 
+// updateRuleset handler function
+func updateRuleset(c echo.Context) error {
+	return updateComponent("ruleset", c)
+}
+
 // Update an existing plugin
 func updatePlugin(c echo.Context) error {
-	name := c.Param("name")
-	var req struct {
-		Raw string `json:"raw"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw is required"})
-	}
-	p, ok := plugin.Plugins[name]
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
-	}
-
-	if err := os.WriteFile(p.Path, []byte(req.Raw), 0644); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write plugin file"})
-	}
-
-	newP, err := plugin.LoadPlugin(p.Path)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to reload plugin: " + err.Error()})
-	}
-	plugin.Plugins[name] = newP
-
-	if cluster.IsLeader {
-		body, _ := json.Marshal(map[string]string{"id": name, "raw": req.Raw})
-		go syncToFollowers("PUT", "/plugin/"+name, body)
-	}
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "plugin updated successfully"})
+	return updateComponent("plugin", c)
 }
 
 // Update an existing input
 func updateInput(c echo.Context) error {
-	id := c.Param("id")
-	var req struct {
-		Raw string `json:"raw"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw is required"})
-	}
-	in, ok := project.GlobalProject.Inputs[id]
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
-	}
-
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("input", id, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
-		}
-		body, _ := json.Marshal(map[string]string{"id": id, "raw": req.Raw})
-		go syncToFollowers("PUT", "/input/"+id, body)
-	}
-
-	// Hot reload
-	if err := in.Stop(); err != nil {
-		logger.Error("failed to stop input", "error", err)
-	}
-	newIn, err := input.NewInput("", req.Raw, id)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid input config: " + err.Error()})
-	}
-	project.GlobalProject.Inputs[id] = newIn
-	common.GlobalMu.Lock()
-	common.AllInputsRawConfig[id] = req.Raw
-	common.GlobalMu.Unlock()
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "input updated successfully"})
+	return updateComponent("input", c)
 }
 
 // Update an existing output
 func updateOutput(c echo.Context) error {
-	id := c.Param("id")
-	var req struct {
-		Raw string `json:"raw"`
-	}
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw is required"})
-	}
-	out, ok := project.GlobalProject.Outputs[id]
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
-	}
-
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("output", id, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
-		}
-		body, _ := json.Marshal(map[string]string{"id": id, "raw": req.Raw})
-		go syncToFollowers("PUT", "/output/"+id, body)
-	}
-
-	// Hot reload
-	if err := out.Stop(); err != nil {
-		logger.Error("failed to stop output", "error", err)
-	}
-	newOut, err := output.NewOutput("", req.Raw, id)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid output config: " + err.Error()})
-	}
-	project.GlobalProject.Outputs[id] = newOut
-	common.GlobalMu.Lock()
-	common.AllOutputsRawConfig[id] = req.Raw
-	common.GlobalMu.Unlock()
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "output updated successfully"})
+	return updateComponent("output", c)
 }
 
 // Update an existing project
 func updateProject(c echo.Context) error {
+	return updateComponent("project", c)
+}
+
+func updateComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
 	var req struct {
 		Raw string `json:"raw"`
 	}
+
+	// Parse request body
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.Raw == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "raw is required"})
-	}
-	_, ok := project.GlobalProject.Projects[id]
-	if !ok {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body: " + err.Error()})
 	}
 
-	// Write config file
-	if cluster.IsLeader {
-		if err := common.WriteConfigFile("project", id, req.Raw); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file"})
+	// 先检查是否存在临时文件
+	componentPath, exist := GetComponentPath(componentType, id, true)
+	if !exist {
+		// 如果临时文件不存在，检查是否存在正式文件
+		componentPath, exist = GetComponentPath(componentType, id, false)
+		if !exist {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 		}
-		body, _ := json.Marshal(map[string]string{"id": id, "raw": req.Raw})
-		go syncToFollowers("PUT", "/project/"+id, body)
+
+		// 如果只有正式文件，创建临时文件
+		tempPath, _ := GetComponentPath(componentType, id, true)
+		componentPath = tempPath
 	}
 
-	// Hot reload
-	newPrj, err := project.NewProject("", req.Raw, id)
+	err := WriteComponentFile(componentPath, req.Raw)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid project config: " + err.Error()})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
 	}
-	project.GlobalProject.Projects[id] = newPrj
-	common.GlobalMu.Lock()
-	common.AllProjectRawConfig[id] = req.Raw
-	common.GlobalMu.Unlock()
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "project updated successfully"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "component updated successfully"})
+}
+
+// Verify component configuration
+func verifyComponent(c echo.Context) error {
+	componentType := c.Param("type")
+	id := c.Param("id")
+	var req struct {
+		Raw string `json:"raw"`
+	}
+
+	// Parse request body
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body: " + err.Error()})
+	}
+
+	// 如果请求中没有提供raw内容，尝试从临时文件或正式文件中读取
+	if req.Raw == "" {
+		// 先检查临时文件
+		tempPath, tempExists := GetComponentPath(componentType, id, true)
+		if tempExists {
+			content, err := ReadComponent(tempPath)
+			if err == nil {
+				req.Raw = content
+			}
+		}
+
+		// 如果临时文件不存在或读取失败，检查正式文件
+		if req.Raw == "" {
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			if formalExists {
+				content, err := ReadComponent(formalPath)
+				if err == nil {
+					req.Raw = content
+				}
+			}
+		}
+	}
+
+	var err error
+	switch componentType {
+	case "input":
+		err = input.Verify("", req.Raw)
+	case "output":
+		err = output.Verify("", req.Raw)
+	case "ruleset":
+		err = rules_engine.Verify("", req.Raw)
+	case "project":
+		err = project.Verify("", req.Raw)
+	case "plugin":
+		err = plugin.Verify("", req.Raw, id)
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
+	}
+
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid": false,
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"valid": true,
+	})
+}
+
+// connectCheck checks the connection status of an input or output component's client
+func connectCheck(c echo.Context) error {
+	componentType := c.Param("type")
+	id := c.Param("id")
+
+	// Check if component type is valid
+	if componentType != "inputs" && componentType != "outputs" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid component type. Must be 'inputs' or 'outputs'",
+		})
+	}
+
+	// Check input component client connection
+	if componentType == "inputs" {
+		_, existsNew := project.GlobalProject.InputsNew[id]
+		inputComp := project.GlobalProject.Inputs[id]
+
+		if !existsNew && inputComp == nil {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": "Input component not found",
+			})
+		}
+
+		// Initialize result
+		result := map[string]interface{}{
+			"status":  "success",
+			"message": "Connection check successful",
+			"details": map[string]interface{}{
+				"client_type":       "",
+				"connection_status": "unknown",
+				"connection_info":   map[string]interface{}{},
+				"connection_errors": []map[string]interface{}{},
+			},
+		}
+
+		// If the input is in pending changes, we can't check its connection
+		if existsNew {
+			result["status"] = "warning"
+			result["message"] = "Component has pending changes, cannot check connection"
+			return c.JSON(http.StatusOK, result)
+		}
+
+		// Check connection based on input type
+		switch inputComp.Type {
+		case input.InputTypeKafka:
+			result["details"].(map[string]interface{})["client_type"] = "kafka"
+
+			// Check if Kafka consumer is initialized
+			if inputComp.Config != nil && inputComp.Config.Kafka != nil {
+				connectionInfo := map[string]interface{}{
+					"brokers": inputComp.Config.Kafka.Brokers,
+					"group":   inputComp.Config.Kafka.Group,
+					"topic":   inputComp.Config.Kafka.Topic,
+				}
+				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+				// Check if consumer is running
+				if inputComp.GetConsumeQPS() > 0 {
+					result["details"].(map[string]interface{})["connection_status"] = "active"
+					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+						"consume_qps":   inputComp.GetConsumeQPS(),
+						"consume_total": inputComp.GetConsumeTotal(),
+					}
+				} else {
+					// Consumer exists but no messages being processed
+					if inputComp.GetConsumeTotal() > 0 {
+						result["status"] = "warning"
+						result["message"] = "Connection established but no recent activity"
+						result["details"].(map[string]interface{})["connection_status"] = "idle"
+						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+							"consume_total": inputComp.GetConsumeTotal(),
+						}
+					} else {
+						// No messages processed yet
+						result["status"] = "warning"
+						result["message"] = "Connection established but no messages processed"
+						result["details"].(map[string]interface{})["connection_status"] = "connected"
+					}
+				}
+			} else {
+				result["status"] = "error"
+				result["message"] = "Kafka configuration missing"
+				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+					{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
+				}
+			}
+
+		case input.InputTypeAliyunSLS:
+			result["details"].(map[string]interface{})["client_type"] = "aliyun_sls"
+
+			// Check if SLS consumer is initialized
+			if inputComp.Config != nil && inputComp.Config.AliyunSLS != nil {
+				connectionInfo := map[string]interface{}{
+					"endpoint":       inputComp.Config.AliyunSLS.Endpoint,
+					"project":        inputComp.Config.AliyunSLS.Project,
+					"logstore":       inputComp.Config.AliyunSLS.Logstore,
+					"consumer_group": inputComp.Config.AliyunSLS.ConsumerGroupName,
+				}
+				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+				// Check if consumer is running
+				if inputComp.GetConsumeQPS() > 0 {
+					result["details"].(map[string]interface{})["connection_status"] = "active"
+					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+						"consume_qps":   inputComp.GetConsumeQPS(),
+						"consume_total": inputComp.GetConsumeTotal(),
+					}
+				} else {
+					// Consumer exists but no messages being processed
+					if inputComp.GetConsumeTotal() > 0 {
+						result["status"] = "warning"
+						result["message"] = "Connection established but no recent activity"
+						result["details"].(map[string]interface{})["connection_status"] = "idle"
+						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+							"consume_total": inputComp.GetConsumeTotal(),
+						}
+					} else {
+						// No messages processed yet
+						result["status"] = "warning"
+						result["message"] = "Connection established but no messages processed"
+						result["details"].(map[string]interface{})["connection_status"] = "connected"
+					}
+				}
+			} else {
+				result["status"] = "error"
+				result["message"] = "Aliyun SLS configuration missing"
+				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+					{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
+				}
+			}
+		default:
+			result["status"] = "error"
+			result["message"] = "Unsupported input type"
+			result["details"].(map[string]interface{})["client_type"] = string(inputComp.Type)
+			result["details"].(map[string]interface{})["connection_status"] = "unsupported"
+		}
+
+		return c.JSON(http.StatusOK, result)
+	} else if componentType == "outputs" {
+		_, existsNew := project.GlobalProject.OutputsNew[id]
+		outputComp := project.GlobalProject.Outputs[id]
+
+		if !existsNew && outputComp == nil {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": "Output component not found",
+			})
+		}
+
+		// Initialize result
+		result := map[string]interface{}{
+			"status":  "success",
+			"message": "Connection check successful",
+			"details": map[string]interface{}{
+				"client_type":       "",
+				"connection_status": "unknown",
+				"connection_info":   map[string]interface{}{},
+				"connection_errors": []map[string]interface{}{},
+			},
+		}
+
+		// If the output is in pending changes, we can't check its connection
+		if existsNew {
+			result["status"] = "warning"
+			result["message"] = "Component has pending changes, cannot check connection"
+			return c.JSON(http.StatusOK, result)
+		}
+
+		// Check connection based on output type
+		switch outputComp.Type {
+		case output.OutputTypeKafka:
+			result["details"].(map[string]interface{})["client_type"] = "kafka"
+
+			// Check if Kafka producer is initialized
+			if outputComp.Config != nil && outputComp.Config.Kafka != nil {
+				connectionInfo := map[string]interface{}{
+					"brokers": outputComp.Config.Kafka.Brokers,
+					"topic":   outputComp.Config.Kafka.Topic,
+				}
+				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+				// Check if producer is running
+				if outputComp.GetProduceQPS() > 0 {
+					result["details"].(map[string]interface{})["connection_status"] = "active"
+					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+						"produce_qps":   outputComp.GetProduceQPS(),
+						"produce_total": outputComp.GetProduceTotal(),
+					}
+				} else {
+					// Producer exists but no messages being sent
+					if outputComp.GetProduceTotal() > 0 {
+						result["status"] = "warning"
+						result["message"] = "Connection established but no recent activity"
+						result["details"].(map[string]interface{})["connection_status"] = "idle"
+						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+							"produce_total": outputComp.GetProduceTotal(),
+						}
+					} else {
+						// No messages sent yet
+						result["status"] = "warning"
+						result["message"] = "Connection established but no messages sent"
+						result["details"].(map[string]interface{})["connection_status"] = "connected"
+					}
+				}
+			} else {
+				result["status"] = "error"
+				result["message"] = "Kafka configuration missing"
+				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+					{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
+				}
+			}
+
+		case output.OutputTypeElasticsearch:
+			result["details"].(map[string]interface{})["client_type"] = "elasticsearch"
+
+			// Check if Elasticsearch producer is initialized
+			if outputComp.Config != nil && outputComp.Config.Elasticsearch != nil {
+				connectionInfo := map[string]interface{}{
+					"hosts": outputComp.Config.Elasticsearch.Hosts,
+					"index": outputComp.Config.Elasticsearch.Index,
+				}
+				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+				// Check if producer is running
+				if outputComp.GetProduceQPS() > 0 {
+					result["details"].(map[string]interface{})["connection_status"] = "active"
+					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+						"produce_qps":   outputComp.GetProduceQPS(),
+						"produce_total": outputComp.GetProduceTotal(),
+					}
+				} else {
+					// Producer exists but no messages being sent
+					if outputComp.GetProduceTotal() > 0 {
+						result["status"] = "warning"
+						result["message"] = "Connection established but no recent activity"
+						result["details"].(map[string]interface{})["connection_status"] = "idle"
+						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+							"produce_total": outputComp.GetProduceTotal(),
+						}
+					} else {
+						// No messages sent yet
+						result["status"] = "warning"
+						result["message"] = "Connection established but no messages sent"
+						result["details"].(map[string]interface{})["connection_status"] = "connected"
+					}
+				}
+			} else {
+				result["status"] = "error"
+				result["message"] = "Elasticsearch configuration missing"
+				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+					{"message": "Elasticsearch configuration is incomplete or missing", "severity": "error"},
+				}
+			}
+
+		case output.OutputTypeAliyunSLS:
+			result["details"].(map[string]interface{})["client_type"] = "aliyun_sls"
+
+			// Check if SLS producer is initialized
+			if outputComp.Config != nil && outputComp.Config.AliyunSLS != nil {
+				connectionInfo := map[string]interface{}{
+					"endpoint": outputComp.Config.AliyunSLS.Endpoint,
+					"project":  outputComp.Config.AliyunSLS.Project,
+					"logstore": outputComp.Config.AliyunSLS.Logstore,
+				}
+				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+				// Check if producer is running
+				if outputComp.GetProduceQPS() > 0 {
+					result["details"].(map[string]interface{})["connection_status"] = "active"
+					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+						"produce_qps":   outputComp.GetProduceQPS(),
+						"produce_total": outputComp.GetProduceTotal(),
+					}
+				} else {
+					// Producer exists but no messages being sent
+					if outputComp.GetProduceTotal() > 0 {
+						result["status"] = "warning"
+						result["message"] = "Connection established but no recent activity"
+						result["details"].(map[string]interface{})["connection_status"] = "idle"
+						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+							"produce_total": outputComp.GetProduceTotal(),
+						}
+					} else {
+						// No messages sent yet
+						result["status"] = "warning"
+						result["message"] = "Connection established but no messages sent"
+						result["details"].(map[string]interface{})["connection_status"] = "connected"
+					}
+				}
+			} else {
+				result["status"] = "error"
+				result["message"] = "Aliyun SLS configuration missing"
+				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+					{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
+				}
+			}
+
+		case output.OutputTypePrint:
+			result["details"].(map[string]interface{})["client_type"] = "print"
+			result["details"].(map[string]interface{})["connection_status"] = "always_connected"
+			result["details"].(map[string]interface{})["connection_info"] = map[string]interface{}{
+				"type": "console_output",
+			}
+
+			// Check if producer is running
+			if outputComp.GetProduceQPS() > 0 {
+				result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+					"produce_qps":   outputComp.GetProduceQPS(),
+					"produce_total": outputComp.GetProduceTotal(),
+				}
+			}
+
+		default:
+			result["status"] = "error"
+			result["message"] = "Unsupported output type"
+			result["details"].(map[string]interface{})["client_type"] = string(outputComp.Type)
+			result["details"].(map[string]interface{})["connection_status"] = "unsupported"
+		}
+
+		return c.JSON(http.StatusOK, result)
+	}
+
+	return c.JSON(http.StatusInternalServerError, map[string]string{
+		"error": "Unknown error occurred",
+	})
+}
+
+// testPlugin tests a plugin with provided arguments
+func testPlugin(c echo.Context) error {
+	name := c.Param("name")
+
+	// Parse request body
+	var req struct {
+		Args []interface{} `json:"args"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Check if plugin exists
+	p, ok := plugin.Plugins[name]
+	if !ok {
+		_, existsNew := plugin.PluginsNew[name]
+		if existsNew {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Plugin has pending changes, cannot test",
+				"result":  nil,
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Plugin not found: " + name,
+			"result":  nil,
+		})
+	}
+
+	// Determine plugin type and execute
+	var result interface{}
+	var success bool
+	var errMsg string
+
+	switch p.Type {
+	case plugin.LOCAL_PLUGIN:
+		// Check if it's a boolean result plugin
+		if f, ok := local_plugin.LocalPluginBoolRes[name]; ok {
+			// 确保参数类型正确
+			if len(req.Args) > 0 {
+				for i, arg := range req.Args {
+					if arg == nil {
+						req.Args[i] = ""
+					}
+				}
+			}
+
+			boolResult, err := f(req.Args...)
+			result = boolResult
+			success = err == nil
+			if err != nil {
+				errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+			}
+		} else if f, ok := local_plugin.LocalPluginInterfaceAndBoolRes[name]; ok {
+			// It's an interface result plugin
+			interfaceResult, boolResult, err := f(req.Args...)
+			result = map[string]interface{}{
+				"result":  interfaceResult,
+				"success": boolResult,
+			}
+			success = err == nil
+			if err != nil {
+				errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+			}
+		} else {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Plugin exists but function not found",
+				"result":  nil,
+			})
+		}
+	case plugin.YAEGI_PLUGIN:
+		// For Yaegi plugins, we need to determine the return type
+		// We need to catch panics that might occur during plugin execution
+		defer func() {
+			if r := recover(); r != nil {
+				success = false
+				errMsg = fmt.Sprintf("Plugin execution panicked: %v", r)
+				result = nil
+			}
+		}()
+
+		// 检查参数类型
+		for i, arg := range req.Args {
+			if arg == nil {
+				req.Args[i] = "" // 将nil转换为空字符串
+			} else {
+				// 尝试将参数转换为字符串
+				switch v := arg.(type) {
+				case float64:
+					// JSON解析可能将数字解析为float64
+					if v == float64(int(v)) {
+						// 如果是整数，转换为整数字符串
+						req.Args[i] = fmt.Sprintf("%d", int(v))
+					} else {
+						req.Args[i] = fmt.Sprintf("%g", v)
+					}
+				case bool:
+					req.Args[i] = fmt.Sprintf("%t", v)
+				case map[string]interface{}, []interface{}:
+					jsonBytes, err := json.Marshal(v)
+					if err != nil {
+						req.Args[i] = fmt.Sprintf("%v", v)
+					} else {
+						req.Args[i] = string(jsonBytes)
+					}
+				case string:
+					// 已经是字符串，不需要转换
+				default:
+					req.Args[i] = fmt.Sprintf("%v", v)
+				}
+			}
+		}
+
+		// 执行插件
+		boolResult := p.FuncEvalCheckNode(req.Args...)
+		result = boolResult
+		success = true
+
+		// Note: For Yaegi plugins, errors are logged but not returned
+	default:
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Unknown plugin type",
+			"result":  nil,
+		})
+	}
+
+	// Return the result
+	if errMsg != "" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   errMsg,
+			"result":  result,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": success,
+		"result":  result,
+	})
 }
 
 func ServerStart(listener string) error {
@@ -1176,6 +1552,9 @@ func ServerStart(listener string) error {
 	e.PUT("/plugin/:name", updatePlugin, TokenAuthMiddleware)
 	e.DELETE("/plugin/:name", deletePlugin, TokenAuthMiddleware)
 
+	// Verify component configuration
+	e.POST("/verify/:type/:id", verifyComponent, TokenAuthMiddleware)
+
 	// Metrics endpoints
 	e.GET("/metrics", getMetrics)
 	e.GET("/metrics/:id", getProjectMetrics)
@@ -1201,6 +1580,27 @@ func ServerStart(listener string) error {
 
 	// Hub cluster
 	e.GET("/cluster_info", getCluster, TokenAuthMiddleware)
+
+	// Get all pending changes
+	e.GET("/pending-changes", GetPendingChanges, TokenAuthMiddleware)
+
+	// Apply all pending changes
+	e.POST("/apply-changes", ApplyPendingChanges, TokenAuthMiddleware)
+
+	// Apply a single pending change
+	e.POST("/apply-single-change", ApplySingleChange, TokenAuthMiddleware)
+
+	// Restart all projects
+	e.POST("/restart-all-projects", RestartAllProjects, TokenAuthMiddleware)
+
+	// Create temporary file for editing
+	e.POST("/temp-file/:type/:id", CreateTempFile, TokenAuthMiddleware)
+
+	// Connect check
+	e.GET("/connect-check/:type/:id", connectCheck, TokenAuthMiddleware)
+
+	// Test plugin
+	e.POST("/test-plugin/:name", testPlugin, TokenAuthMiddleware)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

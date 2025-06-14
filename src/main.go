@@ -43,7 +43,7 @@ func readToken(create bool) (string, error) {
 		return string(data), nil
 	}
 
-	//leader create new token
+	// Leader creates a new token
 	if create {
 		f, err := os.Create(tokenPath)
 		if err != nil {
@@ -52,7 +52,7 @@ func readToken(create bool) (string, error) {
 
 		defer f.Close()
 
-		uuid := common.NewUUID() // 假设 common.NewUUID() 返回 uuid 字符串
+		uuid := common.NewUUID() // Assumes common.NewUUID() returns a uuid string
 		_, err = f.WriteString(uuid)
 		if err != nil {
 			logger.Error("failed to write uuid to .token file", "error", err)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ const (
 	OutputTypeKafka         OutputType = "kafka"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
 	OutputTypePrint         OutputType = "print"
+	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
 )
 
 // OutputConfig is the YAML config for an output.
@@ -96,12 +98,74 @@ func Verify(path string, raw string) error {
 			return err
 		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return err
+			// 从错误信息中提取行号
+			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
+				errMsg := yamlErr.Errors[0]
+				// 尝试提取行号
+				lineInfo := ""
+				for _, line := range yamlErr.Errors {
+					if strings.Contains(line, "line") {
+						lineInfo = line
+						break
+					}
+				}
+				return fmt.Errorf("YAML parse error: %s (location: %s)", errMsg, lineInfo)
+			}
+			return fmt.Errorf("YAML parse error: %v", err)
 		}
 	} else {
 		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-			return err
+			// 从错误信息中提取行号
+			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
+				errMsg := yamlErr.Errors[0]
+				// 尝试提取行号
+				lineInfo := ""
+				for _, line := range yamlErr.Errors {
+					if strings.Contains(line, "line") {
+						lineInfo = line
+						break
+					}
+				}
+				return fmt.Errorf("YAML parse error: %s (location: %s)", errMsg, lineInfo)
+			}
+			return fmt.Errorf("YAML parse error: %v", err)
 		}
+	}
+
+	// 验证必要字段
+	if cfg.Type == "" {
+		return fmt.Errorf("missing required field 'type' (line: unknown)")
+	}
+
+	// 根据类型验证特定字段
+	switch cfg.Type {
+	case OutputTypeKafka:
+		if cfg.Kafka == nil {
+			return fmt.Errorf("missing required field 'kafka' for kafka output (line: unknown)")
+		}
+		if len(cfg.Kafka.Brokers) == 0 {
+			return fmt.Errorf("missing required field 'kafka.brokers' for kafka output (line: unknown)")
+		}
+		if cfg.Kafka.Topic == "" {
+			return fmt.Errorf("missing required field 'kafka.topic' for kafka output (line: unknown)")
+		}
+	case OutputTypeElasticsearch:
+		if cfg.Elasticsearch == nil {
+			return fmt.Errorf("missing required field 'elasticsearch' for elasticsearch output (line: unknown)")
+		}
+		if len(cfg.Elasticsearch.Hosts) == 0 {
+			return fmt.Errorf("missing required field 'elasticsearch.hosts' for elasticsearch output (line: unknown)")
+		}
+		if cfg.Elasticsearch.Index == "" {
+			return fmt.Errorf("missing required field 'elasticsearch.index' for elasticsearch output (line: unknown)")
+		}
+	case OutputTypeAliyunSLS:
+		if cfg.AliyunSLS == nil {
+			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS output (line: unknown)")
+		}
+		// 添加更多AliyunSLS特定字段验证
+	default:
+		return fmt.Errorf("unsupported output type: %s (line: unknown)", cfg.Type)
 	}
 
 	return nil

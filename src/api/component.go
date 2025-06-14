@@ -2,9 +2,12 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/plugin"
+	"AgentSmith-HUB/project"
 	"fmt"
 	"os"
 	"path"
+	"strings"
 )
 
 const (
@@ -118,6 +121,58 @@ func GetComponentPath(componentType string, id string, new bool) (string, bool) 
 }
 
 func WriteComponentFile(path string, content string) error {
+	// 检查是否是临时文件（.new）
+	if path[len(path)-4:] == ".new" {
+		// 获取组件类型和ID
+		dir := path[:len(path)-4]
+		var componentType, id string
+
+		// 根据路径确定组件类型
+		if dir[len(dir)-4:] == ".xml" {
+			componentType = "ruleset"
+			id = path[len(path)-8-len(id) : len(path)-8]
+		} else if dir[len(dir)-3:] == ".go" {
+			componentType = "plugin"
+			id = path[len(path)-7-len(id) : len(path)-7]
+		} else if dir[len(dir)-5:] == ".yaml" {
+			// 从路径中提取组件类型
+			parts := strings.Split(dir, "/")
+			if len(parts) >= 2 {
+				componentType = parts[len(parts)-2]
+				id = parts[len(parts)-1][:len(parts[len(parts)-1])-5]
+			}
+		}
+
+		// 如果是临时文件，同时更新内存中的副本
+		switch componentType {
+		case "input":
+			if project.GlobalProject.InputsNew == nil {
+				project.GlobalProject.InputsNew = make(map[string]string)
+			}
+			project.GlobalProject.InputsNew[id] = content
+		case "output":
+			if project.GlobalProject.OutputsNew == nil {
+				project.GlobalProject.OutputsNew = make(map[string]string)
+			}
+			project.GlobalProject.OutputsNew[id] = content
+		case "ruleset":
+			if project.GlobalProject.RulesetsNew == nil {
+				project.GlobalProject.RulesetsNew = make(map[string]string)
+			}
+			project.GlobalProject.RulesetsNew[id] = content
+		case "project":
+			if project.GlobalProject.ProjectsNew == nil {
+				project.GlobalProject.ProjectsNew = make(map[string]string)
+			}
+			project.GlobalProject.ProjectsNew[id] = content
+		case "plugin":
+			if plugin.PluginsNew == nil {
+				plugin.PluginsNew = make(map[string]string)
+			}
+			plugin.PluginsNew[id] = content
+		}
+	}
+
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write file %s: %w", path, err)
 	}
@@ -132,35 +187,4 @@ func ReadComponent(path string) (string, error) {
 	} else {
 		return string(data), err
 	}
-}
-
-// only can edit 'new' file
-func EditComponent(componentType string, id string, raw string) error {
-	p, _ := GetComponentPath(componentType, id, true)
-	return WriteComponentFile(p, raw)
-}
-
-func DiffComponent(componentType string, id string) (string, string) {
-	newPath, _ := GetComponentPath(componentType, id, true)
-	oldPath, _ := GetComponentPath(componentType, id, false)
-
-	dataNew, _ := ReadComponent(newPath)
-	dataOld, _ := ReadComponent(oldPath)
-	return string(dataOld), string(dataNew)
-}
-
-func MergeComponent(componentType string, id string) error {
-	newPath, exist := GetComponentPath(componentType, id, true)
-	if !exist {
-		return fmt.Errorf("File does not exist: %s", newPath)
-	}
-	oldPath, _ := GetComponentPath(componentType, id, false)
-
-	data, err := ReadComponent(newPath)
-	if err != nil {
-		return fmt.Errorf("read file error: %s %w", newPath, err)
-	}
-
-	_ = os.Remove(oldPath)
-	return WriteComponentFile(oldPath, data)
 }

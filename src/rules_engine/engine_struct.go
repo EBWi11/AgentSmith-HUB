@@ -181,7 +181,11 @@ func Verify(path string, raw string) error {
 
 	_, err := ParseRulesetFromByte(rawRuleset)
 	if err != nil {
-		return fmt.Errorf("failed to parse resource: %w", err)
+		// 尝试提取XML错误中的行号
+		if strings.Contains(err.Error(), "line") {
+			return fmt.Errorf("failed to parse resource: %w", err)
+		}
+		return fmt.Errorf("failed to parse resource: %w (line: unknown)", err)
 	}
 	return nil
 }
@@ -728,4 +732,42 @@ func sortCheckNodes(checkNodes []CheckNodes) []CheckNodes {
 	}
 
 	return sorted
+}
+
+// Reload reloads the ruleset from its source file or raw config
+func (r *Ruleset) Reload() error {
+	var rawRuleset []byte
+	var err error
+
+	if r.Path != "" {
+		xmlFile, err := os.Open(r.Path)
+		if err != nil {
+			return fmt.Errorf("failed to open ruleset file at %s: %w", r.Path, err)
+		}
+		defer xmlFile.Close()
+
+		rawRuleset, err = io.ReadAll(xmlFile)
+		if err != nil {
+			return fmt.Errorf("failed to read ruleset file: %w", err)
+		}
+	} else if r.RawConfig != "" {
+		rawRuleset = []byte(r.RawConfig)
+	} else {
+		return fmt.Errorf("no source available to reload ruleset")
+	}
+
+	newRuleset, err := ParseRulesetFromByte(rawRuleset)
+	if err != nil {
+		return fmt.Errorf("failed to parse ruleset: %w", err)
+	}
+
+	// Update the current ruleset with new data
+	r.XMLName = newRuleset.XMLName
+	r.Type = newRuleset.Type
+	r.IsDetection = newRuleset.IsDetection
+	r.Rules = newRuleset.Rules
+	r.RulesByFilter = newRuleset.RulesByFilter
+
+	// Build the ruleset
+	return RulesetBuild(r)
 }

@@ -1,20 +1,20 @@
 <template>
   <div class="p-6">
-    <h2 class="text-xl font-bold mb-4">集群状态</h2>
-    <div v-if="loading">加载中...</div>
+    <h2 class="text-xl font-bold mb-4">Cluster Status</h2>
+    <div v-if="loading">Loading...</div>
     <div v-else-if="error" class="text-red-500">{{ error }}</div>
     <div v-else>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="bg-blue-50 rounded p-4">
-          <div class="text-xs text-gray-500">本节点ID</div>
+          <div class="text-xs text-gray-500">Node ID</div>
           <div class="font-semibold">{{ cluster.SelfID }}</div>
         </div>
         <div class="bg-blue-50 rounded p-4">
-          <div class="text-xs text-gray-500">本节点地址</div>
+          <div class="text-xs text-gray-500">Node Address</div>
           <div class="font-semibold">{{ cluster.SelfAddress }}</div>
         </div>
         <div class="bg-green-50 rounded p-4">
-          <div class="text-xs text-gray-500">角色</div>
+          <div class="text-xs text-gray-500">Role</div>
           <div class="font-semibold">{{ cluster.Status === 'leader' ? 'Leader' : 'Follower' }}</div>
         </div>
         <div class="bg-blue-50 rounded p-4">
@@ -22,28 +22,28 @@
           <div class="font-semibold">{{ cluster.LeaderID }}</div>
         </div>
         <div class="bg-blue-50 rounded p-4">
-          <div class="text-xs text-gray-500">Leader地址</div>
+          <div class="text-xs text-gray-500">Leader Address</div>
           <div class="font-semibold">{{ cluster.LeaderAddress }}</div>
         </div>
       </div>
       <div class="mb-6">
-        <h3 class="font-bold mb-2">集群参数</h3>
+        <h3 class="font-bold mb-2">Cluster Parameters</h3>
         <ul class="text-sm space-y-1">
-          <li>心跳间隔：{{ nsToSec(cluster.HeartbeatInterval) }} 秒</li>
-          <li>心跳超时：{{ nsToSec(cluster.HeartbeatTimeout) }} 秒</li>
-          <li>清理间隔：{{ nsToSec(cluster.CleanupInterval) }} 秒</li>
-          <li>最大丢包数：{{ cluster.MaxMissCount }}</li>
+          <li>Heartbeat Interval: {{ nsToSec(cluster.HeartbeatInterval) }} seconds</li>
+          <li>Heartbeat Timeout: {{ nsToSec(cluster.HeartbeatTimeout) }} seconds</li>
+          <li>Cleanup Interval: {{ nsToSec(cluster.CleanupInterval) }} seconds</li>
+          <li>Max Miss Count: {{ cluster.MaxMissCount }}</li>
         </ul>
       </div>
       <div v-if="cluster.Nodes && Object.keys(cluster.Nodes).length > 0">
-        <h3 class="font-bold mb-2">节点列表</h3>
+        <h3 class="font-bold mb-2">Node List</h3>
         <table class="min-w-full text-xs border">
           <thead>
             <tr class="bg-gray-100">
-              <th class="p-2 border">节点ID</th>
-              <th class="p-2 border">地址</th>
-              <th class="p-2 border">状态</th>
-              <th class="p-2 border">最后心跳</th>
+              <th class="p-2 border">Node ID</th>
+              <th class="p-2 border">Address</th>
+              <th class="p-2 border">Status</th>
+              <th class="p-2 border">Last Heartbeat</th>
             </tr>
           </thead>
           <tbody>
@@ -62,7 +62,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { hubApi } from '../api/index.js'
+import { hubApi } from '../api'
 
 const cluster = ref({})
 const loading = ref(true)
@@ -72,7 +72,7 @@ onMounted(async () => {
   try {
     cluster.value = await hubApi.fetchClusterInfo()
   } catch (e) {
-    error.value = '获取集群信息失败'
+    error.value = 'Failed to get cluster information'
   } finally {
     loading.value = false
   }

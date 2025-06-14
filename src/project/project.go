@@ -49,11 +49,24 @@ func Verify(path string, raw string) error {
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		// 从错误信息中提取行号
+		if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
+			errMsg := yamlErr.Errors[0]
+			// 尝试提取行号
+			lineInfo := ""
+			for _, line := range yamlErr.Errors {
+				if strings.Contains(line, "line") {
+					lineInfo = line
+					break
+				}
+			}
+			return fmt.Errorf("failed to parse project configuration: %s (location: %s)", errMsg, lineInfo)
+		}
 		return fmt.Errorf("failed to parse project configuration: %w", err)
 	}
 
 	if strings.TrimSpace(cfg.Content) == "" {
-		return fmt.Errorf("project content cannot be empty in configuration file: %s", path)
+		return fmt.Errorf("project content cannot be empty in configuration file (line: unknown)")
 	}
 
 	p = &Project{
@@ -64,7 +77,7 @@ func Verify(path string, raw string) error {
 
 	_, err = p.parseContent()
 	if err != nil {
-		return fmt.Errorf("failed to parse project content: %v", err)
+		return fmt.Errorf("failed to parse project content: %v (line: unknown)", err)
 	}
 
 	return nil
@@ -458,37 +471,4 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	p.metrics.mu.RLock()
 	defer p.metrics.mu.RUnlock()
 	return p.metrics
-}
-
-// GetProject returns a project by ID
-func GetProject(id string) *Project {
-	return GlobalProject.Projects[id]
-}
-
-func GetProjectNew(id string) string {
-	return GlobalProject.ProjectsNew[id]
-}
-
-func GetInput(id string) *input.Input {
-	return GlobalProject.Inputs[id]
-}
-
-func GetInputNew(id string) string {
-	return GlobalProject.InputsNew[id]
-}
-
-func GetOutput(id string) *output.Output {
-	return GlobalProject.Outputs[id]
-}
-
-func GetOutputNew(id string) string {
-	return GlobalProject.OutputsNew[id]
-}
-
-func GetRuleset(id string) *rules_engine.Ruleset {
-	return GlobalProject.Rulesets[id]
-}
-
-func GetRulesetNew(id string) string {
-	return GlobalProject.RulesetsNew[id]
 }
