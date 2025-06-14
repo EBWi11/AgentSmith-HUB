@@ -247,7 +247,7 @@ func getOutputs(c echo.Context) error {
 // getOutput returns details of a specific output component
 func getOutput(c echo.Context) error {
 	id := c.Param("id")
-	out_raw, ok := project.GlobalProject.ProjectsNew[id]
+	out_raw, ok := project.GlobalProject.OutputsNew[id]
 	if ok {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":  id,
@@ -1352,7 +1352,7 @@ func testPlugin(c echo.Context) error {
 
 	// Parse request body
 	var req struct {
-		Args []interface{} `json:"args"`
+		Data map[string]interface{} `json:"data"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -1381,6 +1381,20 @@ func testPlugin(c echo.Context) error {
 		})
 	}
 
+	// 将输入数据转换为字符串参数
+	// 插件通常接受JSON字符串作为输入
+	jsonData, err := json.Marshal(req.Data)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to serialize input data: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// 创建参数数组，只传入一个JSON字符串参数
+	args := []interface{}{string(jsonData)}
+
 	// Determine plugin type and execute
 	var result interface{}
 	var success bool
@@ -1390,16 +1404,7 @@ func testPlugin(c echo.Context) error {
 	case plugin.LOCAL_PLUGIN:
 		// Check if it's a boolean result plugin
 		if f, ok := local_plugin.LocalPluginBoolRes[name]; ok {
-			// 确保参数类型正确
-			if len(req.Args) > 0 {
-				for i, arg := range req.Args {
-					if arg == nil {
-						req.Args[i] = ""
-					}
-				}
-			}
-
-			boolResult, err := f(req.Args...)
+			boolResult, err := f(args...)
 			result = boolResult
 			success = err == nil
 			if err != nil {
@@ -1407,7 +1412,7 @@ func testPlugin(c echo.Context) error {
 			}
 		} else if f, ok := local_plugin.LocalPluginInterfaceAndBoolRes[name]; ok {
 			// It's an interface result plugin
-			interfaceResult, boolResult, err := f(req.Args...)
+			interfaceResult, boolResult, err := f(args...)
 			result = map[string]interface{}{
 				"result":  interfaceResult,
 				"success": boolResult,
@@ -1434,40 +1439,8 @@ func testPlugin(c echo.Context) error {
 			}
 		}()
 
-		// 检查参数类型
-		for i, arg := range req.Args {
-			if arg == nil {
-				req.Args[i] = "" // 将nil转换为空字符串
-			} else {
-				// 尝试将参数转换为字符串
-				switch v := arg.(type) {
-				case float64:
-					// JSON解析可能将数字解析为float64
-					if v == float64(int(v)) {
-						// 如果是整数，转换为整数字符串
-						req.Args[i] = fmt.Sprintf("%d", int(v))
-					} else {
-						req.Args[i] = fmt.Sprintf("%g", v)
-					}
-				case bool:
-					req.Args[i] = fmt.Sprintf("%t", v)
-				case map[string]interface{}, []interface{}:
-					jsonBytes, err := json.Marshal(v)
-					if err != nil {
-						req.Args[i] = fmt.Sprintf("%v", v)
-					} else {
-						req.Args[i] = string(jsonBytes)
-					}
-				case string:
-					// 已经是字符串，不需要转换
-				default:
-					req.Args[i] = fmt.Sprintf("%v", v)
-				}
-			}
-		}
-
 		// 执行插件
-		boolResult := p.FuncEvalCheckNode(req.Args...)
+		boolResult := p.FuncEvalCheckNode(args...)
 		result = boolResult
 		success = true
 
@@ -1492,6 +1465,683 @@ func testPlugin(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": success,
 		"result":  result,
+	})
+}
+
+// getAvailablePlugins returns a list of all available official plugins (excluding temporary ones)
+func getAvailablePlugins(c echo.Context) error {
+	plugins := make([]map[string]interface{}, 0)
+
+	// 只返回正式插件，排除临时插件
+	for _, p := range plugin.Plugins {
+		if p.Type == plugin.YAEGI_PLUGIN {
+			// 提取插件描述（如果有的话）
+			description := extractPluginDescription(string(p.Payload))
+			plugins = append(plugins, map[string]interface{}{
+				"name":        p.Name,
+				"description": description,
+			})
+		}
+	}
+
+	return c.JSON(http.StatusOK, plugins)
+}
+
+// extractPluginDescription 尝试从插件代码中提取描述信息
+func extractPluginDescription(code string) string {
+	// 尝试查找注释中的描述
+	lines := strings.Split(code, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "//") {
+			desc := strings.TrimSpace(strings.TrimPrefix(line, "//"))
+			if desc != "" && !strings.HasPrefix(desc, "Package") && !strings.HasPrefix(desc, "import") {
+				return desc
+			}
+		}
+	}
+
+	// 如果没有找到合适的注释，返回默认描述
+	return "Plugin function"
+}
+
+// testRuleset tests a ruleset with provided input data
+func testRuleset(c echo.Context) error {
+	id := c.Param("id")
+
+	// Parse request body
+	var req struct {
+		Data map[string]interface{} `json:"data"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Check if input data is provided
+	if req.Data == nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input data is required",
+			"result":  nil,
+		})
+	}
+
+	// Check if ruleset exists in formal or temporary files
+	var rulesetContent string
+	var isTemp bool
+
+	// Check if there's a temporary file first
+	tempPath, tempExists := GetComponentPath("ruleset", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			rulesetContent = content
+			isTemp = true
+		}
+	}
+
+	// If no temp file, check formal file
+	if rulesetContent == "" {
+		formalPath, formalExists := GetComponentPath("ruleset", id, false)
+		if !formalExists {
+			// Check if ruleset exists in memory
+			r := project.GlobalProject.Rulesets[id]
+			if r == nil {
+				// Check if ruleset exists in new rulesets
+				content, ok := project.GlobalProject.RulesetsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Ruleset not found: " + id,
+						"result":  nil,
+					})
+				}
+				rulesetContent = content
+			} else {
+				rulesetContent = r.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read ruleset: " + err.Error(),
+					"result":  nil,
+				})
+			}
+			rulesetContent = content
+		}
+	}
+
+	// Create a temporary ruleset for testing
+	tempRuleset, err := rules_engine.NewRuleset("", rulesetContent, "temp_test_"+id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse ruleset: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Create channels for testing
+	inputCh := make(chan map[string]interface{}, 1)
+	outputCh := make(chan map[string]interface{}, 10)
+
+	// Set up the ruleset
+	tempRuleset.UpStream = map[string]*chan map[string]interface{}{
+		"test": &inputCh,
+	}
+	tempRuleset.DownStream = map[string]*chan map[string]interface{}{
+		"test": &outputCh,
+	}
+
+	// Start the ruleset
+	err = tempRuleset.Start()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start ruleset: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Send the test data
+	inputCh <- req.Data
+
+	// Collect results with timeout
+	results := make([]map[string]interface{}, 0)
+	timeout := time.After(2 * time.Second)
+	collectDone := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case result, ok := <-outputCh:
+				if !ok {
+					collectDone <- true
+					return
+				}
+				results = append(results, result)
+			case <-time.After(500 * time.Millisecond):
+				// If no more results after 500ms, assume we're done
+				collectDone <- true
+				return
+			}
+		}
+	}()
+
+	// Wait for collection to complete or timeout
+	select {
+	case <-collectDone:
+		// Collection completed normally
+	case <-timeout:
+		// Timeout occurred
+	}
+
+	// Stop the ruleset
+	err = tempRuleset.Stop()
+	if err != nil {
+		logger.Warn("Failed to stop temporary ruleset: %v", err)
+	}
+
+	// Return the results
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"results": results,
+	})
+}
+
+// testOutput tests an output component by sending data to it
+func testOutput(c echo.Context) error {
+	id := c.Param("id")
+
+	// Parse request body
+	var req struct {
+		Data map[string]interface{} `json:"data"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Check if input data is provided
+	if req.Data == nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input data is required",
+			"result":  nil,
+		})
+	}
+
+	// Check if output exists in formal or temporary files
+	var outputContent string
+	var isTemp bool
+
+	// Check if there's a temporary file first
+	tempPath, tempExists := GetComponentPath("output", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			outputContent = content
+			isTemp = true
+		}
+	}
+
+	// If no temp file, check formal file
+	if outputContent == "" {
+		formalPath, formalExists := GetComponentPath("output", id, false)
+		if !formalExists {
+			// Check if output exists in memory
+			out := project.GlobalProject.Outputs[id]
+			if out == nil {
+				// Check if output exists in new outputs
+				content, ok := project.GlobalProject.OutputsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Output not found: " + id,
+						"result":  nil,
+					})
+				}
+				outputContent = content
+			} else {
+				outputContent = out.Config.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read output: " + err.Error(),
+					"result":  nil,
+				})
+			}
+			outputContent = content
+		}
+	}
+
+	// Create a temporary output for testing
+	tempOutput, err := output.NewOutput("", outputContent, "temp_test_"+id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse output: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Create channels for testing
+	inputCh := make(chan map[string]interface{}, 1)
+	tempOutput.UpStream = append(tempOutput.UpStream, &inputCh)
+
+	// Start the output
+	err = tempOutput.Start()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start output: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Send the test data
+	inputCh <- req.Data
+
+	// Wait a bit to ensure data is processed
+	time.Sleep(500 * time.Millisecond)
+
+	// Get metrics
+	produceTotal := tempOutput.GetProduceTotal()
+	produceQPS := tempOutput.GetProduceQPS()
+
+	// Stop the output
+	err = tempOutput.Stop()
+	if err != nil {
+		logger.Warn("Failed to stop temporary output: %v", err)
+	}
+
+	// Return the results
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"metrics": map[string]interface{}{
+			"produceTotal": produceTotal,
+			"produceQPS":   produceQPS,
+		},
+		"outputType": string(tempOutput.Type),
+	})
+}
+
+// testProject tests a project by sending data to a specified input node and tracking outputs
+func testProject(c echo.Context) error {
+	id := c.Param("id")
+
+	// Parse request body
+	var req struct {
+		InputNode string                 `json:"input_node"` // Format: "input.name"
+		Data      map[string]interface{} `json:"data"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Check if input data and node are provided
+	if req.Data == nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input data is required",
+			"result":  nil,
+		})
+	}
+
+	if req.InputNode == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node is required",
+			"result":  nil,
+		})
+	}
+
+	// Parse input node
+	nodeParts := strings.Split(req.InputNode, ".")
+	if len(nodeParts) != 2 || strings.ToLower(nodeParts[0]) != "input" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid input node format. Expected 'input.name'",
+			"result":  nil,
+		})
+	}
+	inputNodeName := nodeParts[1]
+
+	// Check if project exists
+	var projectContent string
+	var isTemp bool
+
+	// Check if there's a temporary file first
+	tempPath, tempExists := GetComponentPath("project", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			projectContent = content
+			isTemp = true
+		}
+	}
+
+	// If no temp file, check formal file
+	if projectContent == "" {
+		formalPath, formalExists := GetComponentPath("project", id, false)
+		if !formalExists {
+			// Check if project exists in memory
+			proj := project.GlobalProject.Projects[id]
+			if proj == nil {
+				// Check if project exists in new projects
+				content, ok := project.GlobalProject.ProjectsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Project not found: " + id,
+						"result":  nil,
+					})
+				}
+				projectContent = content
+			} else {
+				projectContent = proj.Config.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read project: " + err.Error(),
+					"result":  nil,
+				})
+			}
+			projectContent = content
+		}
+	}
+
+	// Create a temporary project for testing
+	tempProject, err := project.NewProject("", projectContent, "temp_test_"+id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse project: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Check if the specified input exists in the project
+	if _, exists := tempProject.Inputs[inputNodeName]; !exists {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node not found in project: " + inputNodeName,
+			"result":  nil,
+		})
+	}
+
+	// Create a map to collect output results
+	outputResults := make(map[string][]map[string]interface{})
+	outputChannels := make(map[string]chan map[string]interface{})
+
+	// Create channels to capture output data
+	for outputName, output := range tempProject.Outputs {
+		// Create a channel for each output
+		outputChan := make(chan map[string]interface{}, 10)
+		outputChannels[outputName] = outputChan
+
+		// Replace the output's upstream channel with our test channel
+		for _, upChan := range output.UpStream {
+			// Save the original channel reference
+			originalChan := *upChan
+
+			// Create a new goroutine to forward messages and capture them
+			go func(outName string, origChan chan map[string]interface{}, testChan chan map[string]interface{}) {
+				for msg := range testChan {
+					// Forward to original channel
+					origChan <- msg
+
+					// Make a copy for our results
+					msgCopy := make(map[string]interface{})
+					for k, v := range msg {
+						msgCopy[k] = v
+					}
+
+					// Add metadata
+					msgCopy["_HUB_OUTPUT_NAME"] = outName
+					msgCopy["_HUB_TIMESTAMP"] = time.Now().UnixNano() / int64(time.Millisecond)
+
+					// Send to our results channel
+					outputChan <- msgCopy
+				}
+			}(outputName, originalChan, *upChan)
+		}
+	}
+
+	// Start the project
+	err = tempProject.Start()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start project: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Find the input node's downstream channels
+	inputNode := tempProject.Inputs[inputNodeName]
+	if len(inputNode.DownStream) == 0 {
+		tempProject.Stop()
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node has no downstream connections",
+			"result":  nil,
+		})
+	}
+
+	// Send test data to all downstream channels of the input
+	for _, downChan := range inputNode.DownStream {
+		*downChan <- req.Data
+	}
+
+	// Wait a bit to collect results
+	time.Sleep(1000 * time.Millisecond)
+
+	// Collect results from output channels
+	for outputName, outputChan := range outputChannels {
+		// Collect all available messages
+		results := []map[string]interface{}{}
+		for {
+			select {
+			case msg := <-outputChan:
+				results = append(results, msg)
+			default:
+				// No more messages
+				outputResults[outputName] = results
+				goto nextOutput
+			}
+		}
+	nextOutput:
+	}
+
+	// Stop the project
+	err = tempProject.Stop()
+	if err != nil {
+		logger.Warn("Failed to stop temporary project: %v", err)
+	}
+
+	// Get project structure for visualization
+	projectStructure, err := getProjectStructure(tempProject)
+	if err != nil {
+		logger.Warn("Failed to get project structure: %v", err)
+	}
+
+	// Return the results
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success":   true,
+		"isTemp":    isTemp,
+		"outputs":   outputResults,
+		"structure": projectStructure,
+		"inputNode": req.InputNode,
+	})
+}
+
+// getProjectStructure extracts the structure of a project for visualization
+func getProjectStructure(p *project.Project) (map[string]interface{}, error) {
+	// Build nodes and edges for visualization
+	nodes := []map[string]interface{}{}
+	edges := []map[string]interface{}{}
+
+	// Extract project structure from content
+	flowGraph := make(map[string][]string)
+	lines := strings.Split(p.Config.Content, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			continue
+		}
+
+		from := strings.TrimSpace(parts[0])
+		to := strings.TrimSpace(parts[1])
+
+		// Add to flow graph
+		flowGraph[from] = append(flowGraph[from], to)
+	}
+
+	// Add nodes
+	for _, input := range p.Inputs {
+		nodes = append(nodes, map[string]interface{}{
+			"id":   "input." + input.Id,
+			"type": "input",
+			"name": input.Id,
+		})
+	}
+
+	for _, ruleset := range p.Rulesets {
+		nodes = append(nodes, map[string]interface{}{
+			"id":   "ruleset." + ruleset.RulesetID,
+			"type": "ruleset",
+			"name": ruleset.RulesetID,
+		})
+	}
+
+	for _, output := range p.Outputs {
+		nodes = append(nodes, map[string]interface{}{
+			"id":   "output." + output.Id,
+			"type": "output",
+			"name": output.Id,
+		})
+	}
+
+	// Add edges
+	for from, tos := range flowGraph {
+		for _, to := range tos {
+			edges = append(edges, map[string]interface{}{
+				"from": from,
+				"to":   to,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"nodes": nodes,
+		"edges": edges,
+	}, nil
+}
+
+// getProjectInputs 获取项目的输入节点列表
+func getProjectInputs(c echo.Context) error {
+	id := c.Param("id")
+
+	// 检查项目是否存在
+	var projectContent string
+	var isTemp bool
+
+	// 首先检查是否有临时文件
+	tempPath, tempExists := GetComponentPath("project", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			projectContent = content
+			isTemp = true
+		}
+	}
+
+	// 如果没有临时文件，检查正式文件
+	if projectContent == "" {
+		formalPath, formalExists := GetComponentPath("project", id, false)
+		if !formalExists {
+			// 检查项目是否存在于内存中
+			proj := project.GlobalProject.Projects[id]
+			if proj == nil {
+				// 检查项目是否存在于新项目中
+				content, ok := project.GlobalProject.ProjectsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Project not found: " + id,
+					})
+				}
+				projectContent = content
+			} else {
+				projectContent = proj.Config.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read project: " + err.Error(),
+				})
+			}
+			projectContent = content
+		}
+	}
+
+	// 创建临时项目以解析配置
+	tempProject, err := project.NewProject("", projectContent, "temp_list_"+id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse project: " + err.Error(),
+		})
+	}
+
+	// 收集输入节点信息
+	inputs := []map[string]string{}
+	for name, input := range tempProject.Inputs {
+		inputs = append(inputs, map[string]string{
+			"id":   "input." + name,
+			"name": name,
+			"type": string(input.Type),
+		})
+	}
+
+	// 返回结果
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"inputs":  inputs,
 	})
 }
 
@@ -1523,6 +2173,7 @@ func ServerStart(listener string) error {
 	e.POST("/project/start", StartProject, TokenAuthMiddleware)
 	e.POST("/project/stop", StopProject, TokenAuthMiddleware)
 	e.PUT("/project/:id", updateProject, TokenAuthMiddleware)
+	e.GET("/project/:id/inputs", getProjectInputs, TokenAuthMiddleware) // 新增：获取项目输入节点
 
 	// Ruleset endpoints
 	e.GET("/ruleset", getRulesets, TokenAuthMiddleware)
@@ -1551,6 +2202,9 @@ func ServerStart(listener string) error {
 	e.POST("/plugin", createPlugin, TokenAuthMiddleware)
 	e.PUT("/plugin/:name", updatePlugin, TokenAuthMiddleware)
 	e.DELETE("/plugin/:name", deletePlugin, TokenAuthMiddleware)
+
+	// Get available plugins (正式插件列表)
+	e.GET("/plugins/available", getAvailablePlugins, TokenAuthMiddleware)
 
 	// Verify component configuration
 	e.POST("/verify/:type/:id", verifyComponent, TokenAuthMiddleware)
@@ -1601,6 +2255,15 @@ func ServerStart(listener string) error {
 
 	// Test plugin
 	e.POST("/test-plugin/:name", testPlugin, TokenAuthMiddleware)
+
+	// Test ruleset
+	e.POST("/test-ruleset/:id", testRuleset, TokenAuthMiddleware)
+
+	// Test output
+	e.POST("/test-output/:id", testOutput, TokenAuthMiddleware)
+
+	// Test project
+	e.POST("/test-project/:id", testProject, TokenAuthMiddleware)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

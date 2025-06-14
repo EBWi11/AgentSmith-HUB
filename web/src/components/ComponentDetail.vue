@@ -5,6 +5,46 @@
   <!-- Create Mode -->
   <div v-else-if="props.item && props.item.isNew" class="h-full flex flex-col">
     <CodeEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveNew(content)" />
+    <div class="flex justify-end mt-4 px-4 space-x-3 border-t pt-4 pb-3">
+      <button 
+        v-if="isRuleset"
+        @click="showTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
+        v-if="isOutput"
+        @click="showOutputTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
+        v-if="isProject"
+        @click="showProjectTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
+        @click="() => saveNew()" 
+        class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 flex items-center space-x-1.5"
+        :disabled="saving"
+      >
+        <span v-if="saving" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+        <span>{{ saving ? 'Saving...' : 'Save' }}</span>
+      </button>
+    </div>
     <div v-if="saveError" class="text-xs text-red-500 mt-2">{{ saveError }}</div>
   </div>
 
@@ -42,6 +82,36 @@
         Cancel
       </button>
       <button 
+        v-if="isRuleset"
+        @click="showTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
+        v-if="isOutput"
+        @click="showOutputTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
+        v-if="isProject"
+        @click="showProjectTestModal = true" 
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test</span>
+      </button>
+      <button 
         @click="() => saveEdit()" 
         class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 flex items-center space-x-1.5"
         :disabled="saving"
@@ -64,21 +134,94 @@
   </div>
 
   <!-- Default layout for other components -->
-  <div v-else-if="detail && detail.raw" class="h-full">
-    <CodeEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" />
+  <div v-else-if="detail && detail.raw" class="h-full flex flex-col">
+    <div v-if="isRuleset || isOutput || isPlugin || isProject" class="flex justify-end px-4 py-2 bg-gray-50 border-b">
+      <button 
+        v-if="isRuleset"
+        @click="showTestModal = true"
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test Ruleset</span>
+      </button>
+      <button 
+        v-if="isOutput"
+        @click="showOutputTestModal = true"
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test Output</span>
+      </button>
+      <button 
+        v-if="isPlugin"
+        @click="showPluginTestModal = true"
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test Plugin</span>
+      </button>
+      <button 
+        v-if="isProject"
+        @click="showProjectTestModal = true"
+        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <span>Test Project</span>
+      </button>
+    </div>
+    <CodeEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" />
   </div>
 
   <div v-else class="flex items-center justify-center h-full text-gray-400 text-lg">
     No content available
   </div>
+
+  <!-- Test Modal -->
+  <RulesetTestModal 
+    v-if="props.item && props.item.type === 'rulesets'" 
+    :show="showTestModal" 
+    :rulesetId="props.item?.id" 
+    @close="showTestModal = false" 
+  />
+  <OutputTestModal
+    v-if="props.item && props.item.type === 'outputs'"
+    :show="showOutputTestModal"
+    :outputId="props.item?.id"
+    @close="showOutputTestModal = false"
+  />
+  <PluginTestModal
+    v-if="props.item && props.item.type === 'plugins'"
+    :show="showPluginTestModal"
+    :pluginId="props.item?.id"
+    @close="showPluginTestModal = false"
+  />
+  <ProjectTestModal
+    v-if="props.item && props.item.type === 'projects'"
+    :show="showProjectTestModal"
+    :projectId="props.item?.id"
+    @close="showProjectTestModal = false"
+  />
 </template>
 
 <script setup>
 import { ref, watch, inject, computed, onMounted } from 'vue'
-import { hubApi } from '../api'
+import { hubApi, verifyComponent } from '../api'
 import CodeEditor from './CodeEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
+import RulesetTestModal from './RulesetTestModal.vue'
+import OutputTestModal from './OutputTestModal.vue'
+import PluginTestModal from './PluginTestModal.vue'
+import ProjectTestModal from './ProjectTestModal.vue'
 import { useStore } from 'vuex'
+import { useRouter } from 'vue-router'
 import { validateRulesetXml } from '../utils/rulesetValidator'
 import { getDefaultTemplate } from '../utils/templateGenerator'
 
@@ -105,8 +248,23 @@ const validationResult = ref({
   warnings: []
 })
 const isRuleset = computed(() => {
-  return props.item.type === 'rulesets'
+  return props.item?.type === 'rulesets'
 })
+const isOutput = computed(() => {
+  return props.item?.type === 'outputs'
+})
+const isPlugin = computed(() => {
+  return props.item?.type === 'plugins'
+})
+const isProject = computed(() => {
+  return props.item?.type === 'projects'
+})
+
+// Test modal state
+const showTestModal = ref(false)
+const showOutputTestModal = ref(false)
+const showPluginTestModal = ref(false)
+const showProjectTestModal = ref(false)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -116,20 +274,26 @@ const router = useRouter()
 // Watch for item changes
 watch(
   () => props.item,
-  (newVal) => {
+  (newVal, oldVal) => {
+    if (!newVal) {
+      detail.value = null;
+      errorLines.value = [];
+      return;
+    }
+    
     if (newVal && newVal.isNew) {
-      detail.value = null
-      editorValue.value = getTemplateForComponent(newVal.type, newVal.id)
-      errorLines.value = [] // 清空错误行
+      detail.value = null;
+      editorValue.value = getTemplateForComponent(newVal.type, newVal.id);
+      errorLines.value = [];
     } else if (newVal && newVal.isEdit) {
-      fetchDetail(newVal, true)
-      errorLines.value = [] // 清空错误行
-    } else {
-      fetchDetail(newVal)
-      errorLines.value = [] // 清空错误行
+      fetchDetail(newVal, true);
+      errorLines.value = [];
+    } else if (newVal) {
+      fetchDetail(newVal);
+      errorLines.value = [];
     }
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 )
 
 // 从错误信息中提取行号
@@ -152,21 +316,28 @@ function extractLineNumber(errorMessage) {
 async function fetchDetail(item, forEdit = false) {
   detail.value = null
   error.value = null
-  if (!item || !item.id) return
+  if (!item || !item.id) {
+    return;
+  }
   loading.value = true
   try {
     let data
     switch (item.type) {
       case 'inputs':
-        data = await hubApi.getInput(item.id); break
+        data = await hubApi.getInput(item.id);
+        break
       case 'outputs':
-        data = await hubApi.getOutput(item.id); break
+        data = await hubApi.getOutput(item.id);
+        break
       case 'rulesets':
-        data = await hubApi.getRuleset(item.id); break
+        data = await hubApi.getRuleset(item.id);
+        break
       case 'projects':
-        data = await hubApi.getProject(item.id); break
+        data = await hubApi.getProject(item.id);
+        break
       case 'plugins':
-        data = await hubApi.getPlugin(item.id); break
+        data = await hubApi.getPlugin(item.id);
+        break
       default:
         data = null
     }
@@ -178,42 +349,23 @@ async function fetchDetail(item, forEdit = false) {
       
       // Check if this is already a temporary file
       const isAlreadyTemp = item.isNew || (data && data.path && data.path.endsWith('.new'));
-      console.log('Component details:', {
-        id: item.id,
-        type: item.type,
-        isNew: item.isNew,
-        path: data?.path,
-        isAlreadyTemp
-      });
       
       // Only create a temporary file if this is not already a temporary file
       if (!isAlreadyTemp) {
         try {
           // Convert plural component type to singular for API call
           const singularType = item.type.endsWith('s') ? item.type.slice(0, -1) : item.type;
-          console.log('Creating temporary file for', singularType, item.id);
           
           // Create a temporary file for editing, but don't submit changes
           const response = await hubApi.createTempFile(singularType, item.id);
-          console.log('Temporary file creation response:', response);
         } catch (e) {
           // Only show error message on failure
-          console.error('Failed to create temporary file:', e);
-          if (e.response) {
-            console.error('Error response:', e.response.status, e.response.data);
-          }
           $message?.error?.('Failed to create temporary file: ' + (e?.message || 'Unknown error'))
         }
-      } else {
-        console.log('Skipping temporary file creation as this is already a temporary file');
       }
     }
   } catch (e) {
     error.value = 'Failed to load details'
-    console.error('Failed to load details:', e);
-    if (e.response) {
-      console.error('Error response:', e.response.status, e.response.data);
-    }
   } finally {
     loading.value = false
   }
@@ -270,7 +422,6 @@ async function saveEdit(content) {
   try {
     // 保存组件
     const response = await hubApi.saveEdit(props.item.type, props.item.id, contentToSave)
-    console.log('Save response:', response)
     
     // 如果是ruleset，保存后进行验证
     if (isRuleset.value) {
@@ -301,7 +452,6 @@ async function saveEdit(content) {
     // 更新组件列表
     emit('updated', props.item.id)
   } catch (err) {
-    console.error('Failed to save edit:', err)
     saveError.value = err.response?.data || err.message || 'Failed to save'
     $message?.error?.('Error: ' + saveError.value)
   } finally {
@@ -328,7 +478,6 @@ async function saveNew(content) {
   try {
     // 保存新组件
     const response = await hubApi.saveNew(props.item.type, props.item.id, contentToSave)
-    console.log('Save new response:', response)
     
     // 如果是ruleset，保存后进行验证
     if (isRuleset.value) {

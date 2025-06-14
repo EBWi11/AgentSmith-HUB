@@ -56,7 +56,7 @@
           <div v-else-if="!loading[type] && !error[type]">
             <div v-for="item in filteredItems(type)" :key="item.id || item.name"
                  :class="['flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all', selected && selected.type === type && selected.id === (item.id || item.name) ? 'bg-primary/10 text-primary font-semibold border-l-2 border-primary' : 'text-gray-800 hover:bg-gray-100']"
-                 @click="$emit('select-item', { type, id: item.id || item.name })">
+                 @click="handleItemClick(type, item)">
               <div v-if="type === 'projects'" class="relative mr-1.5">
                 <div class="w-2 h-2 rounded-full"
                      :class="{
@@ -84,6 +84,9 @@
                   <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="$emit('open-editor', { type, id: item.id || item.name, isEdit: true })">Edit</div>
                   <div v-if="type === 'inputs' || type === 'outputs'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="checkConnection(type, item)">Connect check</div>
                   <div v-if="type === 'plugins'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestPlugin(item)">Test plugin</div>
+                  <div v-if="type === 'rulesets'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestRuleset(item)">Test ruleset</div>
+                  <div v-if="type === 'outputs'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestOutput(item)">Test output</div>
+                  <div v-if="type === 'projects'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestProject(item)">Test project</div>
                   <div class="border-t border-gray-100 my-1"></div>
                   <div class="px-3 py-1 text-xs text-red-600 hover:bg-red-50 cursor-pointer" @click.stop="deleteItem(type, item)">Delete</div>
                 </div>
@@ -102,17 +105,17 @@
 
     <!-- Create New Modal -->
     <div v-if="showAddModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div class="bg-white rounded shadow-lg p-6 w-80">
-        <h3 class="font-bold mb-4">New {{ sections[addType]?.title || addType }}</h3>
-        <div class="mb-2">
-          <label class="block text-xs text-gray-500 mb-1">Name</label>
-          <input v-model="addName" class="w-full border rounded px-2 py-1 text-sm" @keyup.enter="confirmAddName" />
+      <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Add {{ addType ? addType.slice(0, -1) : 'Component' }}</h3>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+          <input type="text" v-model="addName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Enter name" />
         </div>
-        <div class="flex justify-end space-x-2 mt-4">
-          <button @click="showAddModal=false" class="px-3 py-1 text-sm text-gray-500">Cancel</button>
-          <button @click="confirmAddName" class="px-3 py-1 text-sm bg-blue-600 text-white rounded">Next</button>
+        <div class="flex justify-end space-x-3">
+          <button @click="closeAddModal" class="px-3 py-1 text-sm text-gray-500">Cancel</button>
+          <button @click="confirmAddName" class="px-3 py-1 bg-blue-500 text-white text-sm rounded">Create</button>
         </div>
-        <div v-if="addError" class="text-xs text-red-500 mt-2">{{ addError }}</div>
+        <div v-if="addError" class="mt-3 text-sm text-red-500">{{ addError }}</div>
       </div>
     </div>
 
@@ -121,7 +124,7 @@
       <div class="bg-white rounded shadow-lg p-6 w-96 max-h-[80vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
           <h3 class="font-bold">Client Connection Status</h3>
-          <button @click="showConnectionModal=false" class="text-gray-400 hover:text-gray-600">
+          <button @click="closeConnectionModal" class="text-gray-400 hover:text-gray-600">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
@@ -245,7 +248,7 @@
         </div>
         
         <div class="flex justify-end mt-4">
-          <button @click="showConnectionModal=false" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+          <button @click="closeConnectionModal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
         </div>
       </div>
     </div>
@@ -255,7 +258,7 @@
       <div class="bg-white rounded shadow-lg p-6 w-[500px] max-h-[80vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
           <h3 class="font-bold">Test Plugin: {{ testPluginName }}</h3>
-          <button @click="showTestPluginModal=false" class="text-gray-400 hover:text-gray-600">
+          <button @click="closeTestPluginModal" class="text-gray-400 hover:text-gray-600">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
@@ -324,7 +327,57 @@
         </div>
         
         <div class="flex justify-end mt-4">
-          <button @click="showTestPluginModal=false" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+          <button @click="closeTestPluginModal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div v-if="showDeleteModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-medium text-gray-900">Confirm Delete</h3>
+          <button @click="closeDeleteModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="mb-6">
+          <p class="text-sm text-gray-600 mb-2">
+            You are about to delete <span class="font-semibold">{{ itemToDelete?.item?.id || itemToDelete?.item?.name }}</span>.
+            This action cannot be undone.
+          </p>
+          <p class="text-sm text-gray-600 mb-4">
+            Type <span class="font-bold text-red-600">delete</span> to confirm.
+          </p>
+          
+          <input 
+            type="text" 
+            v-model="deleteConfirmText" 
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-red-500" 
+            placeholder="Type 'delete' to confirm"
+            @keyup.enter="confirmDelete"
+          />
+        </div>
+        
+        <div v-if="deleteError" class="mb-4 text-sm text-red-600">{{ deleteError }}</div>
+        
+        <div class="flex justify-end space-x-3">
+          <button 
+            @click="closeDeleteModal" 
+            class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            @click="confirmDelete" 
+            class="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+            :disabled="deleteConfirmText !== 'delete'"
+          >
+            Delete
+          </button>
         </div>
       </div>
     </div>
@@ -341,7 +394,15 @@ const props = defineProps({
 })
 
 // Emits
-const emit = defineEmits(['select-item', 'open-editor', 'item-deleted', 'open-pending-changes'])
+const emit = defineEmits([
+  'select-item',
+  'open-editor',
+  'item-deleted',
+  'open-pending-changes',
+  'test-ruleset',
+  'test-output',
+  'test-project'
+])
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -433,6 +494,12 @@ const testPluginLoading = ref(false)
 const testPluginResult = ref(null)
 const testPluginError = ref(null)
 
+// 添加删除确认相关的响应式变量
+const showDeleteModal = ref(false)
+const deleteConfirmText = ref('')
+const itemToDelete = ref(null)
+const deleteError = ref('')
+
 // Lifecycle hooks
 onMounted(async () => {
   await fetchAllItems()
@@ -444,6 +511,9 @@ onBeforeUnmount(() => {
   if (projectRefreshInterval.value) {
     clearInterval(projectRefreshInterval.value)
   }
+  
+  // 移除ESC键监听
+  document.removeEventListener('keydown', handleEscKey)
 })
 
 // Methods
@@ -454,6 +524,41 @@ function startProjectPolling() {
       await fetchItems('projects')
     }
   }, 5000)
+}
+
+// 处理ESC键按下
+function handleEscKey(event) {
+  if (event.key === 'Escape') {
+    if (showAddModal.value) {
+      showAddModal.value = false
+    }
+    if (showConnectionModal.value) {
+      showConnectionModal.value = false
+    }
+    if (showTestPluginModal.value) {
+      showTestPluginModal.value = false
+    }
+    if (showDeleteModal.value) {
+      closeDeleteModal()
+    }
+  }
+}
+
+function openAddModal(type) {
+  addType.value = type
+  addName.value = ''
+  addError.value = ''
+  showAddModal.value = true
+  
+  // 添加ESC键监听
+  document.addEventListener('keydown', handleEscKey)
+}
+
+function closeAddModal() {
+  showAddModal.value = false
+  
+  // 移除ESC键监听
+  document.removeEventListener('keydown', handleEscKey)
 }
 
 async function toggleCollapse(type) {
@@ -578,13 +683,6 @@ flow:
   }
 }
 
-function openAddModal(type) {
-  addType.value = type
-  addName.value = ''
-  addError.value = ''
-  showAddModal.value = true
-}
-
 async function confirmAddName() {
   if (!addName.value || addName.value.trim() === '') {
     addError.value = 'Name cannot be empty'
@@ -659,8 +757,43 @@ function copyName(item) {
   closeAllMenus()
 }
 
-async function deleteItem(type, item) {
+// 打开删除确认模态框
+function openDeleteModal(type, item) {
   closeAllMenus()
+  itemToDelete.value = { type, item }
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+  showDeleteModal.value = true
+  
+  // 添加ESC键监听
+  document.addEventListener('keydown', handleEscKey)
+}
+
+// 关闭删除确认模态框
+function closeDeleteModal() {
+  showDeleteModal.value = false
+  itemToDelete.value = null
+  deleteConfirmText.value = ''
+  deleteError.value = ''
+  
+  // 移除ESC键监听
+  document.removeEventListener('keydown', handleEscKey)
+}
+
+// 确认删除
+async function confirmDelete() {
+  if (deleteConfirmText.value !== 'delete') {
+    deleteError.value = 'Please type "delete" to confirm'
+    return
+  }
+  
+  if (!itemToDelete.value) {
+    closeDeleteModal()
+    return
+  }
+  
+  const { type, item } = itemToDelete.value
+  
   try {
     if (type === 'inputs') await hubApi.deleteInput(item.id)
     else if (type === 'outputs') await hubApi.deleteOutput(item.id)
@@ -676,9 +809,16 @@ async function deleteItem(type, item) {
     
     // Emit delete event to notify parent component
     emit('item-deleted', { type, id: item.id })
+    
+    // Close modal
+    closeDeleteModal()
   } catch (e) {
-    $message?.error?.('Delete failed: ' + (e?.message || 'Unknown error'))
+    deleteError.value = 'Delete failed: ' + (e?.message || 'Unknown error')
   }
+}
+
+function deleteItem(type, item) {
+  openDeleteModal(type, item)
 }
 
 function closeAllMenus() {
@@ -696,6 +836,9 @@ async function checkConnection(type, item) {
     connectionError.value = null
     showConnectionModal.value = true
     
+    // 添加ESC键监听
+    document.addEventListener('keydown', handleEscKey)
+    
     const id = item.id || item.name
     const result = await hubApi.connectCheck(type, id)
     connectionResult.value = result
@@ -707,6 +850,14 @@ async function checkConnection(type, item) {
   }
 }
 
+// 关闭连接检查模态框
+function closeConnectionModal() {
+  showConnectionModal.value = false
+  
+  // 移除ESC键监听
+  document.removeEventListener('keydown', handleEscKey)
+}
+
 // 打开测试插件弹窗
 function openTestPlugin(item) {
   testPluginName.value = item.name || item.id
@@ -714,6 +865,56 @@ function openTestPlugin(item) {
   testPluginResult.value = null
   testPluginError.value = null
   showTestPluginModal.value = true
+  
+  // 添加ESC键监听
+  document.addEventListener('keydown', handleEscKey)
+}
+
+// 关闭测试插件模态框
+function closeTestPluginModal() {
+  showTestPluginModal.value = false
+  
+  // 移除ESC键监听
+  document.removeEventListener('keydown', handleEscKey)
+}
+
+// 打开测试ruleset弹窗
+function openTestRuleset(item) {
+  console.log('Sidebar: openTestRuleset called with item', item);
+  const payload = { 
+    type: 'rulesets', 
+    id: item.id || item.name
+  };
+  console.log('Sidebar: emitting test-ruleset event with payload', payload);
+  emit('test-ruleset', payload);
+  // 确保菜单关闭
+  closeAllMenus();
+}
+
+// 打开测试output弹窗
+function openTestOutput(item) {
+  console.log('Sidebar: openTestOutput called with item', item);
+  const payload = { 
+    type: 'outputs', 
+    id: item.id || item.name
+  };
+  console.log('Sidebar: emitting test-output event with payload', payload);
+  emit('test-output', payload);
+  // 确保菜单关闭
+  closeAllMenus();
+}
+
+// 打开测试project弹窗
+function openTestProject(item) {
+  console.log('Sidebar: openTestProject called with item', item);
+  const payload = { 
+    type: 'projects', 
+    id: item.id || item.name
+  };
+  console.log('Sidebar: emitting test-project event with payload', payload);
+  emit('test-project', payload);
+  // 确保菜单关闭
+  closeAllMenus();
 }
 
 // 添加插件参数
@@ -777,6 +978,11 @@ defineExpose({
   fetchItems,
   fetchAllItems
 })
+
+function handleItemClick(type, item) {
+  const id = item.id || item.name;
+  emit('select-item', { type, id });
+}
 </script>
 
 <style>

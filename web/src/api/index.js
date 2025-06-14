@@ -405,38 +405,16 @@ export const hubApi = {
     return response;
   },
 
-  // 修改获取所有可用插件的函数，添加模拟数据
+  // 获取所有可用插件的函数
   async getAvailablePlugins() {
     try {
-      // 尝试从API获取插件列表
-      try {
-        const response = await api.get('/plugins/available');
-        return response.data;
-      } catch (apiError) {
-        console.warn('Failed to fetch plugins from API, using mock data:', apiError);
-        
-        // 如果API不可用，返回模拟数据
-        return [
-          { name: 'ip_in_range', description: 'Check if IP is in a specified range' },
-          { name: 'is_base64', description: 'Check if string is base64 encoded' },
-          { name: 'is_url', description: 'Check if string is a valid URL' },
-          { name: 'contains_sensitive', description: 'Check if string contains sensitive information' },
-          { name: 'regex_match', description: 'Match string against a regex pattern' },
-          { name: 'json_extract', description: 'Extract value from JSON string' },
-          { name: 'base64_decode', description: 'Decode base64 string' },
-          { name: 'url_decode', description: 'Decode URL encoded string' },
-          { name: 'hash_md5', description: 'Calculate MD5 hash of string' },
-          { name: 'hash_sha1', description: 'Calculate SHA1 hash of string' },
-          { name: 'hash_sha256', description: 'Calculate SHA256 hash of string' },
-          { name: 'timestamp_to_date', description: 'Convert timestamp to date string' },
-          { name: 'is_ip', description: 'Check if string is a valid IP address' },
-          { name: 'is_domain', description: 'Check if string is a valid domain name' },
-          { name: 'domain_to_ip', description: 'Resolve domain name to IP address' },
-          { name: 'ip_to_geo', description: 'Get geolocation information for IP address' }
-        ];
-      }
+      // 使用正确的API路径
+      const response = await api.get('/plugins/available');
+      return response.data;
     } catch (error) {
       console.error('Failed to fetch available plugins:', error);
+      
+      // 如果API调用失败，返回空数组而不是模拟数据，以避免混淆
       return [];
     }
   },
@@ -492,22 +470,22 @@ export const hubApi = {
   },
   
   // 添加测试插件函数
-  async testPlugin(name, args) {
+  async testPlugin(id, data) {
     try {
       // 基本验证
-      if (!name) {
-        throw new Error('Plugin name is required');
+      if (!id) {
+        throw new Error('Plugin ID is required');
       }
       
-      if (!Array.isArray(args)) {
-        throw new Error('Arguments must be an array');
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
       }
       
       // 使用api实例发送请求
-      const response = await api.post(`/test-plugin/${name}`, { args });
+      const response = await api.post(`/test-plugin/${id}`, { data });
       return response.data;
     } catch (error) {
-      console.error(`Failed to test plugin ${name}:`, error);
+      console.error(`Failed to test plugin ${id}:`, error);
       // 如果是HTTP错误，返回错误信息
       if (error.response && error.response.data) {
         return {
@@ -521,6 +499,145 @@ export const hubApi = {
         success: false,
         error: error.message || 'Network error or server not responding',
         result: null
+      };
+    }
+  },
+
+  // 测试ruleset规则
+  async testRuleset(id, data) {
+    try {
+      // 基本验证
+      if (!id) {
+        throw new Error('Ruleset ID is required');
+      }
+      
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+      
+      // 使用api实例发送请求
+      const response = await api.post(`/test-ruleset/${id}`, { data });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to test ruleset ${id}:`, error);
+      // 如果是HTTP错误，返回错误信息
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to test ruleset',
+          results: []
+        };
+      }
+      // 如果是网络错误或其他错误
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        results: []
+      };
+    }
+  },
+
+  // 测试output组件
+  async testOutput(id, data) {
+    try {
+      // 基本验证
+      if (!id) {
+        throw new Error('Output ID is required');
+      }
+      
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+      
+      // 使用api实例发送请求
+      const response = await api.post(`/test-output/${id}`, { data });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to test output ${id}:`, error);
+      // 如果是HTTP错误，返回错误信息
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to test output',
+          metrics: {}
+        };
+      }
+      // 如果是网络错误或其他错误
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        metrics: {}
+      };
+    }
+  },
+
+  // 测试project组件
+  async testProject(id, inputNode, data) {
+    try {
+      // 基本验证
+      if (!id) {
+        throw new Error('Project ID is required');
+      }
+      
+      if (!inputNode) {
+        throw new Error('Input node is required');
+      }
+      
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+      
+      // 使用api实例发送请求
+      const response = await api.post(`/test-project/${id}`, { 
+        input_node: inputNode,
+        data 
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to test project ${id}:`, error);
+      // 如果是HTTP错误，返回错误信息
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to test project',
+          outputs: {}
+        };
+      }
+      // 如果是网络错误或其他错误
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        outputs: {}
+      };
+    }
+  },
+  
+  // 获取项目输入节点列表
+  async getProjectInputs(id) {
+    try {
+      // 基本验证
+      if (!id) {
+        throw new Error('Project ID is required');
+      }
+      
+      // 使用api实例发送请求
+      const response = await api.get(`/project/${id}/inputs`);
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to get project inputs ${id}:`, error);
+      // 如果是HTTP错误，返回错误信息
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to get project inputs',
+          inputs: []
+        };
+      }
+      // 如果是网络错误或其他错误
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        inputs: []
       };
     }
   },

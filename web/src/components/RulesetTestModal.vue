@@ -1,0 +1,190 @@
+<template>
+  <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+    <div class="bg-white rounded shadow-lg p-6 w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-bold text-lg">Test Ruleset: {{ rulesetId }}</h3>
+        <button @click="closeModal" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="flex flex-1 overflow-hidden" style="min-height: 500px;">
+        <!-- Left panel: Input data -->
+        <div class="w-1/2 pr-3 flex flex-col overflow-hidden">
+          <h4 class="text-sm font-medium text-gray-700 mb-2">Input Data:</h4>
+          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md">
+            <CodeEditor 
+              v-model:value="inputData" 
+              :language="'json'" 
+              :read-only="false" 
+              class="h-full" 
+            />
+          </div>
+        </div>
+        
+        <!-- Right panel: Results -->
+        <div class="w-1/2 pl-3 flex flex-col overflow-hidden">
+          <h4 class="text-sm font-medium text-gray-700 mb-2">Results:</h4>
+          <div class="flex-1 overflow-auto border border-gray-200 rounded-md bg-gray-50 p-3">
+            <div v-if="testLoading" class="flex justify-center items-center h-full">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+            
+            <div v-else-if="testError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+              <div class="flex">
+                <div class="flex-shrink-0">
+                  <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <p class="text-sm text-red-700">{{ testError }}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div v-else-if="testResults.length === 0" class="text-center py-8 text-gray-500">
+              <p>No results yet. Click "Run Test" to execute the ruleset.</p>
+              <p v-if="testExecuted" class="mt-2 text-sm text-yellow-600">
+                No output was generated. The ruleset may not have matched any rules.
+              </p>
+            </div>
+            
+            <div v-else>
+              <div v-for="(result, index) in testResults" :key="index" class="mb-4">
+                <div class="bg-white border border-gray-200 rounded-md p-3">
+                  <div class="mb-2 flex justify-between">
+                    <span class="text-sm font-medium text-gray-700">Result {{ index + 1 }}</span>
+                    <span v-if="result._HUB_HIT_RULE_ID" class="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
+                      Rule: {{ result._HUB_HIT_RULE_ID }}
+                    </span>
+                  </div>
+                  <pre class="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-80">{{ JSON.stringify(result, null, 2) }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="flex justify-end mt-6 space-x-3">
+        <button 
+          @click="runTest" 
+          class="px-5 py-2.5 bg-primary text-white rounded hover:bg-primary-dark transition-colors flex items-center space-x-2 text-base"
+          :disabled="testLoading"
+        >
+          <span v-if="testLoading" class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+          <span>Run Test</span>
+        </button>
+        <button @click="closeModal" class="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 rounded transition-colors text-base">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { hubApi } from '../api';
+import CodeEditor from './CodeEditor.vue';
+
+// Props
+const props = defineProps({
+  show: Boolean,
+  rulesetId: String
+});
+
+// Emits
+const emit = defineEmits(['close']);
+
+// Reactive state
+const showModal = ref(false);
+const inputData = ref('{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}');
+const testResults = ref([]);
+const testLoading = ref(false);
+const testError = ref(null);
+const testExecuted = ref(false);
+
+// Debug info on mount
+onMounted(() => {
+  console.log('RulesetTestModal mounted with props:', props);
+});
+
+// Watch for prop changes
+watch(() => props.show, (newVal) => {
+  console.log('RulesetTestModal: show prop changed to', newVal);
+  showModal.value = newVal;
+  
+  // 添加或移除ESC键监听
+  if (newVal) {
+    document.addEventListener('keydown', handleEscKey);
+  } else {
+    document.removeEventListener('keydown', handleEscKey);
+  }
+}, { immediate: true });
+
+watch(() => props.rulesetId, (newVal) => {
+  console.log('RulesetTestModal: rulesetId prop changed to', newVal);
+  // Reset state when ruleset changes
+  testResults.value = [];
+  testError.value = null;
+  testExecuted.value = false;
+});
+
+// 在组件卸载时移除事件监听
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEscKey);
+});
+
+// Methods
+function closeModal() {
+  emit('close');
+}
+
+// 处理ESC键按下
+function handleEscKey(event) {
+  if (event.key === 'Escape') {
+    closeModal();
+  }
+}
+
+async function runTest() {
+  testLoading.value = true;
+  testError.value = null;
+  testResults.value = [];
+  testExecuted.value = true;
+  
+  try {
+    // Parse input data
+    let data;
+    try {
+      data = JSON.parse(inputData.value);
+    } catch (e) {
+      testError.value = `Invalid JSON: ${e.message}`;
+      testLoading.value = false;
+      return;
+    }
+    
+    // Call API
+    const response = await hubApi.testRuleset(props.rulesetId, data);
+    
+    if (response.success) {
+      testResults.value = response.results || [];
+    } else {
+      testError.value = response.error || 'Unknown error occurred';
+    }
+  } catch (e) {
+    testError.value = e.message || 'Failed to test ruleset';
+    console.error('Test ruleset error:', e);
+  } finally {
+    testLoading.value = false;
+  }
+}
+</script>
+
+<style scoped>
+/* Any component-specific styles can go here */
+</style> 

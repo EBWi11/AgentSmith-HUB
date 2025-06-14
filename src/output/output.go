@@ -163,7 +163,7 @@ func Verify(path string, raw string) error {
 		if cfg.AliyunSLS == nil {
 			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS output (line: unknown)")
 		}
-		// 添加更多AliyunSLS特定字段验证
+	case OutputTypePrint:
 	default:
 		return fmt.Errorf("unsupported output type: %s (line: unknown)", cfg.Type)
 	}
