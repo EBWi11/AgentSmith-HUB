@@ -133,7 +133,6 @@ export default createStore({
         }
         commit('setComponents', { type, components })
       } catch (error) {
-        console.error(`Failed to fetch ${type}:`, error)
       }
     },
     async fetchAvailablePlugins({ commit }) {
@@ -141,7 +140,6 @@ export default createStore({
         const plugins = await hubApi.getAvailablePlugins()
         commit('setAvailablePlugins', plugins)
       } catch (error) {
-        console.error('Failed to fetch available plugins:', error)
         commit('setAvailablePlugins', [])
       }
     },
@@ -160,7 +158,6 @@ export default createStore({
         const changes = await hubApi.fetchPendingChanges()
         commit('setPendingChanges', changes)
       } catch (error) {
-        console.error('Failed to fetch pending changes:', error)
         commit('setPendingChanges', [])
       }
     },
@@ -169,7 +166,6 @@ export default createStore({
         const status = await hubApi.fetchClusterStatus()
         commit('setClusterStatus', status)
       } catch (error) {
-        console.error('Failed to fetch cluster status:', error)
         commit('setClusterStatus', {})
       }
     },
@@ -178,7 +174,6 @@ export default createStore({
         const info = await hubApi.fetchClusterInfo()
         commit('setClusterInfo', info)
       } catch (error) {
-        console.error('Failed to fetch cluster info:', error)
         commit('setClusterInfo', {})
       }
     }

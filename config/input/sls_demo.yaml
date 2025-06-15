@@ -6,6 +6,6 @@ aliyun_sls:
   project: "xx"
   logstore: "xx"
   consumer_group_name: "xx"
-  consumer_name: "xx"
+  consumer_name: "x123x"
   cursor_position: "BEGIN_CURSOR"
   query: "xx"

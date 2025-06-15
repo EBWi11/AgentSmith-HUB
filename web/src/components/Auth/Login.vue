@@ -66,7 +66,6 @@ export default {
         await hubApi.verifyToken();
         this.$router.push('/dashboard');
       } catch (err) {
-        console.error('Login failed:', err);
         this.error = 'Invalid token. Please try again.';
         hubApi.clearToken();
       } finally {

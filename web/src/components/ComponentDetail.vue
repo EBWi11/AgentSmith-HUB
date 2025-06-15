@@ -4,7 +4,7 @@
   
   <!-- Create Mode -->
   <div v-else-if="props.item && props.item.isNew" class="h-full flex flex-col">
-    <CodeEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveNew(content)" />
+    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveNew(content)" />
     <div class="flex justify-end mt-4 px-4 space-x-3 border-t pt-4 pb-3">
       <button 
         v-if="isRuleset"
@@ -73,7 +73,7 @@
       </ul>
     </div>
     
-    <CodeEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveEdit(content)" />
+    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveEdit(content)" />
     <div class="flex justify-end mt-4 px-4 space-x-3 border-t pt-4 pb-3">
       <button 
         @click="cancelEdit" 
@@ -126,7 +126,7 @@
   <!-- Special layout for projects -->
   <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="flex h-full">
     <div class="w-1/2 h-full">
-       <CodeEditor :value="detail.raw" :language="'yaml'" :read-only="true" class="h-full" />
+       <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" />
     </div>
     <div class="w-1/2 h-full border-l border-gray-200">
       <ProjectWorkflow :projectContent="detail.raw" />
@@ -135,49 +135,125 @@
 
   <!-- Default layout for other components -->
   <div v-else-if="detail && detail.raw" class="h-full flex flex-col">
-    <div v-if="isRuleset || isOutput || isPlugin || isProject" class="flex justify-end px-4 py-2 bg-gray-50 border-b">
-      <button 
-        v-if="isRuleset"
-        @click="showTestModal = true"
-        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        <span>Test Ruleset</span>
-      </button>
-      <button 
-        v-if="isOutput"
-        @click="showOutputTestModal = true"
-        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        <span>Test Output</span>
-      </button>
-      <button 
-        v-if="isPlugin"
-        @click="showPluginTestModal = true"
-        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        <span>Test Plugin</span>
-      </button>
-      <button 
-        v-if="isProject"
-        @click="showProjectTestModal = true"
-        class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        <span>Test Project</span>
-      </button>
+    <div class="flex justify-between px-4 py-2 bg-gray-50 border-b">
+      <div class="flex items-center">
+        <span v-if="detail.isTemporary" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md mr-2">
+          Temporary Version
+        </span>
+        <span v-if="isPlugin && detail.type === 'local'" class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-md mr-2">
+          Built-in Plugin
+        </span>
+        
+        <!-- Project control buttons -->
+        <div v-if="isProject && !detail.isTemporary" class="flex space-x-2">
+          <button 
+            v-if="detail.status === 'stopped'"
+            @click="startProject"
+            class="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500 flex items-center space-x-1.5"
+            :disabled="projectOperationLoading"
+          >
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Start</span>
+          </button>
+          
+          <button 
+            v-if="detail.status === 'running'"
+            @click="stopProject"
+            class="px-3 py-1.5 bg-red-500 text-white text-sm rounded hover:bg-red-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-red-500 flex items-center space-x-1.5"
+            :disabled="projectOperationLoading"
+          >
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+            </svg>
+            <span>Stop</span>
+          </button>
+          
+          <button 
+            v-if="detail.status === 'running'"
+            @click="restartProject"
+            class="px-3 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-yellow-500 flex items-center space-x-1.5"
+            :disabled="projectOperationLoading"
+          >
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>Restart</span>
+          </button>
+        </div>
+        
+        <!-- Temporary project warning -->
+        <div v-if="isProject && detail.isTemporary" class="flex items-center text-yellow-600">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span class="text-xs">Project operations unavailable for temporary version</span>
+        </div>
+      </div>
+      <div class="flex items-center">
+        <!-- Refresh button -->
+        <button 
+          @click="refreshComponent"
+          class="px-2 py-1 mr-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors duration-150 focus:outline-none"
+          :disabled="loading"
+          title="Refresh"
+        >
+          <svg class="w-4 h-4" :class="{ 'animate-spin': loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+        
+        <div v-if="isRuleset || isOutput || isPlugin || isProject" class="flex">
+          <button 
+            v-if="isRuleset"
+            @click="showTestModal = true"
+            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <span>Test Ruleset</span>
+          </button>
+          <button 
+            v-if="isOutput"
+            @click="showOutputTestModal = true"
+            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <span>Test Output</span>
+          </button>
+          <button 
+            v-if="isPlugin"
+            @click="showPluginTestModal = true"
+            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <span>Test Plugin</span>
+          </button>
+          <button 
+            v-if="isProject"
+            @click="showProjectTestModal = true"
+            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            <span>Test Project</span>
+          </button>
+        </div>
+      </div>
     </div>
-    <CodeEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" />
+    <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" />
   </div>
 
   <div v-else class="flex items-center justify-center h-full text-gray-400 text-lg">
@@ -188,7 +264,8 @@
   <RulesetTestModal 
     v-if="props.item && props.item.type === 'rulesets'" 
     :show="showTestModal" 
-    :rulesetId="props.item?.id" 
+    :rulesetId="props.item?.originalId || props.item?.id" 
+    :rulesetContent="props.item?.isEdit ? editorValue : null"
     @close="showTestModal = false" 
   />
   <OutputTestModal
@@ -209,12 +286,36 @@
     :projectId="props.item?.id"
     @close="showProjectTestModal = false"
   />
+
+  <!-- Project Operation Warning Modal -->
+  <div v-if="projectWarningModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+      <div class="flex items-center mb-4 text-yellow-600">
+        <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <h3 class="text-lg font-medium">Warning</h3>
+      </div>
+      
+      <p class="mb-4 text-sm text-gray-600">{{ projectWarningMessage }}</p>
+      
+      <div class="flex justify-end space-x-3">
+        <button @click="closeProjectWarningModal" class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50">
+          Cancel
+        </button>
+        <button @click="continueProjectOperation" class="px-3 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600" :disabled="projectOperationLoading">
+          <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin mr-1"></span>
+          Continue Anyway
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { ref, watch, inject, computed, onMounted } from 'vue'
+import { ref, watch, inject, computed, onMounted, onBeforeUnmount } from 'vue'
 import { hubApi, verifyComponent } from '../api'
-import CodeEditor from './CodeEditor.vue'
+import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
 import OutputTestModal from './OutputTestModal.vue'
@@ -241,7 +342,8 @@ const editorValue = ref('')
 const saveError = ref('')
 const saving = ref(false)
 const originalContent = ref('') // Save original content for restoring when canceling edit
-const errorLines = ref([]) // 错误行数组
+const errorLines = ref([]) // Array of error lines
+const preventRefetch = ref(false) // Flag to prevent unnecessary re-fetching
 const validationResult = ref({
   isValid: true,
   errors: [],
@@ -271,15 +373,38 @@ const $message = inject('$message', window?.$toast)
 const store = useStore()
 const router = useRouter()
 
+// Project operation state
+const projectOperationLoading = ref(false)
+const projectWarningModal = ref(false)
+const projectWarningMessage = ref('')
+const projectOperationType = ref('') // 'start', 'stop', 'restart'
+
+// Project status refresh
+const statusRefreshInterval = ref(null)
+
 // Watch for item changes
 watch(
   () => props.item,
   (newVal, oldVal) => {
+    console.log('Item watch triggered:', { newVal, oldVal, preventRefetch: preventRefetch.value })
+    
+    // Skip if we're preventing refetch (during save operations)
+    if (preventRefetch.value) {
+      console.log('Skipping refetch due to preventRefetch flag')
+      return
+    }
+    
     if (!newVal) {
       detail.value = null;
       errorLines.value = [];
       return;
     }
+    
+    // Detect changes in timestamp or other properties
+    const timestampChanged = newVal._timestamp !== oldVal?._timestamp;
+    const typeChanged = newVal.type !== oldVal?.type;
+    const idChanged = newVal.id !== oldVal?.id;
+    const editModeChanged = newVal.isEdit !== oldVal?.isEdit;
     
     if (newVal && newVal.isNew) {
       detail.value = null;
@@ -288,7 +413,8 @@ watch(
     } else if (newVal && newVal.isEdit) {
       fetchDetail(newVal, true);
       errorLines.value = [];
-    } else if (newVal) {
+    } else if (newVal && (typeChanged || idChanged || timestampChanged || editModeChanged)) {
+      // If component ID, type, timestamp or edit mode changes, refresh details
       fetchDetail(newVal);
       errorLines.value = [];
     }
@@ -296,11 +422,11 @@ watch(
   { immediate: true, deep: true }
 )
 
-// 从错误信息中提取行号
+// Extract line number from error message
 function extractLineNumber(errorMessage) {
   if (!errorMessage) return null;
   
-  // 尝试从错误信息中提取行号
+  // Try to extract line number from error message
   const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
                       errorMessage.match(/line:\s*(\d+)/i) ||
                       errorMessage.match(/location:.*line\s*(\d+)/i);
@@ -314,14 +440,31 @@ function extractLineNumber(errorMessage) {
 
 // Methods
 async function fetchDetail(item, forEdit = false) {
+  console.log('fetchDetail called with:', { item, forEdit, itemId: item?.id, itemType: item?.type })
+  
   detail.value = null
   error.value = null
   if (!item || !item.id) {
+    console.log('fetchDetail: No item or item.id provided', item);
     return;
   }
   loading.value = true
   try {
     let data
+    let tempInfo = null
+    
+    console.log(`Fetching ${item.type} ${item.id}, forEdit: ${forEdit}`)
+    
+    // If in edit mode, check for temporary file
+    if (forEdit) {
+      tempInfo = await hubApi.checkTemporaryFile(item.type, item.id);
+      console.log('Temporary file info:', tempInfo)
+      
+      // Don't automatically create temporary file - let the save operation handle it
+      // This prevents creating unnecessary .new files when content is identical
+    }
+    
+    // Get details based on component type
     switch (item.type) {
       case 'inputs':
         data = await hubApi.getInput(item.id);
@@ -334,81 +477,144 @@ async function fetchDetail(item, forEdit = false) {
         break
       case 'projects':
         data = await hubApi.getProject(item.id);
+        // Get project status
+        try {
+          const clusterStatus = await hubApi.fetchClusterStatus();
+          if (clusterStatus && clusterStatus.projects) {
+            const projectStatus = clusterStatus.projects.find(p => p.id === item.id);
+            if (projectStatus) {
+              data.status = projectStatus.status || 'stopped';
+            } else {
+              data.status = 'stopped'; // Default to stopped state
+            }
+          }
+        } catch (statusError) {
+          console.error('Failed to fetch project status:', statusError);
+          data.status = 'unknown';
+        }
         break
       case 'plugins':
         data = await hubApi.getPlugin(item.id);
         break
       default:
-        data = null
+        throw new Error(`Unsupported component type: ${item.type}`);
     }
-    detail.value = data
-    if (forEdit) {
-      // Initialize with empty string even if raw is empty to allow editing
-      editorValue.value = data?.raw || ''
-      originalContent.value = data?.raw || '' // Save original content
-      
-      // Check if this is already a temporary file
-      const isAlreadyTemp = item.isNew || (data && data.path && data.path.endsWith('.new'));
-      
-      // Only create a temporary file if this is not already a temporary file
-      if (!isAlreadyTemp) {
-        try {
-          // Convert plural component type to singular for API call
-          const singularType = item.type.endsWith('s') ? item.type.slice(0, -1) : item.type;
-          
-          // Create a temporary file for editing, but don't submit changes
-          const response = await hubApi.createTempFile(singularType, item.id);
-        } catch (e) {
-          // Only show error message on failure
-          $message?.error?.('Failed to create temporary file: ' + (e?.message || 'Unknown error'))
-        }
+    
+    console.log('Fetched data:', { 
+      hasData: !!data, 
+      hasRaw: !!data?.raw, 
+      rawLength: data?.raw?.length || 0,
+      path: data?.path,
+      isTemporary: data?.path?.endsWith('.new')
+    })
+    
+    // Check if this is a temporary file
+    if (data && data.path) {
+      data.isTemporary = data.path.endsWith('.new');
+    }
+    
+    // Ensure we have content
+    if (!data || (!data.raw && data.raw !== '')) {
+      console.warn(`No content received for ${item.type} ${item.id}:`, data);
+      // Try to fetch again without temporary file logic
+      if (forEdit && tempInfo && tempInfo.hasTemp) {
+        console.log('Retrying fetch without temporary file logic...');
+        return await fetchDetail(item, false);
       }
     }
+    
+    detail.value = data;
+    
+    if (forEdit) {
+      editorValue.value = data.raw || '';
+      originalContent.value = data.raw || '';
+      console.log('Set editor values:', { 
+        editorValueLength: editorValue.value.length,
+        originalContentLength: originalContent.value.length 
+      })
+    }
+    
+    // 如果是ruleset，验证XML
+    if (item.type === 'rulesets' && data.raw) {
+      validationResult.value = validateRulesetXml(data.raw);
+      if (!validationResult.value.isValid) {
+        // 提取错误行号
+        errorLines.value = validationResult.value.errors.map(err => extractLineNumber(err)).filter(Boolean);
+      } else {
+        errorLines.value = [];
+      }
+    }
+    
+    console.log('fetchDetail completed successfully:', {
+      hasDetail: !!detail.value,
+      hasRaw: !!detail.value?.raw,
+      editorValueLength: editorValue.value.length
+    })
   } catch (e) {
-    error.value = 'Failed to load details'
+    error.value = `Failed to load ${item.type}: ${e.message || 'Unknown error'}`;
+    console.error(`Error fetching ${item.type} detail:`, e);
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
-// 添加验证函数
+// Add validation function
 const validateRuleset = () => {
   if (isRuleset.value && editorValue.value) {
     const result = validateRulesetXml(editorValue.value)
     validationResult.value = result
     
-    // 更新错误行高亮
+    // Update error line highlights
     errorLines.value = result.errors.map(error => error.line)
     return result.isValid
   }
   return true
 }
 
-// 监听编辑内容变化，进行实时验证
+// Watch for changes in editor content and perform real-time validation
 watch(editorValue, (newContent) => {
   if (isRuleset.value && newContent) {
     validateRuleset()
   }
 }, { deep: true })
 
-// 在组件挂载时进行初始验证
+// Add a method to manually clear error lines (for debugging)
+function clearErrorLines() {
+  errorLines.value = []
+  console.log('Error lines cleared manually')
+}
+
+// Expose clearErrorLines to window for debugging
+if (typeof window !== 'undefined') {
+  window.clearErrorLines = clearErrorLines
+}
+
+// Perform initial validation when component is mounted
 onMounted(() => {
   if (isRuleset.value && editorValue.value) {
     validateRuleset()
   }
   
-  // 如果是项目类型，获取所有组件列表
+  // If component type is project, fetch all components list
   if (props.item && props.item.type === 'projects') {
     store.dispatch('fetchAllComponents')
   }
 })
 
 async function saveEdit(content) {
-  // 如果直接从CodeEditor的@save事件调用，content会有值
-  // 如果从按钮点击调用，content会是undefined
+  // If called directly from MonacoEditor's @save event, content will have a value
+  // If called from button click, content will be undefined
   const contentToSave = content !== undefined ? content : editorValue.value
   
-  // 对ruleset进行验证
+  // Preserve the current item reference
+  const currentItem = props.item
+  if (!currentItem || !currentItem.id) {
+    console.error('saveEdit: No valid item to save', currentItem)
+    saveError.value = 'Invalid item to save'
+    return
+  }
+  
+  // Validate ruleset using XML validator
   if (isRuleset.value) {
     const isValid = validateRuleset()
     if (!isValid && !confirm('Ruleset contains validation errors. Save anyway?')) {
@@ -420,54 +626,115 @@ async function saveEdit(content) {
   saving.value = true
   
   try {
-    // 保存组件
-    const response = await hubApi.saveEdit(props.item.type, props.item.id, contentToSave)
+    // Set flag to prevent unnecessary re-fetching during save
+    preventRefetch.value = true
     
-    // 如果是ruleset，保存后进行验证
-    if (isRuleset.value) {
-      try {
-        const verifyRes = await verifyComponent(props.item.type, props.item.id)
-        if (verifyRes.status === 200) {
-          $message?.success?.('Saved and verified successfully')
-        } else {
-          $message?.warning?.('Saved but verification failed: ' + verifyRes.data)
-          // 解析错误信息中的行号
-          const errorMessage = verifyRes.data
-          const lineNumber = extractLineNumber(errorMessage)
-          if (lineNumber) {
-            errorLines.value = [lineNumber]
-          }
+    // Save component directly - the backend will handle whether to create .new file or not
+    // based on content comparison
+    
+    // Pre-save verification for all component types
+    try {
+      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id, contentToSave)
+
+      // If verification failed, ask user if they want to proceed
+      if (verifyRes.data && !verifyRes.data.valid) {
+        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
+        if (!confirm(`Verification failed: ${errorMessage}\n\nSave anyway?`)) {
+          saving.value = false
+          return
         }
-      } catch (verifyErr) {
-        $message?.warning?.('Saved but verification failed: ' + verifyErr.message)
-        const lineNumber = extractLineNumber(verifyErr.message)
+      }
+    } catch (verifyErr) {
+      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
+      if (!confirm(`Verification error: ${errorMessage}\n\nSave anyway?`)) {
+        saving.value = false
+        return
+      }
+    }
+    
+    // Save component
+    const response = await hubApi.saveEdit(currentItem.type, currentItem.id, contentToSave)
+    
+    // Add a small delay to ensure backend has processed the save
+    await new Promise(resolve => setTimeout(resolve, 200))
+    
+    // Force refresh by clearing current detail first
+    detail.value = null
+    editorValue.value = ''
+    
+    // Refresh component content after successful save but stay in edit mode
+    await fetchDetail(currentItem, true)
+    
+    // If still no content, try fetching the original file
+    if (!detail.value || !detail.value.raw) {
+      console.log('No content after edit mode fetch, trying view mode...')
+      await fetchDetail(currentItem, false)
+      if (detail.value && detail.value.raw) {
+        editorValue.value = detail.value.raw
+        originalContent.value = detail.value.raw
+      }
+    }
+    
+    // Post-save verification
+    try {
+      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id)
+      if (verifyRes.data && verifyRes.data.valid) {
+        $message?.success?.('Saved and verified successfully')
+      } else {
+        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
+        $message?.warning?.('Saved but verification failed: ' + errorMessage)
+        
+        // Extract line number from error message
+        const lineNumber = extractLineNumber(errorMessage)
         if (lineNumber) {
           errorLines.value = [lineNumber]
         }
       }
-    } else {
-      $message?.success?.('Saved successfully')
+    } catch (verifyErr) {
+      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
+      $message?.warning?.('Saved but verification failed: ' + errorMessage)
+      
+      const lineNumber = extractLineNumber(errorMessage)
+      if (lineNumber) {
+        errorLines.value = [lineNumber]
+      }
     }
     
-    // 更新组件列表
-    emit('updated', props.item.id)
+    // Update component list (but don't emit immediately to avoid re-render issues)
+    setTimeout(() => {
+      emit('updated', currentItem)
+      // Clear the prevent refetch flag after a delay
+      setTimeout(() => {
+        preventRefetch.value = false
+        console.log('Re-enabled refetch after save completion')
+      }, 500)
+    }, 100)
   } catch (err) {
-    saveError.value = err.response?.data || err.message || 'Failed to save'
+    saveError.value = err.response?.data?.error || err.message || 'Failed to save'
     $message?.error?.('Error: ' + saveError.value)
   } finally {
     saving.value = false
+    // Don't clear the flag here, let the timeout handle it
   }
 }
 
 async function saveNew(content) {
-  // 如果直接从CodeEditor的@save事件调用，content会有值
-  // 如果从按钮点击调用，content会是undefined
+  // If called directly from MonacoEditor's @save event, content will have a value
+  // If called from button click, content will be undefined
   const contentToSave = content !== undefined ? content : editorValue.value
   
-  // 对ruleset进行验证
+  // Preserve the current item reference
+  const currentItem = props.item
+  if (!currentItem || !currentItem.id) {
+    console.error('saveNew: No valid item to save', currentItem)
+    saveError.value = 'Invalid item to save'
+    return
+  }
+  
+  // Validate ruleset using XML validator
   if (isRuleset.value) {
     const isValid = validateRuleset()
-    if (!isValid && !confirm('Ruleset contains validation errors. Save anyway?')) {
+    if (!isValid && !confirm('Ruleset contains validation errors. Create anyway?')) {
       return
     }
   }
@@ -476,43 +743,92 @@ async function saveNew(content) {
   saving.value = true
   
   try {
-    // 保存新组件
-    const response = await hubApi.saveNew(props.item.type, props.item.id, contentToSave)
+    // Set flag to prevent unnecessary re-fetching during save
+    preventRefetch.value = true
     
-    // 如果是ruleset，保存后进行验证
-    if (isRuleset.value) {
-      try {
-        const verifyRes = await verifyComponent(props.item.type, props.item.id)
-        if (verifyRes.status === 200) {
-          $message?.success?.('Created and verified successfully')
-        } else {
-          $message?.warning?.('Created but verification failed: ' + verifyRes.data)
-          // 解析错误信息中的行号
-          const errorMessage = verifyRes.data
-          const lineNumber = extractLineNumber(errorMessage)
-          if (lineNumber) {
-            errorLines.value = [lineNumber]
-          }
+    // Pre-save verification for all component types
+    try {
+      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id, contentToSave)
+
+      // If verification failed, ask user if they want to proceed
+      if (verifyRes.data && !verifyRes.data.valid) {
+        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
+        if (!confirm(`Verification failed: ${errorMessage}\n\nCreate anyway?`)) {
+          saving.value = false
+          return
         }
-      } catch (verifyErr) {
-        $message?.warning?.('Created but verification failed: ' + verifyErr.message)
-        const lineNumber = extractLineNumber(verifyErr.message)
+      }
+    } catch (verifyErr) {
+      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
+      if (!confirm(`Verification error: ${errorMessage}\n\nCreate anyway?`)) {
+        saving.value = false
+        return
+      }
+    }
+    
+    // Save new component
+    const response = await hubApi.saveNew(currentItem.type, currentItem.id, contentToSave)
+    
+    // Add a small delay to ensure backend has processed the save
+    await new Promise(resolve => setTimeout(resolve, 200))
+    
+    // Force refresh by clearing current detail first
+    detail.value = null
+    editorValue.value = ''
+    
+    // Refresh component content after successful save but stay in edit mode
+    await fetchDetail(currentItem, true)
+    
+    // If still no content, try fetching the original file
+    if (!detail.value || !detail.value.raw) {
+      console.log('No content after edit mode fetch, trying view mode...')
+      await fetchDetail(currentItem, false)
+      if (detail.value && detail.value.raw) {
+        editorValue.value = detail.value.raw
+        originalContent.value = detail.value.raw
+      }
+    }
+    
+    // Post-save verification
+    try {
+      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id)
+      if (verifyRes.data && verifyRes.data.valid) {
+        $message?.success?.('Created and verified successfully')
+      } else {
+        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
+        $message?.warning?.('Created but verification failed: ' + errorMessage)
+        
+        // Extract line number from error message
+        const lineNumber = extractLineNumber(errorMessage)
         if (lineNumber) {
           errorLines.value = [lineNumber]
         }
       }
-    } else {
-      $message?.success?.('Created successfully')
+    } catch (verifyErr) {
+      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
+      $message?.warning?.('Created but verification failed: ' + errorMessage)
+      
+      const lineNumber = extractLineNumber(errorMessage)
+      if (lineNumber) {
+        errorLines.value = [lineNumber]
+      }
     }
     
-    // 通知父组件创建成功
-    emit('created', props.item.id)
+    // Notify parent component of successful creation
+    setTimeout(() => {
+      emit('created', currentItem)
+      // Clear the prevent refetch flag after a delay
+      setTimeout(() => {
+        preventRefetch.value = false
+        console.log('Re-enabled refetch after save completion')
+      }, 500)
+    }, 100)
   } catch (err) {
-    console.error('Failed to create new component:', err)
-    saveError.value = err.response?.data || err.message || 'Failed to create'
+    saveError.value = err.response?.data?.error || err.message || 'Failed to create'
     $message?.error?.('Error: ' + saveError.value)
   } finally {
     saving.value = false
+    // Don't clear the flag here, let the timeout handle it
   }
 }
 
@@ -543,6 +859,240 @@ function getLanguage(type) {
 function getTemplateForComponent(type, id) {
   // 传递store参数，特别是对于项目类型
   return getDefaultTemplate(type, id, store);
+}
+
+// Project operations
+async function startProject() {
+  if (!props.item || !props.item.id) return
+  
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.startProject(props.item.id)
+    
+    if (result.warning) {
+      // 如果有警告（例如存在临时文件），显示警告模态框
+      projectWarningMessage.value = result.message
+      projectOperationType.value = 'start'
+      projectWarningModal.value = true
+    } else if (result.success) {
+      // 成功启动项目
+      $message?.success?.('Project started successfully')
+      // 更新项目状态
+      if (detail.value) {
+        detail.value.status = 'running'
+      }
+    } else if (result.error) {
+      // 启动失败
+      $message?.error?.('Failed to start project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error starting project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+async function stopProject() {
+  if (!props.item || !props.item.id) return
+  
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.stopProject(props.item.id)
+    
+    if (result.warning) {
+      // 如果有警告（例如存在临时文件），显示警告模态框
+      projectWarningMessage.value = result.message
+      projectOperationType.value = 'stop'
+      projectWarningModal.value = true
+    } else if (result.success) {
+      // 成功停止项目
+      $message?.success?.('Project stopped successfully')
+      // 更新项目状态
+      if (detail.value) {
+        detail.value.status = 'stopped'
+      }
+    } else if (result.error) {
+      // 停止失败
+      $message?.error?.('Failed to stop project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error stopping project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+async function restartProject() {
+  if (!props.item || !props.item.id) return
+  
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.restartProject(props.item.id)
+    
+    if (result.warning) {
+      // 如果有警告（例如存在临时文件），显示警告模态框
+      projectWarningMessage.value = result.message
+      projectOperationType.value = 'restart'
+      projectWarningModal.value = true
+    } else if (result.success) {
+      // 成功重启项目
+      $message?.success?.('Project restarted successfully')
+      // 更新项目状态
+      if (detail.value) {
+        detail.value.status = 'running'
+      }
+    } else if (result.error) {
+      // 重启失败
+      $message?.error?.('Failed to restart project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error restarting project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+function closeProjectWarningModal() {
+  projectWarningModal.value = false
+}
+
+function continueProjectOperation() {
+  closeProjectWarningModal()
+  
+  if (!props.item || !props.item.id || !projectOperationType.value) return
+  
+  projectOperationLoading.value = true
+  
+  try {
+    const id = props.item.id
+    
+    // 使用原始项目进行操作
+    if (projectOperationType.value === 'start') {
+      // 直接调用API启动项目
+      hubApi.startProject(id)
+        .then(result => {
+          if (result.success) {
+            $message?.success?.('Project started successfully')
+            if (detail.value) {
+              detail.value.status = 'running'
+            }
+          } else if (result.error) {
+            $message?.error?.('Failed to start project: ' + result.error)
+          }
+        })
+        .catch(error => {
+          $message?.error?.('Failed to start project: ' + (error.message || 'Unknown error'))
+        })
+        .finally(() => {
+          projectOperationLoading.value = false
+        })
+    } else if (projectOperationType.value === 'stop') {
+      // 直接调用API停止项目
+      hubApi.stopProject(id)
+        .then(result => {
+          if (result.success) {
+            $message?.success?.('Project stopped successfully')
+            if (detail.value) {
+              detail.value.status = 'stopped'
+            }
+          } else if (result.error) {
+            $message?.error?.('Failed to stop project: ' + result.error)
+          }
+        })
+        .catch(error => {
+          $message?.error?.('Failed to stop project: ' + (error.message || 'Unknown error'))
+        })
+        .finally(() => {
+          projectOperationLoading.value = false
+        })
+    } else if (projectOperationType.value === 'restart') {
+      // 先停止，再启动
+      hubApi.restartProject(id)
+        .then(result => {
+          if (result.success) {
+            $message?.success?.('Project restarted successfully')
+            if (detail.value) {
+              detail.value.status = 'running'
+            }
+          } else if (result.error) {
+            $message?.error?.('Failed to restart project: ' + result.error)
+          }
+        })
+        .catch(error => {
+          $message?.error?.('Failed to restart project: ' + (error.message || 'Unknown error'))
+        })
+        .finally(() => {
+          projectOperationLoading.value = false
+        })
+    }
+  } catch (error) {
+    $message?.error?.('Error with project operation: ' + (error.message || 'Unknown error'))
+    projectOperationLoading.value = false
+  }
+}
+
+// 设置定时刷新项目状态
+function setupStatusRefresh() {
+  if (isProject.value && props.item && props.item.id && !statusRefreshInterval.value) {
+    // 每5秒刷新一次项目状态
+    statusRefreshInterval.value = setInterval(async () => {
+      if (detail.value && !detail.value.isTemporary) {
+        try {
+          const clusterStatus = await hubApi.fetchClusterStatus();
+          if (clusterStatus && clusterStatus.projects) {
+            const projectStatus = clusterStatus.projects.find(p => p.id === props.item.id);
+            if (projectStatus && detail.value) {
+              detail.value.status = projectStatus.status || 'stopped';
+            }
+          }
+        } catch (error) {
+          console.error('Failed to refresh project status:', error);
+        }
+      }
+    }, 5000);
+  }
+}
+
+// 清除定时刷新
+function clearStatusRefresh() {
+  if (statusRefreshInterval.value) {
+    clearInterval(statusRefreshInterval.value);
+    statusRefreshInterval.value = null;
+  }
+}
+
+// 监听项目类型变化，设置或清除定时刷新
+watch(isProject, (newVal) => {
+  if (newVal) {
+    setupStatusRefresh();
+  } else {
+    clearStatusRefresh();
+  }
+});
+
+// 监听项目ID变化，重置定时刷新
+watch(() => props.item?.id, (newVal, oldVal) => {
+  if (newVal !== oldVal) {
+    clearStatusRefresh();
+    if (isProject.value) {
+      setupStatusRefresh();
+    }
+  }
+});
+
+// 组件卸载时清除定时刷新
+onBeforeUnmount(() => {
+  clearStatusRefresh();
+});
+
+// Refresh component details
+async function refreshComponent() {
+  if (!props.item || !props.item.id) return
+  await fetchDetail(props.item)
+  $message?.success?.('Component refreshed')
 }
 </script> 
 

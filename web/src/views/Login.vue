@@ -49,6 +49,12 @@ export default {
       error: null
     };
   },
+  created() {
+    // 清除可能存在的刷新状态
+    localStorage.removeItem('crazyRefreshActive');
+    localStorage.removeItem('refreshCount');
+    localStorage.removeItem('totalRefreshes');
+  },
   methods: {
     async login() {
       this.loading = true;
@@ -60,7 +66,6 @@ export default {
       } catch (err) {
         hubApi.clearToken();
         this.error = 'Login failed. Please check your token.';
-        console.error('Login error:', err);
       } finally {
         this.loading = false;
       }

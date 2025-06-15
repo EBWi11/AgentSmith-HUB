@@ -112,7 +112,6 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
     edges.value = tempEdges;
 
       } catch (e) {
-        console.error("Error parsing project workflow:", e);
     nodes.value = [];
     edges.value = [];
   }

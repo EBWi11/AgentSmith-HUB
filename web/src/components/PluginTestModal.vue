@@ -12,16 +12,18 @@
       
       <div class="flex flex-1 overflow-hidden">
         <!-- Input Panel -->
-        <div class="w-1/2 flex flex-col border-r">
+        <div class="w-1/2 flex flex-col">
           <div class="px-6 py-3 bg-gray-50 border-b">
             <h3 class="text-sm font-medium text-gray-700">Input Data</h3>
           </div>
-          <div class="flex-1 p-4 overflow-auto">
-            <CodeEditor 
+          <div class="flex-1 p-4 overflow-hidden" style="height: 400px;">
+            <MonacoEditor 
               v-model:value="inputData" 
-              language="json" 
+              :language="'json'" 
               :read-only="false" 
               class="h-full" 
+              :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
+              style="height: 100%; min-height: 380px;"
             />
           </div>
         </div>
@@ -40,12 +42,15 @@
               <pre class="text-red-600 text-sm mt-2 whitespace-pre-wrap">{{ testError }}</pre>
             </div>
             <div v-else-if="testExecuted && Object.keys(testResults).length > 0" class="h-full overflow-auto">
-              <CodeEditor 
-                :value="JSON.stringify(testResults, null, 2)" 
-                language="json" 
-                :read-only="true" 
-                class="h-full" 
-              />
+              <div class="flex-1 overflow-hidden border border-gray-200 rounded-md" style="height: 400px;">
+                <MonacoEditor 
+                  :value="JSON.stringify(testResults, null, 2)" 
+                  :language="'json'" 
+                  :read-only="true" 
+                  class="h-full" 
+                  style="height: 100%; min-height: 380px;"
+                />
+              </div>
             </div>
             <div v-else-if="testExecuted" class="flex items-center justify-center h-full text-gray-400">
               No results returned
@@ -77,7 +82,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { hubApi } from '../api';
-import CodeEditor from './CodeEditor.vue';
+import MonacoEditor from './MonacoEditor.vue';
 
 // Props
 const props = defineProps({
@@ -95,48 +100,59 @@ const testResults = ref({});
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
+const jsonError = ref(null);
+const jsonErrorLine = ref(null);
 
 // Debug info on mount
 onMounted(() => {
-  console.log('PluginTestModal mounted with props:', props);
 });
 
 // Watch for prop changes
 watch(() => props.show, (newVal) => {
-  console.log('PluginTestModal: show prop changed to', newVal);
   showModal.value = newVal;
-  
-  // 添加或移除ESC键监听
   if (newVal) {
+    // Reset state when opening modal
+    resetState();
+    // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
+    // Remove ESC key listener
     document.removeEventListener('keydown', handleEscKey);
   }
 }, { immediate: true });
 
 watch(() => props.pluginId, (newVal) => {
-  console.log('PluginTestModal: pluginId prop changed to', newVal);
   // Reset state when plugin changes
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
 });
 
-// 在组件卸载时移除事件监听
+// Remove event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey);
 });
 
-// Methods
-function closeModal() {
-  emit('close');
-}
-
-// 处理ESC键按下
+// Handle ESC key press
 function handleEscKey(event) {
   if (event.key === 'Escape') {
     closeModal();
   }
+}
+
+function resetState() {
+  // Reset state when opening modal
+  inputData.value = '{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}';
+  testResults.value = {};
+  testError.value = null;
+  testExecuted.value = false;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
+}
+
+// Methods
+function closeModal() {
+  emit('close');
 }
 
 async function runTest() {
@@ -144,6 +160,8 @@ async function runTest() {
   testError.value = null;
   testResults.value = {};
   testExecuted.value = true;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
   
   try {
     // Parse input data
@@ -152,6 +170,14 @@ async function runTest() {
       data = JSON.parse(inputData.value);
     } catch (e) {
       testError.value = `Invalid JSON: ${e.message}`;
+      
+      // Try to extract line number from JSON parse error
+      const match = e.message.match(/line (\d+)/i) || e.message.match(/position (\d+)/i);
+      if (match) {
+        jsonErrorLine.value = parseInt(match[1]);
+        jsonError.value = e.message;
+      }
+      
       testLoading.value = false;
       return;
     }
@@ -166,7 +192,6 @@ async function runTest() {
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test plugin';
-    console.error('Test plugin error:', e);
   } finally {
     testLoading.value = false;
   }

@@ -67,33 +67,52 @@
             </button>
             <button 
               @click="applySingleChange(change)" 
-              class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none"
+              class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none mr-2"
               :disabled="applying || (change.verifyStatus === 'error')"
             >
               Apply
             </button>
+            <button 
+              @click="cancelUpgrade(change)" 
+              class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors duration-150 focus:outline-none"
+              :disabled="applying || cancelling"
+              title="Cancel upgrade and delete .new file"
+            >
+              Cancel
+            </button>
           </div>
         </div>
         
-        <div class="p-3 bg-gray-100">
-          <div v-if="change.verifyError" class="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded">
+        <div class="bg-gray-100" style="padding: 0; margin: 0;">
+          <div v-if="change.verifyError" class="p-2 bg-red-50 border border-red-200 text-red-700 text-xs" style="margin: 0 0 8px 0;">
             {{ change.verifyError }}
           </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="bg-white rounded border p-2">
-              <div class="text-xs text-gray-500 mb-1">{{ change.is_new ? 'Empty file' : 'Original content' }}</div>
-              <pre class="text-xs overflow-auto max-h-60 p-2 bg-gray-50 rounded">{{ change.old_content || '(empty)' }}</pre>
+          
+          <div class="bg-white" style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
+            <!-- New file: display content directly -->
+            <div v-if="change.is_new" style="height: 400px; margin: 0; padding: 0; border: none;">
+              <MonacoEditor 
+                :key="`new-${change.type}-${change.id}`"
+                :value="change.new_content || ''" 
+                :language="getEditorLanguage(change.type)" 
+                :read-only="true" 
+                :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                :diff-mode="false"
+                style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+              />
             </div>
-            <div class="bg-white rounded border p-2">
-              <div class="text-xs text-gray-500 mb-1">New content</div>
-              <div class="h-60">
-                <CodeEditor 
-                  :value="change.new_content || ''" 
-                  :language="getEditorLanguage(change.type)" 
-                  :read-only="true" 
-                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []" 
-                />
-              </div>
+            <!-- Modified file: use diff mode -->
+            <div v-else style="height: 400px; margin: 0; padding: 0; border: none;">
+              <MonacoEditor 
+                :key="`diff-${change.type}-${change.id}`"
+                :value="change.new_content || ''" 
+                :original-value="change.old_content || ''"
+                :language="getEditorLanguage(change.type)" 
+                :read-only="true" 
+                :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                :diff-mode="true"
+                style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+              />
             </div>
           </div>
         </div>
@@ -103,9 +122,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
-import CodeEditor from './CodeEditor.vue'
+import MonacoEditor from './MonacoEditor.vue'
+
+// Define emits
+const emit = defineEmits(['refresh-list'])
 
 // State
 const changes = ref([])
@@ -113,6 +135,8 @@ const loading = ref(false)
 const error = ref(null)
 const applying = ref(false)
 const verifying = ref(false)
+const cancelling = ref(false)
+const editorRefs = ref([]) // Store editor references
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -135,12 +159,39 @@ async function refreshChanges() {
       verifyError: null,
       errorLine: null
     })) || []
+    
+    // Wait for DOM update then refresh editor layout
+    await nextTick()
+    refreshEditorsLayout()
   } catch (e) {
-    console.error('Failed to fetch pending changes:', e)
     error.value = 'Failed to fetch pending changes: ' + (e?.message || 'Unknown error')
   } finally {
     loading.value = false
   }
+}
+
+// Refresh all editor layouts
+function refreshEditorsLayout() {
+  // Give editors some time to render
+  setTimeout(() => {
+    // Find all Monaco editor instances on the page and refresh layout
+    const editorElements = document.querySelectorAll('.monaco-editor-container')
+    editorElements.forEach(el => {
+      const editor = el.__vue__?.exposed
+      if (editor) {
+        const monacoEditor = editor.getEditor()
+        const diffEditor = editor.getDiffEditor()
+        
+        if (monacoEditor) {
+          monacoEditor.layout()
+        }
+        
+        if (diffEditor) {
+          diffEditor.layout()
+        }
+      }
+    })
+  }, 300)
 }
 
 function getEditorLanguage(type) {
@@ -154,6 +205,24 @@ function getEditorLanguage(type) {
   }
 }
 
+// Convert singular component type to plural form (for API calls)
+function getApiComponentType(type) {
+  switch (type) {
+    case 'input':
+      return 'inputs'
+    case 'output':
+      return 'outputs'
+    case 'ruleset':
+      return 'rulesets'
+    case 'project':
+      return 'projects'
+    case 'plugin':
+      return 'plugins'
+    default:
+      return type + 's' // Default: add 's'
+  }
+}
+
 async function verifyChanges() {
   if (!changes.value.length) return
   
@@ -161,27 +230,33 @@ async function verifyChanges() {
   let allValid = true
   
   try {
-    // 验证每个更改
+    // Verify each change
     for (const change of changes.value) {
       try {
-        // 调用验证API
-        const result = await hubApi.verifyComponent(change.type, change.id, change.new_content)
+        // Call verification API with plural component type
+        const result = await hubApi.verifyComponent(getApiComponentType(change.type), change.id, change.new_content)
         
-        if (result.valid) {
+        // API now returns consistent format: {data: {valid: boolean, error: string|null}}
+        const isValid = result.data?.valid === true;
+        const errorMessage = result.data?.error || '';
+        
+        if (isValid) {
           change.verifyStatus = 'success'
           change.verifyError = null
         } else {
           change.verifyStatus = 'error'
-          change.verifyError = result.error
+          change.verifyError = errorMessage || 'Unknown verification error'
           allValid = false
           
-          // 尝试从错误信息中提取行号
-          const lineMatches = result.error.match(/line\s*(\d+)/i) || 
-                             result.error.match(/line:\s*(\d+)/i) ||
-                             result.error.match(/location:.*line\s*(\d+)/i);
-          
-          if (lineMatches && lineMatches[1]) {
-            change.errorLine = parseInt(lineMatches[1]);
+          // Try to extract line number from error message
+          if (errorMessage && typeof errorMessage === 'string') {
+            const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
+                               errorMessage.match(/line:\s*(\d+)/i) ||
+                               errorMessage.match(/location:.*line\s*(\d+)/i);
+            
+            if (lineMatches && lineMatches[1]) {
+              change.errorLine = parseInt(lineMatches[1]);
+            }
           }
         }
       } catch (e) {
@@ -189,11 +264,12 @@ async function verifyChanges() {
         change.verifyError = e.message || 'Verification failed'
         allValid = false
         
-        // 尝试从错误信息中提取行号
-        if (e.message) {
-          const lineMatches = e.message.match(/line\s*(\d+)/i) || 
-                             e.message.match(/line:\s*(\d+)/i) ||
-                             e.message.match(/location:.*line\s*(\d+)/i);
+        // Try to extract line number from error message
+        const errorMessage = e.message || ''
+        if (errorMessage && typeof errorMessage === 'string') {
+          const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
+                             errorMessage.match(/line:\s*(\d+)/i) ||
+                             errorMessage.match(/location:.*line\s*(\d+)/i);
           
           if (lineMatches && lineMatches[1]) {
             change.errorLine = parseInt(lineMatches[1]);
@@ -202,13 +278,16 @@ async function verifyChanges() {
       }
     }
     
+    // Refresh editor layout to ensure error line highlighting displays correctly
+    await nextTick()
+    refreshEditorsLayout()
+    
     if (allValid) {
       $message?.success?.('All changes verified successfully!')
     } else {
       $message?.error?.('Some changes failed verification. Please fix the errors before applying.')
     }
   } catch (e) {
-    console.error('Failed to verify changes:', e)
     $message?.error?.('Failed to verify changes: ' + (e?.message || 'Unknown error'))
   } finally {
     verifying.value = false
@@ -219,52 +298,68 @@ async function verifySingleChange(change) {
   verifying.value = true
   
   try {
-    // 调用验证API
-    const result = await hubApi.verifyComponent(change.type, change.id, change.new_content)
+    // Call verification API with plural component type
+    const result = await hubApi.verifyComponent(getApiComponentType(change.type), change.id, change.new_content)
     
-    if (result.valid) {
+    // API now returns consistent format: {data: {valid: boolean, error: string|null}}
+    const isValid = result.data?.valid === true;
+    const errorMessage = result.data?.error || '';
+    
+    if (isValid) {
       change.verifyStatus = 'success'
       change.verifyError = null
       change.errorLine = null
       $message?.success?.('Verification successful!')
     } else {
       change.verifyStatus = 'error'
-      change.verifyError = result.error
+      change.verifyError = errorMessage || 'Unknown verification error'
       
-      // 尝试从错误信息中提取行号
-      const lineMatches = result.error.match(/line\s*(\d+)/i) || 
-                         result.error.match(/line:\s*(\d+)/i) ||
-                         result.error.match(/location:.*line\s*(\d+)/i);
-      
-      if (lineMatches && lineMatches[1]) {
-        const lineNum = parseInt(lineMatches[1]);
-        change.errorLine = lineNum;
-        $message?.error?.(`Verification failed at line ${lineNum}: ${result.error}`)
+      // Try to extract line number from error message
+      if (errorMessage && typeof errorMessage === 'string') {
+        const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
+                           errorMessage.match(/line:\s*(\d+)/i) ||
+                           errorMessage.match(/location:.*line\s*(\d+)/i);
+        
+        if (lineMatches && lineMatches[1]) {
+          const lineNum = parseInt(lineMatches[1]);
+          change.errorLine = lineNum;
+          $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
+        } else {
+          $message?.error?.(`Verification failed: ${errorMessage}`)
+        }
       } else {
-        $message?.error?.(`Verification failed: ${result.error}`)
+        $message?.error?.(`Verification failed: ${errorMessage || 'Unknown error'}`)
       }
     }
+    
+    // Refresh editor layout to ensure error line highlighting displays correctly
+    await nextTick()
+    refreshEditorsLayout()
   } catch (e) {
-    console.error('Failed to verify change:', e)
     change.verifyStatus = 'error'
     change.verifyError = e.message || 'Verification failed'
     
-    // 尝试从错误信息中提取行号
-    if (e.message) {
-      const lineMatches = e.message.match(/line\s*(\d+)/i) || 
-                         e.message.match(/line:\s*(\d+)/i) ||
-                         e.message.match(/location:.*line\s*(\d+)/i);
+    // Try to extract line number from error message
+    const errorMessage = e.message || ''
+    if (errorMessage && typeof errorMessage === 'string') {
+      const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
+                         errorMessage.match(/line:\s*(\d+)/i) ||
+                         errorMessage.match(/location:.*line\s*(\d+)/i);
       
       if (lineMatches && lineMatches[1]) {
         const lineNum = parseInt(lineMatches[1]);
         change.errorLine = lineNum;
-        $message?.error?.(`Verification failed at line ${lineNum}: ${e.message}`)
+        $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
       } else {
-        $message?.error?.('Failed to verify change: ' + (e?.message || 'Unknown error'))
+        $message?.error?.('Failed to verify change: ' + errorMessage)
       }
     } else {
-      $message?.error?.('Failed to verify change: ' + (e?.message || 'Unknown error'))
+      $message?.error?.('Failed to verify change: Unknown error')
     }
+    
+    // Refresh editor layout
+    await nextTick()
+    refreshEditorsLayout()
   } finally {
     verifying.value = false
   }
@@ -276,6 +371,9 @@ async function applyChanges() {
   applying.value = true
   
   try {
+    // Record component types before applying for later list refresh
+    const affectedTypes = new Set(changes.value.map(change => change.type))
+    
     const result = await hubApi.applyPendingChanges()
     
     // Check if any projects need to be restarted
@@ -288,10 +386,18 @@ async function applyChanges() {
     
     // Refresh the list
     await refreshChanges()
-  } catch (e) {
-    console.error('Failed to apply changes:', e)
     
-    // 处理验证失败的情况
+    // Refresh all affected component type lists
+    affectedTypes.forEach(type => {
+      // Notify parent component to refresh corresponding type list
+      emit('refresh-list', type)
+    })
+    
+    // 确保编辑器布局正确
+    refreshEditorsLayout()
+  } catch (e) {
+
+    // Handle verification failure cases
     if (e.verifyFailures && Array.isArray(e.verifyFailures)) {
       // 显示验证失败的详细信息
       const failedComponents = e.verifyFailures.map(f => `${getComponentTypeLabel(f.type)} ${f.id}: ${f.error}`).join('\n');
@@ -301,6 +407,12 @@ async function applyChanges() {
       // 如果有部分成功的更改，刷新列表
       if (e.successCount > 0) {
         await refreshChanges();
+        refreshEditorsLayout();
+        
+        // Refresh all potentially affected component type lists
+        ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
+          emit('refresh-list', type)
+        })
       }
     } else {
       $message?.error?.('Failed to apply changes: ' + (e?.message || 'Unknown error'))
@@ -320,6 +432,9 @@ async function applySingleChange(change) {
   applying.value = true
   
   try {
+    // Actually apply the single change via API
+    await hubApi.applySingleChange(change.type, change.id)
+    
     // Check if this change requires project restart
     if (needsRestart(change)) {
       // Find affected projects
@@ -333,10 +448,15 @@ async function applySingleChange(change) {
     
     // Refresh the list
     await refreshChanges()
-  } catch (e) {
-    console.error('Failed to apply change:', e)
     
-    // 处理验证失败的情况
+    // Refresh affected component type list
+    emit('refresh-list', change.type)
+    
+    // 确保编辑器布局正确
+    refreshEditorsLayout()
+  } catch (e) {
+
+    // Handle verification failure cases
     if (e.isVerificationError) {
       $message?.error?.(`验证失败，无法应用更改: ${e.message}`, { timeout: 5000 });
     } else {
@@ -393,8 +513,7 @@ async function restartProjects(projectIds) {
       $message?.success?.(`Projects restarted: ${projectIds.join(', ')}`)
     }
   } catch (e) {
-    console.error('Failed to restart projects:', e)
-    $message?.error?.('Failed to restart projects: ' + (e?.message || 'Unknown error'))
+        $message?.error?.('Failed to restart projects: ' + (e?.message || 'Unknown error'))
   }
 }
 
@@ -408,6 +527,38 @@ function getComponentTypeLabel(type) {
   }
   
   return labels[type] || type
+}
+
+
+
+// Cancel upgrade for a single change
+async function cancelUpgrade(change) {
+  // Confirm the action
+  const confirmed = confirm(`Are you sure you want to cancel the upgrade for ${getComponentTypeLabel(change.type)} "${change.id}"?\n\nThis will delete the .new file and all pending changes will be lost.`)
+  if (!confirmed) {
+    return
+  }
+  
+  cancelling.value = true
+  
+  try {
+    await hubApi.cancelUpgrade(change.type, change.id)
+    
+    $message?.success?.(`Upgrade cancelled for ${getComponentTypeLabel(change.type)} "${change.id}"`)
+    
+    // Refresh the list to remove the cancelled change
+    await refreshChanges()
+    
+    // Refresh affected component type list
+    emit('refresh-list', change.type)
+    
+    // Ensure editor layout is correct
+    refreshEditorsLayout()
+  } catch (e) {
+    $message?.error?.('Failed to cancel upgrade: ' + (e?.message || 'Unknown error'))
+  } finally {
+    cancelling.value = false
+  }
 }
 </script>
 

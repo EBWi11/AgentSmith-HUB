@@ -35,12 +35,14 @@
           </div>
           
           <h4 class="text-sm font-medium text-gray-700 mb-2">Input Data:</h4>
-          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md">
-            <CodeEditor 
+          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md" style="height: 400px;">
+            <MonacoEditor 
               v-model:value="inputData" 
               :language="'json'" 
               :read-only="false" 
               class="h-full" 
+              :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
+              style="height: 100%; min-height: 380px;"
             />
           </div>
         </div>
@@ -212,7 +214,7 @@
 <script setup>
 import { ref, watch, onMounted, computed, onUnmounted } from 'vue';
 import { hubApi } from '../api';
-import CodeEditor from './CodeEditor.vue';
+import MonacoEditor from './MonacoEditor.vue';
 
 // Props
 const props = defineProps({
@@ -235,41 +237,40 @@ const inputNodes = ref([]);
 const inputNodesLoading = ref(false);
 const projectStructure = ref(null);
 const outputResults = ref({});
+const jsonError = ref(null);
+const jsonErrorLine = ref(null);
 
 // Debug info on mount
 onMounted(() => {
-  console.log('ProjectTestModal mounted with props:', props);
-});
+  });
 
 // Watch for prop changes
 watch(() => props.show, (newVal) => {
-  console.log('ProjectTestModal: show prop changed to', newVal);
-  showModal.value = newVal;
+    showModal.value = newVal;
   if (newVal) {
     // Reset state when opening modal
     resetState();
-    // 添加ESC键监听
+    // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
-    // 获取项目输入节点
+    // Fetch project input nodes
     fetchProjectInputs();
   } else {
-    // 移除ESC键监听
+    // Remove ESC key listener
     document.removeEventListener('keydown', handleEscKey);
   }
 }, { immediate: true });
 
 watch(() => props.projectId, (newVal) => {
-  console.log('ProjectTestModal: projectId prop changed to', newVal);
-  // Reset state when project changes
+    // Reset state when project changes
   resetState();
 });
 
-// 在组件卸载时移除事件监听
+// Remove event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey);
 });
 
-// 处理ESC键按下
+// Handle ESC key press
 function handleEscKey(event) {
   if (event.key === 'Escape') {
     closeModal();
@@ -285,6 +286,8 @@ function resetState() {
   inputNodes.value = [];
   projectStructure.value = null;
   outputResults.value = {};
+  jsonError.value = null;
+  jsonErrorLine.value = null;
 }
 
 function closeModal() {
@@ -302,6 +305,8 @@ async function runTest() {
   testResults.value = {};
   outputResults.value = {};
   testExecuted.value = true;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
   
   try {
     // Parse input data
@@ -310,6 +315,14 @@ async function runTest() {
       data = JSON.parse(inputData.value);
     } catch (e) {
       testError.value = `Invalid JSON: ${e.message}`;
+      
+      // Try to extract line number from JSON parse error
+      const match = e.message.match(/line (\d+)/i) || e.message.match(/position (\d+)/i);
+      if (match) {
+        jsonErrorLine.value = parseInt(match[1]);
+        jsonError.value = e.message;
+      }
+      
       testLoading.value = false;
       return;
     }
@@ -331,7 +344,6 @@ async function runTest() {
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test project';
-    console.error('Test project error:', e);
   } finally {
     testLoading.value = false;
   }
@@ -417,7 +429,7 @@ function getDataFlowPaths() {
   return paths;
 }
 
-// 获取项目输入节点
+// Fetch project input nodes
 async function fetchProjectInputs() {
   if (!props.projectId) return;
   
@@ -428,15 +440,15 @@ async function fetchProjectInputs() {
     if (response.success && response.inputs) {
       inputNodes.value = response.inputs;
       
-      // 如果有输入节点，自动选择第一个
+      // If there are input nodes, auto-select the first one
       if (inputNodes.value.length > 0) {
         selectedInputNode.value = inputNodes.value[0].id;
       }
     } else {
-      console.error('Failed to fetch project inputs:', response.error);
+      // Handle error case
     }
   } catch (error) {
-    console.error('Error fetching project inputs:', error);
+    // Handle error case
   } finally {
     inputNodesLoading.value = false;
   }

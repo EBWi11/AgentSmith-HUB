@@ -28,67 +28,181 @@
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
+            <!-- Add section icon -->
+            <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
             <span class="truncate">{{ section.title }}</span>
           </button>
-          <button v-if="!section.children" @click="openAddModal(type)" class="rounded-full p-0.5 hover:bg-primary/10 text-primary transition flex items-center justify-center">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-          </button>
+          <div class="relative">
+            <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+            </button>
+          </div>
         </div>
         <div v-if="!collapsed[type]" class="space-y-0.5">
           <div v-if="section.children">
-            <!-- Add Push button (only shown in Settings section) -->
-            <div v-if="type === 'settings'" class="flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all hover:bg-gray-100 mb-1"
-                 @click="openPendingChanges">
-              <svg class="w-4 h-4 mr-1.5 text-gray-400 group-hover:text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-              </svg>
-              <span class="flex-1 truncate">Push Changes</span>
-            </div>
-            
+            <!-- 已经将Push Changes整合到section.children中，不再需要单独的部分 -->
             <div v-for="child in section.children" :key="child.type"
-                 class="flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all hover:bg-gray-100"
-                 :class="{ 'bg-primary/10 text-primary font-semibold border-l-2 border-primary': selected && selected.type === child.type, 'text-gray-800': !(selected && selected.type === child.type) }"
+                 class="flex items-center justify-between py-1 px-3 rounded-md group cursor-pointer transition-all hover:bg-gray-100"
+                 :class="{ 'bg-blue-50': selected && selected.type === child.type }"
                  @click="$emit('select-item', { type: child.type })">
-              <svg v-html="child.icon" class="w-4 h-4 mr-1.5 text-gray-400 group-hover:text-primary"></svg>
-              <span class="flex-1 truncate">{{ child.title }}</span>
+              <div class="flex items-center min-w-0 flex-1">
+                <!-- 移除所有子组件的图标 -->
+                <span class="text-sm truncate">{{ child.title }}</span>
+              </div>
             </div>
           </div>
           <div v-else-if="!loading[type] && !error[type]">
-            <div v-for="item in filteredItems(type)" :key="item.id || item.name"
-                 :class="['flex items-center px-1.5 py-1 rounded-md group cursor-pointer transition-all', selected && selected.type === type && selected.id === (item.id || item.name) ? 'bg-primary/10 text-primary font-semibold border-l-2 border-primary' : 'text-gray-800 hover:bg-gray-100']"
+            <div v-for="item in filteredItems(type)" :key="item.id" 
+                 class="flex items-center justify-between py-1 px-3 hover:bg-gray-100 rounded-md cursor-pointer group"
+                 :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
                  @click="handleItemClick(type, item)">
-              <div v-if="type === 'projects'" class="relative mr-1.5">
-                <div class="w-2 h-2 rounded-full"
-                     :class="{
-                       'bg-green-500 animate-pulse': item.status === 'running',
-                       'bg-red-500': item.status === 'stopped',
-                       'bg-yellow-500': item.status === 'error'
-                     }">
-                </div>
+              <div class="flex items-center min-w-0 flex-1">
+                <span class="text-sm truncate">{{ item.id }}</span>
+                <!-- Plugin type badge -->
+                <span v-if="type === 'plugins' && item.type === 'local'" 
+                      class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                      @mouseenter="showTooltip($event, 'Built-in Plugin')"
+                      @mouseleave="hideTooltip">
+                  L
+                </span>
+                <!-- Temporary file badge -->
+                <span v-if="item.hasTemp" 
+                      class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                      @mouseenter="showTooltip($event, 'Temporary Version')"
+                      @mouseleave="hideTooltip">
+                  T
+                </span>
+                <!-- Project status badge -->
+                <span v-if="type === 'projects' && item.status" 
+                      class="ml-2 text-xs w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                      :class="{
+                        'bg-green-100 text-green-800': item.status === 'running',
+                        'bg-gray-100 text-gray-800': item.status === 'stopped',
+                        'bg-red-100 text-red-800': item.status === 'error'
+                      }"
+                      @mouseenter="showTooltip($event, getStatusTitle(item))"
+                      @mouseleave="hideTooltip">
+                  {{ getStatusLabel(item.status) }}
+                </span>
               </div>
-              <svg v-html="section.icon" class="w-4 h-4 mr-1.5 text-gray-400 group-hover:text-primary"></svg>
-              <span class="flex-1 truncate">{{ item.id || item.name }}</span>
-              <div class="relative ml-0.5 flex items-center" @click.stop>
-                <button @click="item.menuOpen = !item.menuOpen"
-                  class="p-0.5 rounded-full focus:outline-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 text-gray-300 hover:text-gray-500 flex items-center justify-center"
-                  style="transform: scale(0.7); transform-origin: right;">
-                  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <circle cx="12" cy="5" r="1.5"/>
-                    <circle cx="12" cy="12" r="1.5"/>
-                    <circle cx="12" cy="19" r="1.5"/>
+              
+              <!-- Actions menu -->
+              <div class="relative">
+                <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                        @click.stop="toggleMenu(item)">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
                   </svg>
                 </button>
-                <div v-if="item.menuOpen" class="absolute right-0 z-50 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg py-1 select-none"
-                  @mouseleave="item.menuOpen = false">
-                  <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="copyName(item)">Copy name</div>
-                  <div class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="$emit('open-editor', { type, id: item.id || item.name, isEdit: true })">Edit</div>
-                  <div v-if="type === 'inputs' || type === 'outputs'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="checkConnection(type, item)">Connect check</div>
-                  <div v-if="type === 'plugins'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestPlugin(item)">Test plugin</div>
-                  <div v-if="type === 'rulesets'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestRuleset(item)">Test ruleset</div>
-                  <div v-if="type === 'outputs'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestOutput(item)">Test output</div>
-                  <div v-if="type === 'projects'" class="px-3 py-1 text-xs hover:bg-gray-100 cursor-pointer" @click.stop="openTestProject(item)">Test project</div>
-                  <div class="border-t border-gray-100 my-1"></div>
-                  <div class="px-3 py-1 text-xs text-red-600 hover:bg-red-50 cursor-pointer" @click.stop="deleteItem(type, item)">Delete</div>
+                <!-- Dropdown menu -->
+                <div v-if="item.menuOpen" 
+                     class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                     @click.stop>
+                  <div class="py-1">
+                    <!-- Edit action -->
+                    <a v-if="!(type === 'plugins' && item.type === 'local')" 
+                       href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type, id: item.id, isEdit: true })">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                      </svg>
+                      Edit
+                    </a>
+                    
+                    <!-- Project specific actions -->
+                    <template v-if="type === 'projects'">
+                      <!-- Start action -->
+                      <a v-if="item.status === 'stopped'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="startProject(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Start
+                      </a>
+                      
+                      <!-- Stop action -->
+                      <a v-if="item.status === 'running'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="stopProject(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        Stop
+                      </a>
+                      
+                      <!-- Restart action -->
+                      <a v-if="item.status === 'running'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="restartProject(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Restart
+                      </a>
+                    </template>
+                    
+                    <!-- Test actions for different component types -->
+                    <a v-if="type === 'inputs' || type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="checkConnection(type, item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Connect Check
+                    </a>
+                    
+                    <!-- 添加查看使用情况选项，仅对input、output和ruleset类型显示 -->
+                    <a v-if="type === 'inputs' || type === 'outputs' || type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openUsageModal(type, item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
+                      View Usage
+                    </a>
+                    
+                    <a v-if="type === 'plugins'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openTestPlugin(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Test Plugin
+                    </a>
+                    
+                    <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openTestOutput(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Test Output
+                    </a>
+                    
+                    <a v-if="type === 'projects'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openTestProject(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Test Project
+                    </a>
+                    
+                    <!-- Copy name action -->
+                    <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="copyName(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                      </svg>
+                      Copy Name
+                    </a>
+                    
+                    <!-- Delete action -->
+                    <div v-if="!(type === 'plugins' && item.type === 'local')" class="border-t border-gray-100 my-1"></div>
+                    <a v-if="!(type === 'plugins' && item.type === 'local')" 
+                       href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
+                       @click.prevent.stop="openDeleteModal(type, item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16" />
+                      </svg>
+                      Delete
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>
@@ -253,7 +367,7 @@
       </div>
     </div>
 
-    <!-- 改进测试插件弹窗 -->
+    <!-- Test Plugin Modal -->
     <div v-if="showTestPluginModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
       <div class="bg-white rounded shadow-lg p-6 w-[500px] max-h-[80vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
@@ -381,12 +495,131 @@
         </div>
       </div>
     </div>
+
+    <!-- Project Warning Modal -->
+    <div v-if="showProjectWarningModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <div class="flex items-center mb-4 text-yellow-600">
+          <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <h3 class="text-lg font-medium">Warning</h3>
+        </div>
+        
+        <p class="mb-4 text-sm text-gray-600">{{ projectWarningMessage }}</p>
+        
+        <div class="flex justify-end space-x-3">
+          <button @click="closeProjectWarningModal" class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50">
+            Cancel
+          </button>
+          <button @click="continueProjectOperation" class="px-3 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600" :disabled="projectOperationLoading">
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin mr-1"></span>
+            Continue Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tooltip component -->
+    <div v-if="tooltip.show" 
+         class="absolute z-50 bg-gray-800 text-white text-xs rounded py-1 px-2 max-w-xs"
+         :style="{
+           top: tooltip.y + 'px',
+           left: tooltip.x + 'px',
+           transform: 'translate(-50%, -100%)',
+           marginTop: '-8px'
+         }">
+      {{ tooltip.text }}
+    </div>
+
+    <!-- 添加组件使用情况模态框 -->
+    <div v-if="showUsageModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded shadow-lg p-6 w-96 max-h-[80vh] overflow-y-auto">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold">Component Usage</h3>
+          <button @click="closeUsageModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div v-if="usageLoading" class="flex justify-center items-center py-8">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+        
+        <div v-else-if="usageError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div class="ml-3">
+              <p class="text-sm text-red-700">{{ usageError }}</p>
+            </div>
+          </div>
+        </div>
+        
+        <div v-else>
+          <div class="mb-3">
+            <div class="text-sm text-gray-600 mb-1">Component Type:</div>
+            <div class="font-medium">{{ usageComponentType }}</div>
+          </div>
+          
+          <div class="mb-3">
+            <div class="text-sm text-gray-600 mb-1">Component ID:</div>
+            <div class="font-medium">{{ usageComponentId }}</div>
+          </div>
+          
+          <div class="mb-3">
+            <div class="text-sm text-gray-600 mb-1">Projects using this component:</div>
+            <div v-if="usageProjects.length === 0" class="text-gray-500 italic">
+              No projects are using this component
+            </div>
+            <div v-else class="mt-2 space-y-2">
+              <div v-for="project in usageProjects" :key="project.id" 
+                   class="p-2 border rounded-md flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+                   @click="navigateToProject(project.id)">
+                <div class="flex items-center">
+                  <span class="w-2 h-2 rounded-full mr-2"
+                        :class="{
+                          'bg-green-500': project.status === 'running',
+                          'bg-gray-500': project.status === 'stopped',
+                          'bg-red-500': project.status === 'error'
+                        }"></span>
+                  <span>{{ project.id }}</span>
+                </div>
+                <div>
+                  <span class="text-xs px-2 py-0.5 rounded-full"
+                        :class="{
+                          'bg-green-100 text-green-800': project.status === 'running',
+                          'bg-gray-100 text-gray-800': project.status === 'stopped',
+                          'bg-red-100 text-red-800': project.status === 'error'
+                        }">
+                    {{ project.status }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flex justify-end mt-4">
+          <button @click="closeUsageModal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onBeforeUnmount, inject } from 'vue'
 import { hubApi } from '@/api'
+import { useRouter } from 'vue-router'
+
+// 获取路由器实例
+const router = useRouter()
 
 // Props
 const props = defineProps({
@@ -408,15 +641,6 @@ const emit = defineEmits([
 const $message = inject('$message', window?.$toast)
 
 // Reactive state
-const search = ref('')
-const items = reactive({
-  inputs: [],
-  outputs: [],
-  rulesets: [],
-  plugins: [],
-  projects: [],
-  cluster: []
-})
 const loading = reactive({
   inputs: false,
   outputs: false,
@@ -425,6 +649,7 @@ const loading = reactive({
   projects: false,
   cluster: false
 })
+
 const error = reactive({
   inputs: null,
   outputs: null,
@@ -433,42 +658,53 @@ const error = reactive({
   projects: null,
   cluster: null
 })
+
+const items = reactive({
+  inputs: [],
+  outputs: [],
+  rulesets: [],
+  plugins: [],
+  projects: [],
+  cluster: []
+})
+
 const collapsed = reactive({
   inputs: true,
   outputs: true,
   rulesets: true,
   plugins: true,
   projects: true,
-  cluster: true,
   settings: true
 })
 
 const sections = reactive({
   inputs: { 
     title: 'Input', 
-    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 1C4.22386 1 4 1.22386 4 1.5C4 1.77614 4.22386 2 4.5 2H12V13H4.5C4.22386 13 4 13.2239 4 13.5C4 13.7761 4.22386 14 4.5 14H12C12.5523 14 13 13.5523 13 13V2C13 1.44772 12.5523 1 12 1H4.5ZM6.60355 4.89645C6.40829 4.70118 6.09171 4.70118 5.89645 4.89645C5.70118 5.09171 5.70118 5.40829 5.89645 5.60355L7.29289 7H0.5C0.223858 7 0 7.22386 0 7.5C0 7.77614 0.223858 8 0.5 8H7.29289L5.89645 9.39645C5.70118 9.59171 5.70118 9.90829 5.89645 10.1036C6.09171 10.2988 6.40829 10.2988 6.60355 10.1036L8.85355 7.85355C9.04882 7.65829 9.04882 7.34171 8.85355 7.14645L6.60355 4.89645Z"></path>' 
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 
   },
   outputs: { 
     title: 'Output', 
-    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 1C2.44771 1 2 1.44772 2 2V13C2 13.5523 2.44772 14 3 14H10.5C10.7761 14 11 13.7761 11 13.5C11 13.2239 10.7761 13 10.5 13H3V2L10.5 2C10.7761 2 11 1.77614 11 1.5C11 1.22386 10.7761 1 10.5 1H3ZM12.6036 4.89645C12.4083 4.70118 12.0917 4.70118 11.8964 4.89645C11.7012 5.09171 11.7012 5.40829 11.8964 5.60355L13.2929 7H6.5C6.22386 7 6 7.22386 6 7.5C6 7.77614 6.22386 8 6.5 8H13.2929L11.8964 9.39645C11.7012 9.59171 11.7012 9.90829 11.8964 10.1036C12.0917 10.2988 12.4083 10.2988 12.6036 10.1036L14.8536 7.85355C15.0488 7.65829 15.0488 7.34171 14.8536 7.14645L12.6036 4.89645Z"></path>' 
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 15l-3-3 3-3m-5 3h8M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 
   },
   rulesets: { 
     title: 'Ruleset', 
-    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.2 1H4.17741H4.1774C3.86936 0.999988 3.60368 0.999978 3.38609 1.02067C3.15576 1.04257 2.92825 1.09113 2.71625 1.22104C2.51442 1.34472 2.34473 1.51442 2.22104 1.71625C2.09113 1.92825 2.04257 2.15576 2.02067 2.38609C1.99998 2.60367 1.99999 2.86935 2 3.17738V3.1774V3.2V11.8V11.8226V11.8226C1.99999 12.1307 1.99998 12.3963 2.02067 12.6139C2.04257 12.8442 2.09113 13.0717 2.22104 13.2837C2.34473 13.4856 2.51442 13.6553 2.71625 13.779C2.92825 13.9089 3.15576 13.9574 3.38609 13.9793C3.60368 14 3.86937 14 4.17741 14H4.2H10.8H10.8226C11.1306 14 11.3963 14 11.6139 13.9793C11.8442 13.9574 12.0717 13.9089 12.2837 13.779C12.4856 13.6553 12.6553 13.4856 12.779 13.2837C12.9089 13.0717 12.9574 12.8442 12.9793 12.6139C13 12.3963 13 12.1306 13 11.8226V11.8V3.2V3.17741C13 2.86936 13 2.60368 12.9793 2.38609C12.9574 2.15576 12.9089 1.92825 12.779 1.71625C12.6553 1.51442 12.4856 1.34472 12.2837 1.22104C12.0717 1.09113 11.8442 1.04257 11.6139 1.02067C11.3963 0.999978 11.1306 0.999988 10.8226 1H10.8H4.2ZM3.23875 2.07368C3.26722 2.05623 3.32362 2.03112 3.48075 2.01618C3.64532 2.00053 3.86298 2 4.2 2H10.8C11.137 2 11.3547 2.00053 11.5193 2.01618C11.6764 2.03112 11.7328 2.05623 11.7613 2.07368C11.8285 2.11491 11.8851 2.17147 11.9263 2.23875C11.9438 2.26722 11.9689 2.32362 11.9838 2.48075C11.9995 2.64532 12 2.86298 12 3.2V11.8C12 12.137 11.9995 12.3547 11.9838 12.5193C11.9689 12.6764 11.9438 12.7328 11.9263 12.7613C11.8851 12.8285 11.8285 12.8851 11.7613 12.9263C11.7328 12.9438 11.6764 12.9689 11.5193 12.9838C11.3547 12.9995 11.137 13 10.8 13H4.2C3.86298 13 3.64532 12.9995 3.48075 12.9838C3.32362 12.9689 3.26722 12.9438 3.23875 12.9263C3.17147 12.8851 3.11491 12.8285 3.07368 12.7613C3.05624 12.7328 3.03112 12.6764 3.01618 12.5193C3.00053 12.3547 3 12.137 3 11.8V3.2C3 2.86298 3.00053 2.64532 3.01618 2.48075C3.03112 2.32362 3.05624 2.26722 3.07368 2.23875C3.11491 2.17147 3.17147 2.11491 3.23875 2.07368ZM5 10C4.72386 10 4.5 10.2239 4.5 10.5C4.5 10.7761 4.72386 11 5 11H8C8.27614 11 8.5 10.7761 8.5 10.5C8.5 10.2239 8.27614 10 8 10H5ZM4.5 7.5C4.5 7.22386 4.72386 7 5 7H10C10.2761 7 10.5 7.22386 10.5 7.5C10.5 7.77614 10.2761 8 10 8H5C4.72386 8 4.5 7.77614 4.5 7.5ZM5 4C4.72386 4 4.5 4.22386 4.5 4.5C4.5 4.77614 4.72386 5 5 5H10C10.2761 5 10.5 4.77614 10.5 4.5C10.5 4.22386 10.2761 4 10 4H5Z"></path>' 
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>' 
   },
   plugins: { 
     title: 'Plugin', 
-    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.14921 3.99996C2.14921 2.97778 2.97784 2.14915 4.00002 2.14915C5.02219 2.14915 5.85083 2.97778 5.85083 3.99996C5.85083 5.02213 5.02219 5.85077 4.00002 5.85077C2.97784 5.85077 2.14921 5.02213 2.14921 3.99996ZM4.00002 1.24915C2.48079 1.24915 1.24921 2.48073 1.24921 3.99996C1.24921 5.51919 2.48079 6.75077 4.00002 6.75077C5.51925 6.75077 6.75083 5.51919 6.75083 3.99996C6.75083 2.48073 5.51925 1.24915 4.00002 1.24915ZM5.82034 11.0001L2.49998 12.8369V9.16331L5.82034 11.0001ZM2.63883 8.21159C2.17228 7.9535 1.59998 8.29093 1.59998 8.82411V13.1761C1.59998 13.7093 2.17228 14.0467 2.63883 13.7886L6.57235 11.6126C7.05389 11.3462 7.05389 10.654 6.57235 10.3876L2.63883 8.21159ZM8.30001 9.00003C8.30001 8.61343 8.61341 8.30003 9.00001 8.30003H13C13.3866 8.30003 13.7 8.61343 13.7 9.00003V13C13.7 13.3866 13.3866 13.7 13 13.7H9.00001C8.61341 13.7 8.30001 13.3866 8.30001 13V9.00003ZM9.20001 9.20003V12.8H12.8V9.20003H9.20001ZM13.4432 2.19311C13.6189 2.01737 13.6189 1.73245 13.4432 1.55671C13.2675 1.38098 12.9826 1.38098 12.8068 1.55671L11 3.36353L9.19321 1.55674C9.01748 1.381 8.73255 1.381 8.55682 1.55674C8.38108 1.73247 8.38108 2.0174 8.55682 2.19313L10.3636 3.99992L8.55682 5.80671C8.38108 5.98245 8.38108 6.26737 8.55682 6.44311C8.73255 6.61885 9.01748 6.61885 9.19321 6.44311L11 4.63632L12.8068 6.44314C12.9826 6.61887 13.2675 6.61887 13.4432 6.44314C13.6189 6.2674 13.6189 5.98247 13.4432 5.80674L11.6364 3.99992L13.4432 2.19311Z"></path>' 
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>' 
   },
   projects: { 
     title: 'Project', 
-    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M0.900024 7.50002C0.900024 3.85495 3.85495 0.900024 7.50002 0.900024C11.1451 0.900024 14.1 3.85495 14.1 7.50002C14.1 11.1451 11.1451 14.1 7.50002 14.1C3.85495 14.1 0.900024 11.1451 0.900024 7.50002ZM7.50002 1.80002C4.35201 1.80002 1.80002 4.35201 1.80002 7.50002C1.80002 10.648 4.35201 13.2 7.50002 13.2C10.648 13.2 13.2 10.648 13.2 7.50002C13.2 4.35201 10.648 1.80002 7.50002 1.80002ZM3.07504 7.50002C3.07504 5.05617 5.05618 3.07502 7.50004 3.07502C9.94388 3.07502 11.925 5.05617 11.925 7.50002C11.925 9.94386 9.94388 11.925 7.50004 11.925C5.05618 11.925 3.07504 9.94386 3.07504 7.50002ZM7.50004 3.92502C5.52562 3.92502 3.92504 5.52561 3.92504 7.50002C3.92504 9.47442 5.52563 11.075 7.50004 11.075C9.47444 11.075 11.075 9.47442 11.075 7.50002C11.075 5.52561 9.47444 3.92502 7.50004 3.92502ZM7.50004 5.25002C6.2574 5.25002 5.25004 6.25739 5.25004 7.50002C5.25004 8.74266 6.2574 9.75002 7.50004 9.75002C8.74267 9.75002 9.75004 8.74266 9.75004 7.50002C9.75004 6.25738 8.74267 5.25002 7.50004 5.25002ZM6.05004 7.50002C6.05004 6.69921 6.69923 6.05002 7.50004 6.05002C8.30084 6.05002 8.95004 6.69921 8.95004 7.50002C8.95004 8.30083 8.30084 8.95002 7.50004 8.95002C6.69923 8.95002 6.05004 8.30083 6.05004 7.50002Z"></path>' 
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' 
   },
   settings: { 
     title: 'Setting', 
-    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7zm7.94-2.06a1 1 0 0 0 .26-1.09l-1.43-4.14a1 1 0 0 0-.76-.65l-4.14-1.43a1 1 0 0 0-1.09.26l-2.83 2.83a1 1 0 0 0-.26 1.09l1.43 4.14a1 1 0 0 0 .76.65l4.14 1.43a1 1 0 0 0 1.09-.26l2.83-2.83z"/></svg>',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>',
     children: [
-      { type: 'cluster', title: 'Cluster', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 7.5a3 3 0 1 1 6 0a3 3 0 0 1-6 0zm3-6a6 6 0 1 0 0 12a6 6 0 0 0 0-12z"></path>' }
+      { type: 'pending-changes', title: 'Push Changes' },
+      { type: 'load-local-components', title: 'Load Local Components' },
+      { type: 'cluster', title: 'Cluster', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12a7 7 0 1114 0 7 7 0 01-14 0zM12 8v4l3 3"></path></svg>' }
     ]
   }
 })
@@ -480,13 +716,13 @@ const addRaw = ref('')
 const addError = ref('')
 const projectRefreshInterval = ref(null)
 
-// 添加连接检查相关的响应式变量
+// Connection check related reactive variables
 const showConnectionModal = ref(false)
 const connectionResult = ref(null)
 const connectionLoading = ref(false)
 const connectionError = ref(null)
 
-// 添加测试插件相关的响应式变量
+// Plugin testing related reactive variables
 const showTestPluginModal = ref(false)
 const testPluginName = ref('')
 const testPluginArgs = ref([{ value: '' }])
@@ -494,16 +730,101 @@ const testPluginLoading = ref(false)
 const testPluginResult = ref(null)
 const testPluginError = ref(null)
 
-// 添加删除确认相关的响应式变量
+// Delete confirmation related reactive variables
 const showDeleteModal = ref(false)
 const deleteConfirmText = ref('')
 const itemToDelete = ref(null)
 const deleteError = ref('')
 
+// Project operation states
+const projectOperationLoading = ref(false)
+const showProjectWarningModal = ref(false)
+const projectWarningMessage = ref('')
+const projectOperationItem = ref(null)
+const projectOperationType = ref('') // 'start', 'stop', 'restart'
+
+// Flag variable to track if ESC key listener is added
+const escKeyListenerAdded = ref(false)
+
+// Search
+const search = ref('')
+
+// Centralized modal management
+const activeModal = ref(null) // Tracks which modal is currently active
+
+// Tooltip state
+const tooltip = reactive({
+  show: false,
+  text: '',
+  x: 0,
+  y: 0
+})
+
+// Add ESC key listener
+function addEscKeyListener() {
+  if (!escKeyListenerAdded.value) {
+    document.addEventListener('keydown', handleEscKey)
+    escKeyListenerAdded.value = true
+  }
+}
+
+// Remove ESC key listener
+function removeEscKeyListener() {
+  if (escKeyListenerAdded.value) {
+    document.removeEventListener('keydown', handleEscKey)
+    escKeyListenerAdded.value = false
+  }
+}
+
+// Handle ESC key press
+function handleEscKey(event) {
+  if (event.key === 'Escape' && activeModal.value) {
+    closeActiveModal()
+  }
+}
+
+// Close currently active modal
+function closeActiveModal() {
+  switch (activeModal.value) {
+    case 'delete':
+      closeDeleteModal()
+      break
+    case 'add':
+      closeAddModal()
+      break
+    case 'connection':
+      closeConnectionModal()
+      break
+    case 'testPlugin':
+      closeTestPluginModal()
+      break
+    case 'testRuleset':
+      closeTestRulesetModal()
+      break
+    case 'testOutput':
+      closeTestOutputModal()
+      break
+    case 'testProject':
+      closeTestProjectModal()
+      break
+    case 'projectWarning':
+      closeProjectWarningModal()
+      break
+    case 'usage':
+      closeUsageModal()
+      break
+  }
+  
+  activeModal.value = null
+}
+
 // Lifecycle hooks
 onMounted(async () => {
   await fetchAllItems()
   startProjectPolling()
+  
+  // Add click event listener to close menus when clicking outside
+  document.addEventListener('click', handleOutsideClick)
 })
 
 onBeforeUnmount(() => {
@@ -512,8 +833,11 @@ onBeforeUnmount(() => {
     clearInterval(projectRefreshInterval.value)
   }
   
-  // 移除ESC键监听
-  document.removeEventListener('keydown', handleEscKey)
+  // Remove ESC key listener
+  removeEscKeyListener()
+  
+  // Remove click event listener
+  document.removeEventListener('click', handleOutsideClick)
 })
 
 // Methods
@@ -526,39 +850,23 @@ function startProjectPolling() {
   }, 5000)
 }
 
-// 处理ESC键按下
-function handleEscKey(event) {
-  if (event.key === 'Escape') {
-    if (showAddModal.value) {
-      showAddModal.value = false
-    }
-    if (showConnectionModal.value) {
-      showConnectionModal.value = false
-    }
-    if (showTestPluginModal.value) {
-      showTestPluginModal.value = false
-    }
-    if (showDeleteModal.value) {
-      closeDeleteModal()
-    }
-  }
-}
-
 function openAddModal(type) {
   addType.value = type
   addName.value = ''
   addError.value = ''
   showAddModal.value = true
+  activeModal.value = 'add'
   
-  // 添加ESC键监听
-  document.addEventListener('keydown', handleEscKey)
+  addEscKeyListener()
 }
 
 function closeAddModal() {
   showAddModal.value = false
+  activeModal.value = null
   
-  // 移除ESC键监听
-  document.removeEventListener('keydown', handleEscKey)
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
 }
 
 async function toggleCollapse(type) {
@@ -569,9 +877,7 @@ async function toggleCollapse(type) {
   }
 }
 
-function openPendingChanges() {
-  emit('open-pending-changes')
-}
+
 
 function filteredItems(type) {
   if (!items[type] || !Array.isArray(items[type])) return []
@@ -593,57 +899,63 @@ async function fetchItems(type) {
   error[type] = null
   try {
     let response
-    console.log(`Fetching ${type}...`)
-    switch (type) {
-      case 'inputs':
-        response = await hubApi.fetchInputs()
-        break
-      case 'outputs':
-        response = await hubApi.fetchOutputs()
-        break
-      case 'rulesets':
-        response = await hubApi.fetchRulesets()
-        break
-      case 'plugins':
-        response = await hubApi.fetchPlugins()
-        break
-      case 'projects':
-        response = await hubApi.fetchProjects()
-        break
-      case 'cluster':
-        response = await hubApi.fetchClusterInfo()
-        break
-      default:
-        response = []
-    }
-    console.log(`${type} response:`, response)
-    
+    // Use new API method to get components with temporary file information
+    response = await hubApi.fetchComponentsWithTempInfo(type);
+
     // Transform response data to match expected format
     if (Array.isArray(response)) {
       items[type] = response.map(item => {
+        // 确保只处理属于当前类型的组件
         if (type === 'plugins') {
+          // 插件必须有name字段
+          if (!item.name) {
+            console.warn(`Skipping invalid plugin item:`, item);
+            return null;
+          }
           return {
             id: item.name,
-            type: item.type
+            type: item.type,
+            hasTemp: item.hasTemp
           }
         } else {
+          // 其他组件必须有id字段
+          if (!item.id) {
+            console.warn(`Skipping invalid ${type} item:`, item);
+            return null;
+          }
+          
+          // 如果是项目且状态为error，获取错误信息
+          if (type === 'projects' && item.status === 'error') {
+            // 异步获取错误信息，但不等待
+            (async () => {
+              try {
+                const projectDetails = await hubApi.getProject(item.id);
+                if (projectDetails && projectDetails.errorMessage) {
+                  // 更新项目的错误信息
+                  const index = items[type].findIndex(p => p.id === item.id);
+                  if (index !== -1) {
+                    items[type][index].errorMessage = projectDetails.errorMessage;
+                  }
+                }
+              } catch (err) {
+                console.error(`Failed to fetch error details for project ${item.id}:`, err);
+              }
+            })();
+          }
+          
           return {
             id: item.id,
             type: item.type,
-            status: item.status
+            status: item.status,
+            hasTemp: item.hasTemp,
+            errorMessage: item.errorMessage || ''
           }
         }
-      })
+      }).filter(Boolean) // 过滤掉null项
     } else {
       items[type] = []
     }
   } catch (err) {
-    console.error(`Error fetching ${type}:`, err)
-    console.error('Error details:', {
-      message: err.message,
-      response: err.response?.data,
-      status: err.response?.status
-    })
     error[type] = `Failed to load ${type}: ${err.message}`
   } finally {
     loading[type] = false
@@ -689,17 +1001,8 @@ async function confirmAddName() {
     return
   }
   
-  // 规范化名称，移除空格
+  // Normalize name by removing whitespace
   addName.value = addName.value.trim()
-  
-  // Check for duplicates
-  if (items[addType.value].some(item => 
-    (item.id && item.id.toLowerCase() === addName.value.toLowerCase()) || 
-    (item.name && item.name.toLowerCase() === addName.value.toLowerCase())
-  )) {
-    addError.value = 'Name already exists'
-    return
-  }
 
   try {
     const raw = ''
@@ -757,27 +1060,29 @@ function copyName(item) {
   closeAllMenus()
 }
 
-// 打开删除确认模态框
+// Open delete confirmation modal
 function openDeleteModal(type, item) {
   closeAllMenus()
   itemToDelete.value = { type, item }
   deleteConfirmText.value = ''
   deleteError.value = ''
   showDeleteModal.value = true
+  activeModal.value = 'delete'
   
-  // 添加ESC键监听
-  document.addEventListener('keydown', handleEscKey)
+  addEscKeyListener()
 }
 
-// 关闭删除确认模态框
+// Close delete confirmation modal
 function closeDeleteModal() {
   showDeleteModal.value = false
   itemToDelete.value = null
   deleteConfirmText.value = ''
   deleteError.value = ''
+  activeModal.value = null
   
-  // 移除ESC键监听
-  document.removeEventListener('keydown', handleEscKey)
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
 }
 
 // 确认删除
@@ -810,6 +1115,11 @@ async function confirmDelete() {
     // Emit delete event to notify parent component
     emit('item-deleted', { type, id: item.id })
     
+    // If the currently selected item is the one being deleted, clear selection
+    if (props.selected && props.selected.type === type && props.selected.id === item.id) {
+      emit('select-item', { type: null, id: null })
+    }
+    
     // Close modal
     closeDeleteModal()
   } catch (e) {
@@ -822,107 +1132,111 @@ function deleteItem(type, item) {
 }
 
 function closeAllMenus() {
-  Object.values(items).forEach(arr => {
-    if (Array.isArray(arr)) {
-      arr.forEach(i => { if (i.menuOpen) i.menuOpen = false })
+  // Close all dropdown menus
+  Object.keys(items).forEach(type => {
+    if (Array.isArray(items[type])) {
+      items[type].forEach(item => {
+        if (item.menuOpen) {
+          item.menuOpen = false
+        }
+      })
     }
   })
 }
 
-// 添加连接检查函数实现
+// Implement connection check function
 async function checkConnection(type, item) {
+  closeAllMenus()
   try {
     connectionLoading.value = true
     connectionError.value = null
     showConnectionModal.value = true
+    activeModal.value = 'connection'
     
-    // 添加ESC键监听
-    document.addEventListener('keydown', handleEscKey)
+    addEscKeyListener()
     
     const id = item.id || item.name
     const result = await hubApi.connectCheck(type, id)
     connectionResult.value = result
   } catch (error) {
-    console.error('Connection check failed:', error)
     connectionError.value = error.message || 'Failed to check connection'
   } finally {
     connectionLoading.value = false
   }
 }
 
-// 关闭连接检查模态框
+// Close connection check modal
 function closeConnectionModal() {
   showConnectionModal.value = false
+  activeModal.value = null
   
-  // 移除ESC键监听
-  document.removeEventListener('keydown', handleEscKey)
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
 }
 
-// 打开测试插件弹窗
+// Open test plugin modal
 function openTestPlugin(item) {
+  closeAllMenus()
   testPluginName.value = item.name || item.id
   testPluginArgs.value = [{ value: '' }]
   testPluginResult.value = null
   testPluginError.value = null
   showTestPluginModal.value = true
+  activeModal.value = 'testPlugin'
   
-  // 添加ESC键监听
-  document.addEventListener('keydown', handleEscKey)
+  addEscKeyListener()
 }
 
-// 关闭测试插件模态框
+// Close test plugin modal
 function closeTestPluginModal() {
   showTestPluginModal.value = false
+  activeModal.value = null
   
-  // 移除ESC键监听
-  document.removeEventListener('keydown', handleEscKey)
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
 }
 
-// 打开测试ruleset弹窗
+// Open test ruleset modal
 function openTestRuleset(item) {
-  console.log('Sidebar: openTestRuleset called with item', item);
-  const payload = { 
+  const payload = {
     type: 'rulesets', 
     id: item.id || item.name
   };
-  console.log('Sidebar: emitting test-ruleset event with payload', payload);
   emit('test-ruleset', payload);
-  // 确保菜单关闭
+  // Ensure menus are closed
   closeAllMenus();
 }
 
-// 打开测试output弹窗
+// Open test output modal
 function openTestOutput(item) {
-  console.log('Sidebar: openTestOutput called with item', item);
-  const payload = { 
+  const payload = {
     type: 'outputs', 
     id: item.id || item.name
   };
-  console.log('Sidebar: emitting test-output event with payload', payload);
   emit('test-output', payload);
-  // 确保菜单关闭
+  // Ensure menus are closed
   closeAllMenus();
 }
 
-// 打开测试project弹窗
+// Open test project modal
 function openTestProject(item) {
-  console.log('Sidebar: openTestProject called with item', item);
-  const payload = { 
+  const payload = {
     type: 'projects', 
     id: item.id || item.name
   };
-  console.log('Sidebar: emitting test-project event with payload', payload);
   emit('test-project', payload);
-  // 确保菜单关闭
+  // Ensure menus are closed
   closeAllMenus();
 }
 
-// 添加插件参数
+// Add plugin parameter
 function addPluginArg() {
   testPluginArgs.value.push({ value: '' })
 }
 
-// 移除插件参数
+// Remove plugin parameter
 function removePluginArg(index) {
   testPluginArgs.value.splice(index, 1)
   if (testPluginArgs.value.length === 0) {
@@ -930,14 +1244,14 @@ function removePluginArg(index) {
   }
 }
 
-// 测试插件
+// Test plugin
 async function testPlugin() {
   try {
     testPluginLoading.value = true
     testPluginResult.value = null
     testPluginError.value = null
     
-    // 处理参数值，尝试转换为合适的类型
+    // Process parameter values, try to convert to appropriate types
     const args = testPluginArgs.value.map(arg => {
       const value = arg.value.trim()
       if (value === '') return null
@@ -950,12 +1264,11 @@ async function testPlugin() {
     const result = await hubApi.testPlugin(testPluginName.value, args)
     testPluginResult.value = result
     
-    // 处理错误信息
+    // Handle error message
     if (result.error) {
       testPluginError.value = result.error
     }
   } catch (error) {
-    console.error('Plugin test failed:', error)
     testPluginError.value = error.message || 'Failed to test plugin'
     testPluginResult.value = { 
       success: false, 
@@ -967,9 +1280,9 @@ async function testPlugin() {
   }
 }
 
-// 获取参数类型提示
+// Get parameter type hint
 function getArgumentTypeHint() {
-  // 默认提示
+  // Default hint
   return 'String, number, or boolean value'
 }
 
@@ -982,6 +1295,311 @@ defineExpose({
 function handleItemClick(type, item) {
   const id = item.id || item.name;
   emit('select-item', { type, id });
+}
+
+// Project operations
+async function startProject(item) {
+  closeAllMenus()
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.startProject(item.id)
+    
+    if (result.warning) {
+      // If there are warnings (e.g., temporary files exist), show warning modal
+      projectWarningMessage.value = result.message
+      projectOperationItem.value = item
+      projectOperationType.value = 'start'
+      showProjectWarningModal.value = true
+      activeModal.value = 'projectWarning'
+      addEscKeyListener()
+    } else if (result.success) {
+      // Project started successfully
+      $message?.success?.('Project started successfully')
+      // Update project status
+      item.status = 'running'
+      // Refresh project list
+      await fetchItems('projects')
+    } else if (result.error) {
+      // Start failed
+      $message?.error?.('Failed to start project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error starting project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+async function stopProject(item) {
+  closeAllMenus()
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.stopProject(item.id)
+    
+    if (result.warning) {
+      // If there are warnings (e.g., temporary files exist), show warning modal
+      projectWarningMessage.value = result.message
+      projectOperationItem.value = item
+      projectOperationType.value = 'stop'
+      showProjectWarningModal.value = true
+      activeModal.value = 'projectWarning'
+      addEscKeyListener()
+    } else if (result.success) {
+      // Project stopped successfully
+      $message?.success?.('Project stopped successfully')
+      // Update project status
+      item.status = 'stopped'
+      // Refresh project list
+      await fetchItems('projects')
+    } else if (result.error) {
+      // Stop failed
+      $message?.error?.('Failed to stop project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error stopping project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+async function restartProject(item) {
+  closeAllMenus()
+  projectOperationLoading.value = true
+  
+  try {
+    const result = await hubApi.restartProject(item.id)
+    
+    if (result.warning) {
+      // If there are warnings (e.g., temporary files exist), show warning modal
+      projectWarningMessage.value = result.message
+      projectOperationItem.value = item
+      projectOperationType.value = 'restart'
+      showProjectWarningModal.value = true
+      activeModal.value = 'projectWarning'
+      addEscKeyListener()
+    } else if (result.success) {
+      // Project restarted successfully
+      $message?.success?.('Project restarted successfully')
+      // Update project status
+      item.status = 'running'
+      // Refresh project list
+      await fetchItems('projects')
+    } else if (result.error) {
+      // Restart failed
+      $message?.error?.('Failed to restart project: ' + result.error)
+    }
+  } catch (error) {
+    $message?.error?.('Error restarting project: ' + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+// Close project operation warning modal
+function closeProjectWarningModal() {
+  showProjectWarningModal.value = false
+  projectWarningMessage.value = ''
+  projectOperationItem.value = null
+  projectOperationType.value = ''
+  activeModal.value = null
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
+}
+
+// Continue project operation (based on original project, not temporary files)
+async function continueProjectOperation() {
+  if (!projectOperationItem.value || !projectOperationType.value) {
+    closeProjectWarningModal()
+    return
+  }
+  
+  const item = projectOperationItem.value
+  const operationType = projectOperationType.value
+  
+  closeProjectWarningModal()
+  projectOperationLoading.value = true
+  
+  try {
+    let result
+    
+    // Perform operations on the original project
+    if (operationType === 'start') {
+      // Start using original project ID
+      const response = await hubApi.startProject(item.id)
+      result = { success: true, data: response.data }
+    } else if (operationType === 'stop') {
+      // Stop using original project ID
+      const response = await hubApi.stopProject(item.id)
+      result = { success: true, data: response.data }
+    } else if (operationType === 'restart') {
+      // Stop first, then start
+      await hubApi.stopProject(item.id)
+      const response = await hubApi.startProject(item.id)
+      result = { success: true, data: response.data }
+    }
+    
+    if (result && result.success) {
+      // Operation executed successfully
+      $message?.success?.(`Project ${operationType}ed successfully`)
+      // Update project status
+      if (operationType === 'start' || operationType === 'restart') {
+        item.status = 'running'
+      } else if (operationType === 'stop') {
+        item.status = 'stopped'
+      }
+      
+      // Refresh project list
+      await fetchItems('projects')
+    }
+  } catch (error) {
+    $message?.error?.(`Error ${operationType}ing project: ` + (error.message || 'Unknown error'))
+  } finally {
+    projectOperationLoading.value = false
+  }
+}
+
+// Check if any modal is open
+function isAnyModalOpen() {
+  // Simply check if there's an active modal
+  return activeModal.value !== null;
+}
+
+// Handle clicks outside the menu
+function handleOutsideClick(event) {
+  // Check if the click is inside a dropdown menu or on a menu toggle button
+  const isMenuClick = event.target.closest('.dropdown-menu')
+  const isToggleClick = event.target.closest('.menu-toggle-button')
+  
+  // If clicking inside menu or on toggle button, don't close
+  if (isMenuClick || isToggleClick) {
+    return
+  }
+  
+  // Close all menus
+  closeAllMenus()
+}
+
+// Get status title based on project status
+function getStatusTitle(item) {
+  switch (item.status) {
+    case 'running':
+      return 'Running'
+    case 'stopped':
+      return 'Stopped'
+    case 'error':
+      // 如果有错误信息，则显示错误信息
+      return item.errorMessage ? `Error: ${item.errorMessage}` : 'Error'
+    default:
+      return 'Unknown'
+  }
+}
+
+// Get status label based on project status
+function getStatusLabel(status) {
+  switch (status) {
+    case 'running':
+      return 'R'
+    case 'stopped':
+      return 'S'
+    case 'error':
+      return 'E'
+    default:
+      return '?'
+  }
+}
+
+// Show tooltip
+function showTooltip(event, text) {
+  tooltip.text = text
+  tooltip.x = event.clientX
+  tooltip.y = event.clientY
+  tooltip.show = true
+}
+
+// Hide tooltip
+function hideTooltip() {
+  tooltip.show = false
+}
+
+// 组件使用情况相关变量
+const showUsageModal = ref(false)
+const usageLoading = ref(false)
+const usageError = ref(null)
+const usageComponentType = ref('')
+const usageComponentId = ref('')
+const usageProjects = ref([])
+
+// 在三点菜单中添加"查看使用情况"选项
+function openUsageModal(type, item) {
+  closeAllMenus()
+  usageLoading.value = true
+  usageError.value = null
+  usageComponentType.value = type
+  usageComponentId.value = item.id || item.name
+  usageProjects.value = []
+  showUsageModal.value = true
+  activeModal.value = 'usage'
+  
+  addEscKeyListener()
+  
+  // 获取组件使用情况
+  fetchComponentUsage(type, item.id || item.name)
+}
+
+// 关闭使用情况模态框
+function closeUsageModal() {
+  showUsageModal.value = false
+  activeModal.value = null
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
+}
+
+// 获取组件使用情况
+async function fetchComponentUsage(type, id) {
+  try {
+    const result = await hubApi.getComponentUsage(type, id)
+    usageProjects.value = result.usage || []
+  } catch (error) {
+    usageError.value = error.message || 'Failed to fetch component usage'
+  } finally {
+    usageLoading.value = false
+  }
+}
+
+// 跳转到项目详情页面
+function navigateToProject(projectId) {
+  // 关闭模态框
+  closeUsageModal()
+  
+  // 跳转到项目详情页面
+  router.push(`/app/projects/${projectId}`)
+  
+  // 通知父组件选择了项目
+  emit('select-item', {
+    type: 'projects',
+    id: projectId,
+    isEdit: false,
+    _timestamp: Date.now()
+  })
+}
+
+// Toggle menu for a specific item
+function toggleMenu(item) {
+  const wasOpen = item.menuOpen
+  
+  // Close all menus first
+  closeAllMenus()
+  
+  // If the menu wasn't open, open it
+  if (!wasOpen) {
+    item.menuOpen = true
+  }
 }
 </script>
 

@@ -2,6 +2,7 @@ package project
 
 import (
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"fmt"
@@ -28,6 +29,14 @@ func init() {
 
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
 	GlobalProject.msgChansCounter = make(map[string]int)
+
+	// 注册一个延迟函数，在所有项目加载完成后分析依赖关系
+	go func() {
+		// 等待一段时间，确保所有项目都已加载完成
+		time.Sleep(5 * time.Second)
+		// 分析项目依赖关系
+		AnalyzeProjectDependencies()
+	}()
 }
 
 func Verify(path string, raw string) error {
@@ -109,7 +118,7 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 
 	p := &Project{
 		Id:          cfg.Id,
-		Status:      ProjectStatusStopped,
+		Status:      ProjectStatusRunning, // Default to running status for new projects
 		Config:      &cfg,
 		Inputs:      make(map[string]*input.Input),
 		Outputs:     make(map[string]*output.Output),
@@ -127,6 +136,26 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 		p.Status = ProjectStatusError
 		p.Err = err
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
+	}
+
+	// Load saved status if available
+	savedStatus, err := p.LoadProjectStatus()
+	if err == nil {
+		// Only update to stopped or error status
+		// Running status will be handled by StartAllProject
+		if savedStatus == ProjectStatusError {
+			p.Status = ProjectStatusError
+			logger.Warn("Project loaded with error status from previous run", "id", p.Id)
+		} else if savedStatus == ProjectStatusStopped {
+			p.Status = ProjectStatusStopped
+			logger.Info("Project loaded with stopped status from previous run", "id", p.Id)
+		}
+	}
+
+	// Save the initial status to file
+	err = p.SaveProjectStatus()
+	if err != nil {
+		logger.Warn("Failed to save initial project status", "id", p.Id, "error", err)
 	}
 
 	return p, nil
@@ -223,6 +252,25 @@ func (p *Project) initComponents() error {
 	err = p.loadComponents(inputNames, outputNames, rulesetNames)
 	if err != nil {
 		return err
+	}
+
+	// Actually assign components to the project
+	for _, name := range inputNames {
+		if i, ok := GlobalProject.Inputs[name]; ok {
+			p.Inputs[name] = i
+		}
+	}
+
+	for _, name := range outputNames {
+		if o, ok := GlobalProject.Outputs[name]; ok {
+			p.Outputs[name] = o
+		}
+	}
+
+	for _, name := range rulesetNames {
+		if ruleset, ok := GlobalProject.Rulesets[name]; ok {
+			p.Rulesets[name] = ruleset
+		}
 	}
 
 	projectNodeSequence := ""
@@ -357,6 +405,8 @@ func (p *Project) Start() error {
 		if err := in.Start(); err != nil {
 			p.Status = ProjectStatusError
 			p.Err = err
+			// Save the error status to file
+			_ = p.SaveProjectStatus()
 			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
 		}
 	}
@@ -366,6 +416,8 @@ func (p *Project) Start() error {
 		if err := rs.Start(); err != nil {
 			p.Status = ProjectStatusError
 			p.Err = err
+			// Save the error status to file
+			_ = p.SaveProjectStatus()
 			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 		}
 	}
@@ -375,6 +427,8 @@ func (p *Project) Start() error {
 		if err := out.Start(); err != nil {
 			p.Status = ProjectStatusError
 			p.Err = err
+			// Save the error status to file
+			_ = p.SaveProjectStatus()
 			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
 		}
 	}
@@ -384,6 +438,13 @@ func (p *Project) Start() error {
 	go p.collectMetrics()
 
 	p.Status = ProjectStatusRunning
+
+	// Save the running status to file
+	err := p.SaveProjectStatus()
+	if err != nil {
+		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+	}
+
 	return nil
 }
 
@@ -392,8 +453,10 @@ func (p *Project) Stop() error {
 	if p.Status != ProjectStatusRunning {
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
-	if p.Status != ProjectStatusError {
-		return fmt.Errorf("project is error %s %s", p.Id, p.Err)
+
+	// Check if project is in error state
+	if p.Err != nil {
+		logger.Warn("Stopping project with errors", "id", p.Id, "error", p.Err)
 	}
 
 	// Stop all components
@@ -437,6 +500,13 @@ func (p *Project) Stop() error {
 	p.wg.Wait()
 
 	p.Status = ProjectStatusStopped
+
+	// Save the stopped status to file
+	err := p.SaveProjectStatus()
+	if err != nil {
+		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+	}
+
 	return nil
 }
 
@@ -471,4 +541,294 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	p.metrics.mu.RLock()
 	defer p.metrics.mu.RUnlock()
 	return p.metrics
+}
+
+// 在文件中添加一个新函数，用于分析项目依赖关系
+func AnalyzeProjectDependencies() {
+	// 清除所有项目的依赖关系
+	for _, p := range GlobalProject.Projects {
+		p.DependsOn = []string{}
+		p.DependedBy = []string{}
+		p.SharedInputs = []string{}
+		p.SharedOutputs = []string{}
+		p.SharedRulesets = []string{}
+	}
+
+	// 构建组件使用映射
+	inputUsage := make(map[string][]string)   // 输入组件ID -> 使用它的项目ID列表
+	outputUsage := make(map[string][]string)  // 输出组件ID -> 使用它的项目ID列表
+	rulesetUsage := make(map[string][]string) // 规则集ID -> 使用它的项目ID列表
+
+	// 分析每个项目使用的组件
+	for projectID, p := range GlobalProject.Projects {
+		// 记录输入组件使用情况
+		for inputID := range p.Inputs {
+			inputUsage[inputID] = append(inputUsage[inputID], projectID)
+		}
+
+		// 记录输出组件使用情况
+		for outputID := range p.Outputs {
+			outputUsage[outputID] = append(outputUsage[outputID], projectID)
+		}
+
+		// 记录规则集使用情况
+		for rulesetID := range p.Rulesets {
+			rulesetUsage[rulesetID] = append(rulesetUsage[rulesetID], projectID)
+		}
+	}
+
+	// 更新共享组件信息
+	for inputID, projects := range inputUsage {
+		if len(projects) > 1 {
+			// 这是一个共享输入组件
+			for _, projectID := range projects {
+				GlobalProject.Projects[projectID].SharedInputs = append(
+					GlobalProject.Projects[projectID].SharedInputs,
+					inputID,
+				)
+			}
+		}
+	}
+
+	for outputID, projects := range outputUsage {
+		if len(projects) > 1 {
+			// 这是一个共享输出组件
+			for _, projectID := range projects {
+				GlobalProject.Projects[projectID].SharedOutputs = append(
+					GlobalProject.Projects[projectID].SharedOutputs,
+					outputID,
+				)
+			}
+		}
+	}
+
+	for rulesetID, projects := range rulesetUsage {
+		if len(projects) > 1 {
+			// 这是一个共享规则集
+			for _, projectID := range projects {
+				GlobalProject.Projects[projectID].SharedRulesets = append(
+					GlobalProject.Projects[projectID].SharedRulesets,
+					rulesetID,
+				)
+			}
+		}
+	}
+
+	// 分析项目之间的依赖关系
+	for projectID, p := range GlobalProject.Projects {
+		// 解析项目配置以获取数据流
+		flowGraph, err := p.parseContent()
+		if err != nil {
+			logger.Error("Failed to parse project content", "id", projectID, "error", err)
+			continue
+		}
+
+		// 分析数据流中的项目间依赖
+		for fromNode, toNodes := range flowGraph {
+			fromType, fromID := parseNode(fromNode)
+
+			// 检查是否存在跨项目依赖
+			for _, toNode := range toNodes {
+				toType, toID := parseNode(toNode)
+
+				// 如果源节点是一个项目的输出，目标节点是另一个项目的输入，则存在项目间依赖
+				if fromType == "OUTPUT" && toType == "INPUT" {
+					// 找出拥有这些组件的项目
+					var fromProjectID, toProjectID string
+
+					// 查找拥有源输出的项目
+					for pid, proj := range GlobalProject.Projects {
+						if _, exists := proj.Outputs[fromID]; exists {
+							fromProjectID = pid
+							break
+						}
+					}
+
+					// 查找拥有目标输入的项目
+					for pid, proj := range GlobalProject.Projects {
+						if _, exists := proj.Inputs[toID]; exists {
+							toProjectID = pid
+							break
+						}
+					}
+
+					// 如果找到了两个不同的项目，则存在项目间依赖
+					if fromProjectID != "" && toProjectID != "" && fromProjectID != toProjectID {
+						// 更新依赖关系
+						GlobalProject.Projects[toProjectID].DependsOn = append(
+							GlobalProject.Projects[toProjectID].DependsOn,
+							fromProjectID,
+						)
+						GlobalProject.Projects[fromProjectID].DependedBy = append(
+							GlobalProject.Projects[fromProjectID].DependedBy,
+							toProjectID,
+						)
+					}
+				}
+			}
+		}
+	}
+
+	// 记录依赖关系信息
+	for projectID, p := range GlobalProject.Projects {
+		if len(p.DependsOn) > 0 || len(p.DependedBy) > 0 ||
+			len(p.SharedInputs) > 0 || len(p.SharedOutputs) > 0 || len(p.SharedRulesets) > 0 {
+			logger.Info("Project dependencies analyzed",
+				"id", projectID,
+				"depends_on", p.DependsOn,
+				"depended_by", p.DependedBy,
+				"shared_inputs", p.SharedInputs,
+				"shared_outputs", p.SharedOutputs,
+				"shared_rulesets", p.SharedRulesets,
+			)
+		}
+	}
+}
+
+// GetAffectedProjects returns the list of project IDs affected by component changes
+func GetAffectedProjects(componentType string, componentID string) []string {
+	affectedProjects := make(map[string]struct{})
+
+	switch componentType {
+	case "input":
+		// Find all projects using this input
+		for projectID, p := range GlobalProject.Projects {
+			if _, exists := p.Inputs[componentID]; exists {
+				affectedProjects[projectID] = struct{}{}
+			}
+		}
+	case "output":
+		// Find all projects using this output
+		for projectID, p := range GlobalProject.Projects {
+			if _, exists := p.Outputs[componentID]; exists {
+				affectedProjects[projectID] = struct{}{}
+			}
+		}
+	case "ruleset":
+		// Find all projects using this ruleset
+		for projectID, p := range GlobalProject.Projects {
+			if _, exists := p.Rulesets[componentID]; exists {
+				affectedProjects[projectID] = struct{}{}
+			}
+		}
+	case "project":
+		// The project itself is affected
+		affectedProjects[componentID] = struct{}{}
+
+		// Find other projects that depend on this project
+		if p, exists := GlobalProject.Projects[componentID]; exists {
+			for _, depID := range p.DependedBy {
+				affectedProjects[depID] = struct{}{}
+			}
+		}
+	}
+
+	// Convert to string slice
+	result := make([]string, 0, len(affectedProjects))
+	for projectID := range affectedProjects {
+		result = append(result, projectID)
+	}
+
+	return result
+}
+
+// SaveProjectStatus saves the current status of a project to a file
+func (p *Project) SaveProjectStatus() error {
+	statusFile := ".project_status"
+
+	// Read existing statuses
+	projectStatuses := make(map[string]string)
+
+	// Check if the file exists
+	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
+		// Create the file if it doesn't exist
+		f, err := os.Create(statusFile)
+		if err != nil {
+			return fmt.Errorf("failed to create status file: %w", err)
+		}
+		_ = f.Close()
+	} else {
+		// Read the status file if it exists
+		data, err := os.ReadFile(statusFile)
+		if err == nil {
+			// Parse the content
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				if line == "" {
+					continue
+				}
+
+				parts := strings.Split(line, ":")
+				if len(parts) == 2 {
+					projectStatuses[parts[0]] = parts[1]
+				}
+			}
+		}
+	}
+
+	// Update the status for this project
+	projectStatuses[p.Id] = string(p.Status)
+
+	// Create or open the status file
+	f, err := os.OpenFile(statusFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open status file: %w", err)
+	}
+	defer f.Close()
+
+	// Write all project statuses to the file
+	for id, status := range projectStatuses {
+		_, err = fmt.Fprintf(f, "%s:%s\n", id, status)
+		if err != nil {
+			return fmt.Errorf("failed to write project status: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// LoadProjectStatus loads the project status from a file
+func (p *Project) LoadProjectStatus() (ProjectStatus, error) {
+	statusFile := ".project_status"
+
+	// Check if the file exists
+	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
+		// File doesn't exist, create an empty one
+		f, err := os.Create(statusFile)
+		if err != nil {
+			return ProjectStatusStopped, fmt.Errorf("failed to create status file: %w", err)
+		}
+		_ = f.Close()
+		return ProjectStatusStopped, nil
+	}
+
+	// Read the status file
+	data, err := os.ReadFile(statusFile)
+	if err != nil {
+		return ProjectStatusStopped, fmt.Errorf("failed to read status file: %w", err)
+	}
+
+	// Parse the content
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, ":")
+		if len(parts) != 2 {
+			continue
+		}
+
+		projectID := parts[0]
+		status := parts[1]
+
+		// If this is the project we're looking for
+		if projectID == p.Id {
+			return ProjectStatus(status), nil
+		}
+	}
+
+	// Project not found in the status file
+	return ProjectStatusStopped, nil
 }

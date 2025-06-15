@@ -14,12 +14,14 @@
         <!-- Left panel: Input data -->
         <div class="w-1/2 pr-3 flex flex-col overflow-hidden">
           <h4 class="text-sm font-medium text-gray-700 mb-2">Input Data:</h4>
-          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md">
-            <CodeEditor 
+          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md" style="height: 400px;">
+            <MonacoEditor 
               v-model:value="inputData" 
               :language="'json'" 
               :read-only="false" 
               class="h-full" 
+              :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
+              style="height: 100%; min-height: 380px;"
             />
           </div>
         </div>
@@ -108,7 +110,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { hubApi } from '../api';
-import CodeEditor from './CodeEditor.vue';
+import MonacoEditor from './MonacoEditor.vue';
 
 // Props
 const props = defineProps({
@@ -126,48 +128,59 @@ const testResults = ref({});
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
+const jsonError = ref(null);
+const jsonErrorLine = ref(null);
 
 // Debug info on mount
 onMounted(() => {
-  console.log('OutputTestModal mounted with props:', props);
 });
 
 // Watch for prop changes
 watch(() => props.show, (newVal) => {
-  console.log('OutputTestModal: show prop changed to', newVal);
   showModal.value = newVal;
-  
-  // 添加或移除ESC键监听
   if (newVal) {
+    // Reset state when opening modal
+    resetState();
+    // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
+    // Remove ESC key listener
     document.removeEventListener('keydown', handleEscKey);
   }
 }, { immediate: true });
 
 watch(() => props.outputId, (newVal) => {
-  console.log('OutputTestModal: outputId prop changed to', newVal);
   // Reset state when output changes
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
 });
 
-// 在组件卸载时移除事件监听
+// Remove event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey);
 });
 
-// Methods
-function closeModal() {
-  emit('close');
-}
-
-// 处理ESC键按下
+// Handle ESC key press
 function handleEscKey(event) {
   if (event.key === 'Escape') {
     closeModal();
   }
+}
+
+function resetState() {
+  // Reset state when opening modal
+  inputData.value = '{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}';
+  testResults.value = {};
+  testError.value = null;
+  testExecuted.value = false;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
+}
+
+// Methods
+function closeModal() {
+  emit('close');
 }
 
 async function runTest() {
@@ -175,6 +188,8 @@ async function runTest() {
   testError.value = null;
   testResults.value = {};
   testExecuted.value = true;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
   
   try {
     // Parse input data
@@ -183,6 +198,14 @@ async function runTest() {
       data = JSON.parse(inputData.value);
     } catch (e) {
       testError.value = `Invalid JSON: ${e.message}`;
+      
+      // Try to extract line number from JSON parse error
+      const match = e.message.match(/line (\d+)/i) || e.message.match(/position (\d+)/i);
+      if (match) {
+        jsonErrorLine.value = parseInt(match[1]);
+        jsonError.value = e.message;
+      }
+      
       testLoading.value = false;
       return;
     }
@@ -197,7 +220,6 @@ async function runTest() {
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test output';
-    console.error('Test output error:', e);
   } finally {
     testLoading.value = false;
   }

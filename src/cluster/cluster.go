@@ -1,8 +1,6 @@
 package cluster
 
 import (
-	"AgentSmith-HUB/common"
-	"AgentSmith-HUB/logger"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -93,7 +91,7 @@ func ClusterInit(selfID, selfAddress string) *ClusterManager {
 
 // RegisterNode registers a new node in the cluster
 func (cm *ClusterManager) RegisterNode(nodeID, address string) {
-	cm.Mu.RLock()
+	cm.Mu.Lock()
 	defer cm.Mu.Unlock()
 
 	cm.Nodes[nodeID] = &NodeInfo{
@@ -108,7 +106,7 @@ func (cm *ClusterManager) RegisterNode(nodeID, address string) {
 
 // UpdateNodeHeartbeat updates the last seen time for a node
 func (cm *ClusterManager) UpdateNodeHeartbeat(nodeID string) {
-	cm.Mu.RLock()
+	cm.Mu.Lock()
 	defer cm.Mu.Unlock()
 
 	if node, exists := cm.Nodes[nodeID]; exists {
@@ -183,7 +181,7 @@ func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
 
 // SendHeartbeat sends a heartbeat to the leader
 func (cm *ClusterManager) SendHeartbeat() error {
-	cm.Mu.Unlock()
+	cm.Mu.RLock()
 	leaderAddr := cm.LeaderAddress
 	selfID := cm.SelfID
 	selfAddr := cm.SelfAddress
@@ -310,46 +308,4 @@ func (cm *ClusterManager) Start() {
 
 	// Start cleanup loop
 	cm.StartCleanupLoop()
-}
-
-// NotifyFollowersComponentUpdate notifies all followers about a component update
-func NotifyFollowersComponentUpdate(componentType string, id string, raw string) error {
-	GlobalMu.RLock()
-	defer GlobalMu.RUnlock()
-
-	for node := range Nodes {
-		if node != Leader {
-			// Skip if the node is the leader itself
-			url := fmt.Sprintf("http://%s/component/sync", node)
-			payload := map[string]interface{}{
-				"type": componentType,
-				"id":   id,
-				"raw":  raw,
-			}
-
-			jsonData, err := json.Marshal(payload)
-			if err != nil {
-				logger.Error("failed to marshal component update payload", "error", err)
-				continue
-			}
-
-			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-			if err != nil {
-				logger.Error("failed to create request for follower sync", "error", err)
-				continue
-			}
-
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", common.Config.Token))
-
-			client := &http.Client{Timeout: 10 * time.Second}
-			resp, err := client.Do(req)
-			if err != nil {
-				logger.Error("failed to sync with follower", "node", node, "error", err)
-				continue
-			}
-			_ = resp.Body.Close()
-		}
-	}
-	return nil
 }

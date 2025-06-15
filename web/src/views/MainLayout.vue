@@ -15,13 +15,21 @@
       />
       <main class="flex-1 bg-gray-50">
         <ComponentDetail 
-          v-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes'" 
+          v-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
+          @created="handleCreated"
         />
         <ClusterStatus v-else-if="selected && selected.type === 'cluster'" />
-        <PendingChanges v-else-if="selected && selected.type === 'pending-changes'" />
+        <PendingChanges 
+          v-else-if="selected && selected.type === 'pending-changes'" 
+          @refresh-list="handleRefreshList"
+        />
+        <LoadLocalComponents 
+          v-else-if="selected && selected.type === 'load-local-components'" 
+          @refresh-list="handleRefreshList"
+        />
       </main>
     </div>
     
@@ -49,12 +57,14 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Header from '../components/Header.vue'
 import Sidebar from '../components/Sidebar/Sidebar.vue'
 import ComponentDetail from '../components/ComponentDetail.vue'
 import ClusterStatus from '../components/ClusterStatus.vue'
 import PendingChanges from '../components/PendingChanges.vue'
+import LoadLocalComponents from '../components/LoadLocalComponents.vue'
 import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
 import ProjectTestModal from '../components/ProjectTestModal.vue'
@@ -69,9 +79,101 @@ const testOutputId = ref('')
 const showTestProjectModal = ref(false)
 const testProjectId = ref('')
 
+// Get route and router
+const route = useRoute()
+const router = useRouter()
+
+// Handle route changes
+onMounted(() => {
+  // Check if we have component type in the route
+  const { params, meta } = route
+  if (meta.componentType) {
+    if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components') {
+      // For cluster, pending-changes, and load-local-components, no ID needed
+      selected.value = {
+        type: meta.componentType,
+        _timestamp: Date.now()
+      }
+    } else if (params.id) {
+      // For regular components, need ID
+      selected.value = {
+        type: meta.componentType,
+        id: params.id,
+        isEdit: false,
+        _timestamp: Date.now()
+      }
+    }
+  }
+})
+
+// Watch for route changes
+watch(
+  () => [route.params, route.meta],
+  ([newParams, newMeta]) => {
+    const { id } = newParams
+    const componentType = newMeta.componentType
+    
+    if (componentType) {
+      if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components') {
+        // For cluster, pending-changes, and load-local-components, no ID needed
+        if (!selected.value || selected.value.type !== componentType) {
+          selected.value = {
+            type: componentType,
+            _timestamp: Date.now()
+          }
+        }
+      } else if (id && (!selected.value || selected.value.id !== id || selected.value.type !== componentType)) {
+        // For regular components, need ID
+        selected.value = {
+          type: componentType,
+          id,
+          isEdit: false,
+          _timestamp: Date.now()
+        }
+      }
+    }
+  }
+)
+
+// Update URL when selected component changes
+watch(
+  () => selected.value,
+  (newVal) => {
+    if (newVal && newVal.type && !newVal.isNew) {
+      const currentPath = router.currentRoute.value.path
+      let expectedPath
+      
+      if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components') {
+        // For cluster, pending-changes, and load-local-components, no ID in URL
+        expectedPath = `/app/${newVal.type}`
+      } else if (newVal.id) {
+        // For regular components, include ID in URL
+        expectedPath = `/app/${newVal.type}/${newVal.id}`
+      }
+      
+      if (expectedPath && currentPath !== expectedPath) {
+        router.push(expectedPath)
+      }
+    }
+  },
+  { deep: true }
+)
+
 // Methods
 function onSelectItem(item) {
-  selected.value = item
+  // Use router navigation for better URL management
+  if (item.type === 'cluster') {
+    router.push('/app/cluster')
+  } else if (item.type === 'pending-changes') {
+    router.push('/app/pending-changes')
+  } else if (item.type === 'load-local-components') {
+    router.push('/app/load-local-components')
+  } else if (item.id) {
+    router.push(`/app/${item.type}/${item.id}`)
+  } else {
+    // Fallback for direct selection (e.g., new components)
+    selected.value = item
+  }
 }
 
 async function onOpenEditor(payload) {
@@ -90,7 +192,6 @@ async function onOpenEditor(payload) {
     }
   } catch (e) {
     // Only log error, don't show notification
-    console.error('Failed to open editor:', e);
   }
 }
 
@@ -103,10 +204,28 @@ function handleCancelEdit(item) {
 }
 
 function handleUpdated(item) {
-  // Handle post-update logic
+  // 直接更新状态，不要先设置为null
   selected.value = {
-    ...item,
-    isEdit: false
+    type: item.type,
+    id: item.id,
+    isEdit: false,
+    // 添加时间戳触发重新获取数据
+    _timestamp: Date.now()
+  }
+  
+  // Refresh sidebar list
+  refreshSidebar(item.type)
+}
+
+// Handle component creation completed event
+function handleCreated(item) {
+  // 直接更新状态，不要先设置为null
+  selected.value = {
+    type: item.type,
+    id: item.id,
+    isEdit: false,
+    // 添加时间戳触发重新获取数据
+    _timestamp: Date.now()
   }
   
   // Refresh sidebar list
@@ -133,7 +252,7 @@ function refreshSidebar(type) {
 
 // Open the pending changes view
 function onOpenPendingChanges() {
-  selected.value = { type: 'pending-changes' }
+  router.push('/app/pending-changes')
 }
 
 // 处理ESC键按下
@@ -151,19 +270,15 @@ function handleEscKey(event) {
   }
 }
 
-// 组件卸载前移除事件监听
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscKey);
 });
 
 // Open the ruleset test modal
 function onTestRuleset(payload) {
-  console.log('MainLayout: onTestRuleset called with payload', payload);
   testRulesetId.value = payload.id;
   showTestRulesetModal.value = true;
-  console.log('MainLayout: showTestRulesetModal set to', showTestRulesetModal.value);
-  
-  // 添加ESC键监听
+
   document.addEventListener('keydown', handleEscKey);
 }
 
@@ -177,11 +292,9 @@ function closeTestRulesetModal() {
 
 // Open the output test modal
 function onTestOutput(payload) {
-  console.log('MainLayout: onTestOutput called with payload', payload);
   testOutputId.value = payload.id;
   showTestOutputModal.value = true;
-  console.log('MainLayout: showTestOutputModal set to', showTestOutputModal.value);
-  
+
   // 添加ESC键监听
   document.addEventListener('keydown', handleEscKey);
 }
@@ -196,11 +309,9 @@ function closeTestOutputModal() {
 
 // Open the project test modal
 function onTestProject(payload) {
-  console.log('MainLayout: onTestProject called with payload', payload);
   testProjectId.value = payload.id;
   showTestProjectModal.value = true;
-  console.log('MainLayout: showTestProjectModal set to', showTestProjectModal.value);
-  
+
   // 添加ESC键监听
   document.addEventListener('keydown', handleEscKey);
 }
@@ -211,5 +322,10 @@ function closeTestProjectModal() {
   
   // 移除ESC键监听
   document.removeEventListener('keydown', handleEscKey);
+}
+
+function handleRefreshList(type) {
+  // Refresh component list of specified type
+  refreshSidebar(type)
 }
 </script> 

@@ -14,12 +14,14 @@
         <!-- Left panel: Input data -->
         <div class="w-1/2 pr-3 flex flex-col overflow-hidden">
           <h4 class="text-sm font-medium text-gray-700 mb-2">Input Data:</h4>
-          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md">
-            <CodeEditor 
+          <div class="flex-1 overflow-hidden border border-gray-200 rounded-md" style="height: 400px;">
+            <MonacoEditor 
               v-model:value="inputData" 
               :language="'json'" 
               :read-only="false" 
               class="h-full" 
+              :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
+              style="height: 100%; min-height: 380px;"
             />
           </div>
         </div>
@@ -87,14 +89,15 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { hubApi } from '../api';
-import CodeEditor from './CodeEditor.vue';
+import MonacoEditor from './MonacoEditor.vue';
 
 // Props
 const props = defineProps({
   show: Boolean,
-  rulesetId: String
+  rulesetId: String,
+  rulesetContent: String  // Optional: if provided, test this content instead of saved ruleset
 });
 
 // Emits
@@ -107,34 +110,35 @@ const testResults = ref([]);
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
+const jsonError = ref(null);
+const jsonErrorLine = ref(null);
 
 // Debug info on mount
 onMounted(() => {
-  console.log('RulesetTestModal mounted with props:', props);
 });
 
 // Watch for prop changes
 watch(() => props.show, (newVal) => {
-  console.log('RulesetTestModal: show prop changed to', newVal);
   showModal.value = newVal;
-  
-  // 添加或移除ESC键监听
   if (newVal) {
+    // Reset state when opening modal
+    resetState();
+    // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
+    // Remove ESC key listener
     document.removeEventListener('keydown', handleEscKey);
   }
 }, { immediate: true });
 
 watch(() => props.rulesetId, (newVal) => {
-  console.log('RulesetTestModal: rulesetId prop changed to', newVal);
   // Reset state when ruleset changes
   testResults.value = [];
   testError.value = null;
   testExecuted.value = false;
 });
 
-// 在组件卸载时移除事件监听
+// Remove event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey);
 });
@@ -144,7 +148,7 @@ function closeModal() {
   emit('close');
 }
 
-// 处理ESC键按下
+// Handle ESC key press
 function handleEscKey(event) {
   if (event.key === 'Escape') {
     closeModal();
@@ -156,6 +160,8 @@ async function runTest() {
   testError.value = null;
   testResults.value = [];
   testExecuted.value = true;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
   
   try {
     // Parse input data
@@ -164,12 +170,25 @@ async function runTest() {
       data = JSON.parse(inputData.value);
     } catch (e) {
       testError.value = `Invalid JSON: ${e.message}`;
+      
+      // Try to extract line number from JSON parse error
+      const match = e.message.match(/line (\d+)/i) || e.message.match(/position (\d+)/i);
+      if (match) {
+        jsonErrorLine.value = parseInt(match[1]);
+        jsonError.value = e.message;
+      }
+      
       testLoading.value = false;
       return;
     }
     
-    // Call API
-    const response = await hubApi.testRuleset(props.rulesetId, data);
+    // Call API - use content-based test if content is provided, otherwise use ID-based test
+    let response;
+    if (props.rulesetContent) {
+      response = await hubApi.testRulesetContent(props.rulesetContent, data);
+    } else {
+      response = await hubApi.testRuleset(props.rulesetId, data);
+    }
     
     if (response.success) {
       testResults.value = response.results || [];
@@ -178,10 +197,29 @@ async function runTest() {
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test ruleset';
-    console.error('Test ruleset error:', e);
   } finally {
     testLoading.value = false;
   }
+}
+
+function formatTestResult() {
+  if (testError.value) {
+    return testError.value;
+  } else if (testResults.value.length === 0) {
+    return 'No results yet. Click "Run Test" to execute the ruleset.';
+  } else {
+    return testResults.value.map(result => JSON.stringify(result, null, 2)).join('\n');
+  }
+}
+
+function resetState() {
+  // Reset state when opening modal
+  inputData.value = '{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}';
+  testResults.value = [];
+  testError.value = null;
+  testExecuted.value = false;
+  jsonError.value = null;
+  jsonErrorLine.value = null;
 }
 </script>
 

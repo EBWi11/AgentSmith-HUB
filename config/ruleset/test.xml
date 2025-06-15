@@ -25,4 +25,11 @@
             <node type="INCL" field="argv">8400</node>
         </checklist>
     </rule>
+
+    <rule id="reverse_shell_04" name="测试" author="test">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="REGEX" field="exe">will</node>
+        </checklist>
+    </rule>
 </root>

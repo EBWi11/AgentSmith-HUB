@@ -39,28 +39,36 @@ type ProjectConfig struct {
 	Path      string
 }
 
-// Project represents a data processing project with inputs, outputs, and rules
+// Project represents a project
 type Project struct {
-	// Basic info
-	Id     string
-	Status ProjectStatus
-	Config *ProjectConfig
+	Id     string        `json:"id"`
+	Status ProjectStatus `json:"status"`
+	Err    error         `json:"-"`
+
+	Config *ProjectConfig `json:"config"`
 
 	// Components
-	Inputs   map[string]*input.Input
-	Outputs  map[string]*output.Output
-	Rulesets map[string]*rules_engine.Ruleset
+	Inputs   map[string]*input.Input          `json:"-"`
+	Outputs  map[string]*output.Output        `json:"-"`
+	Rulesets map[string]*rules_engine.Ruleset `json:"-"`
 
-	MsgChannels []string
+	// Data flow
+	MsgChannels []string `json:"-"`
 
-	// Runtime
-	stopChan    chan struct{}
-	wg          sync.WaitGroup
-	errorChan   chan error
-	metrics     *ProjectMetrics
-	metricsStop chan struct{}
+	// Metrics
+	metrics     *ProjectMetrics `json:"-"`
+	metricsStop chan struct{}   `json:"-"`
 
-	Err error
+	// For graceful shutdown
+	stopChan chan struct{}  `json:"-"`
+	wg       sync.WaitGroup `json:"-"`
+
+	// Dependencies tracking
+	DependsOn      []string `json:"-"` // Projects this project depends on
+	DependedBy     []string `json:"-"` // Projects that depend on this project
+	SharedInputs   []string `json:"-"` // Inputs shared with other projects
+	SharedOutputs  []string `json:"-"` // Outputs shared with other projects
+	SharedRulesets []string `json:"-"` // Rulesets shared with other projects
 }
 
 // ProjectMetrics holds runtime metrics for the project

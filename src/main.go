@@ -188,7 +188,7 @@ func LoadComponents() {
 			project.GlobalProject.OutputsNew[id] = string(data)
 		}
 
-		rulesetListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "ruleset"), ".xml,new")
+		rulesetListNew, err := traverseComponents(path.Join(common.Config.ConfigRoot, "ruleset"), ".xml.new")
 		if err != nil {
 			logger.Error("travers ruleset new error", "error", err)
 		}
@@ -202,7 +202,34 @@ func LoadComponents() {
 			project.GlobalProject.RulesetsNew[id] = string(data)
 		}
 	} else {
-		for name, raw := range common.AllPluginsRawConfig {
+		// For follower nodes, read from global config maps with read lock protection
+		common.GlobalMu.RLock()
+
+		// Create local copies to avoid holding lock during component creation
+		pluginsConfig := make(map[string]string)
+		for k, v := range common.AllPluginsRawConfig {
+			pluginsConfig[k] = v
+		}
+
+		inputsConfig := make(map[string]string)
+		for k, v := range common.AllInputsRawConfig {
+			inputsConfig[k] = v
+		}
+
+		outputsConfig := make(map[string]string)
+		for k, v := range common.AllOutputsRawConfig {
+			outputsConfig[k] = v
+		}
+
+		rulesetsConfig := make(map[string]string)
+		for k, v := range common.AllRulesetsRawConfig {
+			rulesetsConfig[k] = v
+		}
+
+		common.GlobalMu.RUnlock()
+
+		// Create components using local copies
+		for name, raw := range pluginsConfig {
 			err := plugin.NewPlugin("", raw, name, plugin.YAEGI_PLUGIN)
 			if err != nil {
 				logger.Error("failed to new plugin", "error", err)
@@ -210,7 +237,7 @@ func LoadComponents() {
 			}
 		}
 
-		for id, raw := range common.AllInputsRawConfig {
+		for id, raw := range inputsConfig {
 			tmp, err := input.NewInput("", raw, id)
 			if err != nil {
 				logger.Error("failed to create input instance", "error", err, "id", id)
@@ -219,7 +246,7 @@ func LoadComponents() {
 			project.GlobalProject.Inputs[id] = tmp
 		}
 
-		for id, raw := range common.AllOutputsRawConfig {
+		for id, raw := range outputsConfig {
 			tmp, err := output.NewOutput("", raw, id)
 			if err != nil {
 				logger.Error("failed to create output instance", "error", err, "id", id)
@@ -228,7 +255,7 @@ func LoadComponents() {
 			project.GlobalProject.Outputs[id] = tmp
 		}
 
-		for id, raw := range common.AllRulesetsRawConfig {
+		for id, raw := range rulesetsConfig {
 			tmp, err := rules_engine.NewRuleset("", raw, id)
 			if err != nil {
 				logger.Error("failed to create ruleset instance", "error", err, "id", id)
@@ -273,10 +300,22 @@ func LoadProject() {
 				logger.Error("failed to read component", "error", err, "path", projectPath)
 				continue
 			}
-			plugin.PluginsNew[id] = string(data)
+			project.GlobalProject.ProjectsNew[id] = string(data)
 		}
 	} else {
-		for id, raw := range common.AllProjectRawConfig {
+		// For follower nodes, read from global config map with read lock protection
+		common.GlobalMu.RLock()
+
+		// Create local copy to avoid holding lock during project creation
+		projectsConfig := make(map[string]string)
+		for k, v := range common.AllProjectRawConfig {
+			projectsConfig[k] = v
+		}
+
+		common.GlobalMu.RUnlock()
+
+		// Create projects using local copy
+		for id, raw := range projectsConfig {
 			p, err := project.NewProject("", raw, id)
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_id", id)
@@ -312,7 +351,11 @@ func LoadLeaderConfigAndComponents() error {
 	}
 
 	common.Config.Redis = leaderConfig["redis"]
-	common.Config.Redis = leaderConfig["redis_password"]
+	common.Config.RedisPassword = leaderConfig["redis_password"]
+
+	// Use write lock to safely initialize global config maps
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
 
 	plugins, err := api.GetAllComponents("plugin")
 	if err != nil {
@@ -367,12 +410,23 @@ func main() {
 	// init global config
 	common.Config = &common.HubConfig{}
 
-	configRoot := flag.String("config_root", "", "agent smith hub config path, only leader need")
-	leaderAddr := flag.String("leader", "", "hub cluster leader address")
+	// Create a new FlagSet to avoid inheriting testing flags
+	fs := flag.NewFlagSet("agentsmith-hub", flag.ExitOnError)
 
-	flag.Parse()
+	// Define our application flags
+	configRoot := fs.String("config_root", "", "agent smith hub config path, only leader need")
+	leaderAddr := fs.String("leader", "", "hub cluster leader address")
 
-	logger.Info("hub_starting", "config_root", *configRoot, "leader", leaderAddr)
+	// Custom usage function
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		fs.PrintDefaults()
+	}
+
+	// Parse command line flags
+	_ = fs.Parse(os.Args[1:])
+
+	logger.Info("hub_starting", "config_root", *configRoot, "leader", *leaderAddr)
 
 	if (*configRoot != "" && *leaderAddr != "") || (*configRoot == "" && *leaderAddr == "") {
 		fmt.Println("If the instance is a Leader, only 'config_root' needs to be given; if it is a Follower, only 'leader' needs to be given")
