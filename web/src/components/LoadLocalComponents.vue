@@ -83,7 +83,7 @@
               {{ change.verifyError }}
             </div>
             
-            <div class="bg-white" style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
+            <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
               <!-- New local file: show full content -->
               <div v-if="change.has_local && !change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
                 <MonacoEditor 

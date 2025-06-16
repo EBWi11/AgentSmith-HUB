@@ -88,7 +88,7 @@
             {{ change.verifyError }}
           </div>
           
-          <div class="bg-white" style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
+          <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
             <!-- New file: display content directly -->
             <div v-if="change.is_new" style="height: 400px; margin: 0; padding: 0; border: none;">
               <MonacoEditor 

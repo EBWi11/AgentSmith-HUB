@@ -49,28 +49,63 @@
   </div>
 
   <!-- Edit Mode -->
-  <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col">
-    <!-- Ruleset validation status -->
-    <div v-if="isRuleset && validationResult.errors.length > 0" class="validation-errors p-3 mb-3 bg-red-50 border-l-4 border-red-500 text-red-700">
-      <h3 class="font-bold text-sm">Validation Errors</h3>
-      <ul class="mt-1 text-xs">
-        <li v-for="(error, index) in validationResult.errors" :key="index" class="mb-1">
-          <span class="font-semibold">Line {{ error.line }}:</span> 
-          {{ error.message }}
-          <span v-if="error.detail" class="block ml-4 text-red-600 italic">{{ error.detail }}</span>
-        </li>
-      </ul>
+  <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col relative">
+    <!-- Floating Validation Status -->
+    <div v-if="isRuleset && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
+         class="absolute top-4 right-4 z-50 max-w-md bg-white border border-gray-200 rounded-lg shadow-lg">
+      <!-- Validation Errors -->
+      <div v-if="validationResult.errors.length > 0" class="validation-errors p-3 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-t-lg">
+        <div class="flex justify-between items-start mb-2">
+          <h3 class="font-bold text-sm">Validation Errors</h3>
+          <button @click="showValidationPanel = false" class="text-red-400 hover:text-red-600 ml-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <ul class="text-xs">
+          <li v-for="(error, index) in validationResult.errors" :key="index" class="mb-1">
+            <span class="font-semibold">Line {{ error.line }}:</span> 
+            {{ error.message }}
+            <span v-if="error.detail" class="block ml-4 text-red-600 italic">{{ error.detail }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Validation Warnings -->
+      <div v-if="validationResult.warnings.length > 0" 
+           class="validation-warnings p-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-700"
+           :class="{ 'rounded-t-lg': validationResult.errors.length === 0, 'rounded-b-lg': true }">
+        <div v-if="validationResult.errors.length === 0" class="flex justify-between items-start mb-2">
+          <h3 class="font-bold text-sm">Validation Warnings</h3>
+          <button @click="showValidationPanel = false" class="text-yellow-400 hover:text-yellow-600 ml-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <h3 v-else class="font-bold text-sm mb-2">Validation Warnings</h3>
+        <ul class="text-xs">
+          <li v-for="(warning, index) in validationResult.warnings" :key="index" class="mb-1">
+            <span class="font-semibold">Line {{ warning.line }}:</span> 
+            {{ warning.message }}
+            <span v-if="warning.detail" class="block ml-4 text-yellow-600 italic">{{ warning.detail }}</span>
+          </li>
+        </ul>
+      </div>
     </div>
 
-    <div v-if="isRuleset && validationResult.warnings.length > 0" class="validation-warnings p-3 mb-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-700">
-      <h3 class="font-bold text-sm">Validation Warnings</h3>
-      <ul class="mt-1 text-xs">
-        <li v-for="(warning, index) in validationResult.warnings" :key="index" class="mb-1">
-          <span class="font-semibold">Line {{ warning.line }}:</span> 
-          {{ warning.message }}
-          <span v-if="warning.detail" class="block ml-4 text-yellow-600 italic">{{ warning.detail }}</span>
-        </li>
-      </ul>
+    <!-- Validation Status Indicator -->
+    <div v-if="isRuleset && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && !showValidationPanel"
+         class="absolute top-4 right-4 z-50">
+      <button @click="showValidationPanel = true" 
+              class="flex items-center space-x-1 px-2 py-1 rounded-full text-white text-xs shadow-lg transition-all hover:scale-105"
+              :class="validationResult.errors.length > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500 hover:bg-yellow-600'">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span>{{ validationResult.errors.length > 0 ? `${validationResult.errors.length} Error${validationResult.errors.length > 1 ? 's' : ''}` : `${validationResult.warnings.length} Warning${validationResult.warnings.length > 1 ? 's' : ''}` }}</span>
+      </button>
     </div>
     
     <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveEdit(content)" />
@@ -374,6 +409,7 @@ const validationResult = ref({
   warnings: []
 })
 const verifyLoading = ref(false)
+const showValidationPanel = ref(true) // Show validation panel by default when there are errors/warnings
 const isRuleset = computed(() => {
   return props.item?.type === 'rulesets'
 })
@@ -565,8 +601,12 @@ async function fetchDetail(item, forEdit = false) {
       if (!validationResult.value.isValid) {
         // 提取错误行号
         errorLines.value = validationResult.value.errors.map(err => extractLineNumber(err)).filter(Boolean);
+        // Show validation panel when there are errors/warnings
+        showValidationPanel.value = true;
       } else {
         errorLines.value = [];
+        // Hide validation panel when there are no errors/warnings
+        showValidationPanel.value = false;
       }
     }
     
@@ -591,6 +631,14 @@ const validateRuleset = () => {
     
     // Update error line highlights
     errorLines.value = result.errors.map(error => error.line)
+    
+    // Show/hide validation panel based on results
+    if (result.errors.length > 0 || result.warnings.length > 0) {
+      showValidationPanel.value = true;
+    } else {
+      showValidationPanel.value = false;
+    }
+    
     return result.isValid
   }
   return true
