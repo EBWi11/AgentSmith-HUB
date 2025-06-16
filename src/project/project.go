@@ -22,10 +22,10 @@ func init() {
 	GlobalProject.Outputs = make(map[string]*output.Output)
 	GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
 
-	GlobalProject.ProjectsNew = make(map[string]string, 0)
-	GlobalProject.InputsNew = make(map[string]string, 0)
-	GlobalProject.OutputsNew = make(map[string]string, 0)
-	GlobalProject.RulesetsNew = make(map[string]string, 0)
+	GlobalProject.ProjectsNew = make(map[string]string)
+	GlobalProject.InputsNew = make(map[string]string)
+	GlobalProject.OutputsNew = make(map[string]string)
+	GlobalProject.RulesetsNew = make(map[string]string)
 
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
 	GlobalProject.msgChansCounter = make(map[string]int)
