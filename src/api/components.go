@@ -510,11 +510,11 @@ func getOutputs(c echo.Context) error {
 	p := project.GlobalProject
 	outputs := make([]map[string]interface{}, 0)
 
-	// 创建一个map来跟踪已处理的ID
+	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
 
 	for _, out := range p.Outputs {
-		// 检查是否有临时文件
+		// Check if there is a temporary file
 		_, hasTemp := p.OutputsNew[out.Id]
 
 		outputs = append(outputs, map[string]interface{}{
@@ -524,7 +524,7 @@ func getOutputs(c echo.Context) error {
 		processedIDs[out.Id] = true
 	}
 
-	// 添加只存在于临时文件中的组件
+	// Add components that only exist in temporary files
 	for id := range p.OutputsNew {
 		if !processedIDs[id] {
 			outputs = append(outputs, map[string]interface{}{
@@ -655,8 +655,8 @@ func deleteComponent(componentType string, c echo.Context) error {
 	}
 
 	// Check file existence without lock (file system operations are atomic)
-	tempPath, tempExists := GetComponentPath(componentType, id, true)         // .new 文件
-	componentPath, formalExists := GetComponentPath(componentType, id, false) // 正式文件
+	tempPath, tempExists := GetComponentPath(componentType, id, true)         // .new file
+	componentPath, formalExists := GetComponentPath(componentType, id, false) // formal file
 
 	// Lock for all memory operations
 	common.GlobalMu.Lock()

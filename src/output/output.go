@@ -98,10 +98,10 @@ func Verify(path string, raw string) error {
 			return err
 		}
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			// 从错误信息中提取行号
+			// Extract line number from error message
 			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
 				errMsg := yamlErr.Errors[0]
-				// 尝试提取行号
+				// Try to extract line number
 				lineInfo := ""
 				for _, line := range yamlErr.Errors {
 					if strings.Contains(line, "line") {
@@ -115,10 +115,10 @@ func Verify(path string, raw string) error {
 		}
 	} else {
 		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-			// 从错误信息中提取行号
+			// Extract line number from error message
 			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
 				errMsg := yamlErr.Errors[0]
-				// 尝试提取行号
+				// Try to extract line number
 				lineInfo := ""
 				for _, line := range yamlErr.Errors {
 					if strings.Contains(line, "line") {
@@ -132,12 +132,12 @@ func Verify(path string, raw string) error {
 		}
 	}
 
-	// 验证必要字段
+	// Validate required fields
 	if cfg.Type == "" {
 		return fmt.Errorf("missing required field 'type' (line: unknown)")
 	}
 
-	// 根据类型验证特定字段
+	// Validate type-specific fields
 	switch cfg.Type {
 	case OutputTypeKafka:
 		if cfg.Kafka == nil {

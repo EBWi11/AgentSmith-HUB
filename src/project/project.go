@@ -30,11 +30,11 @@ func init() {
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
 	GlobalProject.msgChansCounter = make(map[string]int)
 
-	// 注册一个延迟函数，在所有项目加载完成后分析依赖关系
+	// Register a delayed function to analyze dependencies after all projects are loaded
 	go func() {
-		// 等待一段时间，确保所有项目都已加载完成
+		// Wait for a while to ensure all projects are loaded
 		time.Sleep(5 * time.Second)
-		// 分析项目依赖关系
+		// Analyze project dependencies
 		AnalyzeProjectDependencies()
 	}()
 }
@@ -58,10 +58,10 @@ func Verify(path string, raw string) error {
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		// 从错误信息中提取行号
+		// Extract line number from error message
 		if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
 			errMsg := yamlErr.Errors[0]
-			// 尝试提取行号
+			// Try to extract line number
 			lineInfo := ""
 			for _, line := range yamlErr.Errors {
 				if strings.Contains(line, "line") {
@@ -216,9 +216,9 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 // rulesetNames: List of ruleset IDs
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
 	for _, v := range inputNames {
-		// 检查正式组件是否存在
+		// Check if formal component exists
 		if _, ok := GlobalProject.Inputs[v]; !ok {
-			// 检查是否为临时组件，临时组件不应该被引用
+			// Check if it's a temporary component, temporary components should not be referenced
 			if _, tempExists := GlobalProject.InputsNew[v]; tempExists {
 				return fmt.Errorf("cannot reference temporary input component '%s', please save it first", v)
 			}
