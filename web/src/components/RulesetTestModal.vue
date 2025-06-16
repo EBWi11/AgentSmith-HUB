@@ -58,7 +58,10 @@
               <div v-for="(result, index) in testResults" :key="index" class="mb-4">
                 <div class="bg-white border border-gray-200 rounded-md p-3">
                   <div class="mb-2 flex justify-between">
-                    <span class="text-sm font-medium text-gray-700">Result {{ index + 1 }}</span>
+                    <span class="text-sm font-medium text-gray-700">
+                      Result {{ index + 1 }}
+                      <span v-if="result._input_index" class="text-gray-500">(From Input {{ result._input_index }})</span>
+                    </span>
                     <span v-if="result._HUB_HIT_RULE_ID" class="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
                       Rule: {{ result._HUB_HIT_RULE_ID }}
                     </span>
@@ -105,7 +108,7 @@ const emit = defineEmits(['close']);
 
 // Reactive state
 const showModal = ref(false);
-const inputData = ref('{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}');
+const inputData = ref('[\n  {\n    "data": "test data 1",\n    "data_type": "59",\n    "exe": "/bin/bash",\n    "pid": "1234",\n    "dip": "192.168.1.1",\n    "sip": "192.168.1.2",\n    "dport": "80",\n    "sport": "12345"\n  },\n  {\n    "data": "test data 2",\n    "data_type": "60",\n    "exe": "/bin/sh",\n    "pid": "5678",\n    "dip": "192.168.1.3",\n    "sip": "192.168.1.4",\n    "dport": "443",\n    "sport": "54321"\n  }\n]');
 const testResults = ref([]);
 const testLoading = ref(false);
 const testError = ref(null);
@@ -182,18 +185,53 @@ async function runTest() {
       return;
     }
     
-    // Call API - use content-based test if content is provided, otherwise use ID-based test
-    let response;
-    if (props.rulesetContent) {
-      response = await hubApi.testRulesetContent(props.rulesetContent, data);
+    // Check if data is array or single object
+    if (Array.isArray(data)) {
+      // Process array of JSON objects
+      let allResults = [];
+      
+      for (let i = 0; i < data.length; i++) {
+        try {
+          let response;
+          if (props.rulesetContent) {
+            response = await hubApi.testRulesetContent(props.rulesetContent, data[i]);
+          } else {
+            response = await hubApi.testRuleset(props.rulesetId, data[i]);
+          }
+          
+          if (response.success) {
+            // Add results from this item with index information
+            const itemResults = (response.results || []).map(result => ({
+              ...result,
+              _input_index: i + 1,
+              _input_data: data[i]
+            }));
+            allResults.push(...itemResults);
+          } else {
+            testError.value = `Error processing item ${i + 1}: ${response.error || 'Unknown error'}`;
+            return;
+          }
+        } catch (e) {
+          testError.value = `Error processing item ${i + 1}: ${e.message}`;
+          return;
+        }
+      }
+      
+      testResults.value = allResults;
     } else {
-      response = await hubApi.testRuleset(props.rulesetId, data);
-    }
-    
-    if (response.success) {
-      testResults.value = response.results || [];
-    } else {
-      testError.value = response.error || 'Unknown error occurred';
+      // Process single JSON object (existing logic)
+      let response;
+      if (props.rulesetContent) {
+        response = await hubApi.testRulesetContent(props.rulesetContent, data);
+      } else {
+        response = await hubApi.testRuleset(props.rulesetId, data);
+      }
+      
+      if (response.success) {
+        testResults.value = response.results || [];
+      } else {
+        testError.value = response.error || 'Unknown error occurred';
+      }
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test ruleset';
@@ -214,7 +252,7 @@ function formatTestResult() {
 
 function resetState() {
   // Reset state when opening modal
-  inputData.value = '{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}';
+  inputData.value = '[\n  {\n    "data": "test data 1",\n    "data_type": "59",\n    "exe": "/bin/bash",\n    "pid": "1234",\n    "dip": "192.168.1.1",\n    "sip": "192.168.1.2",\n    "dport": "80",\n    "sport": "12345"\n  },\n  {\n    "data": "test data 2",\n    "data_type": "60",\n    "exe": "/bin/sh",\n    "pid": "5678",\n    "dip": "192.168.1.3",\n    "sip": "192.168.1.4",\n    "dport": "443",\n    "sport": "54321"\n  }\n]';
   testResults.value = [];
   testError.value = null;
   testExecuted.value = false;

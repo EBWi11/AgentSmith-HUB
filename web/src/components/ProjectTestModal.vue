@@ -227,7 +227,7 @@ const emit = defineEmits(['close']);
 
 // Reactive state
 const showModal = ref(false);
-const inputData = ref('{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}');
+const inputData = ref('[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]');
 const testResults = ref({});
 const testLoading = ref(false);
 const testError = ref(null);
@@ -327,20 +327,77 @@ async function runTest() {
       return;
     }
     
-    // Call API
-    const response = await hubApi.testProject(props.projectId, selectedInputNode.value, data);
-    
-    if (response.success) {
-      testResults.value = response;
-      outputResults.value = response.outputs || {};
-      projectStructure.value = response.structure || null;
+    // Check if data is array or single object
+    if (Array.isArray(data)) {
+      // Process array of JSON objects
+      let allOutputResults = {};
+      let totalProcessed = 0;
+      
+      for (let i = 0; i < data.length; i++) {
+        try {
+          const response = await hubApi.testProject(props.projectId, selectedInputNode.value, data[i]);
+          if (response.success) {
+            totalProcessed++;
+            
+            // Merge output results
+            if (response.outputs) {
+              Object.keys(response.outputs).forEach(outputId => {
+                if (!allOutputResults[outputId]) {
+                  allOutputResults[outputId] = {
+                    total: 0,
+                    items: []
+                  };
+                }
+                allOutputResults[outputId].total += response.outputs[outputId].total || 0;
+                if (response.outputs[outputId].items) {
+                  allOutputResults[outputId].items.push(...response.outputs[outputId].items);
+                }
+              });
+            }
+            
+            // Set structure from first successful response
+            if (!projectStructure.value && response.structure) {
+              projectStructure.value = response.structure;
+            }
+          } else {
+            testError.value = `Error processing item ${i + 1}: ${response.error || 'Unknown error'}`;
+            return;
+          }
+        } catch (e) {
+          testError.value = `Error processing item ${i + 1}: ${e.message}`;
+          return;
+        }
+      }
+      
+      // Set combined results
+      testResults.value = {
+        success: true,
+        arrayProcessed: true,
+        itemCount: data.length,
+        totalProcessed: totalProcessed
+      };
+      outputResults.value = allOutputResults;
       
       // If we have a structure but no input nodes, extract them
       if (projectStructure.value && inputNodes.value.length === 0) {
         extractInputNodes();
       }
     } else {
-      testError.value = response.error || 'Unknown error occurred';
+      // Process single JSON object (existing logic)
+      const response = await hubApi.testProject(props.projectId, selectedInputNode.value, data);
+      
+      if (response.success) {
+        testResults.value = response;
+        outputResults.value = response.outputs || {};
+        projectStructure.value = response.structure || null;
+        
+        // If we have a structure but no input nodes, extract them
+        if (projectStructure.value && inputNodes.value.length === 0) {
+          extractInputNodes();
+        }
+      } else {
+        testError.value = response.error || 'Unknown error occurred';
+      }
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test project';

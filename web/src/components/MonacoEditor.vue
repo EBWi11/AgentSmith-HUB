@@ -34,6 +34,8 @@ const logicTypes = computed(() => store.getters.getLogicTypes);
 const countTypes = computed(() => store.getters.getCountTypes);
 const rootTypes = computed(() => store.getters.getRootTypes);
 const commonFields = computed(() => store.getters.getCommonFields);
+const inputTypes = computed(() => store.getters.getInputTypes || []);
+const outputTypes = computed(() => store.getters.getOutputTypes || []);
 
 // 获取组件列表
 const inputComponents = computed(() => store.getters.getComponents('inputs'));
@@ -48,6 +50,9 @@ onMounted(() => {
   store.dispatch('fetchComponents', 'outputs');
   store.dispatch('fetchComponents', 'rulesets');
   store.dispatch('fetchComponents', 'plugins');
+  // 获取支持的类型列表
+  store.dispatch('fetchInputTypes');
+  store.dispatch('fetchOutputTypes');
   
   // 设置Monaco主题
   setupMonacoTheme();
@@ -1227,12 +1232,24 @@ function getInputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    const inputTypes = [
-      { value: 'kafka', description: 'Apache Kafka input source' },
-      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS input source' }
-    ];
+    // 优先使用store中的动态类型数据
+    let availableInputTypes = [];
     
-    inputTypes.forEach(type => {
+    if (inputTypes.value && inputTypes.value.length > 0) {
+      // 从store获取动态类型
+      availableInputTypes = inputTypes.value.map(type => ({
+        value: type.name || type.value || type,
+        description: type.description || `${type.name || type.value || type} input source`
+      }));
+    } else {
+      // 如果store中没有数据，使用默认类型
+      availableInputTypes = [
+        { value: 'kafka', description: 'Apache Kafka input source' },
+        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS input source' }
+      ];
+    }
+    
+    availableInputTypes.forEach(type => {
       if (!suggestions.some(s => s.label === type.value)) {
         suggestions.push({
           label: type.value,
@@ -1347,7 +1364,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka input configuration section',
-          insertText: 'kafka:\n  ${1}',
+          insertText: 'kafka\nkafka:\n  brokers:\n    - :9092\n  topic: test-topic\n  group: test',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1358,7 +1375,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: 'aliyun_sls',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Aliyun SLS input configuration section',
-          insertText: 'aliyun_sls:\n  ${1}',
+          insertText: 'aliyun_sls\naliyun_sls:\n  endpoint: ""\n  access_key_id: ""\n  access_key_secret: ""\n  project: ""\n  logstore: ""\n  consumer_group_name: ""\n  consumer_name: ""\n  cursor_position: ""\n  query: ""',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1459,10 +1476,10 @@ function getDefaultInputCompletions(fullText, context, range) {
           'type: kafka',
           'kafka:',
           '  brokers:',
-          '    - "${1:broker-host}:${2:9092}"',
-          '  topic: "${3:topic-name}"',
-          '  group: "${4:consumer-group}"',
-          '  compression: "${5|none,gzip,snappy,lz4,zstd|}"'
+          '    - ""',
+          '  topic: ""',
+          '  group: ""',
+          '  compression: ""'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1474,13 +1491,13 @@ function getDefaultInputCompletions(fullText, context, range) {
         insertText: [
           'type: aliyun_sls',
           'aliyun_sls:',
-          '  endpoint: "${1:region}.log.aliyuncs.com"',
-          '  access_key_id: "${2:your-access-key-id}"',
-          '  access_key_secret: "${3:your-access-key-secret}"',
-          '  project: "${4:your-project}"',
-          '  logstore: "${5:your-logstore}"',
-          '  consumer_group_name: "${6:consumer-group}"',
-          '  consumer_name: "${7:consumer-name}"'
+          '  endpoint: ""',
+          '  access_key_id: ""',
+          '  access_key_secret: ""',
+          '  project: ""',
+          '  logstore: ""',
+          '  consumer_group_name: ""',
+          '  consumer_name: ""'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1543,14 +1560,26 @@ function getOutputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    const outputTypes = [
-      { value: 'kafka', description: 'Apache Kafka output destination' },
-      { value: 'elasticsearch', description: 'Elasticsearch output destination' },
-      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
-      { value: 'print', description: 'Console print output for debugging' }
-    ];
+    // 优先使用store中的动态类型数据
+    let availableOutputTypes = [];
     
-    outputTypes.forEach(type => {
+    if (outputTypes.value && outputTypes.value.length > 0) {
+      // 从store获取动态类型
+      availableOutputTypes = outputTypes.value.map(type => ({
+        value: type.name || type.value || type,
+        description: type.description || `${type.name || type.value || type} output destination`
+      }));
+    } else {
+      // 如果store中没有数据，使用默认类型
+      availableOutputTypes = [
+        { value: 'kafka', description: 'Apache Kafka output destination' },
+        { value: 'elasticsearch', description: 'Elasticsearch output destination' },
+        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
+        { value: 'print', description: 'Console print output for debugging' }
+      ];
+    }
+    
+    availableOutputTypes.forEach(type => {
       if (!suggestions.some(s => s.label === type.value)) {
         suggestions.push({
           label: type.value,
@@ -1687,7 +1716,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka output configuration section',
-          insertText: 'kafka:\n  ${1}',
+          insertText: 'kafka:\n  brokers:\n    - \n  topic: \n  group: ',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1821,10 +1850,10 @@ function getDefaultOutputCompletions(fullText, context, range) {
           'name: "${1:es-output}"',
           'elasticsearch:',
           '  hosts:',
-          '    - "${2|http,https|}://${3:elasticsearch-host}:${4:9200}"',
-          '  index: "${5:index-name}"',
-          '  batch_size: ${6:1000}',
-          '  flush_dur: "${7:5s}"'
+          '    - ""',
+          '  index: ""',
+          '  batch_size: ',
+          '  flush_dur: ""'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1835,13 +1864,13 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Aliyun SLS output configuration',
         insertText: [
           'type: aliyun_sls',
-          'name: "${1:sls-output}"',
+          'name: ""',
           'aliyun_sls:',
-          '  endpoint: "${2:region}.log.aliyuncs.com"',
-          '  access_key_id: "${3:your-access-key-id}"',
-          '  access_key_secret: "${4:your-access-key-secret}"',
-          '  project: "${5:your-project}"',
-          '  logstore: "${6:your-logstore}"'
+          '  endpoint: ""',
+          '  access_key_id: ""',
+          '  access_key_secret: ""',
+          '  project: ""',
+          '  logstore: ""'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1851,8 +1880,7 @@ function getDefaultOutputCompletions(fullText, context, range) {
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Simple print output for debugging',
         insertText: [
-          'type: print',
-          'name: "${1:debug-output}"'
+          'type: print'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -2958,14 +2986,42 @@ function getBaseYamlValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    const componentTypes = [
-      { value: 'kafka', description: 'Apache Kafka component' },
-      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS component' },
-      { value: 'elasticsearch', description: 'Elasticsearch component' },
-      { value: 'print', description: 'Console print component' }
-    ];
+    // 合并input和output类型，提供完整的类型选择
+    let availableTypes = [];
     
-    componentTypes.forEach(type => {
+    // 添加input类型
+    if (inputTypes.value && inputTypes.value.length > 0) {
+      availableTypes = availableTypes.concat(inputTypes.value.map(type => ({
+        value: type.name || type.value || type,
+        description: type.description || `${type.name || type.value || type} input component`
+      })));
+    }
+    
+    // 添加output类型
+    if (outputTypes.value && outputTypes.value.length > 0) {
+      const outputTypeList = outputTypes.value.map(type => ({
+        value: type.name || type.value || type,
+        description: type.description || `${type.name || type.value || type} output component`
+      }));
+      // 避免重复类型
+      outputTypeList.forEach(outputType => {
+        if (!availableTypes.some(t => t.value === outputType.value)) {
+          availableTypes.push(outputType);
+        }
+      });
+    }
+    
+    // 如果store中没有数据，使用默认类型
+    if (availableTypes.length === 0) {
+      availableTypes = [
+        { value: 'kafka', description: 'Apache Kafka component' },
+        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS component' },
+        { value: 'elasticsearch', description: 'Elasticsearch component' },
+        { value: 'print', description: 'Console print component' }
+      ];
+    }
+    
+    availableTypes.forEach(type => {
       if (!suggestions.some(s => s.label === type.value)) {
         suggestions.push({
           label: type.value,
@@ -2992,7 +3048,7 @@ function getBaseYamlKeyCompletions(context, range, fullText) {
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Component type specification',
-        insertText: 'type: ${1|kafka,aliyun_sls,elasticsearch,print|}',
+        insertText: 'type: ',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -3003,7 +3059,7 @@ function getBaseYamlKeyCompletions(context, range, fullText) {
         label: 'name',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Component name identifier',
-        insertText: 'name: "${1:component-name}"',
+        insertText: 'name: ""',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });

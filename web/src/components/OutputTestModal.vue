@@ -61,14 +61,14 @@
               
               <div class="bg-white border border-gray-200 rounded-md p-4">
                 <h5 class="font-medium text-gray-700 mb-2">Metrics</h5>
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4">
                   <div class="bg-gray-50 p-3 rounded">
                     <div class="text-xs text-gray-500">Total Messages</div>
                     <div class="text-xl font-semibold">{{ testResults.metrics?.produceTotal || 0 }}</div>
                   </div>
-                  <div class="bg-gray-50 p-3 rounded">
-                    <div class="text-xs text-gray-500">Messages/Second</div>
-                    <div class="text-xl font-semibold">{{ testResults.metrics?.produceQPS || 0 }}</div>
+                  <div v-if="testResults.arrayProcessed" class="bg-blue-50 p-3 rounded">
+                    <div class="text-xs text-blue-600">Items Processed</div>
+                    <div class="text-xl font-semibold text-blue-700">{{ testResults.itemCount || 0 }}</div>
                   </div>
                 </div>
               </div>
@@ -123,7 +123,7 @@ const emit = defineEmits(['close']);
 
 // Reactive state
 const showModal = ref(false);
-const inputData = ref('{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}');
+const inputData = ref('[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]');
 const testResults = ref({});
 const testLoading = ref(false);
 const testError = ref(null);
@@ -170,7 +170,7 @@ function handleEscKey(event) {
 
 function resetState() {
   // Reset state when opening modal
-  inputData.value = '{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}';
+  inputData.value = '[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]';
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
@@ -210,13 +210,48 @@ async function runTest() {
       return;
     }
     
-    // Call API
-    const response = await hubApi.testOutput(props.outputId, data);
+    // Check if data is array or single object
+    let totalMessages = 0;
+    let allResults = [];
     
-    if (response.success) {
-      testResults.value = response;
+    if (Array.isArray(data)) {
+      // Process array of JSON objects
+      for (let i = 0; i < data.length; i++) {
+        try {
+          const response = await hubApi.testOutput(props.outputId, data[i]);
+          if (response.success) {
+            allResults.push(response);
+            totalMessages += response.metrics?.produceTotal || 0;
+          } else {
+            testError.value = `Error processing item ${i + 1}: ${response.error || 'Unknown error'}`;
+            return;
+          }
+        } catch (e) {
+          testError.value = `Error processing item ${i + 1}: ${e.message}`;
+          return;
+        }
+      }
+      
+      // Combine results for array processing
+      testResults.value = {
+        success: true,
+        outputType: allResults[0]?.outputType || 'Unknown',
+        metrics: {
+          produceTotal: totalMessages
+        },
+        isTemp: allResults[0]?.isTemp || false,
+        arrayProcessed: true,
+        itemCount: data.length
+      };
     } else {
-      testError.value = response.error || 'Unknown error occurred';
+      // Process single JSON object (existing logic)
+      const response = await hubApi.testOutput(props.outputId, data);
+      
+      if (response.success) {
+        testResults.value = response;
+      } else {
+        testError.value = response.error || 'Unknown error occurred';
+      }
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test output';

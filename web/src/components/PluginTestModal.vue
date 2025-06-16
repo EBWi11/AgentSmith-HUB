@@ -95,7 +95,7 @@ const emit = defineEmits(['close']);
 
 // Reactive state
 const showModal = ref(false);
-const inputData = ref('{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}');
+const inputData = ref('[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]');
 const testResults = ref({});
 const testLoading = ref(false);
 const testError = ref(null);
@@ -142,7 +142,7 @@ function handleEscKey(event) {
 
 function resetState() {
   // Reset state when opening modal
-  inputData.value = '{\n  "timestamp": 1698765432,\n  "event_type": "login",\n  "user_id": "user123",\n  "source_ip": "192.168.1.100",\n  "success": true,\n  "device_info": {\n    "os": "Windows",\n    "browser": "Chrome",\n    "version": "96.0.4664.110"\n  }\n}';
+  inputData.value = '[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]';
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
@@ -182,13 +182,45 @@ async function runTest() {
       return;
     }
     
-    // Call API
-    const response = await hubApi.testPlugin(props.pluginId, data);
-    
-    if (response.success) {
-      testResults.value = response.result || {};
+    // Check if data is array or single object
+    if (Array.isArray(data)) {
+      // Process array of JSON objects
+      let allResults = [];
+      
+      for (let i = 0; i < data.length; i++) {
+        try {
+          const response = await hubApi.testPlugin(props.pluginId, data[i]);
+          if (response.success) {
+            allResults.push({
+              index: i + 1,
+              input: data[i],
+              output: response.result || {}
+            });
+          } else {
+            testError.value = `Error processing item ${i + 1}: ${response.error || 'Unknown error'}`;
+            return;
+          }
+        } catch (e) {
+          testError.value = `Error processing item ${i + 1}: ${e.message}`;
+          return;
+        }
+      }
+      
+      // Set combined results
+      testResults.value = {
+        arrayProcessed: true,
+        itemCount: data.length,
+        results: allResults
+      };
     } else {
-      testError.value = response.error || 'Unknown error occurred';
+      // Process single JSON object (existing logic)
+      const response = await hubApi.testPlugin(props.pluginId, data);
+      
+      if (response.success) {
+        testResults.value = response.result || {};
+      } else {
+        testError.value = response.error || 'Unknown error occurred';
+      }
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test plugin';

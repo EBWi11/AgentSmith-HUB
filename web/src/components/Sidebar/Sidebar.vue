@@ -231,11 +231,24 @@
         <h3 class="text-lg font-medium text-gray-900 mb-4">Add {{ addType ? addType.slice(0, -1) : 'Component' }}</h3>
         <div class="mb-4">
           <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-          <input type="text" v-model="addName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Enter name" />
+          <input 
+            type="text" 
+            v-model="addName" 
+            @keyup.enter="confirmAddName"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" 
+            placeholder="Enter name" 
+            ref="addNameInput"
+          />
         </div>
         <div class="flex justify-end space-x-3">
           <button @click="closeAddModal" class="px-3 py-1 text-sm text-gray-500">Cancel</button>
-          <button @click="confirmAddName" class="px-3 py-1 bg-blue-500 text-white text-sm rounded">Create</button>
+          <button 
+            @click="confirmAddName" 
+            :disabled="!addName || !addName.trim()"
+            class="px-3 py-1 bg-blue-500 text-white text-sm rounded disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+          >
+            Create
+          </button>
         </div>
         <div v-if="addError" class="mt-3 text-sm text-red-500">{{ addError }}</div>
       </div>
@@ -622,7 +635,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, inject } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick } from 'vue'
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 
@@ -866,6 +879,15 @@ function openAddModal(type) {
   activeModal.value = 'add'
   
   addEscKeyListener()
+  
+  // Auto focus on input field when modal opens
+  nextTick(() => {
+    const inputElement = document.querySelector('input[ref="addNameInput"]') || 
+                        document.querySelector('.bg-white input[type="text"]')
+    if (inputElement) {
+      inputElement.focus()
+    }
+  })
 }
 
 function closeAddModal() {
