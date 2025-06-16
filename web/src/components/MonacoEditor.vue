@@ -636,23 +636,18 @@ function isEditorValid(editorInstance) {
   }
 }
 
-// Toggle diff view mode
-
-
-
-
 // Store current decorator IDs
 let currentDecorations = [];
 
-// 更新错误行高亮
+// Update error line highlighting
 function updateErrorLines(errorLines) {
   if (!isEditorValid(editor)) return;
   
   try {
-    // 创建新的装饰器
+    // Create a new decorator
     let newDecorations = [];
     
-    // 如果有错误行，创建装饰器
+    // If there are any error lines, create a decorator
     if (errorLines && errorLines.length > 0) {
       newDecorations = errorLines.map(error => {
         const lineNum = typeof error === 'object' ? error.line : parseInt(error);
@@ -672,14 +667,14 @@ function updateErrorLines(errorLines) {
       }).filter(Boolean);
     }
     
-    // 更新装饰器：清除旧的，应用新的
+    // Update decorator: Remove old and apply new
     currentDecorations = editor.deltaDecorations(currentDecorations, newDecorations);
   } catch (error) {
     console.warn('Failed to update error lines:', error);
   }
 }
 
-// 监听值变化
+// Monitoring value changes
 watch(() => props.value, (newValue) => {
   if (editor && editor.getModel() && newValue !== editor.getValue()) {
     try {
@@ -690,7 +685,7 @@ watch(() => props.value, (newValue) => {
   }
 });
 
-// 监听语言变化
+// Monitor language changes
 watch(() => props.language, (newLanguage) => {
   if (editor && editor.getModel()) {
     try {
@@ -704,7 +699,7 @@ watch(() => props.language, (newLanguage) => {
   }
 });
 
-// 监听只读状态变化
+// Monitor read-only status changes
 watch(() => props.readOnly, (newReadOnly) => {
   if (isEditorValid(editor)) {
     try {
@@ -715,20 +710,20 @@ watch(() => props.readOnly, (newReadOnly) => {
   }
 });
 
-// 监听错误行变化
+// Monitor error line changes
 watch(() => props.errorLines, (newErrorLines) => {
   updateErrorLines(newErrorLines);
 });
 
-// 监听diff模式变化
+// Monitor diff mode changes
 watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalValue]) => {
   if (newDiffMode !== (diffEditor !== null)) {
-    // 模式发生变化，需要重新创建编辑器
+    // The mode has changed and a new editor needs to be created
     disposeEditors();
     initializeEditor();
   } else if (isEditorValid(diffEditor) && newOriginalValue !== undefined) {
     try {
-      // 只更新原始模型的内容
+      // Only update the content of the original model
       const originalModel = diffEditor.getOriginalEditor().getModel();
       if (originalModel) {
         originalModel.setValue(newOriginalValue);
@@ -739,7 +734,7 @@ watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalVal
   }
 }, { deep: true });
 
-// 处理窗口大小变化
+// Handle window size changes
 function handleResize() {
   try {
     if (isEditorValid(editor)) {
@@ -753,14 +748,14 @@ function handleResize() {
   }
 }
 
-// 组件销毁前清理
+// Cleaning before component destruction
 onBeforeUnmount(() => {
-  // 移除窗口大小变化监听
+  // Remove window size change monitoring
   window.removeEventListener('resize', handleResize);
   disposeEditors();
 });
 
-// 清理编辑器实例
+// Clean up editor instance
 function disposeEditors() {
   try {
     if (isEditorValid(editor)) {
@@ -784,9 +779,9 @@ function disposeEditors() {
   }
 }
 
-// 注册编辑器动作和快捷键
+// Register editor actions and shortcut keys
 function registerEditorActions() {
-  // 注册智能代码格式化动作
+  // Register intelligent code formatting action
   monaco.editor.addEditorAction({
     id: 'smart-format',
     label: 'Smart Format Document',
@@ -796,7 +791,7 @@ function registerEditorActions() {
     contextMenuGroupId: 'navigation',
     contextMenuOrder: 1.5,
     run: function(editor) {
-      // 根据语言类型进行智能格式化
+      // Intelligent formatting based on language type
       const model = editor.getModel();
       if (!model) return;
       
@@ -804,19 +799,16 @@ function registerEditorActions() {
       const fullText = model.getValue();
       
       if (language === 'yaml') {
-        // YAML格式化逻辑
         formatYamlDocument(editor, fullText);
       } else if (language === 'xml') {
-        // XML格式化逻辑
         formatXmlDocument(editor, fullText);
       } else if (language === 'go') {
-        // Go代码格式化逻辑
         formatGoDocument(editor, fullText);
       }
     }
   });
   
-  // 注册快速插入模板动作
+  // Register for quick template insertion action
   monaco.editor.addEditorAction({
     id: 'insert-template',
     label: 'Insert Component Template',
@@ -834,7 +826,7 @@ function registerEditorActions() {
     }
   });
   
-  // 注册智能注释切换
+  // Registration intelligent annotation switching
   monaco.editor.addEditorAction({
     id: 'toggle-smart-comment',
     label: 'Toggle Smart Comment',
@@ -852,7 +844,7 @@ function registerEditorActions() {
     }
   });
   
-  // 注册快速补全建议动作
+  // Suggested actions for quick registration completion
   monaco.editor.addEditorAction({
     id: 'trigger-suggest',
     label: 'Trigger Suggest',
@@ -865,16 +857,13 @@ function registerEditorActions() {
   });
 }
 
-// 格式化YAML文档
 function formatYamlDocument(editor, content) {
   try {
-    // 基本的YAML格式化逻辑
     const lines = content.split('\n');
     const formattedLines = lines.map(line => {
-      // 移除尾随空格
       line = line.trimEnd();
       
-      // 规范化缩进（2个空格）
+      // Normalized indentation (2 spaces)
       const match = line.match(/^(\s*)(.*)/);
       if (match) {
         const indent = match[1];
@@ -899,10 +888,8 @@ function formatYamlDocument(editor, content) {
   }
 }
 
-// 格式化XML文档
 function formatXmlDocument(editor, content) {
   try {
-    // 基本的XML格式化逻辑
     let formatted = content
       .replace(/></g, '>\n<')
       .replace(/^\s*\n/gm, '')
@@ -939,10 +926,8 @@ function formatXmlDocument(editor, content) {
   }
 }
 
-// 格式化Go文档
 function formatGoDocument(editor, content) {
   try {
-    // 基本的Go代码格式化逻辑
     const lines = content.split('\n');
     let indentLevel = 0;
     let inString = false;
@@ -975,7 +960,6 @@ function formatGoDocument(editor, content) {
   }
 }
 
-// 插入组件模板
 function insertComponentTemplate(editor, language) {
   const position = editor.getPosition();
   if (!position) return;
@@ -1022,7 +1006,6 @@ function toggleSmartComment(editor, language) {
       commentPrefix = '# ';
       break;
     case 'xml':
-      // XML注释比较复杂，这里简化处理
       editor.trigger('keyboard', 'editor.action.blockComment', {});
       return;
     case 'go':
@@ -1328,7 +1311,7 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
-  // cursor_position属性值补全
+  // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
     suggestions.push(
       { label: 'BEGIN_CURSOR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Start from beginning', insertText: 'BEGIN_CURSOR', range: range },
@@ -1336,7 +1319,7 @@ function getInputValueCompletions(context, range, fullText) {
     );
   }
   
-  // endpoint格式建议
+  // Suggested endpoint format
   else if (context.currentKey === 'endpoint') {
     suggestions.push({
       label: 'region.log.aliyuncs.com',
@@ -1348,7 +1331,7 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
-  // 数组项建议 - 只提供格式提示
+  // Array item suggestion - only provides formatting hints
   else if (context.currentKey === 'brokers' || context.beforeCursor.includes('- ')) {
     suggestions.push({
       label: 'broker-address:port',
