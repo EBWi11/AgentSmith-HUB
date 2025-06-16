@@ -2468,7 +2468,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Rule definition',
-        insertText: 'rule id="${1:rule-id}" name="${2:rule-name}" author="${3:author}">\n    ${4}\n</rule>',
+        insertText: 'rule id="" name="" author=""></rule>',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -2480,7 +2480,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'filter',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Filter condition for rule',
-        insertText: 'filter field="${1:field-name}">${2:_$value}</filter>',
+        insertText: 'filter field=""></filter',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
@@ -2488,7 +2488,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Checklist with conditions',
-        insertText: 'checklist condition="${1:a and b}">\n    <node id="${2:a}" type="${3|REGEX,EQU,INCL,PLUGIN|}" field="${4:field-name}">${5:value}</node>\n    <node id="${6:b}" type="${7|REGEX,EQU,INCL,PLUGIN|}" field="${8:field-name}">${9:value}</node>\n</checklist>',
+        insertText: 'checklist>\n    <node id="" type="" field=""></node>\n</checklist',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
@@ -2496,7 +2496,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'threshold',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Threshold configuration',
-        insertText: 'threshold group_by="${1:field1,field2}" range="${2:5m}" count_type="${3|SUM,CLASSIFY|}" count_field="${4:field}" local_cache="${5|true,false|}">${6:10}</threshold>',
+        insertText: 'threshold group_by="" range="" count_type="" count_field="" local_cache=""></threshold',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
@@ -2504,7 +2504,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'append',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Append field to result',
-        insertText: 'append field_name="${1:field-name}"${2: type="PLUGIN"}>${3:value}</append>',
+        insertText: 'append field_name="" type=""></append',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
@@ -2512,7 +2512,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
         documentation: 'Plugin execution',
-        insertText: 'plugin>${1:plugin_name(_$ORIDATA)}</plugin>',
+        insertText: 'plugin></plugin>',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
@@ -2520,7 +2520,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'del',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Delete fields from result',
-        insertText: 'del>${1:field1,field2}</del>',
+        insertText: 'del></del',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       }
@@ -2534,7 +2534,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'node',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Check node',
-        insertText: 'node id="${1:node-id}" type="${2|REGEX,EQU,INCL,PLUGIN|}" field="${3:field-name}"${4: logic="${5|AND,OR|}" delimiter="${6:||}"}>${7:value}</node>',
+        insertText: 'node id="" type="" field="" delimiter=""></node',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
