@@ -420,6 +420,10 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := plugin.Plugins[pluginName]; ok {
 					appendNode.Plugin = p
 				} else {
+					// 检查是否为临时组件，临时组件不应该被引用
+					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
+					}
 					return errors.New("not found this plugin: " + pluginName)
 				}
 
@@ -443,6 +447,10 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if p, ok := plugin.Plugins[pluginName]; ok {
 				pluginNode.Plugin = p
 			} else {
+				// 检查是否为临时组件，临时组件不应该被引用
+				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
+				}
 				return errors.New("not fount this plugin: " + pluginName)
 			}
 
@@ -561,6 +569,10 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := plugin.Plugins[pluginName]; ok {
 					node.Plugin = p
 				} else {
+					// 检查是否为临时组件，临时组件不应该被引用
+					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first (rule id: " + rule.ID + ")")
+					}
 					return errors.New("not found this plugin: " + pluginName + " rule id: " + rule.ID)
 				}
 

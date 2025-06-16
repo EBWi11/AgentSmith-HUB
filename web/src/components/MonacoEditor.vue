@@ -111,6 +111,11 @@ function setupMonacoTheme() {
       { token: 'comment', foreground: '6a737d', fontStyle: 'italic' },
       { token: 'variable', foreground: 'e36209' },
       { token: 'type', foreground: '6f42c1' },
+      // 项目组件引用关键字 - INPUT/OUTPUT/RULESET
+      { token: 'project.component', foreground: '0366d6', fontStyle: 'bold' },
+      { token: 'project.input', foreground: '28a745', fontStyle: 'bold' },
+      { token: 'project.output', foreground: 'e36209', fontStyle: 'bold' },
+      { token: 'project.ruleset', foreground: '6f42c1', fontStyle: 'bold' },
     ],
     colors: {
       'editor.foreground': '#24292e',
@@ -147,6 +152,66 @@ function registerLanguageProviders() {
     return;
   }
   
+  // 注册自定义YAML语言定义，用于项目组件关键字语法高亮
+  monaco.languages.setMonarchTokensProvider('yaml', {
+    defaultToken: '',
+    ignoreCase: false,
+    
+    // Token patterns
+    tokenizer: {
+      root: [
+        // Project component references - INPUT/OUTPUT/RULESET (must be followed by dot)
+        [/\bINPUT(?=\.)/, 'project.input'],
+        [/\bOUTPUT(?=\.)/, 'project.output'],
+        [/\bRULESET(?=\.)/, 'project.ruleset'],
+        
+        // Comments
+        [/#.*$/, 'comment'],
+        
+        // Strings
+        [/"([^"\\]|\\.)*$/, 'string.invalid'],  // non-terminated string
+        [/"/, 'string', '@dstring'],
+        [/'([^'\\]|\\.)*$/, 'string.invalid'],  // non-terminated string
+        [/'/, 'string', '@sstring'],
+        
+        // Numbers
+        [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
+        [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+        [/\d+/, 'number'],
+        
+        // Delimiters
+        [/[{}]/, 'delimiter.bracket'],
+        [/\[/, 'delimiter.square'],
+        [/\]/, 'delimiter.square'],
+        [/:(?=\s|$)/, 'delimiter.colon'],
+        [/,/, 'delimiter.comma'],
+        [/-(?=\s)/, 'delimiter.dash'],
+        [/\|/, 'delimiter.pipe'],
+        [/>/, 'delimiter.greater'],
+        
+        // Keys (before colon)
+        [/[a-zA-Z_][\w\-]*(?=\s*:)/, 'key'],
+        
+        // Identifiers
+        [/[a-zA-Z_][\w\-]*/, 'identifier'],
+        
+        // Whitespace
+        [/\s+/, ''],
+      ],
+      
+      dstring: [
+        [/[^\\"]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, 'string', '@pop'],
+      ],
+      
+      sstring: [
+        [/[^\\']+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/'/, 'string', '@pop'],
+      ],
+    },
+  });
 
   
 
@@ -536,6 +601,13 @@ function initializeEditor() {
         console.warn('Failed to set initial editor value:', error);
       }
     }
+  }
+  
+  // 确保应用自定义主题（用于组件关键字语法高亮）
+  try {
+    monaco.editor.setTheme('agentsmith-theme');
+  } catch (error) {
+    console.warn('Failed to apply custom theme:', error);
   }
   
   // Add save shortcut
@@ -1113,20 +1185,21 @@ function getInputCompletions(fullText, lineText, range, position) {
     
     if (prefix === 'INPUT') {
       
-      if (inputComponents.value.length > 0) {
-        // 提示所有INPUT组件
-        inputComponents.value.forEach(input => {
-          if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-              !suggestions.some(s => s.label === input.id)) {
-            suggestions.push({
-              label: input.id,
-              kind: monaco.languages.CompletionItemKind.Reference,
-              documentation: `Input component: ${input.id}`,
-              insertText: input.id,
-              range: range
-            });
-          }
-        });
+              if (inputComponents.value.length > 0) {
+          // 提示所有INPUT组件，但过滤掉临时组件
+          inputComponents.value.forEach(input => {
+            if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
+                !suggestions.some(s => s.label === input.id) &&
+                !input.hasTemp) {  // 过滤掉临时组件
+              suggestions.push({
+                label: input.id,
+                kind: monaco.languages.CompletionItemKind.Reference,
+                documentation: `Input component: ${input.id}`,
+                insertText: input.id,
+                range: range
+              });
+            }
+          });
       } else {
         // 如果没有input组件，添加一个提示
         suggestions.push({
@@ -1519,10 +1592,11 @@ function getOutputCompletions(fullText, lineText, range, position) {
     const partialLower = (partial || '').toLowerCase();
     
     if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
-      // 提示所有OUTPUT组件
+      // 提示所有OUTPUT组件，但过滤掉临时组件
       outputComponents.value.forEach(output => {
         if ((!partial || output.id.toLowerCase().includes(partialLower)) && 
-            !suggestions.some(s => s.label === output.id)) {
+            !suggestions.some(s => s.label === output.id) &&
+            !output.hasTemp) {  // 过滤掉临时组件
           suggestions.push({
             label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
@@ -1946,10 +2020,11 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         };
         
         if (inputComponents.value.length > 0) {
-          // 提示所有INPUT组件
+          // 提示所有INPUT组件，但过滤掉临时组件
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id)) {
+                !suggestions.some(s => s.label === input.id) &&
+                !input.hasTemp) {  // 过滤掉临时组件
               suggestions.push({
                 label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -1986,10 +2061,11 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         console.log('RULESET prefix detected, rulesetComponents:', rulesetComponents.value);
         
         if (rulesetComponents.value.length > 0) {
-          // 提示所有RULESET组件
+          // 提示所有RULESET组件，但过滤掉临时组件
           rulesetComponents.value.forEach(ruleset => {
             if ((!partial || ruleset.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === ruleset.id)) {
+                !suggestions.some(s => s.label === ruleset.id) &&
+                !ruleset.hasTemp) {  // 过滤掉临时组件
               suggestions.push({
                 label: ruleset.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -2023,12 +2099,13 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // 提示所有OUTPUT组件
+      // 提示所有OUTPUT组件，但过滤掉临时组件
       outputComponents.value.forEach(output => {
         const matches = !partial || output.id.toLowerCase().includes(partialLower);
         const alreadyExists = suggestions.some(s => s.label === output.id);
+        const isNotTemp = !output.hasTemp;  // 过滤掉临时组件
         
-        if (matches && !alreadyExists) {
+        if (matches && !alreadyExists && isNotTemp) {
           suggestions.push({
             label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
@@ -2579,17 +2656,19 @@ function getXmlTagContentCompletions(context, range, fullText) {
   // 插件函数补全
   if (context.currentTag === 'plugin' || (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
     
-    // 添加现有插件的建议
+    // 添加现有插件的建议，但过滤掉临时组件
     pluginComponents.value.forEach(plugin => {
-      const pluginLabel = `${plugin.id}(_$ORIDATA)`;
-      if (!suggestions.some(s => s.label === pluginLabel)) {
-        suggestions.push({
-          label: pluginLabel,
-          kind: monaco.languages.CompletionItemKind.Function,
-          documentation: `Plugin: ${plugin.id}`,
-          insertText: pluginLabel,
-          range: range
-        });
+      if (!plugin.hasTemp) {  // 过滤掉临时组件
+        const pluginLabel = `${plugin.id}(_$ORIDATA)`;
+        if (!suggestions.some(s => s.label === pluginLabel)) {
+          suggestions.push({
+            label: pluginLabel,
+            kind: monaco.languages.CompletionItemKind.Function,
+            documentation: `Plugin: ${plugin.id}`,
+            insertText: pluginLabel,
+            range: range
+          });
+        }
       }
     });
     
@@ -3278,6 +3357,26 @@ defineExpose({
   border: none !important;
 }
 
+/* 项目组件关键字样式 - INPUT/OUTPUT/RULESET */
+.monaco-editor .token.project\.input,
+.monaco-diff-editor .token.project\.input {
+  color: #28a745 !important;
+  font-weight: bold !important;
+}
+
+.monaco-editor .token.project\.output,
+.monaco-diff-editor .token.project\.output {
+  color: #e36209 !important;
+  font-weight: bold !important;
+}
+
+.monaco-editor .token.project\.ruleset,
+.monaco-diff-editor .token.project\.ruleset {
+  color: #6f42c1 !important;
+  font-weight: bold !important;
+}
+
+/* 错误行样式 */
 .monaco-error-line {
   background-color: rgba(255, 0, 0, 0.1);
 }

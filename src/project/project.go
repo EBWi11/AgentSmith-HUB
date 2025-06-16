@@ -216,19 +216,34 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 // rulesetNames: List of ruleset IDs
 func (p *Project) loadComponents(inputNames []string, outputNames []string, rulesetNames []string) error {
 	for _, v := range inputNames {
+		// 检查正式组件是否存在
 		if _, ok := GlobalProject.Inputs[v]; !ok {
+			// 检查是否为临时组件，临时组件不应该被引用
+			if _, tempExists := GlobalProject.InputsNew[v]; tempExists {
+				return fmt.Errorf("cannot reference temporary input component '%s', please save it first", v)
+			}
 			return fmt.Errorf("conn't find input %s", v)
 		}
 	}
 
 	for _, v := range outputNames {
+		// 检查正式组件是否存在
 		if _, ok := GlobalProject.Outputs[v]; !ok {
+			// 检查是否为临时组件，临时组件不应该被引用
+			if _, tempExists := GlobalProject.OutputsNew[v]; tempExists {
+				return fmt.Errorf("cannot reference temporary output component '%s', please save it first", v)
+			}
 			return fmt.Errorf("conn't find output %s", v)
 		}
 	}
 
 	for _, v := range rulesetNames {
+		// 检查正式组件是否存在
 		if _, ok := GlobalProject.Rulesets[v]; !ok {
+			// 检查是否为临时组件，临时组件不应该被引用
+			if _, tempExists := GlobalProject.RulesetsNew[v]; tempExists {
+				return fmt.Errorf("cannot reference temporary ruleset component '%s', please save it first", v)
+			}
 			return fmt.Errorf("conn't find ruleset %s", v)
 		}
 	}
