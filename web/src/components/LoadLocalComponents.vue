@@ -379,6 +379,9 @@ async function loadAllChanges() {
     })
   } catch (e) {
     $message?.error?.('Failed to load changes: ' + (e?.message || 'Unknown error'))
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges();
   } finally {
     loading.value = false
   }
@@ -414,6 +417,12 @@ async function loadSingleChange(change) {
     refreshEditorsLayout()
   } catch (e) {
     $message?.error?.('Failed to process change: ' + (e?.message || 'Unknown error'))
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges();
+    
+    // 即使失败，也要尝试刷新对应的组件类型列表
+    emit('refresh-list', change.type)
   } finally {
     loading.value = false
   }

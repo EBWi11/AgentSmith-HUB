@@ -167,6 +167,14 @@
                       Test Plugin
                     </a>
                     
+                    <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openTestRuleset(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Test Ruleset
+                    </a>
+                    
                     <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                        @click.prevent.stop="openTestOutput(item)">
                       <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -952,6 +960,13 @@ async function fetchItems(type) {
           }
         }
       }).filter(Boolean) // 过滤掉null项
+      
+      // 对列表按照ID排序
+      items[type].sort((a, b) => {
+        const idA = a.id || a.name || ''
+        const idB = b.id || b.name || ''
+        return idA.localeCompare(idB)
+      })
     } else {
       items[type] = []
     }

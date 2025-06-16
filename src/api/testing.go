@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -545,15 +546,22 @@ func testProject(c echo.Context) error {
 		}
 	}
 
-	// Create a temporary project for testing
-	tempProject, err := project.NewProject("", projectContent, "temp_test_"+id)
+	// Create a temporary project for testing with completely independent components
+	tempProject, err := createTestProject(projectContent, "temp_test_"+id)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
-			"error":   "Failed to parse project: " + err.Error(),
+			"error":   "Failed to create test project: " + err.Error(),
 			"result":  nil,
 		})
 	}
+
+	// Ensure cleanup on exit
+	defer func() {
+		if stopErr := tempProject.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop temporary project: %v", stopErr)
+		}
+	}()
 
 	// Check if the specified input exists in the project
 	if _, exists := tempProject.Inputs[inputNodeName]; !exists {
@@ -568,23 +576,17 @@ func testProject(c echo.Context) error {
 	outputResults := make(map[string][]map[string]interface{})
 	outputChannels := make(map[string]chan map[string]interface{})
 
-	// Create channels to capture o data
+	// Create channels to capture output data
 	for outputName, o := range tempProject.Outputs {
-		// Create a channel for each o
+		// Create a channel for each output to collect results
 		outputChan := make(chan map[string]interface{}, 10)
 		outputChannels[outputName] = outputChan
 
-		// Replace the o's upstream channel with our test channel
+		// Monitor the output's upstream channels to capture results
 		for _, upChan := range o.UpStream {
-			// Save the original channel reference
-			originalChan := *upChan
-
-			// Create a new goroutine to forward messages and capture them
-			go func(outName string, origChan chan map[string]interface{}, testChan chan map[string]interface{}) {
-				for msg := range testChan {
-					// Forward to original channel
-					origChan <- msg
-
+			// Create a goroutine to intercept messages going to this output
+			go func(outName string, testChan chan map[string]interface{}) {
+				for msg := range *upChan {
 					// Make a copy for our results
 					msgCopy := make(map[string]interface{})
 					for k, v := range msg {
@@ -596,9 +598,9 @@ func testProject(c echo.Context) error {
 					msgCopy["_HUB_TIMESTAMP"] = time.Now().UnixNano() / int64(time.Millisecond)
 
 					// Send to our results channel
-					outputChan <- msgCopy
+					testChan <- msgCopy
 				}
-			}(outputName, originalChan, *upChan)
+			}(outputName, outputChan)
 		}
 	}
 
@@ -718,8 +720,8 @@ func getProjectInputs(c echo.Context) error {
 		}
 	}
 
-	// 创建临时项目以解析配置
-	tempProject, err := project.NewProject("", projectContent, "temp_list_"+id)
+	// 创建临时项目以解析配置（用于测试的版本，不初始化真实组件）
+	tempProject, err := project.NewProjectForTesting("", projectContent, "temp_list_"+id)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -727,15 +729,20 @@ func getProjectInputs(c echo.Context) error {
 		})
 	}
 
-	// 收集输入节点信息
+	// 收集输入节点信息（这些是虚拟的input节点，仅用于流程图验证）
 	inputs := []map[string]string{}
-	for name, i := range tempProject.Inputs {
+	for name := range tempProject.Inputs {
 		inputs = append(inputs, map[string]string{
 			"id":   "input." + name,
 			"name": name,
-			"type": string(i.Type),
+			"type": "virtual", // 测试用的虚拟input节点
 		})
 	}
+
+	// 对输入节点列表按名称排序
+	sort.Slice(inputs, func(i, j int) bool {
+		return inputs[i]["name"] < inputs[j]["name"]
+	})
 
 	// 返回结果
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -743,6 +750,18 @@ func getProjectInputs(c echo.Context) error {
 		"isTemp":  isTemp,
 		"inputs":  inputs,
 	})
+}
+
+// createTestProject creates a completely independent project instance for testing
+// All components (except inputs) are created as new instances to avoid affecting the live environment
+func createTestProject(projectContent string, testProjectId string) (*project.Project, error) {
+	// Create the project instance using a special constructor for testing
+	tempProject, err := project.NewProjectForTesting("", projectContent, testProjectId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse project: %v", err)
+	}
+
+	return tempProject, nil
 }
 
 func connectCheck(c echo.Context) error {

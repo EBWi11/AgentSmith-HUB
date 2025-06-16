@@ -73,24 +73,35 @@ function setupMonacoTheme() {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'tag', foreground: '3366ae' },
-      { token: 'attribute.name', foreground: '367719' },
-      { token: 'attribute.value', foreground: 'a63437' },
-      { token: 'string', foreground: 'a63437' },
-      { token: 'number', foreground: '17572d' },
-      { token: 'keyword', foreground: '17572d' },
-      { token: 'property', foreground: '008073' },
-      { token: 'comment', foreground: '95a5a6', fontStyle: 'italic' },
+      { token: 'tag', foreground: '005cc5' },
+      { token: 'attribute.name', foreground: '6f42c1' },
+      { token: 'attribute.value', foreground: 'd73a49' },
+      { token: 'string', foreground: 'd73a49' },
+      { token: 'number', foreground: '005cc5' },
+      { token: 'keyword', foreground: 'd73a49' },
+      { token: 'property', foreground: '005cc5' },
+      { token: 'comment', foreground: '6a737d', fontStyle: 'italic' },
+      { token: 'variable', foreground: 'e36209' },
+      { token: 'type', foreground: '6f42c1' },
     ],
     colors: {
-      'editor.foreground': '#34495e',
+      'editor.foreground': '#24292e',
       'editor.background': '#ffffff',
-      'editor.lineHighlightBackground': '#f5f7fa',
-      'editorLineNumber.foreground': '#adb5bd',
-      'editor.selectionBackground': '#e5f3ff',
-      'editorCursor.foreground': '#34495e',
-      'editorError.foreground': '#e74c3c',
-      'editorWarning.foreground': '#f39c12',
+      'editor.lineHighlightBackground': '#f6f8fa',
+      'editorLineNumber.foreground': '#d1d9e0',
+      'editorActiveLineNumber.foreground': '#24292e',
+      'editor.selectionBackground': '#c8e1ff',
+      'editor.inactiveSelectionBackground': '#e5f0ff',
+      'editorCursor.foreground': '#24292e',
+      'editorError.foreground': '#d73a49',
+      'editorWarning.foreground': '#f66a0a',
+      'editorGutter.background': '#ffffff',
+      'editorGutter.addedBackground': '#28a745',
+      'editorGutter.deletedBackground': '#d73a49',
+      'editorGutter.modifiedBackground': '#2188ff',
+      'scrollbarSlider.background': '#959da533',
+      'scrollbarSlider.hoverBackground': '#959da544',
+      'scrollbarSlider.activeBackground': '#959da588',
     }
   });
   
@@ -346,9 +357,9 @@ function initializeEditor() {
       verticalScrollbarSize: 10,
       horizontalScrollbarSize: 10
     },
-    fontSize: 13,
-    fontFamily: 'inherit',
-    lineHeight: 20,
+    fontSize: 14,
+    fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace',
+    lineHeight: 21,
     tabSize: 2,
     wordWrap: 'on',
     contextmenu: true,
@@ -732,6 +743,9 @@ defineExpose({
 </script>
 
 <style>
+/* 导入编程字体 */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+
 .monaco-editor-wrapper {
   width: 100%;
   height: 100%;
@@ -741,6 +755,10 @@ defineExpose({
   padding: 0;
   border: none;
   overflow: hidden;
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "liga" 1, "calt" 1;
 }
 
 
@@ -940,6 +958,54 @@ defineExpose({
 .monaco-diff-editor .monaco-scrollable-element {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* 字体优化 */
+.monaco-editor .view-lines,
+.monaco-diff-editor .view-lines {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace !important;
+  font-size: 14px !important;
+  line-height: 21px !important;
+  font-weight: 400 !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  font-feature-settings: "liga" 1, "calt" 1 !important;
+}
+
+/* 行号字体优化 */
+.monaco-editor .margin-view-overlays .line-numbers,
+.monaco-diff-editor .margin-view-overlays .line-numbers {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* minimap字体优化 */
+.monaco-editor .minimap,
+.monaco-diff-editor .minimap {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* 自动完成建议框字体优化 */
+.monaco-editor .suggest-widget,
+.monaco-diff-editor .suggest-widget {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace !important;
+  font-size: 13px !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* 悬停提示字体优化 */
+.monaco-editor .monaco-hover,
+.monaco-diff-editor .monaco-hover {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", Monaco, Menlo, "Ubuntu Mono", Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace !important;
+  font-size: 13px !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
 }
 
 

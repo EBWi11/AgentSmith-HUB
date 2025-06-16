@@ -131,6 +131,14 @@ export default createStore({
             components = await hubApi.fetchPlugins()
             break
         }
+        // 对组件列表按照ID排序
+        if (Array.isArray(components)) {
+          components.sort((a, b) => {
+            const idA = a.id || a.name || ''
+            const idB = b.id || b.name || ''
+            return idA.localeCompare(idB)
+          })
+        }
         commit('setComponents', { type, components })
       } catch (error) {
       }

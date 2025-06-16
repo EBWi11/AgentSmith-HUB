@@ -1127,8 +1127,14 @@ fetchComponentsByType = async (type, endpoint) => {
       }
     }
     
-    // 转换回数组
-    return Array.from(uniqueItems.values());
+    // 转换回数组并排序
+    const result = Array.from(uniqueItems.values());
+    result.sort((a, b) => {
+      const idA = a.id || a.name || '';
+      const idB = b.id || b.name || '';
+      return idA.localeCompare(idB);
+    });
+    return result;
   } catch (error) {
     return handleApiError(error, `Error fetching ${type}:`, true);
   }

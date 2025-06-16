@@ -161,6 +161,55 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 	return p, nil
 }
 
+// NewProjectForTesting creates a new project instance specifically for testing
+// This version creates completely independent component instances (except inputs) to avoid affecting the live environment
+func NewProjectForTesting(path string, raw string, id string) (*Project, error) {
+	var cfg ProjectConfig
+	var data []byte
+	var err error
+
+	err = Verify(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("project config verify error: %s %s", id, err.Error())
+	}
+
+	if path != "" {
+		data, _ = os.ReadFile(path)
+		cfg.RawConfig = string(data)
+		cfg.Path = path
+	} else {
+		cfg.RawConfig = raw
+		data = []byte(raw)
+	}
+	cfg.Id = id
+
+	_ = yaml.Unmarshal(data, &cfg)
+
+	p := &Project{
+		Id:          cfg.Id,
+		Status:      ProjectStatusRunning,
+		Config:      &cfg,
+		Inputs:      make(map[string]*input.Input),
+		Outputs:     make(map[string]*output.Output),
+		Rulesets:    make(map[string]*rules_engine.Ruleset),
+		MsgChannels: make([]string, 0),
+		stopChan:    make(chan struct{}),
+		metrics: &ProjectMetrics{
+			InputQPS:  make(map[string]uint64),
+			OutputQPS: make(map[string]uint64),
+		},
+	}
+
+	// Initialize components with independent instances for testing
+	if err := p.initComponentsForTesting(); err != nil {
+		p.Status = ProjectStatusError
+		p.Err = err
+		return p, fmt.Errorf("failed to initialize test project components: %w", err)
+	}
+
+	return p, nil
+}
+
 // loadComponents loads and initializes all project components
 // inputNames: List of input component IDs
 // outputNames: List of output component IDs
@@ -324,6 +373,193 @@ func (p *Project) initComponents() error {
 				if out, ok := p.Outputs[toId]; ok {
 					out.UpStream = append(out.UpStream, &msgChan)
 					out.ProjectNodeSequence = projectNodeSequence
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// initComponentsForTesting initializes all project components for testing with independent instances
+// This creates new component instances to avoid affecting the live environment
+func (p *Project) initComponentsForTesting() error {
+	// Parse project content to build the data flow graph
+	flowGraph, err := p.parseContent()
+	if err != nil {
+		return fmt.Errorf("failed to parse project content: %v", err)
+	}
+
+	// Collect all input/output/ruleset names from flowGraph
+	inputNames := []string{}
+	outputNames := []string{}
+	rulesetNames := []string{}
+
+	nameExists := func(list []string, name string) bool {
+		for _, n := range list {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		if len(fromParts) == 2 {
+			switch strings.ToUpper(fromParts[0]) {
+			case "INPUT":
+				if !nameExists(inputNames, fromParts[1]) {
+					inputNames = append(inputNames, fromParts[1])
+				}
+			case "OUTPUT":
+				if !nameExists(outputNames, fromParts[1]) {
+					outputNames = append(outputNames, fromParts[1])
+				}
+			case "RULESET":
+				if !nameExists(rulesetNames, fromParts[1]) {
+					rulesetNames = append(rulesetNames, fromParts[1])
+				}
+			}
+		}
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			if len(toParts) == 2 {
+				switch strings.ToUpper(toParts[0]) {
+				case "INPUT":
+					if !nameExists(inputNames, toParts[1]) {
+						inputNames = append(inputNames, toParts[1])
+					}
+				case "OUTPUT":
+					if !nameExists(outputNames, toParts[1]) {
+						outputNames = append(outputNames, toParts[1])
+					}
+				case "RULESET":
+					if !nameExists(rulesetNames, toParts[1]) {
+						rulesetNames = append(rulesetNames, toParts[1])
+					}
+				}
+			}
+		}
+	}
+
+	// For testing, we don't need to initialize actual input components
+	// Just validate that the referenced inputs exist in the system for configuration validation
+	for _, v := range inputNames {
+		if _, ok := GlobalProject.Inputs[v]; !ok {
+			return fmt.Errorf("input %s referenced in project flow but not found in system", v)
+		}
+	}
+
+	// Check if outputs exist (formal or temp configs)
+	for _, v := range outputNames {
+		if _, ok := GlobalProject.Outputs[v]; !ok {
+			// Check if output exists in temp configs
+			if _, ok := GlobalProject.OutputsNew[v]; !ok {
+				return fmt.Errorf("output %s referenced in project flow but not found", v)
+			}
+		}
+	}
+
+	// Check if rulesets exist (formal or temp configs)
+	for _, v := range rulesetNames {
+		if _, ok := GlobalProject.Rulesets[v]; !ok {
+			// Check if ruleset exists in temp configs
+			if _, ok := GlobalProject.RulesetsNew[v]; !ok {
+				return fmt.Errorf("ruleset %s referenced in project flow but not found", v)
+			}
+		}
+	}
+
+	// For testing, create virtual input nodes (just placeholders for flow graph validation)
+	// We don't need actual input component instances - users will provide test data directly
+	for _, name := range inputNames {
+		// Create a minimal input placeholder for testing
+		p.Inputs[name] = &input.Input{
+			Id:         name,
+			DownStream: make([]*chan map[string]interface{}, 0),
+		}
+	}
+
+	// Create independent output instances for testing
+	for _, name := range outputNames {
+		var outputConfig string
+		var err error
+
+		// Check if there's a temp config first
+		if tempConfig, ok := GlobalProject.OutputsNew[name]; ok {
+			outputConfig = tempConfig
+		} else if existingOutput, ok := GlobalProject.Outputs[name]; ok {
+			outputConfig = existingOutput.Config.RawConfig
+		} else {
+			return fmt.Errorf("output %s not found", name)
+		}
+
+		// Create a new independent output instance
+		testOutput, err := output.NewOutput("", outputConfig, "test_"+name)
+		if err != nil {
+			return fmt.Errorf("failed to create test output %s: %v", name, err)
+		}
+		p.Outputs[name] = testOutput
+	}
+
+	// Create independent ruleset instances for testing
+	for _, name := range rulesetNames {
+		var rulesetConfig string
+		var err error
+
+		// Check if there's a temp config first
+		if tempConfig, ok := GlobalProject.RulesetsNew[name]; ok {
+			rulesetConfig = tempConfig
+		} else if existingRuleset, ok := GlobalProject.Rulesets[name]; ok {
+			rulesetConfig = existingRuleset.RawConfig
+		} else {
+			return fmt.Errorf("ruleset %s not found", name)
+		}
+
+		// Create a new independent ruleset instance
+		testRuleset, err := rules_engine.NewRuleset("", rulesetConfig, "test_"+name)
+		if err != nil {
+			return fmt.Errorf("failed to create test ruleset %s: %v", name, err)
+		}
+		p.Rulesets[name] = testRuleset
+	}
+
+	// Connect components according to the flow graph
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		fromType := fromParts[0]
+		fromId := fromParts[1]
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			toType := toParts[0]
+			toId := toParts[1]
+
+			// Create a channel for this connection
+			msgChan := make(chan map[string]interface{}, 1024)
+
+			// Connect based on component types
+			switch fromType {
+			case "INPUT":
+				if in, ok := p.Inputs[fromId]; ok {
+					in.DownStream = append(in.DownStream, &msgChan)
+				}
+			case "RULESET":
+				if rs, ok := p.Rulesets[fromId]; ok {
+					rs.DownStream[to] = &msgChan
+				}
+			}
+
+			switch toType {
+			case "RULESET":
+				if rs, ok := p.Rulesets[toId]; ok {
+					rs.UpStream[from] = &msgChan
+				}
+			case "OUTPUT":
+				if out, ok := p.Outputs[toId]; ok {
+					out.UpStream = append(out.UpStream, &msgChan)
 				}
 			}
 		}

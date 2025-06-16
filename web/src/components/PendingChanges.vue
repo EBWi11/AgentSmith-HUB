@@ -416,6 +416,9 @@ async function applyChanges() {
       }
     } else {
       $message?.error?.('Failed to apply changes: ' + (e?.message || 'Unknown error'))
+      
+      // 即使失败，也要刷新列表以确保显示最新状态
+      await refreshChanges();
     }
   } finally {
     applying.value = false
@@ -462,6 +465,10 @@ async function applySingleChange(change) {
     } else {
       $message?.error?.('Failed to apply change: ' + (e?.message || 'Unknown error'))
     }
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges();
+    emit('refresh-list', change.type)
   } finally {
     applying.value = false
   }
@@ -556,6 +563,10 @@ async function cancelUpgrade(change) {
     refreshEditorsLayout()
   } catch (e) {
     $message?.error?.('Failed to cancel upgrade: ' + (e?.message || 'Unknown error'))
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges();
+    emit('refresh-list', change.type)
   } finally {
     cancelling.value = false
   }
