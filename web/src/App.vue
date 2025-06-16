@@ -27,7 +27,12 @@ onMounted(() => {
 </script>
 
 <style>
-/* Using a cdn for now, we can install it locally later */
-@import url('https://rsms.me/inter/inter.css');
-html { font-family: 'Inter', sans-serif; }
+/* Using local fonts to avoid network timeouts */
+@import url('./assets/fonts/inter-local.css');
+html { 
+  font-family: 'Inter', sans-serif; 
+}
+@supports (font-variation-settings: normal) {
+  html { font-family: 'InterVariable', sans-serif; }
+}
 </style> 

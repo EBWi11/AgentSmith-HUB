@@ -10,8 +10,7 @@
  * @returns {string} - XML template for the ruleset
  */
 export function generateRulesetTemplate(id) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<root type="DETECTION">
+  return `<root type="DETECTION">
     <rule id="${id}_01" name="Example Rule" author="user">
         <filter field="data_type">59</filter>
         <checklist condition="a and (b or c)">

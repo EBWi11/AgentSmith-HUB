@@ -78,7 +78,6 @@ kafka:
 Rules are defined in XML files under the `config_demo/ruleset` directory:
 
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
 <root name="Ruleset Name" type="DETECTION">
   <rule id="rule1" name="Rule Name" author="Author">
     <filter field="field.path">value</filter>

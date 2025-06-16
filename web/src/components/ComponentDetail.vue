@@ -112,6 +112,18 @@
         <span>Test</span>
       </button>
       <button 
+        v-if="isProject"
+        @click="verifyProject" 
+        class="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500 flex items-center space-x-1.5 mr-2"
+        :disabled="verifyLoading"
+      >
+        <span v-if="verifyLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+        <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>{{ verifyLoading ? 'Verifying...' : 'Verify' }}</span>
+      </button>
+      <button 
         @click="() => saveEdit()" 
         class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-blue-500 flex items-center space-x-1.5"
         :disabled="saving"
@@ -242,6 +254,18 @@
           </button>
           <button 
             v-if="isProject"
+            @click="verifyProject"
+            class="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500 flex items-center space-x-1.5 mr-2"
+            :disabled="verifyLoading"
+          >
+            <span v-if="verifyLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{{ verifyLoading ? 'Verifying...' : 'Verify' }}</span>
+          </button>
+          <button 
+            v-if="isProject"
             @click="showProjectTestModal = true"
             class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
           >
@@ -349,6 +373,7 @@ const validationResult = ref({
   errors: [],
   warnings: []
 })
+const verifyLoading = ref(false)
 const isRuleset = computed(() => {
   return props.item?.type === 'rulesets'
 })
@@ -587,6 +612,36 @@ function clearErrorLines() {
 // Expose clearErrorLines to window for debugging
 if (typeof window !== 'undefined') {
   window.clearErrorLines = clearErrorLines
+}
+
+// Verify project function
+async function verifyProject() {
+  if (!isProject.value) return;
+  
+  verifyLoading.value = true;
+  
+  try {
+    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
+    
+    if (!contentToVerify) {
+      $message?.warning?.('No content to verify');
+      return;
+    }
+    
+    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
+    
+    if (response.data && response.data.valid) {
+      $message?.success?.('Project configuration is valid');
+    } else {
+      const errorMessage = response.data?.error || 'Unknown verification error';
+      $message?.error?.('Verification failed: ' + errorMessage);
+    }
+  } catch (error) {
+    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
+    $message?.error?.('Verification error: ' + errorMessage);
+  } finally {
+    verifyLoading.value = false;
+  }
 }
 
 // Perform initial validation when component is mounted

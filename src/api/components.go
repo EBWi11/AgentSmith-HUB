@@ -823,16 +823,28 @@ func updateComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body: " + err.Error()})
 	}
 
-	// First check if formal file exists
+	// Check if formal file exists, if not check if temporary file exists
 	formalPath, formalExists := GetComponentPath(componentType, id, false)
-	if !formalExists {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
-	}
+	tempPath, tempExists := GetComponentPath(componentType, id, true)
 
-	// Read original file content to compare
-	originalContent, err := ReadComponent(formalPath)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+	var originalContent string
+	var err error
+
+	if formalExists {
+		// Read original formal file content to compare
+		originalContent, err = ReadComponent(formalPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+		}
+	} else if tempExists {
+		// If no formal file but temp file exists, read temp file content
+		originalContent, err = ReadComponent(tempPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+		}
+	} else {
+		// Neither formal nor temp file exists
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 	}
 
 	// Compare content with original file
@@ -863,7 +875,7 @@ func updateComponent(componentType string, c echo.Context) error {
 	}
 
 	// Content is different, create or update temporary file
-	tempPath, _ := GetComponentPath(componentType, id, true)
+	tempPath, _ = GetComponentPath(componentType, id, true)
 	err = WriteComponentFile(tempPath, req.Raw)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
