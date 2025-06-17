@@ -154,10 +154,10 @@ func ParseDurationToSecondsInt(input string) (int, error) {
 func DirExists(path string) (bool, error) {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return false, nil // 不存在
+		return false, nil // does not exist
 	}
 	if err != nil {
-		return false, err // 其他错误
+		return false, err // other error
 	}
 	return info.IsDir(), nil
 }

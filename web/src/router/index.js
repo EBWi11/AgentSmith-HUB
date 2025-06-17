@@ -74,25 +74,25 @@ const router = createRouter({
 });
 
 router.beforeEach((to, from, next) => {
-  // 简化路由守卫逻辑，防止无限刷新
-  // 移除了token验证逻辑，因为它可能导致在token无效时页面不断刷新
-  // 现在只检查token是否存在，而不验证其有效性
-  // 如果token无效，将在API请求时处理
+  // Simplify route guard logic to prevent infinite refresh
+  // Removed token validation logic as it may cause continuous page refresh when token is invalid
+  // Now only checks if token exists, without validating its validity
+  // Invalid token will be handled during API requests
   const loggedIn = !!localStorage.getItem('auth_token');
 
   if (to.matched.some(record => record.meta.requiresAuth)) {
-    // 需要认证的路由
+    // Routes requiring authentication
     if (!loggedIn) {
       next({ name: 'Login' });
     } else {
-      // 有token就直接通过，不进行验证
+      // Pass through if token exists, without validation
       next();
     }
   } else if (to.name === 'Login' && loggedIn) {
-    // 已登录用户访问登录页，重定向到应用页面
+    // Redirect logged-in users to app page when accessing login page
     next({ path: '/app' });
   } else {
-    // 其他情况正常通过
+    // Pass through normally for other cases
     next();
   }
 });

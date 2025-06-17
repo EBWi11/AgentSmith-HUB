@@ -130,12 +130,12 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 	}
 }
 
-// flush 批量写入ES
+// flush batch writes to ES
 func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
 	p.sendBatch(batch)
 }
 
-// Close 关闭producer
+// Close closes the producer
 func (p *ElasticsearchProducer) Close() {
 	close(p.MsgChan)
 }

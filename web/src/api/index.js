@@ -948,13 +948,13 @@ export const hubApi = {
           return { hasTemp: false };
       }
       
-      // 直接从API获取组件信息
+      // Retrieve component information directly from the API
       try {
         const response = await api.get(endpoint);
         data = response.data;
         
-        // 验证返回的数据确实属于请求的组件类型
-        // 所有组件现在都应该有id字段
+        // Verify that the returned data indeed belongs to the requested component type
+        // All components should now have an ID field
         if (!data.id) {
           console.error(`Invalid ${type} data for ${id}:`, data);
           return { hasTemp: false };
@@ -966,7 +966,7 @@ export const hubApi = {
           data: data
         };
       } catch (error) {
-        // 如果API返回404，说明该组件不存在
+        // If the API returns 404, it means that the component does not exist
         if (error.response && error.response.status === 404) {
           console.debug(`${type} ${id} not found`);
         } else {
@@ -980,10 +980,10 @@ export const hubApi = {
     }
   },
 
-  // 获取组件被哪些项目使用
+  // Obtain which projects are using the component
   async getComponentUsage(type, id) {
     try {
-      // 后端API期望复数形式的组件类型，直接使用传入的type
+      // The backend API expects complex component types and directly uses the passed type
       const response = await api.get(`/component-usage/${type}/${id}`);
       return response.data;
     } catch (error) {
@@ -1110,24 +1110,24 @@ fetchComponentsByType = async (type, endpoint) => {
     
     // Add temporary file information to each item
     for (const item of items) {
-      // 获取组件ID（对于plugins，使用name作为ID）
+      // Get component ID (for plugins, use name as ID)
       const id = item.id || item.name;
       if (!id) continue;
       
-      // 检查是否有临时文件，确保只检查当前类型的组件
+      // Check for temporary files and ensure that only components of the current type are checked
       const tempInfo = await hubApi.checkTemporaryFile(type, id);
       
-      // 设置hasTemp属性
+      // Set hasTemp property
       item.hasTemp = tempInfo.hasTemp;
       
-      // 存储到Map中，确保每个ID只有一个组件
-      // 如果已经存在同ID的组件，只有当新组件是临时文件时才替换
+      // Store in Map, ensuring that each ID has only one component
+      // If there is already a component with the same ID, it should only be replaced when the new component is a temporary file
       if (!uniqueItems.has(id) || item.hasTemp) {
         uniqueItems.set(id, item);
       }
     }
     
-    // 转换回数组并排序
+    // Convert back to array and sort
     const result = Array.from(uniqueItems.values());
     result.sort((a, b) => {
       const idA = a.id || a.name || '';

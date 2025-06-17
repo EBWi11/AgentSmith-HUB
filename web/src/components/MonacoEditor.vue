@@ -15,8 +15,8 @@ const props = defineProps({
   language: { type: String, default: 'yaml' },
   readOnly: { type: Boolean, default: true },
   errorLines: { type: Array, default: () => [] },
-  originalValue: { type: String, default: '' }, // 用于diff模式
-  diffMode: { type: Boolean, default: false }, // 是否开启diff模式
+  originalValue: { type: String, default: '' }, // For diff mode
+  diffMode: { type: Boolean, default: false }, // Enable diff mode
 });
 
 const container = ref(null);
@@ -27,7 +27,7 @@ const store = useStore();
 
 
 
-// 获取store中的数据
+// Get data from store
 const availablePlugins = computed(() => store.getters.getAvailablePlugins);
 const nodeTypes = computed(() => store.getters.getNodeTypes);
 const logicTypes = computed(() => store.getters.getLogicTypes);
@@ -37,32 +37,32 @@ const commonFields = computed(() => store.getters.getCommonFields);
 const inputTypes = computed(() => store.getters.getInputTypes || []);
 const outputTypes = computed(() => store.getters.getOutputTypes || []);
 
-// 获取组件列表
+// Get component lists
 const inputComponents = computed(() => store.getters.getComponents('inputs'));
 const outputComponents = computed(() => store.getters.getComponents('outputs'));
 const rulesetComponents = computed(() => store.getters.getComponents('rulesets'));
 const pluginComponents = computed(() => store.getters.getComponents('plugins'));
 
-// 在组件挂载时获取插件列表和组件列表
+// Get plugin lists and component lists when component is mounted
 onMounted(() => {
   store.dispatch('fetchAvailablePlugins');
   store.dispatch('fetchComponents', 'inputs');
   store.dispatch('fetchComponents', 'outputs');
   store.dispatch('fetchComponents', 'rulesets');
   store.dispatch('fetchComponents', 'plugins');
-  // 获取支持的类型列表
+  // Get supported type lists
   store.dispatch('fetchInputTypes');
   store.dispatch('fetchOutputTypes');
   
-  // 设置Monaco主题
+  // Setup Monaco theme
   setupMonacoTheme();
   
-  // 完全禁用Monaco内置的YAML语言支持
+  // Completely disable Monaco's built-in YAML language support
   try {
-    // 取消注册所有现有的YAML completion providers
+    // Unregister all existing YAML completion providers
     const yamlProviders = monaco.languages.getLanguages().find(lang => lang.id === 'yaml');
     if (yamlProviders) {
-      // 重新定义YAML语言，移除所有内置功能
+      // Redefine YAML language, removing all built-in features
       monaco.languages.setLanguageConfiguration('yaml', {
         wordPattern: /[\w\d_$\-\.]+/g,
         brackets: [],
@@ -77,25 +77,25 @@ onMounted(() => {
     console.warn('Failed to disable built-in YAML support:', e);
   }
   
-  // 注册语言提示
+  // Register language providers
   registerLanguageProviders();
   
-  // 注册编辑器动作和快捷键
+  // Register editor actions and shortcuts
   registerEditorActions();
   
-  // 初始化编辑器
+  // Initialize editor
   initializeEditor();
   
-  // 添加窗口大小变化监听，确保编辑器布局正确
+  // Add window resize listener to ensure correct editor layout
   window.addEventListener('resize', handleResize);
   
-  // 初始布局调整
+  // Initial layout adjustment
   setTimeout(() => {
     handleResize();
   }, 200);
 });
 
-// 设置Monaco主题
+// Setup Monaco theme
 function setupMonacoTheme() {
   monaco.editor.defineTheme('agentsmith-theme', {
     base: 'vs',
@@ -111,7 +111,7 @@ function setupMonacoTheme() {
       { token: 'comment', foreground: '6a737d', fontStyle: 'italic' },
       { token: 'variable', foreground: 'e36209' },
       { token: 'type', foreground: '6f42c1' },
-      // 项目组件引用关键字 - INPUT/OUTPUT/RULESET
+      // Project component reference keywords - INPUT/OUTPUT/RULESET
       { token: 'project.component', foreground: '0366d6', fontStyle: 'bold' },
       { token: 'project.input', foreground: '28a745', fontStyle: 'bold' },
       { token: 'project.output', foreground: 'e36209', fontStyle: 'bold' },
@@ -141,18 +141,52 @@ function setupMonacoTheme() {
   monaco.editor.setTheme('agentsmith-theme');
 }
 
-// 全局级别的provider注册标记 - 确保整个应用只注册一次
+// Utility function to deduplicate completion suggestions
+function deduplicateCompletions(result, range, prefix) {
+  if (result && result.suggestions && Array.isArray(result.suggestions)) {
+    const uniqueSuggestions = [];
+    const seenLabels = new Set();
+    
+    result.suggestions.forEach((suggestion, index) => {
+      if (suggestion && suggestion.label) {
+        const label = suggestion.label.toString().trim();
+        
+        if (!seenLabels.has(label)) {
+          seenLabels.add(label);
+          uniqueSuggestions.push({
+            label: label,
+            kind: suggestion.kind || monaco.languages.CompletionItemKind.Text,
+            insertText: suggestion.insertText || label,
+            range: suggestion.range || range,
+            documentation: suggestion.documentation || '',
+            sortText: `${prefix}_${String(index).padStart(3, '0')}_${label}`,
+            detail: `${prefix.toUpperCase()}: ${label}`
+          });
+        }
+      }
+    });
+    
+    return {
+      suggestions: uniqueSuggestions,
+      incomplete: false
+    };
+  }
+  
+  return result || { suggestions: [], incomplete: false };
+}
+
+// Global-level provider registration flag - ensure entire app registers only once
 window.monacoProvidersRegistered = window.monacoProvidersRegistered || false;
 
-// 注册语言提示
+// Register language providers
 function registerLanguageProviders() {
-  // 防止重复注册 - 全局级别检查
+  // Prevent duplicate registration - global level check
   if (window.monacoProvidersRegistered) {
     
     return;
   }
   
-  // 注册自定义YAML语言定义，用于项目组件关键字语法高亮
+  // Register custom YAML language definition for project component keyword syntax highlighting
   monaco.languages.setMonarchTokensProvider('yaml', {
     defaultToken: '',
     ignoreCase: false,
@@ -216,7 +250,7 @@ function registerLanguageProviders() {
   
 
 
-  // YAML 语言提示 - 针对Input/Output/Project组件
+  // YAML language suggestions - for Input/Output/Project components
   monaco.languages.registerCompletionItemProvider('yaml', {
     provideCompletionItems: function(model, position) {
       try {
@@ -240,7 +274,7 @@ function registerLanguageProviders() {
         
         let result;
         
-        // 根据上下文检测组件类型
+        // Detect component type based on context
         const componentType = detectYamlComponentType(textUntilPosition, currentLine);
         
         if (componentType === 'input') {
@@ -248,7 +282,7 @@ function registerLanguageProviders() {
         } else if (componentType === 'output') {
           result = getOutputCompletions(textUntilPosition, lineUntilPosition, range, position);
         } else if (componentType === 'project') {
-          // 检测是否是项目流程定义（在content内容区域）
+          // Check if this is a project flow definition (in content area)
           if (textUntilPosition.includes('content:') || lineUntilPosition.includes('->') || 
               lineUntilPosition.includes('INPUT.') || lineUntilPosition.includes('OUTPUT.') || 
               lineUntilPosition.includes('RULESET.')) {
@@ -257,39 +291,12 @@ function registerLanguageProviders() {
             result = getProjectCompletions(textUntilPosition, lineUntilPosition, range, position);
           }
         } else {
-          // 默认基础YAML补全
+          // Default basic YAML completions
           result = getBaseYamlCompletions(textUntilPosition, lineUntilPosition, range, position);
         }
         
-        // 简单去重
-        if (result && result.suggestions && Array.isArray(result.suggestions)) {
-          const uniqueSuggestions = [];
-          const seenLabels = new Set();
-          
-          result.suggestions.forEach((suggestion, index) => {
-            if (suggestion && suggestion.label) {
-              const label = suggestion.label.toString().trim();
-              
-              if (!seenLabels.has(label)) {
-                seenLabels.add(label);
-                uniqueSuggestions.push({
-                  label: label,
-                  kind: suggestion.kind || monaco.languages.CompletionItemKind.Text,
-                  insertText: suggestion.insertText || label,
-                  range: suggestion.range || range,
-                  documentation: suggestion.documentation || '',
-                  sortText: `yaml_${String(index).padStart(3, '0')}_${label}`,
-                  detail: `YAML: ${label}`
-                });
-              }
-            }
-          });
-          
-          return {
-            suggestions: uniqueSuggestions,
-            incomplete: false
-          };
-        }
+        // Simple deduplication
+        return deduplicateCompletions(result, range, 'yaml');
         
         return { suggestions: [], incomplete: false };
       } catch (error) {
@@ -303,7 +310,7 @@ function registerLanguageProviders() {
   
 
 
-  // XML 语言提示 - 针对Ruleset组件
+  // XML language suggestions - for Ruleset components
   monaco.languages.registerCompletionItemProvider('xml', {
     provideCompletionItems: function(model, position) {
       try {
@@ -327,35 +334,8 @@ function registerLanguageProviders() {
         
         const result = getRulesetXmlCompletions(textUntilPosition, lineUntilPosition, range, position);
         
-        // 简单去重
-        if (result && result.suggestions && Array.isArray(result.suggestions)) {
-          const uniqueSuggestions = [];
-          const seenLabels = new Set();
-          
-          result.suggestions.forEach((suggestion, index) => {
-            if (suggestion && suggestion.label) {
-              const label = suggestion.label.toString();
-              
-              if (!seenLabels.has(label)) {
-                seenLabels.add(label);
-                uniqueSuggestions.push({
-                  label: label,
-                  kind: suggestion.kind || monaco.languages.CompletionItemKind.Text,
-                  insertText: suggestion.insertText || label,
-                  range: suggestion.range || range,
-                  documentation: suggestion.documentation || '',
-                  sortText: `xml_${String(index).padStart(3, '0')}_${label}`,
-                  detail: `Ruleset XML: ${label}`
-                });
-              }
-            }
-          });
-          
-          return {
-            suggestions: uniqueSuggestions,
-            incomplete: false
-          };
-        }
+        // Simple deduplication
+        return deduplicateCompletions(result, range, 'xml');
         
         return { suggestions: [], incomplete: false };
       } catch (error) {
@@ -369,7 +349,7 @@ function registerLanguageProviders() {
   
 
 
-  // Go 语言提示 - 针对Plugin组件
+  // Go language suggestions - for Plugin components
   monaco.languages.registerCompletionItemProvider('go', {
     provideCompletionItems: function(model, position) {
       try {
@@ -393,35 +373,8 @@ function registerLanguageProviders() {
         
         const result = getPluginGoCompletions(textUntilPosition, lineUntilPosition, range, position);
         
-        // 简单去重
-        if (result && result.suggestions && Array.isArray(result.suggestions)) {
-          const uniqueSuggestions = [];
-          const seenLabels = new Set();
-          
-          result.suggestions.forEach((suggestion, index) => {
-            if (suggestion && suggestion.label) {
-              const label = suggestion.label.toString();
-              
-              if (!seenLabels.has(label)) {
-                seenLabels.add(label);
-                uniqueSuggestions.push({
-                  label: label,
-                  kind: suggestion.kind || monaco.languages.CompletionItemKind.Text,
-                  insertText: suggestion.insertText || label,
-                  range: suggestion.range || range,
-                  documentation: suggestion.documentation || '',
-                  sortText: `go_${String(index).padStart(3, '0')}_${label}`,
-                  detail: `Go Plugin: ${label}`
-                });
-              }
-            }
-          });
-          
-          return {
-            suggestions: uniqueSuggestions,
-            incomplete: false
-          };
-        }
+        // Simple deduplication
+        return deduplicateCompletions(result, range, 'go');
         
         return { suggestions: [], incomplete: false };
       } catch (error) {
@@ -433,13 +386,13 @@ function registerLanguageProviders() {
     triggerCharacters: ['.', '(', ' ', '\n', '\t']
   });
   
-  // 标记providers已注册 - 全局级别
+  // Mark providers as registered - global level
   window.monacoProvidersRegistered = true;
   
 
 }
 
-// 初始化编辑器
+  // Initialize editor
 function initializeEditor() {
   if (!container.value) return;
   
@@ -471,7 +424,7 @@ function initializeEditor() {
     tabSize: 2,
     wordWrap: 'on',
     contextmenu: true,
-    // 根据语言类型和只读状态配置补全
+    // Configure completion based on language type and read-only status
     quickSuggestions: props.readOnly ? false : true,
     snippetSuggestions: props.readOnly ? 'none' : 'inline',
     suggestOnTriggerCharacters: !props.readOnly,
@@ -480,7 +433,7 @@ function initializeEditor() {
     suggestSelection: 'first',
     acceptSuggestionOnCommitCharacter: !props.readOnly,
     quickSuggestionsDelay: 100,
-    // 禁用内置的单词补全，保留自定义补全
+    // Disable built-in word completion, keep custom completions
     wordBasedSuggestions: 'off',
     folding: true,
     autoIndent: 'full',
@@ -603,7 +556,7 @@ function initializeEditor() {
     }
   }
   
-  // 确保应用自定义主题（用于组件关键字语法高亮）
+  // Ensure custom theme is applied (for component keyword syntax highlighting)
   try {
     monaco.editor.setTheme('agentsmith-theme');
   } catch (error) {
@@ -657,7 +610,7 @@ function initializeEditor() {
   }, 100);
 }
 
-// 获取编辑器语言
+// Get editor language
 function getLanguage() {
   switch (props.language) {
     case 'xml':
@@ -683,23 +636,18 @@ function isEditorValid(editorInstance) {
   }
 }
 
-// Toggle diff view mode
-
-
-
-
-// 存储当前的装饰器ID
+// Store current decorator IDs
 let currentDecorations = [];
 
-// 更新错误行高亮
+// Update error line highlighting
 function updateErrorLines(errorLines) {
   if (!isEditorValid(editor)) return;
   
   try {
-    // 创建新的装饰器
+    // Create a new decorator
     let newDecorations = [];
     
-    // 如果有错误行，创建装饰器
+    // If there are any error lines, create a decorator
     if (errorLines && errorLines.length > 0) {
       newDecorations = errorLines.map(error => {
         const lineNum = typeof error === 'object' ? error.line : parseInt(error);
@@ -719,14 +667,14 @@ function updateErrorLines(errorLines) {
       }).filter(Boolean);
     }
     
-    // 更新装饰器：清除旧的，应用新的
+    // Update decorator: Remove old and apply new
     currentDecorations = editor.deltaDecorations(currentDecorations, newDecorations);
   } catch (error) {
     console.warn('Failed to update error lines:', error);
   }
 }
 
-// 监听值变化
+// Monitoring value changes
 watch(() => props.value, (newValue) => {
   if (editor && editor.getModel() && newValue !== editor.getValue()) {
     try {
@@ -737,7 +685,7 @@ watch(() => props.value, (newValue) => {
   }
 });
 
-// 监听语言变化
+// Monitor language changes
 watch(() => props.language, (newLanguage) => {
   if (editor && editor.getModel()) {
     try {
@@ -751,7 +699,7 @@ watch(() => props.language, (newLanguage) => {
   }
 });
 
-// 监听只读状态变化
+// Monitor read-only status changes
 watch(() => props.readOnly, (newReadOnly) => {
   if (isEditorValid(editor)) {
     try {
@@ -762,20 +710,20 @@ watch(() => props.readOnly, (newReadOnly) => {
   }
 });
 
-// 监听错误行变化
+// Monitor error line changes
 watch(() => props.errorLines, (newErrorLines) => {
   updateErrorLines(newErrorLines);
 });
 
-// 监听diff模式变化
+// Monitor diff mode changes
 watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalValue]) => {
   if (newDiffMode !== (diffEditor !== null)) {
-    // 模式发生变化，需要重新创建编辑器
+    // The mode has changed and a new editor needs to be created
     disposeEditors();
     initializeEditor();
   } else if (isEditorValid(diffEditor) && newOriginalValue !== undefined) {
     try {
-      // 只更新原始模型的内容
+      // Only update the content of the original model
       const originalModel = diffEditor.getOriginalEditor().getModel();
       if (originalModel) {
         originalModel.setValue(newOriginalValue);
@@ -786,7 +734,7 @@ watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalVal
   }
 }, { deep: true });
 
-// 处理窗口大小变化
+// Handle window size changes
 function handleResize() {
   try {
     if (isEditorValid(editor)) {
@@ -800,14 +748,14 @@ function handleResize() {
   }
 }
 
-// 组件销毁前清理
+// Cleaning before component destruction
 onBeforeUnmount(() => {
-  // 移除窗口大小变化监听
+  // Remove window size change monitoring
   window.removeEventListener('resize', handleResize);
   disposeEditors();
 });
 
-// 清理编辑器实例
+// Clean up editor instance
 function disposeEditors() {
   try {
     if (isEditorValid(editor)) {
@@ -831,9 +779,9 @@ function disposeEditors() {
   }
 }
 
-// 注册编辑器动作和快捷键
+// Register editor actions and shortcut keys
 function registerEditorActions() {
-  // 注册智能代码格式化动作
+  // Register intelligent code formatting action
   monaco.editor.addEditorAction({
     id: 'smart-format',
     label: 'Smart Format Document',
@@ -843,7 +791,7 @@ function registerEditorActions() {
     contextMenuGroupId: 'navigation',
     contextMenuOrder: 1.5,
     run: function(editor) {
-      // 根据语言类型进行智能格式化
+      // Intelligent formatting based on language type
       const model = editor.getModel();
       if (!model) return;
       
@@ -851,19 +799,16 @@ function registerEditorActions() {
       const fullText = model.getValue();
       
       if (language === 'yaml') {
-        // YAML格式化逻辑
         formatYamlDocument(editor, fullText);
       } else if (language === 'xml') {
-        // XML格式化逻辑
         formatXmlDocument(editor, fullText);
       } else if (language === 'go') {
-        // Go代码格式化逻辑
         formatGoDocument(editor, fullText);
       }
     }
   });
   
-  // 注册快速插入模板动作
+  // Register for quick template insertion action
   monaco.editor.addEditorAction({
     id: 'insert-template',
     label: 'Insert Component Template',
@@ -881,7 +826,7 @@ function registerEditorActions() {
     }
   });
   
-  // 注册智能注释切换
+  // Registration intelligent annotation switching
   monaco.editor.addEditorAction({
     id: 'toggle-smart-comment',
     label: 'Toggle Smart Comment',
@@ -899,7 +844,7 @@ function registerEditorActions() {
     }
   });
   
-  // 注册快速补全建议动作
+  // Suggested actions for quick registration completion
   monaco.editor.addEditorAction({
     id: 'trigger-suggest',
     label: 'Trigger Suggest',
@@ -912,16 +857,13 @@ function registerEditorActions() {
   });
 }
 
-// 格式化YAML文档
 function formatYamlDocument(editor, content) {
   try {
-    // 基本的YAML格式化逻辑
     const lines = content.split('\n');
     const formattedLines = lines.map(line => {
-      // 移除尾随空格
       line = line.trimEnd();
       
-      // 规范化缩进（2个空格）
+      // Normalized indentation (2 spaces)
       const match = line.match(/^(\s*)(.*)/);
       if (match) {
         const indent = match[1];
@@ -946,10 +888,8 @@ function formatYamlDocument(editor, content) {
   }
 }
 
-// 格式化XML文档
 function formatXmlDocument(editor, content) {
   try {
-    // 基本的XML格式化逻辑
     let formatted = content
       .replace(/></g, '>\n<')
       .replace(/^\s*\n/gm, '')
@@ -986,10 +926,8 @@ function formatXmlDocument(editor, content) {
   }
 }
 
-// 格式化Go文档
 function formatGoDocument(editor, content) {
   try {
-    // 基本的Go代码格式化逻辑
     const lines = content.split('\n');
     let indentLevel = 0;
     let inString = false;
@@ -1022,7 +960,6 @@ function formatGoDocument(editor, content) {
   }
 }
 
-// 插入组件模板
 function insertComponentTemplate(editor, language) {
   const position = editor.getPosition();
   if (!position) return;
@@ -1069,7 +1006,6 @@ function toggleSmartComment(editor, language) {
       commentPrefix = '# ';
       break;
     case 'xml':
-      // XML注释比较复杂，这里简化处理
       editor.trigger('keyboard', 'editor.action.blockComment', {});
       return;
     case 'go':
@@ -1375,7 +1311,7 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
-  // cursor_position属性值补全
+  // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
     suggestions.push(
       { label: 'BEGIN_CURSOR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Start from beginning', insertText: 'BEGIN_CURSOR', range: range },
@@ -1383,7 +1319,7 @@ function getInputValueCompletions(context, range, fullText) {
     );
   }
   
-  // endpoint格式建议
+  // Suggested endpoint format
   else if (context.currentKey === 'endpoint') {
     suggestions.push({
       label: 'region.log.aliyuncs.com',
@@ -1395,7 +1331,7 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
-  // 数组项建议 - 只提供格式提示
+  // Array item suggestion - only provides formatting hints
   else if (context.currentKey === 'brokers' || context.beforeCursor.includes('- ')) {
     suggestions.push({
       label: 'broker-address:port',
@@ -1989,28 +1925,28 @@ function getProjectCompletions(fullText, lineText, range, position) {
 
 
 
-// Project流程补全
+// Project flow completions
 function getProjectFlowCompletions(fullText, lineText, range, position) {
   
   const suggestions = [];
   
-  // 获取当前光标位置的单词
+  // Get the word at current cursor position
   const currentWord = getCurrentWord(lineText, position.column);
   
 
   
-  // 检测当前输入的上下文
+  // Detect current input context
   if (currentWord.includes('.')) {
-    // 用户已经输入了前缀，如 "INPUT.", "OUTPUT.", "RULESET."
+    // User has already entered a prefix, such as "INPUT.", "OUTPUT.", "RULESET."
     const [prefix, partial] = currentWord.split('.');
     const partialLower = (partial || '').toLowerCase();
     
-    // 当检测到具体前缀时，只处理该前缀的组件建议，不添加其他前缀建议
+    // When a specific prefix is detected, only process suggestions for that prefix, don't add other prefix suggestions
     
 
     
                 if (prefix === 'INPUT') {
-        // 计算正确的range，只替换点号后面的部分
+        // Calculate the correct range, only replace the part after the dot
         const dotIndex = currentWord.indexOf('.');
         const replaceRange = {
           startLineNumber: position.lineNumber,
@@ -2020,11 +1956,11 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         };
         
         if (inputComponents.value.length > 0) {
-          // 提示所有INPUT组件，但过滤掉临时组件
+          // Suggest all INPUT components, but filter out temporary ones
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
                 !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // 过滤掉临时组件
+                !input.hasTemp) {  // Filter out temporary components
               suggestions.push({
                 label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -2035,7 +1971,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
             }
           });
         } else {
-          // 如果没有input组件，添加一个提示
+          // If no input components, add a hint
           suggestions.push({
             label: 'No input components available',
             kind: monaco.languages.CompletionItemKind.Text,
@@ -2045,7 +1981,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
           });
         }
         
-        // 处理完INPUT组件后直接返回，不继续处理其他逻辑
+        // After processing INPUT components, return directly without processing other logic
         return { suggestions };
         
       } else if (prefix === 'RULESET') {
@@ -2061,11 +1997,11 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         console.log('RULESET prefix detected, rulesetComponents:', rulesetComponents.value);
         
         if (rulesetComponents.value.length > 0) {
-          // 提示所有RULESET组件，但过滤掉临时组件
+          // Suggest all RULESET components, but filter out temporary ones
           rulesetComponents.value.forEach(ruleset => {
             if ((!partial || ruleset.id.toLowerCase().includes(partialLower)) && 
                 !suggestions.some(s => s.label === ruleset.id) &&
-                !ruleset.hasTemp) {  // 过滤掉临时组件
+                !ruleset.hasTemp) {  // Filter out temporary components
               suggestions.push({
                 label: ruleset.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -2076,7 +2012,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
             }
           });
         } else {
-          // 如果没有ruleset组件，添加一个提示
+          // If no ruleset components, add a hint
           suggestions.push({
             label: 'No ruleset components available',
             kind: monaco.languages.CompletionItemKind.Text,
@@ -2086,7 +2022,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
           });
         }
         
-        // 处理完RULESET组件后直接返回
+        // After processing RULESET components, return directly
         return { suggestions };
       
     } else if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
@@ -2099,11 +2035,11 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // 提示所有OUTPUT组件，但过滤掉临时组件
+      // Suggest all OUTPUT components, but filter out temporary ones
       outputComponents.value.forEach(output => {
         const matches = !partial || output.id.toLowerCase().includes(partialLower);
         const alreadyExists = suggestions.some(s => s.label === output.id);
-        const isNotTemp = !output.hasTemp;  // 过滤掉临时组件
+        const isNotTemp = !output.hasTemp;  // Filter out temporary components
         
         if (matches && !alreadyExists && isNotTemp) {
           suggestions.push({
@@ -2116,18 +2052,18 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         }
       });
       
-      // 处理完OUTPUT组件后直接返回
+      // After processing OUTPUT components, return directly
       return { suggestions };
     }
     
-    // 如果没有匹配的前缀，返回空建议
+    // If no matching prefix, return empty suggestions
     return { suggestions: [] };
     
   } else {
-    // 用户还没有输入前缀，需要根据上下文提供前缀建议
+    // User hasn't entered a prefix yet, provide prefix suggestions based on context
     const suggestionsMap = new Map();
 
-    // 统一管理所有前缀建议，确保不重复
+    // Manage all prefix suggestions uniformly, ensure no duplicates
     const addSuggestion = (label, kind, doc, insertText) => {
       if (!suggestionsMap.has(label)) {
         suggestionsMap.set(label, {
@@ -2140,26 +2076,26 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
       }
     };
 
-    // 根据上下文判断应该提供哪些建议
+    // Determine which suggestions to provide based on context
     const arrowIndex = lineText.lastIndexOf('->');
     const isAfterArrow = arrowIndex !== -1 && position.column > arrowIndex + 2;
 
     if (isAfterArrow) {
-      // 箭头后：只能是 RULESET 或 OUTPUT
+      // After arrow: can only be RULESET or OUTPUT
       addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET');
       addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT');
     } else {
-      // 箭头前或新行：可以是 INPUT, RULESET, OUTPUT
+      // Before arrow or new line: can be INPUT, RULESET, OUTPUT
       addSuggestion('INPUT', monaco.languages.CompletionItemKind.Module, 'Input component reference', 'INPUT');
       addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET');
       addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT');
     }
 
-    // 将Map中的建议转换成数组
+    // Convert Map suggestions to array
     suggestions.push(...Array.from(suggestionsMap.values()));
     
-    // 检查是否应该提示箭头操作符
-    // 只有当行中有完整的组件引用（如 INPUT.demo, RULESET.test）且不在箭头后时才提示
+    // Check if arrow operator should be suggested
+    // Only when line has complete component reference (like INPUT.demo, RULESET.test) and not after arrow
     const hasCompleteComponentRef = /\b(INPUT|RULESET|OUTPUT)\.\w+/.test(lineText);
     if (!isAfterArrow && hasCompleteComponentRef) {
       suggestions.push({
@@ -2171,10 +2107,10 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
       });
     }
     
-    // Flow Template已移除 - 用户不需要
+    // Flow Template removed - user doesn't need it
   }
   
-  // 最终去重
+  // Final deduplication
   const finalSuggestions = [];
   const seenLabels = new Set();
   
@@ -2196,17 +2132,17 @@ function getCurrentWord(lineText, column) {
   const beforeCursor = lineText.substring(0, column - 1);
   const afterCursor = lineText.substring(column - 1);
   
-  // 查找单词边界，特别处理组件引用格式（如 INPUT.component_name）
+  // Find word boundaries, special handling for component reference format (like INPUT.component_name)
   const wordStart = Math.max(
     beforeCursor.lastIndexOf(' '),
     beforeCursor.lastIndexOf('\t'),
     beforeCursor.lastIndexOf('|'),
     beforeCursor.lastIndexOf('>'),
     beforeCursor.lastIndexOf('-'),
-    0  // 确保不会是负数
+    0  // Ensure it's not negative
   ) + 1;
   
-  // 对于afterCursor，需要找到下一个分隔符，但要保留完整的组件引用
+  // For afterCursor, need to find the next separator, but preserve complete component reference
   const wordEnd = afterCursor.search(/[\s\t|>-]/) === -1 ? afterCursor.length : afterCursor.search(/[\s\t|>-]/);
   
   const word = beforeCursor.substring(wordStart) + afterCursor.substring(0, wordEnd);
@@ -2214,12 +2150,12 @@ function getCurrentWord(lineText, column) {
   return word;
 }
 
-// Ruleset XML智能补全
+// Ruleset XML intelligent completions
 function getRulesetXmlCompletions(fullText, lineText, range, position) {
-  // 解析当前XML上下文
+  // Parse current XML context
   const context = parseXmlContext(fullText, position.lineNumber, position.column);
   
-  // 根据不同的上下文提供精确的补全，避免重复
+  // Provide accurate completions based on different contexts, avoid duplicates
   let result;
   if (context.isInAttributeValue) {
     result = getXmlAttributeValueCompletions(context, range);
@@ -2230,21 +2166,21 @@ function getRulesetXmlCompletions(fullText, lineText, range, position) {
   } else if (context.isInTagContent) {
     result = getXmlTagContentCompletions(context, range, fullText);
   } else {
-    // 默认情况 - 只有在没有其他匹配时才提供默认建议
+    // Default case - only provide default suggestions when there are no other matches
     result = getDefaultXmlCompletions(fullText, range);
   }
   
   return result;
 }
 
-// 解析XML上下文
+// Parse XML context
 function parseXmlContext(fullText, lineNumber, column) {
   const lines = fullText.split('\n');
   const currentLine = lines[lineNumber - 1] || '';
   const beforeCursor = currentLine.substring(0, column - 1);
   const afterCursor = currentLine.substring(column - 1);
   
-  // 检测当前位置的上下文
+  // Detect context of current position
   const context = {
     currentLine,
     beforeCursor,
@@ -2260,21 +2196,21 @@ function parseXmlContext(fullText, lineNumber, column) {
     attributeQuoteChar: ''
   };
   
-  // 解析父标签层级
+  // Parse parent tag hierarchy
   const beforeLines = lines.slice(0, lineNumber - 1).join('\n') + '\n' + beforeCursor;
   context.parentTags = getParentTags(beforeLines);
   
-  // 检测是否在属性值内（引号内）
+  // Detect if inside attribute value (within quotes)
   const lastQuote = Math.max(beforeCursor.lastIndexOf('"'), beforeCursor.lastIndexOf("'"));
   const lastOpenTag = beforeCursor.lastIndexOf('<');
   const lastCloseTag = beforeCursor.lastIndexOf('>');
   
   if (lastQuote > lastOpenTag && lastOpenTag > lastCloseTag) {
-    // 在属性值内
+    // Inside attribute value
     context.isInAttributeValue = true;
     context.attributeQuoteChar = beforeCursor.charAt(lastQuote);
     
-    // 查找属性名
+    // Find attribute name
     const beforeQuote = beforeCursor.substring(0, lastQuote);
     const equalsPos = beforeQuote.lastIndexOf('=');
     if (equalsPos > 0) {
@@ -2284,13 +2220,13 @@ function parseXmlContext(fullText, lineNumber, column) {
       }
     }
     
-    // 查找当前标签名
+    // Find current tag name
     const tagMatch = beforeCursor.match(/<(\w+)[^>]*$/);
     if (tagMatch) {
       context.currentTag = tagMatch[1];
     }
   } else if (lastOpenTag > lastCloseTag) {
-    // 在标签内但不在属性值内
+    // Inside tag but not in attribute value
     context.isInTag = true;
     
     const tagContent = beforeCursor.substring(lastOpenTag + 1);

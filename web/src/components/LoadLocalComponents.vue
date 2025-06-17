@@ -418,10 +418,10 @@ async function loadSingleChange(change) {
   } catch (e) {
     $message?.error?.('Failed to process change: ' + (e?.message || 'Unknown error'))
     
-    // 即使失败，也要刷新列表以确保显示最新状态
+    // Even if it fails, refresh the list to ensure the latest status is displayed
     await refreshChanges();
     
-    // 即使失败，也要尝试刷新对应的组件类型列表
+    // Even if it fails, try refreshing the corresponding component type list
     emit('refresh-list', change.type)
   } finally {
     loading.value = false

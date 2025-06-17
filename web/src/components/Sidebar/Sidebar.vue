@@ -1562,7 +1562,7 @@ function hideTooltip() {
   tooltip.show = false
 }
 
-// 组件使用情况相关变量
+// Variables related to component usage
 const showUsageModal = ref(false)
 const usageLoading = ref(false)
 const usageError = ref(null)
@@ -1570,7 +1570,7 @@ const usageComponentType = ref('')
 const usageComponentId = ref('')
 const usageProjects = ref([])
 
-// 在三点菜单中添加"查看使用情况"选项
+// Add the "View Usage" option to the three-point menu
 function openUsageModal(type, item) {
   closeAllMenus()
   usageLoading.value = true
@@ -1583,11 +1583,11 @@ function openUsageModal(type, item) {
   
   addEscKeyListener()
   
-  // 获取组件使用情况
+  // Obtain component usage status
   fetchComponentUsage(type, item.id || item.name)
 }
 
-// 关闭使用情况模态框
+// Close the usage mode box
 function closeUsageModal() {
   showUsageModal.value = false
   activeModal.value = null
@@ -1597,7 +1597,7 @@ function closeUsageModal() {
   }
 }
 
-// 获取组件使用情况
+// Obtain component usage status
 async function fetchComponentUsage(type, id) {
   try {
     const result = await hubApi.getComponentUsage(type, id)
@@ -1609,15 +1609,13 @@ async function fetchComponentUsage(type, id) {
   }
 }
 
-// 跳转到项目详情页面
+// Jump to the project details page
 function navigateToProject(projectId) {
-  // 关闭模态框
   closeUsageModal()
   
-  // 跳转到项目详情页面
   router.push(`/app/projects/${projectId}`)
   
-  // 通知父组件选择了项目
+  // Notify the parent component that a project has been selected
   emit('select-item', {
     type: 'projects',
     id: projectId,

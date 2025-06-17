@@ -57,8 +57,8 @@ func testPlugin(c echo.Context) error {
 		})
 	}
 
-	// 将输入数据转换为字符串参数
-	// 插件通常接受JSON字符串作为输入
+	// Convert input data to string parameter
+	// Plugins typically accept JSON string as input
 	jsonData, err := json.Marshal(req.Data)
 	if err != nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -68,7 +68,7 @@ func testPlugin(c echo.Context) error {
 		})
 	}
 
-	// 创建参数数组，只传入一个JSON字符串参数
+	// Create parameter array, only passing one JSON string parameter
 	args := []interface{}{string(jsonData)}
 
 	// Determine plugin type and execute
@@ -115,7 +115,7 @@ func testPlugin(c echo.Context) error {
 			}
 		}()
 
-		// 执行插件
+		// Execute plugin
 		boolResult := p.FuncEvalCheckNode(args...)
 		result = boolResult
 		success = true
@@ -150,7 +150,7 @@ func getAvailablePlugins(c echo.Context) error {
 	// Only return formal plugins, exclude temporary plugins
 	for _, p := range plugin.Plugins {
 		if p.Type == plugin.YAEGI_PLUGIN {
-			// 提取插件描述（如果有的话）
+			// Extract plugin description (if any)
 			description := extractPluginDescription(string(p.Payload))
 			plugins = append(plugins, map[string]interface{}{
 				"name":        p.Name,
@@ -163,7 +163,7 @@ func getAvailablePlugins(c echo.Context) error {
 }
 
 func extractPluginDescription(code string) string {
-	// 尝试查找注释中的描述
+	// Try to find description in comments
 	lines := strings.Split(code, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -175,7 +175,7 @@ func extractPluginDescription(code string) string {
 		}
 	}
 
-	// 如果没有找到合适的注释，返回默认描述
+	// If no suitable comment is found, return default description
 	return "Plugin function"
 }
 
@@ -503,7 +503,7 @@ func testProject(c echo.Context) error {
 	var projectContent string
 	var isTemp bool
 
-	// Check if there's a temporary file first
+	// First check if there is a temporary file
 	tempPath, tempExists := GetComponentPath("project", id, true)
 	if tempExists {
 		content, err := ReadComponent(tempPath)
@@ -513,7 +513,7 @@ func testProject(c echo.Context) error {
 		}
 	}
 
-	// If no temp file, check formal file
+	// If no temporary file, check formal file
 	if projectContent == "" {
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
@@ -546,12 +546,12 @@ func testProject(c echo.Context) error {
 		}
 	}
 
-	// Create a temporary project for testing with completely independent components
-	tempProject, err := createTestProject(projectContent, "temp_test_"+id)
+	// Create temporary project to parse configuration (test version, no real component initialization)
+	tempProject, err := project.NewProjectForTesting("", projectContent, "temp_list_"+id)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
-			"error":   "Failed to create test project: " + err.Error(),
+			"error":   "Failed to parse project: " + err.Error(),
 			"result":  nil,
 		})
 	}
@@ -675,11 +675,11 @@ func testProject(c echo.Context) error {
 func getProjectInputs(c echo.Context) error {
 	id := c.Param("id")
 
-	// 检查项目是否存在
+	// Check if project exists
 	var projectContent string
 	var isTemp bool
 
-	// 首先检查是否有临时文件
+	// First check if there is a temporary file
 	tempPath, tempExists := GetComponentPath("project", id, true)
 	if tempExists {
 		content, err := ReadComponent(tempPath)
@@ -689,14 +689,14 @@ func getProjectInputs(c echo.Context) error {
 		}
 	}
 
-	// 如果没有临时文件，检查正式文件
+	// If no temporary file, check formal file
 	if projectContent == "" {
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
-			// 检查项目是否存在于内存中
+			// Check if project exists in memory
 			proj := project.GlobalProject.Projects[id]
 			if proj == nil {
-				// 检查项目是否存在于新项目中
+				// Check if project exists in new projects
 				content, ok := project.GlobalProject.ProjectsNew[id]
 				if !ok {
 					return c.JSON(http.StatusNotFound, map[string]interface{}{
@@ -720,7 +720,7 @@ func getProjectInputs(c echo.Context) error {
 		}
 	}
 
-	// 创建临时项目以解析配置（用于测试的版本，不初始化真实组件）
+	// Create temporary project to parse configuration (test version, no real component initialization)
 	tempProject, err := project.NewProjectForTesting("", projectContent, "temp_list_"+id)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -729,22 +729,22 @@ func getProjectInputs(c echo.Context) error {
 		})
 	}
 
-	// 收集输入节点信息（这些是虚拟的input节点，仅用于流程图验证）
+	// Collect input node information (these are virtual input nodes, only for flow chart validation)
 	inputs := []map[string]string{}
 	for name := range tempProject.Inputs {
 		inputs = append(inputs, map[string]string{
 			"id":   "input." + name,
 			"name": name,
-			"type": "virtual", // 测试用的虚拟input节点
+			"type": "virtual", // Virtual input node for testing
 		})
 	}
 
-	// 对输入节点列表按名称排序
+	// Sort input node list by name
 	sort.Slice(inputs, func(i, j int) bool {
 		return inputs[i]["name"] < inputs[j]["name"]
 	})
 
-	// 返回结果
+	// Return result
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
 		"isTemp":  isTemp,

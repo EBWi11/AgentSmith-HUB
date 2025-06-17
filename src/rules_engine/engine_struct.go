@@ -44,8 +44,8 @@ type Ruleset struct {
 	UpStream   map[string]*chan map[string]interface{}
 	DownStream map[string]*chan map[string]interface{}
 
-	stopChan chan struct{} // 用于Start/Stop的控制
-	antsPool *ants.Pool    // ants线程池
+	stopChan chan struct{} // Control channel for Start/Stop
+	antsPool *ants.Pool    // Ants thread pool
 
 	Cache            *ristretto.Cache[string, int]
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
@@ -181,7 +181,7 @@ func Verify(path string, raw string) error {
 
 	_, err := ParseRulesetFromByte(rawRuleset)
 	if err != nil {
-		// 尝试提取XML错误中的行号
+		// Try to extract line number from XML error
 		if strings.Contains(err.Error(), "line") {
 			return fmt.Errorf("failed to parse resource: %w", err)
 		}
@@ -420,7 +420,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := plugin.Plugins[pluginName]; ok {
 					appendNode.Plugin = p
 				} else {
-					// 检查是否为临时组件，临时组件不应该被引用
+					// Check if it's a temporary component, temporary components should not be referenced
 					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
 						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 					}
@@ -447,7 +447,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if p, ok := plugin.Plugins[pluginName]; ok {
 				pluginNode.Plugin = p
 			} else {
-				// 检查是否为临时组件，临时组件不应该被引用
+				// Check if it's a temporary component, temporary components should not be referenced
 				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
 					return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 				}
@@ -569,7 +569,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if p, ok := plugin.Plugins[pluginName]; ok {
 					node.Plugin = p
 				} else {
-					// 检查是否为临时组件，临时组件不应该被引用
+					// Check if it's a temporary component, temporary components should not be referenced
 					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
 						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first (rule id: " + rule.ID + ")")
 					}
