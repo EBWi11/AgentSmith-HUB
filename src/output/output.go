@@ -245,7 +245,9 @@ func (out *Output) Start() error {
 				atomic.AddUint64(&out.produceQPS, 1)
 
 				// Sample the message
-				out.sampler.Sample(msg, "kafka", out.ProjectNodeSequence)
+				if out.sampler != nil {
+					out.sampler.Sample(msg, "kafka", out.ProjectNodeSequence)
+				}
 			}
 		}()
 
@@ -289,7 +291,9 @@ func (out *Output) Start() error {
 				atomic.AddUint64(&out.produceQPS, 1)
 
 				// Sample the message
-				out.sampler.Sample(msg, "elasticsearch", out.ProjectNodeSequence)
+				if out.sampler != nil {
+					out.sampler.Sample(msg, "elasticsearch", out.ProjectNodeSequence)
+				}
 			}
 		}()
 
@@ -309,7 +313,9 @@ func (out *Output) Start() error {
 						atomic.AddUint64(&out.produceQPS, 1)
 
 						// Sample the message
-						out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+						if out.sampler != nil {
+							out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+						}
 
 						data, _ := json.Marshal(msg)
 						logger.Info("[Print Output]", "data", string(data))

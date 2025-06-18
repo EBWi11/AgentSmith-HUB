@@ -337,8 +337,8 @@ func (p *Project) initComponents() error {
 		}
 	}
 
-	projectNodeSequence := ""
 	// Connect components according to the flow graph
+	projectNodeSequence := ""
 	for from, tos := range flowGraph {
 		fromParts := strings.Split(from, ".")
 		fromType := fromParts[0]

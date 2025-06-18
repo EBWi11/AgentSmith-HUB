@@ -217,7 +217,9 @@ func (in *Input) Start() error {
 				atomic.AddUint64(&in.consumeQPS, 1)
 
 				// Sample the message
-				in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+				if in.sampler != nil {
+					in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+				}
 
 				// Forward to downstream
 				for _, ch := range in.DownStream {
@@ -260,7 +262,9 @@ func (in *Input) Start() error {
 				atomic.AddUint64(&in.consumeQPS, 1)
 
 				// Sample the message
-				in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+				if in.sampler != nil {
+					in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+				}
 
 				// Forward to downstream
 				for _, ch := range in.DownStream {
