@@ -72,6 +72,9 @@ type Input struct {
 	consumeQPS   uint64
 	metricStop   chan struct{}
 
+	// sampler
+	sampler *common.Sampler
+
 	// raw config
 	Config *InputConfig
 }
@@ -173,6 +176,7 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 		kafkaCfg:     cfg.Kafka,
 		aliyunSLSCfg: cfg.AliyunSLS,
 		Config:       &cfg,
+		sampler:      common.GetSampler("input." + id),
 	}
 	return in, nil
 }
@@ -202,27 +206,36 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to initialize kafka consumer for input %s: %w", in.Id, err)
+			return fmt.Errorf("failed to create kafka consumer for input %s: %v", in.Id, err)
 		}
 		in.kafkaConsumer = cons
+
+		// Start consumer goroutine
 		go func() {
 			for msg := range msgChan {
-				for _, down := range in.DownStream {
-					*down <- msg
-					atomic.AddUint64(&in.consumeTotal, 1)
+				atomic.AddUint64(&in.consumeTotal, 1)
+				atomic.AddUint64(&in.consumeQPS, 1)
+
+				// Sample the message
+				in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+
+				// Forward to downstream
+				for _, ch := range in.DownStream {
+					*ch <- msg
 				}
 			}
 		}()
+
 	case InputTypeAliyunSLS:
 		if in.slsConsumer != nil {
-			return fmt.Errorf("aliyun SLS consumer already running for input %s", in.Id)
+			return fmt.Errorf("sls consumer already running for input %s", in.Id)
 		}
 		if in.aliyunSLSCfg == nil {
-			return fmt.Errorf("aliyun SLS configuration missing for input %s", in.Id)
+			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
 		msgChan := make(chan map[string]interface{}, 1024)
-		consumerWorker := common.NewAliyunSLSConsumer(
+		cons, err := common.NewAliyunSLSConsumer(
 			in.aliyunSLSCfg.Endpoint,
 			in.aliyunSLSCfg.AccessKeyID,
 			in.aliyunSLSCfg.AccessKeySecret,
@@ -235,40 +248,47 @@ func (in *Input) Start() error {
 			in.aliyunSLSCfg.Query,
 			msgChan,
 		)
+		if err != nil {
+			return fmt.Errorf("failed to create sls consumer for input %s: %v", in.Id, err)
+		}
+		in.slsConsumer = cons
 
-		in.slsConsumer = consumerWorker
-		consumerWorker.Start()
+		// Start consumer goroutine
 		go func() {
 			for msg := range msgChan {
-				for _, down := range in.DownStream {
-					*down <- msg
-					atomic.AddUint64(&in.consumeTotal, 1)
+				atomic.AddUint64(&in.consumeTotal, 1)
+				atomic.AddUint64(&in.consumeQPS, 1)
+
+				// Sample the message
+				in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+
+				// Forward to downstream
+				for _, ch := range in.DownStream {
+					*ch <- msg
 				}
 			}
 		}()
-	default:
-		return fmt.Errorf("unsupported input type %s for input %s", in.Type, in.Id)
 	}
+
 	return nil
 }
 
-// Stop stops the input consumer and waits for all routines to finish.
+// Stop stops the input component and its consumers
 func (in *Input) Stop() error {
-	switch in.Type {
-	case InputTypeKafka:
-		if in.kafkaConsumer != nil {
-			in.kafkaConsumer.Close()
-			in.kafkaConsumer = nil
-		}
-	case InputTypeAliyunSLS:
-		if in.slsConsumer != nil {
-			in.slsConsumer.Close()
-			in.slsConsumer = nil
-		}
+	close(in.metricStop)
+
+	if in.kafkaConsumer != nil {
+		in.kafkaConsumer.Close()
+		in.kafkaConsumer = nil
 	}
-	if in.metricStop != nil {
-		close(in.metricStop)
+
+	if in.slsConsumer != nil {
+		if err := in.slsConsumer.Close(); err != nil {
+			return fmt.Errorf("failed to close sls consumer for input %s: %v", in.Id, err)
+		}
+		in.slsConsumer = nil
 	}
+
 	return nil
 }
 

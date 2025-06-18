@@ -150,6 +150,16 @@
                       Connect Check
                     </a>
                     
+                    <!-- View Sample Data for inputs -->
+                    <a v-if="type === 'inputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openSampleDataModal(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      View Sample Data
+                    </a>
+                    
                     <!-- 添加查看使用情况选项，仅对input、output和ruleset类型显示 -->
                     <a v-if="type === 'inputs' || type === 'outputs' || type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                        @click.prevent.stop="openUsageModal(type, item)">
@@ -206,7 +216,7 @@
                        href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
                        @click.prevent.stop="openDeleteModal(type, item)">
                       <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1v3M4 7h16" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
                       Delete
                     </a>
@@ -631,6 +641,51 @@
         </div>
       </div>
     </div>
+
+    <!-- Sample Data Modal -->
+    <div v-if="showSampleDataModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg font-medium">Sample Data - INPUT ({{ sampleDataInputId }})</h3>
+          <button @click="closeSampleDataModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 max-h-[70vh] overflow-auto">
+          <div v-if="sampleDataLoading" class="flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+          <div v-else-if="sampleDataError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-red-700">{{ sampleDataError }}</p>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="!sampleData || sampleData.length === 0" class="text-center text-gray-500 py-8">
+            No sample data available
+          </div>
+          <div v-else class="space-y-4">
+            <div v-for="(sample, index) in sampleData" :key="index" class="border border-gray-200 rounded-lg p-4">
+              <div class="mb-2 text-sm text-gray-500">
+                Time: {{ new Date(sample.timestamp).toLocaleString() }}
+              </div>
+              <div class="mb-2 text-sm text-gray-500">
+                Source: {{ sample.source }}
+              </div>
+              <pre class="bg-gray-50 rounded p-3 text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -764,6 +819,13 @@ const projectWarningMessage = ref('')
 const projectOperationItem = ref(null)
 const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
+// Sample Data Modal states
+const showSampleDataModal = ref(false)
+const sampleDataInputId = ref('')
+const sampleDataLoading = ref(false)
+const sampleDataError = ref(null)
+const sampleData = ref([])
+
 // Flag variable to track if ESC key listener is added
 const escKeyListenerAdded = ref(false)
 
@@ -833,6 +895,9 @@ function closeActiveModal() {
       break
     case 'usage':
       closeUsageModal()
+      break
+    case 'sampleData':
+      closeSampleDataModal()
       break
   }
   
@@ -1634,6 +1699,56 @@ function toggleMenu(item) {
   // If the menu wasn't open, open it
   if (!wasOpen) {
     item.menuOpen = true
+  }
+}
+
+// Open sample data modal
+function openSampleDataModal(item) {
+  closeAllMenus()
+  sampleDataInputId.value = item.id || item.name
+  sampleDataLoading.value = true
+  sampleDataError.value = null
+  sampleData.value = []
+  showSampleDataModal.value = true
+  activeModal.value = 'sampleData'
+  
+  addEscKeyListener()
+  
+  // Fetch sample data
+  fetchSampleData(item.id || item.name)
+}
+
+// Close sample data modal
+function closeSampleDataModal() {
+  showSampleDataModal.value = false
+  sampleDataInputId.value = ''
+  sampleDataLoading.value = false
+  sampleDataError.value = null
+  sampleData.value = []
+  activeModal.value = null
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
+}
+
+// Fetch sample data
+async function fetchSampleData(id) {
+  try {
+    const response = await hubApi.getSamplerData({
+      name: 'input',
+      projectNodeSequence: `input.${id}`
+    })
+    
+    if (response && response.input) {
+      sampleData.value = response.input[`input.${id}`] || []
+    } else {
+      sampleData.value = []
+    }
+  } catch (error) {
+    sampleDataError.value = error.message || 'Failed to fetch sample data'
+  } finally {
+    sampleDataLoading.value = false
   }
 }
 </script>

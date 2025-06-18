@@ -50,9 +50,6 @@ onMounted(() => {
   store.dispatch('fetchComponents', 'outputs');
   store.dispatch('fetchComponents', 'rulesets');
   store.dispatch('fetchComponents', 'plugins');
-  // Get supported type lists
-  store.dispatch('fetchInputTypes');
-  store.dispatch('fetchOutputTypes');
   
   // Setup Monaco theme
   setupMonacoTheme();

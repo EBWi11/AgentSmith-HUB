@@ -1042,6 +1042,15 @@ export const hubApi = {
       console.error(`Error loading single local change for ${type}/${id}:`, error);
       throw error;
     }
+  },
+
+  async getSamplerData(params) {
+    try {
+      const response = await api.get('/sampler/data', { params });
+      return response.data;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching sampler data:', true);
+    }
   }
 };
 
@@ -1138,4 +1147,23 @@ fetchComponentsByType = async (type, endpoint) => {
   } catch (error) {
     return handleApiError(error, `Error fetching ${type}:`, true);
   }
-}; 
+};
+
+// 采样器相关接口
+export async function getSamplerData(params) {
+  const { name, projectNodeSequence } = params;
+  const queryParams = new URLSearchParams();
+  
+  if (name) {
+    queryParams.append('name', name);
+  }
+  if (projectNodeSequence) {
+    queryParams.append('projectNodeSequence', projectNodeSequence);
+  }
+  
+  const response = await fetch(`${API_BASE}/samplers/data?${queryParams.toString()}`, {
+    headers: getHeaders(),
+  });
+  
+  return handleResponse(response);
+} 

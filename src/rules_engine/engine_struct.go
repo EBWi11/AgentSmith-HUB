@@ -23,8 +23,8 @@ const FromRawSymbol = "_$"
 const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
-const MinPoolSize = 4
-const MaxPoolSize = 512
+const MinPoolSize = 32
+const MaxPoolSize = 256
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 
@@ -53,6 +53,7 @@ type Ruleset struct {
 	CacheMu sync.RWMutex
 
 	RawConfig string
+	sampler   *common.Sampler
 }
 
 type RulesByFilter struct {
@@ -221,6 +222,7 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	}
 
 	ruleset.RulesetID = id
+	ruleset.sampler = common.GetSampler("ruleset." + id)
 	return ruleset, nil
 }
 

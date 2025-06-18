@@ -83,6 +83,9 @@ type Output struct {
 	produceQPS   uint64
 	metricStop   chan struct{}
 
+	// sampler
+	sampler *common.Sampler
+
 	// for print output
 	printStop chan struct{}
 
@@ -198,6 +201,7 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
 		Config:           &cfg,
+		sampler:          common.GetSampler("output." + id),
 	}
 	return out, nil
 }
@@ -217,8 +221,9 @@ func (out *Output) Start() error {
 		if out.kafkaCfg == nil {
 			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
 		}
+
 		msgChan := make(chan map[string]interface{}, 1024)
-		prod, err := common.NewKafkaProducer(
+		producer, err := common.NewKafkaProducer(
 			out.kafkaCfg.Brokers,
 			out.kafkaCfg.Topic,
 			out.kafkaCfg.Compression,
@@ -227,21 +232,23 @@ func (out *Output) Start() error {
 			out.kafkaCfg.Key,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to initialize kafka producer for output %s: %w", out.Id, err)
+			return fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err)
 		}
-		out.kafkaProducer = prod
+		out.kafkaProducer = producer
+
+		// Start producer goroutine
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
-			for _, up := range out.UpStream {
-				go func() {
-					for msg := range *up {
-						msgChan <- msg
-						atomic.AddUint64(&out.produceTotal, 1)
-					}
-				}()
+			for msg := range msgChan {
+				atomic.AddUint64(&out.produceTotal, 1)
+				atomic.AddUint64(&out.produceQPS, 1)
+
+				// Sample the message
+				out.sampler.Sample(msg, "kafka", out.ProjectNodeSequence)
 			}
 		}()
+
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
 			return fmt.Errorf("elasticsearch producer already running for output %s", out.Id)
@@ -249,6 +256,7 @@ func (out *Output) Start() error {
 		if out.elasticsearchCfg == nil {
 			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
 		}
+
 		msgChan := make(chan map[string]interface{}, 1024)
 		batchSize := 1000
 		if out.elasticsearchCfg.BatchSize > 0 {
@@ -260,7 +268,7 @@ func (out *Output) Start() error {
 				flushDur = d
 			}
 		}
-		prod, err := common.NewElasticsearchProducer(
+		producer, err := common.NewElasticsearchProducer(
 			out.elasticsearchCfg.Hosts,
 			out.elasticsearchCfg.Index,
 			msgChan,
@@ -268,51 +276,53 @@ func (out *Output) Start() error {
 			flushDur,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to initialize elasticsearch producer for output %s: %w", out.Id, err)
+			return fmt.Errorf("failed to create elasticsearch producer for output %s: %v", out.Id, err)
 		}
-		out.elasticsearchProducer = prod
+		out.elasticsearchProducer = producer
+
+		// Start producer goroutine
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
-			for _, up := range out.UpStream {
-				go func() {
-					for msg := range *up {
-						msgChan <- msg
-						atomic.AddUint64(&out.produceTotal, 1)
-					}
-				}()
+			for msg := range msgChan {
+				atomic.AddUint64(&out.produceTotal, 1)
+				atomic.AddUint64(&out.produceQPS, 1)
+
+				// Sample the message
+				out.sampler.Sample(msg, "elasticsearch", out.ProjectNodeSequence)
 			}
 		}()
+
 	case OutputTypePrint:
 		out.printStop = make(chan struct{})
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
-			for _, up := range out.UpStream {
-				go func() {
-					for {
-						select {
-						case <-out.printStop:
-							return
-						case msg, ok := <-*up:
-							if !ok {
-								return
-							}
-							b, err := json.Marshal(msg)
-							if err != nil {
-								logger.Error("[PRINT OUTPUT] marshal error: %v\n", err)
-								continue
-							}
-							fmt.Println(string(b))
-							atomic.AddUint64(&out.produceTotal, 1)
-						}
+			for {
+				select {
+				case <-out.printStop:
+					return
+				default:
+					for _, up := range out.UpStream {
+						msg := <-*up
+						atomic.AddUint64(&out.produceTotal, 1)
+						atomic.AddUint64(&out.produceQPS, 1)
+
+						// Sample the message
+						out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+
+						data, _ := json.Marshal(msg)
+						logger.Info("[Print Output]", "data", string(data))
 					}
-				}()
+				}
 			}
 		}()
-	default:
-		return fmt.Errorf("unsupported output type %s for output %s", out.Type, out.Id)
+
+	case OutputTypeAliyunSLS:
+		// TODO: Implement Aliyun SLS output
+		return fmt.Errorf("aliyun SLS output not implemented yet")
 	}
+
 	return nil
 }
 

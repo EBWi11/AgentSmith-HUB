@@ -5,11 +5,12 @@ import (
 	"AgentSmith-HUB/logger"
 	"errors"
 	"fmt"
-	regexp "github.com/BurntSushi/rure-go"
-	"github.com/panjf2000/ants/v2"
 	"strconv"
 	"strings"
 	"time"
+
+	regexp "github.com/BurntSushi/rure-go"
+	"github.com/panjf2000/ants/v2"
 )
 
 const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
@@ -74,8 +75,14 @@ func (r *Ruleset) Start() error {
 					task := func() {
 						results := r.EngineCheck(data)
 						for _, res := range results {
+							// Sample the result with source data
+							sampleData := map[string]interface{}{
+								"source": data,
+								"result": res,
+							}
+							r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
+
 							for _, downCh := range r.DownStream {
-								// Block until data is written to downstream channel.
 								*downCh <- res
 							}
 						}

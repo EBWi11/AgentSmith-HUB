@@ -6,27 +6,91 @@
       :fit-view-on-init="true"
       :nodes-draggable="false"
       :edges-updatable="false"
+      :prevent-scrolling="false"
+      :auto-connect="false"
+      :elevate-edges-on-select="false"
+      @node-click="onNodeClick"
+      @node-context-menu="onNodeContextMenu"
     >
-      <template #node-custom="props">
-        <CustomNode :node-type="props.data.nodeType" :node-name="props.data.nodeName" />
+      <template #node-custom="nodeProps">
+        <div @click="() => handleNodeClick(nodeProps)" @contextmenu.prevent="(event) => handleNodeContextMenu(event, nodeProps)">
+          <CustomNode 
+            :node-type="nodeProps.data.nodeType" 
+            :node-name="nodeProps.data.nodeName"
+            class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+          />
+        </div>
       </template>
 
       <Background :pattern-color="'#e5e7eb'" :gap="10" />
       <MiniMap />
       <Controls />
     </VueFlow>
+
+    <!-- Right-click menu -->
+    <div v-if="showContextMenu" class="context-menu" :style="contextMenuStyle">
+      <div class="bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px]">
+        <button 
+          class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center"
+          @click="viewSampleData"
+        >
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+          </svg>
+          View Sample Data
+        </button>
+      </div>
+    </div>
+
+    <!-- Sample data modal -->
+    <div v-if="showSampleModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg font-medium">Sample Data - {{ selectedNode?.data.nodeType }} ({{ selectedNode?.data.nodeName }})</h3>
+          <button @click="closeSampleModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 max-h-[70vh] overflow-auto">
+          <div v-if="loadingSamples" class="flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+          <div v-else-if="!samples || samples.length === 0" class="text-center text-gray-500 py-8">
+            No sample data available
+          </div>
+          <div v-else class="space-y-4">
+            <div v-for="(sample, index) in samples" :key="index" class="border border-gray-200 rounded-lg p-4">
+              <div class="mb-2 text-sm text-gray-500">
+                Time: {{ new Date(sample.timestamp).toLocaleString() }}
+              </div>
+              <div class="mb-2 text-sm text-gray-500">
+                Source: {{ sample.source }}
+              </div>
+              <pre class="bg-gray-50 rounded p-3 text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { VueFlow } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
+import { useRouter } from 'vue-router';
 import dagre from 'dagre';
 import yaml from 'js-yaml';
 import CustomNode from './CustomNode.vue';
+import { hubApi } from '../../api';
+
+const router = useRouter();
 
 const props = defineProps({
     projectContent: {
@@ -38,26 +102,156 @@ const props = defineProps({
 const nodes = ref([]);
 const edges = ref([]);
 
+// Right-click menu related
+const showContextMenu = ref(false);
+const contextMenuStyle = ref({
+  position: 'fixed',
+  top: '0px',
+  left: '0px',
+});
+const selectedNode = ref(null);
+
+// Sample data related
+const showSampleModal = ref(false);
+const loadingSamples = ref(false);
+const samples = ref([]);
+
+// VueFlow node click handler (keeping compatibility)
+function onNodeClick(event, node) {
+  console.log('VueFlow node click!', event, node);
+  handleNodeClick(node);
+}
+
+// VueFlow context menu handler (keeping compatibility)
+function onNodeContextMenu(event, node) {
+  console.log('VueFlow context menu!', event, node);
+  handleNodeContextMenu(event, node);
+}
+
+// New node click handler
+function handleNodeClick(nodeProps) {
+  console.log('Direct node click!', nodeProps);
+  
+  if (!nodeProps || !nodeProps.data) {
+    console.warn('Invalid nodeProps:', nodeProps);
+    return;
+  }
+  
+  const type = nodeProps.data.nodeType?.toLowerCase();
+  const id = nodeProps.data.componentId;
+  
+  console.log('Node type:', type, 'Node ID:', id);
+  
+  if (!type || !id) {
+    console.warn('Invalid node data:', nodeProps.data);
+    return;
+  }
+
+  // Determine route based on node type
+  let routePath;
+  switch (type) {
+    case 'input':
+      routePath = `/app/inputs/${id}`;
+      break;
+    case 'output':
+      routePath = `/app/outputs/${id}`;
+      break;
+    case 'ruleset':
+      routePath = `/app/rulesets/${id}`;
+      break;
+    default:
+      console.warn('Unsupported node type:', type);
+      return;
+  }
+
+  // Open component details page in new tab
+  console.log('Opening in new tab:', routePath);
+  const url = window.location.origin + routePath;
+  window.open(url, '_blank');
+}
+
+// New context menu handler
+function handleNodeContextMenu(event, nodeProps) {
+  console.log('Direct context menu!', event, nodeProps);
+  event.preventDefault();
+  event.stopPropagation();
+  showContextMenu.value = true;
+  contextMenuStyle.value = {
+    position: 'fixed',
+    top: `${event.clientY}px`,
+    left: `${event.clientX}px`,
+  };
+  selectedNode.value = nodeProps;
+}
+
+// Listen for global click events to close context menu
+function onGlobalClick(event) {
+  if (event.target.closest('.context-menu')) return;
+  showContextMenu.value = false;
+}
+
+// Add global click event listener on component mount
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick);
+});
+
+// Remove global click event listener on component unmount
+onUnmounted(() => {
+  document.removeEventListener('click', onGlobalClick);
+});
+
+// View sample data
+async function viewSampleData() {
+  showContextMenu.value = false;
+  showSampleModal.value = true;
+  loadingSamples.value = true;
+  
+  try {
+    const response = await hubApi.getSamplerData({
+      name: selectedNode.value.data.nodeType.toLowerCase(),
+      projectNodeSequence: selectedNode.value.id
+    });
+    
+    if (response && response[selectedNode.value.data.nodeType.toLowerCase()]) {
+      const nodeData = response[selectedNode.value.data.nodeType.toLowerCase()];
+      samples.value = nodeData[selectedNode.value.id] || [];
+    } else {
+      samples.value = [];
+    }
+  } catch (error) {
+    console.error('Failed to fetch sample data:', error);
+    samples.value = [];
+  } finally {
+    loadingSamples.value = false;
+  }
+}
+
+// Close sample data modal
+function closeSampleModal() {
+  showSampleModal.value = false;
+  samples.value = [];
+}
+
 const parseAndLayoutWorkflow = (rawProjectContent) => {
   if (!rawProjectContent) {
     nodes.value = [];
     edges.value = [];
-          return;
-        }
+    return;
+  }
 
   try {
     const doc = yaml.load(rawProjectContent);
     const content = doc.content || '';
-        const lines = content.trim().split('\n');
+    const lines = content.trim().split('\n');
     
     const tempNodes = new Map();
     const tempEdges = [];
 
     lines.forEach((line, index) => {
       if (!line.trim() || !line.includes('->')) return;
-          const parts = line.split('->');
-          if (parts.length !== 2) return;
-          
+      const parts = line.split('->');
+      if (parts.length !== 2) return;
+      
       const fromId = parts[0].trim();
       const toId = parts[1].trim();
       
@@ -66,11 +260,16 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
           const [type, ...nameParts] = id.split('.');
           const name = nameParts.join('.') || type;
           tempNodes.set(id, {
-            id,
+            id: id,
             type: 'custom',
-            data: { nodeType: type.toUpperCase(), nodeName: name }
+            data: { 
+              nodeType: type.toUpperCase(), 
+              nodeName: name,
+              componentId: name,
+              originalId: id
+            }
           });
-          }
+        }
       };
 
       addNode(fromId);
@@ -84,7 +283,7 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
         style: { stroke: '#a1a1aa', strokeWidth: 1.5 },
         markerEnd: { type: 'arrowclosed', color: '#a1a1aa' }
       });
-        });
+    });
 
     const newNodes = Array.from(tempNodes.values());
     
@@ -103,15 +302,16 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 
     nodes.value = newNodes.map(node => {
       const nodeWithPosition = g.node(node.id);
-          return {
+      return {
         ...node,
         position: { x: nodeWithPosition.x - 45, y: nodeWithPosition.y - 22.5 },
-          };
-        });
+      };
+    });
 
     edges.value = tempEdges;
 
-      } catch (e) {
+  } catch (e) {
+    console.error('Error parsing workflow:', e);
     nodes.value = [];
     edges.value = [];
   }
@@ -135,5 +335,14 @@ watch(() => props.projectContent, (newVal) => {
   border: none !important;
   box-shadow: none !important;
   background-color: transparent !important;
+  transition: transform 0.2s ease;
+}
+
+.vue-flow__node:hover {
+  transform: scale(1.02);
+}
+
+.context-menu {
+  z-index: 1000;
 }
 </style> 

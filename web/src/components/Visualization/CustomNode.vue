@@ -1,5 +1,7 @@
 <template>
-  <div class="compact-node">
+  <div 
+    class="compact-node"
+  >
     <div class="node-header" :style="{ backgroundColor: headerColor, borderColor: borderColor, color: textColor }">
       <span class="node-title">{{ nodeType }}</span>
     </div>
@@ -42,7 +44,6 @@ const colors = computed(() => {
 const headerColor = computed(() => colors.value.header);
 const borderColor = computed(() => colors.value.border);
 const textColor = computed(() => colors.value.text);
-
 </script>
 
 <style>
@@ -54,6 +55,13 @@ const textColor = computed(() => colors.value.text);
   width: 90px;
   font-family: 'Inter', sans-serif;
   overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease-in-out;
+  user-select: none;
+}
+
+.compact-node:hover {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
 
 .node-header {

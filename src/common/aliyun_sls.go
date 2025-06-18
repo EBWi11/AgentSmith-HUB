@@ -1,6 +1,8 @@
 package common
 
 import (
+	"fmt"
+
 	sls "github.com/aliyun/aliyun-log-go-sdk"
 	consumerLibrary "github.com/aliyun/aliyun-log-go-sdk/consumer"
 )
@@ -11,7 +13,7 @@ type AliyunSLSConsumer struct {
 	ConsumerWorker *consumerLibrary.ConsumerWorker
 }
 
-func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logstore, consumerGroupName, consumerName, cursorPosition string, cursorStartTime int64, query string, msgChan chan map[string]interface{}) *AliyunSLSConsumer {
+func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logstore, consumerGroupName, consumerName, cursorPosition string, cursorStartTime int64, query string, msgChan chan map[string]interface{}) (*AliyunSLSConsumer, error) {
 	slsConsumer := &AliyunSLSConsumer{}
 
 	if cursorPosition == "" {
@@ -36,16 +38,25 @@ func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logst
 
 	slsConsumer.MsgChan = msgChan
 
-	return slsConsumer
+	// Start the consumer to validate configuration
+	slsConsumer.ConsumerWorker = consumerLibrary.InitConsumerWorkerWithCheckpointTracker(slsConsumer.LoghubConfig, slsConsumer.aliyunSLSConsumerProcess)
+	if slsConsumer.ConsumerWorker == nil {
+		return nil, fmt.Errorf("failed to initialize SLS consumer worker")
+	}
+
+	return slsConsumer, nil
 }
 
 func (consumer *AliyunSLSConsumer) Start() {
-	consumer.ConsumerWorker = consumerLibrary.InitConsumerWorkerWithCheckpointTracker(consumer.LoghubConfig, consumer.aliyunSLSConsumerProcess)
 	consumer.ConsumerWorker.Start()
 }
 
-func (consumer *AliyunSLSConsumer) Close() {
+func (consumer *AliyunSLSConsumer) Close() error {
+	if consumer.ConsumerWorker == nil {
+		return fmt.Errorf("consumer worker is not initialized")
+	}
 	consumer.ConsumerWorker.StopAndWait()
+	return nil
 }
 
 func (consumer *AliyunSLSConsumer) aliyunSLSConsumerProcess(shardId int, logGroupList *sls.LogGroupList, checkpointTracker consumerLibrary.CheckPointTracker) (string, error) {

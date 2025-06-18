@@ -197,6 +197,11 @@ func ServerStart(listener string) error {
 	e.GET("/temp-file/:type/:id", CheckTempFile)
 	e.DELETE("/temp-file/:type/:id", DeleteTempFile)
 
+	// Sampler endpoints
+	e.GET("/sampler/data", GetSamplerData)
+	e.GET("/sampler/stats", GetSamplerStats)
+	e.POST("/sampler/reset", ResetSampler)
+
 	// Cancel upgrade routes
 	e.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)
 	e.POST("/cancel-upgrade/inputs/:id", cancelInputUpgrade)
