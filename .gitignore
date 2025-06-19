@@ -55,3 +55,9 @@ lerna-debug.log*
 
 # Local config files
 src/config/config.local.js
+
+# Additional ignores
+.cursor/
+bin/
+src/.project_status
+src/.token
