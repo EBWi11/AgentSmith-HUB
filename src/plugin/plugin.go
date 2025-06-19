@@ -259,3 +259,8 @@ func LoadPlugin(path string) (*Plugin, error) {
 	}
 	return p, nil
 }
+
+// YaegiLoad is a public wrapper for yaegiLoad to allow external access
+func (p *Plugin) YaegiLoad() error {
+	return p.yaegiLoad()
+}

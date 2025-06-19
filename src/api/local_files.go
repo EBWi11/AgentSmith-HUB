@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"crypto/md5"
 	"fmt"
@@ -222,7 +223,61 @@ func getLocalChanges(c echo.Context) error {
 		// Continue
 	}
 
-	// Skip plugins - they should not be shown in Load Local Components
+	// Check plugins
+	pluginDir := filepath.Join(configRoot, "plugin")
+	if err := filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		filename := d.Name()
+		id := strings.TrimSuffix(filename, ".go")
+
+		fileContent, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		memoryPlugin, exists := plugin.Plugins[id]
+		var memoryContent string
+		if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
+			memoryContent = string(memoryPlugin.Payload)
+		}
+
+		// Also check if there's content in temporary memory (PluginsNew)
+		// If plugin was loaded but not yet applied, use temporary content for comparison
+		if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+			memoryContent = tempContent
+			exists = true // Treat as existing if it's in temporary memory
+		}
+
+		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+			changeType := "modified"
+			if !exists {
+				changeType = "new"
+			}
+
+			changes = append(changes, map[string]interface{}{
+				"type":           "plugin",
+				"id":             id,
+				"change_type":    changeType,
+				"file_path":      path,
+				"file_size":      len(fileContent),
+				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+				"local_content":  string(fileContent),
+				"memory_content": memoryContent,
+				"has_local":      true,
+				"has_memory":     exists,
+			})
+		}
+
+		return nil
+	}); err != nil {
+		// Continue
+	}
 
 	// Check for components that exist in memory but not in local files (deleted locally)
 	// configRoot is already defined above
@@ -303,7 +358,28 @@ func getLocalChanges(c echo.Context) error {
 		}
 	}
 
-	// Skip deleted plugins - they should not be shown in Load Local Components
+	// Check for deleted plugins
+	for id, pluginInstance := range plugin.Plugins {
+		// Only check yaegi plugins (skip local/built-in plugins)
+		if pluginInstance.Type != plugin.YAEGI_PLUGIN {
+			continue
+		}
+		pluginPath := filepath.Join(configRoot, "plugin", id+".go")
+		if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
+			changes = append(changes, map[string]interface{}{
+				"type":           "plugin",
+				"id":             id,
+				"change_type":    "deleted",
+				"file_path":      pluginPath,
+				"file_size":      0,
+				"checksum":       "",
+				"local_content":  "",
+				"memory_content": string(pluginInstance.Payload),
+				"has_local":      false,
+				"has_memory":     true,
+			})
+		}
+	}
 
 	return c.JSON(http.StatusOK, changes)
 }
@@ -443,7 +519,44 @@ func loadLocalChanges(c echo.Context) error {
 		return nil
 	})
 
-	// Skip plugins - they should not be loaded via Load Local Components
+	// Check plugins
+	pluginDir := filepath.Join(configRoot, "plugin")
+	filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		filename := d.Name()
+		id := strings.TrimSuffix(filename, ".go")
+
+		fileContent, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		memoryPlugin, exists := plugin.Plugins[id]
+		var memoryContent string
+		if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
+			memoryContent = string(memoryPlugin.Payload)
+		}
+
+		// Also check if there's content in temporary memory (PluginsNew)
+		// If plugin was loaded but not yet applied, use temporary content for comparison
+		if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+			memoryContent = tempContent
+			exists = true // Treat as existing if it's in temporary memory
+		}
+
+		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+			changes = append(changes, map[string]interface{}{
+				"type":         "plugin",
+				"id":           id,
+				"file_path":    path,
+				"file_content": string(fileContent),
+			})
+		}
+		return nil
+	})
 
 	// Load all changes into memory and create temp files
 	results := make([]map[string]interface{}, 0)
@@ -480,7 +593,11 @@ func loadLocalChanges(c echo.Context) error {
 				project.GlobalProject.ProjectsNew = make(map[string]string)
 			}
 			project.GlobalProject.ProjectsNew[id] = content
-		// Skip plugin loading - plugins should not be loaded via Load Local Components
+		case "plugin":
+			if plugin.PluginsNew == nil {
+				plugin.PluginsNew = make(map[string]string)
+			}
+			plugin.PluginsNew[id] = content
 		default:
 			success = false
 			message = "unsupported component type"
@@ -534,7 +651,7 @@ func loadSingleLocalChange(c echo.Context) error {
 	case "project":
 		filePath = filepath.Join(configRoot, "project", req.ID+".yaml")
 	case "plugin":
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "plugins cannot be loaded via Load Local Components"})
+		filePath = filepath.Join(configRoot, "plugin", req.ID+".go")
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
 	}
@@ -575,7 +692,11 @@ func loadSingleLocalChange(c echo.Context) error {
 			project.GlobalProject.ProjectsNew = make(map[string]string)
 		}
 		project.GlobalProject.ProjectsNew[req.ID] = string(fileContent)
-		// Skip plugin loading - plugins should not be loaded via Load Local Components
+	case "plugin":
+		if plugin.PluginsNew == nil {
+			plugin.PluginsNew = make(map[string]string)
+		}
+		plugin.PluginsNew[req.ID] = string(fileContent)
 	}
 
 	// Unlock before file operations

@@ -80,9 +80,7 @@ func (r *Ruleset) Start() error {
 								"source": data,
 								"result": res,
 							}
-							if r.sampler != nil {
-								r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
-							}
+							r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
 
 							for _, downCh := range r.DownStream {
 								*downCh <- res

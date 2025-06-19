@@ -201,6 +201,11 @@ func ApplyPendingChanges(c echo.Context) error {
 
 	// Apply plugin changes
 	for name, content := range pluginsToProcess {
+		// Remove existing plugin from memory before verification to avoid name conflict
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, name)
+		common.GlobalMu.Unlock()
+
 		// Verify plugin configuration
 		err := plugin.Verify("", content, name)
 		if err != nil {
@@ -219,12 +224,21 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply plugin changes", "name", name, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("plugin", name)
+			// Reload the plugin into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			pluginPath := path.Join(configRoot, "plugin", name+".go")
+			reloadErr := plugin.NewPlugin(pluginPath, "", name, plugin.YAEGI_PLUGIN)
+			if reloadErr != nil {
+				logger.Error("Failed to reload plugin after merge", "name", name, "error", reloadErr)
+				failureCount++
+			} else {
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("plugin", name)
 
-			// Plugin changes may affect all projects, but we don't automatically restart projects
-			logger.Info("Plugin updated, manual restart of affected projects may be required", "name", name)
+				// Plugin changes may affect all projects, but we don't automatically restart projects
+				logger.Info("Plugin updated, manual restart of affected projects may be required", "name", name)
+			}
 		}
 	}
 
@@ -248,14 +262,36 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply input changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("input", id)
+			// Reload the input component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			inputPath := path.Join(configRoot, "input", id+".yaml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("input", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			if oldInput, exists := project.GlobalProject.Inputs[id]; exists {
+				stopErr := oldInput.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old input", "id", id, "error", stopErr)
+				}
+			}
+
+			newInput, reloadErr := input.NewInput(inputPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload input after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Inputs[id] = newInput
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("input", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("input", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -280,14 +316,36 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply output changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("output", id)
+			// Reload the output component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			outputPath := path.Join(configRoot, "output", id+".yaml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("output", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			if oldOutput, exists := project.GlobalProject.Outputs[id]; exists {
+				stopErr := oldOutput.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old output", "id", id, "error", stopErr)
+				}
+			}
+
+			newOutput, reloadErr := output.NewOutput(outputPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload output after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Outputs[id] = newOutput
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("output", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("output", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -312,14 +370,36 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply ruleset changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("ruleset", id)
+			// Reload the ruleset component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			rulesetPath := path.Join(configRoot, "ruleset", id+".xml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("ruleset", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			if oldRuleset, exists := project.GlobalProject.Rulesets[id]; exists {
+				stopErr := oldRuleset.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old ruleset", "id", id, "error", stopErr)
+				}
+			}
+
+			newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload ruleset after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Rulesets[id] = newRuleset
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("ruleset", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("ruleset", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -344,14 +424,48 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply project changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("project", id)
+			// Reload the project component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			projectPath := path.Join(configRoot, "project", id+".yaml")
 
-			// Get affected projects (the project itself and projects that depend on it)
-			affectedProjects := project.GetAffectedProjects("project", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Handle project lifecycle carefully
+			var wasRunning bool
+			if oldProject, exists := project.GlobalProject.Projects[id]; exists {
+				wasRunning = (oldProject.Status == project.ProjectStatusRunning)
+				if wasRunning {
+					stopErr := oldProject.Stop()
+					if stopErr != nil {
+						logger.Error("Failed to stop old project", "id", id, "error", stopErr)
+					}
+				}
+			}
+
+			newProject, reloadErr := project.NewProject(projectPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload project after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Projects[id] = newProject
+				common.GlobalMu.Unlock()
+
+				// Restart project if it was previously running
+				if wasRunning {
+					startErr := newProject.Start()
+					if startErr != nil {
+						logger.Error("Failed to restart project after reload", "id", id, "error", startErr)
+					}
+				}
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("project", id)
+
+				// Get affected projects (the project itself and projects that depend on it)
+				affectedProjects := project.GetAffectedProjects("project", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -461,6 +575,10 @@ func ApplySingleChange(c echo.Context) error {
 	// Verify configuration (without holding lock)
 	switch req.Type {
 	case "plugin":
+		// Remove existing plugin from memory before verification to avoid name conflict
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, req.ID)
+		common.GlobalMu.Unlock()
 		verifyErr = plugin.Verify("", content, req.ID)
 	case "input":
 		verifyErr = input.Verify("", content)
