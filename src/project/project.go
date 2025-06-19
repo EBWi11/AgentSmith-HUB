@@ -711,22 +711,34 @@ func (p *Project) Stop() error {
 	}
 
 	// Stop all components
+	logger.Info("Stopping inputs", "project", p.Id, "count", len(p.Inputs))
 	for _, in := range p.Inputs {
+		logger.Info("Stopping input", "project", p.Id, "input", in.Id)
+		startTime := time.Now()
 		if err := in.Stop(); err != nil {
 			return fmt.Errorf("failed to stop input %s: %v", in.Id, err)
 		}
+		logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
 	}
 
+	logger.Info("Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 	for _, rs := range p.Rulesets {
+		logger.Info("Stopping ruleset", "project", p.Id, "ruleset", rs.RulesetID)
+		startTime := time.Now()
 		if err := rs.Stop(); err != nil {
 			return fmt.Errorf("failed to stop ruleset %s: %v", rs.RulesetID, err)
 		}
+		logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
 	}
 
+	logger.Info("Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 	for _, out := range p.Outputs {
+		logger.Info("Stopping output", "project", p.Id, "output", out.Id)
+		startTime := time.Now()
 		if err := out.Stop(); err != nil {
 			return fmt.Errorf("failed to stop output %s: %v", out.Id, err)
 		}
+		logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
 	}
 
 	// Stop metrics collection

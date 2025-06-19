@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
@@ -11,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -39,22 +42,81 @@ func testPlugin(c echo.Context) error {
 		})
 	}
 
-	// Check if plugin exists
-	p, ok := plugin.Plugins[id]
-	if !ok {
-		_, existsNew := plugin.PluginsNew[id]
-		if existsNew {
+	// Check if plugin exists in memory
+	p, existsInMemory := plugin.Plugins[id]
+
+	// Check if plugin exists in temporary files
+	tempContent, existsInTemp := plugin.PluginsNew[id]
+
+	var pluginToTest *plugin.Plugin
+	var isTemporary bool
+
+	if existsInMemory {
+		// Use existing plugin
+		pluginToTest = p
+		isTemporary = false
+	} else if existsInTemp {
+		// Try to verify the temporary plugin
+		err := plugin.Verify("", tempContent, id+"_test_temp")
+		if err != nil {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"success": false,
-				"error":   "Plugin has pending changes, cannot test",
+				"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
 				"result":  nil,
 			})
 		}
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Plugin not found: " + id,
-			"result":  nil,
-		})
+
+		// Create a temporary plugin instance for testing
+		tempPlugin := &plugin.Plugin{
+			Name:    id,
+			Payload: []byte(tempContent),
+			Type:    plugin.YAEGI_PLUGIN,
+		}
+
+		pluginToTest = tempPlugin
+		isTemporary = true
+	} else {
+		// Try to load plugin from file system directly
+		configRoot := common.Config.ConfigRoot
+		pluginPath := filepath.Join(configRoot, "plugin", id+".go")
+
+		if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Plugin not found: " + id,
+				"result":  nil,
+			})
+		}
+
+		// Verify the plugin file
+		err := plugin.Verify(pluginPath, "", id+"_test_temp")
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
+				"result":  nil,
+			})
+		}
+
+		// Read and create a temporary plugin instance
+		content, err := os.ReadFile(pluginPath)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("Failed to read plugin file: %v", err),
+				"result":  nil,
+			})
+		}
+
+		tempPlugin := &plugin.Plugin{
+			Name:    id,
+			Path:    pluginPath,
+			Payload: content,
+			Type:    plugin.YAEGI_PLUGIN,
+		}
+
+		pluginToTest = tempPlugin
+		isTemporary = true
 	}
 
 	// Convert input data to string parameter
@@ -76,7 +138,7 @@ func testPlugin(c echo.Context) error {
 	var success bool
 	var errMsg string
 
-	switch p.Type {
+	switch pluginToTest.Type {
 	case plugin.LOCAL_PLUGIN:
 		// Check if it's a boolean result plugin
 		if f, ok := local_plugin.LocalPluginBoolRes[id]; ok {
@@ -115,8 +177,20 @@ func testPlugin(c echo.Context) error {
 			}
 		}()
 
+		if isTemporary {
+			// For temporary plugins, we need to load them first since they're not in the global registry
+			err := pluginToTest.YaegiLoad()
+			if err != nil {
+				return c.JSON(http.StatusOK, map[string]interface{}{
+					"success": false,
+					"error":   fmt.Sprintf("Failed to load temporary plugin: %v", err),
+					"result":  nil,
+				})
+			}
+		}
+
 		// Execute plugin
-		boolResult := p.FuncEvalCheckNode(args...)
+		boolResult := pluginToTest.FuncEvalCheckNode(args...)
 		result = boolResult
 		success = true
 
@@ -768,15 +842,23 @@ func connectCheck(c echo.Context) error {
 	componentType := c.Param("type")
 	id := c.Param("id")
 
+	// Normalize component type (accept both singular and plural forms)
+	normalizedType := componentType
+	if componentType == "input" {
+		normalizedType = "inputs"
+	} else if componentType == "output" {
+		normalizedType = "outputs"
+	}
+
 	// Check if component type is valid
-	if componentType != "inputs" && componentType != "outputs" {
+	if normalizedType != "inputs" && normalizedType != "outputs" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid component type. Must be 'inputs' or 'outputs'",
+			"error": "Invalid component type. Must be 'input', 'inputs', 'output', or 'outputs'",
 		})
 	}
 
 	// Check input component client connection
-	if componentType == "inputs" {
+	if normalizedType == "inputs" {
 		_, existsNew := project.GlobalProject.InputsNew[id]
 		inputComp := project.GlobalProject.Inputs[id]
 
@@ -903,7 +985,7 @@ func connectCheck(c echo.Context) error {
 		}
 
 		return c.JSON(http.StatusOK, result)
-	} else if componentType == "outputs" {
+	} else if normalizedType == "outputs" {
 		_, existsNew := project.GlobalProject.OutputsNew[id]
 		outputComp := project.GlobalProject.Outputs[id]
 

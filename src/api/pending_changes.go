@@ -201,6 +201,11 @@ func ApplyPendingChanges(c echo.Context) error {
 
 	// Apply plugin changes
 	for name, content := range pluginsToProcess {
+		// Remove existing plugin from memory before verification to avoid name conflict
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, name)
+		common.GlobalMu.Unlock()
+
 		// Verify plugin configuration
 		err := plugin.Verify("", content, name)
 		if err != nil {
@@ -219,12 +224,26 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply plugin changes", "name", name, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("plugin", name)
+			// Reload the plugin into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			pluginPath := path.Join(configRoot, "plugin", name+".go")
+			reloadErr := plugin.NewPlugin(pluginPath, "", name, plugin.YAEGI_PLUGIN)
+			if reloadErr != nil {
+				logger.Error("Failed to reload plugin after merge", "name", name, "error", reloadErr)
+				failureCount++
+			} else {
+				// Clear the memory map entry after successful merge
+				common.GlobalMu.Lock()
+				delete(plugin.PluginsNew, name)
+				common.GlobalMu.Unlock()
 
-			// Plugin changes may affect all projects, but we don't automatically restart projects
-			logger.Info("Plugin updated, manual restart of affected projects may be required", "name", name)
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("plugin", name)
+
+				// Plugin changes may affect all projects, but we don't automatically restart projects
+				logger.Info("Plugin updated, manual restart of affected projects may be required", "name", name)
+			}
 		}
 	}
 
@@ -248,14 +267,41 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply input changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("input", id)
+			// Reload the input component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			inputPath := path.Join(configRoot, "input", id+".yaml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("input", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			common.GlobalMu.RLock()
+			oldInput, exists := project.GlobalProject.Inputs[id]
+			common.GlobalMu.RUnlock()
+			if exists {
+				stopErr := oldInput.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old input", "id", id, "error", stopErr)
+				}
+			}
+
+			newInput, reloadErr := input.NewInput(inputPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload input after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Inputs[id] = newInput
+				// Clear the memory map entry after successful merge
+				delete(project.GlobalProject.InputsNew, id)
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("input", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("input", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -280,14 +326,41 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply output changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("output", id)
+			// Reload the output component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			outputPath := path.Join(configRoot, "output", id+".yaml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("output", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			common.GlobalMu.RLock()
+			oldOutput, exists := project.GlobalProject.Outputs[id]
+			common.GlobalMu.RUnlock()
+			if exists {
+				stopErr := oldOutput.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old output", "id", id, "error", stopErr)
+				}
+			}
+
+			newOutput, reloadErr := output.NewOutput(outputPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload output after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Outputs[id] = newOutput
+				// Clear the memory map entry after successful merge
+				delete(project.GlobalProject.OutputsNew, id)
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("output", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("output", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -312,14 +385,41 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply ruleset changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("ruleset", id)
+			// Reload the ruleset component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			rulesetPath := path.Join(configRoot, "ruleset", id+".xml")
 
-			// Get affected projects
-			affectedProjects := project.GetAffectedProjects("ruleset", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Stop old component if it exists
+			common.GlobalMu.RLock()
+			oldRuleset, exists := project.GlobalProject.Rulesets[id]
+			common.GlobalMu.RUnlock()
+			if exists {
+				stopErr := oldRuleset.Stop()
+				if stopErr != nil {
+					logger.Error("Failed to stop old ruleset", "id", id, "error", stopErr)
+				}
+			}
+
+			newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload ruleset after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Rulesets[id] = newRuleset
+				// Clear the memory map entry after successful merge
+				delete(project.GlobalProject.RulesetsNew, id)
+				common.GlobalMu.Unlock()
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("ruleset", id)
+
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("ruleset", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -344,14 +444,53 @@ func ApplyPendingChanges(c echo.Context) error {
 			logger.Error("Failed to apply project changes", "id", id, "error", err)
 			failureCount++
 		} else {
-			successCount++
-			// Sync to follower nodes
-			syncComponentToFollowers("project", id)
+			// Reload the project component into memory after successful merge
+			configRoot := common.Config.ConfigRoot
+			projectPath := path.Join(configRoot, "project", id+".yaml")
 
-			// Get affected projects (the project itself and projects that depend on it)
-			affectedProjects := project.GetAffectedProjects("project", id)
-			for _, projectID := range affectedProjects {
-				projectsToRestart[projectID] = struct{}{}
+			// Handle project lifecycle carefully
+			var wasRunning bool
+			common.GlobalMu.RLock()
+			oldProject, exists := project.GlobalProject.Projects[id]
+			common.GlobalMu.RUnlock()
+			if exists {
+				wasRunning = (oldProject.Status == project.ProjectStatusRunning)
+				if wasRunning {
+					stopErr := oldProject.Stop()
+					if stopErr != nil {
+						logger.Error("Failed to stop old project", "id", id, "error", stopErr)
+					}
+				}
+			}
+
+			newProject, reloadErr := project.NewProject(projectPath, "", id)
+			if reloadErr != nil {
+				logger.Error("Failed to reload project after merge", "id", id, "error", reloadErr)
+				failureCount++
+			} else {
+				common.GlobalMu.Lock()
+				project.GlobalProject.Projects[id] = newProject
+				// Clear the memory map entry after successful merge
+				delete(project.GlobalProject.ProjectsNew, id)
+				common.GlobalMu.Unlock()
+
+				// Restart project if it was previously running
+				if wasRunning {
+					startErr := newProject.Start()
+					if startErr != nil {
+						logger.Error("Failed to restart project after reload", "id", id, "error", startErr)
+					}
+				}
+
+				successCount++
+				// Sync to follower nodes
+				syncComponentToFollowers("project", id)
+
+				// Get affected projects (the project itself and projects that depend on it)
+				affectedProjects := project.GetAffectedProjects("project", id)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
 			}
 		}
 	}
@@ -375,7 +514,10 @@ func ApplyPendingChanges(c echo.Context) error {
 
 		// First stop all affected projects
 		for _, id := range projectIDs {
+			common.GlobalMu.RLock()
 			p, exists := project.GlobalProject.Projects[id]
+			common.GlobalMu.RUnlock()
+
 			if !exists {
 				logger.Error("Project not found for restart", "id", id)
 				continue
@@ -392,7 +534,10 @@ func ApplyPendingChanges(c echo.Context) error {
 
 		// Then start all affected projects
 		for _, id := range projectIDs {
+			common.GlobalMu.RLock()
 			p, exists := project.GlobalProject.Projects[id]
+			common.GlobalMu.RUnlock()
+
 			if !exists {
 				continue
 			}
@@ -425,10 +570,20 @@ func ApplyPendingChanges(c echo.Context) error {
 
 // ApplySingleChange applies a single pending change
 func ApplySingleChange(c echo.Context) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in ApplySingleChange", "panic", r)
+		}
+	}()
+
 	var req SingleChangeRequest
 	if err := c.Bind(&req); err != nil {
+		logger.Error("Failed to bind request in ApplySingleChange", "error", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
+
+	logger.Info("ApplySingleChange request", "type", req.Type, "id", req.ID)
 
 	// First verify configuration with lock protection
 	var verifyErr error
@@ -461,6 +616,10 @@ func ApplySingleChange(c echo.Context) error {
 	// Verify configuration (without holding lock)
 	switch req.Type {
 	case "plugin":
+		// Remove existing plugin from memory before verification to avoid name conflict
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, req.ID)
+		common.GlobalMu.Unlock()
 		verifyErr = plugin.Verify("", content, req.ID)
 	case "input":
 		verifyErr = input.Verify("", content)
@@ -501,18 +660,22 @@ func ApplySingleChange(c echo.Context) error {
 	case "input", "output", "ruleset", "project":
 		err = mergeComponentFile(req.Type, req.ID)
 		if err == nil {
-			// Clear the memory map entry after successful merge
-			common.GlobalMu.Lock()
+			// Clear the memory map entry after successful merge and reload components
 			switch req.Type {
 			case "input":
+				common.GlobalMu.Lock()
 				delete(project.GlobalProject.InputsNew, req.ID)
 				common.GlobalMu.Unlock()
+
 				// Reload the input component
 				configRoot := common.Config.ConfigRoot
 				inputPath := path.Join(configRoot, "input", req.ID+".yaml")
 
 				// Stop old component if it exists
-				if oldInput, exists := project.GlobalProject.Inputs[req.ID]; exists {
+				common.GlobalMu.RLock()
+				oldInput, exists := project.GlobalProject.Inputs[req.ID]
+				common.GlobalMu.RUnlock()
+				if exists {
 					err := oldInput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old input", "id", req.ID, "error", err)
@@ -526,7 +689,7 @@ func ApplySingleChange(c echo.Context) error {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Inputs[req.ID] = newInput
 					common.GlobalMu.Unlock()
-					// Note: Input components are typically started by projects, not individually
+					logger.Info("Successfully reloaded input component", "id", req.ID)
 				}
 			case "output":
 				common.GlobalMu.Lock()
@@ -537,7 +700,10 @@ func ApplySingleChange(c echo.Context) error {
 				outputPath := path.Join(configRoot, "output", req.ID+".yaml")
 
 				// Stop old component if it exists
-				if oldOutput, exists := project.GlobalProject.Outputs[req.ID]; exists {
+				common.GlobalMu.RLock()
+				oldOutput, exists := project.GlobalProject.Outputs[req.ID]
+				common.GlobalMu.RUnlock()
+				if exists {
 					err := oldOutput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old output", "id", req.ID, "error", err)
@@ -551,7 +717,7 @@ func ApplySingleChange(c echo.Context) error {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Outputs[req.ID] = newOutput
 					common.GlobalMu.Unlock()
-					// Note: Output components are typically started by projects, not individually
+					logger.Info("Successfully reloaded output component", "id", req.ID)
 				}
 			case "ruleset":
 				common.GlobalMu.Lock()
@@ -562,7 +728,10 @@ func ApplySingleChange(c echo.Context) error {
 				rulesetPath := path.Join(configRoot, "ruleset", req.ID+".xml")
 
 				// Stop old component if it exists
-				if oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]; exists {
+				common.GlobalMu.RLock()
+				oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
+				common.GlobalMu.RUnlock()
+				if exists {
 					err := oldRuleset.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old ruleset", "id", req.ID, "error", err)
@@ -576,7 +745,7 @@ func ApplySingleChange(c echo.Context) error {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Rulesets[req.ID] = newRuleset
 					common.GlobalMu.Unlock()
-					// Note: Ruleset components are typically started by projects, not individually
+					logger.Info("Successfully reloaded ruleset component", "id", req.ID)
 				}
 			case "project":
 				common.GlobalMu.Lock()
@@ -588,7 +757,10 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Handle project lifecycle carefully
 				var wasRunning bool
-				if oldProject, exists := project.GlobalProject.Projects[req.ID]; exists {
+				common.GlobalMu.RLock()
+				oldProject, exists := project.GlobalProject.Projects[req.ID]
+				common.GlobalMu.RUnlock()
+				if exists {
 					wasRunning = (oldProject.Status == project.ProjectStatusRunning)
 					if wasRunning {
 						err := oldProject.Stop()
@@ -605,6 +777,7 @@ func ApplySingleChange(c echo.Context) error {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Projects[req.ID] = newProject
 					common.GlobalMu.Unlock()
+					logger.Info("Successfully reloaded project component", "id", req.ID)
 					// Restart project if it was previously running
 					if wasRunning {
 						startErr := newProject.Start()
@@ -618,6 +791,7 @@ func ApplySingleChange(c echo.Context) error {
 	}
 
 	if err != nil {
+		logger.Error("Failed to apply change", "type", req.Type, "id", req.ID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
 	}
 
@@ -642,7 +816,10 @@ func ApplySingleChange(c echo.Context) error {
 
 		// First stop all affected projects
 		for _, projectID := range affectedProjects {
+			common.GlobalMu.RLock()
 			p, exists := project.GlobalProject.Projects[projectID]
+			common.GlobalMu.RUnlock()
+
 			if !exists {
 				logger.Error("Project not found for restart", "id", projectID)
 				continue
@@ -659,7 +836,10 @@ func ApplySingleChange(c echo.Context) error {
 
 		// Then start all affected projects
 		for _, projectID := range affectedProjects {
+			common.GlobalMu.RLock()
 			p, exists := project.GlobalProject.Projects[projectID]
+			common.GlobalMu.RUnlock()
+
 			if !exists {
 				continue
 			}
@@ -684,25 +864,71 @@ func ApplySingleChange(c echo.Context) error {
 
 // RestartAllProjects restarts all projects
 func RestartAllProjects(c echo.Context) error {
-	// First stop all projects
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in RestartAllProjects", "panic", r)
+		}
+	}()
+
+	// Acquire read lock to get project list safely
+	common.GlobalMu.RLock()
+	projectList := make([]*project.Project, 0, len(project.GlobalProject.Projects))
+	projectIDs := make([]string, 0, len(project.GlobalProject.Projects))
 	for id, p := range project.GlobalProject.Projects {
+		projectList = append(projectList, p)
+		projectIDs = append(projectIDs, id)
+	}
+	common.GlobalMu.RUnlock()
+
+	logger.Info("Starting project restart", "count", len(projectList))
+
+	// First stop all projects
+	stoppedCount := 0
+	for i, p := range projectList {
 		if p.Status == project.ProjectStatusRunning {
-			err := p.Stop()
-			if err != nil {
-				logger.Error("Failed to stop project", "id", id, "error", err)
+			logger.Info("Stopping project", "id", projectIDs[i], "inputs", len(p.Inputs), "rulesets", len(p.Rulesets), "outputs", len(p.Outputs))
+			startTime := time.Now()
+
+			// Log component details before stopping
+			for inputID := range p.Inputs {
+				logger.Info("Project has input", "project", projectIDs[i], "input", inputID)
 			}
+			for rulesetID := range p.Rulesets {
+				logger.Info("Project has ruleset", "project", projectIDs[i], "ruleset", rulesetID)
+			}
+			for outputID := range p.Outputs {
+				logger.Info("Project has output", "project", projectIDs[i], "output", outputID)
+			}
+
+			err := p.Stop()
+			duration := time.Since(startTime)
+			if err != nil {
+				logger.Error("Failed to stop project", "id", projectIDs[i], "error", err, "duration", duration)
+			} else {
+				stoppedCount++
+				logger.Info("Stopped project", "id", projectIDs[i], "duration", duration)
+			}
+		} else {
+			logger.Info("Skipping project (not running)", "id", projectIDs[i], "status", p.Status)
 		}
 	}
 
+	logger.Info("Stop phase completed", "stopped", stoppedCount)
+
 	// Then start all projects
-	for id, p := range project.GlobalProject.Projects {
+	startedCount := 0
+	for i, p := range projectList {
+		logger.Info("Starting project", "id", projectIDs[i])
 		err := p.Start()
 		if err != nil {
-			logger.Error("Failed to start project", "id", id, "error", err)
+			logger.Error("Failed to start project", "id", projectIDs[i], "error", err)
 		} else {
-			logger.Info("Started project", "id", id)
+			startedCount++
+			logger.Info("Started project", "id", projectIDs[i])
 		}
 	}
+
+	logger.Info("Restart completed", "total", len(projectList), "started", startedCount)
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "All projects restarted"})
 }
@@ -1007,6 +1233,9 @@ func CreateTempFile(c echo.Context) error {
 	// Strip trailing 's' if present to normalize component type
 	singularType := strings.TrimSuffix(componentType, "s")
 
+	// Lock for reading component data
+	common.GlobalMu.RLock()
+
 	switch singularType {
 	case "input":
 		originalPath = path.Join(configRoot, "input", id+".yaml")
@@ -1015,6 +1244,7 @@ func CreateTempFile(c echo.Context) error {
 		if i, ok := project.GlobalProject.Inputs[id]; ok {
 			content = i.Config.RawConfig
 		} else {
+			common.GlobalMu.RUnlock()
 			logger.Error("Input not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 		}
@@ -1026,6 +1256,7 @@ func CreateTempFile(c echo.Context) error {
 		if o, ok := project.GlobalProject.Outputs[id]; ok {
 			content = o.Config.RawConfig
 		} else {
+			common.GlobalMu.RUnlock()
 			logger.Error("Output not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
 		}
@@ -1037,6 +1268,7 @@ func CreateTempFile(c echo.Context) error {
 		if ruleset, ok := project.GlobalProject.Rulesets[id]; ok {
 			content = ruleset.RawConfig
 		} else {
+			common.GlobalMu.RUnlock()
 			logger.Error("Ruleset not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
 		}
@@ -1048,6 +1280,7 @@ func CreateTempFile(c echo.Context) error {
 		if proj, ok := project.GlobalProject.Projects[id]; ok {
 			content = proj.Config.RawConfig
 		} else {
+			common.GlobalMu.RUnlock()
 			logger.Error("Project not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 		}
@@ -1059,14 +1292,18 @@ func CreateTempFile(c echo.Context) error {
 		if p, ok := plugin.Plugins[id]; ok {
 			content = string(p.Payload)
 		} else {
+			common.GlobalMu.RUnlock()
 			logger.Error("Plugin not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 		}
 
 	default:
+		common.GlobalMu.RUnlock()
 		logger.Error("Unsupported component type", "type", componentType)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
 	}
+
+	common.GlobalMu.RUnlock()
 
 	// Check if temp file already exists
 	if _, err := os.Stat(tempPath); err == nil {

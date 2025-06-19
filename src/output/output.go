@@ -307,18 +307,29 @@ func (out *Output) Start() error {
 				case <-out.printStop:
 					return
 				default:
+					// Non-blocking check for messages from any upstream channel
+					processed := false
 					for _, up := range out.UpStream {
-						msg := <-*up
-						atomic.AddUint64(&out.produceTotal, 1)
-						atomic.AddUint64(&out.produceQPS, 1)
+						select {
+						case msg := <-*up:
+							atomic.AddUint64(&out.produceTotal, 1)
+							atomic.AddUint64(&out.produceQPS, 1)
 
-						// Sample the message
-						if out.sampler != nil {
-							out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+							}
+
+							data, _ := json.Marshal(msg)
+							logger.Info("[Print Output]", "data", string(data))
+							processed = true
+						default:
+							// No message available from this channel, continue to next
 						}
-
-						data, _ := json.Marshal(msg)
-						logger.Info("[Print Output]", "data", string(data))
+					}
+					// If no messages were processed, sleep briefly to avoid busy waiting
+					if !processed {
+						time.Sleep(10 * time.Millisecond)
 					}
 				}
 			}
@@ -335,18 +346,30 @@ func (out *Output) Start() error {
 // Stop stops the output producer and waits for all routines to finish.
 // It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
+	logger.Info("Stopping output", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
+
 	// Wait for all upstream channels to be empty before closing producers
+	logger.Info("Waiting for upstream channels to empty", "output", out.Id)
+	waitCount := 0
 waitUpstream:
 	for {
 		allEmpty := true
-		for _, up := range out.UpStream {
-			if len(*up) > 0 {
+		totalMessages := 0
+		for i, up := range out.UpStream {
+			chLen := len(*up)
+			if chLen > 0 {
 				allEmpty = false
-				break
+				totalMessages += chLen
+				logger.Info("Output upstream channel not empty", "output", out.Id, "channel", i, "length", chLen)
 			}
 		}
 		if allEmpty {
+			logger.Info("All output upstream channels empty", "output", out.Id)
 			break waitUpstream
+		}
+		waitCount++
+		if waitCount%20 == 0 { // Log every second (20 * 50ms)
+			logger.Info("Still waiting for output upstream channels", "output", out.Id, "total_messages", totalMessages, "wait_cycles", waitCount)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -362,6 +385,8 @@ waitUpstream:
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
+			// Close the channel we own
+			close(out.kafkaProducer.MsgChan)
 			out.kafkaProducer.Close()
 			out.kafkaProducer = nil
 		}
@@ -374,18 +399,25 @@ waitUpstream:
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
+			// Close the channel we own
+			close(out.elasticsearchProducer.MsgChan)
 			out.elasticsearchProducer.Close()
 			out.elasticsearchProducer = nil
 		}
 	case OutputTypePrint:
 		if out.printStop != nil {
 			close(out.printStop)
+			out.printStop = nil
 		}
 	}
 	if out.metricStop != nil {
 		close(out.metricStop)
+		out.metricStop = nil
 	}
+
+	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
 	out.wg.Wait()
+	logger.Info("Output stopped successfully", "id", out.Id)
 	return nil
 }
 

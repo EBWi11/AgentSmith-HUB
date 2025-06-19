@@ -522,16 +522,18 @@ function initializeEditor() {
         
         // Scroll to first difference if not a new file
         if (!isNewFile) {
-          const nav = diffEditor.getNavigator();
-          if (nav.hasNext()) {
-            nav.next();
-            const diff = nav.current();
-            if (diff) {
+          try {
+            // Get the line changes from the diff editor
+            const lineChanges = diffEditor.getLineChanges();
+            if (lineChanges && lineChanges.length > 0) {
+              const firstChange = lineChanges[0];
               const modifiedEditor = diffEditor.getModifiedEditor();
-              if (modifiedEditor) {
-                modifiedEditor.revealLineInCenter(diff.modifiedLineStart);
+              if (modifiedEditor && firstChange.modifiedStartLineNumber) {
+                modifiedEditor.revealLineInCenter(firstChange.modifiedStartLineNumber);
               }
             }
+          } catch (error) {
+            console.warn('Failed to scroll to first difference:', error);
           }
         }
       }

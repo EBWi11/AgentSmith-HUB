@@ -390,7 +390,7 @@ async function applyChanges() {
     // Refresh all affected component type lists
     affectedTypes.forEach(type => {
       // Notify parent component to refresh corresponding type list
-      emit('refresh-list', type)
+      emit('refresh-list', getApiComponentType(type))
     })
     
     // 确保编辑器布局正确
@@ -453,7 +453,7 @@ async function applySingleChange(change) {
     await refreshChanges()
     
     // Refresh affected component type list
-    emit('refresh-list', change.type)
+    emit('refresh-list', getApiComponentType(change.type))
     
     // 确保编辑器布局正确
     refreshEditorsLayout()
@@ -468,7 +468,7 @@ async function applySingleChange(change) {
     
     // 即使失败，也要刷新列表以确保显示最新状态
     await refreshChanges();
-    emit('refresh-list', change.type)
+    emit('refresh-list', getApiComponentType(change.type))
   } finally {
     applying.value = false
   }
@@ -557,7 +557,7 @@ async function cancelUpgrade(change) {
     await refreshChanges()
     
     // Refresh affected component type list
-    emit('refresh-list', change.type)
+    emit('refresh-list', getApiComponentType(change.type))
     
     // Ensure editor layout is correct
     refreshEditorsLayout()
@@ -566,7 +566,7 @@ async function cancelUpgrade(change) {
     
     // 即使失败，也要刷新列表以确保显示最新状态
     await refreshChanges();
-    emit('refresh-list', change.type)
+    emit('refresh-list', getApiComponentType(change.type))
   } finally {
     cancelling.value = false
   }

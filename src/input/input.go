@@ -255,6 +255,8 @@ func (in *Input) Start() error {
 		}
 		in.slsConsumer = cons
 
+		cons.Start()
+
 		// Start consumer goroutine
 		go func() {
 			for msg := range msgChan {
@@ -279,7 +281,11 @@ func (in *Input) Start() error {
 
 // Stop stops the input component and its consumers
 func (in *Input) Stop() error {
-	close(in.metricStop)
+	// Only close metricStop if it was initialized
+	if in.metricStop != nil {
+		close(in.metricStop)
+		in.metricStop = nil
+	}
 
 	if in.kafkaConsumer != nil {
 		in.kafkaConsumer.Close()

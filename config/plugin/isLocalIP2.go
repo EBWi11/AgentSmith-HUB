@@ -28,6 +28,5 @@ func Eval(ipStr string) (bool, error) {
 			return true, nil
 		}
 	}
-
 	return false, nil
 }
