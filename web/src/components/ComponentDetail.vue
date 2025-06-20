@@ -377,43 +377,11 @@
         </div>
       </div>
       <div class="flex items-center">
-        <!-- Refresh button -->
-        <button 
-          @click="refreshComponent"
-          class="btn btn-icon btn-secondary-ghost mr-2"
-          :disabled="loading"
-          title="Refresh"
-        >
-          <svg class="w-4 h-4" :class="{ 'animate-spin': loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
-        
-        <div v-if="isRuleset || isOutput || isPlugin || isProject" class="flex">
+        <!-- Keep only Verify button for projects -->
+        <div v-if="isProject" class="flex">
           <button 
-            v-if="isRuleset"
-            @click="showTestModal = true"
-            class="btn btn-test-ruleset btn-sm"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <span>Test Ruleset</span>
-          </button>
-          <button 
-            v-if="isPlugin"
-            @click="showPluginTestModal = true"
-            class="btn btn-test-plugin btn-sm"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <span>Test Plugin</span>
-          </button>
-          <button 
-            v-if="isProject"
             @click="verifyProject"
-            class="btn btn-verify btn-sm mr-2"
+            class="btn btn-verify btn-sm"
             :disabled="verifyLoading"
           >
             <span v-if="verifyLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
@@ -421,16 +389,6 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>{{ verifyLoading ? 'Verifying...' : 'Verify' }}</span>
-          </button>
-          <button 
-            v-if="isProject"
-            @click="showProjectTestModal = true"
-            class="btn btn-test-project btn-sm"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <span>Test Project</span>
           </button>
         </div>
       </div>
@@ -1891,12 +1849,7 @@ onBeforeUnmount(() => {
   }
 });
 
-// Refresh component details
-async function refreshComponent() {
-  if (!props.item || !props.item.id) return
-  await fetchDetail(props.item)
-  $message?.success?.('Component refreshed')
-}
+
 
 // Mount hook for initial setup
 onMounted(async () => {
@@ -1920,194 +1873,287 @@ onMounted(async () => {
 </script> 
 
 <style scoped>
-/* Modern Button Color Overrides - Professional Tech Theme */
 
-/* Test Buttons - Different colors for each component type */
-button[v-if="isRuleset"] svg path {
-  stroke: currentColor;
+
+/* Test Ruleset Button - Minimal Style */
+.btn.btn-test-ruleset {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Test Ruleset Button - Sophisticated Purple */
-.btn-test-ruleset {
-  background: linear-gradient(135deg, #f3f4f6 0%, #ede9fe 100%);
-  border-color: #c4b5fd;
-  color: #6d28d9;
-  border-radius: 0.5rem;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.btn-test-ruleset:hover {
-  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
-  border-color: #a78bfa;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+.btn.btn-test-ruleset:hover:not(:disabled) {
+  border-color: #9ca3af !important;
+  color: #374151 !important;
+  background: rgba(249, 250, 251, 0.5) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
 
-/* Test Project Button - Modern Cyan */
-.btn-test-project {
-  background: linear-gradient(135deg, #ecfeff 0%, #a7f3d0 100%) !important;
-  border-color: #67e8f9 !important;
+/* Test Project Button - Minimal Style */
+.btn.btn-test-project {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-test-project:hover:not(:disabled) {
+  border-color: #0891b2 !important;
   color: #0891b2 !important;
+  background: rgba(236, 254, 255, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-.btn-test-project:hover {
-  background: linear-gradient(135deg, #a7f3d0 0%, #22d3ee 100%) !important;
-  border-color: #06b6d4 !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.2) !important;
+/* Test Plugin Button - Minimal Style */
+.btn.btn-test-plugin {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Test Plugin Button - Modern Indigo */
-.btn-test-plugin {
-  background: linear-gradient(135deg, #eef2ff 0%, #c7d2fe 100%) !important;
-  border-color: #a5b4fc !important;
-  color: #4338ca !important;
-}
-
-.btn-test-plugin:hover {
-  background: linear-gradient(135deg, #c7d2fe 0%, #818cf8 100%) !important;
+.btn.btn-test-plugin:hover:not(:disabled) {
   border-color: #6366f1 !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2) !important;
+  color: #6366f1 !important;
+  background: rgba(238, 242, 255, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Verify Buttons - Enhanced Green Theme */
-.btn-verify {
-  background: linear-gradient(135deg, #ecfdf5 0%, #a7f3d0 100%) !important;
-  border-color: #6ee7b7 !important;
-  color: #047857 !important;
-  border-radius: 0.5rem !important;
+/* Verify Buttons - Minimal Style */
+.btn.btn-verify {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-.btn-verify:hover {
-  background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%) !important;
-  border-color: #10b981 !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2) !important;
+.btn.btn-verify:hover:not(:disabled) {
+  border-color: #059669 !important;
+  color: #059669 !important;
+  background: rgba(236, 253, 245, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Connect Check Button - Modern Purple */
-.btn-connect {
-  background: linear-gradient(135deg, #faf5ff 0%, #ddd6fe 100%) !important;
-  border-color: #c4b5fd !important;
-  color: #7c3aed !important;
-  border-radius: 0.5rem !important;
+/* Connect Check Button - Minimal Style */
+.btn.btn-connect {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-.btn-connect:hover {
-  background: linear-gradient(135deg, #ddd6fe 0%, #a78bfa 100%) !important;
+.btn.btn-connect:hover:not(:disabled) {
   border-color: #8b5cf6 !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.2) !important;
+  color: #8b5cf6 !important;
+  background: rgba(250, 245, 255, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Save/Create/Update Buttons - Premium Gradient */
-button.bg-indigo-600 {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
-  border: none !important;
-  border-radius: 0.5rem !important;
-  box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.25) !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+/* Primary Buttons (Save/Create/Update) - Minimal Style */
+.btn.btn-primary {
+  background: transparent !important;
+  border: 1px solid #3b82f6 !important;
+  color: #3b82f6 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-button.bg-indigo-600:hover {
-  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
-  transform: translateY(-1px) !important;
-  box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3) !important;
+.btn.btn-primary:hover:not(:disabled) {
+  border-color: #2563eb !important;
+  color: #2563eb !important;
+  background: rgba(59, 130, 246, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Cancel Button - Subtle Modern Gray */
-button.text-gray-700.bg-white {
-  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%) !important;
+.btn.btn-primary:disabled {
+  border-color: #d1d5db !important;
+  color: #9ca3af !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Secondary Buttons (Cancel) - Minimal Style */
+.btn.btn-secondary {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-secondary:hover:not(:disabled) {
+  border-color: #9ca3af !important;
+  color: #374151 !important;
+  background: rgba(249, 250, 251, 0.5) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Project Control Buttons - Minimal Style */
+.btn.btn-start {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-start:hover:not(:disabled) {
+  border-color: #059669 !important;
+  color: #059669 !important;
+  background: rgba(236, 253, 245, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-stop {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-stop:hover:not(:disabled) {
+  border-color: #dc2626 !important;
+  color: #dc2626 !important;
+  background: rgba(254, 242, 242, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-restart {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-restart:hover:not(:disabled) {
+  border-color: #f59e0b !important;
+  color: #f59e0b !important;
+  background: rgba(255, 251, 235, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Warning Buttons - Minimal Style */
+.btn.btn-warning {
+  background: transparent !important;
+  border: 1px solid #f59e0b !important;
+  color: #f59e0b !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-warning:hover:not(:disabled) {
+  border-color: #d97706 !important;
+  color: #d97706 !important;
+  background: rgba(255, 251, 235, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Icon Buttons - Minimal Style */
+.btn.btn-icon {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  padding: 0.5rem !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-icon:hover:not(:disabled) {
   border-color: #d1d5db !important;
   color: #374151 !important;
-  border-radius: 0.5rem !important;
+  background: rgba(249, 250, 251, 0.5) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-button.text-gray-700.bg-white:hover {
-  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
-  border-color: #9ca3af !important;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1) !important;
+/* Ghost Button Variants */
+.btn.btn-secondary-ghost {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-/* Project Control Buttons */
-button.text-emerald-600.bg-emerald-50 {
-  background: linear-gradient(135deg, #ecfdf5 0%, #a7f3d0 100%) !important;
-  border-color: #6ee7b7 !important;
-  color: #047857 !important;
-  border-radius: 0.5rem !important;
+.btn.btn-secondary-ghost:hover:not(:disabled) {
+  border-color: #d1d5db !important;
+  color: #374151 !important;
+  background: rgba(249, 250, 251, 0.5) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 
-button.text-emerald-600.bg-emerald-50:hover {
-  background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%) !important;
-  border-color: #10b981 !important;
-}
-
-button.text-red-600.bg-red-50 {
-  background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%) !important;
-  border-color: #f87171 !important;
-  color: #dc2626 !important;
-  border-radius: 0.5rem !important;
-}
-
-button.text-red-600.bg-red-50:hover {
-  background: linear-gradient(135deg, #fecaca 0%, #f87171 100%) !important;
-  border-color: #ef4444 !important;
-}
-
-/* Add subtle animations to all buttons */
+/* General Button Styles - Minimal Tech Theme */
 button {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-button:hover {
-  transform: translateY(-1px);
-}
-
-button:active {
-  transform: translateY(0);
+  transition: all 0.15s ease !important;
 }
 
 /* Disabled button states */
 button:disabled {
-  opacity: 0.6 !important;
+  opacity: 0.5 !important;
   cursor: not-allowed !important;
-  transform: none !important;
-  box-shadow: none !important;
 }
 
 /* Enhanced focus states for accessibility */
 button:focus {
-  outline: none !important;
-  ring: 2px solid currentColor !important;
-  ring-opacity: 0.3 !important;
-  ring-offset: 2px !important;
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 2px !important;
 }
 
-/* 验证错误和警告样式 */
+/* Validation Styles - Minimal Tech Theme */
 .validation-errors, .validation-warnings {
-  margin-bottom: 15px;
-  padding: 10px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .validation-errors {
-  background-color: rgba(244, 67, 54, 0.1);
-  border-left: 4px solid #f44336;
+  background-color: rgba(239, 68, 68, 0.05);
+  border-left: 3px solid #ef4444;
 }
 
 .validation-warnings {
-  background-color: rgba(255, 152, 0, 0.1);
-  border-left: 4px solid #ff9800;
+  background-color: rgba(245, 158, 11, 0.05);
+  border-left: 3px solid #f59e0b;
 }
 
 .validation-errors h3, .validation-warnings h3 {
   margin-top: 0;
-  font-size: 16px;
-  font-weight: bold;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.025em;
 }
 
 </style> 
