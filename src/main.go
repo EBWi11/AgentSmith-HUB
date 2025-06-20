@@ -330,11 +330,17 @@ func StartAllProject() {
 
 	if project.GlobalProject != nil {
 		for _, p := range project.GlobalProject.Projects {
-			err = p.Start()
-			if err != nil {
-				logger.Error("project start error", "error", err, "project_id", p.Id)
+			// Only try to start projects that are stopped or error status
+			if p.Status == project.ProjectStatusStopped || p.Status == project.ProjectStatusError {
+				logger.Info("Starting project", "project_id", p.Id, "current_status", p.Status)
+				err = p.Start()
+				if err != nil {
+					logger.Error("project start error", "error", err, "project_id", p.Id)
+				} else {
+					logger.Info("project start successful", "project_id", p.Id)
+				}
 			} else {
-				logger.Info("project start successful", "project_id", p.Id)
+				logger.Info("Skipping project start (already running)", "project_id", p.Id, "status", p.Status)
 			}
 		}
 	}

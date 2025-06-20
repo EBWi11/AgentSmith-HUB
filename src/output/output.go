@@ -348,76 +348,171 @@ func (out *Output) Start() error {
 func (out *Output) Stop() error {
 	logger.Info("Stopping output", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
 
-	// Wait for all upstream channels to be empty before closing producers
-	logger.Info("Waiting for upstream channels to empty", "output", out.Id)
-	waitCount := 0
-waitUpstream:
-	for {
-		allEmpty := true
-		totalMessages := 0
-		for i, up := range out.UpStream {
-			chLen := len(*up)
-			if chLen > 0 {
-				allEmpty = false
-				totalMessages += chLen
-				logger.Info("Output upstream channel not empty", "output", out.Id, "channel", i, "length", chLen)
-			}
-		}
-		if allEmpty {
-			logger.Info("All output upstream channels empty", "output", out.Id)
-			break waitUpstream
-		}
-		waitCount++
-		if waitCount%20 == 0 { // Log every second (20 * 50ms)
-			logger.Info("Still waiting for output upstream channels", "output", out.Id, "total_messages", totalMessages, "wait_cycles", waitCount)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// Overall timeout for output stop
+	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
+	stopCompleted := make(chan struct{})
 
-	// Wait for all internal msgChan to be empty (for each output type)
-	switch out.Type {
-	case OutputTypeKafka:
-		if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
-		waitKafkaMsgChan:
-			for {
-				if len(out.kafkaProducer.MsgChan) == 0 {
-					break waitKafkaMsgChan
+	go func() {
+		defer close(stopCompleted)
+
+		// Wait for all upstream channels to be empty before closing producers
+		logger.Info("Waiting for upstream channels to empty", "output", out.Id)
+		upstreamTimeout := time.After(10 * time.Second) // 10 second timeout for upstream
+		waitCount := 0
+
+	waitUpstream:
+		for {
+			select {
+			case <-upstreamTimeout:
+				logger.Warn("Timeout waiting for upstream channels, forcing shutdown", "output", out.Id)
+				break waitUpstream
+			default:
+				allEmpty := true
+				totalMessages := 0
+				for i, up := range out.UpStream {
+					chLen := len(*up)
+					if chLen > 0 {
+						allEmpty = false
+						totalMessages += chLen
+						if waitCount%20 == 0 { // Log every second (20 * 50ms)
+							logger.Info("Output upstream channel not empty", "output", out.Id, "channel", i, "length", chLen)
+						}
+					}
+				}
+				if allEmpty {
+					logger.Info("All output upstream channels empty", "output", out.Id)
+					break waitUpstream
+				}
+				waitCount++
+				if waitCount%20 == 0 { // Log every second (20 * 50ms)
+					logger.Info("Still waiting for output upstream channels", "output", out.Id, "total_messages", totalMessages, "wait_cycles", waitCount)
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
-			// Close the channel we own
-			close(out.kafkaProducer.MsgChan)
-			out.kafkaProducer.Close()
-			out.kafkaProducer = nil
 		}
-	case OutputTypeElasticsearch:
-		if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
-		waitESMsgChan:
-			for {
-				if len(out.elasticsearchProducer.MsgChan) == 0 {
-					break waitESMsgChan
+
+		// Wait for all internal msgChan to be empty (for each output type)
+		switch out.Type {
+		case OutputTypeKafka:
+			if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
+				logger.Info("Waiting for kafka internal channel to empty", "output", out.Id)
+				internalTimeout := time.After(5 * time.Second) // 5 second timeout for internal channels
+				waitCount := 0
+
+			waitKafkaMsgChan:
+				for {
+					select {
+					case <-internalTimeout:
+						logger.Warn("Timeout waiting for kafka internal channel, forcing close", "output", out.Id)
+						break waitKafkaMsgChan
+					default:
+						if len(out.kafkaProducer.MsgChan) == 0 {
+							break waitKafkaMsgChan
+						}
+						waitCount++
+						if waitCount%20 == 0 { // Log every second
+							logger.Info("Kafka internal channel not empty", "output", out.Id, "length", len(out.kafkaProducer.MsgChan))
+						}
+						time.Sleep(50 * time.Millisecond)
+					}
 				}
-				time.Sleep(50 * time.Millisecond)
+				// Close the channel we own
+				close(out.kafkaProducer.MsgChan)
+				out.kafkaProducer.Close()
+				out.kafkaProducer = nil
 			}
-			// Close the channel we own
-			close(out.elasticsearchProducer.MsgChan)
-			out.elasticsearchProducer.Close()
-			out.elasticsearchProducer = nil
+		case OutputTypeElasticsearch:
+			if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
+				logger.Info("Waiting for elasticsearch internal channel to empty", "output", out.Id)
+				internalTimeout := time.After(5 * time.Second) // 5 second timeout for internal channels
+				waitCount := 0
+
+			waitESMsgChan:
+				for {
+					select {
+					case <-internalTimeout:
+						logger.Warn("Timeout waiting for elasticsearch internal channel, forcing close", "output", out.Id)
+						break waitESMsgChan
+					default:
+						if len(out.elasticsearchProducer.MsgChan) == 0 {
+							break waitESMsgChan
+						}
+						waitCount++
+						if waitCount%20 == 0 { // Log every second
+							logger.Info("Elasticsearch internal channel not empty", "output", out.Id, "length", len(out.elasticsearchProducer.MsgChan))
+						}
+						time.Sleep(50 * time.Millisecond)
+					}
+				}
+				// Close the channel we own
+				close(out.elasticsearchProducer.MsgChan)
+				out.elasticsearchProducer.Close()
+				out.elasticsearchProducer = nil
+			}
+		case OutputTypePrint:
+			if out.printStop != nil {
+				close(out.printStop)
+				out.printStop = nil
+			}
 		}
-	case OutputTypePrint:
-		if out.printStop != nil {
-			close(out.printStop)
-			out.printStop = nil
+
+		if out.metricStop != nil {
+			close(out.metricStop)
+			out.metricStop = nil
 		}
-	}
-	if out.metricStop != nil {
-		close(out.metricStop)
-		out.metricStop = nil
+	}()
+
+	select {
+	case <-stopCompleted:
+		logger.Info("Output channels drained successfully", "output", out.Id)
+	case <-overallTimeout:
+		logger.Warn("Output stop timeout exceeded, forcing shutdown", "output", out.Id)
+		// Force cleanup even on timeout
+		switch out.Type {
+		case OutputTypeKafka:
+			if out.kafkaProducer != nil {
+				if out.kafkaProducer.MsgChan != nil {
+					close(out.kafkaProducer.MsgChan)
+				}
+				out.kafkaProducer.Close()
+				out.kafkaProducer = nil
+			}
+		case OutputTypeElasticsearch:
+			if out.elasticsearchProducer != nil {
+				if out.elasticsearchProducer.MsgChan != nil {
+					close(out.elasticsearchProducer.MsgChan)
+				}
+				out.elasticsearchProducer.Close()
+				out.elasticsearchProducer = nil
+			}
+		case OutputTypePrint:
+			if out.printStop != nil {
+				close(out.printStop)
+				out.printStop = nil
+			}
+		}
+		if out.metricStop != nil {
+			close(out.metricStop)
+			out.metricStop = nil
+		}
 	}
 
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
-	out.wg.Wait()
-	logger.Info("Output stopped successfully", "id", out.Id)
+
+	// Wait for goroutines with timeout
+	waitDone := make(chan struct{})
+	go func() {
+		out.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		logger.Info("Output stopped successfully", "id", out.Id)
+	case <-time.After(5 * time.Second): // Reduced from 15s to 5s
+		logger.Warn("Timeout waiting for output goroutines", "id", out.Id)
+	}
+
 	return nil
 }
 
@@ -446,4 +541,56 @@ func (out *Output) GetProduceQPS() uint64 {
 // GetProduceTotal returns the total produced count.
 func (out *Output) GetProduceTotal() uint64 {
 	return atomic.LoadUint64(&out.produceTotal)
+}
+
+// StopForTesting stops the output quickly for testing purposes without waiting for channel drainage
+func (out *Output) StopForTesting() error {
+	logger.Info("Quick stopping test output", "id", out.Id, "type", out.Type)
+
+	// Stop metrics first
+	if out.metricStop != nil {
+		close(out.metricStop)
+		out.metricStop = nil
+	}
+
+	// Force close producers without waiting
+	switch out.Type {
+	case OutputTypeKafka:
+		if out.kafkaProducer != nil {
+			if out.kafkaProducer.MsgChan != nil {
+				close(out.kafkaProducer.MsgChan)
+			}
+			out.kafkaProducer.Close()
+			out.kafkaProducer = nil
+		}
+	case OutputTypeElasticsearch:
+		if out.elasticsearchProducer != nil {
+			if out.elasticsearchProducer.MsgChan != nil {
+				close(out.elasticsearchProducer.MsgChan)
+			}
+			out.elasticsearchProducer.Close()
+			out.elasticsearchProducer = nil
+		}
+	case OutputTypePrint:
+		if out.printStop != nil {
+			close(out.printStop)
+			out.printStop = nil
+		}
+	}
+
+	// Wait for goroutines with very short timeout
+	waitDone := make(chan struct{})
+	go func() {
+		out.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		logger.Info("Test output stopped successfully", "id", out.Id)
+	case <-time.After(1 * time.Second): // Very short timeout for testing
+		logger.Warn("Timeout waiting for test output goroutines, proceeding anyway", "id", out.Id)
+	}
+
+	return nil
 }

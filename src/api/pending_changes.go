@@ -23,6 +23,191 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Enhanced pending change management structures
+type ChangeStatus int
+
+const (
+	ChangeStatusDraft ChangeStatus = iota
+	ChangeStatusVerified
+	ChangeStatusInvalid
+	ChangeStatusApplied
+	ChangeStatusFailed
+)
+
+func (cs ChangeStatus) String() string {
+	switch cs {
+	case ChangeStatusDraft:
+		return "draft"
+	case ChangeStatusVerified:
+		return "verified"
+	case ChangeStatusInvalid:
+		return "invalid"
+	case ChangeStatusApplied:
+		return "applied"
+	case ChangeStatusFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
+// Enhanced change tracking
+type EnhancedPendingChange struct {
+	Type         string       `json:"type"`
+	ID           string       `json:"id"`
+	IsNew        bool         `json:"is_new"`
+	OldContent   string       `json:"old_content"`
+	NewContent   string       `json:"new_content"`
+	Status       ChangeStatus `json:"status"`
+	ErrorMessage string       `json:"error_message,omitempty"`
+	LastUpdated  time.Time    `json:"last_updated"`
+	VerifiedAt   *time.Time   `json:"verified_at,omitempty"`
+}
+
+// Transaction result for batch operations
+type ChangeTransactionResult struct {
+	TotalChanges      int                `json:"total_changes"`
+	SuccessCount      int                `json:"success_count"`
+	FailureCount      int                `json:"failure_count"`
+	SuccessfulIDs     []string           `json:"successful_ids"`
+	FailedChanges     []FailedChangeInfo `json:"failed_changes"`
+	ProjectsToRestart []string           `json:"projects_to_restart"`
+}
+
+type FailedChangeInfo struct {
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Error string `json:"error"`
+}
+
+// PendingChangeManager provides centralized management of pending changes
+type PendingChangeManager struct {
+	changes map[string]*EnhancedPendingChange // key: type:id
+	mu      sync.RWMutex
+}
+
+var globalPendingChangeManager = &PendingChangeManager{
+	changes: make(map[string]*EnhancedPendingChange),
+}
+
+func (pcm *PendingChangeManager) getKey(changeType, id string) string {
+	return fmt.Sprintf("%s:%s", changeType, id)
+}
+
+// AddChange adds or updates a pending change
+func (pcm *PendingChangeManager) AddChange(changeType, id, newContent, oldContent string, isNew bool) {
+	// Input validation
+	if changeType == "" || id == "" {
+		logger.Error("Invalid change parameters", "type", changeType, "id", id)
+		return
+	}
+
+	// Validate component type
+	validTypes := map[string]bool{
+		"plugin": true, "input": true, "output": true, "ruleset": true, "project": true,
+	}
+	if !validTypes[changeType] {
+		logger.Error("Invalid component type", "type", changeType)
+		return
+	}
+
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+
+	key := pcm.getKey(changeType, id)
+	change := &EnhancedPendingChange{
+		Type:        changeType,
+		ID:          id,
+		IsNew:       isNew,
+		OldContent:  oldContent,
+		NewContent:  newContent,
+		Status:      ChangeStatusDraft,
+		LastUpdated: time.Now(),
+	}
+	pcm.changes[key] = change
+}
+
+// GetChange retrieves a specific pending change
+func (pcm *PendingChangeManager) GetChange(changeType, id string) (*EnhancedPendingChange, bool) {
+	pcm.mu.RLock()
+	defer pcm.mu.RUnlock()
+
+	key := pcm.getKey(changeType, id)
+	change, exists := pcm.changes[key]
+	return change, exists
+}
+
+// GetAllChanges returns all pending changes
+func (pcm *PendingChangeManager) GetAllChanges() []*EnhancedPendingChange {
+	pcm.mu.RLock()
+	defer pcm.mu.RUnlock()
+
+	changes := make([]*EnhancedPendingChange, 0, len(pcm.changes))
+	for _, change := range pcm.changes {
+		changes = append(changes, change)
+	}
+	return changes
+}
+
+// RemoveChange removes a pending change
+func (pcm *PendingChangeManager) RemoveChange(changeType, id string) {
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+
+	key := pcm.getKey(changeType, id)
+	delete(pcm.changes, key)
+}
+
+// UpdateChangeStatus updates the status of a pending change
+func (pcm *PendingChangeManager) UpdateChangeStatus(changeType, id string, status ChangeStatus, errorMsg string) {
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+
+	key := pcm.getKey(changeType, id)
+	if change, exists := pcm.changes[key]; exists {
+		change.Status = status
+		change.ErrorMessage = errorMsg
+		change.LastUpdated = time.Now()
+
+		if status == ChangeStatusVerified {
+			now := time.Now()
+			change.VerifiedAt = &now
+		}
+	}
+}
+
+// VerifyChange verifies a single pending change
+func (pcm *PendingChangeManager) VerifyChange(changeType, id string) error {
+	change, exists := pcm.GetChange(changeType, id)
+	if !exists {
+		return fmt.Errorf("change not found: %s:%s", changeType, id)
+	}
+
+	var err error
+	switch changeType {
+	case "plugin":
+		err = plugin.Verify("", change.NewContent, id)
+	case "input":
+		err = input.Verify("", change.NewContent)
+	case "output":
+		err = output.Verify("", change.NewContent)
+	case "ruleset":
+		err = rules_engine.Verify("", change.NewContent)
+	case "project":
+		err = project.Verify("", change.NewContent)
+	default:
+		err = fmt.Errorf("unsupported component type: %s", changeType)
+	}
+
+	if err != nil {
+		pcm.UpdateChangeStatus(changeType, id, ChangeStatusInvalid, err.Error())
+		return err
+	}
+
+	pcm.UpdateChangeStatus(changeType, id, ChangeStatusVerified, "")
+	return nil
+}
+
 // PendingChange represents a component with pending changes
 type PendingChange struct {
 	Type       string `json:"type"`        // Component type (input, output, ruleset, project, plugin)
@@ -46,36 +231,64 @@ type ComponentSyncRequest struct {
 }
 
 // GetPendingChanges returns all components with pending changes (.new files)
+// GetPendingChanges returns all pending changes (legacy format for backward compatibility)
 func GetPendingChanges(c echo.Context) error {
-	changes := []PendingChange{}
+	// First, sync from legacy storage to new manager
+	syncLegacyToEnhancedManager()
 
+	// Get enhanced changes
+	enhancedChanges := globalPendingChangeManager.GetAllChanges()
+
+	// Convert to legacy format for backward compatibility
+	changes := make([]PendingChange, 0, len(enhancedChanges))
+	for _, enhanced := range enhancedChanges {
+		changes = append(changes, PendingChange{
+			Type:       enhanced.Type,
+			ID:         enhanced.ID,
+			IsNew:      enhanced.IsNew,
+			OldContent: enhanced.OldContent,
+			NewContent: enhanced.NewContent,
+		})
+	}
+
+	return c.JSON(http.StatusOK, changes)
+}
+
+// GetEnhancedPendingChanges returns all pending changes with enhanced status information
+func GetEnhancedPendingChanges(c echo.Context) error {
+	// Sync from legacy storage to new manager
+	syncLegacyToEnhancedManager()
+
+	changes := globalPendingChangeManager.GetAllChanges()
+	return c.JSON(http.StatusOK, changes)
+}
+
+// syncLegacyToEnhancedManager synchronizes data from legacy storage to the enhanced manager
+func syncLegacyToEnhancedManager() {
 	// Lock for reading all pending changes and existing components
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
 
 	p := project.GlobalProject
 
-	// Check plugins with pending changes
+	// Sync plugins with pending changes
 	for name, newContent := range plugin.PluginsNew {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing plugin
-		if p, ok := plugin.Plugins[name]; ok {
-			oldContent = string(p.Payload)
+		if plugin, ok := plugin.Plugins[name]; ok {
+			oldContent = string(plugin.Payload)
 			isNew = false
 		}
 
-		changes = append(changes, PendingChange{
-			Type:       "plugin",
-			ID:         name,
-			IsNew:      isNew,
-			OldContent: oldContent,
-			NewContent: newContent,
-		})
+		// Only add if not already managed by enhanced manager
+		if _, exists := globalPendingChangeManager.GetChange("plugin", name); !exists {
+			globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
+		}
 	}
 
-	// Check inputs with pending changes
+	// Sync inputs with pending changes
 	for id, newContent := range p.InputsNew {
 		var oldContent string
 		isNew := true
@@ -86,16 +299,12 @@ func GetPendingChanges(c echo.Context) error {
 			isNew = false
 		}
 
-		changes = append(changes, PendingChange{
-			Type:       "input",
-			ID:         id,
-			IsNew:      isNew,
-			OldContent: oldContent,
-			NewContent: newContent,
-		})
+		if _, exists := globalPendingChangeManager.GetChange("input", id); !exists {
+			globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
+		}
 	}
 
-	// Check outputs with pending changes
+	// Sync outputs with pending changes
 	for id, newContent := range p.OutputsNew {
 		var oldContent string
 		isNew := true
@@ -106,16 +315,12 @@ func GetPendingChanges(c echo.Context) error {
 			isNew = false
 		}
 
-		changes = append(changes, PendingChange{
-			Type:       "output",
-			ID:         id,
-			IsNew:      isNew,
-			OldContent: oldContent,
-			NewContent: newContent,
-		})
+		if _, exists := globalPendingChangeManager.GetChange("output", id); !exists {
+			globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
+		}
 	}
 
-	// Check rulesets with pending changes
+	// Sync rulesets with pending changes
 	for id, newContent := range p.RulesetsNew {
 		var oldContent string
 		isNew := true
@@ -126,40 +331,609 @@ func GetPendingChanges(c echo.Context) error {
 			isNew = false
 		}
 
-		changes = append(changes, PendingChange{
-			Type:       "ruleset",
-			ID:         id,
-			IsNew:      isNew,
-			OldContent: oldContent,
-			NewContent: newContent,
-		})
+		if _, exists := globalPendingChangeManager.GetChange("ruleset", id); !exists {
+			globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
+		}
 	}
 
-	// Check projects with pending changes
+	// Sync projects with pending changes
 	for id, newContent := range p.ProjectsNew {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing project
-		if p, ok := p.Projects[id]; ok {
-			oldContent = p.Config.RawConfig
+		if proj, ok := p.Projects[id]; ok {
+			oldContent = proj.Config.RawConfig
 			isNew = false
 		}
 
-		changes = append(changes, PendingChange{
-			Type:       "project",
-			ID:         id,
-			IsNew:      isNew,
-			OldContent: oldContent,
-			NewContent: newContent,
+		if _, exists := globalPendingChangeManager.GetChange("project", id); !exists {
+			globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
+		}
+	}
+}
+
+// ApplyPendingChangesEnhanced applies all pending changes with improved transaction handling
+func ApplyPendingChangesEnhanced(c echo.Context) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in ApplyPendingChangesEnhanced", "panic", r)
+			c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "Internal server error during change application",
+			})
+		}
+	}()
+
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	// Get all pending changes
+	changes := globalPendingChangeManager.GetAllChanges()
+	if len(changes) == 0 {
+		return c.JSON(http.StatusOK, ChangeTransactionResult{
+			TotalChanges: 0,
+			SuccessCount: 0,
+			FailureCount: 0,
 		})
 	}
 
-	return c.JSON(http.StatusOK, changes)
+	// Check for nil changes
+	filteredChanges := make([]*EnhancedPendingChange, 0, len(changes))
+	for _, change := range changes {
+		if change != nil && change.Type != "" && change.ID != "" {
+			filteredChanges = append(filteredChanges, change)
+		} else {
+			logger.Warn("Skipping invalid change", "change", change)
+		}
+	}
+	changes = filteredChanges
+
+	if len(changes) == 0 {
+		return c.JSON(http.StatusOK, ChangeTransactionResult{
+			TotalChanges: 0,
+			SuccessCount: 0,
+			FailureCount: 0,
+		})
+	}
+
+	// Phase 1: Verify all changes first
+	logger.Info("Starting enhanced apply process", "total_changes", len(changes))
+
+	verificationErrors := make([]FailedChangeInfo, 0)
+	validChanges := make([]*EnhancedPendingChange, 0)
+
+	for _, change := range changes {
+		if change.Status == ChangeStatusVerified {
+			validChanges = append(validChanges, change)
+			continue
+		}
+
+		err := globalPendingChangeManager.VerifyChange(change.Type, change.ID)
+		if err != nil {
+			verificationErrors = append(verificationErrors, FailedChangeInfo{
+				Type:  change.Type,
+				ID:    change.ID,
+				Error: fmt.Sprintf("Verification failed: %v", err),
+			})
+			logger.Error("Change verification failed", "type", change.Type, "id", change.ID, "error", err)
+		} else {
+			validChanges = append(validChanges, change)
+		}
+	}
+
+	// If any verification failed, return early
+	if len(verificationErrors) > 0 {
+		return c.JSON(http.StatusBadRequest, ChangeTransactionResult{
+			TotalChanges:  len(changes),
+			SuccessCount:  0,
+			FailureCount:  len(verificationErrors),
+			FailedChanges: verificationErrors,
+		})
+	}
+
+	// Phase 2: Apply changes with transaction-like behavior
+	result := ChangeTransactionResult{
+		TotalChanges:      len(validChanges),
+		SuccessfulIDs:     make([]string, 0),
+		FailedChanges:     make([]FailedChangeInfo, 0),
+		ProjectsToRestart: make([]string, 0),
+	}
+
+	projectsToRestart := make(map[string]struct{})
+
+	// Apply changes by type to maintain dependencies
+	changesByType := make(map[string][]*EnhancedPendingChange)
+	for _, change := range validChanges {
+		changesByType[change.Type] = append(changesByType[change.Type], change)
+	}
+
+	// Apply in dependency order: plugins -> inputs/outputs -> rulesets -> projects
+	applyOrder := []string{"plugin", "input", "output", "ruleset", "project"}
+
+	for _, changeType := range applyOrder {
+		changes := changesByType[changeType]
+		for _, change := range changes {
+			err := applyEnhancedSingleChange(change, projectsToRestart)
+			if err != nil {
+				result.FailedChanges = append(result.FailedChanges, FailedChangeInfo{
+					Type:  change.Type,
+					ID:    change.ID,
+					Error: err.Error(),
+				})
+				result.FailureCount++
+				globalPendingChangeManager.UpdateChangeStatus(change.Type, change.ID, ChangeStatusFailed, err.Error())
+			} else {
+				result.SuccessfulIDs = append(result.SuccessfulIDs, fmt.Sprintf("%s:%s", change.Type, change.ID))
+				result.SuccessCount++
+				globalPendingChangeManager.UpdateChangeStatus(change.Type, change.ID, ChangeStatusApplied, "")
+				// Remove from enhanced manager after successful application
+				globalPendingChangeManager.RemoveChange(change.Type, change.ID)
+			}
+		}
+	}
+
+	// Convert projects to restart to slice
+	for projectID := range projectsToRestart {
+		result.ProjectsToRestart = append(result.ProjectsToRestart, projectID)
+	}
+
+	logger.Info("Enhanced apply process completed",
+		"total", result.TotalChanges,
+		"success", result.SuccessCount,
+		"failed", result.FailureCount,
+		"projects_to_restart", len(result.ProjectsToRestart))
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// VerifyPendingChanges verifies all pending changes without applying them
+func VerifyPendingChanges(c echo.Context) error {
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	changes := globalPendingChangeManager.GetAllChanges()
+	if len(changes) == 0 {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"total_changes":   0,
+			"valid_changes":   0,
+			"invalid_changes": 0,
+			"results":         []map[string]interface{}{},
+		})
+	}
+
+	results := make([]map[string]interface{}, 0, len(changes))
+	validCount := 0
+	invalidCount := 0
+
+	for _, change := range changes {
+		result := map[string]interface{}{
+			"type":   change.Type,
+			"id":     change.ID,
+			"is_new": change.IsNew,
+			"valid":  false,
+			"error":  "",
+		}
+
+		err := globalPendingChangeManager.VerifyChange(change.Type, change.ID)
+		if err != nil {
+			result["error"] = err.Error()
+			invalidCount++
+		} else {
+			result["valid"] = true
+			validCount++
+		}
+
+		results = append(results, result)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"total_changes":   len(changes),
+		"valid_changes":   validCount,
+		"invalid_changes": invalidCount,
+		"results":         results,
+	})
+}
+
+// VerifySinglePendingChange verifies a single pending change
+func VerifySinglePendingChange(c echo.Context) error {
+	changeType := c.Param("type")
+	id := c.Param("id")
+
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	change, exists := globalPendingChangeManager.GetChange(changeType, id)
+	if !exists {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Pending change not found",
+		})
+	}
+
+	err := globalPendingChangeManager.VerifyChange(changeType, id)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"valid": false,
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"valid":  true,
+		"change": change,
+	})
+}
+
+// CancelPendingChange cancels a single pending change and removes associated files
+func CancelPendingChange(c echo.Context) error {
+	changeType := c.Param("type")
+	id := c.Param("id")
+
+	// Input validation
+	if changeType == "" || id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Missing component type or ID",
+		})
+	}
+
+	// Validate component type
+	validTypes := map[string]bool{
+		"plugin": true, "input": true, "output": true, "ruleset": true, "project": true,
+	}
+	if !validTypes[changeType] {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid component type: " + changeType,
+		})
+	}
+
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	change, exists := globalPendingChangeManager.GetChange(changeType, id)
+	if !exists {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": "Pending change not found",
+		})
+	}
+
+	// Remove from enhanced manager
+	globalPendingChangeManager.RemoveChange(changeType, id)
+
+	// Remove from legacy storage
+	common.GlobalMu.Lock()
+	switch changeType {
+	case "plugin":
+		delete(plugin.PluginsNew, id)
+	case "input":
+		delete(project.GlobalProject.InputsNew, id)
+	case "output":
+		delete(project.GlobalProject.OutputsNew, id)
+	case "ruleset":
+		delete(project.GlobalProject.RulesetsNew, id)
+	case "project":
+		delete(project.GlobalProject.ProjectsNew, id)
+	}
+	common.GlobalMu.Unlock()
+
+	// Remove .new file if it exists
+	configRoot := common.Config.ConfigRoot
+	var tempPath string
+	switch changeType {
+	case "plugin":
+		tempPath = path.Join(configRoot, "plugin", id+".go.new")
+	case "input":
+		tempPath = path.Join(configRoot, "input", id+".yaml.new")
+	case "output":
+		tempPath = path.Join(configRoot, "output", id+".yaml.new")
+	case "ruleset":
+		tempPath = path.Join(configRoot, "ruleset", id+".xml.new")
+	case "project":
+		tempPath = path.Join(configRoot, "project", id+".yaml.new")
+	}
+
+	if tempPath != "" {
+		if _, err := os.Stat(tempPath); err == nil {
+			err = os.Remove(tempPath)
+			if err != nil {
+				logger.Warn("Failed to remove temp file", "path", tempPath, "error", err)
+			} else {
+				logger.Info("Temp file removed", "path", tempPath)
+			}
+		}
+	}
+
+	logger.Info("Pending change cancelled", "type", changeType, "id", id)
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Pending change cancelled successfully",
+		"change":  change,
+	})
+}
+
+// CancelAllPendingChanges cancels all pending changes
+func CancelAllPendingChanges(c echo.Context) error {
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	changes := globalPendingChangeManager.GetAllChanges()
+	cancelledCount := 0
+
+	for _, change := range changes {
+		// Remove from enhanced manager
+		globalPendingChangeManager.RemoveChange(change.Type, change.ID)
+
+		// Remove from legacy storage
+		common.GlobalMu.Lock()
+		switch change.Type {
+		case "plugin":
+			delete(plugin.PluginsNew, change.ID)
+		case "input":
+			delete(project.GlobalProject.InputsNew, change.ID)
+		case "output":
+			delete(project.GlobalProject.OutputsNew, change.ID)
+		case "ruleset":
+			delete(project.GlobalProject.RulesetsNew, change.ID)
+		case "project":
+			delete(project.GlobalProject.ProjectsNew, change.ID)
+		}
+		common.GlobalMu.Unlock()
+
+		// Remove .new file if it exists
+		configRoot := common.Config.ConfigRoot
+		var tempPath string
+		switch change.Type {
+		case "plugin":
+			tempPath = path.Join(configRoot, "plugin", change.ID+".go.new")
+		case "input":
+			tempPath = path.Join(configRoot, "input", change.ID+".yaml.new")
+		case "output":
+			tempPath = path.Join(configRoot, "output", change.ID+".yaml.new")
+		case "ruleset":
+			tempPath = path.Join(configRoot, "ruleset", change.ID+".xml.new")
+		case "project":
+			tempPath = path.Join(configRoot, "project", change.ID+".yaml.new")
+		}
+
+		if tempPath != "" {
+			if _, err := os.Stat(tempPath); err == nil {
+				err = os.Remove(tempPath)
+				if err != nil {
+					logger.Warn("Failed to remove temp file", "path", tempPath, "error", err)
+				}
+			}
+		}
+
+		cancelledCount++
+	}
+
+	logger.Info("All pending changes cancelled", "count", cancelledCount)
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message":         "All pending changes cancelled successfully",
+		"cancelled_count": cancelledCount,
+	})
+}
+
+// applyEnhancedSingleChange applies a single enhanced pending change
+func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart map[string]struct{}) error {
+	switch change.Type {
+	case "plugin":
+		return applyPluginChange(change)
+	case "input":
+		affectedProjects := applyInputChange(change)
+		for _, projectID := range affectedProjects {
+			projectsToRestart[projectID] = struct{}{}
+		}
+		return nil
+	case "output":
+		affectedProjects := applyOutputChange(change)
+		for _, projectID := range affectedProjects {
+			projectsToRestart[projectID] = struct{}{}
+		}
+		return nil
+	case "ruleset":
+		affectedProjects := applyRulesetChange(change)
+		for _, projectID := range affectedProjects {
+			projectsToRestart[projectID] = struct{}{}
+		}
+		return nil
+	case "project":
+		return applyProjectChange(change)
+	default:
+		return fmt.Errorf("unsupported component type: %s", change.Type)
+	}
+}
+
+// Component-specific apply functions
+func applyPluginChange(change *EnhancedPendingChange) error {
+	// Remove existing plugin from memory before applying
+	common.GlobalMu.Lock()
+	delete(plugin.Plugins, change.ID)
+	common.GlobalMu.Unlock()
+
+	// Write directly to file (skip .new file approach)
+	configRoot := common.Config.ConfigRoot
+	pluginPath := path.Join(configRoot, "plugin", change.ID+".go")
+
+	err := os.WriteFile(pluginPath, []byte(change.NewContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write plugin file: %w", err)
+	}
+
+	// Reload plugin into memory
+	reloadErr := plugin.NewPlugin(pluginPath, "", change.ID, plugin.YAEGI_PLUGIN)
+	if reloadErr != nil {
+		return fmt.Errorf("failed to reload plugin: %w", reloadErr)
+	}
+
+	// Clear from legacy storage
+	common.GlobalMu.Lock()
+	delete(plugin.PluginsNew, change.ID)
+	common.GlobalMu.Unlock()
+
+	// Sync to followers
+	syncComponentToFollowers("plugin", change.ID)
+
+	logger.Info("Plugin change applied successfully", "id", change.ID)
+	return nil
+}
+
+// Generic component application with type-specific handling
+func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
+	configRoot := common.Config.ConfigRoot
+	var filePath string
+	var affectedProjects []string
+
+	// Determine file path and extension
+	switch change.Type {
+	case "input":
+		filePath = path.Join(configRoot, "input", change.ID+".yaml")
+	case "output":
+		filePath = path.Join(configRoot, "output", change.ID+".yaml")
+	case "ruleset":
+		filePath = path.Join(configRoot, "ruleset", change.ID+".xml")
+	default:
+		return nil, fmt.Errorf("unsupported component type: %s", change.Type)
+	}
+
+	// Write directly to file
+	err := os.WriteFile(filePath, []byte(change.NewContent), 0644)
+	if err != nil {
+		logger.Error("Failed to write component file", "type", change.Type, "id", change.ID, "error", err)
+		return nil, fmt.Errorf("failed to write %s file: %w", change.Type, err)
+	}
+
+	// Type-specific component handling
+	switch change.Type {
+	case "input":
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldInput, exists := project.GlobalProject.Inputs[change.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			oldInput.Stop()
+		}
+
+		// Reload component
+		newInput, reloadErr := input.NewInput(filePath, "", change.ID)
+		if reloadErr != nil {
+			return nil, fmt.Errorf("failed to reload input: %w", reloadErr)
+		}
+
+		common.GlobalMu.Lock()
+		project.GlobalProject.Inputs[change.ID] = newInput
+		delete(project.GlobalProject.InputsNew, change.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("input", change.ID)
+
+	case "output":
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldOutput, exists := project.GlobalProject.Outputs[change.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			oldOutput.Stop()
+		}
+
+		// Reload component
+		newOutput, reloadErr := output.NewOutput(filePath, "", change.ID)
+		if reloadErr != nil {
+			return nil, fmt.Errorf("failed to reload output: %w", reloadErr)
+		}
+
+		common.GlobalMu.Lock()
+		project.GlobalProject.Outputs[change.ID] = newOutput
+		delete(project.GlobalProject.OutputsNew, change.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("output", change.ID)
+
+	case "ruleset":
+		// Reload component
+		newRuleset, reloadErr := rules_engine.NewRuleset(filePath, "", change.ID)
+		if reloadErr != nil {
+			return nil, fmt.Errorf("failed to reload ruleset: %w", reloadErr)
+		}
+
+		common.GlobalMu.Lock()
+		project.GlobalProject.Rulesets[change.ID] = newRuleset
+		delete(project.GlobalProject.RulesetsNew, change.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("ruleset", change.ID)
+	}
+
+	// Sync to followers
+	syncComponentToFollowers(change.Type, change.ID)
+
+	logger.Info("Component change applied successfully", "type", change.Type, "id", change.ID, "affected_projects", len(affectedProjects))
+	return affectedProjects, nil
+}
+
+func applyInputChange(change *EnhancedPendingChange) []string {
+	affectedProjects, err := applyComponentChange(change)
+	if err != nil {
+		logger.Error("Failed to apply input change", "id", change.ID, "error", err)
+		return nil
+	}
+	return affectedProjects
+}
+
+func applyOutputChange(change *EnhancedPendingChange) []string {
+	affectedProjects, err := applyComponentChange(change)
+	if err != nil {
+		logger.Error("Failed to apply output change", "id", change.ID, "error", err)
+		return nil
+	}
+	return affectedProjects
+}
+
+func applyRulesetChange(change *EnhancedPendingChange) []string {
+	affectedProjects, err := applyComponentChange(change)
+	if err != nil {
+		logger.Error("Failed to apply ruleset change", "id", change.ID, "error", err)
+		return nil
+	}
+	return affectedProjects
+}
+
+func applyProjectChange(change *EnhancedPendingChange) error {
+	configRoot := common.Config.ConfigRoot
+	projectPath := path.Join(configRoot, "project", change.ID+".yaml")
+
+	// Write directly to file
+	err := os.WriteFile(projectPath, []byte(change.NewContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write project file: %w", err)
+	}
+
+	// Stop old component if it exists
+	common.GlobalMu.RLock()
+	oldProject, exists := project.GlobalProject.Projects[change.ID]
+	common.GlobalMu.RUnlock()
+	if exists {
+		oldProject.Stop()
+	}
+
+	// Reload component
+	newProject, reloadErr := project.NewProject(projectPath, "", change.ID)
+	if reloadErr != nil {
+		return fmt.Errorf("failed to reload project: %w", reloadErr)
+	}
+
+	common.GlobalMu.Lock()
+	project.GlobalProject.Projects[change.ID] = newProject
+	delete(project.GlobalProject.ProjectsNew, change.ID)
+	common.GlobalMu.Unlock()
+
+	// Sync to followers
+	syncComponentToFollowers("project", change.ID)
+
+	logger.Info("Project change applied successfully", "id", change.ID)
+	return nil
 }
 
 // ApplyPendingChanges applies all pending changes by merging .new files with their originals
-// and syncs changes to follower nodes
+// and syncs changes to follower nodes (legacy version for backward compatibility)
 func ApplyPendingChanges(c echo.Context) error {
 	successCount := 0
 	failureCount := 0
@@ -1008,15 +1782,9 @@ func mergePluginFile(name string) error {
 }
 
 // reloadComponents reloads components after applying changes
+// reloadComponents is deprecated - use enhanced manager instead
+// Kept for legacy compatibility only
 func reloadComponents() {
-	// Reload rulesets (they support hot reload)
-	for _, ruleset := range project.GlobalProject.Rulesets {
-		err := ruleset.Reload()
-		if err != nil {
-			logger.Error("ruleset reload error", "error", err)
-		}
-	}
-
 	// Clear the temporary files maps with proper locking
 	common.GlobalMu.Lock()
 	plugin.PluginsNew = make(map[string]string)

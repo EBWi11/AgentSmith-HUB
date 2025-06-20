@@ -2,9 +2,11 @@ package input
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,7 +53,7 @@ type AliyunSLSInputConfig struct {
 	Query             string `yaml:"query,omitempty"`             // Optional query for filtering logs
 }
 
-// Input is the runtime input instance.
+// Input represents an input component that consumes data from external sources
 type Input struct {
 	Id                  string `json:"Id"`
 	Path                string
@@ -77,6 +79,10 @@ type Input struct {
 
 	// raw config
 	Config *InputConfig
+
+	// goroutine management
+	wg       sync.WaitGroup
+	stopChan chan struct{}
 }
 
 func Verify(path string, raw string) error {
@@ -184,9 +190,16 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 // Start initializes and starts the input component based on its type
 // Returns an error if the component is already running or if initialization fails
 func (in *Input) Start() error {
+	// Initialize stop channel
+	in.stopChan = make(chan struct{})
+
 	// Start metric goroutine
 	in.metricStop = make(chan struct{})
-	go in.metricLoop()
+	in.wg.Add(1)
+	go func() {
+		defer in.wg.Done()
+		in.metricLoop()
+	}()
 
 	switch in.Type {
 	case InputTypeKafka:
@@ -210,20 +223,39 @@ func (in *Input) Start() error {
 		}
 		in.kafkaConsumer = cons
 
-		// Start consumer goroutine
+		// Start consumer goroutine with proper management
+		in.wg.Add(1)
 		go func() {
-			for msg := range msgChan {
-				atomic.AddUint64(&in.consumeTotal, 1)
-				atomic.AddUint64(&in.consumeQPS, 1)
-
-				// Sample the message
-				if in.sampler != nil {
-					in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+			defer in.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in kafka consumer goroutine", "input", in.Id, "panic", r)
 				}
+			}()
 
-				// Forward to downstream
-				for _, ch := range in.DownStream {
-					*ch <- msg
+			for {
+				select {
+				case <-in.stopChan:
+					logger.Info("Kafka consumer goroutine stopping", "input", in.Id)
+					return
+				case msg, ok := <-msgChan:
+					if !ok {
+						logger.Info("Kafka message channel closed", "input", in.Id)
+						return
+					}
+
+					atomic.AddUint64(&in.consumeTotal, 1)
+					atomic.AddUint64(&in.consumeQPS, 1)
+
+					// Sample the message
+					if in.sampler != nil {
+						in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+					}
+
+					// Forward to downstream
+					for _, ch := range in.DownStream {
+						*ch <- msg
+					}
 				}
 			}
 		}()
@@ -257,20 +289,39 @@ func (in *Input) Start() error {
 
 		cons.Start()
 
-		// Start consumer goroutine
+		// Start consumer goroutine with proper management
+		in.wg.Add(1)
 		go func() {
-			for msg := range msgChan {
-				atomic.AddUint64(&in.consumeTotal, 1)
-				atomic.AddUint64(&in.consumeQPS, 1)
-
-				// Sample the message
-				if in.sampler != nil {
-					in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+			defer in.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in sls consumer goroutine", "input", in.Id, "panic", r)
 				}
+			}()
 
-				// Forward to downstream
-				for _, ch := range in.DownStream {
-					*ch <- msg
+			for {
+				select {
+				case <-in.stopChan:
+					logger.Info("SLS consumer goroutine stopping", "input", in.Id)
+					return
+				case msg, ok := <-msgChan:
+					if !ok {
+						logger.Info("SLS message channel closed", "input", in.Id)
+						return
+					}
+
+					atomic.AddUint64(&in.consumeTotal, 1)
+					atomic.AddUint64(&in.consumeQPS, 1)
+
+					// Sample the message
+					if in.sampler != nil {
+						in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+					}
+
+					// Forward to downstream
+					for _, ch := range in.DownStream {
+						*ch <- msg
+					}
 				}
 			}
 		}()
@@ -281,12 +332,14 @@ func (in *Input) Start() error {
 
 // Stop stops the input component and its consumers
 func (in *Input) Stop() error {
-	// Only close metricStop if it was initialized
-	if in.metricStop != nil {
-		close(in.metricStop)
-		in.metricStop = nil
+	logger.Info("Stopping input", "id", in.Id, "type", in.Type)
+
+	// Signal all goroutines to stop
+	if in.stopChan != nil {
+		close(in.stopChan)
 	}
 
+	// First, stop the consumers to prevent new messages
 	if in.kafkaConsumer != nil {
 		in.kafkaConsumer.Close()
 		in.kafkaConsumer = nil
@@ -294,10 +347,33 @@ func (in *Input) Stop() error {
 
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
-			return fmt.Errorf("failed to close sls consumer for input %s: %v", in.Id, err)
+			logger.Warn("Failed to close sls consumer", "input", in.Id, "error", err)
 		}
 		in.slsConsumer = nil
 	}
+
+	// Stop metrics collection
+	if in.metricStop != nil {
+		close(in.metricStop)
+		in.metricStop = nil
+	}
+
+	// Wait for all goroutines to finish with timeout
+	waitDone := make(chan struct{})
+	go func() {
+		in.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		logger.Info("Input stopped gracefully", "id", in.Id)
+	case <-time.After(10 * time.Second): // Reduced timeout for faster shutdown
+		logger.Warn("Input stop timeout, some goroutines may still be running", "id", in.Id)
+	}
+
+	// Reset stop channel for potential restart
+	in.stopChan = nil
 
 	return nil
 }

@@ -444,13 +444,23 @@ export const hubApi = {
     return response.data;
   },
 
-  // Get all pending changes (temporary files)
+  // Get all pending changes (temporary files) - Legacy API
   async fetchPendingChanges() {
     const response = await api.get('/pending-changes');
     return response.data;
   },
 
-  // Apply all pending changes
+  // Get enhanced pending changes with status information
+  async fetchEnhancedPendingChanges() {
+    try {
+      const response = await api.get('/pending-changes/enhanced');
+      return response.data || [];
+    } catch (error) {
+      return handleApiError(error, 'Error fetching enhanced pending changes:', true);
+    }
+  },
+
+  // Apply all pending changes - Legacy API
   async applyPendingChanges() {
     try {
       const response = await api.post('/apply-changes');
@@ -465,6 +475,61 @@ export const hubApi = {
           failureCount: error.response.data.failure_count
         };
       }
+      throw error;
+    }
+  },
+
+  // Apply all pending changes with enhanced transaction support
+  async applyPendingChangesEnhanced() {
+    try {
+      const response = await api.post('/apply-changes/enhanced');
+      return response.data;
+    } catch (error) {
+      console.error('Error applying pending changes (enhanced):', error);
+      throw error;
+    }
+  },
+
+  // Verify all pending changes without applying them
+  async verifyPendingChanges() {
+    try {
+      const response = await api.post('/verify-changes');
+      return response.data;
+    } catch (error) {
+      console.error('Error verifying pending changes:', error);
+      throw error;
+    }
+  },
+
+  // Verify a single pending change
+  async verifySinglePendingChange(type, id) {
+    try {
+      const response = await api.post(`/verify-change/${type}/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error verifying single pending change:', error);
+      throw error;
+    }
+  },
+
+  // Cancel a single pending change
+  async cancelPendingChange(type, id) {
+    try {
+      const response = await api.delete(`/cancel-change/${type}/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error cancelling pending change:', error);
+      throw error;
+    }
+  },
+
+  // Cancel all pending changes
+  async cancelAllPendingChanges() {
+    try {
+      const response = await api.delete('/cancel-all-changes');
+      return response.data;
+    } catch (error) {
+      console.error('Error cancelling all pending changes:', error);
       throw error;
     }
   },
@@ -509,26 +574,32 @@ export const hubApi = {
       return this.restartAllProjects();
     }
     
-    // First check if the project has temporary files
-    const tempInfo = await this.checkTemporaryFile('projects', id);
-    if (tempInfo.hasTemp) {
+    try {
+      // First check if the project has temporary files
+      const tempInfo = await this.checkTemporaryFile('projects', id);
+      if (tempInfo.hasTemp) {
+        // Apply the changes first
+        try {
+          await this.applySingleChange('projects', id);
+        } catch (applyError) {
+          console.error(`Failed to apply changes for project ${id} before restarting:`, applyError);
+          return {
+            success: false,
+            error: `Failed to apply changes before restarting: ${applyError.message}`
+          };
+        }
+      }
+      
+      // Use the dedicated restart endpoint
+      const response = await api.post('/restart-project', { project_id: id });
+      return response.data;
+    } catch (error) {
+      console.error(`Error restarting project ${id}:`, error);
       return {
         success: false,
-        warning: true,
-        message: 'This project has pending changes. The changes will not take effect until you push them.',
-        originalProject: tempInfo.data
+        error: error.response?.data?.error || error.message || 'Unknown error'
       };
     }
-    
-    // First stop the project
-    const stopResult = await this.stopProject(id);
-    if (!stopResult.success) {
-      return stopResult;
-    }
-    
-    // Then start it again
-    const startResult = await this.startProject(id);
-    return startResult;
   },
   
   // Verify component configuration
@@ -1046,7 +1117,7 @@ export const hubApi = {
 
   async getSamplerData(params) {
     try {
-      const response = await api.get('/sampler/data', { params });
+      const response = await api.get('/samplers/data', { params });
       return response.data;
     } catch (error) {
       return handleApiError(error, 'Error fetching sampler data:', true);

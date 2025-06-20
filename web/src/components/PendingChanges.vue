@@ -18,6 +18,14 @@
           Verify
         </button>
         <button 
+          @click="cancelAllChanges" 
+          class="px-3 py-1.5 border border-red-300 text-red-700 text-sm rounded hover:bg-red-50 transition-colors duration-150 focus:outline-none"
+          :disabled="cancelling || !changes.length"
+        >
+          <span v-if="cancelling" class="w-3 h-3 border-1.5 border-red-700 border-t-transparent rounded-full animate-spin mr-1"></span>
+          Cancel All
+        </button>
+        <button 
           @click="applyChanges" 
           class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none flex items-center space-x-1.5"
           :disabled="applying || !changes.length"
@@ -152,21 +160,63 @@ async function refreshChanges() {
   error.value = null
   
   try {
-    const data = await hubApi.fetchPendingChanges()
-    changes.value = data.map(change => ({
-      ...change,
-      verifyStatus: null,
-      verifyError: null,
-      errorLine: null
-    })) || []
+    // Use enhanced API to get changes with status information
+    const data = await hubApi.fetchEnhancedPendingChanges()
+    
+    // Validate and filter data
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid response format: expected array')
+    }
+    
+    changes.value = data
+      .filter(change => {
+        // Filter out invalid changes
+        if (!change || typeof change !== 'object') {
+          console.warn('Skipping invalid change:', change)
+          return false
+        }
+        if (!change.type || !change.id) {
+          console.warn('Skipping change with missing type or id:', change)
+          return false
+        }
+        return true
+      })
+      .map(change => ({
+        ...change,
+        verifyStatus: getVerifyStatusFromChange(change),
+        verifyError: change.error_message || null,
+        errorLine: null,
+        // Ensure required fields have default values
+        new_content: change.new_content || '',
+        old_content: change.old_content || '',
+        is_new: Boolean(change.is_new)
+      }))
     
     // Wait for DOM update then refresh editor layout
     await nextTick()
     refreshEditorsLayout()
   } catch (e) {
+    console.error('Error fetching pending changes:', e)
     error.value = 'Failed to fetch pending changes: ' + (e?.message || 'Unknown error')
+    changes.value = [] // Reset to empty array on error
   } finally {
     loading.value = false
+  }
+}
+
+// Helper function to convert enhanced change status to verify status
+function getVerifyStatusFromChange(change) {
+  switch (change.status) {
+    case 'verified':
+      return 'success'
+    case 'invalid':
+      return 'error'
+    case 'applied':
+      return 'success'
+    case 'failed':
+      return 'error'
+    default:
+      return null
   }
 }
 
@@ -227,52 +277,36 @@ async function verifyChanges() {
   if (!changes.value.length) return
   
   verifying.value = true
-  let allValid = true
   
   try {
-    // Verify each change
-    for (const change of changes.value) {
-      try {
-        // Call verification API with plural component type
-        const result = await hubApi.verifyComponent(getApiComponentType(change.type), change.id, change.new_content)
-        
-        // API now returns consistent format: {data: {valid: boolean, error: string|null}}
-        const isValid = result.data?.valid === true;
-        const errorMessage = result.data?.error || '';
-        
-        if (isValid) {
-          change.verifyStatus = 'success'
-          change.verifyError = null
-        } else {
-          change.verifyStatus = 'error'
-          change.verifyError = errorMessage || 'Unknown verification error'
-          allValid = false
+    // Use enhanced batch verification API
+    const result = await hubApi.verifyPendingChanges()
+    
+    if (result.valid_changes === result.total_changes) {
+      $message?.success?.(`All ${result.total_changes} changes verified successfully!`)
+    } else {
+      $message?.warning?.(`${result.valid_changes} valid, ${result.invalid_changes} invalid out of ${result.total_changes} changes`)
+    }
+    
+    // Update individual change status based on verification results
+    if (result.results) {
+      for (const verifyResult of result.results) {
+        const change = changes.value.find(c => c.type === verifyResult.type && c.id === verifyResult.id)
+        if (change) {
+          change.verifyStatus = verifyResult.valid ? 'success' : 'error'
+          change.verifyError = verifyResult.error || null
           
           // Try to extract line number from error message
-          if (errorMessage && typeof errorMessage === 'string') {
-            const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
-                               errorMessage.match(/line:\s*(\d+)/i) ||
-                               errorMessage.match(/location:.*line\s*(\d+)/i);
+          if (!verifyResult.valid && verifyResult.error) {
+            const lineMatches = verifyResult.error.match(/line\s*(\d+)/i) || 
+                               verifyResult.error.match(/line:\s*(\d+)/i) ||
+                               verifyResult.error.match(/location:.*line\s*(\d+)/i);
             
             if (lineMatches && lineMatches[1]) {
               change.errorLine = parseInt(lineMatches[1]);
             }
-          }
-        }
-      } catch (e) {
-        change.verifyStatus = 'error'
-        change.verifyError = e.message || 'Verification failed'
-        allValid = false
-        
-        // Try to extract line number from error message
-        const errorMessage = e.message || ''
-        if (errorMessage && typeof errorMessage === 'string') {
-          const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
-                             errorMessage.match(/line:\s*(\d+)/i) ||
-                             errorMessage.match(/location:.*line\s*(\d+)/i);
-          
-          if (lineMatches && lineMatches[1]) {
-            change.errorLine = parseInt(lineMatches[1]);
+          } else {
+            change.errorLine = null;
           }
         }
       }
@@ -282,11 +316,8 @@ async function verifyChanges() {
     await nextTick()
     refreshEditorsLayout()
     
-    if (allValid) {
-      $message?.success?.('All changes verified successfully!')
-    } else {
-      $message?.error?.('Some changes failed verification. Please fix the errors before applying.')
-    }
+    // Refresh the changes list to get updated status from server
+    await refreshChanges()
   } catch (e) {
     $message?.error?.('Failed to verify changes: ' + (e?.message || 'Unknown error'))
   } finally {
@@ -366,23 +397,60 @@ async function verifySingleChange(change) {
 }
 
 async function applyChanges() {
-  if (!changes.value.length) return
+  if (!changes.value || !changes.value.length) return
+  
+  // Check if any changes are in applying state
+  if (applying.value) {
+    console.warn('Apply operation already in progress')
+    return
+  }
   
   applying.value = true
   
   try {
-    // Record component types before applying for later list refresh
-    const affectedTypes = new Set(changes.value.map(change => change.type))
+    // Validate changes before applying
+    const validChanges = changes.value.filter(change => {
+      if (!change || !change.type || !change.id) {
+        console.warn('Skipping invalid change:', change)
+        return false
+      }
+      return true
+    })
     
-    const result = await hubApi.applyPendingChanges()
-    
-    // Check if any projects need to be restarted
-    const projectsToRestart = findProjectsToRestart()
-    if (projectsToRestart.length > 0) {
-      await restartProjects(projectsToRestart)
+    if (validChanges.length === 0) {
+      $message?.warning?.('No valid changes to apply')
+      return
     }
     
-    $message?.success?.(`Applied successfully! Success: ${result.success_count}, Failed: ${result.failure_count}`)
+    // Record component types before applying for later list refresh
+    const affectedTypes = new Set(validChanges.map(change => change.type))
+    
+    // Use enhanced API for better transaction handling
+    const result = await hubApi.applyPendingChangesEnhanced()
+    
+    // Validate result
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid response from server')
+    }
+    
+    if (result.success_count > 0) {
+      $message?.success?.(`Applied successfully! Success: ${result.success_count}, Failed: ${result.failure_count}`)
+      
+      // Show projects that need restart
+      if (result.projects_to_restart && result.projects_to_restart.length > 0) {
+        $message?.warning?.(`Projects requiring restart: ${result.projects_to_restart.join(', ')}`)
+      }
+    }
+    
+    if (result.failure_count > 0) {
+      $message?.error?.(`Failed to apply ${result.failure_count} changes`)
+      
+      // Show detailed error information
+      if (result.failed_changes && result.failed_changes.length > 0) {
+        const errorDetails = result.failed_changes.map(fc => `${fc.type}:${fc.id} - ${fc.error}`).join('\n')
+        console.error('Apply failures:', errorDetails)
+      }
+    }
     
     // Refresh the list
     await refreshChanges()
@@ -396,30 +464,18 @@ async function applyChanges() {
     // 确保编辑器布局正确
     refreshEditorsLayout()
   } catch (e) {
-
     // Handle verification failure cases
-    if (e.verifyFailures && Array.isArray(e.verifyFailures)) {
-      // 显示验证失败的详细信息
-      const failedComponents = e.verifyFailures.map(f => `${getComponentTypeLabel(f.type)} ${f.id}: ${f.error}`).join('\n');
+    if (e.response?.data?.failed_changes) {
+      const failedChanges = e.response.data.failed_changes
+      const failedComponents = failedChanges.map(f => `${getComponentTypeLabel(f.type)} ${f.id}: ${f.error}`).join('\n');
       
-      $message?.error?.(`验证失败，无法应用更改:\n${failedComponents}`, { timeout: 10000 });
-      
-      // 如果有部分成功的更改，刷新列表
-      if (e.successCount > 0) {
-        await refreshChanges();
-        refreshEditorsLayout();
-        
-        // Refresh all potentially affected component type lists
-        ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
-          emit('refresh-list', type)
-        })
-      }
+      $message?.error?.(`Verification failed, unable to apply changes:\n${failedComponents}`, { timeout: 10000 });
     } else {
       $message?.error?.('Failed to apply changes: ' + (e?.message || 'Unknown error'))
-      
-      // 即使失败，也要刷新列表以确保显示最新状态
-      await refreshChanges();
     }
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges();
   } finally {
     applying.value = false
   }
@@ -549,9 +605,10 @@ async function cancelUpgrade(change) {
   cancelling.value = true
   
   try {
-    await hubApi.cancelUpgrade(change.type, change.id)
+    // Use enhanced cancel API
+    await hubApi.cancelPendingChange(change.type, change.id)
     
-    $message?.success?.(`Upgrade cancelled for ${getComponentTypeLabel(change.type)} "${change.id}"`)
+    $message?.success?.(`Change cancelled for ${getComponentTypeLabel(change.type)} "${change.id}"`)
     
     // Refresh the list to remove the cancelled change
     await refreshChanges()
@@ -562,11 +619,48 @@ async function cancelUpgrade(change) {
     // Ensure editor layout is correct
     refreshEditorsLayout()
   } catch (e) {
-    $message?.error?.('Failed to cancel upgrade: ' + (e?.message || 'Unknown error'))
+    $message?.error?.('Failed to cancel change: ' + (e?.message || 'Unknown error'))
     
     // 即使失败，也要刷新列表以确保显示最新状态
     await refreshChanges();
     emit('refresh-list', getApiComponentType(change.type))
+  } finally {
+    cancelling.value = false
+  }
+}
+
+// Cancel all pending changes
+async function cancelAllChanges() {
+  if (!changes.value.length) return
+  
+  // Confirm the action
+  const confirmed = confirm(`Are you sure you want to cancel ALL pending changes?\n\nThis will delete all .new files and all pending changes will be lost.`)
+  if (!confirmed) {
+    return
+  }
+  
+  cancelling.value = true
+  
+  try {
+    const result = await hubApi.cancelAllPendingChanges()
+    
+    $message?.success?.(`${result.cancelled_count} changes cancelled successfully`)
+    
+    // Refresh the list to remove all cancelled changes
+    await refreshChanges()
+    
+    // Refresh all component type lists
+    ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
+      emit('refresh-list', type)
+    })
+    
+    // Ensure editor layout is correct
+    refreshEditorsLayout()
+  } catch (e) {
+    $message?.error?.('Failed to cancel all changes: ' + (e?.message || 'Unknown error'))
+    
+    // 即使失败，也要刷新列表以确保显示最新状态
+    await refreshChanges()
   } finally {
     cancelling.value = false
   }

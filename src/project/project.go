@@ -118,7 +118,7 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 
 	p := &Project{
 		Id:          cfg.Id,
-		Status:      ProjectStatusRunning, // Default to running status for new projects
+		Status:      ProjectStatusStopped, // Default to stopped status, will be started by StartAllProject
 		Config:      &cfg,
 		Inputs:      make(map[string]*input.Input),
 		Outputs:     make(map[string]*output.Output),
@@ -141,15 +141,10 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 	// Load saved status if available
 	savedStatus, err := p.LoadProjectStatus()
 	if err == nil {
-		// Only update to stopped or error status
-		// Running status will be handled by StartAllProject
-		if savedStatus == ProjectStatusError {
-			p.Status = ProjectStatusError
-			logger.Warn("Project loaded with error status from previous run", "id", p.Id)
-		} else if savedStatus == ProjectStatusStopped {
-			p.Status = ProjectStatusStopped
-			logger.Info("Project loaded with stopped status from previous run", "id", p.Id)
-		}
+		// Always respect the saved status, but don't actually start components here
+		// StartAllProject will handle the actual starting of components
+		p.Status = savedStatus
+		logger.Info("Project loaded with saved status", "id", p.Id, "status", savedStatus)
 	}
 
 	// Save the initial status to file
@@ -187,7 +182,7 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 
 	p := &Project{
 		Id:          cfg.Id,
-		Status:      ProjectStatusRunning,
+		Status:      ProjectStatusStopped, // Start as stopped for testing
 		Config:      &cfg,
 		Inputs:      make(map[string]*input.Input),
 		Outputs:     make(map[string]*output.Output),
@@ -337,63 +332,8 @@ func (p *Project) initComponents() error {
 		}
 	}
 
-	// Connect components according to the flow graph
-	projectNodeSequence := ""
-	for from, tos := range flowGraph {
-		fromParts := strings.Split(from, ".")
-		fromType := fromParts[0]
-		fromId := fromParts[1]
-
-		for _, to := range tos {
-			toParts := strings.Split(to, ".")
-			toType := toParts[0]
-			toId := toParts[1]
-
-			// Create a channel for this connection
-			var msgChan chan map[string]interface{}
-			projectNodeSequence = projectNodeSequence + "-" + fmt.Sprintf("%s-%s", from, to)
-
-			if GlobalProject.msgChans[projectNodeSequence] != nil {
-				msgChan = GlobalProject.msgChans[projectNodeSequence]
-				GlobalProject.msgChansCounter[projectNodeSequence] = GlobalProject.msgChansCounter[projectNodeSequence] + 1
-			} else {
-				msgChan = make(chan map[string]interface{}, 1024)
-				GlobalProject.msgChans[projectNodeSequence] = msgChan
-				GlobalProject.msgChansCounter[projectNodeSequence] = 1
-			}
-
-			p.MsgChannels = append(p.MsgChannels, projectNodeSequence)
-
-			// Connect based on component types
-			switch fromType {
-			case "INPUT":
-				if in, ok := p.Inputs[fromId]; ok {
-					in.DownStream = append(in.DownStream, &msgChan)
-					in.ProjectNodeSequence = projectNodeSequence
-				}
-			case "RULESET":
-				if rs, ok := p.Rulesets[fromId]; ok {
-					rs.DownStream[to] = &msgChan
-					rs.ProjectNodeSequence = projectNodeSequence
-				}
-			}
-
-			switch toType {
-			case "RULESET":
-				if rs, ok := p.Rulesets[toId]; ok {
-					rs.UpStream[from] = &msgChan
-					rs.ProjectNodeSequence = projectNodeSequence
-				}
-			case "OUTPUT":
-				if out, ok := p.Outputs[toId]; ok {
-					out.UpStream = append(out.UpStream, &msgChan)
-					out.ProjectNodeSequence = projectNodeSequence
-				}
-			}
-		}
-	}
-
-	return nil
+	// Create channel connections
+	return p.createChannelConnections(flowGraph)
 }
 
 // initComponentsForTesting initializes all project components for testing with independent instances
@@ -651,7 +591,35 @@ func (p *Project) Start() error {
 		return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
 	}
 
-	// Start inputs
+	// Initialize project control channels
+	p.stopChan = make(chan struct{})
+
+	// Parse project content to get component flow
+	flowGraph, err := p.parseContent()
+	if err != nil {
+		p.Status = ProjectStatusError
+		p.Err = err
+		return fmt.Errorf("failed to parse project content: %v", err)
+	}
+
+	// Load components from global registry
+	err = p.loadComponentsFromGlobal(flowGraph)
+	if err != nil {
+		p.Status = ProjectStatusError
+		p.Err = err
+		return fmt.Errorf("failed to load components: %v", err)
+	}
+
+	// Create fresh channel connections
+	err = p.createChannelConnections(flowGraph)
+	if err != nil {
+		p.Status = ProjectStatusError
+		p.Err = err
+		return fmt.Errorf("failed to create channel connections: %v", err)
+	}
+
+	// Start components in proper order: Input → Ruleset → Output
+	// Start inputs first
 	for _, in := range p.Inputs {
 		if err := in.Start(); err != nil {
 			p.Status = ProjectStatusError
@@ -662,7 +630,7 @@ func (p *Project) Start() error {
 		}
 	}
 
-	// Start rulesets
+	// Start rulesets after inputs
 	for _, rs := range p.Rulesets {
 		if err := rs.Start(); err != nil {
 			p.Status = ProjectStatusError
@@ -673,7 +641,7 @@ func (p *Project) Start() error {
 		}
 	}
 
-	// Start outputs
+	// Start outputs last
 	for _, out := range p.Outputs {
 		if err := out.Start(); err != nil {
 			p.Status = ProjectStatusError
@@ -686,12 +654,16 @@ func (p *Project) Start() error {
 
 	// Start metrics collection
 	p.metricsStop = make(chan struct{})
-	go p.collectMetrics()
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.collectMetrics()
+	}()
 
 	p.Status = ProjectStatusRunning
 
 	// Save the running status to file
-	err := p.SaveProjectStatus()
+	err = p.SaveProjectStatus()
 	if err != nil {
 		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
 	}
@@ -699,7 +671,7 @@ func (p *Project) Start() error {
 	return nil
 }
 
-// Stop stops the project and all its components
+// Stop stops the project and all its components in proper order
 func (p *Project) Stop() error {
 	if p.Status != ProjectStatusRunning {
 		return fmt.Errorf("project is not running %s", p.Id)
@@ -710,67 +682,134 @@ func (p *Project) Stop() error {
 		logger.Warn("Stopping project with errors", "id", p.Id, "error", p.Err)
 	}
 
-	// Stop all components
-	logger.Info("Stopping inputs", "project", p.Id, "count", len(p.Inputs))
-	for _, in := range p.Inputs {
-		logger.Info("Stopping input", "project", p.Id, "input", in.Id)
-		startTime := time.Now()
-		if err := in.Stop(); err != nil {
-			return fmt.Errorf("failed to stop input %s: %v", in.Id, err)
+	// Overall timeout for the entire stop process
+	overallTimeout := time.After(2 * time.Minute) // 2 minute overall timeout
+	stopCompleted := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic during project stop", "project", p.Id, "panic", r)
+				stopCompleted <- fmt.Errorf("panic during stop: %v", r)
+			}
+		}()
+
+		// Step 1: Stop inputs first to prevent new data
+		logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
+		for _, in := range p.Inputs {
+			logger.Info("Stopping input", "project", p.Id, "input", in.Id)
+			startTime := time.Now()
+			if err := in.Stop(); err != nil {
+				logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+				// Continue with other inputs instead of failing immediately
+			} else {
+				logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
+			}
 		}
-		logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
-	}
 
-	logger.Info("Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
-	for _, rs := range p.Rulesets {
-		logger.Info("Stopping ruleset", "project", p.Id, "ruleset", rs.RulesetID)
-		startTime := time.Now()
-		if err := rs.Stop(); err != nil {
-			return fmt.Errorf("failed to stop ruleset %s: %v", rs.RulesetID, err)
+		// Step 2: Wait for data to drain through the pipeline
+		logger.Info("Step 2: Waiting for data to drain through pipeline", "project", p.Id)
+		p.waitForDataDrain()
+
+		// Step 3: Stop rulesets
+		logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
+		for _, rs := range p.Rulesets {
+			logger.Info("Stopping ruleset", "project", p.Id, "ruleset", rs.RulesetID)
+			startTime := time.Now()
+			if err := rs.Stop(); err != nil {
+				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
+				// Continue with other rulesets instead of failing immediately
+			} else {
+				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
+			}
 		}
-		logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
-	}
 
-	logger.Info("Stopping outputs", "project", p.Id, "count", len(p.Outputs))
-	for _, out := range p.Outputs {
-		logger.Info("Stopping output", "project", p.Id, "output", out.Id)
-		startTime := time.Now()
-		if err := out.Stop(); err != nil {
-			return fmt.Errorf("failed to stop output %s: %v", out.Id, err)
+		// Step 4: Stop outputs last
+		logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
+		for _, out := range p.Outputs {
+			logger.Info("Stopping output", "project", p.Id, "output", out.Id)
+			startTime := time.Now()
+			if err := out.Stop(); err != nil {
+				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
+				// Continue with other outputs instead of failing immediately
+			} else {
+				logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
+			}
 		}
-		logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
-	}
 
-	// Stop metrics collection
-	if p.metricsStop != nil {
-		close(p.metricsStop)
-	}
-
-	for i := range p.MsgChannels {
-		id := p.MsgChannels[i]
-		GlobalProject.msgChansCounter[id] = GlobalProject.msgChansCounter[id] - 1
-		if GlobalProject.msgChansCounter[id] == 0 {
-			close(GlobalProject.msgChans[id])
-			delete(GlobalProject.msgChans, id)
-			delete(GlobalProject.msgChansCounter, id)
+		// Step 5: Stop metrics collection
+		if p.metricsStop != nil {
+			close(p.metricsStop)
+			p.metricsStop = nil
 		}
+
+		// Step 6: Wait for all project goroutines to finish
+		waitDone := make(chan struct{})
+		go func() {
+			p.wg.Wait()
+			close(waitDone)
+		}()
+
+		select {
+		case <-waitDone:
+			logger.Info("All project goroutines finished", "project", p.Id)
+		case <-time.After(30 * time.Second):
+			logger.Warn("Timeout waiting for project goroutines to finish", "project", p.Id)
+		}
+
+		// Step 7: Clean up channels
+		logger.Info("Step 7: Cleaning up channels", "project", p.Id, "channel_count", len(p.MsgChannels))
+		for _, channelId := range p.MsgChannels {
+			if GlobalProject.msgChansCounter[channelId] > 0 {
+				GlobalProject.msgChansCounter[channelId]--
+				if GlobalProject.msgChansCounter[channelId] == 0 {
+					if ch, exists := GlobalProject.msgChans[channelId]; exists {
+						close(ch)
+						delete(GlobalProject.msgChans, channelId)
+						delete(GlobalProject.msgChansCounter, channelId)
+						logger.Info("Closed and cleaned up channel", "project", p.Id, "channel", channelId)
+					}
+				}
+			}
+		}
+		p.MsgChannels = []string{}
+
+		// Step 8: Clear component references
+		logger.Info("Step 8: Clearing component references", "project", p.Id)
+		p.Inputs = make(map[string]*input.Input)
+		p.Outputs = make(map[string]*output.Output)
+		p.Rulesets = make(map[string]*rules_engine.Ruleset)
+
+		// Step 9: Close project channels after all goroutines are done
+		if p.stopChan != nil {
+			close(p.stopChan)
+			p.stopChan = nil
+		}
+
+		p.Status = ProjectStatusStopped
+
+		// Save the stopped status to file
+		err := p.SaveProjectStatus()
+		if err != nil {
+			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+		}
+
+		stopCompleted <- nil
+	}()
+
+	select {
+	case err := <-stopCompleted:
+		if err != nil {
+			logger.Error("Project stop completed with error", "project", p.Id, "error", err)
+			return err
+		}
+		logger.Info("Project stopped successfully", "project", p.Id)
+		return nil
+	case <-overallTimeout:
+		logger.Error("Project stop timeout exceeded", "project", p.Id)
+		p.Status = ProjectStatusError
+		return fmt.Errorf("project stop timeout exceeded for %s", p.Id)
 	}
-
-	// Close all channels
-	close(p.stopChan)
-
-	// Wait for all goroutines to finish
-	p.wg.Wait()
-
-	p.Status = ProjectStatusStopped
-
-	// Save the stopped status to file
-	err := p.SaveProjectStatus()
-	if err != nil {
-		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
-	}
-
-	return nil
 }
 
 // collectMetrics collects runtime metrics
@@ -1094,4 +1133,292 @@ func (p *Project) LoadProjectStatus() (ProjectStatus, error) {
 
 	// Project not found in the status file
 	return ProjectStatusStopped, nil
+}
+
+// StartForTesting starts the project for testing purposes, bypassing normal status checks
+func (p *Project) StartForTesting() error {
+	// Force set status to stopped to allow starting
+	p.Status = ProjectStatusStopped
+
+	// Start inputs
+	for _, in := range p.Inputs {
+		if err := in.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
+			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
+		}
+	}
+
+	// Start rulesets
+	for _, rs := range p.Rulesets {
+		if err := rs.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
+			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+		}
+	}
+
+	// Start outputs
+	for _, out := range p.Outputs {
+		if err := out.Start(); err != nil {
+			p.Status = ProjectStatusError
+			p.Err = err
+			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
+		}
+	}
+
+	// Start metrics collection
+	p.metricsStop = make(chan struct{})
+	go p.collectMetrics()
+
+	p.Status = ProjectStatusRunning
+	return nil
+}
+
+// StopForTesting stops the project quickly for testing purposes
+func (p *Project) StopForTesting() error {
+	// Quick stop without extensive timeouts for testing
+	logger.Info("Quick stopping test project", "project", p.Id)
+
+	// Stop metrics collection first
+	if p.metricsStop != nil {
+		close(p.metricsStop)
+		p.metricsStop = nil
+	}
+
+	// Stop components quickly without waiting for channel drainage
+	for _, in := range p.Inputs {
+		if err := in.Stop(); err != nil {
+			logger.Warn("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
+		}
+	}
+
+	for _, rs := range p.Rulesets {
+		// Use the quick stop method for rulesets in testing
+		if err := rs.StopForTesting(); err != nil {
+			logger.Warn("Failed to stop test ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
+		}
+	}
+
+	for _, out := range p.Outputs {
+		// Use the quick stop method for outputs in testing
+		if err := out.StopForTesting(); err != nil {
+			logger.Warn("Failed to stop test output", "project", p.Id, "output", out.Id, "error", err)
+		}
+	}
+
+	p.Status = ProjectStatusStopped
+	logger.Info("Test project stopped", "project", p.Id)
+	return nil
+}
+
+// ParseContentForVisualization parses the project content for visualization purposes
+// This is a public wrapper around parseContent for use in API visualization
+func (p *Project) ParseContentForVisualization() (map[string][]string, error) {
+	return p.parseContent()
+}
+
+// waitForDataDrain waits for data to drain through the pipeline after inputs are stopped
+func (p *Project) waitForDataDrain() {
+	logger.Info("Waiting for data to drain through pipeline", "project", p.Id)
+
+	drainTimeout := time.After(30 * time.Second) // 30 second timeout for data drain
+	checkInterval := 100 * time.Millisecond
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-drainTimeout:
+			logger.Warn("Data drain timeout reached, proceeding with shutdown", "project", p.Id)
+			return
+		case <-ticker.C:
+			allEmpty := true
+			totalMessages := 0
+
+			// Check all channels for remaining messages
+			for _, channelId := range p.MsgChannels {
+				if ch, exists := GlobalProject.msgChans[channelId]; exists {
+					chLen := len(ch)
+					if chLen > 0 {
+						allEmpty = false
+						totalMessages += chLen
+					}
+				}
+			}
+
+			if allEmpty {
+				logger.Info("All channels drained, proceeding with shutdown", "project", p.Id)
+				return
+			}
+
+			// Log progress every 5 seconds
+			if time.Now().UnixNano()%(5*int64(time.Second)) < int64(checkInterval) {
+				logger.Info("Waiting for channels to drain", "project", p.Id, "remaining_messages", totalMessages)
+			}
+		}
+	}
+}
+
+// loadComponentsFromGlobal loads component references from global registry based on flow graph
+func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error {
+	logger.Info("Loading components from global registry", "project", p.Id)
+
+	// Collect component names
+	inputNames := []string{}
+	outputNames := []string{}
+	rulesetNames := []string{}
+
+	nameExists := func(list []string, name string) bool {
+		for _, n := range list {
+			if n == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		if len(fromParts) == 2 {
+			switch strings.ToUpper(fromParts[0]) {
+			case "INPUT":
+				if !nameExists(inputNames, fromParts[1]) {
+					inputNames = append(inputNames, fromParts[1])
+				}
+			case "OUTPUT":
+				if !nameExists(outputNames, fromParts[1]) {
+					outputNames = append(outputNames, fromParts[1])
+				}
+			case "RULESET":
+				if !nameExists(rulesetNames, fromParts[1]) {
+					rulesetNames = append(rulesetNames, fromParts[1])
+				}
+			}
+		}
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			if len(toParts) == 2 {
+				switch strings.ToUpper(toParts[0]) {
+				case "INPUT":
+					if !nameExists(inputNames, toParts[1]) {
+						inputNames = append(inputNames, toParts[1])
+					}
+				case "OUTPUT":
+					if !nameExists(outputNames, toParts[1]) {
+						outputNames = append(outputNames, toParts[1])
+					}
+				case "RULESET":
+					if !nameExists(rulesetNames, toParts[1]) {
+						rulesetNames = append(rulesetNames, toParts[1])
+					}
+				}
+			}
+		}
+	}
+
+	// Clear existing component references
+	p.Inputs = make(map[string]*input.Input)
+	p.Outputs = make(map[string]*output.Output)
+	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+
+	// Load components from global registry
+	for _, name := range inputNames {
+		if globalInput, ok := GlobalProject.Inputs[name]; ok {
+			p.Inputs[name] = globalInput
+		} else {
+			return fmt.Errorf("input component %s not found in global registry", name)
+		}
+	}
+
+	for _, name := range outputNames {
+		if globalOutput, ok := GlobalProject.Outputs[name]; ok {
+			p.Outputs[name] = globalOutput
+		} else {
+			return fmt.Errorf("output component %s not found in global registry", name)
+		}
+	}
+
+	for _, name := range rulesetNames {
+		if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
+			p.Rulesets[name] = globalRuleset
+		} else {
+			return fmt.Errorf("ruleset component %s not found in global registry", name)
+		}
+	}
+
+	logger.Info("Components loaded from global registry", "project", p.Id, "inputs", len(inputNames), "outputs", len(outputNames), "rulesets", len(rulesetNames))
+	return nil
+}
+
+// createChannelConnections creates fresh channel connections between components
+func (p *Project) createChannelConnections(flowGraph map[string][]string) error {
+	logger.Info("Creating channel connections", "project", p.Id)
+
+	// Clear existing channel references in components
+	for _, in := range p.Inputs {
+		in.DownStream = []*chan map[string]interface{}{}
+	}
+	for _, rs := range p.Rulesets {
+		rs.UpStream = make(map[string]*chan map[string]interface{})
+		rs.DownStream = make(map[string]*chan map[string]interface{})
+	}
+	for _, out := range p.Outputs {
+		out.UpStream = []*chan map[string]interface{}{}
+	}
+
+	// Create new channel connections
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		fromType := fromParts[0]
+		fromId := fromParts[1]
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			toType := toParts[0]
+			toId := toParts[1]
+
+			// Create a unique channel ID for this connection
+			channelId := fmt.Sprintf("%s_%s_%s_%s", p.Id, from, to, time.Now().Format("20060102150405"))
+
+			// Create a new channel
+			msgChan := make(chan map[string]interface{}, 1024)
+			GlobalProject.msgChans[channelId] = msgChan
+			GlobalProject.msgChansCounter[channelId] = 1
+			p.MsgChannels = append(p.MsgChannels, channelId)
+
+			// Connect components based on types
+			switch fromType {
+			case "INPUT":
+				if in, ok := p.Inputs[fromId]; ok {
+					in.DownStream = append(in.DownStream, &msgChan)
+					in.ProjectNodeSequence = channelId
+				}
+			case "RULESET":
+				if rs, ok := p.Rulesets[fromId]; ok {
+					rs.DownStream[to] = &msgChan
+					rs.ProjectNodeSequence = channelId
+				}
+			}
+
+			switch toType {
+			case "RULESET":
+				if rs, ok := p.Rulesets[toId]; ok {
+					rs.UpStream[from] = &msgChan
+					rs.ProjectNodeSequence = channelId
+				}
+			case "OUTPUT":
+				if out, ok := p.Outputs[toId]; ok {
+					out.UpStream = append(out.UpStream, &msgChan)
+					out.ProjectNodeSequence = channelId
+				}
+			}
+
+			logger.Info("Created channel connection", "project", p.Id, "from", from, "to", to, "channel", channelId)
+		}
+	}
+
+	logger.Info("Channel connections created", "project", p.Id, "total_channels", len(p.MsgChannels))
+	return nil
 }

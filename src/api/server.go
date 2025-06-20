@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
 	"errors"
 	"net/http"
@@ -16,29 +17,43 @@ func getProjectStructure(p *project.Project) (map[string]interface{}, error) {
 	nodes := []map[string]interface{}{}
 	edges := []map[string]interface{}{}
 
-	// Extract project structure from content
-	flowGraph := make(map[string][]string)
-	lines := strings.Split(p.Config.Content, "\n")
+	// Try to get flow graph from project content
+	var flowGraph map[string][]string
+	var err error
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	if p.Config != nil && p.Config.Content != "" {
+		// Parse from Config.Content if available
+		flowGraph = make(map[string][]string)
+		lines := strings.Split(p.Config.Content, "\n")
+
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			parts := strings.Split(line, "->")
+			if len(parts) != 2 {
+				continue
+			}
+
+			from := strings.TrimSpace(parts[0])
+			to := strings.TrimSpace(parts[1])
+
+			// Add to flow graph
+			flowGraph[from] = append(flowGraph[from], to)
 		}
-
-		parts := strings.Split(line, "->")
-		if len(parts) != 2 {
-			continue
+	} else {
+		// Fallback: try to parse from project's parseContent method
+		flowGraph, err = p.ParseContentForVisualization()
+		if err != nil {
+			// If parsing fails, create a simple flow graph from existing components
+			flowGraph = make(map[string][]string)
+			logger.Warn("Failed to parse project content for visualization, using fallback", "project", p.Id, "error", err)
 		}
-
-		from := strings.TrimSpace(parts[0])
-		to := strings.TrimSpace(parts[1])
-
-		// Add to flow graph
-		flowGraph[from] = append(flowGraph[from], to)
 	}
 
-	// Add nodes
+	// Add nodes from actual project components
 	for _, input := range p.Inputs {
 		nodes = append(nodes, map[string]interface{}{
 			"id":   "input." + input.Id,
@@ -63,7 +78,7 @@ func getProjectStructure(p *project.Project) (map[string]interface{}, error) {
 		})
 	}
 
-	// Add edges
+	// Add edges from flow graph
 	for from, tos := range flowGraph {
 		for _, to := range tos {
 			edges = append(edges, map[string]interface{}{
@@ -132,6 +147,7 @@ func ServerStart(listener string) error {
 	e.PUT("/projects/:id", updateProject)
 	e.POST("/start-project", StartProject)
 	e.POST("/stop-project", StopProject)
+	e.POST("/restart-project", RestartProject)
 	e.POST("/restart-all-projects", RestartAllProjects)
 	e.GET("/project-error/:id", getProjectError)
 	e.GET("/project-inputs/:id", getProjectInputs)
@@ -187,10 +203,16 @@ func ServerStart(listener string) error {
 	e.GET("/config_root", leaderConfig)
 	e.GET("/download-config", downloadConfig)
 
-	// Pending changes management
-	e.GET("/pending-changes", GetPendingChanges)
-	e.POST("/apply-changes", ApplyPendingChanges)
-	e.POST("/apply-single-change", ApplySingleChange)
+	// Pending changes management (enhanced)
+	e.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
+	e.GET("/pending-changes/enhanced", GetEnhancedPendingChanges)  // Enhanced endpoint with status info
+	e.POST("/apply-changes", ApplyPendingChanges)                  // Legacy endpoint
+	e.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Enhanced endpoint with transaction support
+	e.POST("/apply-single-change", ApplySingleChange)              // Legacy endpoint
+	e.POST("/verify-changes", VerifyPendingChanges)                // Verify all changes
+	e.POST("/verify-change/:type/:id", VerifySinglePendingChange)  // Verify single change
+	e.DELETE("/cancel-change/:type/:id", CancelPendingChange)      // Cancel single change
+	e.DELETE("/cancel-all-changes", CancelAllPendingChanges)       // Cancel all changes
 
 	// Temporary file management
 	e.POST("/temp-file/:type/:id", CreateTempFile)

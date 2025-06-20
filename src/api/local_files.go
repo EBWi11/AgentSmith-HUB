@@ -2,8 +2,11 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"crypto/md5"
 	"fmt"
 	"io/fs"
@@ -558,7 +561,7 @@ func loadLocalChanges(c echo.Context) error {
 		return nil
 	})
 
-	// Load all changes into memory and create temp files
+	// Load all changes directly into official memory (bypassing temporary storage)
 	results := make([]map[string]interface{}, 0)
 
 	for _, change := range changes {
@@ -569,44 +572,12 @@ func loadLocalChanges(c echo.Context) error {
 		success := true
 		message := "loaded successfully"
 
-		// Lock for memory operations
-		common.GlobalMu.Lock()
-		// Load into appropriate memory structure
-		switch componentType {
-		case "input":
-			if project.GlobalProject.InputsNew == nil {
-				project.GlobalProject.InputsNew = make(map[string]string)
-			}
-			project.GlobalProject.InputsNew[id] = content
-		case "output":
-			if project.GlobalProject.OutputsNew == nil {
-				project.GlobalProject.OutputsNew = make(map[string]string)
-			}
-			project.GlobalProject.OutputsNew[id] = content
-		case "ruleset":
-			if project.GlobalProject.RulesetsNew == nil {
-				project.GlobalProject.RulesetsNew = make(map[string]string)
-			}
-			project.GlobalProject.RulesetsNew[id] = content
-		case "project":
-			if project.GlobalProject.ProjectsNew == nil {
-				project.GlobalProject.ProjectsNew = make(map[string]string)
-			}
-			project.GlobalProject.ProjectsNew[id] = content
-		case "plugin":
-			if plugin.PluginsNew == nil {
-				plugin.PluginsNew = make(map[string]string)
-			}
-			plugin.PluginsNew[id] = content
-		default:
+		// Load directly into official component storage
+		err := loadComponentDirectly(componentType, id, content)
+		if err != nil {
 			success = false
-			message = "unsupported component type"
+			message = "failed to load component: " + err.Error()
 		}
-		common.GlobalMu.Unlock()
-
-		// Create temp file (without holding lock)
-		tempPath, _ := GetComponentPath(componentType, id, true)
-		_ = WriteComponentFile(tempPath, content)
 
 		results = append(results, map[string]interface{}{
 			"type":    componentType,
@@ -667,44 +638,13 @@ func loadSingleLocalChange(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read file: " + err.Error()})
 	}
 
-	// Lock for memory operations
-	common.GlobalMu.Lock()
+	content := string(fileContent)
 
-	// Load into appropriate memory structure
-	switch req.Type {
-	case "input":
-		if project.GlobalProject.InputsNew == nil {
-			project.GlobalProject.InputsNew = make(map[string]string)
-		}
-		project.GlobalProject.InputsNew[req.ID] = string(fileContent)
-	case "output":
-		if project.GlobalProject.OutputsNew == nil {
-			project.GlobalProject.OutputsNew = make(map[string]string)
-		}
-		project.GlobalProject.OutputsNew[req.ID] = string(fileContent)
-	case "ruleset":
-		if project.GlobalProject.RulesetsNew == nil {
-			project.GlobalProject.RulesetsNew = make(map[string]string)
-		}
-		project.GlobalProject.RulesetsNew[req.ID] = string(fileContent)
-	case "project":
-		if project.GlobalProject.ProjectsNew == nil {
-			project.GlobalProject.ProjectsNew = make(map[string]string)
-		}
-		project.GlobalProject.ProjectsNew[req.ID] = string(fileContent)
-	case "plugin":
-		if plugin.PluginsNew == nil {
-			plugin.PluginsNew = make(map[string]string)
-		}
-		plugin.PluginsNew[req.ID] = string(fileContent)
+	// Load directly into official component storage
+	err = loadComponentDirectly(req.Type, req.ID, content)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load component: " + err.Error()})
 	}
-
-	// Unlock before file operations
-	common.GlobalMu.Unlock()
-
-	// Create temp file (without holding lock)
-	tempPath, _ := GetComponentPath(req.Type, req.ID, true)
-	_ = WriteComponentFile(tempPath, string(fileContent))
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success":   true,
@@ -714,4 +654,94 @@ func loadSingleLocalChange(c echo.Context) error {
 		"file_path": filePath,
 		"file_size": len(fileContent),
 	})
+}
+
+// loadComponentDirectly loads a component directly into official storage
+// This bypasses the temporary file system and *New mappings
+func loadComponentDirectly(componentType, id, content string) error {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	switch componentType {
+	case "input":
+		// Use the existing NewInput constructor
+		inputInstance, err := input.NewInput("", content, id)
+		if err != nil {
+			return fmt.Errorf("failed to create input: %w", err)
+		}
+
+		// Ensure global inputs map exists
+		if project.GlobalProject.Inputs == nil {
+			project.GlobalProject.Inputs = make(map[string]*input.Input)
+		}
+
+		// Store directly in official storage
+		project.GlobalProject.Inputs[id] = inputInstance
+
+	case "output":
+		// Use the existing NewOutput constructor
+		outputInstance, err := output.NewOutput("", content, id)
+		if err != nil {
+			return fmt.Errorf("failed to create output: %w", err)
+		}
+
+		// Ensure global outputs map exists
+		if project.GlobalProject.Outputs == nil {
+			project.GlobalProject.Outputs = make(map[string]*output.Output)
+		}
+
+		// Store directly in official storage
+		project.GlobalProject.Outputs[id] = outputInstance
+
+	case "ruleset":
+		// Use the existing NewRuleset constructor
+		rulesetInstance, err := rules_engine.NewRuleset("", content, id)
+		if err != nil {
+			return fmt.Errorf("failed to create ruleset: %w", err)
+		}
+
+		// Ensure global rulesets map exists
+		if project.GlobalProject.Rulesets == nil {
+			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
+		}
+
+		// Store directly in official storage
+		project.GlobalProject.Rulesets[id] = rulesetInstance
+
+	case "project":
+		// Use the existing NewProject constructor
+		projectInstance, err := project.NewProject("", content, id)
+		if err != nil {
+			return fmt.Errorf("failed to create project: %w", err)
+		}
+
+		// Ensure global projects map exists
+		if project.GlobalProject.Projects == nil {
+			project.GlobalProject.Projects = make(map[string]*project.Project)
+		}
+
+		// Store directly in official storage
+		project.GlobalProject.Projects[id] = projectInstance
+
+	case "plugin":
+		// Create plugin directly (plugins are simpler)
+		newPlugin := &plugin.Plugin{
+			Name:    id,
+			Type:    plugin.YAEGI_PLUGIN,
+			Payload: []byte(content),
+		}
+
+		// Ensure global plugins map exists
+		if plugin.Plugins == nil {
+			plugin.Plugins = make(map[string]*plugin.Plugin)
+		}
+
+		// Store directly in official storage
+		plugin.Plugins[id] = newPlugin
+
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	return nil
 }

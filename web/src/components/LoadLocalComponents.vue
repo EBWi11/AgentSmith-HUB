@@ -84,28 +84,16 @@
             </div>
             
             <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
-              <!-- New local file: show full content -->
-              <div v-if="change.has_local && !change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
+              <!-- For Load Local Components, NEVER show diff mode -->
+              <!-- Always show the local file content directly -->
+              <div style="height: 400px; margin: 0; padding: 0; border: none;">
                 <MonacoEditor 
-                  :key="`full-${change.type}-${change.id}`"
+                  :key="`local-${change.type}-${change.id}`"
                   :value="change.local_content || ''" 
                   :language="getEditorLanguage(change.type)" 
                   :read-only="true" 
                   :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
                   :diff-mode="false"
-                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
-                />
-              </div>
-              <!-- Modified file or deleted file: use diff mode -->
-              <div v-else style="height: 400px; margin: 0; padding: 0; border: none;">
-                <MonacoEditor 
-                  :key="`diff-${change.type}-${change.id}`"
-                  :value="change.local_content || ''" 
-                  :original-value="change.memory_content || ''"
-                  :language="getEditorLanguage(change.type)" 
-                  :read-only="true" 
-                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
-                  :diff-mode="true"
                   style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
                 />
               </div>
@@ -442,21 +430,21 @@ function getComponentTypeLabel(type) {
 
 function getChangeStatusClass(change) {
   if (!change.has_local && change.has_memory) {
-    return 'bg-red-100 text-red-800'  // Deleted locally
+    return 'bg-red-100 text-red-800'  // File deleted locally but exists in memory
   } else if (change.has_local && !change.has_memory) {
-    return 'bg-green-100 text-green-800'  // New local file
+    return 'bg-blue-100 text-blue-800'  // New local file not yet loaded
   } else {
-    return 'bg-orange-100 text-orange-800'  // Modified
+    return 'bg-yellow-100 text-yellow-800'  // File exists both locally and in memory (needs sync)
   }
 }
 
 function getChangeStatusLabel(change) {
   if (!change.has_local && change.has_memory) {
-    return 'Deleted Locally'
+    return 'File Deleted'
   } else if (change.has_local && !change.has_memory) {
     return 'New Local File'
   } else {
-    return 'Local Modified'
+    return 'File Changed'
   }
 }
 
