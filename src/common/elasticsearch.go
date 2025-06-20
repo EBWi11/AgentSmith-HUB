@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -140,4 +141,106 @@ func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
 func (p *ElasticsearchProducer) Close() {
 	// The channel will be closed by the owner (output component)
 	// We just need to ensure any pending operations are completed
+}
+
+// TestConnection tests the connection to Elasticsearch cluster
+// This method creates a temporary client to test connectivity without affecting the main producer
+func TestElasticsearchConnection(hosts []string) error {
+	cfg := elasticsearch.Config{
+		Addresses:     hosts,
+		MaxRetries:    1,
+		RetryOnStatus: []int{502, 503, 504, 429},
+	}
+
+	// Create a temporary client for testing
+	testClient, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create test client: %w", err)
+	}
+
+	// Test connection by pinging the cluster
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	res, err := testClient.Ping(testClient.Ping.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("failed to ping Elasticsearch cluster: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return fmt.Errorf("Elasticsearch cluster returned error: %s", res.String())
+	}
+
+	return nil
+}
+
+// TestIndexExists tests if a specific index exists in Elasticsearch
+func TestElasticsearchIndexExists(hosts []string, index string) (bool, error) {
+	cfg := elasticsearch.Config{
+		Addresses:     hosts,
+		MaxRetries:    1,
+		RetryOnStatus: []int{502, 503, 504, 429},
+	}
+
+	// Create a temporary client for testing
+	testClient, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		return false, fmt.Errorf("failed to create test client: %w", err)
+	}
+
+	// Test index existence
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	res, err := testClient.Indices.Exists([]string{index}, testClient.Indices.Exists.WithContext(ctx))
+	if err != nil {
+		return false, fmt.Errorf("failed to check index existence: %w", err)
+	}
+	defer res.Body.Close()
+
+	// 200 means index exists, 404 means index doesn't exist
+	if res.StatusCode == 200 {
+		return true, nil
+	} else if res.StatusCode == 404 {
+		return false, nil
+	} else {
+		return false, fmt.Errorf("unexpected response when checking index: %s", res.String())
+	}
+}
+
+// GetElasticsearchClusterInfo gets basic cluster information
+func GetElasticsearchClusterInfo(hosts []string) (map[string]interface{}, error) {
+	cfg := elasticsearch.Config{
+		Addresses:     hosts,
+		MaxRetries:    1,
+		RetryOnStatus: []int{502, 503, 504, 429},
+	}
+
+	// Create a temporary client for testing
+	testClient, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create test client: %w", err)
+	}
+
+	// Get cluster info
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	res, err := testClient.Info(testClient.Info.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cluster info: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		return nil, fmt.Errorf("Elasticsearch cluster returned error: %s", res.String())
+	}
+
+	var clusterInfo map[string]interface{}
+	if err := json.NewDecoder(res.Body).Decode(&clusterInfo); err != nil {
+		return nil, fmt.Errorf("failed to decode cluster info: %w", err)
+	}
+
+	return clusterInfo, nil
 }

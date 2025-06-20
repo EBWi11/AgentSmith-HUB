@@ -10,6 +10,13 @@
         <del>exe,argv</del>
     </rule>
 
+    <rule id="abc" name="abc" author="123">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="EQU" field="EXE">a</node>
+         </checklist>
+    </rule>
+
     <rule id="c2_connect_02" name="测试" author="test">
         <filter field="data_type">59</filter>
         <checklist>

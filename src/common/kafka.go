@@ -374,3 +374,82 @@ func (c *KafkaConsumer) Close() {
 	close(c.stopChan)
 	c.Client.Close()
 }
+
+// TestConnection tests the connection to Kafka brokers
+// This method creates a temporary client to test connectivity without affecting the main producer
+func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig) error {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.RequestTimeoutOverhead(3 * time.Second), // Set shorter timeout for connection test
+		kgo.ConnIdleTimeout(5 * time.Second),        // Connection idle timeout
+	}
+
+	// Add SASL if enabled
+	if saslCfg != nil && saslCfg.Enable {
+		mechanism, err := getSASLMechanism(saslCfg)
+		if err != nil {
+			return fmt.Errorf("failed to configure SASL: %w", err)
+		}
+		if mechanism != nil {
+			opts = append(opts, kgo.SASL(mechanism))
+		}
+	}
+
+	// Create a temporary client for testing
+	testClient, err := kgo.NewClient(opts...)
+	if err != nil {
+		return fmt.Errorf("failed to create test client: %w", err)
+	}
+	defer testClient.Close()
+
+	// Test connection by getting cluster metadata with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	admin := kadm.NewClient(testClient)
+	_, err = admin.ListTopics(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Kafka brokers: %w", err)
+	}
+
+	return nil
+}
+
+// TestTopicExists tests if a specific topic exists in Kafka
+func TestKafkaTopicExists(brokers []string, topic string, saslCfg *KafkaSASLConfig) (bool, error) {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.RequestTimeoutOverhead(5 * time.Second),
+	}
+
+	// Add SASL if enabled
+	if saslCfg != nil && saslCfg.Enable {
+		mechanism, err := getSASLMechanism(saslCfg)
+		if err != nil {
+			return false, fmt.Errorf("failed to configure SASL: %w", err)
+		}
+		if mechanism != nil {
+			opts = append(opts, kgo.SASL(mechanism))
+		}
+	}
+
+	// Create a temporary client for testing
+	testClient, err := kgo.NewClient(opts...)
+	if err != nil {
+		return false, fmt.Errorf("failed to create test client: %w", err)
+	}
+	defer testClient.Close()
+
+	// Test topic existence
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	admin := kadm.NewClient(testClient)
+	metadata, err := admin.ListTopics(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to list topics: %w", err)
+	}
+
+	_, exists := metadata[topic]
+	return exists, nil
+}

@@ -404,3 +404,201 @@ func (in *Input) GetConsumeQPS() uint64 {
 func (in *Input) GetConsumeTotal() uint64 {
 	return atomic.LoadUint64(&in.consumeTotal)
 }
+
+// CheckConnectivity performs a real connectivity test for the input component
+// This method tests actual connection to external systems (Kafka, SLS, etc.)
+func (in *Input) CheckConnectivity() map[string]interface{} {
+	result := map[string]interface{}{
+		"status":  "success",
+		"message": "Connection check successful",
+		"details": map[string]interface{}{
+			"client_type":         string(in.Type),
+			"connection_status":   "unknown",
+			"connection_info":     map[string]interface{}{},
+			"connection_errors":   []map[string]interface{}{},
+			"connection_warnings": []map[string]interface{}{},
+		},
+	}
+
+	switch in.Type {
+	case InputTypeKafka:
+		if in.kafkaCfg == nil {
+			result["status"] = "error"
+			result["message"] = "Kafka configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info
+		connectionInfo := map[string]interface{}{
+			"brokers": in.kafkaCfg.Brokers,
+			"topic":   in.kafkaCfg.Topic,
+			"group":   in.kafkaCfg.Group,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to Kafka brokers
+		err := common.TestKafkaConnection(in.kafkaCfg.Brokers, in.kafkaCfg.SASL)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to Kafka brokers"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Test if topic exists
+		topicExists, err := common.TestKafkaTopicExists(in.kafkaCfg.Brokers, in.kafkaCfg.Topic, in.kafkaCfg.SASL)
+		if err != nil {
+			result["status"] = "warning"
+			result["message"] = "Connected to Kafka but failed to verify topic"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_unknown"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Could not verify topic existence: %v", err), "severity": "warning"},
+			}
+		} else if !topicExists {
+			result["status"] = "error"
+			result["message"] = "Connected to Kafka but topic does not exist"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_missing"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Topic '%s' does not exist", in.kafkaCfg.Topic), "severity": "error"},
+			}
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to Kafka and verified topic"
+		}
+
+		// Add consumer metrics if available
+		if in.kafkaConsumer != nil {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"consume_qps":     in.GetConsumeQPS(),
+				"consume_total":   in.GetConsumeTotal(),
+				"consumer_active": true,
+			}
+		} else {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"consumer_active": false,
+			}
+		}
+
+	case InputTypeAliyunSLS:
+		if in.aliyunSLSCfg == nil {
+			result["status"] = "error"
+			result["message"] = "Aliyun SLS configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info (without sensitive credentials)
+		connectionInfo := map[string]interface{}{
+			"endpoint":       in.aliyunSLSCfg.Endpoint,
+			"project":        in.aliyunSLSCfg.Project,
+			"logstore":       in.aliyunSLSCfg.Logstore,
+			"consumer_group": in.aliyunSLSCfg.ConsumerGroupName,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to Aliyun SLS
+		err := common.TestAliyunSLSConnection(
+			in.aliyunSLSCfg.Endpoint,
+			in.aliyunSLSCfg.AccessKeyID,
+			in.aliyunSLSCfg.AccessKeySecret,
+			in.aliyunSLSCfg.Project,
+			in.aliyunSLSCfg.Logstore,
+		)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to Aliyun SLS"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Connection successful, now test if logstore exists
+		logstoreExists, err := common.TestAliyunSLSLogstoreExists(
+			in.aliyunSLSCfg.Endpoint,
+			in.aliyunSLSCfg.AccessKeyID,
+			in.aliyunSLSCfg.AccessKeySecret,
+			in.aliyunSLSCfg.Project,
+			in.aliyunSLSCfg.Logstore,
+		)
+		if err != nil {
+			// Check if it's a permission issue
+			if strings.Contains(err.Error(), "insufficient permissions") {
+				result["status"] = "success"
+				result["message"] = "Connected to Aliyun SLS (logstore verification limited by permissions)"
+				result["details"].(map[string]interface{})["connection_status"] = "connected_limited_permissions"
+				result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+					{"message": err.Error(), "severity": "info"},
+				}
+			} else {
+				result["status"] = "warning"
+				result["message"] = "Connected to Aliyun SLS but failed to verify logstore"
+				result["details"].(map[string]interface{})["connection_status"] = "connected_logstore_unknown"
+				result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+					{"message": fmt.Sprintf("Could not verify logstore existence: %v", err), "severity": "warning"},
+				}
+			}
+		} else if !logstoreExists {
+			result["status"] = "error"
+			result["message"] = "Connected to Aliyun SLS but logstore does not exist"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_logstore_missing"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Logstore '%s' does not exist in project '%s'", in.aliyunSLSCfg.Logstore, in.aliyunSLSCfg.Project), "severity": "error"},
+			}
+			return result
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to Aliyun SLS and verified logstore"
+		}
+
+		// Try to get project info for additional details (this might fail due to permissions)
+		projectInfo, err := common.GetAliyunSLSProjectInfo(
+			in.aliyunSLSCfg.Endpoint,
+			in.aliyunSLSCfg.AccessKeyID,
+			in.aliyunSLSCfg.AccessKeySecret,
+			in.aliyunSLSCfg.Project,
+		)
+		if err == nil {
+			result["details"].(map[string]interface{})["project_info"] = projectInfo
+		} else {
+			// Don't fail the connection check just because we can't get project info
+			// This is likely a permission issue, not a connectivity issue
+			if strings.Contains(err.Error(), "Unauthorized") || strings.Contains(err.Error(), "denied by sts or ram") {
+				result["details"].(map[string]interface{})["project_info"] = map[string]interface{}{
+					"note": "Project info unavailable due to limited permissions",
+				}
+			}
+		}
+
+		// Add consumer metrics if available
+		if in.slsConsumer != nil {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"consume_qps":     in.GetConsumeQPS(),
+				"consume_total":   in.GetConsumeTotal(),
+				"consumer_active": true,
+			}
+		} else {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"consumer_active": false,
+			}
+		}
+
+	default:
+		result["status"] = "error"
+		result["message"] = "Unsupported input type"
+		result["details"].(map[string]interface{})["connection_status"] = "unsupported"
+	}
+
+	return result
+}

@@ -163,6 +163,405 @@ type Plugin struct {
 	PluginArgs []*PluginArg   // Arguments for plugin execution
 }
 
+// ValidationError represents a validation error with line number
+type ValidationError struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// ValidationWarning represents a validation warning with line number
+type ValidationWarning struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// ValidationResult represents the complete validation result
+type ValidationResult struct {
+	IsValid  bool                `json:"is_valid"`
+	Errors   []ValidationError   `json:"errors"`
+	Warnings []ValidationWarning `json:"warnings"`
+}
+
+// ValidateWithDetails performs detailed validation and returns structured errors with line numbers
+func ValidateWithDetails(path string, raw string) (*ValidationResult, error) {
+	var rawRuleset []byte
+	if path != "" {
+		xmlFile, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
+		}
+		defer xmlFile.Close()
+
+		rawRuleset, err = io.ReadAll(xmlFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read resource file: %w", err)
+		}
+	} else {
+		rawRuleset = []byte(raw)
+	}
+
+	result := &ValidationResult{
+		IsValid:  true,
+		Errors:   []ValidationError{},
+		Warnings: []ValidationWarning{},
+	}
+
+	// Parse XML first to check basic syntax
+	var ruleset Ruleset
+	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
+		// Extract line number from XML parsing error
+		lineNum := extractLineFromXMLError(err.Error())
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    lineNum,
+			Message: "XML parsing error",
+			Detail:  err.Error(),
+		})
+		return result, nil
+	}
+
+	// Perform detailed validation
+	validateRulesetStructure(&ruleset, string(rawRuleset), result)
+
+	return result, nil
+}
+
+// extractLineFromXMLError extracts line number from XML parsing error message
+func extractLineFromXMLError(errorMsg string) int {
+	// Try to extract line number from XML error messages
+	re := regexpgo.MustCompile(`line (\d+)`)
+	matches := re.FindStringSubmatch(errorMsg)
+	if len(matches) > 1 {
+		if lineNum, err := strconv.Atoi(matches[1]); err == nil {
+			return lineNum
+		}
+	}
+	return 1
+}
+
+// getLineNumber finds the line number of a pattern in XML content
+func getLineNumber(xmlContent, pattern string, occurrence int) int {
+	lines := strings.Split(xmlContent, "\n")
+	count := 0
+	for i, line := range lines {
+		if strings.Contains(line, pattern) {
+			if count == occurrence {
+				return i + 1
+			}
+			count++
+		}
+	}
+	return 1
+}
+
+// findElementInRule finds the line number of an element within a specific rule
+func findElementInRule(xmlContent, ruleID, pattern string, ruleIndex, elementIndex int) int {
+	lines := strings.Split(xmlContent, "\n")
+	var ruleStartLine int
+
+	if ruleID != "" && strings.TrimSpace(ruleID) != "" {
+		// Find rule by ID
+		for i, line := range lines {
+			if strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID)) {
+				ruleStartLine = i + 1
+				break
+			}
+		}
+	} else {
+		// Find rule by index
+		ruleCount := 0
+		for i, line := range lines {
+			if strings.Contains(line, "<rule") {
+				if ruleCount == ruleIndex {
+					ruleStartLine = i + 1
+					break
+				}
+				ruleCount++
+			}
+		}
+	}
+
+	// Search for pattern within the rule
+	patternCount := 0
+	for i := ruleStartLine - 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], pattern) {
+			if patternCount == elementIndex {
+				return i + 1
+			}
+			patternCount++
+		}
+		// Stop at next rule or end
+		if i > ruleStartLine-1 && (strings.Contains(lines[i], "<rule") || strings.Contains(lines[i], "</root>")) {
+			break
+		}
+	}
+
+	return ruleStartLine
+}
+
+// validateRulesetStructure performs detailed validation of ruleset structure
+func validateRulesetStructure(ruleset *Ruleset, xmlContent string, result *ValidationResult) {
+	// Validate root element type
+	if ruleset.Type != "" && ruleset.Type != "DETECTION" && ruleset.Type != "WHITELIST" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    getLineNumber(xmlContent, "<root", 0),
+			Message: "Root type must be 'DETECTION' or 'WHITELIST'",
+		})
+	}
+
+	// Check for duplicate rule IDs
+	ruleIDMap := make(map[string]int)
+	for i, rule := range ruleset.Rules {
+		if rule.ID != "" {
+			if prevIndex, exists := ruleIDMap[rule.ID]; exists {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    getLineNumber(xmlContent, fmt.Sprintf(`id="%s"`, rule.ID), 1),
+					Message: fmt.Sprintf("Duplicate rule ID: %s", rule.ID),
+					Detail:  fmt.Sprintf("First occurrence at rule index %d", prevIndex),
+				})
+			} else {
+				ruleIDMap[rule.ID] = i
+			}
+		}
+	}
+
+	// Validate each rule
+	for ruleIndex, rule := range ruleset.Rules {
+		validateRule(&rule, xmlContent, ruleIndex, result)
+	}
+}
+
+// validateRule validates a single rule
+func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *ValidationResult) {
+	ruleID := rule.ID
+	var ruleLine int
+
+	if ruleID != "" && strings.TrimSpace(ruleID) != "" {
+		ruleLine = getLineNumber(xmlContent, fmt.Sprintf(`id="%s"`, ruleID), 0)
+	} else {
+		ruleLine = getLineNumber(xmlContent, "<rule", ruleIndex)
+	}
+
+	// Check required attributes
+	if rule.ID == "" || strings.TrimSpace(rule.ID) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    ruleLine,
+			Message: "Rule id cannot be empty",
+		})
+	}
+
+	if rule.Name == "" || strings.TrimSpace(rule.Name) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    ruleLine,
+			Message: "Rule name cannot be empty",
+		})
+	}
+
+	if rule.Author == "" || strings.TrimSpace(rule.Author) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    ruleLine,
+			Message: "Rule author cannot be empty",
+		})
+	}
+
+	// Validate filter
+	if rule.Filter.Field == "" || strings.TrimSpace(rule.Filter.Field) == "" {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Line:    findElementInRule(xmlContent, ruleID, "<filter", ruleIndex, 0),
+			Message: "Filter field is empty",
+		})
+	}
+
+	// Validate checklist
+	validateChecklist(&rule.Checklist, xmlContent, ruleID, ruleIndex, result)
+
+	// Validate threshold
+	validateThreshold(&rule.Threshold, xmlContent, ruleID, ruleIndex, result)
+
+	// Validate appends
+	for appendIndex, appendElem := range rule.Appends {
+		validateAppend(&appendElem, xmlContent, ruleID, ruleIndex, appendIndex, result)
+	}
+
+	// Validate plugins
+	for pluginIndex, plugin := range rule.Plugins {
+		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, pluginIndex, result)
+	}
+}
+
+// validateChecklist validates checklist elements
+func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
+	if len(checklist.CheckNodes) == 0 {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Line:    findElementInRule(xmlContent, ruleID, "<checklist", ruleIndex, 0),
+			Message: "Checklist has no check nodes",
+		})
+		return
+	}
+
+	// Check for duplicate node IDs
+	nodeIDMap := make(map[string]int)
+	hasCondition := checklist.Condition != "" && strings.TrimSpace(checklist.Condition) != ""
+
+	for nodeIndex, node := range checklist.CheckNodes {
+		nodeLine := findElementInRule(xmlContent, ruleID, "<node", ruleIndex, nodeIndex)
+
+		// Check required attributes
+		if node.Type == "" || strings.TrimSpace(node.Type) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Check node type cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		} else if node.Type != "REGEX" && node.Type != "INCL" && node.Type != "EQU" && node.Type != "IN" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Check node type must be one of: REGEX, INCL, EQU, IN",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		if node.Field == "" || strings.TrimSpace(node.Field) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Check node field cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		// Check node ID if condition is present
+		if hasCondition {
+			if node.ID == "" || strings.TrimSpace(node.ID) == "" {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    nodeLine,
+					Message: "Check node id cannot be empty when condition is used",
+					Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+				})
+			} else if prevIndex, exists := nodeIDMap[node.ID]; exists {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    nodeLine,
+					Message: fmt.Sprintf("Duplicate node ID: %s", node.ID),
+					Detail:  fmt.Sprintf("Rule ID: %s, first occurrence at node index %d", ruleID, prevIndex),
+				})
+			} else {
+				nodeIDMap[node.ID] = nodeIndex
+			}
+		}
+
+		// Validate regex pattern
+		if node.Type == "REGEX" {
+			nodeValue := strings.TrimSpace(node.Value)
+			if nodeValue == "" {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    nodeLine,
+					Message: "REGEX node value cannot be empty",
+					Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+				})
+			} else {
+				if _, err := regexp.Compile(nodeValue); err != nil {
+					result.IsValid = false
+					result.Errors = append(result.Errors, ValidationError{
+						Line:    nodeLine,
+						Message: "Invalid regex pattern",
+						Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+					})
+				}
+			}
+		}
+	}
+}
+
+// validateThreshold validates threshold elements
+func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
+	if threshold.GroupBy == "" && threshold.Range == "" && threshold.Value == 0 {
+		// No threshold defined, skip validation
+		return
+	}
+
+	thresholdLine := findElementInRule(xmlContent, ruleID, "<threshold", ruleIndex, 0)
+
+	if threshold.GroupBy == "" || strings.TrimSpace(threshold.GroupBy) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Threshold group_by cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if threshold.Range == "" || strings.TrimSpace(threshold.Range) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Threshold range cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if threshold.Value <= 1 {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Threshold value must be greater than 1",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+}
+
+// validateAppend validates append elements
+func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, appendIndex int, result *ValidationResult) {
+	appendLine := findElementInRule(xmlContent, ruleID, "<append", ruleIndex, appendIndex)
+
+	if appendElem.FieldName == "" || strings.TrimSpace(appendElem.FieldName) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    appendLine,
+			Message: "Append field_name cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if appendElem.Type == "PLUGIN" {
+		value := strings.TrimSpace(appendElem.Value)
+		if value == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    appendLine,
+				Message: "Append plugin value cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+	}
+}
+
+// validatePlugin validates plugin elements
+func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, pluginIndex int, result *ValidationResult) {
+	pluginLine := findElementInRule(xmlContent, ruleID, "<plugin", ruleIndex, pluginIndex)
+
+	value := strings.TrimSpace(plugin.Value)
+	if value == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    pluginLine,
+			Message: "Plugin value cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+}
+
 func Verify(path string, raw string) error {
 	var rawRuleset []byte
 	if path != "" {
@@ -659,7 +1058,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 					return errors.New("check node value does not exist in delimiter: " + rule.ID)
 				}
 			} else {
-				rule.ChecklistLen = len(rule.Checklist.CheckNodes) - 1
+				rule.ChecklistLen = len(rule.Checklist.CheckNodes)
 			}
 		}
 

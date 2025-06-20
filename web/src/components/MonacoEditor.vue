@@ -2508,7 +2508,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Rule definition',
-        insertText: 'rule id="" name="" author=""></rule>',
+        insertText: 'rule id="" name="" author="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n     </checklist>\n</rule',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -3313,13 +3313,15 @@ defineExpose({
 
 /* 错误行样式 */
 .monaco-error-line {
-  background-color: rgba(255, 0, 0, 0.1);
+  background-color: rgba(255, 0, 0, 0.2) !important;
+  border-left: 3px solid #e74c3c !important;
 }
 
 .monaco-error-line-decoration {
-  background-color: #e74c3c;
-  width: 4px !important;
-  margin-left: 3px;
+  background-color: #e74c3c !important;
+  width: 5px !important;
+  margin-left: 2px !important;
+  border-radius: 2px !important;
 }
 
 /* Diff编辑器样式优化 */

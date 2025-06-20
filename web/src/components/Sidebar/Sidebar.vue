@@ -142,7 +142,7 @@
                     </template>
                     
                     <!-- Test actions for different component types -->
-                    <a v-if="type === 'inputs' || type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                    <a v-if="shouldShowConnectCheck(type, item)" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                        @click.prevent.stop="checkConnection(type, item)">
                       <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -266,7 +266,7 @@
 
     <!-- Connection Modal -->
     <div v-if="showConnectionModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div class="bg-white rounded shadow-lg p-6 w-96 max-h-[80vh] overflow-y-auto">
+      <div class="bg-white rounded shadow-lg p-6 w-[800px] max-w-4xl max-h-[80vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
           <h3 class="font-bold">Client Connection Status</h3>
           <button @click="closeConnectionModal" class="text-gray-400 hover:text-gray-600">
@@ -340,20 +340,9 @@
             <h4 class="text-sm font-medium text-gray-700 mb-2">Connection Info:</h4>
             <div class="p-3 bg-gray-50 rounded-md text-sm overflow-x-auto">
               <div v-for="(value, key) in connectionResult.details.connection_info" :key="key" class="mb-1 flex">
-                <span class="font-medium text-gray-600 mr-2">{{ key }}:</span>
-                <span v-if="Array.isArray(value)" class="text-gray-800">{{ value.join(', ') }}</span>
-                <span v-else class="text-gray-800">{{ value }}</span>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Metrics -->
-          <div v-if="connectionResult.details.metrics" class="mb-4">
-            <h4 class="text-sm font-medium text-gray-700 mb-2">Metrics:</h4>
-            <div class="p-3 bg-gray-50 rounded-md text-sm">
-              <div v-for="(value, key) in connectionResult.details.metrics" :key="key" class="mb-1 flex">
-                <span class="font-medium text-gray-600 mr-2">{{ key }}:</span>
-                <span class="text-gray-800">{{ value }}</span>
+                <span class="font-medium text-gray-600 mr-2 min-w-[120px]">{{ key }}:</span>
+                <span v-if="Array.isArray(value)" class="text-gray-800 break-all">{{ value.join(', ') }}</span>
+                <span v-else class="text-gray-800 break-all">{{ value }}</span>
               </div>
             </div>
           </div>
@@ -363,22 +352,37 @@
             <h4 class="text-sm font-medium text-gray-700 mb-2">Connection Issues:</h4>
             <ul class="space-y-2">
               <li v-for="(error, index) in connectionResult.details.connection_errors" :key="index" 
-                  class="p-2 border rounded-md"
+                  class="p-3 border rounded-md"
                   :class="{
                     'border-red-200 bg-red-50': error.severity === 'error',
                     'border-yellow-200 bg-yellow-50': error.severity === 'warning',
                     'border-blue-200 bg-blue-50': error.severity === 'info'
                   }">
-                <div class="flex items-center">
+                <div class="flex items-center mb-1">
                   <span class="w-2 h-2 rounded-full mr-2" 
                         :class="{
                           'bg-red-500': error.severity === 'error',
                           'bg-yellow-500': error.severity === 'warning',
                           'bg-blue-500': error.severity === 'info'
                         }"></span>
-                  <span class="text-xs text-gray-500">{{ error.severity }}</span>
+                  <span class="text-xs text-gray-500 font-medium">{{ error.severity }}</span>
                 </div>
-                <p class="text-sm mt-1">{{ error.message }}</p>
+                <p class="text-sm break-words">{{ error.message }}</p>
+              </li>
+            </ul>
+          </div>
+          
+          <!-- Connection Warnings -->
+          <div v-if="connectionResult.details.connection_warnings && connectionResult.details.connection_warnings.length > 0" class="mb-4">
+            <h4 class="text-sm font-medium text-gray-700 mb-2">Connection Warnings:</h4>
+            <ul class="space-y-2">
+              <li v-for="(warning, index) in connectionResult.details.connection_warnings" :key="index" 
+                  class="p-3 border border-yellow-200 bg-yellow-50 rounded-md">
+                <div class="flex items-center mb-1">
+                  <span class="w-2 h-2 rounded-full mr-2 bg-yellow-500"></span>
+                  <span class="text-xs text-gray-500 font-medium">{{ warning.severity || 'warning' }}</span>
+                </div>
+                <p class="text-sm break-words">{{ warning.message }}</p>
               </li>
             </ul>
           </div>
@@ -674,12 +678,6 @@
           </div>
           <div v-else class="space-y-4">
             <div v-for="(sample, index) in sampleData" :key="index" class="border border-gray-200 rounded-lg p-4">
-              <div class="mb-2 text-sm text-gray-500">
-                Time: {{ new Date(sample.timestamp).toLocaleString() }}
-              </div>
-              <div class="mb-2 text-sm text-gray-500">
-                Source: {{ sample.source }}
-              </div>
               <pre class="bg-gray-50 rounded p-3 text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
             </div>
           </div>
@@ -1750,6 +1748,33 @@ async function fetchSampleData(id) {
   } finally {
     sampleDataLoading.value = false
   }
+}
+
+function shouldShowConnectCheck(type, item) {
+  // 对于inputs，总是显示Connect Check
+  if (type === 'inputs') {
+    return true;
+  }
+  
+  // 对于outputs，需要检查是否为print类型
+  if (type === 'outputs') {
+    // 检查item的raw配置中是否包含type: print
+    if (item && item.raw) {
+      try {
+        // 简单的字符串检查，看配置中是否包含 type: print
+        if (item.raw.includes('type: print') || item.raw.includes('type:print')) {
+          return false; // print类型不显示Connect Check
+        }
+      } catch (error) {
+        // 如果检查出错，默认显示
+        console.warn('Error checking output type:', error);
+      }
+    }
+    return true;
+  }
+  
+  // 其他类型不显示Connect Check
+  return false;
 }
 </script>
 

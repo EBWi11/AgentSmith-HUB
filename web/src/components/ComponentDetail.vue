@@ -100,8 +100,8 @@
       
       <!-- Connect Check Button -->
       <button 
-        v-if="isInput"
-        @click="connectCheckInput" 
+        v-if="supportsConnectCheck"
+        @click="connectCheck" 
         class="inline-flex items-center px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 hover:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 transition-colors duration-200"
         :disabled="connectCheckLoading"
         :class="{ 'opacity-50 cursor-not-allowed': connectCheckLoading }"
@@ -335,8 +335,8 @@
       
       <!-- Connect Check Button -->
       <button 
-        v-if="isInput"
-        @click="connectCheckInput" 
+        v-if="supportsConnectCheck"
+        @click="connectCheck" 
         class="inline-flex items-center px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 hover:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 transition-colors duration-200"
         :disabled="connectCheckLoading"
         :class="{ 'opacity-50 cursor-not-allowed': connectCheckLoading }"
@@ -582,7 +582,7 @@
 
 <script setup>
 import { ref, watch, inject, computed, onMounted, onBeforeUnmount } from 'vue'
-import { hubApi, verifyComponent } from '../api'
+import { hubApi } from '../api'
 import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
@@ -591,7 +591,7 @@ import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
 import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
-import { validateRulesetXml } from '../utils/rulesetValidator'
+
 import { getDefaultTemplate } from '../utils/templateGenerator'
 
 // Props
@@ -635,6 +635,27 @@ const isProject = computed(() => {
 })
 const isInput = computed(() => {
   return props.item?.type === 'inputs'
+})
+
+// Check if component supports connect check (excludes print output)
+const supportsConnectCheck = computed(() => {
+  if (isInput.value) {
+    return true // All input types support connect check
+  }
+  if (isOutput.value && detail.value?.raw) {
+    // Parse output config to check if it's print type
+    try {
+      const yamlContent = detail.value.raw
+      // Simple check for print type in YAML
+      if (yamlContent.includes('type: print') || yamlContent.includes('type: "print"') || yamlContent.includes("type: 'print'")) {
+        return false // Print output doesn't need connect check
+      }
+      return true // Other output types support connect check
+    } catch (e) {
+      return true // Default to supporting connect check if parse fails
+    }
+  }
+  return false
 })
 
 // Test modal state
@@ -809,17 +830,38 @@ async function fetchDetail(item, forEdit = false) {
       })
     }
     
-    // 如果是ruleset，验证XML
+    // 如果是ruleset，进行后端验证
     if (item.type === 'rulesets' && data.raw) {
-      validationResult.value = validateRulesetXml(data.raw);
-      if (!validationResult.value.isValid) {
-        // 提取错误行号
-        errorLines.value = validationResult.value.errors.map(err => extractLineNumber(err)).filter(Boolean);
-        // Show validation panel when there are errors/warnings
-        showValidationPanel.value = true;
-      } else {
+      try {
+        const response = await hubApi.verifyComponent(item.type, item.id, data.raw);
+        if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
+          // Backend returned structured validation result
+          validationResult.value = {
+            isValid: response.data.valid || false,
+            errors: response.data.errors || [],
+            warnings: response.data.warnings || []
+          };
+          
+          // Extract error lines for highlighting
+          errorLines.value = response.data.errors.map(err => err.line).filter(Boolean);
+          
+          // Show validation panel if there are errors or warnings
+          if (response.data.errors.length > 0 || (response.data.warnings && response.data.warnings.length > 0)) {
+            showValidationPanel.value = true;
+          } else {
+            showValidationPanel.value = false;
+          }
+        } else {
+          // Clear validation if no structured response
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        }
+      } catch (verifyError) {
+        console.warn('Initial ruleset verification failed:', verifyError);
+        // Don't show errors on initial load, just clear validation
+        validationResult.value = { isValid: true, errors: [], warnings: [] };
         errorLines.value = [];
-        // Hide validation panel when there are no errors/warnings
         showValidationPanel.value = false;
       }
     }
@@ -837,31 +879,57 @@ async function fetchDetail(item, forEdit = false) {
   }
 }
 
-// Add validation function
-const validateRuleset = () => {
-  if (isRuleset.value && editorValue.value) {
-    const result = validateRulesetXml(editorValue.value)
-    validationResult.value = result
-    
-    // Update error line highlights
-    errorLines.value = result.errors.map(error => error.line)
-    
-    // Show/hide validation panel based on results
-    if (result.errors.length > 0 || result.warnings.length > 0) {
-      showValidationPanel.value = true;
-    } else {
-      showValidationPanel.value = false;
+// Add validation function (now using backend validation)
+const validateRuleset = async () => {
+  if (isRuleset.value && editorValue.value && props.item?.id) {
+    try {
+      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
+      
+      if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
+        // Backend returned structured validation result
+        validationResult.value = {
+          isValid: response.data.valid || false,
+          errors: response.data.errors || [],
+          warnings: response.data.warnings || []
+        };
+        
+        // Update error line highlights
+        errorLines.value = response.data.errors.map(error => error.line).filter(Boolean);
+        
+        // Show/hide validation panel based on results
+        if (response.data.errors.length > 0 || (response.data.warnings && response.data.warnings.length > 0)) {
+          showValidationPanel.value = true;
+        } else {
+          showValidationPanel.value = false;
+        }
+        
+        return response.data.valid || false;
+      } else {
+        // Clear validation
+        validationResult.value = { isValid: true, errors: [], warnings: [] };
+        errorLines.value = [];
+        showValidationPanel.value = false;
+        return true;
+      }
+    } catch (error) {
+      console.warn('Validation request failed:', error);
+      // Don't show errors for real-time validation failures
+      return true;
     }
-    
-    return result.isValid
   }
-  return true
+  return true;
 }
 
-// Watch for changes in editor content and perform real-time validation
+// Watch for changes in editor content and perform real-time validation  
+const rulesetValidationTimeout = ref(null);
+
 watch(editorValue, (newContent) => {
   if (isRuleset.value && newContent) {
-    validateRuleset()
+    // Debounce ruleset validation to avoid excessive API calls
+    clearTimeout(rulesetValidationTimeout.value);
+    rulesetValidationTimeout.value = setTimeout(async () => {
+      await validateRuleset();
+    }, 1000); // Wait 1 second after user stops typing
   } else if (isPlugin.value && newContent && props.item?.isEdit) {
     // Auto-verify plugin code changes, but with debouncing to avoid excessive API calls
     clearTimeout(pluginVerifyTimeout.value)
@@ -871,16 +939,7 @@ watch(editorValue, (newContent) => {
   }
 }, { deep: true })
 
-// Add a method to manually clear error lines (for debugging)
-function clearErrorLines() {
-  errorLines.value = []
-  console.log('Error lines cleared manually')
-}
 
-// Expose clearErrorLines to window for debugging
-if (typeof window !== 'undefined') {
-  window.clearErrorLines = clearErrorLines
-}
 
 // Verify project function
 async function verifyProject() {
@@ -1032,70 +1091,66 @@ async function verifyRuleset() {
         warnings: []
       };
       errorLines.value = [];
+      showValidationPanel.value = false;
     } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
-      
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
+      // Handle structured response from backend
+      if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
+        // Backend returned structured validation result
+        validationResult.value = {
+          isValid: response.data.valid || false,
+          errors: response.data.errors || [],
+          warnings: response.data.warnings || []
+        };
         
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
+        // Extract error lines for highlighting
+        errorLines.value = response.data.errors.map(err => err.line).filter(Boolean);
+        
+        const errorCount = response.data.errors.length;
+        const warningCount = (response.data.warnings || []).length;
+        
+        if (errorCount > 0) {
+          $message?.error?.(`Verification failed: ${errorCount} error${errorCount > 1 ? 's' : ''} found`);
+        } else if (warningCount > 0) {
+          $message?.warning?.(`Verification completed with ${warningCount} warning${warningCount > 1 ? 's' : ''}`);
+        }
+        
+        showValidationPanel.value = true;
       } else {
-        // Add general error without line number
+        // Fallback to old format
+        const errorMessage = response.data?.error || 'Unknown verification error';
+        $message?.error?.('Verification failed: ' + errorMessage);
+        
+        const lineNumber = extractLineNumber(errorMessage);
+        errorLines.value = lineNumber ? [lineNumber] : [];
+        
         validationResult.value = {
           isValid: false,
           errors: [{
-            line: 'Unknown',
+            line: lineNumber || 'Unknown',
             message: errorMessage,
             detail: response.data?.detail || null
           }],
           warnings: []
         };
+        showValidationPanel.value = true;
       }
-      showValidationPanel.value = true;
     }
   } catch (error) {
     const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
     $message?.error?.('Verification error: ' + errorMessage);
     
-    // Extract line number from error message for highlighting
     const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
-      
-      // Add to validation result for display in the panel
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber,
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    }
+    errorLines.value = lineNumber ? [lineNumber] : [];
+    
+    validationResult.value = {
+      isValid: false,
+      errors: [{
+        line: lineNumber || 'Unknown',
+        message: errorMessage,
+        detail: error.response?.data?.detail || null
+      }],
+      warnings: []
+    };
     showValidationPanel.value = true;
   } finally {
     verifyLoading.value = false;
@@ -1292,22 +1347,26 @@ async function verifyInput() {
   }
 }
 
-// Connect check input function
-async function connectCheckInput() {
-  if (!isInput.value) return;
+// Connect check function for both input and output components
+async function connectCheck() {
+  if (!isInput.value && !isOutput.value) return;
   
   connectCheckLoading.value = true;
   
   try {
-    // Call connect check API using existing hubApi.connectCheck method
-    const response = await hubApi.connectCheck('inputs', props.item.id);
+    // Determine component type
+    const componentType = isInput.value ? 'inputs' : 'outputs';
+    const componentName = isInput.value ? 'Input' : 'Output';
+    
+    // Call connect check API
+    const response = await hubApi.connectCheck(componentType, props.item.id);
     
     if (response.status === 'success') {
-      $message?.success?.(response.message || 'Input connection check passed');
+      $message?.success?.(response.message || `${componentName} connection check passed`);
     } else if (response.status === 'warning') {
-      $message?.warning?.(response.message || 'Input connection check has warnings');
+      $message?.warning?.(response.message || `${componentName} connection check has warnings`);
     } else {
-      $message?.error?.(response.message || 'Input connection check failed');
+      $message?.error?.(response.message || `${componentName} connection check failed`);
     }
   } catch (error) {
     const errorMessage = error.response?.data?.error || error.message || 'Connection check error';
@@ -1413,9 +1472,9 @@ async function autoVerifyPlugin() {
 }
 
 // Perform initial validation when component is mounted
-onMounted(() => {
+onMounted(async () => {
   if (isRuleset.value && editorValue.value) {
-    validateRuleset()
+    await validateRuleset()
   }
   
   // If component type is project, fetch all components list

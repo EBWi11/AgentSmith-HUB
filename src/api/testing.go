@@ -2,7 +2,6 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
-	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
@@ -648,36 +647,22 @@ func testProject(c echo.Context) error {
 		})
 	}
 
-	// Create a map to collect o results
+	// Create a map to collect output results
 	outputResults := make(map[string][]map[string]interface{})
 	outputChannels := make(map[string]chan map[string]interface{})
 
-	// Create channels to capture output data
-	for outputName, o := range tempProject.Outputs {
-		// Create a channel for each output to collect results
-		outputChan := make(chan map[string]interface{}, 10)
-		outputChannels[outputName] = outputChan
+	// For each output component, create a test collection channel
+	for outputName, outputComp := range tempProject.Outputs {
+		// Create a channel for each output to collect test results
+		testChan := make(chan map[string]interface{}, 100)
+		outputChannels[outputName] = testChan
 
-		// Monitor the output's upstream channels to capture results
-		for _, upChan := range o.UpStream {
-			// Create a goroutine to intercept messages going to this output
-			go func(outName string, testChan chan map[string]interface{}) {
-				for msg := range *upChan {
-					// Make a copy for our results
-					msgCopy := make(map[string]interface{})
-					for k, v := range msg {
-						msgCopy[k] = v
-					}
+		// Set the test collection channel for output component
+		// Don't replace UpStream - let the output use its original data flow
+		// We'll modify the output to also send data to test collection channel
+		outputComp.TestCollectionChan = &testChan
 
-					// Add metadata
-					msgCopy["_HUB_OUTPUT_NAME"] = outName
-					msgCopy["_HUB_TIMESTAMP"] = time.Now().UnixNano() / int64(time.Millisecond)
-
-					// Send to our results channel
-					testChan <- msgCopy
-				}
-			}(outputName, outputChan)
-		}
+		logger.Info("Created test collection channel for output", "output", outputName, "project", testProjectId)
 	}
 
 	// Start the project
@@ -690,75 +675,62 @@ func testProject(c echo.Context) error {
 		})
 	}
 
-	// Get project structure for visualization before checking connections
-	projectStructure, err := getProjectStructure(tempProject)
-	if err != nil {
-		logger.Warn("Failed to get project structure: %v", err)
-	}
-
-	// Find the input node's downstream channels
+	// Find the input node and verify it has downstream connections
 	inputNode := tempProject.Inputs[inputNodeName]
 	if len(inputNode.DownStream) == 0 {
-		// For test projects, if no downstream connections exist, we need to create them
-		// This can happen when the project structure parsing fails
-		logger.Warn("Input node has no downstream connections, attempting to rebuild connections", "input", inputNodeName)
+		logger.Warn("Input node has no downstream connections", "input", inputNodeName, "project", testProjectId)
 
-		// Try to manually connect based on project structure
-		if projectStructure != nil {
-			if edges, ok := projectStructure["edges"].([]map[string]interface{}); ok {
-				for _, edge := range edges {
-					if from, ok := edge["from"].(string); ok && from == "input."+inputNodeName {
-						logger.Info("Found edge in project structure", "from", from, "to", edge["to"])
-					}
-				}
-			}
-		}
-
-		// If still no connections, return an error
-		if len(inputNode.DownStream) == 0 {
-			return c.JSON(http.StatusBadRequest, map[string]interface{}{
-				"success": false,
-				"error":   "Input node has no downstream connections. Please check project configuration.",
-				"result":  nil,
-			})
-		}
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node has no downstream connections. Please check project configuration.",
+			"result":  nil,
+		})
 	}
 
 	// Send test data to all downstream channels of the input
-	for _, downChan := range inputNode.DownStream {
+	logger.Info("Sending test data to input channels", "input", inputNodeName, "downstream_count", len(inputNode.DownStream))
+	for i, downChan := range inputNode.DownStream {
+		logger.Info("Sending data to downstream channel", "input", inputNodeName, "channel", i)
 		*downChan <- req.Data
 	}
 
-	// Wait a shorter time to collect results (reduce from 1000ms to 200ms)
-	time.Sleep(200 * time.Millisecond)
+	// Wait for data to flow through the system and be collected
+	time.Sleep(500 * time.Millisecond)
 
-	// Collect results from output channels
+	// Collect results from output channels with timeout
+	collectTimeout := time.After(1000 * time.Millisecond)
 	for outputName, outputChan := range outputChannels {
-		// Collect all available messages
 		results := []map[string]interface{}{}
-		// Use a shorter timeout for collecting results
-		timeout := time.After(100 * time.Millisecond)
+
+		// Collect messages with timeout
+		logger.Info("Collecting results from output channel", "output", outputName)
 
 	collectLoop:
 		for {
 			select {
 			case msg := <-outputChan:
+				// Directly use the message without adding test metadata
 				results = append(results, msg)
-			case <-timeout:
-				// Timeout reached, stop collecting
+				logger.Info("Collected message from output", "output", outputName, "message_count", len(results))
+
+			case <-collectTimeout:
+				logger.Info("Collection timeout reached", "output", outputName, "collected_count", len(results))
 				break collectLoop
+
 			default:
-				// No more messages immediately available
-				break collectLoop
+				// No more immediate messages, check if we should continue waiting
+				if len(results) > 0 {
+					// We got some results, wait a bit more for potential additional messages
+					time.Sleep(50 * time.Millisecond)
+				} else {
+					// No results yet, continue waiting
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 		}
-		outputResults[outputName] = results
-	}
 
-	// Stop the project
-	err = tempProject.Stop()
-	if err != nil {
-		logger.Warn("Failed to stop temporary project: %v", err)
+		outputResults[outputName] = results
+		logger.Info("Final collection result", "output", outputName, "total_messages", len(results))
 	}
 
 	// Return the results
@@ -766,7 +738,6 @@ func testProject(c echo.Context) error {
 		"success":   true,
 		"isTemp":    isTemp,
 		"outputs":   outputResults,
-		"structure": projectStructure,
 		"inputNode": req.InputNode,
 	})
 }
@@ -914,104 +885,9 @@ func connectCheck(c echo.Context) error {
 			return c.JSON(http.StatusOK, result)
 		}
 
-		// Check connection based on input type
-		switch inputComp.Type {
-		case input.InputTypeKafka:
-			result["details"].(map[string]interface{})["client_type"] = "kafka"
-
-			// Check if Kafka consumer is initialized
-			if inputComp.Config != nil && inputComp.Config.Kafka != nil {
-				connectionInfo := map[string]interface{}{
-					"brokers": inputComp.Config.Kafka.Brokers,
-					"group":   inputComp.Config.Kafka.Group,
-					"topic":   inputComp.Config.Kafka.Topic,
-				}
-				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
-
-				// Check if consumer is running
-				if inputComp.GetConsumeQPS() > 0 {
-					result["details"].(map[string]interface{})["connection_status"] = "active"
-					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-						"consume_qps":   inputComp.GetConsumeQPS(),
-						"consume_total": inputComp.GetConsumeTotal(),
-					}
-				} else {
-					// Consumer exists but no messages being processed
-					if inputComp.GetConsumeTotal() > 0 {
-						result["status"] = "warning"
-						result["message"] = "Connection established but no recent activity"
-						result["details"].(map[string]interface{})["connection_status"] = "idle"
-						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-							"consume_total": inputComp.GetConsumeTotal(),
-						}
-					} else {
-						// No messages processed yet
-						result["status"] = "warning"
-						result["message"] = "Connection established but no messages processed"
-						result["details"].(map[string]interface{})["connection_status"] = "connected"
-					}
-				}
-			} else {
-				result["status"] = "error"
-				result["message"] = "Kafka configuration missing"
-				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
-				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-					{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
-				}
-			}
-
-		case input.InputTypeAliyunSLS:
-			result["details"].(map[string]interface{})["client_type"] = "aliyun_sls"
-
-			// Check if SLS consumer is initialized
-			if inputComp.Config != nil && inputComp.Config.AliyunSLS != nil {
-				connectionInfo := map[string]interface{}{
-					"endpoint":       inputComp.Config.AliyunSLS.Endpoint,
-					"project":        inputComp.Config.AliyunSLS.Project,
-					"logstore":       inputComp.Config.AliyunSLS.Logstore,
-					"consumer_group": inputComp.Config.AliyunSLS.ConsumerGroupName,
-				}
-				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
-
-				// Check if consumer is running
-				if inputComp.GetConsumeQPS() > 0 {
-					result["details"].(map[string]interface{})["connection_status"] = "active"
-					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-						"consume_qps":   inputComp.GetConsumeQPS(),
-						"consume_total": inputComp.GetConsumeTotal(),
-					}
-				} else {
-					// Consumer exists but no messages being processed
-					if inputComp.GetConsumeTotal() > 0 {
-						result["status"] = "warning"
-						result["message"] = "Connection established but no recent activity"
-						result["details"].(map[string]interface{})["connection_status"] = "idle"
-						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-							"consume_total": inputComp.GetConsumeTotal(),
-						}
-					} else {
-						// No messages processed yet
-						result["status"] = "warning"
-						result["message"] = "Connection established but no messages processed"
-						result["details"].(map[string]interface{})["connection_status"] = "connected"
-					}
-				}
-			} else {
-				result["status"] = "error"
-				result["message"] = "Aliyun SLS configuration missing"
-				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
-				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-					{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
-				}
-			}
-		default:
-			result["status"] = "error"
-			result["message"] = "Unsupported input type"
-			result["details"].(map[string]interface{})["client_type"] = string(inputComp.Type)
-			result["details"].(map[string]interface{})["connection_status"] = "unsupported"
-		}
-
-		return c.JSON(http.StatusOK, result)
+		// Use the enhanced connectivity check method from the input component
+		connectivityResult := inputComp.CheckConnectivity()
+		return c.JSON(http.StatusOK, connectivityResult)
 	} else if normalizedType == "outputs" {
 		_, existsNew := project.GlobalProject.OutputsNew[id]
 		outputComp := project.GlobalProject.Outputs[id]
@@ -1041,161 +917,9 @@ func connectCheck(c echo.Context) error {
 			return c.JSON(http.StatusOK, result)
 		}
 
-		// Check connection based on output type
-		switch outputComp.Type {
-		case output.OutputTypeKafka:
-			result["details"].(map[string]interface{})["client_type"] = "kafka"
-
-			// Check if Kafka producer is initialized
-			if outputComp.Config != nil && outputComp.Config.Kafka != nil {
-				connectionInfo := map[string]interface{}{
-					"brokers": outputComp.Config.Kafka.Brokers,
-					"topic":   outputComp.Config.Kafka.Topic,
-				}
-				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
-
-				// Check if producer is running
-				if outputComp.GetProduceQPS() > 0 {
-					result["details"].(map[string]interface{})["connection_status"] = "active"
-					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-						"produce_qps":   outputComp.GetProduceQPS(),
-						"produce_total": outputComp.GetProduceTotal(),
-					}
-				} else {
-					// Producer exists but no messages being sent
-					if outputComp.GetProduceTotal() > 0 {
-						result["status"] = "warning"
-						result["message"] = "Connection established but no recent activity"
-						result["details"].(map[string]interface{})["connection_status"] = "idle"
-						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-							"produce_total": outputComp.GetProduceTotal(),
-						}
-					} else {
-						// No messages sent yet
-						result["status"] = "warning"
-						result["message"] = "Connection established but no messages sent"
-						result["details"].(map[string]interface{})["connection_status"] = "connected"
-					}
-				}
-			} else {
-				result["status"] = "error"
-				result["message"] = "Kafka configuration missing"
-				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
-				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-					{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
-				}
-			}
-
-		case output.OutputTypeElasticsearch:
-			result["details"].(map[string]interface{})["client_type"] = "elasticsearch"
-
-			// Check if Elasticsearch producer is initialized
-			if outputComp.Config != nil && outputComp.Config.Elasticsearch != nil {
-				connectionInfo := map[string]interface{}{
-					"hosts": outputComp.Config.Elasticsearch.Hosts,
-					"index": outputComp.Config.Elasticsearch.Index,
-				}
-				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
-
-				// Check if producer is running
-				if outputComp.GetProduceQPS() > 0 {
-					result["details"].(map[string]interface{})["connection_status"] = "active"
-					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-						"produce_qps":   outputComp.GetProduceQPS(),
-						"produce_total": outputComp.GetProduceTotal(),
-					}
-				} else {
-					// Producer exists but no messages being sent
-					if outputComp.GetProduceTotal() > 0 {
-						result["status"] = "warning"
-						result["message"] = "Connection established but no recent activity"
-						result["details"].(map[string]interface{})["connection_status"] = "idle"
-						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-							"produce_total": outputComp.GetProduceTotal(),
-						}
-					} else {
-						// No messages sent yet
-						result["status"] = "warning"
-						result["message"] = "Connection established but no messages sent"
-						result["details"].(map[string]interface{})["connection_status"] = "connected"
-					}
-				}
-			} else {
-				result["status"] = "error"
-				result["message"] = "Elasticsearch configuration missing"
-				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
-				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-					{"message": "Elasticsearch configuration is incomplete or missing", "severity": "error"},
-				}
-			}
-
-		case output.OutputTypeAliyunSLS:
-			result["details"].(map[string]interface{})["client_type"] = "aliyun_sls"
-
-			// Check if SLS producer is initialized
-			if outputComp.Config != nil && outputComp.Config.AliyunSLS != nil {
-				connectionInfo := map[string]interface{}{
-					"endpoint": outputComp.Config.AliyunSLS.Endpoint,
-					"project":  outputComp.Config.AliyunSLS.Project,
-					"logstore": outputComp.Config.AliyunSLS.Logstore,
-				}
-				result["details"].(map[string]interface{})["connection_info"] = connectionInfo
-
-				// Check if producer is running
-				if outputComp.GetProduceQPS() > 0 {
-					result["details"].(map[string]interface{})["connection_status"] = "active"
-					result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-						"produce_qps":   outputComp.GetProduceQPS(),
-						"produce_total": outputComp.GetProduceTotal(),
-					}
-				} else {
-					// Producer exists but no messages being sent
-					if outputComp.GetProduceTotal() > 0 {
-						result["status"] = "warning"
-						result["message"] = "Connection established but no recent activity"
-						result["details"].(map[string]interface{})["connection_status"] = "idle"
-						result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-							"produce_total": outputComp.GetProduceTotal(),
-						}
-					} else {
-						// No messages sent yet
-						result["status"] = "warning"
-						result["message"] = "Connection established but no messages sent"
-						result["details"].(map[string]interface{})["connection_status"] = "connected"
-					}
-				}
-			} else {
-				result["status"] = "error"
-				result["message"] = "Aliyun SLS configuration missing"
-				result["details"].(map[string]interface{})["connection_status"] = "not_configured"
-				result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-					{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
-				}
-			}
-
-		case output.OutputTypePrint:
-			result["details"].(map[string]interface{})["client_type"] = "print"
-			result["details"].(map[string]interface{})["connection_status"] = "always_connected"
-			result["details"].(map[string]interface{})["connection_info"] = map[string]interface{}{
-				"type": "console_output",
-			}
-
-			// Check if producer is running
-			if outputComp.GetProduceQPS() > 0 {
-				result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-					"produce_qps":   outputComp.GetProduceQPS(),
-					"produce_total": outputComp.GetProduceTotal(),
-				}
-			}
-
-		default:
-			result["status"] = "error"
-			result["message"] = "Unsupported output type"
-			result["details"].(map[string]interface{})["client_type"] = string(outputComp.Type)
-			result["details"].(map[string]interface{})["connection_status"] = "unsupported"
-		}
-
-		return c.JSON(http.StatusOK, result)
+		// Use the enhanced connectivity check method from the output component
+		connectivityResult := outputComp.CheckConnectivity()
+		return c.JSON(http.StatusOK, connectivityResult)
 	}
 
 	return c.JSON(http.StatusInternalServerError, map[string]string{

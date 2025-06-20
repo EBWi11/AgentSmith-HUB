@@ -89,6 +89,9 @@ type Output struct {
 	// for print output
 	printStop chan struct{}
 
+	// for testing
+	TestCollectionChan *chan map[string]interface{}
+
 	// raw config
 	Config *OutputConfig
 }
@@ -248,6 +251,24 @@ func (out *Output) Start() error {
 				if out.sampler != nil {
 					out.sampler.Sample(msg, "kafka", out.ProjectNodeSequence)
 				}
+
+				// If test collection channel is set, also send data there
+				if out.TestCollectionChan != nil {
+					// Add output ID to the message for test collection
+					msgWithId := make(map[string]interface{})
+					for k, v := range msg {
+						msgWithId[k] = v
+					}
+					msgWithId["_HUB_OUTPUT_ID"] = out.Id
+
+					select {
+					case *out.TestCollectionChan <- msgWithId:
+						// Successfully sent to test collection channel
+					default:
+						// Test collection channel is full, log warning
+						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+					}
+				}
 			}
 		}()
 
@@ -294,6 +315,24 @@ func (out *Output) Start() error {
 				if out.sampler != nil {
 					out.sampler.Sample(msg, "elasticsearch", out.ProjectNodeSequence)
 				}
+
+				// If test collection channel is set, also send data there
+				if out.TestCollectionChan != nil {
+					// Add output ID to the message for test collection
+					msgWithId := make(map[string]interface{})
+					for k, v := range msg {
+						msgWithId[k] = v
+					}
+					msgWithId["_HUB_OUTPUT_ID"] = out.Id
+
+					select {
+					case *out.TestCollectionChan <- msgWithId:
+						// Successfully sent to test collection channel
+					default:
+						// Test collection channel is full, log warning
+						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+					}
+				}
 			}
 		}()
 
@@ -311,13 +350,35 @@ func (out *Output) Start() error {
 					processed := false
 					for _, up := range out.UpStream {
 						select {
-						case msg := <-*up:
+						case msg, ok := <-*up:
+							if !ok {
+								// Channel is closed, skip this channel
+								continue
+							}
 							atomic.AddUint64(&out.produceTotal, 1)
 							atomic.AddUint64(&out.produceQPS, 1)
 
 							// Sample the message
 							if out.sampler != nil {
 								out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+							}
+
+							// If test collection channel is set, also send data there
+							if out.TestCollectionChan != nil {
+								// Add output ID to the message for test collection
+								msgWithId := make(map[string]interface{})
+								for k, v := range msg {
+									msgWithId[k] = v
+								}
+								msgWithId["_HUB_OUTPUT_ID"] = out.Id
+
+								select {
+								case *out.TestCollectionChan <- msgWithId:
+									// Successfully sent to test collection channel
+								default:
+									// Test collection channel is full, log warning
+									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "print")
+								}
 							}
 
 							data, _ := json.Marshal(msg)
@@ -553,6 +614,9 @@ func (out *Output) StopForTesting() error {
 		out.metricStop = nil
 	}
 
+	// Clear test collection channel
+	out.TestCollectionChan = nil
+
 	// Force close producers without waiting
 	switch out.Type {
 	case OutputTypeKafka:
@@ -593,4 +657,341 @@ func (out *Output) StopForTesting() error {
 	}
 
 	return nil
+}
+
+// StartForTesting starts the output component in test mode
+// In test mode, instead of sending data to external systems,
+// data is processed directly from upstream channels for collection
+func (out *Output) StartForTesting() error {
+	logger.Info("Starting output in test mode", "id", out.Id, "type", out.Type)
+
+	// Start metric goroutine
+	out.metricStop = make(chan struct{})
+	go out.metricLoop()
+
+	// In test mode, we process all upstream channels directly without external connections
+	// This applies to all output types (kafka, elasticsearch, print, aliyun_sls)
+
+	out.wg.Add(1)
+	go func() {
+		defer out.wg.Done()
+
+		for {
+			select {
+			case <-out.metricStop:
+				logger.Info("Test output stopping due to metric stop signal", "id", out.Id)
+				return
+			default:
+				// Process messages from all upstream channels
+				processed := false
+				for i, upChan := range out.UpStream {
+					select {
+					case msg, ok := <-*upChan:
+						if !ok {
+							// Channel is closed, skip this channel
+							continue
+						}
+						atomic.AddUint64(&out.produceTotal, 1)
+						atomic.AddUint64(&out.produceQPS, 1)
+
+						// Sample the message for test mode
+						if out.sampler != nil {
+							out.sampler.Sample(msg, fmt.Sprintf("test_%s", out.Type), out.ProjectNodeSequence)
+						}
+
+						// In test mode, also send to collection channel if available
+						if out.TestCollectionChan != nil {
+							// Add output ID to the message for test collection
+							msgWithId := make(map[string]interface{})
+							for k, v := range msg {
+								msgWithId[k] = v
+							}
+							msgWithId["_HUB_OUTPUT_ID"] = out.Id
+
+							select {
+							case *out.TestCollectionChan <- msgWithId:
+								// Successfully sent to test collection channel
+							default:
+								// Test collection channel is full, log warning
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", out.Type)
+							}
+						}
+
+						// In test mode, log the message processing
+						logger.Debug("Test output processed message", "id", out.Id, "type", out.Type, "channel", i)
+						processed = true
+
+					default:
+						// No message available from this channel, continue to next
+					}
+				}
+
+				// If no messages were processed, sleep briefly to avoid busy waiting
+				if !processed {
+					time.Sleep(1 * time.Millisecond)
+				}
+			}
+		}
+	}()
+
+	logger.Info("Output started in test mode successfully", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
+	return nil
+}
+
+// CheckConnectivity performs a real connectivity test for the output component
+// This method tests actual connection to external systems (Kafka, ES, etc.)
+func (out *Output) CheckConnectivity() map[string]interface{} {
+	result := map[string]interface{}{
+		"status":  "success",
+		"message": "Connection check successful",
+		"details": map[string]interface{}{
+			"client_type":         string(out.Type),
+			"connection_status":   "unknown",
+			"connection_info":     map[string]interface{}{},
+			"connection_errors":   []map[string]interface{}{},
+			"connection_warnings": []map[string]interface{}{},
+		},
+	}
+
+	switch out.Type {
+	case OutputTypeKafka:
+		if out.kafkaCfg == nil {
+			result["status"] = "error"
+			result["message"] = "Kafka configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "Kafka configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info
+		connectionInfo := map[string]interface{}{
+			"brokers": out.kafkaCfg.Brokers,
+			"topic":   out.kafkaCfg.Topic,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to Kafka brokers
+		err := common.TestKafkaConnection(out.kafkaCfg.Brokers, out.kafkaCfg.SASL)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to Kafka brokers"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Test if topic exists
+		topicExists, err := common.TestKafkaTopicExists(out.kafkaCfg.Brokers, out.kafkaCfg.Topic, out.kafkaCfg.SASL)
+		if err != nil {
+			result["status"] = "warning"
+			result["message"] = "Connected to Kafka but failed to verify topic"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_unknown"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Could not verify topic existence: %v", err), "severity": "warning"},
+			}
+		} else if !topicExists {
+			result["status"] = "warning"
+			result["message"] = "Connected to Kafka but topic does not exist"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_missing"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Topic '%s' does not exist", out.kafkaCfg.Topic), "severity": "warning"},
+			}
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to Kafka and verified topic"
+		}
+
+		// Add producer metrics if available
+		if out.kafkaProducer != nil {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"produce_qps":     out.GetProduceQPS(),
+				"produce_total":   out.GetProduceTotal(),
+				"producer_active": true,
+			}
+		} else {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"producer_active": false,
+			}
+		}
+
+	case OutputTypeElasticsearch:
+		if out.elasticsearchCfg == nil {
+			result["status"] = "error"
+			result["message"] = "Elasticsearch configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "Elasticsearch configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info
+		connectionInfo := map[string]interface{}{
+			"hosts": out.elasticsearchCfg.Hosts,
+			"index": out.elasticsearchCfg.Index,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to Elasticsearch cluster
+		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to Elasticsearch cluster"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Test if index exists (this is optional for ES as indices can be auto-created)
+		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index)
+		if err != nil {
+			result["status"] = "warning"
+			result["message"] = "Connected to Elasticsearch but failed to verify index"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_index_unknown"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Could not verify index existence: %v", err), "severity": "warning"},
+			}
+		} else if !indexExists {
+			result["status"] = "success" // This is OK for ES as indices can be auto-created
+			result["message"] = "Connected to Elasticsearch (index will be auto-created)"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_index_will_be_created"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Index '%s' does not exist but will be auto-created", out.elasticsearchCfg.Index), "severity": "info"},
+			}
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to Elasticsearch and verified index"
+		}
+
+		// Get cluster info for additional details
+		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts)
+		if err == nil {
+			result["details"].(map[string]interface{})["cluster_info"] = clusterInfo
+		}
+
+		// Add producer metrics if available
+		if out.elasticsearchProducer != nil {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"produce_qps":     out.GetProduceQPS(),
+				"produce_total":   out.GetProduceTotal(),
+				"producer_active": true,
+				"batch_size":      out.elasticsearchCfg.BatchSize,
+			}
+		} else {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"producer_active": false,
+			}
+		}
+
+	case OutputTypePrint:
+		// Print output doesn't require external connectivity testing
+		result["status"] = "error"
+		result["message"] = "Print output doesn't require connection check"
+		result["details"].(map[string]interface{})["connection_status"] = "not_applicable"
+		result["details"].(map[string]interface{})["connection_info"] = map[string]interface{}{
+			"type":        "console_output",
+			"description": "Print output writes directly to console and doesn't require external connectivity",
+		}
+		result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+			{"message": "Connection check is not applicable for print output type", "severity": "info"},
+		}
+		return result
+
+	case OutputTypeAliyunSLS:
+		if out.aliyunSLSCfg == nil {
+			result["status"] = "error"
+			result["message"] = "Aliyun SLS configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "Aliyun SLS configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info (without sensitive credentials)
+		connectionInfo := map[string]interface{}{
+			"endpoint": out.aliyunSLSCfg.Endpoint,
+			"project":  out.aliyunSLSCfg.Project,
+			"logstore": out.aliyunSLSCfg.Logstore,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to Aliyun SLS
+		err := common.TestAliyunSLSConnection(
+			out.aliyunSLSCfg.Endpoint,
+			out.aliyunSLSCfg.AccessKeyID,
+			out.aliyunSLSCfg.AccessKeySecret,
+			out.aliyunSLSCfg.Project,
+			out.aliyunSLSCfg.Logstore,
+		)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to Aliyun SLS"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Test if logstore exists
+		logstoreExists, err := common.TestAliyunSLSLogstoreExists(
+			out.aliyunSLSCfg.Endpoint,
+			out.aliyunSLSCfg.AccessKeyID,
+			out.aliyunSLSCfg.AccessKeySecret,
+			out.aliyunSLSCfg.Project,
+			out.aliyunSLSCfg.Logstore,
+		)
+		if err != nil {
+			result["status"] = "warning"
+			result["message"] = "Connected to Aliyun SLS but failed to verify logstore"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_logstore_unknown"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Could not verify logstore existence: %v", err), "severity": "warning"},
+			}
+		} else if !logstoreExists {
+			result["status"] = "error"
+			result["message"] = "Connected to Aliyun SLS but logstore does not exist"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_logstore_missing"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Logstore '%s' does not exist in project '%s'", out.aliyunSLSCfg.Logstore, out.aliyunSLSCfg.Project), "severity": "error"},
+			}
+			return result
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to Aliyun SLS and verified logstore"
+		}
+
+		// Get project info for additional details
+		projectInfo, err := common.GetAliyunSLSProjectInfo(
+			out.aliyunSLSCfg.Endpoint,
+			out.aliyunSLSCfg.AccessKeyID,
+			out.aliyunSLSCfg.AccessKeySecret,
+			out.aliyunSLSCfg.Project,
+		)
+		if err == nil {
+			result["details"].(map[string]interface{})["project_info"] = projectInfo
+		}
+
+		// Add metrics if available (note: AliyunSLS output is not fully implemented yet)
+		result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+			"produce_qps":     out.GetProduceQPS(),
+			"produce_total":   out.GetProduceTotal(),
+			"producer_active": false, // AliyunSLS output producer not implemented yet
+			"note":            "AliyunSLS output producer implementation is pending",
+		}
+
+	default:
+		result["status"] = "error"
+		result["message"] = "Unsupported output type"
+		result["details"].(map[string]interface{})["connection_status"] = "unsupported"
+	}
+
+	return result
 }

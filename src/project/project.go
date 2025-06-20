@@ -1158,9 +1158,9 @@ func (p *Project) StartForTesting() error {
 		}
 	}
 
-	// Start outputs
+	// Start outputs in test mode
 	for _, out := range p.Outputs {
-		if err := out.Start(); err != nil {
+		if err := out.StartForTesting(); err != nil {
 			p.Status = ProjectStatusError
 			p.Err = err
 			return fmt.Errorf("failed to start output %s: %v", out.Id, err)

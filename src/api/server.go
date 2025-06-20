@@ -2,97 +2,12 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
-	"AgentSmith-HUB/logger"
-	"AgentSmith-HUB/project"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
-
-func getProjectStructure(p *project.Project) (map[string]interface{}, error) {
-	// Build nodes and edges for visualization
-	nodes := []map[string]interface{}{}
-	edges := []map[string]interface{}{}
-
-	// Try to get flow graph from project content
-	var flowGraph map[string][]string
-	var err error
-
-	if p.Config != nil && p.Config.Content != "" {
-		// Parse from Config.Content if available
-		flowGraph = make(map[string][]string)
-		lines := strings.Split(p.Config.Content, "\n")
-
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-
-			parts := strings.Split(line, "->")
-			if len(parts) != 2 {
-				continue
-			}
-
-			from := strings.TrimSpace(parts[0])
-			to := strings.TrimSpace(parts[1])
-
-			// Add to flow graph
-			flowGraph[from] = append(flowGraph[from], to)
-		}
-	} else {
-		// Fallback: try to parse from project's parseContent method
-		flowGraph, err = p.ParseContentForVisualization()
-		if err != nil {
-			// If parsing fails, create a simple flow graph from existing components
-			flowGraph = make(map[string][]string)
-			logger.Warn("Failed to parse project content for visualization, using fallback", "project", p.Id, "error", err)
-		}
-	}
-
-	// Add nodes from actual project components
-	for _, input := range p.Inputs {
-		nodes = append(nodes, map[string]interface{}{
-			"id":   "input." + input.Id,
-			"type": "input",
-			"name": input.Id,
-		})
-	}
-
-	for _, ruleset := range p.Rulesets {
-		nodes = append(nodes, map[string]interface{}{
-			"id":   "ruleset." + ruleset.RulesetID,
-			"type": "ruleset",
-			"name": ruleset.RulesetID,
-		})
-	}
-
-	for _, output := range p.Outputs {
-		nodes = append(nodes, map[string]interface{}{
-			"id":   "output." + output.Id,
-			"type": "output",
-			"name": output.Id,
-		})
-	}
-
-	// Add edges from flow graph
-	for from, tos := range flowGraph {
-		for _, to := range tos {
-			edges = append(edges, map[string]interface{}{
-				"from": from,
-				"to":   to,
-			})
-		}
-	}
-
-	return map[string]interface{}{
-		"nodes": nodes,
-		"edges": edges,
-	}, nil
-}
 
 func ServerStart(listener string) error {
 	e := echo.New()
