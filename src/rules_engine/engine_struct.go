@@ -259,12 +259,12 @@ func getLineNumber(xmlContent, pattern string, occurrence int) int {
 // findElementInRule finds the line number of an element within a specific rule
 func findElementInRule(xmlContent, ruleID, pattern string, ruleIndex, elementIndex int) int {
 	lines := strings.Split(xmlContent, "\n")
-	var ruleStartLine int
+	var ruleStartLine, ruleEndLine int
 
 	if ruleID != "" && strings.TrimSpace(ruleID) != "" {
-		// Find rule by ID
+		// Find rule by ID - only match rule tags, not other elements
 		for i, line := range lines {
-			if strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID)) {
+			if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID)) {
 				ruleStartLine = i + 1
 				break
 			}
@@ -283,18 +283,25 @@ func findElementInRule(xmlContent, ruleID, pattern string, ruleIndex, elementInd
 		}
 	}
 
-	// Search for pattern within the rule
+	// Find the end of current rule
+	for i := ruleStartLine; i < len(lines); i++ {
+		if strings.Contains(lines[i], "</rule>") {
+			ruleEndLine = i + 1
+			break
+		}
+	}
+	if ruleEndLine == 0 {
+		ruleEndLine = len(lines) // fallback to end of file
+	}
+
+	// Search for pattern within the rule boundaries
 	patternCount := 0
-	for i := ruleStartLine - 1; i < len(lines); i++ {
+	for i := ruleStartLine - 1; i < ruleEndLine-1; i++ {
 		if strings.Contains(lines[i], pattern) {
 			if patternCount == elementIndex {
 				return i + 1
 			}
 			patternCount++
-		}
-		// Stop at next rule or end
-		if i > ruleStartLine-1 && (strings.Contains(lines[i], "<rule") || strings.Contains(lines[i], "</root>")) {
-			break
 		}
 	}
 
@@ -318,8 +325,21 @@ func validateRulesetStructure(ruleset *Ruleset, xmlContent string, result *Valid
 		if rule.ID != "" {
 			if prevIndex, exists := ruleIDMap[rule.ID]; exists {
 				result.IsValid = false
+				// Find the second occurrence of this rule ID
+				lines := strings.Split(xmlContent, "\n")
+				duplicateLine := 1
+				ruleCount := 0
+				for lineIndex, line := range lines {
+					if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, rule.ID)) {
+						ruleCount++
+						if ruleCount == 2 { // Second occurrence
+							duplicateLine = lineIndex + 1
+							break
+						}
+					}
+				}
 				result.Errors = append(result.Errors, ValidationError{
-					Line:    getLineNumber(xmlContent, fmt.Sprintf(`id="%s"`, rule.ID), 1),
+					Line:    duplicateLine,
 					Message: fmt.Sprintf("Duplicate rule ID: %s", rule.ID),
 					Detail:  fmt.Sprintf("First occurrence at rule index %d", prevIndex),
 				})
@@ -341,7 +361,17 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	var ruleLine int
 
 	if ruleID != "" && strings.TrimSpace(ruleID) != "" {
-		ruleLine = getLineNumber(xmlContent, fmt.Sprintf(`id="%s"`, ruleID), 0)
+		// Find rule line by ID - only match rule tags, not other elements
+		lines := strings.Split(xmlContent, "\n")
+		for i, line := range lines {
+			if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID)) {
+				ruleLine = i + 1
+				break
+			}
+		}
+		if ruleLine == 0 {
+			ruleLine = getLineNumber(xmlContent, "<rule", ruleIndex)
+		}
 	} else {
 		ruleLine = getLineNumber(xmlContent, "<rule", ruleIndex)
 	}

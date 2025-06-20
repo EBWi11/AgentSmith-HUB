@@ -5,33 +5,33 @@
       <div class="flex space-x-2">
         <button 
           @click="refreshChanges" 
-          class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50 transition-colors duration-150 focus:outline-none"
+          class="btn btn-secondary btn-sm"
         >
           Refresh
         </button>
         <button 
           @click="verifyChanges" 
-          class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50 transition-colors duration-150 focus:outline-none"
+          class="btn btn-verify btn-sm"
           :disabled="verifying || !changes.length"
         >
-          <span v-if="verifying" class="w-3 h-3 border-1.5 border-gray-700 border-t-transparent rounded-full animate-spin mr-1"></span>
+          <span v-if="verifying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
           Verify
         </button>
         <button 
           @click="cancelAllChanges" 
-          class="px-3 py-1.5 border border-red-300 text-red-700 text-sm rounded hover:bg-red-50 transition-colors duration-150 focus:outline-none"
+          class="btn btn-danger btn-sm"
           :disabled="cancelling || !changes.length"
         >
-          <span v-if="cancelling" class="w-3 h-3 border-1.5 border-red-700 border-t-transparent rounded-full animate-spin mr-1"></span>
+          <span v-if="cancelling" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
           Cancel All
         </button>
         <button 
           @click="applyChanges" 
-          class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none flex items-center space-x-1.5"
+          class="btn btn-primary btn-sm"
           :disabled="applying || !changes.length"
         >
-          <span v-if="applying" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
-          <span>{{ applying ? 'Applying...' : 'Apply All Changes' }}</span>
+          <span v-if="applying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
+          {{ applying ? 'Applying...' : 'Apply All Changes' }}
         </button>
       </div>
     </div>
@@ -68,21 +68,21 @@
             </div>
             <button 
               @click="verifySingleChange(change)" 
-              class="px-2 py-1 text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-150 focus:outline-none mr-2"
+              class="btn btn-verify btn-xs mr-2"
               :disabled="verifying"
             >
               Verify
             </button>
             <button 
               @click="applySingleChange(change)" 
-              class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-150 focus:outline-none mr-2"
+              class="btn btn-primary btn-xs mr-2"
               :disabled="applying || (change.verifyStatus === 'error')"
             >
               Apply
             </button>
             <button 
               @click="cancelUpgrade(change)" 
-              class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors duration-150 focus:outline-none"
+              class="btn btn-danger btn-xs"
               :disabled="applying || cancelling"
               title="Cancel upgrade and delete .new file"
             >

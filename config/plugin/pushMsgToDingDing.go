@@ -19,7 +19,7 @@ type response struct {
 }
 
 // SendMessageText Function to send message
-func Eval(AccessToken string, Secret string, text string) error {
+func Eval(AccessToken string, Secret string, text string) (bool, error) {
 	msg := map[string]interface{}{
 		"msgtype": "text",
 		"text": map[string]string{
@@ -29,28 +29,28 @@ func Eval(AccessToken string, Secret string, text string) error {
 
 	b, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return false, err
 	}
 	resp, err := http.Post(getURL(AccessToken, Secret), "application/json", bytes.NewBuffer(b))
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var r response
 	err = json.Unmarshal(body, &r)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if r.Code != 0 {
-		return errors.New(fmt.Sprintf("response error: %s", string(body)))
+		return false, errors.New(fmt.Sprintf("response error: %s", string(body)))
 	}
-	return err
+	return true, nil
 }
 
 func hmacSha256(stringToSign string, secret string) string {

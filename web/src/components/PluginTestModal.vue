@@ -31,7 +31,7 @@
               </div>
               <button 
                 @click="removePluginArg(index)" 
-                class="p-2 rounded-full bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                class="btn btn-icon btn-danger-ghost"
                 :disabled="pluginArgs.length === 1"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -41,7 +41,7 @@
             </div>
           </div>
           
-          <button @click="addPluginArg" class="mt-3 flex items-center text-sm text-blue-600 hover:text-blue-700 transition-colors">
+          <button @click="addPluginArg" class="btn btn-secondary-ghost btn-sm mt-3">
             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
             </svg>
@@ -95,13 +95,13 @@
       <div class="px-6 py-4 border-t flex justify-end space-x-3">
         <button 
           @click="runTest" 
-          class="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors text-base focus:outline-none focus:ring-2 focus:ring-blue-300 flex items-center"
+          class="btn btn-test-plugin btn-md"
           :disabled="testLoading"
         >
-          <span v-if="testLoading" class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>
-          <span>{{ testLoading ? 'Running...' : 'Run Test' }}</span>
+          <span v-if="testLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
+          {{ testLoading ? 'Running...' : 'Run Test' }}
         </button>
-        <button @click="closeModal" class="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 rounded transition-colors text-base">
+        <button @click="closeModal" class="btn btn-secondary btn-md">
           Close
         </button>
       </div>

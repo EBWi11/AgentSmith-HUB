@@ -135,6 +135,46 @@ func (p *Plugin) yaegiLoad() error {
 	}
 
 	p.f = reflect.ValueOf(v.Interface())
+
+	// Validate function signature
+	err = p.validateFunctionSignature()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateFunctionSignature checks if the plugin Eval function has the correct signature
+func (p *Plugin) validateFunctionSignature() error {
+	if !p.f.IsValid() {
+		return fmt.Errorf("plugin function is not valid")
+	}
+
+	funcType := p.f.Type()
+	if funcType.Kind() != reflect.Func {
+		return fmt.Errorf("plugin Eval is not a function")
+	}
+
+	// Check number of return values
+	numOut := funcType.NumOut()
+	if numOut != 2 {
+		return fmt.Errorf("plugin Eval function must return exactly 2 values (bool, error), but returns %d values", numOut)
+	}
+
+	// Check first return type (should be bool)
+	firstReturnType := funcType.Out(0)
+	if firstReturnType.Kind() != reflect.Bool {
+		return fmt.Errorf("plugin Eval function first return value must be bool, but is %s", firstReturnType.String())
+	}
+
+	// Check second return type (should be error)
+	secondReturnType := funcType.Out(1)
+	errorInterface := reflect.TypeOf((*error)(nil)).Elem()
+	if !secondReturnType.Implements(errorInterface) {
+		return fmt.Errorf("plugin Eval function second return value must be error, but is %s", secondReturnType.String())
+	}
+
 	return nil
 }
 

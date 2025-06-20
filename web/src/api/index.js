@@ -616,13 +616,8 @@ export const hubApi = {
       
       if (raw !== undefined) {
         const response = await api.post(`/verify/${type}/${id}`, { raw });
-        // Ensure consistent response format
-        return {
-          data: {
-            valid: response.data?.valid === true,
-            error: response.data?.error || null
-          }
-        };
+        // Return the complete response data to preserve detailed error information
+        return response;
       } else {
         // If raw is not provided, get component and validate
         let componentData;
@@ -661,41 +656,22 @@ export const hubApi = {
         }
         
         const response = await api.post(`/verify/${type}/${id}`, { raw: componentData.raw });
-        // Ensure consistent response format
-        return {
-          data: {
-            valid: response.data?.valid === true,
-            error: response.data?.error || null
-          }
-        };
+        // Return the complete response data to preserve detailed error information
+        return response;
       }
     } catch (error) {
-      // Provide more detailed error information
-      let errorMessage = 'Unknown verification error';
-      
-      if (error.response && error.response.data) {
-        errorMessage = error.response.data.error || 'Server returned an error';
-        
-        // If there are detailed validation failure information
-        if (error.response.data.verify_failures) {
-          return {
-            data: {
-              valid: false,
-              error: errorMessage,
-              verify_failures: error.response.data.verify_failures
-            }
-          };
-        }
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
       console.error('Verification API error:', error);
       
+      // If this is an HTTP error with response data, return it as-is to preserve structure
+      if (error.response && error.response.data) {
+        return error.response;
+      }
+      
+      // For other errors, return a simple error structure
       return {
         data: {
           valid: false,
-          error: errorMessage
+          error: error.message || 'Unknown verification error'
         }
       };
     }

@@ -93,13 +93,13 @@
       <div class="flex justify-end mt-6 space-x-3">
         <button 
           @click="runTest" 
-          class="px-5 py-2.5 bg-primary text-white rounded hover:bg-primary-dark transition-colors flex items-center space-x-2 text-base"
+          class="btn btn-test-output btn-md"
           :disabled="testLoading"
         >
-          <span v-if="testLoading" class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-          <span>Run Test</span>
+          <span v-if="testLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
+          Run Test
         </button>
-        <button @click="closeModal" class="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 rounded transition-colors text-base">
+        <button @click="closeModal" class="btn btn-secondary btn-md">
           Close
         </button>
       </div>

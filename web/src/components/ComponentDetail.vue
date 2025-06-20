@@ -4,13 +4,13 @@
   
   <!-- Create Mode -->
   <div v-else-if="props.item && props.item.isNew" class="h-full flex flex-col">
-    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveNew(content)" />
+    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Test Buttons -->
       <button 
         v-if="isRuleset"
         @click="showTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-ruleset btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -18,19 +18,9 @@
         Test Ruleset
       </button>
       <button 
-        v-if="isOutput"
-        @click="showOutputTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
-      >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        Test Output
-      </button>
-      <button 
         v-if="isProject"
         @click="showProjectTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-project btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -40,7 +30,7 @@
       <button 
         v-if="isPlugin"
         @click="showPluginTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-plugin btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -52,14 +42,10 @@
       <button 
         v-if="isRuleset"
         @click="verifyRuleset" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -68,14 +54,10 @@
       <button 
         v-if="isOutput"
         @click="verifyOutput" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -84,14 +66,10 @@
       <button 
         v-if="isInput"
         @click="verifyInput" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -102,14 +80,10 @@
       <button 
         v-if="supportsConnectCheck"
         @click="connectCheck" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 hover:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-connect btn-md"
         :disabled="connectCheckLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': connectCheckLoading }"
       >
-        <svg v-if="connectCheckLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="connectCheckLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
@@ -118,15 +92,11 @@
       
       <!-- Save Button -->
       <button 
-        @click="() => saveNew()" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 transition-colors duration-200"
+        @click="saveNew" 
+        class="btn btn-primary btn-md"
         :disabled="saving"
-        :class="{ 'opacity-50 cursor-not-allowed': saving }"
       >
-        <svg v-if="saving" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="saving" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
         </svg>
@@ -140,44 +110,44 @@
   <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col relative">
     <!-- Floating Validation Status (for Rulesets, Plugins, Outputs, and Inputs) -->
     <div v-if="(isRuleset || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
-         class="absolute top-4 right-4 z-50 max-w-md bg-white border border-gray-200 rounded-lg shadow-lg">
+         class="absolute top-4 right-4 z-50 max-w-md bg-white/95 border border-gray-200/60 rounded-xl shadow-2xl backdrop-blur-md">
       <!-- Validation Errors -->
-      <div v-if="validationResult.errors.length > 0" class="validation-errors p-3 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-t-lg">
-        <div class="flex justify-between items-start mb-2">
-          <h3 class="font-bold text-sm">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Errors</h3>
-          <button @click="showValidationPanel = false" class="text-red-400 hover:text-red-600 ml-2">
+      <div v-if="validationResult.errors.length > 0" class="validation-errors p-4 bg-red-50/60 border-l-4 border-red-400/70 text-red-800 rounded-t-xl backdrop-blur-sm">
+        <div class="flex justify-between items-start mb-3">
+          <h3 class="font-semibold text-sm text-red-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Errors</h3>
+          <button @click="showValidationPanel = false" class="text-red-400 hover:text-red-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
           </button>
         </div>
-        <ul class="text-xs">
-          <li v-for="(error, index) in validationResult.errors" :key="index" class="mb-1">
-            <span class="font-semibold">Line {{ error.line }}:</span> 
-            {{ error.message }}
-            <span v-if="error.detail" class="block ml-4 text-red-600 italic">{{ error.detail }}</span>
+        <ul class="text-xs space-y-1">
+          <li v-for="(error, index) in validationResult.errors" :key="index" class="flex flex-col">
+            <span class="font-medium text-red-900">Line {{ error.line }}:</span> 
+            <span class="text-red-700 ml-1">{{ error.message }}</span>
+            <span v-if="error.detail" class="text-red-600 text-xs mt-1 ml-4 italic opacity-80">{{ error.detail }}</span>
           </li>
         </ul>
       </div>
 
       <!-- Validation Warnings -->
       <div v-if="validationResult.warnings.length > 0" 
-           class="validation-warnings p-3 bg-yellow-50 border-l-4 border-yellow-500 text-yellow-700"
-           :class="{ 'rounded-t-lg': validationResult.errors.length === 0, 'rounded-b-lg': true }">
-        <div v-if="validationResult.errors.length === 0" class="flex justify-between items-start mb-2">
-          <h3 class="font-bold text-sm">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
-          <button @click="showValidationPanel = false" class="text-yellow-400 hover:text-yellow-600 ml-2">
+           class="validation-warnings p-4 bg-amber-50/60 border-l-4 border-amber-400/70 text-amber-800 backdrop-blur-sm"
+           :class="{ 'rounded-t-xl': validationResult.errors.length === 0, 'rounded-b-xl': true }">
+        <div v-if="validationResult.errors.length === 0" class="flex justify-between items-start mb-3">
+          <h3 class="font-semibold text-sm text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
+          <button @click="showValidationPanel = false" class="text-amber-400 hover:text-amber-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
           </button>
         </div>
-        <h3 v-else class="font-bold text-sm mb-2">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
-        <ul class="text-xs">
-          <li v-for="(warning, index) in validationResult.warnings" :key="index" class="mb-1">
-            <span class="font-semibold">Line {{ warning.line }}:</span> 
-            {{ warning.message }}
-            <span v-if="warning.detail" class="block ml-4 text-yellow-600 italic">{{ warning.detail }}</span>
+        <h3 v-else class="font-semibold text-sm mb-3 text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
+        <ul class="text-xs space-y-1">
+          <li v-for="(warning, index) in validationResult.warnings" :key="index" class="flex flex-col">
+            <span class="font-medium text-amber-900">Line {{ warning.line }}:</span> 
+            <span class="text-amber-700 ml-1">{{ warning.message }}</span>
+            <span v-if="warning.detail" class="text-amber-600 text-xs mt-1 ml-4 italic opacity-80">{{ warning.detail }}</span>
           </li>
         </ul>
       </div>
@@ -188,7 +158,7 @@
          class="absolute top-4 right-4 z-50">
       <button @click="showValidationPanel = true" 
               class="flex items-center space-x-1 px-2 py-1 rounded-full text-white text-xs shadow-lg transition-all hover:scale-105"
-              :class="validationResult.errors.length > 0 ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500 hover:bg-yellow-600'">
+              :class="validationResult.errors.length > 0 ? 'bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700' : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'">
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
@@ -196,12 +166,12 @@
       </button>
     </div>
     
-    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="content => saveEdit(content)" />
+    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Cancel Button -->
       <button 
         @click="cancelEdit" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-secondary btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -213,7 +183,7 @@
       <button 
         v-if="isRuleset"
         @click="showTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-ruleset btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -221,19 +191,9 @@
         Test Ruleset
       </button>
       <button 
-        v-if="isOutput"
-        @click="showOutputTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
-      >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-        </svg>
-        Test Output
-      </button>
-      <button 
         v-if="isProject"
         @click="showProjectTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-project btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -243,7 +203,7 @@
       <button 
         v-if="isPlugin"
         @click="showPluginTestModal = true" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-test-plugin btn-md"
       >
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -255,14 +215,10 @@
       <button 
         v-if="isRuleset"
         @click="verifyRuleset" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -271,14 +227,10 @@
       <button 
         v-if="isProject"
         @click="verifyProject" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -287,14 +239,10 @@
       <button 
         v-if="isPlugin"
         @click="verifyPlugin" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -303,14 +251,10 @@
       <button 
         v-if="isOutput"
         @click="verifyOutput" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -319,14 +263,10 @@
       <button 
         v-if="isInput"
         @click="verifyInput" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-verify btn-md"
         :disabled="verifyLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': verifyLoading }"
       >
-        <svg v-if="verifyLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -337,14 +277,10 @@
       <button 
         v-if="supportsConnectCheck"
         @click="connectCheck" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 border border-purple-200 rounded-md hover:bg-purple-100 hover:border-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 transition-colors duration-200"
+        class="btn btn-connect btn-md"
         :disabled="connectCheckLoading"
-        :class="{ 'opacity-50 cursor-not-allowed': connectCheckLoading }"
       >
-        <svg v-if="connectCheckLoading" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="connectCheckLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
@@ -353,15 +289,11 @@
       
       <!-- Save Button -->
       <button 
-        @click="() => saveEdit()" 
-        class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 transition-colors duration-200"
+        @click="saveEdit" 
+        class="btn btn-primary btn-md"
         :disabled="saving"
-        :class="{ 'opacity-50 cursor-not-allowed': saving }"
       >
-        <svg v-if="saving" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
+        <span v-if="saving" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
         <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
         </svg>
@@ -397,14 +329,10 @@
           <button 
             v-if="detail.status === 'stopped'"
             @click="startProject"
-            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 hover:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors duration-200"
+            class="btn btn-start btn-sm"
             :disabled="projectOperationLoading"
-            :class="{ 'opacity-50 cursor-not-allowed': projectOperationLoading }"
           >
-            <svg v-if="projectOperationLoading" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
             <svg v-else class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -415,14 +343,10 @@
           <button 
             v-if="detail.status === 'running'"
             @click="stopProject"
-            class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 hover:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 transition-colors duration-200"
+            class="btn btn-stop btn-sm"
             :disabled="projectOperationLoading"
-            :class="{ 'opacity-50 cursor-not-allowed': projectOperationLoading }"
           >
-            <svg v-if="projectOperationLoading" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
             <svg v-else class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
@@ -433,10 +357,10 @@
           <button 
             v-if="detail.status === 'running'"
             @click="restartProject"
-            class="px-3 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-yellow-500 flex items-center space-x-1.5"
+            class="btn btn-restart btn-sm"
             :disabled="projectOperationLoading"
           >
-            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
             <svg v-else class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
@@ -456,7 +380,7 @@
         <!-- Refresh button -->
         <button 
           @click="refreshComponent"
-          class="px-2 py-1 mr-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors duration-150 focus:outline-none"
+          class="btn btn-icon btn-secondary-ghost mr-2"
           :disabled="loading"
           title="Refresh"
         >
@@ -469,7 +393,7 @@
           <button 
             v-if="isRuleset"
             @click="showTestModal = true"
-            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+            class="btn btn-test-ruleset btn-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -477,19 +401,9 @@
             <span>Test Ruleset</span>
           </button>
           <button 
-            v-if="isOutput"
-            @click="showOutputTestModal = true"
-            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <span>Test Output</span>
-          </button>
-          <button 
             v-if="isPlugin"
             @click="showPluginTestModal = true"
-            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+            class="btn btn-test-plugin btn-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -499,10 +413,10 @@
           <button 
             v-if="isProject"
             @click="verifyProject"
-            class="px-3 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-green-500 flex items-center space-x-1.5 mr-2"
+            class="btn btn-verify btn-sm mr-2"
             :disabled="verifyLoading"
           >
-            <span v-if="verifyLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin"></span>
+            <span v-if="verifyLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
             <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -511,7 +425,7 @@
           <button 
             v-if="isProject"
             @click="showProjectTestModal = true"
-            class="px-3 py-1.5 bg-indigo-500 text-white text-sm rounded hover:bg-indigo-600 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-indigo-500 flex items-center space-x-1.5"
+            class="btn btn-test-project btn-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -524,10 +438,6 @@
     <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" />
   </div>
 
-  <div v-else class="flex items-center justify-center h-full text-gray-400 text-lg">
-    No content available
-  </div>
-
   <!-- Test Modal -->
   <RulesetTestModal 
     v-if="props.item && props.item.type === 'rulesets'" 
@@ -536,12 +446,7 @@
     :rulesetContent="props.item?.isEdit ? editorValue : null"
     @close="showTestModal = false" 
   />
-  <OutputTestModal
-    v-if="props.item && props.item.type === 'outputs'"
-    :show="showOutputTestModal"
-    :outputId="props.item?.id"
-    @close="showOutputTestModal = false"
-  />
+
   <PluginTestModal
     v-if="props.item && props.item.type === 'plugins'"
     :show="showPluginTestModal"
@@ -568,11 +473,11 @@
       <p class="mb-4 text-sm text-gray-600">{{ projectWarningMessage }}</p>
       
       <div class="flex justify-end space-x-3">
-        <button @click="closeProjectWarningModal" class="px-3 py-1.5 border border-gray-300 text-gray-700 text-sm rounded hover:bg-gray-50">
+        <button @click="closeProjectWarningModal" class="btn btn-secondary btn-sm">
           Cancel
         </button>
-        <button @click="continueProjectOperation" class="px-3 py-1.5 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600" :disabled="projectOperationLoading">
-          <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-white border-t-transparent rounded-full animate-spin mr-1"></span>
+        <button @click="continueProjectOperation" class="btn btn-warning btn-sm" :disabled="projectOperationLoading">
+          <span v-if="projectOperationLoading" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
           Continue Anyway
         </button>
       </div>
@@ -586,7 +491,6 @@ import { hubApi } from '../api'
 import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
-import OutputTestModal from './OutputTestModal.vue'
 import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
 import { useStore } from 'vuex'
@@ -660,7 +564,6 @@ const supportsConnectCheck = computed(() => {
 
 // Test modal state
 const showTestModal = ref(false)
-const showOutputTestModal = ref(false)
 const showPluginTestModal = ref(false)
 const showProjectTestModal = ref(false)
 
@@ -693,6 +596,8 @@ watch(
     if (!newVal) {
       detail.value = null;
       errorLines.value = [];
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      showValidationPanel.value = false;
       return;
     }
     
@@ -706,13 +611,19 @@ watch(
       detail.value = null;
       editorValue.value = getTemplateForComponent(newVal.type, newVal.id);
       errorLines.value = [];
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      showValidationPanel.value = false;
     } else if (newVal && newVal.isEdit) {
       fetchDetail(newVal, true);
       errorLines.value = [];
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      showValidationPanel.value = false;
     } else if (newVal && (typeChanged || idChanged || timestampChanged || editModeChanged)) {
       // If component ID, type, timestamp or edit mode changes, refresh details
       fetchDetail(newVal);
       errorLines.value = [];
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      showValidationPanel.value = false;
     }
   },
   { immediate: true, deep: true }
@@ -830,7 +741,7 @@ async function fetchDetail(item, forEdit = false) {
       })
     }
     
-    // 如果是ruleset，进行后端验证
+    // 如果是ruleset，进行后端验证（初始加载时静默验证）
     if (item.type === 'rulesets' && data.raw) {
       try {
         const response = await hubApi.verifyComponent(item.type, item.id, data.raw);
@@ -879,8 +790,8 @@ async function fetchDetail(item, forEdit = false) {
   }
 }
 
-// Add validation function (now using backend validation)
-const validateRuleset = async () => {
+// Real-time validation function (no messages, silent)
+const validateRulesetRealtime = async () => {
   if (isRuleset.value && editorValue.value && props.item?.id) {
     try {
       const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
@@ -903,7 +814,26 @@ const validateRuleset = async () => {
           showValidationPanel.value = false;
         }
         
+
         return response.data.valid || false;
+      } else if (response.data && response.data.hasOwnProperty('valid')) {
+        // Handle simple valid/invalid response
+        if (response.data.valid) {
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        } else {
+          // For invalid responses without detailed errors, show generic error
+          const errorMessage = response.data.error || 'Validation failed';
+          validationResult.value = {
+            isValid: false,
+            errors: [{ line: 'Unknown', message: errorMessage }],
+            warnings: []
+          };
+          errorLines.value = [];
+          showValidationPanel.value = true;
+        }
+        return response.data.valid;
       } else {
         // Clear validation
         validationResult.value = { isValid: true, errors: [], warnings: [] };
@@ -912,8 +842,10 @@ const validateRuleset = async () => {
         return true;
       }
     } catch (error) {
-      console.warn('Validation request failed:', error);
-      // Don't show errors for real-time validation failures
+      // Clear validation errors when validation request fails
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      errorLines.value = [];
+      showValidationPanel.value = false;
       return true;
     }
   }
@@ -928,8 +860,8 @@ watch(editorValue, (newContent) => {
     // Debounce ruleset validation to avoid excessive API calls
     clearTimeout(rulesetValidationTimeout.value);
     rulesetValidationTimeout.value = setTimeout(async () => {
-      await validateRuleset();
-    }, 1000); // Wait 1 second after user stops typing
+      await validateRulesetRealtime();
+    }, 800); // Wait 800ms after user stops typing for faster feedback
   } else if (isPlugin.value && newContent && props.item?.isEdit) {
     // Auto-verify plugin code changes, but with debouncing to avoid excessive API calls
     clearTimeout(pluginVerifyTimeout.value)
@@ -1473,8 +1405,13 @@ async function autoVerifyPlugin() {
 
 // Perform initial validation when component is mounted
 onMounted(async () => {
+  // Clear any previous validation state first
+  validationResult.value = { isValid: true, errors: [], warnings: [] };
+  errorLines.value = [];
+  showValidationPanel.value = false;
+  
   if (isRuleset.value && editorValue.value) {
-    await validateRuleset()
+    await validateRulesetRealtime()
   }
   
   // If component type is project, fetch all components list
@@ -1498,7 +1435,7 @@ async function saveEdit(content) {
   
   // Validate ruleset using XML validator
   if (isRuleset.value) {
-    const isValid = validateRuleset()
+    const isValid = await validateRulesetRealtime()
     if (!isValid && !confirm('Ruleset contains validation errors. Save anyway?')) {
       return
     }
@@ -1615,7 +1552,7 @@ async function saveNew(content) {
   
   // Validate ruleset using XML validator
   if (isRuleset.value) {
-    const isValid = validateRuleset()
+    const isValid = await validateRulesetRealtime()
     if (!isValid && !confirm('Ruleset contains validation errors. Create anyway?')) {
       return
     }
@@ -1648,28 +1585,8 @@ async function saveNew(content) {
       }
     }
     
-    // Save new component
-    const response = await hubApi.saveNew(currentItem.type, currentItem.id, contentToSave)
-    
-    // Add a small delay to ensure backend has processed the save
-    await new Promise(resolve => setTimeout(resolve, 200))
-    
-    // Force refresh by clearing current detail first
-    detail.value = null
-    editorValue.value = ''
-    
-    // Refresh component content after successful save but stay in edit mode
-    await fetchDetail(currentItem, true)
-    
-    // If still no content, try fetching the original file
-    if (!detail.value || !detail.value.raw) {
-      console.log('No content after edit mode fetch, trying view mode...')
-      await fetchDetail(currentItem, false)
-      if (detail.value && detail.value.raw) {
-        editorValue.value = detail.value.raw
-        originalContent.value = detail.value.raw
-      }
-    }
+    // Create new component
+    const response = await hubApi.createComponent(currentItem.type, currentItem.id, contentToSave)
     
     // Post-save verification
     try {
@@ -1980,9 +1897,195 @@ async function refreshComponent() {
   await fetchDetail(props.item)
   $message?.success?.('Component refreshed')
 }
+
+// Mount hook for initial setup
+onMounted(async () => {
+  if (props.item) {
+    if (props.item.isNew) {
+      detail.value = null;
+      editorValue.value = getTemplateForComponent(props.item.type, props.item.id);
+    } else if (props.item.isEdit || !props.item.isEdit) {
+      await fetchDetail(props.item, props.item.isEdit);
+      
+      if (isRuleset.value && editorValue.value) {
+        await validateRulesetRealtime()
+      }
+    }
+    
+    if (isProject.value) {
+      setupStatusRefresh();
+    }
+  }
+});
 </script> 
 
 <style scoped>
+/* Modern Button Color Overrides - Professional Tech Theme */
+
+/* Test Buttons - Different colors for each component type */
+button[v-if="isRuleset"] svg path {
+  stroke: currentColor;
+}
+
+/* Test Ruleset Button - Sophisticated Purple */
+.btn-test-ruleset {
+  background: linear-gradient(135deg, #f3f4f6 0%, #ede9fe 100%);
+  border-color: #c4b5fd;
+  color: #6d28d9;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-test-ruleset:hover {
+  background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%);
+  border-color: #a78bfa;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+
+/* Test Project Button - Modern Cyan */
+.btn-test-project {
+  background: linear-gradient(135deg, #ecfeff 0%, #a7f3d0 100%) !important;
+  border-color: #67e8f9 !important;
+  color: #0891b2 !important;
+}
+
+.btn-test-project:hover {
+  background: linear-gradient(135deg, #a7f3d0 0%, #22d3ee 100%) !important;
+  border-color: #06b6d4 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.2) !important;
+}
+
+/* Test Plugin Button - Modern Indigo */
+.btn-test-plugin {
+  background: linear-gradient(135deg, #eef2ff 0%, #c7d2fe 100%) !important;
+  border-color: #a5b4fc !important;
+  color: #4338ca !important;
+}
+
+.btn-test-plugin:hover {
+  background: linear-gradient(135deg, #c7d2fe 0%, #818cf8 100%) !important;
+  border-color: #6366f1 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2) !important;
+}
+
+/* Verify Buttons - Enhanced Green Theme */
+.btn-verify {
+  background: linear-gradient(135deg, #ecfdf5 0%, #a7f3d0 100%) !important;
+  border-color: #6ee7b7 !important;
+  color: #047857 !important;
+  border-radius: 0.5rem !important;
+}
+
+.btn-verify:hover {
+  background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%) !important;
+  border-color: #10b981 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2) !important;
+}
+
+/* Connect Check Button - Modern Purple */
+.btn-connect {
+  background: linear-gradient(135deg, #faf5ff 0%, #ddd6fe 100%) !important;
+  border-color: #c4b5fd !important;
+  color: #7c3aed !important;
+  border-radius: 0.5rem !important;
+}
+
+.btn-connect:hover {
+  background: linear-gradient(135deg, #ddd6fe 0%, #a78bfa 100%) !important;
+  border-color: #8b5cf6 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.2) !important;
+}
+
+/* Save/Create/Update Buttons - Premium Gradient */
+button.bg-indigo-600 {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+  border: none !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.25) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button.bg-indigo-600:hover {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3) !important;
+}
+
+/* Cancel Button - Subtle Modern Gray */
+button.text-gray-700.bg-white {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%) !important;
+  border-color: #d1d5db !important;
+  color: #374151 !important;
+  border-radius: 0.5rem !important;
+}
+
+button.text-gray-700.bg-white:hover {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%) !important;
+  border-color: #9ca3af !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Project Control Buttons */
+button.text-emerald-600.bg-emerald-50 {
+  background: linear-gradient(135deg, #ecfdf5 0%, #a7f3d0 100%) !important;
+  border-color: #6ee7b7 !important;
+  color: #047857 !important;
+  border-radius: 0.5rem !important;
+}
+
+button.text-emerald-600.bg-emerald-50:hover {
+  background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%) !important;
+  border-color: #10b981 !important;
+}
+
+button.text-red-600.bg-red-50 {
+  background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%) !important;
+  border-color: #f87171 !important;
+  color: #dc2626 !important;
+  border-radius: 0.5rem !important;
+}
+
+button.text-red-600.bg-red-50:hover {
+  background: linear-gradient(135deg, #fecaca 0%, #f87171 100%) !important;
+  border-color: #ef4444 !important;
+}
+
+/* Add subtle animations to all buttons */
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+/* Disabled button states */
+button:disabled {
+  opacity: 0.6 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Enhanced focus states for accessibility */
+button:focus {
+  outline: none !important;
+  ring: 2px solid currentColor !important;
+  ring-opacity: 0.3 !important;
+  ring-offset: 2px !important;
+}
 
 /* 验证错误和警告样式 */
 .validation-errors, .validation-warnings {

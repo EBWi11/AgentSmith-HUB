@@ -7,21 +7,21 @@
         <button 
           @click="refreshChanges" 
           :disabled="loading"
-          class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          class="btn btn-secondary btn-sm"
         >
           Refresh
         </button>
         <button 
           @click="verifyChanges" 
           :disabled="!changes.length || verifying"
-          class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          class="btn btn-verify btn-sm"
         >
           {{ verifying ? 'Verifying...' : 'Verify' }}
         </button>
         <button 
           @click="loadAllChanges" 
           :disabled="!changes.length || loading"
-          class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          class="btn btn-primary btn-sm"
         >
           {{ loading ? 'Loading...' : 'Load All Changes' }}
         </button>
@@ -64,7 +64,7 @@
                 v-if="change.has_local"
                 @click="verifySingleChange(change)" 
                 :disabled="verifying"
-                class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                class="btn btn-verify btn-xs"
               >
                 Verify
               </button>
@@ -450,9 +450,9 @@ function getChangeStatusLabel(change) {
 
 function getLoadButtonClass(change) {
   if (!change.has_local && change.has_memory) {
-    return 'px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50'
+    return 'btn btn-danger btn-xs'
   } else {
-    return 'px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
+    return 'btn btn-primary btn-xs'
   }
 }
 

@@ -98,40 +98,139 @@ function setupMonacoTheme() {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'tag', foreground: '005cc5' },
-      { token: 'attribute.name', foreground: '6f42c1' },
-      { token: 'attribute.value', foreground: 'd73a49' },
-      { token: 'string', foreground: 'd73a49' },
-      { token: 'number', foreground: '005cc5' },
-      { token: 'keyword', foreground: 'd73a49' },
-      { token: 'property', foreground: '005cc5' },
-      { token: 'comment', foreground: '6a737d', fontStyle: 'italic' },
-      { token: 'variable', foreground: 'e36209' },
-      { token: 'type', foreground: '6f42c1' },
-      // Project component reference keywords - INPUT/OUTPUT/RULESET
-      { token: 'project.component', foreground: '0366d6', fontStyle: 'bold' },
-      { token: 'project.input', foreground: '28a745', fontStyle: 'bold' },
-      { token: 'project.output', foreground: 'e36209', fontStyle: 'bold' },
-      { token: 'project.ruleset', foreground: '6f42c1', fontStyle: 'bold' },
+      // XML/HTML tags - modern blue-purple gradient
+      { token: 'tag', foreground: '0969da', fontStyle: 'bold' },
+      { token: 'tag.xml', foreground: '0969da', fontStyle: 'bold' },
+      
+      // Attributes - sophisticated purple
+      { token: 'attribute.name', foreground: '8250df' },
+      { token: 'attribute.name.xml', foreground: '8250df' },
+      { token: 'attribute.value', foreground: '0a3069' },
+      { token: 'attribute.value.xml', foreground: '0a3069' },
+      
+      // Strings - warm emerald green
+      { token: 'string', foreground: '116329' },
+      { token: 'string.xml', foreground: '116329' },
+      
+      // Numbers - tech blue
+      { token: 'number', foreground: '0550ae' },
+      
+      // Keywords - accent orange-red
+      { token: 'keyword', foreground: 'cf222e', fontStyle: 'bold' },
+      
+      // Properties - professional blue
+      { token: 'property', foreground: '0969da' },
+      
+      // Comments - sophisticated gray with italic
+      { token: 'comment', foreground: '656d76', fontStyle: 'italic' },
+      
+      // Variables - amber for distinction
+      { token: 'variable', foreground: 'bf8700' },
+      
+      // Types - modern purple
+      { token: 'type', foreground: '8250df', fontStyle: 'bold' },
+      
+      // Project component reference keywords - distinct modern colors
+      { token: 'project.component', foreground: '0969da', fontStyle: 'bold' },
+      { token: 'project.input', foreground: '1a7f37', fontStyle: 'bold' },    // Rich green
+      { token: 'project.output', foreground: 'd1242f', fontStyle: 'bold' },   // Modern red
+      { token: 'project.ruleset', foreground: '8250df', fontStyle: 'bold' },  // Deep purple
+      
+      // YAML specific tokens
+      { token: 'key', foreground: '0969da', fontStyle: 'bold' },
+      { token: 'delimiter.colon', foreground: '656d76' },
+      { token: 'delimiter.dash', foreground: '656d76' },
+      
+      // Go language tokens
+      { token: 'keyword.go', foreground: 'cf222e', fontStyle: 'bold' },
+      { token: 'type.go', foreground: '8250df', fontStyle: 'bold' },
+      { token: 'function.go', foreground: '6639ba' },
     ],
     colors: {
-      'editor.foreground': '#24292e',
-      'editor.background': '#f8f9fa',
-      'editor.lineHighlightBackground': '#f1f3f4',
-      'editorLineNumber.foreground': '#d1d9e0',
-      'editorActiveLineNumber.foreground': '#24292e',
-      'editor.selectionBackground': '#c8e1ff',
-      'editor.inactiveSelectionBackground': '#e5f0ff',
-      'editorCursor.foreground': '#24292e',
-      'editorError.foreground': '#d73a49',
-      'editorWarning.foreground': '#f66a0a',
-      'editorGutter.background': '#f8f9fa',
-      'editorGutter.addedBackground': '#28a745',
-      'editorGutter.deletedBackground': '#d73a49',
-      'editorGutter.modifiedBackground': '#2188ff',
-      'scrollbarSlider.background': '#959da533',
-      'scrollbarSlider.hoverBackground': '#959da544',
-      'scrollbarSlider.activeBackground': '#959da588',
+      // Editor background - clean modern white with subtle warmth
+      'editor.background': '#fafbfc',
+      'editor.foreground': '#1f2328',
+      
+      // Line highlighting - minimal and subtle
+      'editor.lineHighlightBackground': '#f6f8fa',
+      'editor.lineHighlightBorder': '#d1d9e0',
+      
+      // Line numbers - modern contrast
+      'editorLineNumber.foreground': '#8c959f',
+      'editorLineNumber.activeForeground': '#1f2328',
+      'editorActiveLineNumber.foreground': '#1f2328',
+      
+      // Selection - sophisticated blue with transparency
+      'editor.selectionBackground': '#0969da20',
+      'editor.selectionHighlightBackground': '#0969da15',
+      'editor.inactiveSelectionBackground': '#0969da10',
+      
+      // Cursor - professional dark
+      'editorCursor.foreground': '#1f2328',
+      
+      // Error and warning colors - softer but still visible
+      'editorError.foreground': '#d1242f',
+      'editorError.background': '#fff5f5',
+      'editorWarning.foreground': '#bf8700',
+      'editorWarning.background': '#fffdf0',
+      'editorInfo.foreground': '#0969da',
+      
+      // Gutter - clean and minimal
+      'editorGutter.background': '#fafbfc',
+      'editorGutter.addedBackground': '#1a7f37',
+      'editorGutter.deletedBackground': '#d1242f',
+      'editorGutter.modifiedBackground': '#0969da',
+      
+      // Scrollbar - subtle and modern
+      'scrollbarSlider.background': '#8c959f22',
+      'scrollbarSlider.hoverBackground': '#8c959f33',
+      'scrollbarSlider.activeBackground': '#8c959f44',
+      
+      // Minimap
+      'minimap.background': '#f6f8fa',
+      'minimap.selectionHighlight': '#0969da30',
+      'minimap.errorHighlight': '#d1242f40',
+      'minimap.warningHighlight': '#bf870040',
+      
+      // Find/replace widget
+      'editorWidget.background': '#ffffff',
+      'editorWidget.border': '#d1d9e0',
+      'editorWidget.foreground': '#1f2328',
+      
+      // Suggest widget (autocomplete)
+      'editorSuggestWidget.background': '#ffffff',
+      'editorSuggestWidget.border': '#d1d9e0',
+      'editorSuggestWidget.foreground': '#1f2328',
+      'editorSuggestWidget.selectedBackground': '#0969da15',
+      'editorSuggestWidget.highlightForeground': '#0969da',
+      
+      // Hover widget
+      'editorHoverWidget.background': '#ffffff',
+      'editorHoverWidget.border': '#d1d9e0',
+      'editorHoverWidget.foreground': '#1f2328',
+      
+      // Overview ruler
+      'editorOverviewRuler.border': '#d1d9e0',
+      'editorOverviewRuler.errorForeground': '#d1242f60',
+      'editorOverviewRuler.warningForeground': '#bf870060',
+      'editorOverviewRuler.infoForeground': '#0969da60',
+      
+      // Bracket match
+      'editorBracketMatch.background': '#0969da20',
+      'editorBracketMatch.border': '#0969da',
+      
+      // Indent guides
+      'editorIndentGuide.background': '#d1d9e0',
+      'editorIndentGuide.activeBackground': '#8c959f',
+      
+      // Rulers
+      'editorRuler.foreground': '#d1d9e0',
+      
+      // Code lens
+      'editorCodeLens.foreground': '#656d76',
+      
+      // Link
+      'editorLink.activeForeground': '#0969da',
     }
   });
   
@@ -3311,17 +3410,18 @@ defineExpose({
   font-weight: bold !important;
 }
 
-/* 错误行样式 */
+/* 错误行样式 - 柔和现代风格 */
 .monaco-error-line {
-  background-color: rgba(255, 0, 0, 0.2) !important;
-  border-left: 3px solid #e74c3c !important;
+  background-color: rgba(209, 36, 47, 0.08) !important;  /* 极淡的现代红色背景 */
+  border-left: 2px solid rgba(209, 36, 47, 0.4) !important;  /* 更细更淡的边框 */
+  box-shadow: inset 0 0 0 1px rgba(209, 36, 47, 0.05) !important;  /* 细微边框效果 */
 }
 
 .monaco-error-line-decoration {
-  background-color: #e74c3c !important;
-  width: 5px !important;
-  margin-left: 2px !important;
-  border-radius: 2px !important;
+  background-color: rgba(209, 36, 47, 0.6) !important;  /* 柔和的装饰颜色 */
+  width: 3px !important;
+  margin-left: 3px !important;
+  border-radius: 1px !important;
 }
 
 /* Diff编辑器样式优化 */

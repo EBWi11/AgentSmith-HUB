@@ -251,11 +251,11 @@
           />
         </div>
         <div class="flex justify-end space-x-3">
-          <button @click="closeAddModal" class="px-3 py-1 text-sm text-gray-500">Cancel</button>
+          <button @click="closeAddModal" class="btn btn-secondary btn-sm">Cancel</button>
           <button 
             @click="confirmAddName" 
             :disabled="!addName || !addName.trim()"
-            class="px-3 py-1 bg-blue-500 text-white text-sm rounded disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            class="btn btn-primary btn-sm"
           >
             Create
           </button>
@@ -397,7 +397,7 @@
         </div>
         
         <div class="flex justify-end mt-4">
-          <button @click="closeConnectionModal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+          <button @click="closeConnectionModal" class="btn btn-secondary btn-md">Close</button>
         </div>
       </div>
     </div>
@@ -448,7 +448,8 @@
         <div class="mb-4">
           <button 
             @click="testPlugin" 
-            class="w-full py-2 bg-primary text-white rounded-md hover:bg-primary-dark transition-colors flex items-center justify-center"
+            class="btn btn-test-plugin btn-md w-full"
+            :class="{ 'btn-loading': testPluginLoading }"
             :disabled="testPluginLoading"
           >
             <span v-if="!testPluginLoading">Test Plugin</span>
@@ -476,7 +477,7 @@
         </div>
         
         <div class="flex justify-end mt-4">
-          <button @click="closeTestPluginModal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm transition">Close</button>
+          <button @click="closeTestPluginModal" class="btn btn-secondary btn-md">Close</button>
         </div>
       </div>
     </div>

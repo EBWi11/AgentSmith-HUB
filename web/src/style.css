@@ -1,5 +1,437 @@
 @tailwind base;
 @tailwind components;
+
+/* ===========================
+   AgentSmith-HUB Button System
+   Modern, Professional, Consistent
+   =========================== */
+
+/* Base Button Style */
+.btn {
+  @apply inline-flex items-center justify-center font-medium transition-all duration-200 ease-in-out;
+  @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+  @apply disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none;
+  @apply relative overflow-hidden;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  user-select: none;
+}
+
+/* Button Sizes */
+.btn-xs {
+  @apply px-2 py-1 text-xs;
+  border-radius: 0.375rem;
+}
+
+.btn-sm {
+  @apply px-3 py-1.5 text-sm;
+  border-radius: 0.375rem;
+}
+
+.btn-md {
+  @apply px-4 py-2 text-sm;
+}
+
+.btn-lg {
+  @apply px-6 py-3 text-base;
+  border-radius: 0.625rem;
+}
+
+.btn-xl {
+  @apply px-8 py-4 text-lg;
+  border-radius: 0.75rem;
+}
+
+/* Primary Button - Modern Blue-Purple Gradient */
+.btn-primary {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.25);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.25);
+}
+
+.btn-primary:focus {
+  @apply ring-indigo-500;
+}
+
+/* Secondary Button - Modern Gray */
+.btn-secondary {
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  border: 1px solid #d1d5db;
+  color: #374151;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-color: #9ca3af;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary:focus {
+  @apply ring-gray-500;
+}
+
+/* Success Button - Modern Green */
+.btn-success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.25);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
+}
+
+.btn-success:focus {
+  @apply ring-emerald-500;
+}
+
+/* Warning Button - Modern Amber */
+.btn-warning {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.25);
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);
+}
+
+.btn-warning:focus {
+  @apply ring-amber-500;
+}
+
+/* Danger Button - Modern Red */
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.25);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:focus {
+  @apply ring-red-500;
+}
+
+/* Specialized Component Buttons */
+
+/* Test Ruleset - Purple */
+.btn-test-ruleset {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(139, 92, 246, 0.25);
+}
+
+.btn-test-ruleset:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.3);
+}
+
+/* Test Output - Orange */
+.btn-test-output {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(249, 115, 22, 0.25);
+}
+
+.btn-test-output:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
+}
+
+/* Test Project - Cyan */
+.btn-test-project {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(6, 182, 212, 0.25);
+}
+
+.btn-test-project:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(6, 182, 212, 0.3);
+}
+
+/* Test Plugin - Indigo */
+.btn-test-plugin {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.25);
+}
+
+.btn-test-plugin:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
+}
+
+/* Verify Button - Enhanced Green */
+.btn-verify {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.25);
+}
+
+.btn-verify:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
+}
+
+/* Connect Check Button - Purple */
+.btn-connect {
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(168, 85, 247, 0.25);
+}
+
+.btn-connect:hover:not(:disabled) {
+  background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(168, 85, 247, 0.3);
+}
+
+/* Ghost Buttons (Outlined) */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+.btn-ghost-primary {
+  @apply btn-ghost;
+  color: #4f46e5;
+  border-color: #4f46e5;
+}
+
+.btn-ghost-primary:hover:not(:disabled) {
+  background: #4f46e5;
+  color: white;
+  transform: translateY(-1px);
+}
+
+.btn-ghost-success {
+  @apply btn-ghost;
+  color: #10b981;
+  border-color: #10b981;
+}
+
+.btn-ghost-success:hover:not(:disabled) {
+  background: #10b981;
+  color: white;
+  transform: translateY(-1px);
+}
+
+.btn-ghost-danger {
+  @apply btn-ghost;
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.btn-ghost-danger:hover:not(:disabled) {
+  background: #ef4444;
+  color: white;
+  transform: translateY(-1px);
+}
+
+/* Icon Buttons */
+.btn-icon {
+  @apply p-2 rounded-full;
+  min-width: auto;
+}
+
+.btn-icon-sm {
+  @apply p-1.5;
+}
+
+.btn-icon-lg {
+  @apply p-3;
+}
+
+/* Loading State */
+.btn-loading {
+  @apply cursor-wait;
+}
+
+.btn-loading::before {
+  content: '';
+  @apply absolute inset-0 bg-white bg-opacity-20 rounded-lg;
+}
+
+/* Special Project Control Buttons */
+.btn-start {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.25);
+}
+
+.btn-start:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.3);
+}
+
+.btn-stop {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.25);
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(239, 68, 68, 0.3);
+}
+
+.btn-restart {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  border: none;
+  color: white;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.25);
+}
+
+.btn-restart:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);
+}
+
+/* Focus states for all buttons */
+.btn:focus {
+  @apply ring-2 ring-offset-2;
+}
+
+.btn-test-ruleset:focus,
+.btn-test-plugin:focus,
+.btn-primary:focus {
+  @apply ring-indigo-500;
+}
+
+.btn-test-output:focus {
+  @apply ring-orange-500;
+}
+
+.btn-test-project:focus {
+  @apply ring-cyan-500;
+}
+
+.btn-verify:focus,
+.btn-success:focus,
+.btn-start:focus {
+  @apply ring-emerald-500;
+}
+
+.btn-connect:focus {
+  @apply ring-purple-500;
+}
+
+.btn-danger:focus,
+.btn-stop:focus {
+  @apply ring-red-500;
+}
+
+.btn-warning:focus,
+.btn-restart:focus {
+  @apply ring-amber-500;
+}
+
+.btn-secondary:focus {
+  @apply ring-gray-500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .btn-lg {
+    @apply px-4 py-2 text-base;
+  }
+  
+  .btn-xl {
+    @apply px-6 py-3 text-lg;
+  }
+}
+
+/* Animation for loading buttons */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-loading svg {
+  animation: spin 1s linear infinite;
+}
+
+/* ===========================
+   USAGE GUIDE
+   =========================== 
+   
+   Basic Usage:
+   <button class="btn btn-primary btn-md">Primary Button</button>
+   <button class="btn btn-secondary btn-sm">Secondary Button</button>
+   
+   Component-Specific Buttons:
+   <button class="btn btn-test-ruleset btn-md">Test Ruleset</button>
+   <button class="btn btn-test-output btn-md">Test Output</button>
+   <button class="btn btn-test-project btn-md">Test Project</button>
+   <button class="btn btn-test-plugin btn-md">Test Plugin</button>
+   <button class="btn btn-verify btn-md">Verify</button>
+   <button class="btn btn-connect btn-md">Connect Check</button>
+   
+   Project Controls:
+   <button class="btn btn-start btn-md">Start</button>
+   <button class="btn btn-stop btn-md">Stop</button>
+   <button class="btn btn-restart btn-md">Restart</button>
+   
+   Sizes:
+   btn-xs, btn-sm, btn-md (default), btn-lg, btn-xl
+   
+   States:
+   - Add :disabled attribute for disabled state
+   - Add btn-loading class for loading state
+   
+   Icon Buttons:
+   <button class="btn btn-icon btn-primary">
+     <svg>...</svg>
+   </button>
+   
+   Ghost Buttons:
+   <button class="btn btn-ghost-primary btn-md">Ghost Button</button>
+   
+   =========================== */
+
 @tailwind utilities;
 
 .rounded-button {
