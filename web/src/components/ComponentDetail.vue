@@ -543,11 +543,8 @@ const statusRefreshInterval = ref(null)
 watch(
   () => props.item,
   (newVal, oldVal) => {
-    console.log('Item watch triggered:', { newVal, oldVal, preventRefetch: preventRefetch.value })
-    
     // Skip if we're preventing refetch (during save operations)
     if (preventRefetch.value) {
-      console.log('Skipping refetch due to preventRefetch flag')
       return
     }
     
@@ -605,12 +602,9 @@ function extractLineNumber(errorMessage) {
 
 // Methods
 async function fetchDetail(item, forEdit = false) {
-  console.log('fetchDetail called with:', { item, forEdit, itemId: item?.id, itemType: item?.type })
-  
   detail.value = null
   error.value = null
   if (!item || !item.id) {
-    console.log('fetchDetail: No item or item.id provided', item);
     return;
   }
   loading.value = true
@@ -618,12 +612,9 @@ async function fetchDetail(item, forEdit = false) {
     let data
     let tempInfo = null
     
-    console.log(`Fetching ${item.type} ${item.id}, forEdit: ${forEdit}`)
-    
     // If in edit mode, check for temporary file
     if (forEdit) {
       tempInfo = await hubApi.checkTemporaryFile(item.type, item.id);
-      console.log('Temporary file info:', tempInfo)
       
       // Don't automatically create temporary file - let the save operation handle it
       // This prevents creating unnecessary .new files when content is identical
@@ -665,14 +656,6 @@ async function fetchDetail(item, forEdit = false) {
         throw new Error(`Unsupported component type: ${item.type}`);
     }
     
-    console.log('Fetched data:', { 
-      hasData: !!data, 
-      hasRaw: !!data?.raw, 
-      rawLength: data?.raw?.length || 0,
-      path: data?.path,
-      isTemporary: data?.path?.endsWith('.new')
-    })
-    
     // Check if this is a temporary file
     if (data && data.path) {
       data.isTemporary = data.path.endsWith('.new');
@@ -683,7 +666,6 @@ async function fetchDetail(item, forEdit = false) {
       console.warn(`No content received for ${item.type} ${item.id}:`, data);
       // Try to fetch again without temporary file logic
       if (forEdit && tempInfo && tempInfo.hasTemp) {
-        console.log('Retrying fetch without temporary file logic...');
         return await fetchDetail(item, false);
       }
     }
@@ -693,10 +675,6 @@ async function fetchDetail(item, forEdit = false) {
     if (forEdit) {
       editorValue.value = data.raw || '';
       originalContent.value = data.raw || '';
-      console.log('Set editor values:', { 
-        editorValueLength: editorValue.value.length,
-        originalContentLength: originalContent.value.length 
-      })
     }
     
     // 如果是ruleset，进行后端验证（初始加载时静默验证）
@@ -734,12 +712,6 @@ async function fetchDetail(item, forEdit = false) {
         showValidationPanel.value = false;
       }
     }
-    
-    console.log('fetchDetail completed successfully:', {
-      hasDetail: !!detail.value,
-      hasRaw: !!detail.value?.raw,
-      editorValueLength: editorValue.value.length
-    })
   } catch (e) {
     error.value = `Failed to load ${item.type}: ${e.message || 'Unknown error'}`;
     console.error(`Error fetching ${item.type} detail:`, e);
@@ -1444,7 +1416,6 @@ async function saveEdit(content) {
     
     // If still no content, try fetching the original file
     if (!detail.value || !detail.value.raw) {
-      console.log('No content after edit mode fetch, trying view mode...')
       await fetchDetail(currentItem, false)
       if (detail.value && detail.value.raw) {
         editorValue.value = detail.value.raw
@@ -1483,7 +1454,6 @@ async function saveEdit(content) {
       // Clear the prevent refetch flag after a delay
       setTimeout(() => {
         preventRefetch.value = false
-        console.log('Re-enabled refetch after save completion')
       }, 500)
     }, 100)
   } catch (err) {
@@ -1544,7 +1514,7 @@ async function saveNew(content) {
     }
     
     // Create new component
-    const response = await hubApi.createComponent(currentItem.type, currentItem.id, contentToSave)
+    const response = await hubApi.saveNew(currentItem.type, currentItem.id, contentToSave)
     
     // Post-save verification
     try {
@@ -1577,7 +1547,6 @@ async function saveNew(content) {
       // Clear the prevent refetch flag after a delay
       setTimeout(() => {
         preventRefetch.value = false
-        console.log('Re-enabled refetch after save completion')
       }, 500)
     }, 100)
   } catch (err) {

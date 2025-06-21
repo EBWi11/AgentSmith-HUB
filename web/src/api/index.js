@@ -1101,33 +1101,6 @@ export const hubApi = {
   }
 };
 
-export async function verifyComponent(type, id, raw) {
-  try {
-    if (raw !== undefined) {
-      const response = await api.post(`/verify/${type}/${id}`, { raw });
-      return response;
-    }
-  } catch (error) {
-    throw error;
-  }
-}
-
-export async function saveComponent(type, id, raw) {
-  try {
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    
-    if (id.endsWith('.new')) {
-      const response = await api.post(`/${type}`, { id: id.replace('.new', ''), raw: rawString });
-      return response;
-    } else {
-      const response = await api.put(`/${type}/${id}`, { raw: rawString });
-      return response;
-    }
-  } catch (error) {
-    throw error;
-  }
-}
-
 /**
  * Generic function to fetch components by type
  * @param {string} type - Component type
@@ -1194,23 +1167,4 @@ fetchComponentsByType = async (type, endpoint) => {
   } catch (error) {
     return handleApiError(error, `Error fetching ${type}:`, true);
   }
-};
-
-// 采样器相关接口
-export async function getSamplerData(params) {
-  const { name, projectNodeSequence } = params;
-  const queryParams = new URLSearchParams();
-  
-  if (name) {
-    queryParams.append('name', name);
-  }
-  if (projectNodeSequence) {
-    queryParams.append('projectNodeSequence', projectNodeSequence);
-  }
-  
-  const response = await fetch(`${API_BASE}/samplers/data?${queryParams.toString()}`, {
-    headers: getHeaders(),
-  });
-  
-  return handleResponse(response);
-} 
+}; 

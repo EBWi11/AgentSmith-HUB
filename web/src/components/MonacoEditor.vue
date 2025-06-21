@@ -2092,7 +2092,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
           endColumn: position.column
         };
         
-        console.log('RULESET prefix detected, rulesetComponents:', rulesetComponents.value);
+
         
         if (rulesetComponents.value.length > 0) {
           // Suggest all RULESET components, but filter out temporary ones
