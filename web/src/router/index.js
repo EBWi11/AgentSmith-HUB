@@ -77,16 +77,19 @@ const routes = [
       {
         path: 'cluster',
         name: 'Cluster',
+        component: { template: '<router-view />' },
         meta: { requiresAuth: true, componentType: 'cluster' }
       },
       {
         path: 'pending-changes',
         name: 'PendingChanges',
+        component: { template: '<router-view />' },
         meta: { requiresAuth: true, componentType: 'pending-changes' }
       },
       {
         path: 'load-local-components',
         name: 'LoadLocalComponents',
+        component: { template: '<router-view />' },
         meta: { requiresAuth: true, componentType: 'load-local-components' }
       }
     ]

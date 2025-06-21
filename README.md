@@ -87,7 +87,7 @@ Rules are defined in XML files under the `config_demo/ruleset` directory:
       <node id="c" type="PLUGIN" field="field3">plugin_name(arg1, arg2)</node>
     </checklist>
     <threshold group_by="field1,field2" range="5m" count_type="SUM" count_field="field3" local_cache="true">10</threshold>
-    <append type="PLUGIN" field_name="result">plugin_name(arg1, arg2)</append>
+    <append type="PLUGIN" field="result">plugin_name(arg1, arg2)</append>
   </rule>
 </root>
 ```

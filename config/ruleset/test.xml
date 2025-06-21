@@ -6,7 +6,7 @@
             <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">optddd|ltp</node>
             <node id="d" type="EQU" field="sessionid">_$sessionid</node>
         </checklist>
-        <append field_name="abc">123</append>
+        <append field="abc">123</append>
         <del>exe,argv</del>
     </rule>
 

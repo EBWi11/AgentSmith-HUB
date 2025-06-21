@@ -1098,6 +1098,26 @@ export const hubApi = {
     } catch (error) {
       return handleApiError(error, 'Error fetching sampler data:', true);
     }
+  },
+
+  async getRulesetFields(id) {
+    try {
+      const response = await api.get(`/ruleset-fields/${id}`);
+      return response.data;
+    } catch (error) {
+      console.warn(`Failed to fetch ruleset fields for ${id}:`, error);
+      return { fieldKeys: [], sampleCount: 0 };
+    }
+  },
+
+  async getPluginParameters(id) {
+    try {
+      const response = await api.get(`/plugin-parameters/${id}`);
+      return response.data;
+    } catch (error) {
+      console.warn(`Failed to fetch plugin parameters for ${id}:`, error);
+      return { success: false, parameters: [] };
+    }
   }
 };
 

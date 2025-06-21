@@ -59,7 +59,8 @@ export default createStore({
     ],
     pendingChanges: [],
     clusterStatus: {},
-    clusterInfo: {}
+    clusterInfo: {},
+    rulesetFields: {} // Cache for ruleset field keys: { rulesetId: { fieldKeys: [...], sampleCount: 0 } }
   },
   getters: {
     getComponents: (state) => (type) => {
@@ -91,6 +92,9 @@ export default createStore({
     },
     getClusterInfo: (state) => {
       return state.clusterInfo
+    },
+    getRulesetFields: (state) => (rulesetId) => {
+      return state.rulesetFields[rulesetId] || { fieldKeys: [], sampleCount: 0 }
     }
   },
   mutations: {
@@ -108,6 +112,9 @@ export default createStore({
     },
     setClusterInfo(state, info) {
       state.clusterInfo = info
+    },
+    setRulesetFields(state, { rulesetId, fieldData }) {
+      state.rulesetFields[rulesetId] = fieldData
     }
   },
   actions: {
@@ -183,6 +190,18 @@ export default createStore({
         commit('setClusterInfo', info)
       } catch (error) {
         commit('setClusterInfo', {})
+      }
+    },
+    async fetchRulesetFields({ commit }, rulesetId) {
+      try {
+        const fieldData = await hubApi.getRulesetFields(rulesetId)
+        commit('setRulesetFields', { rulesetId, fieldData })
+        return fieldData
+      } catch (error) {
+        console.warn(`Failed to fetch fields for ruleset ${rulesetId}:`, error)
+        const fallbackData = { fieldKeys: [], sampleCount: 0 }
+        commit('setRulesetFields', { rulesetId, fieldData: fallbackData })
+        return fallbackData
       }
     }
   },

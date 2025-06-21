@@ -9,6 +9,7 @@ import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { onBeforeUpdate } from 'vue';
+import { hubApi } from '@/api';
 
 const props = defineProps({
   value: String,
@@ -17,6 +18,8 @@ const props = defineProps({
   errorLines: { type: Array, default: () => [] },
   originalValue: { type: String, default: '' }, // For diff mode
   diffMode: { type: Boolean, default: false }, // Enable diff mode
+  componentId: { type: String, default: '' }, // For dynamic field completion (rulesets)
+  componentType: { type: String, default: '' }, // Component type (input, output, ruleset)
 });
 
 // 正确声明emits
@@ -45,13 +48,75 @@ const outputComponents = computed(() => store.getters.getComponents('outputs'));
 const rulesetComponents = computed(() => store.getters.getComponents('rulesets'));
 const pluginComponents = computed(() => store.getters.getComponents('plugins'));
 
+// Plugin parameters cache
+const pluginParametersCache = ref({});
+
+// Function to get plugin parameters
+const getPluginParameters = async (pluginId) => {
+  if (pluginId in pluginParametersCache.value) {
+    return pluginParametersCache.value[pluginId];
+  }
+  
+  try {
+    const result = await hubApi.getPluginParameters(pluginId);
+    
+    if (result.success && result.parameters) {
+      pluginParametersCache.value[pluginId] = result.parameters;
+      return result.parameters;
+    } else {
+      // Mark as having no parameters (but fetched successfully)
+      pluginParametersCache.value[pluginId] = [];
+      return [];
+    }
+  } catch (error) {
+    console.warn(`Failed to fetch plugin parameters for ${pluginId}:`, error);
+    // Mark as failed to fetch
+    pluginParametersCache.value[pluginId] = [];
+    return [];
+  }
+};
+
+// Get dynamic field keys for ruleset completion
+const dynamicFieldKeys = computed(() => {
+  if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
+    const rulesetFields = store.getters.getRulesetFields(props.componentId);
+    return rulesetFields.fieldKeys || [];
+  }
+  return [];
+});
+
+// Watch for component changes to fetch field data
+watch([() => props.componentId, () => props.componentType], ([newId, newType], [oldId, oldType]) => {
+  if ((newType === 'ruleset' || newType === 'rulesets') && newId && (newId !== oldId || newType !== oldType)) {
+    store.dispatch('fetchRulesetFields', newId);
+  }
+}, { immediate: true });
+
 // Get plugin lists and component lists when component is mounted
-onMounted(() => {
+onMounted(async () => {
   store.dispatch('fetchAvailablePlugins');
   store.dispatch('fetchComponents', 'inputs');
   store.dispatch('fetchComponents', 'outputs');
   store.dispatch('fetchComponents', 'rulesets');
-  store.dispatch('fetchComponents', 'plugins');
+  await store.dispatch('fetchComponents', 'plugins');
+  
+  // Preload plugin parameters for better autocomplete experience
+  try {
+    const plugins = store.getters.getComponents('plugins');
+    const parameterPromises = plugins
+      .filter(plugin => !plugin.hasTemp) // Only fetch for non-temporary plugins
+      .map(plugin => getPluginParameters(plugin.id));
+    
+    await Promise.allSettled(parameterPromises);
+    console.log(`✅ Preloaded parameters for ${Object.keys(pluginParametersCache.value).length} plugins`);
+  } catch (error) {
+    console.warn('Some plugin parameters could not be preloaded:', error);
+  }
+  
+  // Fetch dynamic field keys for rulesets
+  if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
+    store.dispatch('fetchRulesetFields', props.componentId);
+  }
   
   // Setup Monaco theme
   setupMonacoTheme();
@@ -442,7 +507,7 @@ function registerLanguageProviders() {
       }
     },
     
-    triggerCharacters: ['<', ' ', '=', '"', '\n', '\t']
+    triggerCharacters: ['<', ' ', '=', '"', '\n', '\t', ',', '(', ')']
   });
   
 
@@ -469,11 +534,7 @@ function registerLanguageProviders() {
           endColumn: word.endColumn
         };
         
-        const result = getPluginGoCompletions(textUntilPosition, lineUntilPosition, range, position);
-        
-        // Simple deduplication
-        return deduplicateCompletions(result, range, 'go');
-        
+        // Disable Go autocomplete for plugins - keep it simple
         return { suggestions: [], incomplete: false };
       } catch (error) {
         console.error('Go completion error:', error);
@@ -525,7 +586,7 @@ function initializeEditor() {
     tabSize: 2,
     wordWrap: 'on',
     contextmenu: true,
-    // Configure completion based on language type and read-only status
+        // Configure completion based on language type and read-only status
     quickSuggestions: props.readOnly ? false : true,
     snippetSuggestions: props.readOnly ? 'none' : 'inline',
     suggestOnTriggerCharacters: !props.readOnly,
@@ -839,6 +900,13 @@ watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalVal
     }
   }
 }, { deep: true });
+
+// Monitor componentId changes to fetch field keys for rulesets
+watch(() => [props.componentType, props.componentId], ([newType, newId], [oldType, oldId]) => {
+  if (newType === 'ruleset' && newId && newId !== oldId) {
+    store.dispatch('fetchRulesetFields', newId);
+  }
+});
 
 // Handle window size changes
 function handleResize() {
@@ -1297,12 +1365,21 @@ function parseYamlContext(fullText, lineText, position) {
   // 检测是否在值位置（冒号后面）
   const colonIndex = beforeCursor.lastIndexOf(':');
   if (colonIndex !== -1) {
-    const afterColon = beforeCursor.substring(colonIndex + 1).trim();
-    if (afterColon === '' || afterColon.startsWith(' ')) {
+    const afterColon = beforeCursor.substring(colonIndex + 1);
+    // 检查冒号后是否有内容（空格或实际值都算在值位置）
+    if (afterColon.length === 0 || afterColon.match(/^\s/)) {
       context.isInValue = true;
       // 提取键名
       const beforeColon = beforeCursor.substring(0, colonIndex).trim();
       context.currentKey = beforeColon.split(/\s+/).pop() || '';
+      // 提取当前值（用于过滤）
+      context.currentValue = afterColon.trim();
+    } else {
+      // 冒号后有非空格内容，仍然认为在值位置
+      context.isInValue = true;
+      const beforeColon = beforeCursor.substring(0, colonIndex).trim();
+      context.currentKey = beforeColon.split(/\s+/).pop() || '';
+      context.currentValue = afterColon.trim();
     }
   } else {
     // 在键位置
@@ -1347,32 +1424,29 @@ function getInputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    // 优先使用store中的动态类型数据
-    let availableInputTypes = [];
+    console.log('Input type completion triggered', context);
+    // 使用固定的输入类型列表，确保总是有枚举提示
+    const availableInputTypes = [
+      { value: 'kafka', description: 'Apache Kafka input source' },
+      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS input source' }
+    ];
     
-    if (inputTypes.value && inputTypes.value.length > 0) {
-      // 从store获取动态类型
-      availableInputTypes = inputTypes.value.map(type => ({
-        value: type.name || type.value || type,
-        description: type.description || `${type.name || type.value || type} input source`
-      }));
-    } else {
-      // 如果store中没有数据，使用默认类型
-      availableInputTypes = [
-        { value: 'kafka', description: 'Apache Kafka input source' },
-        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS input source' }
-      ];
-    }
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
     availableInputTypes.forEach(type => {
-      if (!suggestions.some(s => s.label === type.value)) {
-        suggestions.push({
-          label: type.value,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: type.description,
-          insertText: type.value,
-          range: range
-        });
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === type.value)) {
+          suggestions.push({
+            label: type.value,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: type.description,
+            insertText: type.value,
+            range: range,
+            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
@@ -1380,49 +1454,83 @@ function getInputValueCompletions(context, range, fullText) {
   // compression属性值补全
   else if (context.currentKey === 'compression') {
     const compressionTypes = ['none', 'gzip', 'snappy', 'lz4', 'zstd'];
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
     compressionTypes.forEach(comp => {
-      if (!suggestions.some(s => s.label === comp)) {
-        suggestions.push({
-          label: comp,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: `${comp} compression`,
-          insertText: comp,
-          range: range
-        });
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || comp.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === comp)) {
+          suggestions.push({
+            label: comp,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: `${comp} compression`,
+            insertText: comp,
+            range: range,
+            sortText: comp.toLowerCase().startsWith(currentValue) ? `0_${comp}` : `1_${comp}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
   
   // enable属性值补全
   else if (context.currentKey === 'enable') {
-    suggestions.push(
-      { label: 'true', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Enable feature', insertText: 'true', range: range },
-      { label: 'false', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Disable feature', insertText: 'false', range: range }
-    );
+    const enableValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    enableValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Enable feature' : 'Disable feature',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}` // 前缀匹配优先
+        });
+      }
+    });
   }
   
   // mechanism属性值补全
   else if (context.currentKey === 'mechanism') {
     const mechanisms = ['plain', 'scram-sha-256', 'scram-sha-512'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
     mechanisms.forEach(mech => {
-      if (!suggestions.some(s => s.label === mech)) {
-        suggestions.push({
-          label: mech,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: `SASL ${mech} mechanism`,
-          insertText: mech,
-          range: range
-        });
+      if (!currentValue || mech.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === mech)) {
+          suggestions.push({
+            label: mech,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: `SASL ${mech} mechanism`,
+            insertText: mech,
+            range: range,
+            sortText: mech.toLowerCase().startsWith(currentValue) ? `0_${mech}` : `1_${mech}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
   
   // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
-    suggestions.push(
-      { label: 'BEGIN_CURSOR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Start from beginning', insertText: 'BEGIN_CURSOR', range: range },
-      { label: 'END_CURSOR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Start from end', insertText: 'END_CURSOR', range: range }
-    );
+    const cursorPositions = ['BEGIN_CURSOR', 'END_CURSOR'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    cursorPositions.forEach(pos => {
+      if (!currentValue || pos.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: pos,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: pos === 'BEGIN_CURSOR' ? 'Start from beginning' : 'Start from end',
+          insertText: pos,
+          range: range,
+          sortText: pos.toLowerCase().startsWith(currentValue) ? `0_${pos}` : `1_${pos}` // 前缀匹配优先
+        });
+      }
+    });
   }
   
   // Suggested endpoint format
@@ -1501,11 +1609,11 @@ function getInputKeyCompletions(context, range, fullText) {
   // Kafka配置段内部
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
-      { key: 'brokers', desc: 'Kafka broker addresses', template: 'brokers:\n  - "${1:broker-host}:${2:9092}"' },
-      { key: 'topic', desc: 'Kafka topic name', template: 'topic: "${1:topic-name}"' },
-      { key: 'group', desc: 'Consumer group name', template: 'group: "${1:consumer-group}"' },
-      { key: 'compression', desc: 'Message compression type', template: 'compression: "${1|none,gzip,snappy,lz4,zstd|}"' },
-      { key: 'sasl', desc: 'SASL authentication configuration', template: 'sasl:\n  enable: ${1|true,false|}\n  mechanism: "${2|plain,scram-sha-256,scram-sha-512|}"\n  username: "${3:username}"\n  password: "${4:password}"' }
+      { key: 'brokers', desc: 'Kafka broker addresses' },
+      { key: 'topic', desc: 'Kafka topic name' },
+      { key: 'group', desc: 'Consumer group name' },
+      { key: 'compression', desc: 'Message compression type' },
+      { key: 'sasl', desc: 'SASL authentication configuration' }
     ];
     
     kafkaKeys.forEach(item => {
@@ -1514,8 +1622,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -1525,10 +1632,10 @@ function getInputKeyCompletions(context, range, fullText) {
   // SASL配置段内部
   else if (context.currentSection === 'sasl') {
     const saslKeys = [
-      { key: 'enable', desc: 'Enable SASL authentication', template: 'enable: ${1|true,false|}' },
-      { key: 'mechanism', desc: 'SASL mechanism', template: 'mechanism: "${1|plain,scram-sha-256,scram-sha-512|}"' },
-      { key: 'username', desc: 'SASL username', template: 'username: "${1:username}"' },
-      { key: 'password', desc: 'SASL password', template: 'password: "${1:password}"' }
+      { key: 'enable', desc: 'Enable SASL authentication' },
+      { key: 'mechanism', desc: 'SASL mechanism' },
+      { key: 'username', desc: 'SASL username' },
+      { key: 'password', desc: 'SASL password' }
     ];
     
     saslKeys.forEach(item => {
@@ -1537,8 +1644,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -1548,15 +1654,15 @@ function getInputKeyCompletions(context, range, fullText) {
   // Aliyun SLS配置段内部
   else if (context.currentSection === 'aliyun_sls') {
     const slsKeys = [
-      { key: 'endpoint', desc: 'SLS service endpoint', template: 'endpoint: "${1:region}.log.aliyuncs.com"' },
-      { key: 'access_key_id', desc: 'Access key ID', template: 'access_key_id: "${1:your-access-key-id}"' },
-      { key: 'access_key_secret', desc: 'Access key secret', template: 'access_key_secret: "${1:your-access-key-secret}"' },
-      { key: 'project', desc: 'SLS project name', template: 'project: "${1:your-project}"' },
-      { key: 'logstore', desc: 'SLS logstore name', template: 'logstore: "${1:your-logstore}"' },
-      { key: 'consumer_group_name', desc: 'Consumer group name', template: 'consumer_group_name: "${1:consumer-group}"' },
-      { key: 'consumer_name', desc: 'Consumer name', template: 'consumer_name: "${1:consumer-name}"' },
-      { key: 'cursor_position', desc: 'Cursor start position', template: 'cursor_position: "${1|BEGIN_CURSOR,END_CURSOR|}"' },
-      { key: 'query', desc: 'Log query filter', template: 'query: "${1:*}"' }
+      { key: 'endpoint', desc: 'SLS service endpoint' },
+      { key: 'access_key_id', desc: 'Access key ID' },
+      { key: 'access_key_secret', desc: 'Access key secret' },
+      { key: 'project', desc: 'SLS project name' },
+      { key: 'logstore', desc: 'SLS logstore name' },
+      { key: 'consumer_group_name', desc: 'Consumer group name' },
+      { key: 'consumer_name', desc: 'Consumer name' },
+      { key: 'cursor_position', desc: 'Cursor start position' },
+      { key: 'query', desc: 'Log query filter' }
     ];
     
     slsKeys.forEach(item => {
@@ -1565,8 +1671,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -1676,34 +1781,31 @@ function getOutputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    // 优先使用store中的动态类型数据
-    let availableOutputTypes = [];
+    console.log('Output type completion triggered', context);
+    // 使用固定的输出类型列表，确保总是有枚举提示
+    const availableOutputTypes = [
+      { value: 'kafka', description: 'Apache Kafka output destination' },
+      { value: 'elasticsearch', description: 'Elasticsearch output destination' },
+      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
+      { value: 'print', description: 'Console print output for debugging' }
+    ];
     
-    if (outputTypes.value && outputTypes.value.length > 0) {
-      // 从store获取动态类型
-      availableOutputTypes = outputTypes.value.map(type => ({
-        value: type.name || type.value || type,
-        description: type.description || `${type.name || type.value || type} output destination`
-      }));
-    } else {
-      // 如果store中没有数据，使用默认类型
-      availableOutputTypes = [
-        { value: 'kafka', description: 'Apache Kafka output destination' },
-        { value: 'elasticsearch', description: 'Elasticsearch output destination' },
-        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
-        { value: 'print', description: 'Console print output for debugging' }
-      ];
-    }
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
     availableOutputTypes.forEach(type => {
-      if (!suggestions.some(s => s.label === type.value)) {
-        suggestions.push({
-          label: type.value,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: type.description,
-          insertText: type.value,
-          range: range
-        });
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === type.value)) {
+          suggestions.push({
+            label: type.value,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: type.description,
+            insertText: type.value,
+            range: range,
+            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
@@ -1711,15 +1813,22 @@ function getOutputValueCompletions(context, range, fullText) {
   // compression属性值补全
   else if (context.currentKey === 'compression') {
     const compressionTypes = ['none', 'gzip', 'snappy', 'lz4', 'zstd'];
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
     compressionTypes.forEach(comp => {
-      if (!suggestions.some(s => s.label === comp)) {
-        suggestions.push({
-          label: comp,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: `${comp} compression`,
-          insertText: comp,
-          range: range
-        });
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || comp.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === comp)) {
+          suggestions.push({
+            label: comp,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: `${comp} compression`,
+            insertText: comp,
+            range: range,
+            sortText: comp.toLowerCase().startsWith(currentValue) ? `0_${comp}` : `1_${comp}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
@@ -1865,9 +1974,9 @@ function getOutputKeyCompletions(context, range, fullText) {
   // Kafka配置段内部
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
-      { key: 'brokers', desc: 'Kafka broker addresses', template: 'brokers:\n  - "${1:broker-host}:${2:9092}"' },
-      { key: 'topic', desc: 'Kafka topic name', template: 'topic: "${1:topic-name}"' },
-      { key: 'compression', desc: 'Message compression type', template: 'compression: "${1|none,gzip,snappy,lz4,zstd|}"' }
+      { key: 'brokers', desc: 'Kafka broker addresses' },
+      { key: 'topic', desc: 'Kafka topic name' },
+      { key: 'compression', desc: 'Message compression type' }
     ];
     
     kafkaKeys.forEach(item => {
@@ -1876,8 +1985,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -1887,10 +1995,10 @@ function getOutputKeyCompletions(context, range, fullText) {
   // Elasticsearch配置段内部
   else if (context.currentSection === 'elasticsearch') {
     const esKeys = [
-      { key: 'hosts', desc: 'Elasticsearch cluster hosts', template: 'hosts:\n  - "${1|http,https|}://${2:elasticsearch-host}:${3:9200}"' },
-      { key: 'index', desc: 'Elasticsearch index name', template: 'index: "${1:index-name}"' },
-      { key: 'batch_size', desc: 'Batch size for bulk operations', template: 'batch_size: ${1:1000}' },
-      { key: 'flush_dur', desc: 'Flush duration for batching', template: 'flush_dur: "${1:5s}"' }
+      { key: 'hosts', desc: 'Elasticsearch cluster hosts' },
+      { key: 'index', desc: 'Elasticsearch index name' },
+      { key: 'batch_size', desc: 'Batch size for bulk operations' },
+      { key: 'flush_dur', desc: 'Flush duration for batching' }
     ];
     
     esKeys.forEach(item => {
@@ -1899,8 +2007,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -1910,11 +2017,11 @@ function getOutputKeyCompletions(context, range, fullText) {
   // Aliyun SLS配置段内部
   else if (context.currentSection === 'aliyun_sls') {
     const slsKeys = [
-      { key: 'endpoint', desc: 'SLS service endpoint', template: 'endpoint: "${1:region}.log.aliyuncs.com"' },
-      { key: 'access_key_id', desc: 'Access key ID', template: 'access_key_id: "${1:your-access-key-id}"' },
-      { key: 'access_key_secret', desc: 'Access key secret', template: 'access_key_secret: "${1:your-access-key-secret}"' },
-      { key: 'project', desc: 'SLS project name', template: 'project: "${1:your-project}"' },
-      { key: 'logstore', desc: 'SLS logstore name', template: 'logstore: "${1:your-logstore}"' }
+      { key: 'endpoint', desc: 'SLS service endpoint' },
+      { key: 'access_key_id', desc: 'Access key ID' },
+      { key: 'access_key_secret', desc: 'Access key secret' },
+      { key: 'project', desc: 'SLS project name' },
+      { key: 'logstore', desc: 'SLS logstore name' }
     ];
     
     slsKeys.forEach(item => {
@@ -1923,8 +2030,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: item.key,
           kind: monaco.languages.CompletionItemKind.Property,
           documentation: item.desc,
-          insertText: item.template,
-          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          insertText: `${item.key}:`,
           range: range
         });
       }
@@ -2508,8 +2614,27 @@ function getXmlAttributeValueCompletions(context, range) {
     });
   }
   
-  // 常见字段名建议
-  else if (context.currentAttribute === 'field') {
+  // Field name suggestions (common fields + dynamic fields from sample data)
+  // Handle multiple field-related attributes
+  else if (context.currentAttribute === 'field' || 
+           context.currentAttribute === 'count_field') {
+    // Add dynamic fields from sample data first (higher priority)
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Sample data field: ${field}`,
+            insertText: field,
+            range: range,
+            sortText: `0_${field}` // Higher priority than common fields
+          });
+        }
+      });
+    }
+    
+    // Add common fields as fallback
     const commonFields = ['data_type', 'exe', 'argv', 'pid', 'sessionid', 'source_ip', 'dest_ip', 'sport', 'dport'];
     commonFields.forEach(field => {
       if (!suggestions.some(s => s.label === field)) {
@@ -2518,7 +2643,70 @@ function getXmlAttributeValueCompletions(context, range) {
           kind: monaco.languages.CompletionItemKind.Field,
           documentation: `Common field: ${field}`,
           insertText: field,
-          range: range
+          range: range,
+          sortText: `1_${field}` // Lower priority than dynamic fields
+        });
+      }
+    });
+  }
+  
+  // group_by attribute - supports comma-separated field lists
+  else if (context.currentAttribute === 'group_by') {
+    // Add individual fields
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Sample data field: ${field}`,
+            insertText: field,
+            range: range,
+            sortText: `0_${field}` // Higher priority than common fields
+          });
+        }
+      });
+      
+      // Add common field combinations
+      const topFields = dynamicFieldKeys.value.slice(0, 3);
+      if (topFields.length >= 2) {
+        suggestions.push({
+          label: topFields.slice(0, 2).join(','),
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: 'Group by top 2 fields from sample data',
+          insertText: topFields.slice(0, 2).join(','),
+          range: range,
+          sortText: '0_combo_2'
+        });
+      }
+      if (topFields.length >= 3) {
+        suggestions.push({
+          label: topFields.join(','),
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: 'Group by top 3 fields from sample data',
+          insertText: topFields.join(','),
+          range: range,
+          sortText: '0_combo_3'
+        });
+      }
+    }
+    
+    // Add common field combinations as fallback
+    const commonCombos = [
+      'data_type,exe',
+      'exe,pid',
+      'source_ip,dest_ip',
+      'source_ip,dest_ip,sport,dport'
+    ];
+    commonCombos.forEach(combo => {
+      if (!suggestions.some(s => s.label === combo)) {
+        suggestions.push({
+          label: combo,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: `Common field combination: ${combo}`,
+          insertText: combo,
+          range: range,
+          sortText: `1_${combo}`
         });
       }
     });
@@ -2548,18 +2736,30 @@ function getXmlAttributeNameCompletions(context, range) {
       break;
       
     case 'node':
+      // Generate smart field suggestion with available fields  
+      let nodeFieldTemplate = 'field="${1:field-name}"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        nodeFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+      }
+      
       suggestions.push(
         { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions', insertText: 'id="${1:node-id}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="${1|PLUGIN,END,START,NEND,NSTART,INCL,NI,NCS_END,NCS_START,NCS_NEND,NCS_NSTART,NCS_INCL,NCS_NI,MT,LT,REGEX,ISNULL,NOTNULL,EQU,NEQ,NCS_EQU,NCS_NEQ|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: 'field="${1:field-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: nodeFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'logic', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical operation for multiple values', insertText: 'logic="${1|AND,OR|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'delimiter', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Delimiter for multiple values', insertText: 'delimiter="${1:|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
       );
       break;
       
     case 'filter':
+      // Generate smart field suggestion with available fields  
+      let filterFieldTemplate = 'field="${1:field-name}"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        filterFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+      }
+      
       suggestions.push(
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to filter on', insertText: 'field="${1:field-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to filter on', insertText: filterFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
       );
       break;
       
@@ -2570,18 +2770,31 @@ function getXmlAttributeNameCompletions(context, range) {
       break;
       
     case 'threshold':
+      // Generate smart group_by suggestion with available fields
+      let groupByTemplate = 'group_by="${1:field1,field2}"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        const topFields = dynamicFieldKeys.value.slice(0, 3).join(',');
+        groupByTemplate = `group_by="${topFields}"`;
+      }
+      
+      // Generate smart count_field suggestion with available fields  
+      let countFieldTemplate = 'count_field="${1:field}"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        countFieldTemplate = `count_field="${dynamicFieldKeys.value[0]}"`;
+      }
+      
       suggestions.push(
-        { label: 'group_by', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Fields to group by', insertText: 'group_by="${1:field1,field2}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'group_by', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Fields to group by', insertText: groupByTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'range', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Time range for aggregation', insertText: 'range="${1:5m}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'count_type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Counting method', insertText: 'count_type="${1|SUM,CLASSIFY|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'count_field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to count', insertText: 'count_field="${1:field}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'count_field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to count', insertText: countFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'local_cache', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Use local cache', insertText: 'local_cache="${1|true,false|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
       );
       break;
       
     case 'append':
       suggestions.push(
-        { label: 'field_name', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Name of field to append', insertText: 'field_name="${1:field-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Name of field to append', insertText: 'field="${1:field-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Append type (PLUGIN for dynamic values)', insertText: 'type="PLUGIN"', range: range }
       );
       break;
@@ -2616,7 +2829,6 @@ function getXmlTagNameCompletions(context, range, fullText) {
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Rule definition',
         insertText: 'rule id="" name="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n    </checklist>\n</rule',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
     }
@@ -2628,15 +2840,13 @@ function getXmlTagNameCompletions(context, range, fullText) {
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Filter condition for rule',
         insertText: 'filter field=""></filter',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
       {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Checklist with conditions',
-        insertText: 'checklist>\n    <node id="" type="" field=""></node>\n</checklist',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'checklist>\n    <node type="" field=""></node>\n</checklist',
         range: range
       },
       {
@@ -2644,23 +2854,20 @@ function getXmlTagNameCompletions(context, range, fullText) {
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Threshold configuration',
         insertText: 'threshold group_by="" range="" count_type="" count_field="" local_cache=""></threshold',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       },
       {
         label: 'append',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Append field to result',
-        insertText: 'append field_name="" type=""></append',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'append field="" type=""></append',
         range: range
       },
       {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
         documentation: 'Plugin execution',
-        insertText: 'plugin></plugin>',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin></plugin',
         range: range
       },
       {
@@ -2668,7 +2875,6 @@ function getXmlTagNameCompletions(context, range, fullText) {
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Delete fields from result',
         insertText: 'del></del',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       }
     ];
@@ -2681,8 +2887,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'node',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Check node',
-        insertText: 'node id="" type="" field="" delimiter=""></node',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'node id="" type="" field="" delimiter=""></node>',
         range: range
       });
     }
@@ -2695,45 +2900,135 @@ function getXmlTagNameCompletions(context, range, fullText) {
 function getXmlTagContentCompletions(context, range, fullText) {
   const suggestions = [];
   
-  // 插件函数补全
+  // Check if user is inside function parameters (parentheses)
+  const functionParamInfo = checkIfInFunctionParameters(context);
+  
+  if (functionParamInfo.isInParams) {
+    // User is editing function parameters, provide field suggestions
+    addFieldSuggestionsForFunctionParams(suggestions, range, context);
+    // Return early - don't show plugin functions when editing parameters
+    return { suggestions };
+  }
+  
+  // Enhanced plugin function completion with parameter information
+  // Only show plugin functions when NOT in function parameters
   if (context.currentTag === 'plugin' || (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
     
-    // 添加现有插件的建议，但过滤掉临时组件
+    // Determine if we're in a checknode context (which requires bool return type)
+    const isInCheckNode = context.currentTag === 'node' && fullText.includes('type="PLUGIN"');
+    
+    // Add existing plugins with smart parameter templates (synchronous approach with cached data)
     pluginComponents.value.forEach(plugin => {
-      if (!plugin.hasTemp) {  // 过滤掉临时组件
-        const pluginLabel = `${plugin.id}(_$ORIDATA)`;
+      if (!plugin.hasTemp) {  // Filter out temporary components
+        // For checknode, only show plugins with bool return type
+        if (isInCheckNode && plugin.returnType !== 'bool') {
+          return; // Skip this plugin
+        }
+        // Check if we have cached parameters for this plugin
+        const cachedParameters = pluginParametersCache.value[plugin.id];
+        
+        let insertText = plugin.id;
+        let documentation = `Plugin: ${plugin.id}`;
+        
+        // Check if we have explicitly fetched parameters (even if empty)
+        const hasParameterInfo = plugin.id in pluginParametersCache.value;
+        
+        if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
+          // Create parameter template based on actual plugin signature
+          const paramSnippets = cachedParameters.map((param, index) => {
+            // Generate clean parameter placeholder based on parameter type
+            let snippet;
+            
+            switch (param.type) {
+              case 'string':
+                snippet = param.name;
+                break;
+              case 'int':
+              case 'float':
+                snippet = param.name;
+                break;
+              case 'bool':
+                snippet = 'true';
+                break;
+              case '...interface{}':
+                snippet = '_$ORIDATA';
+                break;
+              default:
+                if (param.type.includes('interface')) {
+                  snippet = '_$ORIDATA';
+                } else {
+                  snippet = param.name;
+                }
+            }
+            
+            return snippet;
+          }).join(', ');
+          
+          insertText = `${plugin.id}(${paramSnippets})`;
+          
+          // Create simple parameter list for label display
+          const simpleParams = cachedParameters.map(param => param.name).join(', ');
+          
+          // Enhanced documentation with parameter info
+          const paramDocs = cachedParameters.map(p => `${p.name}: ${p.type}${p.required ? ' (required)' : ' (optional)'}`).join('\n');
+          documentation = `Plugin: ${plugin.id}\n\nParameters:\n${paramDocs}`;
+        } else if (hasParameterInfo) {
+          // We have parameter info but no parameters - plugin takes no arguments
+          insertText = `${plugin.id}()`;
+          documentation = `Plugin: ${plugin.id}\n\nNo parameters required`;
+        } else {
+          // No parameter info yet - show basic plugin name and fetch in background
+          insertText = `${plugin.id}()`;
+          documentation = `Plugin: ${plugin.id}\n\nLoading parameter information...`;
+          
+          // Asynchronously fetch parameters for future use
+          getPluginParameters(plugin.id).catch(error => {
+            console.debug(`Could not fetch parameters for plugin ${plugin.id}:`, error);
+          });
+        }
+        
+        // Create user-friendly label
+        let pluginLabel;
+        if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
+          const simpleParams = cachedParameters.map(param => param.name).join(', ');
+          pluginLabel = `${plugin.id}(${simpleParams})`;
+        } else {
+          pluginLabel = `${plugin.id}()`;
+        }
         if (!suggestions.some(s => s.label === pluginLabel)) {
           suggestions.push({
             label: pluginLabel,
             kind: monaco.languages.CompletionItemKind.Function,
-            documentation: `Plugin: ${plugin.id}`,
-            insertText: pluginLabel,
-            range: range
+            documentation: documentation,
+            insertText: insertText,
+            range: range,
+            sortText: `0_${plugin.id}` // Higher priority for actual plugins
           });
         }
       }
     });
     
-    // 添加通用插件模板
-    if (!suggestions.some(s => s.label === 'plugin_name(_$ORIDATA)')) {
+    // Only add generic plugin templates if no real plugins exist
+    const hasRealPlugins = pluginComponents.value.some(plugin => !plugin.hasTemp);
+    if (!hasRealPlugins) {
       suggestions.push({
         label: 'plugin_name(_$ORIDATA)',
         kind: monaco.languages.CompletionItemKind.Snippet,
-        documentation: 'Plugin function with original data',
+        documentation: 'Plugin function with original data (template)',
         insertText: '${1:plugin_name}(_$ORIDATA)',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        range: range,
+        sortText: '9_template_oridata' // Very low priority
       });
-    }
-    
-    if (!suggestions.some(s => s.label === 'plugin_name("arg1", arg2)')) {
+      
       suggestions.push({
         label: 'plugin_name("arg1", arg2)',
         kind: monaco.languages.CompletionItemKind.Snippet,
-        documentation: 'Plugin function with custom arguments',
+        documentation: 'Plugin function with custom arguments (template)',
         insertText: '${1:plugin_name}("${2:arg1}", ${3:arg2})',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        range: range,
+        sortText: '9_template_custom' // Very low priority
       });
     }
   }
@@ -2741,21 +3036,158 @@ function getXmlTagContentCompletions(context, range, fullText) {
   // 过滤器值建议
   if (context.currentTag === 'filter') {
     suggestions.push(
-      { label: '_$data_type', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Dynamic value from raw data', insertText: '_$data_type', range: range },
-      { label: '_$sessionid', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Dynamic session ID', insertText: '_$sessionid', range: range },
-      { label: '59', kind: monaco.languages.CompletionItemKind.Value, documentation: 'Numeric value', insertText: '59', range: range }
+      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
     );
   }
   
   // 节点值建议
   if (context.currentTag === 'node') {
     suggestions.push(
-      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range },
-      { label: 'value1|value2', kind: monaco.languages.CompletionItemKind.Snippet, documentation: 'Multiple values with delimiter', insertText: '${1:value1}|${2:value2}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
     );
   }
   
+  // del标签内容补全 - 字段列表
+  if (context.currentTag === 'del') {
+    // Add individual fields from sample data
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Delete field: ${field}`,
+            insertText: field,
+            range: range,
+            sortText: `0_${field}` // Higher priority than common fields
+          });
+        }
+      });
+      
+      // Add common field combinations for deletion
+      const topFields = dynamicFieldKeys.value.slice(0, 4);
+      if (topFields.length >= 2) {
+        suggestions.push({
+          label: topFields.slice(0, 2).join(','),
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: 'Delete multiple fields from sample data',
+          insertText: topFields.slice(0, 2).join(','),
+          range: range,
+          sortText: '0_delete_combo_2'
+        });
+      }
+      if (topFields.length >= 3) {
+        suggestions.push({
+          label: topFields.slice(0, 3).join(','),
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: 'Delete multiple fields from sample data',
+          insertText: topFields.slice(0, 3).join(','),
+          range: range,
+          sortText: '0_delete_combo_3'
+        });
+      }
+    }
+    
+    // Common fields and combinations removed - only show dynamic fields from sample data
+  }
+  
   return { suggestions };
+}
+
+// Check if user is inside function parameters
+function checkIfInFunctionParameters(context) {
+  const { beforeCursor } = context;
+  
+  // Look for pattern like: functionName(cursor_position)
+  // Find the last opening parenthesis
+  const lastOpenParen = beforeCursor.lastIndexOf('(');
+  const lastCloseParen = beforeCursor.lastIndexOf(')');
+  
+  // If there's an opening parenthesis after the last closing parenthesis, we're likely inside parameters
+  if (lastOpenParen > lastCloseParen && lastOpenParen !== -1) {
+    // Check if there's a function name before the opening parenthesis
+    const beforeParen = beforeCursor.substring(0, lastOpenParen);
+    const functionMatch = beforeParen.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*$/);
+    
+    if (functionMatch) {
+      // Additional validation: make sure there's actual content after the opening parenthesis
+      // or the cursor is right after a comma (indicating a parameter position)
+      const afterParen = beforeCursor.substring(lastOpenParen + 1);
+      const isValidParamPosition = 
+        afterParen.length > 0 || // Content after opening paren
+        beforeCursor.endsWith('(') || // Right after opening paren
+        beforeCursor.match(/,\s*$/) || // After a comma
+        beforeCursor.match(/\(\s*$/) // After opening paren with spaces
+      
+      if (isValidParamPosition) {
+        return {
+          isInParams: true,
+          functionName: functionMatch[1],
+          parameterText: afterParen
+        };
+      }
+    }
+  }
+  
+  return { isInParams: false };
+}
+
+// Add field suggestions for function parameters
+function addFieldSuggestionsForFunctionParams(suggestions, range, context) {
+  // Add dynamic fields from sample data
+  if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+    dynamicFieldKeys.value.forEach(field => {
+      if (!suggestions.some(s => s.label === field)) {
+        suggestions.push({
+          label: field,
+          kind: monaco.languages.CompletionItemKind.Field,
+          documentation: `Field from sample data: ${field}`,
+          insertText: field,
+          range: range,
+          sortText: `0_${field}` // Higher priority than common fields
+        });
+      }
+    });
+  }
+  
+  // Common fields removed - only show dynamic fields from sample data
+  
+  // Add special data references (highest priority)
+  const specialRefs = [
+    { label: '_$ORIDATA', desc: 'Original data reference', insertText: '_$ORIDATA' }
+  ];
+  
+  specialRefs.forEach(ref => {
+    if (!suggestions.some(s => s.label === ref.label)) {
+      suggestions.push({
+        label: ref.label,
+        kind: monaco.languages.CompletionItemKind.Variable,
+        documentation: ref.desc,
+        insertText: ref.insertText,
+        range: range,
+        sortText: `00_${ref.label}` // Highest priority
+      });
+    }
+  });
+  
+  // Add common parameter patterns
+  const patterns = [
+    { label: 'true', desc: 'Boolean true value', insertText: '"true"' },
+    { label: 'false', desc: 'Boolean false value', insertText: '"false"' }
+  ];
+  
+  patterns.forEach(pattern => {
+    if (!suggestions.some(s => s.label === pattern.label)) {
+      suggestions.push({
+        label: pattern.label,
+        kind: monaco.languages.CompletionItemKind.Value,
+        documentation: pattern.desc,
+        insertText: pattern.insertText,
+        range: range,
+        sortText: `3_${pattern.label}` // Lowest priority
+      });
+    }
+  });
 }
 
 // 默认XML补全 - 只在特定情况下提供
@@ -2764,18 +3196,35 @@ function getDefaultXmlCompletions(fullText, range) {
   
   // 只在完全空白的文档中提供完整模板
   if (!fullText.trim() || (!fullText.includes('<root') && !fullText.includes('<'))) {
+    // Generate smart template with dynamic fields if available
+    let filterField = '${5:field-name}';
+    let nodeField = '${10:field-name}';
+    let thresholdGroupBy = '${12:field1,field2}';
+    let thresholdCountField = '${13:count-field}';
+    let delFields = '${14:field1,field2}';
+    
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      filterField = dynamicFieldKeys.value[0] || 'field-name';
+      nodeField = dynamicFieldKeys.value[0] || 'field-name';
+      thresholdGroupBy = dynamicFieldKeys.value.slice(0, 2).join(',') || 'field1,field2';
+      thresholdCountField = dynamicFieldKeys.value[0] || 'count-field';
+      delFields = dynamicFieldKeys.value.slice(0, 2).join(',') || 'field1,field2';
+    }
+    
     suggestions.push({
       label: 'Complete Ruleset Template',
       kind: monaco.languages.CompletionItemKind.Snippet,
-      documentation: 'Complete ruleset XML template',
-              insertText: [
+      documentation: 'Complete ruleset XML template with smart field suggestions',
+      insertText: [
         '<root name="${1:ruleset-name}" type="${2|DETECTION,CLASSIFICATION|}">',
         '    <rule id="${3:rule-id}" name="${4:rule-name}">',
-        '        <filter field="${5:field-name}">${6:filter-value}</filter>',
-        '        <checklist condition="${7:condition}">',
-        '            <node id="${8:node-id}" type="${9|PLUGIN,END,START,NEND,NSTART,INCL,NI,NCS_END,NCS_START,NCS_NEND,NCS_NSTART,NCS_INCL,NCS_NI,MT,LT,REGEX,ISNULL,NOTNULL,EQU,NEQ,NCS_EQU,NCS_NEQ|}" field="${10:field-name}">${11:value}</node>',
+        `        <filter field="${filterField}">\${6:filter-value}</filter>`,
+        '        <checklist condition="${7:a and b}">',
+        `            <node id="\${8:a}" type="\${9|PLUGIN,END,START,NEND,NSTART,INCL,NI,NCS_END,NCS_START,NCS_NEND,NCS_NSTART,NCS_INCL,NCS_NI,MT,LT,REGEX,ISNULL,NOTNULL,EQU,NEQ,NCS_EQU,NCS_NEQ|}" field="${nodeField}">\${11:value}</node>`,
         '        </checklist>',
-        '        ${12}',
+        `        <threshold group_by="${thresholdGroupBy}" range="\${15:5m}" count_type="\${16|SUM,CLASSIFY|}" count_field="${thresholdCountField}" local_cache="\${17|true,false|}">\${18:5}</threshold>`,
+        '        <append field="${19:new-field}">${20:value}</append>',
+        `        <del>${delFields}</del>`,
         '    </rule>',
         '</root>'
       ].join('\n'),
@@ -3107,50 +3556,31 @@ function getBaseYamlValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    // 合并input和output类型，提供完整的类型选择
-    let availableTypes = [];
+    console.log('Base YAML type completion triggered', context);
+    // 使用固定的组件类型列表，确保总是有枚举提示
+    const availableTypes = [
+      { value: 'kafka', description: 'Apache Kafka component' },
+      { value: 'aliyun_sls', description: 'Alibaba Cloud SLS component' },
+      { value: 'elasticsearch', description: 'Elasticsearch component' },
+      { value: 'print', description: 'Console print component' }
+    ];
     
-    // 添加input类型
-    if (inputTypes.value && inputTypes.value.length > 0) {
-      availableTypes = availableTypes.concat(inputTypes.value.map(type => ({
-        value: type.name || type.value || type,
-        description: type.description || `${type.name || type.value || type} input component`
-      })));
-    }
-    
-    // 添加output类型
-    if (outputTypes.value && outputTypes.value.length > 0) {
-      const outputTypeList = outputTypes.value.map(type => ({
-        value: type.name || type.value || type,
-        description: type.description || `${type.name || type.value || type} output component`
-      }));
-      // 避免重复类型
-      outputTypeList.forEach(outputType => {
-        if (!availableTypes.some(t => t.value === outputType.value)) {
-          availableTypes.push(outputType);
-        }
-      });
-    }
-    
-    // 如果store中没有数据，使用默认类型
-    if (availableTypes.length === 0) {
-      availableTypes = [
-        { value: 'kafka', description: 'Apache Kafka component' },
-        { value: 'aliyun_sls', description: 'Alibaba Cloud SLS component' },
-        { value: 'elasticsearch', description: 'Elasticsearch component' },
-        { value: 'print', description: 'Console print component' }
-      ];
-    }
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
     availableTypes.forEach(type => {
-      if (!suggestions.some(s => s.label === type.value)) {
-        suggestions.push({
-          label: type.value,
-          kind: monaco.languages.CompletionItemKind.EnumMember,
-          documentation: type.description,
-          insertText: type.value,
-          range: range
-        });
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === type.value)) {
+          suggestions.push({
+            label: type.value,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: type.description,
+            insertText: type.value,
+            range: range,
+            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+          });
+        }
       }
     });
   }
@@ -3169,7 +3599,7 @@ function getBaseYamlKeyCompletions(context, range, fullText) {
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Component type specification',
-        insertText: 'type: ',
+        insertText: 'type:',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });

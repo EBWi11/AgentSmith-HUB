@@ -4,6 +4,7 @@ kafka:
     - 127.0.0.1:9092
   topic: test-topic
   group: test
+  compression: none
   
 #type: aliyun_sls
 #aliyun_sls:

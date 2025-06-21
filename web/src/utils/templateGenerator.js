@@ -21,8 +21,8 @@ export function generateRulesetTemplate(id) {
 
         <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="SUM" count_field="dip">5</threshold>
 
-        <append field_name="data_type">10</append>
-        <append type="PLUGIN" field_name="data_type">plugin_name(_$ORIDATA)</append>
+        <append field="data_type">10</append>
+        <append type="PLUGIN" field="data_type">plugin_name(_$ORIDATA)</append>
         
         <plugin>plugin_name(_$ORIDATA)</plugin>
         <del>sport,dport</del>

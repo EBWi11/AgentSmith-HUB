@@ -147,9 +147,9 @@ type Threshold struct {
 // Append defines additional fields to append after rule matching.
 // It supports both static values and plugin-based dynamic values.
 type Append struct {
-	Type      string `xml:"type,attr"`       // Type of append (PLUGIN)
-	FieldName string `xml:"field_name,attr"` // Name of field to append
-	Value     string `xml:",chardata"`       // Value to append
+	Type      string `xml:"type,attr"`  // Type of append (PLUGIN)
+	FieldName string `xml:"field,attr"` // Name of field to append
+	Value     string `xml:",chardata"`  // Value to append
 
 	Plugin     *plugin.Plugin // Plugin instance if type is PLUGIN
 	PluginArgs []*PluginArg   // Arguments for plugin execution
@@ -477,6 +477,9 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 		})
 	}
 
+	// Check for duplicate elements within this rule
+	validateRuleDuplicateElements(xmlContent, ruleID, ruleIndex, result)
+
 	// Validate filter
 	if rule.Filter.Field == "" || strings.TrimSpace(rule.Filter.Field) == "" {
 		result.Warnings = append(result.Warnings, ValidationWarning{
@@ -499,6 +502,62 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	// Validate plugins
 	for pluginIndex, plugin := range rule.Plugins {
 		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, pluginIndex, result)
+	}
+}
+
+// validateRuleDuplicateElements checks for duplicate elements within a rule
+func validateRuleDuplicateElements(xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
+	// Extract the rule content
+	lines := strings.Split(xmlContent, "\n")
+	var ruleStartLine, ruleEndLine int
+
+	// Find rule start and end lines
+	for i, line := range lines {
+		if strings.Contains(line, "<rule") && (ruleID == "" || strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID))) {
+			ruleStartLine = i
+		}
+		if ruleStartLine > 0 && strings.Contains(line, "</rule>") {
+			ruleEndLine = i
+			break
+		}
+	}
+
+	if ruleStartLine == 0 || ruleEndLine == 0 {
+		return // Could not find rule boundaries
+	}
+
+	// Count occurrences of each element type within the rule
+	elementCounts := make(map[string][]int) // element type -> line numbers
+
+	for i := ruleStartLine; i <= ruleEndLine; i++ {
+		line := strings.TrimSpace(lines[i])
+
+		// Check for filter elements
+		if strings.Contains(line, "<filter") {
+			elementCounts["filter"] = append(elementCounts["filter"], i+1)
+		}
+
+		// Check for checklist elements
+		if strings.Contains(line, "<checklist") {
+			elementCounts["checklist"] = append(elementCounts["checklist"], i+1)
+		}
+
+		// Check for del elements
+		if strings.Contains(line, "<del>") || (strings.Contains(line, "<del") && strings.Contains(line, ">")) {
+			elementCounts["del"] = append(elementCounts["del"], i+1)
+		}
+	}
+
+	// Report errors for duplicate elements
+	for elementType, lineNumbers := range elementCounts {
+		if len(lineNumbers) > 1 {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    lineNumbers[1], // Report error on second occurrence
+				Message: fmt.Sprintf("Duplicate <%s> element found in rule", elementType),
+				Detail:  fmt.Sprintf("Rule ID: %s, Only one <%s> element is allowed per rule. First occurrence at line %d", ruleID, elementType, lineNumbers[0]),
+			})
+		}
 	}
 }
 
@@ -553,7 +612,9 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 			}
 		}
 
-		if node.Field == "" || strings.TrimSpace(node.Field) == "" {
+		// For PLUGIN type nodes, field is optional since plugins can have their own parameters
+		// For other node types, field is required
+		if node.Type != "PLUGIN" && (node.Field == "" || strings.TrimSpace(node.Field) == "") {
 			result.IsValid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Line:    nodeLine,
@@ -583,7 +644,7 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 			}
 		}
 
-		// Validate regex pattern
+		// Validate specific node types
 		if node.Type == "REGEX" {
 			nodeValue := strings.TrimSpace(node.Value)
 			if nodeValue == "" {
@@ -602,6 +663,22 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 						Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
 					})
 				}
+			}
+		}
+
+		// Validate plugin node
+		if node.Type == "PLUGIN" {
+			nodeValue := strings.TrimSpace(node.Value)
+			if nodeValue == "" {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    nodeLine,
+					Message: "PLUGIN node value cannot be empty",
+					Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+				})
+			} else {
+				// Validate plugin parameters and return type for checknode
+				validateCheckNodePluginCall(nodeValue, nodeLine, ruleID, result)
 			}
 		}
 	}
@@ -685,7 +762,7 @@ func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, ap
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    appendLine,
-			Message: "Append field_name cannot be empty",
+			Message: "Append field cannot be empty",
 			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 		})
 	}
@@ -699,6 +776,9 @@ func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, ap
 				Message: "Append plugin value cannot be empty",
 				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 			})
+		} else {
+			// Validate plugin parameters
+			validatePluginCall(value, appendLine, ruleID, result)
 		}
 	}
 }
@@ -715,7 +795,344 @@ func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, plugin
 			Message: "Plugin value cannot be empty",
 			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 		})
+	} else {
+		// Validate plugin parameters
+		validatePluginCall(value, pluginLine, ruleID, result)
 	}
+}
+
+// validateCheckNodePluginCall validates plugin function call for checknode (must return bool)
+func validateCheckNodePluginCall(pluginCall string, line int, ruleID string, result *ValidationResult) {
+	// Parse the plugin function call
+	pluginName, args, err := ParseFunctionCall(pluginCall)
+	if err != nil {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    line,
+			Message: "Invalid plugin call syntax",
+			Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+		})
+		return
+	}
+
+	// Check if plugin exists
+	var pluginInstance *plugin.Plugin
+	if p, ok := plugin.Plugins[pluginName]; ok {
+		pluginInstance = p
+	} else {
+		// Check if it's a temporary component
+		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: "Cannot reference temporary plugin, please save it first",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		} else {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: "Plugin not found",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		}
+	}
+
+	// Check plugin return type for checknode
+	if pluginInstance.ReturnType != "bool" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    line,
+			Message: fmt.Sprintf("Plugin '%s' cannot be used in checknode", pluginName),
+			Detail:  fmt.Sprintf("Rule ID: %s, Checknode plugins must return bool type, but '%s' returns %s", ruleID, pluginName, pluginInstance.ReturnType),
+		})
+		return
+	}
+
+	// Validate plugin parameters
+	validatePluginParameters(pluginInstance, args, pluginCall, line, ruleID, result)
+}
+
+// validatePluginCall validates plugin function call syntax and parameters
+func validatePluginCall(pluginCall string, line int, ruleID string, result *ValidationResult) {
+	// Parse the plugin function call
+	pluginName, args, err := ParseFunctionCall(pluginCall)
+	if err != nil {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    line,
+			Message: "Invalid plugin call syntax",
+			Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+		})
+		return
+	}
+
+	// Check if plugin exists
+	var pluginInstance *plugin.Plugin
+	if p, ok := plugin.Plugins[pluginName]; ok {
+		pluginInstance = p
+	} else {
+		// Check if it's a temporary component
+		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: "Cannot reference temporary plugin, please save it first",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		} else {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: "Plugin not found",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		}
+	}
+
+	// Validate plugin parameters
+	validatePluginParameters(pluginInstance, args, pluginCall, line, ruleID, result)
+}
+
+// validatePluginParameters validates the parameters of a plugin call
+func validatePluginParameters(p *plugin.Plugin, args []*PluginArg, pluginCall string, line int, ruleID string, result *ValidationResult) {
+	if p == nil || len(p.Parameters) == 0 {
+		// Plugin doesn't have parameter information, skip validation
+		return
+	}
+
+	pluginParams := p.Parameters
+	providedArgCount := len(args)
+	expectedParamCount := len(pluginParams)
+
+	// Count required parameters
+	requiredParamCount := 0
+	for _, param := range pluginParams {
+		if param.Required {
+			requiredParamCount++
+		}
+	}
+
+	// Check if too few arguments provided
+	if providedArgCount < requiredParamCount {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    line,
+			Message: fmt.Sprintf("Not enough arguments for plugin '%s'", p.Name),
+			Detail:  fmt.Sprintf("Rule ID: %s, Expected at least %d arguments, got %d. Required parameters: %s", ruleID, requiredParamCount, providedArgCount, formatRequiredParameters(pluginParams)),
+		})
+		return
+	}
+
+	// Special handling for known pseudo-variadic plugins
+	if isPseudoVariadicPlugin(p.Name, pluginParams) {
+		// For plugins like isLocalIP that use variadic but only handle specific argument counts
+		expectedCount := getExpectedArgumentCount(p.Name)
+		if expectedCount > 0 && providedArgCount != expectedCount {
+			if providedArgCount > expectedCount {
+				result.Warnings = append(result.Warnings, ValidationWarning{
+					Line:    line,
+					Message: fmt.Sprintf("Plugin '%s' only uses the first %d argument(s), extra arguments will be ignored", p.Name, expectedCount),
+					Detail:  fmt.Sprintf("Rule ID: %s, Provided %d arguments but only %d will be used", ruleID, providedArgCount, expectedCount),
+				})
+			} else if providedArgCount < expectedCount {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    line,
+					Message: fmt.Sprintf("Plugin '%s' expects exactly %d argument(s)", p.Name, expectedCount),
+					Detail:  fmt.Sprintf("Rule ID: %s, Expected %d arguments, got %d", ruleID, expectedCount, providedArgCount),
+				})
+				return
+			}
+		}
+	} else {
+		// Check if too many arguments provided (for non-variadic functions)
+		isVariadic := expectedParamCount > 0 && strings.HasPrefix(pluginParams[expectedParamCount-1].Type, "...")
+		if !isVariadic && providedArgCount > expectedParamCount {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: fmt.Sprintf("Too many arguments for plugin '%s'", p.Name),
+				Detail:  fmt.Sprintf("Rule ID: %s, Expected %d arguments, got %d. Expected parameters: %s", ruleID, expectedParamCount, providedArgCount, formatExpectedParameters(pluginParams)),
+			})
+			return
+		}
+	}
+
+	// Validate each argument type
+	for i, arg := range args {
+		if i >= len(pluginParams) {
+			// This is for variadic parameters, which we've already checked above
+			continue
+		}
+
+		param := pluginParams[i]
+		expectedType := param.Type
+
+		// Handle variadic parameters
+		if strings.HasPrefix(expectedType, "...") {
+			expectedType = strings.TrimPrefix(expectedType, "...")
+		}
+
+		// Basic type validation
+		if !isArgumentTypeCompatible(arg, expectedType) {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    line,
+				Message: fmt.Sprintf("Type mismatch for parameter '%s' of plugin '%s'", param.Name, p.Name),
+				Detail:  fmt.Sprintf("Rule ID: %s, Expected type: %s, but argument appears to be: %s", ruleID, expectedType, getArgumentTypeDescription(arg)),
+			})
+		}
+	}
+
+	// Add warning for empty string parameters that might be intentional
+	for i, arg := range args {
+		if i >= len(pluginParams) {
+			continue
+		}
+		if param := pluginParams[i]; param.Type == "string" {
+			if strVal, ok := arg.Value.(string); ok && strVal == "" {
+				result.Warnings = append(result.Warnings, ValidationWarning{
+					Line:    line,
+					Message: fmt.Sprintf("Empty string passed to parameter '%s' of plugin '%s'", param.Name, p.Name),
+					Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+				})
+			}
+		}
+	}
+}
+
+// isPseudoVariadicPlugin checks if a plugin is pseudo-variadic (uses variadic syntax but only handles specific argument counts)
+func isPseudoVariadicPlugin(pluginName string, params []plugin.PluginParameter) bool {
+	// Check if the plugin has exactly one variadic parameter
+	if len(params) == 1 && strings.HasPrefix(params[0].Type, "...") {
+		// Known pseudo-variadic plugins
+		pseudoVariadicPlugins := map[string]bool{
+			"isLocalIP": true,
+			// Add other pseudo-variadic plugins here as needed
+		}
+		return pseudoVariadicPlugins[pluginName]
+	}
+	return false
+}
+
+// getExpectedArgumentCount returns the expected argument count for known pseudo-variadic plugins
+func getExpectedArgumentCount(pluginName string) int {
+	switch pluginName {
+	case "isLocalIP":
+		return 1 // isLocalIP only processes exactly 1 argument
+	default:
+		return 0 // Unknown plugin, no specific requirement
+	}
+}
+
+// isArgumentTypeCompatible checks if an argument is compatible with the expected type
+func isArgumentTypeCompatible(arg *PluginArg, expectedType string) bool {
+	if arg == nil {
+		return false
+	}
+
+	// Special case for raw symbol (${RAWDATA})
+	if arg.Type == 2 {
+		return true // Raw data can be any type
+	}
+
+	// Special case for field reference (Type == 1)
+	if arg.Type == 1 {
+		return true // Field references are resolved at runtime, so we can't check type
+	}
+
+	// Check literal value types (Type == 0)
+	switch expectedType {
+	case "string":
+		_, ok := arg.Value.(string)
+		return ok
+	case "int":
+		switch arg.Value.(type) {
+		case int, int32, int64:
+			return true
+		default:
+			return false
+		}
+	case "float":
+		switch arg.Value.(type) {
+		case float32, float64:
+			return true
+		case int, int32, int64: // Integers can be converted to float
+			return true
+		default:
+			return false
+		}
+	case "bool":
+		_, ok := arg.Value.(bool)
+		return ok
+	case "interface{}":
+		return true // interface{} accepts any type
+	default:
+		// For slice types like []string, []int, etc.
+		if strings.HasPrefix(expectedType, "[]") {
+			// We can't easily validate slice types from string literals
+			// This would require more complex parsing
+			return true
+		}
+		// For unknown types, assume compatible
+		return true
+	}
+}
+
+// getArgumentTypeDescription returns a human-readable description of the argument type
+func getArgumentTypeDescription(arg *PluginArg) string {
+	if arg == nil {
+		return "unknown"
+	}
+
+	switch arg.Type {
+	case 2:
+		return "raw data (${RAWDATA})"
+	case 1:
+		return fmt.Sprintf("field reference (%v)", arg.Value)
+	default:
+		switch arg.Value.(type) {
+		case string:
+			return "string"
+		case int, int32, int64:
+			return "int"
+		case float32, float64:
+			return "float"
+		case bool:
+			return "bool"
+		default:
+			return fmt.Sprintf("unknown (%T)", arg.Value)
+		}
+	}
+}
+
+// formatRequiredParameters formats required parameters for error messages
+func formatRequiredParameters(params []plugin.PluginParameter) string {
+	var required []string
+	for _, param := range params {
+		if param.Required {
+			required = append(required, fmt.Sprintf("%s (%s)", param.Name, param.Type))
+		}
+	}
+	return strings.Join(required, ", ")
+}
+
+// formatExpectedParameters formats all expected parameters for error messages
+func formatExpectedParameters(params []plugin.PluginParameter) string {
+	var formatted []string
+	for _, param := range params {
+		paramStr := fmt.Sprintf("%s (%s)", param.Name, param.Type)
+		if !param.Required {
+			paramStr += " [optional]"
+		}
+		formatted = append(formatted, paramStr)
+	}
+	return strings.Join(formatted, ", ")
 }
 
 func Verify(path string, raw string) error {

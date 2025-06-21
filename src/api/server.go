@@ -114,6 +114,7 @@ func ServerStart(listener string) error {
 	e.PUT("/plugins/:id", updatePlugin)
 	e.DELETE("/plugins/:id", deletePlugin)
 	e.GET("/available-plugins", getAvailablePlugins)
+	e.GET("/plugin-parameters/:id", GetPluginParameters)
 
 	// Component verification and testing
 	e.POST("/verify/:type/:id", verifyComponent)
@@ -150,6 +151,7 @@ func ServerStart(listener string) error {
 
 	// Sampler endpoints
 	e.GET("/samplers/data", GetSamplerData)
+	e.GET("/ruleset-fields/:id", GetRulesetFields)
 
 	// Cancel upgrade routes
 	e.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)

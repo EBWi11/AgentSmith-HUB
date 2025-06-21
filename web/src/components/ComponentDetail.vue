@@ -7,7 +7,7 @@
     <!-- Special layout for projects: Split view with live preview -->
     <div v-if="isProject" class="flex h-full">
       <div class="w-3/5 h-full">
-        <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" />
+        <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
       </div>
       <div class="w-2/5 h-full border-l border-gray-200">
         <div class="p-3 bg-gray-50 border-b border-gray-200">
@@ -23,7 +23,7 @@
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
-          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" />
+          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Test Buttons -->
       <button 
@@ -188,7 +188,7 @@
          <!-- Special layout for projects: Split view with live preview -->
      <div v-if="isProject" class="flex h-full">
        <div class="w-3/5 h-full">
-         <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" />
+         <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
        </div>
        <div class="w-2/5 h-full border-l border-gray-200">
         <div class="p-3 bg-gray-50 border-b border-gray-200">
@@ -204,7 +204,7 @@
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
-           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" />
+           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Cancel Button -->
       <button 
@@ -344,7 +344,7 @@
   <!-- Special layout for projects -->
   <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="flex h-full">
     <div class="w-3/5 h-full">
-       <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" />
+       <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" :component-id="props.item?.id" :component-type="props.item?.type" />
     </div>
     <div class="w-2/5 h-full border-l border-gray-200">
       <ProjectWorkflow :projectContent="detail.raw" />
@@ -431,7 +431,7 @@
         </div>
       </div>
     </div>
-    <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" />
+    <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1" :component-id="props.item?.id" :component-type="props.item?.type" />
   </div>
 
   <!-- Test Modal -->
@@ -520,7 +520,6 @@ const validationResult = ref({
 const verifyLoading = ref(false)
 const connectCheckLoading = ref(false)
 const showValidationPanel = ref(true) // Show validation panel by default when there are errors/warnings
-const pluginVerifyTimeout = ref(null) // Timeout for plugin auto-verification
 const projectValidationTimeout = ref(null) // Timeout for project auto-verification
 const isRuleset = computed(() => {
   return props.item?.type === 'rulesets'
@@ -909,10 +908,110 @@ const validateProjectRealtime = async () => {
   return true;
 }
 
+// Real-time validation function for inputs (no messages, silent)
+const validateInputRealtime = async () => {
+  if (isInput.value && editorValue.value && props.item?.id) {
+    try {
+      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
+      
+      if (response.data && response.data.valid !== undefined) {
+        if (response.data.valid) {
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        } else {
+          // For invalid responses, show error
+          const errorMessage = response.data.error || 'Input validation failed';
+          
+          // Try to extract line number from error message
+          const lineNumber = extractLineNumber(errorMessage);
+          
+          validationResult.value = {
+            isValid: false,
+            errors: [{ 
+              line: lineNumber || 'Unknown', 
+              message: errorMessage,
+              detail: response.data?.detail || null
+            }],
+            warnings: []
+          };
+          
+          errorLines.value = lineNumber ? [lineNumber] : [];
+          showValidationPanel.value = true;
+        }
+        return response.data.valid;
+      } else {
+        // Clear validation
+        validationResult.value = { isValid: true, errors: [], warnings: [] };
+        errorLines.value = [];
+        showValidationPanel.value = false;
+        return true;
+      }
+    } catch (error) {
+      // Clear validation errors when validation request fails
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      errorLines.value = [];
+      showValidationPanel.value = false;
+      return true;
+    }
+  }
+  return true;
+}
+
+// Real-time validation function for outputs (no messages, silent)
+const validateOutputRealtime = async () => {
+  if (isOutput.value && editorValue.value && props.item?.id) {
+    try {
+      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
+      
+      if (response.data && response.data.valid !== undefined) {
+        if (response.data.valid) {
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        } else {
+          // For invalid responses, show error
+          const errorMessage = response.data.error || 'Output validation failed';
+          
+          // Try to extract line number from error message
+          const lineNumber = extractLineNumber(errorMessage);
+          
+          validationResult.value = {
+            isValid: false,
+            errors: [{ 
+              line: lineNumber || 'Unknown', 
+              message: errorMessage,
+              detail: response.data?.detail || null
+            }],
+            warnings: []
+          };
+          
+          errorLines.value = lineNumber ? [lineNumber] : [];
+          showValidationPanel.value = true;
+        }
+        return response.data.valid;
+      } else {
+        // Clear validation
+        validationResult.value = { isValid: true, errors: [], warnings: [] };
+        errorLines.value = [];
+        showValidationPanel.value = false;
+        return true;
+      }
+    } catch (error) {
+      // Clear validation errors when validation request fails
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      errorLines.value = [];
+      showValidationPanel.value = false;
+      return true;
+    }
+  }
+  return true;
+}
+
 // Watch for changes in editor content and perform real-time validation  
 const rulesetValidationTimeout = ref(null);
 
-// Real-time validation for rulesets only, projects use line-based validation
+// Real-time validation for rulesets only, other components use line-based validation
 watch(editorValue, (newContent) => {
   if (isRuleset.value && newContent) {
     // Debounce ruleset validation to avoid excessive API calls
@@ -920,26 +1019,45 @@ watch(editorValue, (newContent) => {
     rulesetValidationTimeout.value = setTimeout(async () => {
       await validateRulesetRealtime();
     }, 800); // Wait 800ms after user stops typing for faster feedback
-  } else if (isPlugin.value && newContent && props.item?.isEdit) {
-    // Auto-verify plugin code changes, but with debouncing to avoid excessive API calls
-    clearTimeout(pluginVerifyTimeout.value)
-    pluginVerifyTimeout.value = setTimeout(() => {
-      autoVerifyPlugin()
-    }, 2000) // Wait 2 seconds after user stops typing
   }
 }, { deep: true })
 
-// Track last cursor line for project validation
+// Track last cursor line for validation
 const lastCursorLine = ref(1)
 
-// Handle line change for project validation
+// Timeout variables for validation
+const inputValidationTimeout = ref(null)
+const outputValidationTimeout = ref(null)
+const pluginValidationTimeout = ref(null)
+
+// Handle line change for real-time validation (project, input, output, plugin)
 function handleLineChange(newLineNumber) {
-  if (isProject.value && newLineNumber !== lastCursorLine.value) {
-    // User moved to a different line, validate the project
-    clearTimeout(projectValidationTimeout.value);
-    projectValidationTimeout.value = setTimeout(async () => {
-      await validateProjectRealtime();
-    }, 300); // Quick validation when changing lines
+  if (newLineNumber !== lastCursorLine.value) {
+    if (isProject.value) {
+      // User moved to a different line in project, validate the project
+      clearTimeout(projectValidationTimeout.value);
+      projectValidationTimeout.value = setTimeout(async () => {
+        await validateProjectRealtime();
+      }, 300); // Quick validation when changing lines
+    } else if (isInput.value) {
+      // User moved to a different line in input, validate the input
+      clearTimeout(inputValidationTimeout.value);
+      inputValidationTimeout.value = setTimeout(async () => {
+        await validateInputRealtime();
+      }, 300); // Quick validation when changing lines
+    } else if (isOutput.value) {
+      // User moved to a different line in output, validate the output
+      clearTimeout(outputValidationTimeout.value);
+      outputValidationTimeout.value = setTimeout(async () => {
+        await validateOutputRealtime();
+      }, 300); // Quick validation when changing lines
+    } else if (isPlugin.value) {
+      // User moved to a different line in plugin, validate the plugin
+      clearTimeout(pluginValidationTimeout.value);
+      pluginValidationTimeout.value = setTimeout(async () => {
+        await validatePluginRealtime();
+      }, 300); // Quick validation when changing lines
+    }
     
     lastCursorLine.value = newLineNumber;
   }
@@ -1384,100 +1502,79 @@ async function connectCheck() {
   }
 }
 
-// Auto-verify plugin function (called by debounced watch)
-async function autoVerifyPlugin() {
-  if (!isPlugin.value || !props.item?.isEdit) return;
-  
-  try {
-    const contentToVerify = editorValue.value;
-    
-    if (!contentToVerify || contentToVerify.trim() === '') {
-      // Clear validation errors if content is empty
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-    } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
+// Real-time validation function for plugins (no messages, silent)
+const validatePluginRealtime = async () => {
+  if (isPlugin.value && editorValue.value && props.item?.id) {
+    try {
+      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
       
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
-        
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      } else {
-        // Add general error without line number
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
+      if (response.data && response.data.valid !== undefined) {
+        if (response.data.valid) {
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        } else {
+          // For invalid responses, show error
+          let errorMessage = 'Plugin validation failed';
+          if (response.data && response.data.error) {
+            errorMessage = response.data.error;
+          } else if (response.data && !response.data.valid) {
+            errorMessage = 'Plugin validation failed - check your code syntax';
+          }
+          
+          // Try to extract line number from error message
+          const lineNumber = extractLineNumber(errorMessage);
+          
+          errorLines.value = lineNumber ? [lineNumber] : [];
+          
+          validationResult.value = {
+            isValid: false,
+            errors: [{
+              line: lineNumber || 'Unknown',
+              message: errorMessage,
+              detail: response.data?.detail || null
+            }],
+            warnings: []
+          };
+          showValidationPanel.value = true;
+        }
       }
-      showValidationPanel.value = true;
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    
-    // Extract line number from error message for highlighting
-    const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
+      return response.data?.valid || false;
+    } catch (error) {
+      // Handle API errors silently for real-time validation
+      console.error('Plugin validation error:', error);
       
-      // Add to validation result for display in the panel
+      let errorMessage = 'Plugin verification failed';
+      if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Plugin verification service not available';
+      } else if (error.response?.status >= 500) {
+        errorMessage = 'Server error during plugin verification';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      const lineNumber = extractLineNumber(errorMessage);
+      errorLines.value = lineNumber ? [lineNumber] : [];
+      
       validationResult.value = {
         isValid: false,
         errors: [{
-          line: lineNumber,
+          line: lineNumber || 'Unknown', 
           message: errorMessage,
           detail: error.response?.data?.detail || null
         }],
         warnings: []
       };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
+      showValidationPanel.value = true;
+      return false;
     }
-    showValidationPanel.value = true;
   }
+  return true;
 }
+
+
 
 // Perform initial validation when component is mounted
 onMounted(async () => {
@@ -1490,6 +1587,12 @@ onMounted(async () => {
     await validateRulesetRealtime()
   } else if (isProject.value && editorValue.value) {
     await validateProjectRealtime()
+  } else if (isInput.value && editorValue.value) {
+    await validateInputRealtime()
+  } else if (isOutput.value && editorValue.value) {
+    await validateOutputRealtime()
+  } else if (isPlugin.value && editorValue.value) {
+    await validatePluginRealtime()
   }
   
   // If component type is project, fetch all components list
@@ -1523,6 +1626,30 @@ async function saveEdit(content) {
   if (isProject.value) {
     const isValid = await validateProjectRealtime()
     if (!isValid && !confirm('Project contains validation errors. Save anyway?')) {
+      return
+    }
+  }
+  
+  // Validate input configuration
+  if (isInput.value) {
+    const isValid = await validateInputRealtime()
+    if (!isValid && !confirm('Input contains validation errors. Save anyway?')) {
+      return
+    }
+  }
+  
+  // Validate output configuration
+  if (isOutput.value) {
+    const isValid = await validateOutputRealtime()
+    if (!isValid && !confirm('Output contains validation errors. Save anyway?')) {
+      return
+    }
+  }
+  
+  // Validate plugin configuration
+  if (isPlugin.value) {
+    const isValid = await validatePluginRealtime()
+    if (!isValid && !confirm('Plugin contains validation errors. Save anyway?')) {
       return
     }
   }
@@ -1646,6 +1773,30 @@ async function saveNew(content) {
   if (isProject.value) {
     const isValid = await validateProjectRealtime()
     if (!isValid && !confirm('Project contains validation errors. Create anyway?')) {
+      return
+    }
+  }
+  
+  // Validate input configuration
+  if (isInput.value) {
+    const isValid = await validateInputRealtime()
+    if (!isValid && !confirm('Input contains validation errors. Create anyway?')) {
+      return
+    }
+  }
+  
+  // Validate output configuration
+  if (isOutput.value) {
+    const isValid = await validateOutputRealtime()
+    if (!isValid && !confirm('Output contains validation errors. Create anyway?')) {
+      return
+    }
+  }
+  
+  // Validate plugin configuration
+  if (isPlugin.value) {
+    const isValid = await validatePluginRealtime()
+    if (!isValid && !confirm('Plugin contains validation errors. Create anyway?')) {
       return
     }
   }
@@ -1970,6 +2121,11 @@ watch(() => props.item?.id, (newVal, oldVal) => {
     if (isProject.value) {
       setupStatusRefresh();
     }
+    
+    // Clear any existing validation errors when switching components
+    validationResult.value = { isValid: true, errors: [], warnings: [] };
+    errorLines.value = [];
+    showValidationPanel.value = false;
   }
 });
 
@@ -1983,8 +2139,14 @@ onBeforeUnmount(() => {
   if (projectValidationTimeout.value) {
     clearTimeout(projectValidationTimeout.value);
   }
-  if (pluginVerifyTimeout.value) {
-    clearTimeout(pluginVerifyTimeout.value);
+  if (inputValidationTimeout.value) {
+    clearTimeout(inputValidationTimeout.value);
+  }
+  if (outputValidationTimeout.value) {
+    clearTimeout(outputValidationTimeout.value);
+  }
+  if (pluginValidationTimeout.value) {
+    clearTimeout(pluginValidationTimeout.value);
   }
 });
 
