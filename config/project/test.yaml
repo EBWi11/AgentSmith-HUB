@@ -1,2 +1,4 @@
 content: |
-  INPUT.sls_demo -> OUTPUT.print_demo
+  INPUT.123 -> RULESET.test
+  INPUT.123  -> OUTPUT.print_demo
+  RULESET.test -> OUTPUT.print_demo

@@ -29,6 +29,9 @@ type GlobalProjectInfo struct {
 
 	msgChans        map[string]chan map[string]interface{}
 	msgChansCounter map[string]int
+
+	// Dedicated lock for project lifecycle management to reduce lock contention
+	ProjectMu sync.RWMutex
 }
 
 // ProjectConfig holds the configuration for a project

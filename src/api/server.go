@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"errors"
 	"net/http"
 
@@ -23,7 +24,25 @@ func ServerStart(listener string) error {
 		MaxAge:           86400,                      // Cache preflight requests for 24 hours
 	}))
 
-	e.Use(middleware.Logger())
+	// Initialize access logger and verify it works
+	accessLogWriter := logger.GetAccessLogger()
+	if accessLogWriter == nil {
+		logger.Error("failed to initialize access logger")
+		return errors.New("access logger initialization failed")
+	}
+	logger.Info("access logger configured successfully")
+
+	// Test access logger to ensure it works
+	if err := logger.TestAccessLogger(); err != nil {
+		logger.Error("access logger test failed", "error", err)
+		return err
+	}
+
+	// Configure access logger with custom format and output to access.log
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: accessLogWriter,
+		Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${uri}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n",
+	}))
 	e.Use(middleware.Recover())
 
 	// Global authentication middleware (skip for health check and token check)

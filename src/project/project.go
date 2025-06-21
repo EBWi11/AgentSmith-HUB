@@ -1,12 +1,14 @@
 package project
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,19 +44,18 @@ func init() {
 func Verify(path string, raw string) error {
 	var err error
 	var cfg ProjectConfig
-	var data []byte
 	var p *Project
 
-	if path != "" {
-		data, err = os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read project configuration file: %w", err)
-		}
+	// Use common file reading function
+	data, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return fmt.Errorf("failed to read project configuration: %w", err)
+	}
 
+	if path != "" {
 		cfg.RawConfig = string(data)
 	} else {
 		cfg.RawConfig = raw
-		data = []byte(raw)
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -75,7 +76,7 @@ func Verify(path string, raw string) error {
 	}
 
 	if strings.TrimSpace(cfg.Content) == "" {
-		return fmt.Errorf("project content cannot be empty in configuration file (line: unknown)")
+		return fmt.Errorf("project content cannot be empty in configuration file")
 	}
 
 	p = &Project{
@@ -86,7 +87,7 @@ func Verify(path string, raw string) error {
 
 	_, err = p.parseContent()
 	if err != nil {
-		return fmt.Errorf("failed to parse project content: %v (line: unknown)", err)
+		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
 	return nil
@@ -135,23 +136,20 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 	if err := p.initComponents(); err != nil {
 		p.Status = ProjectStatusError
 		p.Err = err
+
+		// Save the error status to file
+		if saveErr := p.SaveProjectStatus(); saveErr != nil {
+			logger.Warn("Failed to save error project status", "id", p.Id, "error", saveErr)
+		}
+
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
-	// Load saved status if available
-	savedStatus, err := p.LoadProjectStatus()
-	if err == nil {
-		// Always respect the saved status, but don't actually start components here
-		// StartAllProject will handle the actual starting of components
-		p.Status = savedStatus
-		logger.Info("Project loaded with saved status", "id", p.Id, "status", savedStatus)
-	}
-
-	// Save the initial status to file
-	err = p.SaveProjectStatus()
-	if err != nil {
-		logger.Warn("Failed to save initial project status", "id", p.Id, "error", err)
-	}
+	// IMPORTANT: After hub restart, all projects start with STOPPED status
+	// The .project_status file only records user intention, not current actual status
+	// Current actual status is always STOPPED after hub restart
+	p.Status = ProjectStatusStopped
+	logger.Info("Project created with stopped status (actual status after hub restart)", "id", p.Id, "status", p.Status)
 
 	return p, nil
 }
@@ -529,15 +527,29 @@ func (p *Project) parseContent() (map[string][]string, error) {
 	lines := strings.Split(p.Config.Content, "\n")
 	edgeSet := make(map[string]struct{}) // 用于检测重复流向
 
-	for _, line := range lines {
+	for lineNum, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
+		// Only support standard arrow format: ->
 		parts := strings.Split(line, "->")
+
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid line: %q", line)
+			// Check for invalid arrow-like patterns and provide specific error messages
+			if strings.Contains(line, "→") {
+				return nil, fmt.Errorf("invalid arrow format at line %d: use '->' instead of '→' in %q", lineNum+1, line)
+			} else if strings.Contains(line, "—>") {
+				return nil, fmt.Errorf("invalid arrow format at line %d: use '->' instead of '—>' in %q", lineNum+1, line)
+			} else if strings.Contains(line, "-->") {
+				return nil, fmt.Errorf("invalid arrow format at line %d: use '->' instead of '-->' in %q", lineNum+1, line)
+			} else if strings.Contains(line, "=>") {
+				return nil, fmt.Errorf("invalid arrow format at line %d: use '->' instead of '=>' in %q", lineNum+1, line)
+			} else if strings.Contains(line, "—") || strings.Contains(line, "–") || strings.Contains(line, "―") {
+				return nil, fmt.Errorf("invalid arrow format at line %d: use '->' instead of dash characters in %q", lineNum+1, line)
+			}
+			return nil, fmt.Errorf("invalid line format at line %d: missing or invalid arrow operator in %q (use '->')", lineNum+1, line)
 		}
 
 		from := strings.TrimSpace(parts[0])
@@ -548,26 +560,31 @@ func (p *Project) parseContent() (map[string][]string, error) {
 		toType, _ := parseNode(to)
 
 		if fromType == "" || toType == "" {
-			return nil, fmt.Errorf("invalid node format: %s -> %s", from, to)
+			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
 		}
 
 		// Validate flow rules
 		if toType == "INPUT" {
-			return nil, fmt.Errorf("INPUT node %q cannot be a destination", to)
+			return nil, fmt.Errorf("INPUT node %q cannot be a destination at line %d", to, lineNum+1)
 		}
 		if fromType == "OUTPUT" {
-			return nil, fmt.Errorf("OUTPUT node %q cannot be a source", from)
+			return nil, fmt.Errorf("OUTPUT node %q cannot be a source at line %d", from, lineNum+1)
 		}
 
 		// 检查是否有重复的流向
 		edgeKey := from + "->" + to
 		if _, exists := edgeSet[edgeKey]; exists {
-			return nil, fmt.Errorf("duplicate data flow detected: %s", edgeKey)
+			return nil, fmt.Errorf("duplicate data flow detected at line %d: %s", lineNum+1, edgeKey)
 		}
 		edgeSet[edgeKey] = struct{}{}
 
 		// Add to flow graph
 		flowGraph[from] = append(flowGraph[from], to)
+	}
+
+	// Check if all referenced components exist
+	if err := p.validateComponentExistence(flowGraph); err != nil {
+		return nil, err
 	}
 
 	return flowGraph, nil
@@ -582,7 +599,132 @@ func parseNode(s string) (string, string) {
 	return strings.ToUpper(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
 }
 
-// Start starts the project and all its components
+// validateComponentExistence checks if all referenced components exist in the system
+func (p *Project) validateComponentExistence(flowGraph map[string][]string) error {
+	// Parse content again to get line numbers
+	lines := strings.Split(p.Config.Content, "\n")
+
+	// Build a map of component -> line numbers where they appear
+	componentLineMap := make(map[string][]int)
+
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Find all components mentioned in this line
+		parts := strings.Split(line, "->")
+		if len(parts) == 2 {
+			from := strings.TrimSpace(parts[0])
+			to := strings.TrimSpace(parts[1])
+
+			// Record line numbers for both components
+			componentLineMap[from] = append(componentLineMap[from], lineNum+1)
+			componentLineMap[to] = append(componentLineMap[to], lineNum+1)
+		}
+	}
+
+	// Collect all input/output/ruleset names from flowGraph
+	inputNames := make(map[string]bool)
+	outputNames := make(map[string]bool)
+	rulesetNames := make(map[string]bool)
+
+	for from, tos := range flowGraph {
+		fromParts := strings.Split(from, ".")
+		if len(fromParts) == 2 {
+			switch strings.ToUpper(fromParts[0]) {
+			case "INPUT":
+				inputNames[fromParts[1]] = true
+			case "OUTPUT":
+				outputNames[fromParts[1]] = true
+			case "RULESET":
+				rulesetNames[fromParts[1]] = true
+			}
+		}
+
+		for _, to := range tos {
+			toParts := strings.Split(to, ".")
+			if len(toParts) == 2 {
+				switch strings.ToUpper(toParts[0]) {
+				case "INPUT":
+					inputNames[toParts[1]] = true
+				case "OUTPUT":
+					outputNames[toParts[1]] = true
+				case "RULESET":
+					rulesetNames[toParts[1]] = true
+				}
+			}
+		}
+	}
+
+	// Check if input components exist
+	for inputName := range inputNames {
+		if _, ok := GlobalProject.Inputs[inputName]; !ok {
+			// Check if it's a temporary component, temporary components should not be referenced
+			if _, tempExists := GlobalProject.InputsNew[inputName]; tempExists {
+				// Find the line number where this component appears
+				componentKey := "INPUT." + inputName
+				if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+					return fmt.Errorf("cannot reference temporary input component '%s' at line %d, please save it first", inputName, lineNumbers[0])
+				}
+				return fmt.Errorf("cannot reference temporary input component '%s', please save it first", inputName)
+			}
+			// Find the line number where this component appears
+			componentKey := "INPUT." + inputName
+			if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+				return fmt.Errorf("input component '%s' not found at line %d", inputName, lineNumbers[0])
+			}
+			return fmt.Errorf("input component '%s' not found", inputName)
+		}
+	}
+
+	// Check if output components exist
+	for outputName := range outputNames {
+		if _, ok := GlobalProject.Outputs[outputName]; !ok {
+			// Check if it's a temporary component, temporary components should not be referenced
+			if _, tempExists := GlobalProject.OutputsNew[outputName]; tempExists {
+				// Find the line number where this component appears
+				componentKey := "OUTPUT." + outputName
+				if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+					return fmt.Errorf("cannot reference temporary output component '%s' at line %d, please save it first", outputName, lineNumbers[0])
+				}
+				return fmt.Errorf("cannot reference temporary output component '%s', please save it first", outputName)
+			}
+			// Find the line number where this component appears
+			componentKey := "OUTPUT." + outputName
+			if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+				return fmt.Errorf("output component '%s' not found at line %d", outputName, lineNumbers[0])
+			}
+			return fmt.Errorf("output component '%s' not found", outputName)
+		}
+	}
+
+	// Check if ruleset components exist
+	for rulesetName := range rulesetNames {
+		if _, ok := GlobalProject.Rulesets[rulesetName]; !ok {
+			// Check if it's a temporary component, temporary components should not be referenced
+			if _, tempExists := GlobalProject.RulesetsNew[rulesetName]; tempExists {
+				// Find the line number where this component appears
+				componentKey := "RULESET." + rulesetName
+				if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+					return fmt.Errorf("cannot reference temporary ruleset component '%s' at line %d, please save it first", rulesetName, lineNumbers[0])
+				}
+				return fmt.Errorf("cannot reference temporary ruleset component '%s', please save it first", rulesetName)
+			}
+			// Find the line number where this component appears
+			componentKey := "RULESET." + rulesetName
+			if lineNumbers, exists := componentLineMap[componentKey]; exists && len(lineNumbers) > 0 {
+				return fmt.Errorf("ruleset component '%s' not found at line %d", rulesetName, lineNumbers[0])
+			}
+			return fmt.Errorf("ruleset component '%s' not found", rulesetName)
+		}
+	}
+
+	return nil
+}
+
+// Start starts the project and manages shared components safely
 func (p *Project) Start() error {
 	if p.Status == ProjectStatusRunning {
 		return fmt.Errorf("project is already running %s", p.Id)
@@ -618,37 +760,56 @@ func (p *Project) Start() error {
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
 
-	// Start components in proper order: Input → Ruleset → Output
-	// Start inputs first
+	// Use centralized component usage counter for better performance and code maintainability
+
+	// Start inputs first - only if not already running in other projects
 	for _, in := range p.Inputs {
-		if err := in.Start(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			// Save the error status to file
-			_ = p.SaveProjectStatus()
-			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
+		runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
+		if runningCount == 0 {
+			// No other project is using this input - start it
+			logger.Info("Starting shared input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+			if err := in.Start(); err != nil {
+				p.Status = ProjectStatusError
+				p.Err = err
+				_ = p.SaveProjectStatus()
+				return fmt.Errorf("failed to start shared input %s: %v", in.Id, err)
+			}
+		} else {
+			logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
 		}
 	}
 
-	// Start rulesets after inputs
+	// Start rulesets after inputs - only if not already running in other projects
 	for _, rs := range p.Rulesets {
-		if err := rs.Start(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			// Save the error status to file
-			_ = p.SaveProjectStatus()
-			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+		runningCount := UsageCounter.CountProjectsUsingRuleset(rs.RulesetID, p.Id)
+		if runningCount == 0 {
+			// No other project is using this ruleset - start it
+			logger.Info("Starting shared ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "running_projects", runningCount)
+			if err := rs.Start(); err != nil {
+				p.Status = ProjectStatusError
+				p.Err = err
+				_ = p.SaveProjectStatus()
+				return fmt.Errorf("failed to start shared ruleset %s: %v", rs.RulesetID, err)
+			}
+		} else {
+			logger.Info("Reusing already running ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "running_projects", runningCount)
 		}
 	}
 
-	// Start outputs last
+	// Start outputs last - only if not already running in other projects
 	for _, out := range p.Outputs {
-		if err := out.Start(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			// Save the error status to file
-			_ = p.SaveProjectStatus()
-			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
+		runningCount := UsageCounter.CountProjectsUsingOutput(out.Id, p.Id)
+		if runningCount == 0 {
+			// No other project is using this output - start it
+			logger.Info("Starting shared output component", "project", p.Id, "output", out.Id, "running_projects", runningCount)
+			if err := out.Start(); err != nil {
+				p.Status = ProjectStatusError
+				p.Err = err
+				_ = p.SaveProjectStatus()
+				return fmt.Errorf("failed to start shared output %s: %v", out.Id, err)
+			}
+		} else {
+			logger.Info("Reusing already running output component", "project", p.Id, "output", out.Id, "running_projects", runningCount)
 		}
 	}
 
@@ -668,6 +829,7 @@ func (p *Project) Start() error {
 		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
 	}
 
+	logger.Info("Project started successfully with shared components", "project", p.Id)
 	return nil
 }
 
@@ -694,16 +856,23 @@ func (p *Project) Stop() error {
 			}
 		}()
 
-		// Step 1: Stop inputs first to prevent new data
+		// Use centralized component usage counter for better performance and code maintainability
+
+		// Step 1: Stop inputs first to prevent new data (only if not used by other projects)
 		logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
 		for _, in := range p.Inputs {
-			logger.Info("Stopping input", "project", p.Id, "input", in.Id)
-			startTime := time.Now()
-			if err := in.Stop(); err != nil {
-				logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
-				// Continue with other inputs instead of failing immediately
+			otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
+			if otherProjectsUsing == 0 {
+				logger.Info("Stopping input component", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
+				startTime := time.Now()
+				if err := in.Stop(); err != nil {
+					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+					// Continue with other inputs instead of failing immediately
+				} else {
+					logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
+				}
 			} else {
-				logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
+				logger.Info("Input component still used by other projects, skipping stop", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
 			}
 		}
 
@@ -711,29 +880,39 @@ func (p *Project) Stop() error {
 		logger.Info("Step 2: Waiting for data to drain through pipeline", "project", p.Id)
 		p.waitForDataDrain()
 
-		// Step 3: Stop rulesets
+		// Step 3: Stop rulesets (only if not used by other projects)
 		logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 		for _, rs := range p.Rulesets {
-			logger.Info("Stopping ruleset", "project", p.Id, "ruleset", rs.RulesetID)
-			startTime := time.Now()
-			if err := rs.Stop(); err != nil {
-				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
-				// Continue with other rulesets instead of failing immediately
+			otherProjectsUsing := UsageCounter.CountProjectsUsingRuleset(rs.RulesetID, p.Id)
+			if otherProjectsUsing == 0 {
+				logger.Info("Stopping ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "other_projects_using", otherProjectsUsing)
+				startTime := time.Now()
+				if err := rs.Stop(); err != nil {
+					logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
+					// Continue with other rulesets instead of failing immediately
+				} else {
+					logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
+				}
 			} else {
-				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
+				logger.Info("Ruleset component still used by other projects, skipping stop", "project", p.Id, "ruleset", rs.RulesetID, "other_projects_using", otherProjectsUsing)
 			}
 		}
 
-		// Step 4: Stop outputs last
+		// Step 4: Stop outputs last (only if not used by other projects)
 		logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 		for _, out := range p.Outputs {
-			logger.Info("Stopping output", "project", p.Id, "output", out.Id)
-			startTime := time.Now()
-			if err := out.Stop(); err != nil {
-				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
-				// Continue with other outputs instead of failing immediately
+			otherProjectsUsing := UsageCounter.CountProjectsUsingOutput(out.Id, p.Id)
+			if otherProjectsUsing == 0 {
+				logger.Info("Stopping output component", "project", p.Id, "output", out.Id, "other_projects_using", otherProjectsUsing)
+				startTime := time.Now()
+				if err := out.Stop(); err != nil {
+					logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
+					// Continue with other outputs instead of failing immediately
+				} else {
+					logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
+				}
 			} else {
-				logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
+				logger.Info("Output component still used by other projects, skipping stop", "project", p.Id, "output", out.Id, "other_projects_using", otherProjectsUsing)
 			}
 		}
 
@@ -808,6 +987,12 @@ func (p *Project) Stop() error {
 	case <-overallTimeout:
 		logger.Error("Project stop timeout exceeded", "project", p.Id)
 		p.Status = ProjectStatusError
+
+		// Save the error status to file
+		if err := p.SaveProjectStatus(); err != nil {
+			logger.Warn("Failed to save error project status after timeout", "id", p.Id, "error", err)
+		}
+
 		return fmt.Errorf("project stop timeout exceeded for %s", p.Id)
 	}
 }
@@ -1356,16 +1541,103 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 func (p *Project) createChannelConnections(flowGraph map[string][]string) error {
 	logger.Info("Creating channel connections", "project", p.Id)
 
-	// Clear existing channel references in components
+	// Build ProjectNodeSequence for each component based on data flow paths
+	// This enables component reuse across different logical projects
+	componentSequences := make(map[string]string)
+
+	// First, find all components that have no upstream (entry points)
+	hasUpstream := make(map[string]bool)
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			hasUpstream[to] = true
+		}
+	}
+
+	// Build ProjectNodeSequence recursively
+	var buildSequence func(component string, visited map[string]bool) string
+	buildSequence = func(component string, visited map[string]bool) string {
+		// Check for cycles
+		if visited[component] {
+			return component // Break cycle
+		}
+
+		// If already computed, return cached result
+		if seq, exists := componentSequences[component]; exists {
+			return seq
+		}
+
+		// Mark as visited
+		visited[component] = true
+		defer delete(visited, component)
+
+		// Find upstream components
+		var upstreamComponent string
+		for from, tos := range flowGraph {
+			for _, to := range tos {
+				if to == component {
+					upstreamComponent = from
+					break
+				}
+			}
+			if upstreamComponent != "" {
+				break
+			}
+		}
+
+		var sequence string
+		if upstreamComponent == "" {
+			// No upstream, this is an entry point
+			sequence = component
+		} else {
+			// Has upstream, build sequence
+			upstreamSequence := buildSequence(upstreamComponent, visited)
+			sequence = upstreamSequence + "." + component
+		}
+
+		componentSequences[component] = sequence
+		return sequence
+	}
+
+	// Build sequences for all components
+	for from := range flowGraph {
+		buildSequence(from, make(map[string]bool))
+	}
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			buildSequence(to, make(map[string]bool))
+		}
+	}
+
+	// Set ProjectNodeSequence for each component
 	for _, in := range p.Inputs {
 		in.DownStream = []*chan map[string]interface{}{}
+		componentKey := "input." + in.Id
+		if sequence, exists := componentSequences[componentKey]; exists {
+			in.ProjectNodeSequence = sequence
+		} else {
+			in.ProjectNodeSequence = componentKey
+		}
 	}
+
 	for _, rs := range p.Rulesets {
 		rs.UpStream = make(map[string]*chan map[string]interface{})
 		rs.DownStream = make(map[string]*chan map[string]interface{})
+		componentKey := "ruleset." + rs.RulesetID
+		if sequence, exists := componentSequences[componentKey]; exists {
+			rs.ProjectNodeSequence = sequence
+		} else {
+			rs.ProjectNodeSequence = componentKey
+		}
 	}
+
 	for _, out := range p.Outputs {
 		out.UpStream = []*chan map[string]interface{}{}
+		componentKey := "output." + out.Id
+		if sequence, exists := componentSequences[componentKey]; exists {
+			out.ProjectNodeSequence = sequence
+		} else {
+			out.ProjectNodeSequence = componentKey
+		}
 	}
 
 	// Create new channel connections
@@ -1393,12 +1665,10 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 			case "INPUT":
 				if in, ok := p.Inputs[fromId]; ok {
 					in.DownStream = append(in.DownStream, &msgChan)
-					in.ProjectNodeSequence = channelId
 				}
 			case "RULESET":
 				if rs, ok := p.Rulesets[fromId]; ok {
 					rs.DownStream[to] = &msgChan
-					rs.ProjectNodeSequence = channelId
 				}
 			}
 
@@ -1406,12 +1676,10 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 			case "RULESET":
 				if rs, ok := p.Rulesets[toId]; ok {
 					rs.UpStream[from] = &msgChan
-					rs.ProjectNodeSequence = channelId
 				}
 			case "OUTPUT":
 				if out, ok := p.Outputs[toId]; ok {
 					out.UpStream = append(out.UpStream, &msgChan)
-					out.ProjectNodeSequence = channelId
 				}
 			}
 
@@ -1419,6 +1687,101 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 		}
 	}
 
+	// Log the final ProjectNodeSequence for each component
+	for id, in := range p.Inputs {
+		logger.Info("Input component sequence", "project", p.Id, "input", id, "ProjectNodeSequence", in.ProjectNodeSequence)
+	}
+	for id, rs := range p.Rulesets {
+		logger.Info("Ruleset component sequence", "project", p.Id, "ruleset", id, "ProjectNodeSequence", rs.ProjectNodeSequence)
+	}
+	for id, out := range p.Outputs {
+		logger.Info("Output component sequence", "project", p.Id, "output", id, "ProjectNodeSequence", out.ProjectNodeSequence)
+	}
+
 	logger.Info("Channel connections created", "project", p.Id, "total_channels", len(p.MsgChannels))
+	return nil
+}
+
+// RestartProjectsSafely restarts multiple projects with proper shared component handling
+// Returns the number of successfully restarted projects
+func RestartProjectsSafely(projectIDs []string) (int, error) {
+	if len(projectIDs) == 0 {
+		return 0, nil
+	}
+
+	logger.Info("Starting batch project restart", "count", len(projectIDs))
+	restartedCount := 0
+
+	// Sort project IDs to ensure consistent restart order
+	sort.Strings(projectIDs)
+
+	// Restart each project individually to respect component sharing
+	// The Project.Stop() and Project.Start() methods handle shared components correctly
+	for _, projectID := range projectIDs {
+		common.GlobalMu.RLock()
+		proj, exists := GlobalProject.Projects[projectID]
+		common.GlobalMu.RUnlock()
+
+		if !exists {
+			logger.Error("Project not found for restart", "id", projectID)
+			continue
+		}
+
+		if proj.Status == ProjectStatusRunning {
+			logger.Info("Restarting project", "id", projectID)
+			startTime := time.Now()
+
+			// Stop the project (respects shared components)
+			if err := proj.Stop(); err != nil {
+				logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
+				continue // Skip starting if stop failed
+			}
+			logger.Info("Stopped project during restart", "id", projectID)
+
+			// Start the project (respects shared components)
+			if err := proj.Start(); err != nil {
+				logger.Error("Failed to start project during restart", "id", projectID, "error", err)
+			} else {
+				restartedCount++
+				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
+			}
+		} else {
+			logger.Info("Skipping project restart (not running)", "id", projectID, "status", proj.Status)
+		}
+	}
+
+	logger.Info("Batch project restart completed", "total_affected", len(projectIDs), "restarted", restartedCount)
+	return restartedCount, nil
+}
+
+// RestartSingleProjectSafely restarts a single project with proper error handling
+func RestartSingleProjectSafely(projectID string) error {
+	common.GlobalMu.RLock()
+	proj, exists := GlobalProject.Projects[projectID]
+	common.GlobalMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("project not found: %s", projectID)
+	}
+
+	if proj.Status != ProjectStatusRunning {
+		return fmt.Errorf("project is not running: %s (status: %s)", projectID, proj.Status)
+	}
+
+	logger.Info("Restarting single project", "id", projectID)
+	startTime := time.Now()
+
+	// Stop the project (respects shared components)
+	if err := proj.Stop(); err != nil {
+		return fmt.Errorf("failed to stop project %s: %w", projectID, err)
+	}
+	logger.Info("Stopped project for restart", "id", projectID)
+
+	// Start the project (respects shared components)
+	if err := proj.Start(); err != nil {
+		return fmt.Errorf("failed to start project %s: %w", projectID, err)
+	}
+
+	logger.Info("Successfully restarted single project", "id", projectID, "duration", time.Since(startTime))
 	return nil
 }

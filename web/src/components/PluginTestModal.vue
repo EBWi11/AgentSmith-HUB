@@ -74,8 +74,8 @@
             
             <div v-if="testResults.result !== null && testResults.result !== undefined">
               <div class="text-sm font-medium text-gray-700 mb-2">Result:</div>
-              <div class="bg-white border border-gray-200 rounded p-3">
-                <pre class="text-gray-800 text-sm whitespace-pre-wrap">{{ formatResult(testResults.result) }}</pre>
+              <div class="bg-white border border-gray-200 rounded overflow-hidden">
+                <JsonViewer :value="testResults.result" height="200px" />
               </div>
             </div>
             
@@ -112,6 +112,7 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { hubApi } from '../api';
+import JsonViewer from './JsonViewer.vue';
 
 // Props
 const props = defineProps({

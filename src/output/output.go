@@ -98,44 +98,28 @@ type Output struct {
 
 func Verify(path string, raw string) error {
 	var cfg OutputConfig
-	if path != "" {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			// Extract line number from error message
-			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
-				errMsg := yamlErr.Errors[0]
-				// Try to extract line number
-				lineInfo := ""
-				for _, line := range yamlErr.Errors {
-					if strings.Contains(line, "line") {
-						lineInfo = line
-						break
-					}
+
+	// Use common file reading function
+	data, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return fmt.Errorf("failed to read output configuration: %w", err)
+	}
+
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		// Extract line number from error message
+		if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
+			errMsg := yamlErr.Errors[0]
+			// Try to extract line number
+			lineInfo := ""
+			for _, line := range yamlErr.Errors {
+				if strings.Contains(line, "line") {
+					lineInfo = line
+					break
 				}
-				return fmt.Errorf("YAML parse error: %s (location: %s)", errMsg, lineInfo)
 			}
-			return fmt.Errorf("YAML parse error: %v", err)
+			return fmt.Errorf("YAML parse error: %s (location: %s)", errMsg, lineInfo)
 		}
-	} else {
-		if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
-			// Extract line number from error message
-			if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
-				errMsg := yamlErr.Errors[0]
-				// Try to extract line number
-				lineInfo := ""
-				for _, line := range yamlErr.Errors {
-					if strings.Contains(line, "line") {
-						lineInfo = line
-						break
-					}
-				}
-				return fmt.Errorf("YAML parse error: %s (location: %s)", errMsg, lineInfo)
-			}
-			return fmt.Errorf("YAML parse error: %v", err)
-		}
+		return fmt.Errorf("YAML parse error: %v", err)
 	}
 
 	// Validate required fields
@@ -891,14 +875,15 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 
 	case OutputTypePrint:
 		// Print output doesn't require external connectivity testing
-		result["status"] = "error"
-		result["message"] = "Print output doesn't require connection check"
+		result["status"] = "success"
+		result["message"] = "Print output is ready (no external connection required)"
 		result["details"].(map[string]interface{})["connection_status"] = "not_applicable"
 		result["details"].(map[string]interface{})["connection_info"] = map[string]interface{}{
 			"type":        "console_output",
 			"description": "Print output writes directly to console and doesn't require external connectivity",
 		}
-		result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+		result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{}
+		result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
 			{"message": "Connection check is not applicable for print output type", "severity": "info"},
 		}
 		return result

@@ -10,7 +10,7 @@ import (
 
 const (
 	// 使用位运算优化采样率计算
-	SamplingMask = 1023 // 2^10 - 1，对应千分之一的采样率
+	SamplingMask = 63 // 2^6 - 1，对应六十四分之一的采样率（每64个消息采样1个）
 )
 
 // SampleData represents a single sample with its metadata
@@ -251,7 +251,7 @@ func (s *Sampler) GetStats() SamplerStats {
 		SampledCount:   int64(atomic.LoadUint64(&s.sampledCount)),
 		CurrentSamples: totalSamples,
 		MaxSamples:     s.maxSamples,
-		SamplingRate:   0.001,
+		SamplingRate:   0.015625, // 1/64 = 0.015625
 		ProjectStats:   projectStats,
 	}
 }

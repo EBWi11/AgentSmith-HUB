@@ -65,7 +65,7 @@
                       Rule: {{ result._HUB_HIT_RULE_ID }}
                     </span>
                   </div>
-                  <pre class="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-80">{{ JSON.stringify(result, null, 2) }}</pre>
+                  <JsonViewer :value="result" height="320px" />
                 </div>
               </div>
             </div>
@@ -95,6 +95,7 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
+import JsonViewer from './JsonViewer.vue';
 
 // Props
 const props = defineProps({

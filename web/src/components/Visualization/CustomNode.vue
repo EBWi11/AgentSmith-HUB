@@ -2,7 +2,7 @@
   <div 
     class="compact-node"
   >
-    <div class="node-header" :style="{ backgroundColor: headerColor, borderColor: borderColor, color: textColor }">
+    <div class="node-header" :style="{ backgroundColor: headerColor, borderColor: borderColor, color: textColor, fontWeight: isBold ? 'bold' : 'normal' }">
       <span class="node-title">{{ nodeType }}</span>
     </div>
     <div class="node-content">
@@ -36,6 +36,10 @@ const colors = computed(() => {
       return { header: '#dcfce7', border: '#bbf7d0', text: '#166534' };
     case 'RULESET':
       return { header: '#f3e8ff', border: '#e9d5ff', text: '#581c87' };
+    case 'CHECK':
+      return { header: '#fef2f2', border: '#fecaca', text: '#7f1d1d', bold: true };
+    case 'APPEND':
+      return { header: '#fef2f2', border: '#fecaca', text: '#7f1d1d', bold: true };
     default:
       return { header: '#e2e8f0', border: '#cbd5e1', text: '#1e293b' };
   }
@@ -44,6 +48,7 @@ const colors = computed(() => {
 const headerColor = computed(() => colors.value.header);
 const borderColor = computed(() => colors.value.border);
 const textColor = computed(() => colors.value.text);
+const isBold = computed(() => colors.value.bold || false);
 </script>
 
 <style>
@@ -52,7 +57,7 @@ const textColor = computed(() => colors.value.text);
   border-radius: 4px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  width: 90px;
+  width: 75px;
   font-family: 'Inter', sans-serif;
   overflow: hidden;
   cursor: pointer;
@@ -65,18 +70,20 @@ const textColor = computed(() => colors.value.text);
 }
 
 .node-header {
-  padding: 1px 5px;
-  font-weight: 400;
-  font-size: 9px;
+  padding: 1px 4px;
+  font-weight: 500;
+  font-size: 7px;
   border-bottom: 1px solid;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .node-content {
-  padding: 4px 5px;
-  font-size: 11px;
+  padding: 3px 4px;
+  font-size: 9px;
   color: #334155;
-  min-height: 15px;
+  min-height: 13px;
   word-wrap: break-word;
+  font-weight: 500;
 }
 </style> 

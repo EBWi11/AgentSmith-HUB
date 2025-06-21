@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"fmt"
@@ -69,23 +70,14 @@ func init() {
 }
 
 func Verify(path string, raw string, name string) error {
-	var err error
-	var content []byte
-
 	if _, ok := Plugins[name]; ok {
 		return fmt.Errorf("plugin name conflict: %s already exists", name)
 	}
 
-	if path != "" {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return fmt.Errorf("plugin file not found at path: %s", path)
-		}
-		content, err = os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read plugin file: %w", err)
-		}
-	} else {
-		content = []byte(raw)
+	// Use common file reading function
+	content, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return fmt.Errorf("failed to read plugin configuration: %w", err)
 	}
 
 	p := &Plugin{Path: path, Payload: content}

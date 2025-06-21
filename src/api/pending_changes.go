@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -271,6 +270,12 @@ func syncLegacyToEnhancedManager() {
 
 	p := project.GlobalProject
 
+	// First, get all currently managed changes to detect if we need to clean up
+	existingChanges := globalPendingChangeManager.GetAllChanges()
+
+	// Create a map of what should exist based on current legacy storage
+	shouldExist := make(map[string]bool)
+
 	// Sync plugins with pending changes
 	for name, newContent := range plugin.PluginsNew {
 		var oldContent string
@@ -282,8 +287,17 @@ func syncLegacyToEnhancedManager() {
 			isNew = false
 		}
 
-		// Only add if not already managed by enhanced manager
-		if _, exists := globalPendingChangeManager.GetChange("plugin", name); !exists {
+		key := fmt.Sprintf("plugin:%s", name)
+		shouldExist[key] = true
+
+		// Always update or add to ensure current state
+		if existingChange, exists := globalPendingChangeManager.GetChange("plugin", name); exists {
+			// Update existing change with current content
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
+			}
+		} else {
+			// Add new change
 			globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
 		}
 	}
@@ -299,7 +313,17 @@ func syncLegacyToEnhancedManager() {
 			isNew = false
 		}
 
-		if _, exists := globalPendingChangeManager.GetChange("input", id); !exists {
+		key := fmt.Sprintf("input:%s", id)
+		shouldExist[key] = true
+
+		// Always update or add to ensure current state
+		if existingChange, exists := globalPendingChangeManager.GetChange("input", id); exists {
+			// Update existing change with current content
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
+			}
+		} else {
+			// Add new change
 			globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
 		}
 	}
@@ -315,7 +339,17 @@ func syncLegacyToEnhancedManager() {
 			isNew = false
 		}
 
-		if _, exists := globalPendingChangeManager.GetChange("output", id); !exists {
+		key := fmt.Sprintf("output:%s", id)
+		shouldExist[key] = true
+
+		// Always update or add to ensure current state
+		if existingChange, exists := globalPendingChangeManager.GetChange("output", id); exists {
+			// Update existing change with current content
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
+			}
+		} else {
+			// Add new change
 			globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
 		}
 	}
@@ -331,7 +365,17 @@ func syncLegacyToEnhancedManager() {
 			isNew = false
 		}
 
-		if _, exists := globalPendingChangeManager.GetChange("ruleset", id); !exists {
+		key := fmt.Sprintf("ruleset:%s", id)
+		shouldExist[key] = true
+
+		// Always update or add to ensure current state
+		if existingChange, exists := globalPendingChangeManager.GetChange("ruleset", id); exists {
+			// Update existing change with current content
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
+			}
+		} else {
+			// Add new change
 			globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
 		}
 	}
@@ -347,8 +391,30 @@ func syncLegacyToEnhancedManager() {
 			isNew = false
 		}
 
-		if _, exists := globalPendingChangeManager.GetChange("project", id); !exists {
+		key := fmt.Sprintf("project:%s", id)
+		shouldExist[key] = true
+
+		// Always update or add to ensure current state
+		if existingChange, exists := globalPendingChangeManager.GetChange("project", id); exists {
+			// Update existing change with current content
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
+			}
+		} else {
+			// Add new change
 			globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
+		}
+	}
+
+	// Clean up obsolete changes that no longer exist in legacy storage
+	for _, change := range existingChanges {
+		key := fmt.Sprintf("%s:%s", change.Type, change.ID)
+		if !shouldExist[key] {
+			// This change no longer exists in legacy storage, remove it from Enhanced Manager
+			globalPendingChangeManager.RemoveChange(change.Type, change.ID)
+			logger.Info("Removed obsolete pending change from Enhanced Manager",
+				"type", change.Type,
+				"id", change.ID)
 		}
 	}
 }
@@ -1045,15 +1111,25 @@ func ApplyPendingChanges(c echo.Context) error {
 			configRoot := common.Config.ConfigRoot
 			inputPath := path.Join(configRoot, "input", id+".yaml")
 
-			// Stop old component if it exists
+			// Check if old component exists and count projects using it (using centralized counter)
 			common.GlobalMu.RLock()
 			oldInput, exists := project.GlobalProject.Inputs[id]
 			common.GlobalMu.RUnlock()
+
+			var projectsUsingInput int
 			if exists {
+				projectsUsingInput = project.UsageCounter.CountProjectsUsingInput(id)
+			}
+
+			// Only stop old component if no running projects are using it
+			if exists && projectsUsingInput == 0 {
+				logger.Info("Stopping old input component for reload", "id", id, "projects_using", projectsUsingInput)
 				stopErr := oldInput.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old input", "id", id, "error", stopErr)
 				}
+			} else if exists {
+				logger.Info("Input component still in use, skipping stop during reload", "id", id, "projects_using", projectsUsingInput)
 			}
 
 			newInput, reloadErr := input.NewInput(inputPath, "", id)
@@ -1104,15 +1180,25 @@ func ApplyPendingChanges(c echo.Context) error {
 			configRoot := common.Config.ConfigRoot
 			outputPath := path.Join(configRoot, "output", id+".yaml")
 
-			// Stop old component if it exists
+			// Check if old component exists and count projects using it (using centralized counter)
 			common.GlobalMu.RLock()
 			oldOutput, exists := project.GlobalProject.Outputs[id]
 			common.GlobalMu.RUnlock()
+
+			var projectsUsingOutput int
 			if exists {
+				projectsUsingOutput = project.UsageCounter.CountProjectsUsingOutput(id)
+			}
+
+			// Only stop old component if no running projects are using it
+			if exists && projectsUsingOutput == 0 {
+				logger.Info("Stopping old output component for reload", "id", id, "projects_using", projectsUsingOutput)
 				stopErr := oldOutput.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old output", "id", id, "error", stopErr)
 				}
+			} else if exists {
+				logger.Info("Output component still in use, skipping stop during reload", "id", id, "projects_using", projectsUsingOutput)
 			}
 
 			newOutput, reloadErr := output.NewOutput(outputPath, "", id)
@@ -1163,15 +1249,25 @@ func ApplyPendingChanges(c echo.Context) error {
 			configRoot := common.Config.ConfigRoot
 			rulesetPath := path.Join(configRoot, "ruleset", id+".xml")
 
-			// Stop old component if it exists
+			// Check if old component exists and count projects using it (using centralized counter)
 			common.GlobalMu.RLock()
 			oldRuleset, exists := project.GlobalProject.Rulesets[id]
 			common.GlobalMu.RUnlock()
+
+			var projectsUsingRuleset int
 			if exists {
+				projectsUsingRuleset = project.UsageCounter.CountProjectsUsingRuleset(id)
+			}
+
+			// Only stop old component if no running projects are using it
+			if exists && projectsUsingRuleset == 0 {
+				logger.Info("Stopping old ruleset component for reload", "id", id, "projects_using", projectsUsingRuleset)
 				stopErr := oldRuleset.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old ruleset", "id", id, "error", stopErr)
 				}
+			} else if exists {
+				logger.Info("Ruleset component still in use, skipping stop during reload", "id", id, "projects_using", projectsUsingRuleset)
 			}
 
 			newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", id)
@@ -1276,6 +1372,7 @@ func ApplyPendingChanges(c echo.Context) error {
 	project.AnalyzeProjectDependencies()
 
 	// Restart affected projects
+	var restartedCount int
 	if len(projectsToRestart) > 0 {
 		logger.Info("Restarting affected projects", "count", len(projectsToRestart))
 
@@ -1284,45 +1381,12 @@ func ApplyPendingChanges(c echo.Context) error {
 		for id := range projectsToRestart {
 			projectIDs = append(projectIDs, id)
 		}
-		sort.Strings(projectIDs)
 
-		// First stop all affected projects
-		for _, id := range projectIDs {
-			common.GlobalMu.RLock()
-			p, exists := project.GlobalProject.Projects[id]
-			common.GlobalMu.RUnlock()
-
-			if !exists {
-				logger.Error("Project not found for restart", "id", id)
-				continue
-			}
-
-			if p.Status == project.ProjectStatusRunning {
-				logger.Info("Stopping project for restart", "id", id)
-				err := p.Stop()
-				if err != nil {
-					logger.Error("Failed to stop project", "id", id, "error", err)
-				}
-			}
-		}
-
-		// Then start all affected projects
-		for _, id := range projectIDs {
-			common.GlobalMu.RLock()
-			p, exists := project.GlobalProject.Projects[id]
-			common.GlobalMu.RUnlock()
-
-			if !exists {
-				continue
-			}
-
-			if p.Status == project.ProjectStatusStopped {
-				logger.Info("Starting project after changes", "id", id)
-				err := p.Start()
-				if err != nil {
-					logger.Error("Failed to start project", "id", id, "error", err)
-				}
-			}
+		// Use unified restart function for better maintainability
+		var err error
+		restartedCount, err = project.RestartProjectsSafely(projectIDs)
+		if err != nil {
+			logger.Error("Error during batch project restart", "error", err)
 		}
 	}
 
@@ -1336,9 +1400,14 @@ func ApplyPendingChanges(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success_count":      successCount,
-		"failure_count":      failureCount,
-		"restarted_projects": len(projectsToRestart),
+		"success_count": successCount,
+		"failure_count": failureCount,
+		"restarted_projects": func() int {
+			if len(projectsToRestart) > 0 {
+				return restartedCount
+			}
+			return 0
+		}(),
 	})
 }
 
@@ -1445,15 +1514,25 @@ func ApplySingleChange(c echo.Context) error {
 				configRoot := common.Config.ConfigRoot
 				inputPath := path.Join(configRoot, "input", req.ID+".yaml")
 
-				// Stop old component if it exists
+				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
 				oldInput, exists := project.GlobalProject.Inputs[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var projectsUsingInput int
 				if exists {
+					projectsUsingInput = project.UsageCounter.CountProjectsUsingInput(req.ID)
+				}
+
+				// Only stop old component if no running projects are using it
+				if exists && projectsUsingInput == 0 {
+					logger.Info("Stopping old input component for reload", "id", req.ID, "projects_using", projectsUsingInput)
 					err := oldInput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old input", "id", req.ID, "error", err)
 					}
+				} else if exists {
+					logger.Info("Input component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingInput)
 				}
 
 				newInput, reloadErr := input.NewInput(inputPath, "", req.ID)
@@ -1473,15 +1552,25 @@ func ApplySingleChange(c echo.Context) error {
 				configRoot := common.Config.ConfigRoot
 				outputPath := path.Join(configRoot, "output", req.ID+".yaml")
 
-				// Stop old component if it exists
+				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
 				oldOutput, exists := project.GlobalProject.Outputs[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var projectsUsingOutput int
 				if exists {
+					projectsUsingOutput = project.UsageCounter.CountProjectsUsingOutput(req.ID)
+				}
+
+				// Only stop old component if no running projects are using it
+				if exists && projectsUsingOutput == 0 {
+					logger.Info("Stopping old output component for reload", "id", req.ID, "projects_using", projectsUsingOutput)
 					err := oldOutput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old output", "id", req.ID, "error", err)
 					}
+				} else if exists {
+					logger.Info("Output component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingOutput)
 				}
 
 				newOutput, reloadErr := output.NewOutput(outputPath, "", req.ID)
@@ -1501,15 +1590,25 @@ func ApplySingleChange(c echo.Context) error {
 				configRoot := common.Config.ConfigRoot
 				rulesetPath := path.Join(configRoot, "ruleset", req.ID+".xml")
 
-				// Stop old component if it exists
+				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
 				oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var projectsUsingRuleset int
 				if exists {
+					projectsUsingRuleset = project.UsageCounter.CountProjectsUsingRuleset(req.ID)
+				}
+
+				// Only stop old component if no running projects are using it
+				if exists && projectsUsingRuleset == 0 {
+					logger.Info("Stopping old ruleset component for reload", "id", req.ID, "projects_using", projectsUsingRuleset)
 					err := oldRuleset.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old ruleset", "id", req.ID, "error", err)
 					}
+				} else if exists {
+					logger.Info("Ruleset component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingRuleset)
 				}
 
 				newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", req.ID)
@@ -1588,48 +1687,15 @@ func ApplySingleChange(c echo.Context) error {
 	if len(affectedProjects) > 0 {
 		logger.Info("Restarting affected projects", "count", len(affectedProjects))
 
-		// First stop all affected projects
-		for _, projectID := range affectedProjects {
-			common.GlobalMu.RLock()
-			p, exists := project.GlobalProject.Projects[projectID]
-			common.GlobalMu.RUnlock()
-
-			if !exists {
-				logger.Error("Project not found for restart", "id", projectID)
-				continue
-			}
-
-			if p.Status == project.ProjectStatusRunning {
-				logger.Info("Stopping project for restart", "id", projectID)
-				err := p.Stop()
-				if err != nil {
-					logger.Error("Failed to stop project", "id", projectID, "error", err)
-				}
-			}
-		}
-
-		// Then start all affected projects
-		for _, projectID := range affectedProjects {
-			common.GlobalMu.RLock()
-			p, exists := project.GlobalProject.Projects[projectID]
-			common.GlobalMu.RUnlock()
-
-			if !exists {
-				continue
-			}
-
-			if p.Status == project.ProjectStatusStopped {
-				logger.Info("Starting project after changes", "id", projectID)
-				err := p.Start()
-				if err != nil {
-					logger.Error("Failed to start project", "id", projectID, "error", err)
-				}
-			}
+		// Use unified restart function for better maintainability
+		restartedCount, err := project.RestartProjectsSafely(affectedProjects)
+		if err != nil {
+			logger.Error("Error during affected project restart", "error", err)
 		}
 
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message":            "Change applied successfully",
-			"restarted_projects": len(affectedProjects),
+			"restarted_projects": restartedCount,
 		})
 	}
 
@@ -1656,14 +1722,10 @@ func RestartAllProjects(c echo.Context) error {
 
 	logger.Info("Starting project restart", "count", len(projectList))
 
-	// First stop all projects
-	stoppedCount := 0
+	// Log component details before restarting
 	for i, p := range projectList {
 		if p.Status == project.ProjectStatusRunning {
-			logger.Info("Stopping project", "id", projectIDs[i], "inputs", len(p.Inputs), "rulesets", len(p.Rulesets), "outputs", len(p.Outputs))
-			startTime := time.Now()
-
-			// Log component details before stopping
+			logger.Info("Project details", "id", projectIDs[i], "inputs", len(p.Inputs), "rulesets", len(p.Rulesets), "outputs", len(p.Outputs))
 			for inputID := range p.Inputs {
 				logger.Info("Project has input", "project", projectIDs[i], "input", inputID)
 			}
@@ -1673,33 +1735,13 @@ func RestartAllProjects(c echo.Context) error {
 			for outputID := range p.Outputs {
 				logger.Info("Project has output", "project", projectIDs[i], "output", outputID)
 			}
-
-			err := p.Stop()
-			duration := time.Since(startTime)
-			if err != nil {
-				logger.Error("Failed to stop project", "id", projectIDs[i], "error", err, "duration", duration)
-			} else {
-				stoppedCount++
-				logger.Info("Stopped project", "id", projectIDs[i], "duration", duration)
-			}
-		} else {
-			logger.Info("Skipping project (not running)", "id", projectIDs[i], "status", p.Status)
 		}
 	}
 
-	logger.Info("Stop phase completed", "stopped", stoppedCount)
-
-	// Then start all projects
-	startedCount := 0
-	for i, p := range projectList {
-		logger.Info("Starting project", "id", projectIDs[i])
-		err := p.Start()
-		if err != nil {
-			logger.Error("Failed to start project", "id", projectIDs[i], "error", err)
-		} else {
-			startedCount++
-			logger.Info("Started project", "id", projectIDs[i])
-		}
+	// Use unified restart function for better maintainability
+	startedCount, err := project.RestartProjectsSafely(projectIDs)
+	if err != nil {
+		logger.Error("Error during all projects restart", "error", err)
 	}
 
 	logger.Info("Restart completed", "total", len(projectList), "started", startedCount)

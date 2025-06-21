@@ -326,21 +326,47 @@ func LoadProject() {
 }
 
 func StartAllProject() {
-	var err error
-
 	if project.GlobalProject != nil {
 		for _, p := range project.GlobalProject.Projects {
-			// Only try to start projects that are stopped or error status
-			if p.Status == project.ProjectStatusStopped || p.Status == project.ProjectStatusError {
+			// Read the saved status to determine user's intention
+			savedStatus, err := p.LoadProjectStatus()
+
+			// Default behavior: start the project UNLESS explicitly stopped by user
+			shouldStart := true
+
+			if err != nil {
+				// Project not found in .project_status file or file doesn't exist
+				// This means it's a new project or not explicitly managed -> DEFAULT TO START
+				logger.Info("Project not found in status file, defaulting to start", "project_id", p.Id, "error", err)
+				shouldStart = true
+			} else {
+				// Project found in .project_status file, check if user explicitly stopped it
+				if savedStatus == project.ProjectStatusStopped {
+					// User explicitly stopped this project -> DON'T START
+					shouldStart = false
+					logger.Info("Project explicitly stopped by user, skipping start", "project_id", p.Id, "saved_status", savedStatus)
+				} else {
+					// Project in file but not stopped (running/error/etc.) -> START
+					shouldStart = true
+					logger.Info("Project found in status file and not stopped, will start", "project_id", p.Id, "saved_status", savedStatus)
+				}
+			}
+
+			if shouldStart {
+				// Start the project
 				logger.Info("Starting project", "project_id", p.Id, "current_status", p.Status)
+
+				// Double check the actual status before starting
+				if p.Status == project.ProjectStatusRunning {
+					logger.Error("ERROR: Project status is running before calling Start()! This should not happen!", "project_id", p.Id, "status", p.Status)
+				}
+
 				err = p.Start()
 				if err != nil {
 					logger.Error("project start error", "error", err, "project_id", p.Id)
 				} else {
 					logger.Info("project start successful", "project_id", p.Id)
 				}
-			} else {
-				logger.Info("Skipping project start (already running)", "project_id", p.Id, "status", p.Status)
 			}
 		}
 	}

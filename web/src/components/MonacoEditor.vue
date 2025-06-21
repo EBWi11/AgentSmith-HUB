@@ -20,7 +20,7 @@ const props = defineProps({
 });
 
 // 正确声明emits
-const emit = defineEmits(['update:value', 'save']);
+const emit = defineEmits(['update:value', 'save', 'line-change']);
 
 const container = ref(null);
 let editor = null;
@@ -100,19 +100,17 @@ function setupMonacoTheme() {
     base: 'vs',
     inherit: true,
     rules: [
-      // XML/HTML tags - modern blue-purple gradient
-      { token: 'tag', foreground: '0969da', fontStyle: 'bold' },
-      { token: 'tag.xml', foreground: '0969da', fontStyle: 'bold' },
-      
-      // Attributes - sophisticated purple
-      { token: 'attribute.name', foreground: '8250df' },
-      { token: 'attribute.name.xml', foreground: '8250df' },
-      { token: 'attribute.value', foreground: '0a3069' },
-      { token: 'attribute.value.xml', foreground: '0a3069' },
-      
-      // Strings - warm emerald green
-      { token: 'string', foreground: '116329' },
-      { token: 'string.xml', foreground: '116329' },
+      // Simple consistent XML highlighting
+      { token: 'tag', foreground: 'e36209', fontStyle: 'bold' },              // XML tags - orange bold
+      { token: 'tag.xml', foreground: 'e36209', fontStyle: 'bold' },           
+      { token: 'attribute.name', foreground: '0969da', fontStyle: 'bold' },    // Attribute names - blue bold
+      { token: 'attribute.name.xml', foreground: '0969da', fontStyle: 'bold' },
+      { token: 'attribute.value', foreground: '22863a' },                      // Attribute values - green
+      { token: 'attribute.value.xml', foreground: '22863a' },
+      { token: 'delimiter', foreground: '6f42c1' },                            // Delimiters - purple
+      { token: 'delimiter.xml', foreground: '6f42c1' },
+      { token: 'comment', foreground: '6a737d', fontStyle: 'italic' },         // Comments - gray italic
+      { token: 'comment.xml', foreground: '6a737d', fontStyle: 'italic' },
       
       // Numbers - tech blue
       { token: 'number', foreground: '0550ae' },
@@ -123,8 +121,8 @@ function setupMonacoTheme() {
       // Properties - professional blue
       { token: 'property', foreground: '0969da' },
       
-      // Comments - sophisticated gray with italic
-      { token: 'comment', foreground: '656d76', fontStyle: 'italic' },
+      // Comments - darker gray with italic for better readability
+      { token: 'comment', foreground: '57606a', fontStyle: 'italic' },
       
       // Variables - amber for distinction
       { token: 'variable', foreground: 'bf8700' },
@@ -158,7 +156,7 @@ function setupMonacoTheme() {
       'editor.lineHighlightBorder': '#d1d9e0',
       
       // Line numbers - modern contrast
-      'editorLineNumber.foreground': '#8c959f',
+      'editorLineNumber.foreground': '#656d76',
       'editorLineNumber.activeForeground': '#1f2328',
       'editorActiveLineNumber.foreground': '#1f2328',
       
@@ -183,10 +181,10 @@ function setupMonacoTheme() {
       'editorGutter.deletedBackground': '#d1242f',
       'editorGutter.modifiedBackground': '#0969da',
       
-      // Scrollbar - subtle and modern
-      'scrollbarSlider.background': '#8c959f22',
-      'scrollbarSlider.hoverBackground': '#8c959f33',
-      'scrollbarSlider.activeBackground': '#8c959f44',
+      // Scrollbar - enhanced visibility
+      'scrollbarSlider.background': '#8c959f33',
+      'scrollbarSlider.hoverBackground': '#8c959f55',
+      'scrollbarSlider.activeBackground': '#8c959f77',
       
       // Minimap
       'minimap.background': '#f6f8fa',
@@ -199,16 +197,18 @@ function setupMonacoTheme() {
       'editorWidget.border': '#d1d9e0',
       'editorWidget.foreground': '#1f2328',
       
-      // Suggest widget (autocomplete)
+      // Suggest widget (autocomplete) - enhanced contrast for better readability
       'editorSuggestWidget.background': '#ffffff',
-      'editorSuggestWidget.border': '#d1d9e0',
-      'editorSuggestWidget.foreground': '#1f2328',
-      'editorSuggestWidget.selectedBackground': '#0969da15',
-      'editorSuggestWidget.highlightForeground': '#0969da',
+      'editorSuggestWidget.border': '#8c959f',
+      'editorSuggestWidget.foreground': '#00ccb8',
+      'editorSuggestWidget.selectedBackground': '#0b7999',
+      'editorSuggestWidget.selectedForeground': '#ffffff',
+      'editorSuggestWidget.highlightForeground': '#0550ae',
+      'editorSuggestWidget.focusHighlightForeground': '#ffffff',
       
-      // Hover widget
+      // Hover widget - enhanced visibility
       'editorHoverWidget.background': '#ffffff',
-      'editorHoverWidget.border': '#d1d9e0',
+      'editorHoverWidget.border': '#8c959f',
       'editorHoverWidget.foreground': '#1f2328',
       
       // Overview ruler
@@ -221,15 +221,15 @@ function setupMonacoTheme() {
       'editorBracketMatch.background': '#0969da20',
       'editorBracketMatch.border': '#0969da',
       
-      // Indent guides
-      'editorIndentGuide.background': '#d1d9e0',
-      'editorIndentGuide.activeBackground': '#8c959f',
+      // Indent guides - enhanced visibility
+      'editorIndentGuide.background': '#8c959f40',
+      'editorIndentGuide.activeBackground': '#57606a',
       
       // Rulers
       'editorRuler.foreground': '#d1d9e0',
       
-      // Code lens
-      'editorCodeLens.foreground': '#656d76',
+      // Code lens - enhanced visibility
+      'editorCodeLens.foreground': '#57606a',
       
       // Link
       'editorLink.activeForeground': '#0969da',
@@ -484,6 +484,9 @@ function registerLanguageProviders() {
     triggerCharacters: ['.', '(', ' ', '\n', '\t']
   });
   
+  // Use Monaco's built-in XML language with custom styling
+  // Don't override the XML tokenizer, just rely on Monaco's default XML parsing
+
   // Mark providers as registered - global level
   window.monacoProvidersRegistered = true;
   
@@ -656,13 +659,6 @@ function initializeEditor() {
     }
   }
   
-  // Ensure custom theme is applied (for component keyword syntax highlighting)
-  try {
-    monaco.editor.setTheme('agentsmith-theme');
-  } catch (error) {
-    console.warn('Failed to apply custom theme:', error);
-  }
-  
   // Add save shortcut
   try {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function() {
@@ -681,6 +677,16 @@ function initializeEditor() {
     });
   } catch (error) {
     console.warn('Failed to add content change listener:', error);
+  }
+  
+  // Listen for cursor position changes (for line-based validation)
+  try {
+    editor.onDidChangeCursorPosition((e) => {
+      const lineNumber = e.position.lineNumber;
+      emit('line-change', lineNumber);
+    });
+  } catch (error) {
+    console.warn('Failed to add cursor position change listener:', error);
   }
   
   // Highlight error lines
@@ -1071,7 +1077,7 @@ function insertComponentTemplate(editor, language) {
       template = 'type: ${1|kafka,aliyun_sls,elasticsearch,print|}\n${2}';
       break;
     case 'xml':
-      template = '<root name="${1:ruleset-name}" type="${2|DETECTION,CLASSIFICATION|}">\n    <rule id="${3:rule-id}" name="${4:rule-name}" author="${5:author}">\n        ${6}\n    </rule>\n</root>';
+      template = '<root name="${1:ruleset-name}" type="${2|DETECTION,CLASSIFICATION|}">\n    <rule id="${3:rule-id}" name="${4:rule-name}">\n        ${5}\n    </rule>\n</root>';
       break;
     case 'go':
       template = 'func Eval(${1|data string,oriData map[string]interface{}|}) (${2|bool,map[string]interface{}|}, error) {\n    ${3:// Your plugin logic here}\n    \n    return ${4|true,oriData|}, nil\n}';
@@ -2537,14 +2543,14 @@ function getXmlAttributeNameCompletions(context, range) {
       suggestions.push(
         { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Unique rule identifier', insertText: 'id="${1:rule-id}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'name', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Rule display name', insertText: 'name="${1:rule-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'author', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Rule author', insertText: 'author="${1:author}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+
       );
       break;
       
     case 'node':
       suggestions.push(
         { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions', insertText: 'id="${1:node-id}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="${1|REGEX,EQU,INCL,PLUGIN|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="${1|PLUGIN,END,START,NEND,NSTART,INCL,NI,NCS_END,NCS_START,NCS_NEND,NCS_NSTART,NCS_INCL,NCS_NI,MT,LT,REGEX,ISNULL,NOTNULL,EQU,NEQ,NCS_EQU,NCS_NEQ|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: 'field="${1:field-name}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'logic', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical operation for multiple values', insertText: 'logic="${1|AND,OR|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'delimiter', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Delimiter for multiple values', insertText: 'delimiter="${1:|}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
@@ -2609,7 +2615,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Rule definition',
-        insertText: 'rule id="" name="" author="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n     </checklist>\n</rule',
+        insertText: 'rule id="" name="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n    </checklist>\n</rule',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -2762,14 +2768,14 @@ function getDefaultXmlCompletions(fullText, range) {
       label: 'Complete Ruleset Template',
       kind: monaco.languages.CompletionItemKind.Snippet,
       documentation: 'Complete ruleset XML template',
-      insertText: [
+              insertText: [
         '<root name="${1:ruleset-name}" type="${2|DETECTION,CLASSIFICATION|}">',
-        '    <rule id="${3:rule-id}" name="${4:rule-name}" author="${5:author}">',
-        '        <filter field="${6:field-name}">${7:filter-value}</filter>',
-        '        <checklist condition="${8:condition}">',
-        '            <node id="${9:node-id}" type="${10|REGEX,EQU,INCL,PLUGIN|}" field="${11:field-name}">${12:value}</node>',
+        '    <rule id="${3:rule-id}" name="${4:rule-name}">',
+        '        <filter field="${5:field-name}">${6:filter-value}</filter>',
+        '        <checklist condition="${7:condition}">',
+        '            <node id="${8:node-id}" type="${9|PLUGIN,END,START,NEND,NSTART,INCL,NI,NCS_END,NCS_START,NCS_NEND,NCS_NSTART,NCS_INCL,NCS_NI,MT,LT,REGEX,ISNULL,NOTNULL,EQU,NEQ,NCS_EQU,NCS_NEQ|}" field="${10:field-name}">${11:value}</node>',
         '        </checklist>',
-        '        ${13}',
+        '        ${12}',
         '    </rule>',
         '</root>'
       ].join('\n'),

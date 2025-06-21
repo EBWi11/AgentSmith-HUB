@@ -65,7 +65,6 @@ type RulesByFilter struct {
 type Rule struct {
 	ID             string    `xml:"id,attr"`
 	Name           string    `xml:"name,attr"`
-	Author         string    `xml:"author,attr"`
 	Filter         Filter    `xml:"filter"`
 	Checklist      Checklist `xml:"checklist"`
 	ChecklistLen   int
@@ -186,20 +185,10 @@ type ValidationResult struct {
 
 // ValidateWithDetails performs detailed validation and returns structured errors with line numbers
 func ValidateWithDetails(path string, raw string) (*ValidationResult, error) {
-	var rawRuleset []byte
-	if path != "" {
-		xmlFile, err := os.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open resource file at %s: %w", path, err)
-		}
-		defer xmlFile.Close()
-
-		rawRuleset, err = io.ReadAll(xmlFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read resource file: %w", err)
-		}
-	} else {
-		rawRuleset = []byte(raw)
+	// Use common file reading function
+	rawRuleset, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ruleset configuration: %w", err)
 	}
 
 	result := &ValidationResult{
@@ -211,7 +200,18 @@ func ValidateWithDetails(path string, raw string) (*ValidationResult, error) {
 	// Parse XML first to check basic syntax
 	var ruleset Ruleset
 	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
-		// Extract line number from XML parsing error
+		// Use enhanced error handling for better error messages and line numbers
+		if enhancedErr := enhanceXMLParsingError(err, string(rawRuleset)); enhancedErr != nil {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    extractLineFromEnhancedError(enhancedErr.Error()),
+				Message: "Threshold validation error",
+				Detail:  enhancedErr.Error(),
+			})
+			return result, nil
+		}
+
+		// Fallback to original error handling
 		lineNum := extractLineFromXMLError(err.Error())
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
@@ -238,6 +238,38 @@ func extractLineFromXMLError(errorMsg string) int {
 			return lineNum
 		}
 	}
+	return 1
+}
+
+// extractLineFromEnhancedError extracts line number from enhanced error message
+func extractLineFromEnhancedError(errorMsg string) int {
+	// Try to extract line number from enhanced error messages like "at line 18"
+	re := regexpgo.MustCompile(`at line (\d+)`)
+	matches := re.FindStringSubmatch(errorMsg)
+	if len(matches) > 1 {
+		if lineNum, err := strconv.Atoi(matches[1]); err == nil {
+			return lineNum
+		}
+	}
+
+	// Try to extract line number from XML syntax error messages like "on line 18:"
+	re2 := regexpgo.MustCompile(`on line (\d+):`)
+	matches2 := re2.FindStringSubmatch(errorMsg)
+	if len(matches2) > 1 {
+		if lineNum, err := strconv.Atoi(matches2[1]); err == nil {
+			return lineNum
+		}
+	}
+
+	// Try to extract line number from our local_cache error messages like "at line 18)"
+	re3 := regexpgo.MustCompile(`\(found .* at line (\d+)\)`)
+	matches3 := re3.FindStringSubmatch(errorMsg)
+	if len(matches3) > 1 {
+		if lineNum, err := strconv.Atoi(matches3[1]); err == nil {
+			return lineNum
+		}
+	}
+
 	return 1
 }
 
@@ -305,6 +337,58 @@ func findElementInRule(xmlContent, ruleID, pattern string, ruleIndex, elementInd
 		}
 	}
 
+	return ruleStartLine
+}
+
+// findThresholdElementLine finds the exact line number of the threshold element
+func findThresholdElementLine(xmlContent, ruleID string, ruleIndex int) int {
+	lines := strings.Split(xmlContent, "\n")
+	var ruleStartLine, ruleEndLine int
+
+	if ruleID != "" && strings.TrimSpace(ruleID) != "" {
+		// Find rule by ID
+		for i, line := range lines {
+			if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID)) {
+				ruleStartLine = i + 1
+				break
+			}
+		}
+	} else {
+		// Find rule by index
+		ruleCount := 0
+		for i, line := range lines {
+			if strings.Contains(line, "<rule") {
+				if ruleCount == ruleIndex {
+					ruleStartLine = i + 1
+					break
+				}
+				ruleCount++
+			}
+		}
+	}
+
+	// Find the end of current rule
+	for i := ruleStartLine; i < len(lines); i++ {
+		if strings.Contains(lines[i], "</rule>") {
+			ruleEndLine = i + 1
+			break
+		}
+	}
+	if ruleEndLine == 0 {
+		ruleEndLine = len(lines)
+	}
+
+	// Search for threshold element within the rule boundaries
+	// Look for both opening tag and closing tag patterns
+	for i := ruleStartLine - 1; i < ruleEndLine-1; i++ {
+		line := strings.TrimSpace(lines[i])
+		// Match threshold opening tag or self-closing tag
+		if strings.Contains(line, "<threshold") {
+			return i + 1
+		}
+	}
+
+	// Fallback to rule start line if threshold not found
 	return ruleStartLine
 }
 
@@ -393,14 +477,6 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 		})
 	}
 
-	if rule.Author == "" || strings.TrimSpace(rule.Author) == "" {
-		result.IsValid = false
-		result.Errors = append(result.Errors, ValidationError{
-			Line:    ruleLine,
-			Message: "Rule author cannot be empty",
-		})
-	}
-
 	// Validate filter
 	if rule.Filter.Field == "" || strings.TrimSpace(rule.Filter.Field) == "" {
 		result.Warnings = append(result.Warnings, ValidationWarning{
@@ -451,13 +527,30 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 				Message: "Check node type cannot be empty",
 				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 			})
-		} else if node.Type != "REGEX" && node.Type != "INCL" && node.Type != "EQU" && node.Type != "IN" {
-			result.IsValid = false
-			result.Errors = append(result.Errors, ValidationError{
-				Line:    nodeLine,
-				Message: "Check node type must be one of: REGEX, INCL, EQU, IN",
-				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
-			})
+		} else {
+			// Validate node type against all supported types
+			validTypes := []string{
+				"PLUGIN", "END", "START", "NEND", "NSTART", "INCL", "NI",
+				"NCS_END", "NCS_START", "NCS_NEND", "NCS_NSTART", "NCS_INCL", "NCS_NI",
+				"MT", "LT", "REGEX", "ISNULL", "NOTNULL", "EQU", "NEQ", "NCS_EQU", "NCS_NEQ",
+			}
+
+			isValid := false
+			for _, validType := range validTypes {
+				if node.Type == validType {
+					isValid = true
+					break
+				}
+			}
+
+			if !isValid {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    nodeLine,
+					Message: "Check node type must be one of: PLUGIN, END, START, NEND, NSTART, INCL, NI, NCS_END, NCS_START, NCS_NEND, NCS_NSTART, NCS_INCL, NCS_NI, MT, LT, REGEX, ISNULL, NOTNULL, EQU, NEQ, NCS_EQU, NCS_NEQ",
+					Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, node.Type),
+				})
+			}
 		}
 
 		if node.Field == "" || strings.TrimSpace(node.Field) == "" {
@@ -521,7 +614,8 @@ func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleInde
 		return
 	}
 
-	thresholdLine := findElementInRule(xmlContent, ruleID, "<threshold", ruleIndex, 0)
+	// Find the actual threshold element line with improved accuracy
+	thresholdLine := findThresholdElementLine(xmlContent, ruleID, ruleIndex)
 
 	if threshold.GroupBy == "" || strings.TrimSpace(threshold.GroupBy) == "" {
 		result.IsValid = false
@@ -541,13 +635,45 @@ func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleInde
 		})
 	}
 
-	if threshold.Value <= 1 {
+	// Enhanced validation for threshold value - must be a positive integer
+	if threshold.Value <= 0 {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    thresholdLine,
-			Message: "Threshold value must be greater than 1",
-			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			Message: "Threshold value must be a positive integer (greater than 0)",
+			Detail:  fmt.Sprintf("Rule ID: %s, Current value: %d", ruleID, threshold.Value),
 		})
+	}
+
+	// Validate count_type - must be empty (default count mode), "SUM", or "CLASSIFY"
+	if threshold.CountType != "" && threshold.CountType != "SUM" && threshold.CountType != "CLASSIFY" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Threshold count_type must be empty (default count mode), 'SUM', or 'CLASSIFY'",
+			Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, threshold.CountType),
+		})
+	}
+
+	// Validate count_field - only required when count_type is "SUM" or "CLASSIFY"
+	if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+		if threshold.CountField == "" || strings.TrimSpace(threshold.CountField) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold count_field cannot be empty when count_type is 'SUM' or 'CLASSIFY'",
+				Detail:  fmt.Sprintf("Rule ID: %s, count_type: '%s'", ruleID, threshold.CountType),
+			})
+		}
+	} else {
+		// For default count mode (empty count_type), count_field should be empty or ignored
+		if threshold.CountField != "" && strings.TrimSpace(threshold.CountField) != "" {
+			result.Warnings = append(result.Warnings, ValidationWarning{
+				Line:    thresholdLine,
+				Message: "Threshold count_field is not needed for default count mode (count_type is empty)",
+				Detail:  fmt.Sprintf("Rule ID: %s, count_field will be ignored", ruleID),
+			})
+		}
 	}
 }
 
@@ -593,23 +719,13 @@ func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, plugin
 }
 
 func Verify(path string, raw string) error {
-	var rawRuleset []byte
-	if path != "" {
-		xmlFile, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("failed to open resource file at %s: %w", path, err)
-		}
-		defer xmlFile.Close()
-
-		rawRuleset, err = io.ReadAll(xmlFile)
-		if err != nil {
-			return fmt.Errorf("failed to read resource file: %w", err)
-		}
-	} else {
-		rawRuleset = []byte(raw)
+	// Use common file reading function
+	rawRuleset, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return fmt.Errorf("failed to read ruleset configuration: %w", err)
 	}
 
-	_, err := ParseRulesetFromByte(rawRuleset)
+	_, err = ParseRulesetFromByte(rawRuleset)
 	if err != nil {
 		// Try to extract line number from XML error
 		if strings.Contains(err.Error(), "line") {
@@ -819,9 +935,6 @@ func RulesetBuild(ruleset *Ruleset) error {
 		if strings.TrimSpace(rule.Name) == "" {
 			return errors.New("rule name cannot be empty")
 		}
-		if strings.TrimSpace(rule.Author) == "" {
-			return errors.New("rule author cannot be empty")
-		}
 
 		if strings.TrimSpace(rule.Checklist.Condition) != "" {
 			if _, _, ok := ConditionRegex.Find(strings.TrimSpace(rule.Checklist.Condition)); ok {
@@ -897,17 +1010,17 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if rule.Threshold.Range == "" {
 				return errors.New("threshold range cannot be empty: " + rule.ID)
 			}
-			if rule.Threshold.Value == 0 {
-				return errors.New("threshold vaule cannot be empty: " + rule.ID)
+			if rule.Threshold.Value <= 0 {
+				return errors.New("threshold value must be a positive integer (greater than 0): " + rule.ID)
 			}
 
 			if !(rule.Threshold.CountType == "" || rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY") {
-				return errors.New("threshold count type must be 'SUM' or 'CLASSIFY': " + rule.ID)
+				return errors.New("threshold count_type must be empty (default count mode), 'SUM', or 'CLASSIFY': " + rule.ID)
 			}
 
 			if rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY" {
 				if rule.Threshold.CountField == "" {
-					return errors.New("threshold count field cannot be empty: " + rule.ID)
+					return errors.New("threshold count_field cannot be empty when count_type is 'SUM' or 'CLASSIFY': " + rule.ID)
 				} else {
 					// Parse threshold count field path
 					rule.Threshold.CountFieldList = common.StringToList(strings.TrimSpace(rule.Threshold.CountField))
@@ -919,8 +1032,8 @@ func RulesetBuild(ruleset *Ruleset) error {
 				return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
 			}
 
-			if !(rule.Threshold.Value > 1) {
-				return errors.New("threshold value must be greater than 1: " + rule.ID)
+			if !(rule.Threshold.Value > 0) {
+				return errors.New("threshold value must be a positive integer (greater than 0): " + rule.ID)
 			}
 
 			rule.ThresholdCheck = true
@@ -1124,6 +1237,10 @@ func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 	ruleset.RulesByFilter = make(map[string]*RulesByFilter, 0)
 
 	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
+		// Enhanced error handling for XML parsing errors, especially threshold value errors
+		if enhancedErr := enhanceXMLParsingError(err, string(rawRuleset)); enhancedErr != nil {
+			return nil, enhancedErr
+		}
 		return nil, err
 	}
 	err := RulesetBuild(&ruleset)
@@ -1175,6 +1292,163 @@ func sortCheckNodes(checkNodes []CheckNodes) []CheckNodes {
 	}
 
 	return sorted
+}
+
+// enhanceXMLParsingError provides better error messages for XML parsing errors
+func enhanceXMLParsingError(err error, xmlContent string) error {
+	errorStr := err.Error()
+
+	// Check for XML syntax errors related to attributes
+	if strings.Contains(errorStr, "unquoted or missing attribute value") {
+		// Extract line number from original error if present
+		re := regexpgo.MustCompile(`line (\d+):`)
+		matches := re.FindStringSubmatch(errorStr)
+		var lineNum int = 1
+		if len(matches) > 1 {
+			if num, err := strconv.Atoi(matches[1]); err == nil {
+				lineNum = num
+			}
+		}
+
+		// Try to find the specific line and provide better error message
+		lines := strings.Split(xmlContent, "\n")
+		if lineNum > 0 && lineNum <= len(lines) {
+			line := lines[lineNum-1]
+			if strings.Contains(line, "local_cache") {
+				// Check for common local_cache syntax issues
+				if strings.Contains(line, `local_cache="`) {
+					// Find the attribute value
+					start := strings.Index(line, `local_cache="`)
+					if start != -1 {
+						start += 13 // length of `local_cache="`
+						end := strings.Index(line[start:], `"`)
+						if end != -1 {
+							value := line[start : start+end]
+							if value != "true" && value != "false" {
+								return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s' at line %d)", value, lineNum)
+							}
+						}
+					}
+				}
+				// If we found a line with local_cache but couldn't parse it properly, it's likely a syntax error
+				return fmt.Errorf("local_cache attribute has syntax error at line %d", lineNum)
+			}
+		}
+
+		// Generic XML syntax error with line number if available
+		if lineNum > 1 {
+			return fmt.Errorf("XML syntax error: unquoted or missing attribute value at line %d", lineNum)
+		}
+		return fmt.Errorf("XML syntax error: unquoted or missing attribute value")
+	}
+
+	// Check for boolean parsing errors (local_cache attribute)
+	if strings.Contains(errorStr, "strconv.ParseBool") && strings.Contains(errorStr, "invalid syntax") {
+		// Extract the invalid value from the error message - handle both single and double quotes
+		var invalidValue string
+		var found bool
+
+		// Try double quotes first (more common)
+		start := strings.Index(errorStr, `parsing "`)
+		if start != -1 {
+			start += 9 // length of `parsing "`
+			end := strings.Index(errorStr[start:], `"`)
+			if end != -1 {
+				invalidValue = errorStr[start : start+end]
+				found = true
+			}
+		}
+
+		// Try single quotes if double quotes not found
+		if !found {
+			start = strings.Index(errorStr, "parsing '")
+			if start != -1 {
+				start += 9 // length of "parsing '"
+				end := strings.Index(errorStr[start:], "'")
+				if end != -1 {
+					invalidValue = errorStr[start : start+end]
+					found = true
+				}
+			}
+		}
+
+		if found {
+			// Find the line number where this invalid local_cache value appears
+			lines := strings.Split(xmlContent, "\n")
+			for i, line := range lines {
+				if strings.Contains(line, "local_cache") && strings.Contains(line, invalidValue) {
+					return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s' at line %d)", invalidValue, i+1)
+				}
+			}
+
+			// Fallback: general local_cache parsing error
+			return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s')", invalidValue)
+		}
+
+		// Generic local_cache parsing error
+		return fmt.Errorf("local_cache attribute must be 'true' or 'false'")
+	}
+
+	// Check for threshold value parsing errors
+	if strings.Contains(errorStr, "strconv.ParseInt") && strings.Contains(errorStr, "invalid syntax") {
+		// Extract the invalid value from the error message - handle both single and double quotes
+		var invalidValue string
+		var found bool
+
+		// Try double quotes first (more common)
+		start := strings.Index(errorStr, `parsing "`)
+		if start != -1 {
+			start += 9 // length of `parsing "`
+			end := strings.Index(errorStr[start:], `"`)
+			if end != -1 {
+				invalidValue = errorStr[start : start+end]
+				found = true
+			}
+		}
+
+		// Try single quotes if double quotes not found
+		if !found {
+			start = strings.Index(errorStr, "parsing '")
+			if start != -1 {
+				start += 9 // length of "parsing '"
+				end := strings.Index(errorStr[start:], "'")
+				if end != -1 {
+					invalidValue = errorStr[start : start+end]
+					found = true
+				}
+			}
+		}
+
+		if found {
+			// Find the line number where this invalid threshold value appears
+			lines := strings.Split(xmlContent, "\n")
+			for i, line := range lines {
+				if strings.Contains(line, "<threshold") && strings.Contains(line, invalidValue) {
+					return fmt.Errorf("threshold value must be a positive integer (found '%s' at line %d)", invalidValue, i+1)
+				}
+				// Also check for threshold content on separate lines
+				if strings.Contains(line, invalidValue) && i > 0 {
+					prevLine := lines[i-1]
+					if strings.Contains(prevLine, "<threshold") || strings.Contains(line, "</threshold>") {
+						return fmt.Errorf("threshold value must be a positive integer (found '%s' at line %d)", invalidValue, i+1)
+					}
+				}
+			}
+
+			// Fallback: general threshold parsing error
+			return fmt.Errorf("threshold value must be a positive integer (found '%s')", invalidValue)
+		}
+
+		// Generic threshold parsing error
+		return fmt.Errorf("threshold value must be a positive integer")
+	}
+
+	// For other XML parsing errors, try to extract line information
+	if strings.Contains(errorStr, "line") {
+		return err // Return original error as it already contains line info
+	}
+
+	return nil // Return nil to use the original error
 }
 
 // Reload reloads the ruleset from its source file or raw config

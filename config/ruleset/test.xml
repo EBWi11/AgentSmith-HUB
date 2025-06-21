@@ -1,5 +1,5 @@
 <root name="test2" type="DETECTION">
-    <rule id="reverse_shell_01" name="测试" author="test">
+    <rule id="reverse_shell_01" name="测试">
         <filter field="data_type">_$data_type</filter>
         <checklist condition="a and c and d and e">
             <node id="a" type="REGEX" field="exe">testcases</node>
@@ -10,14 +10,18 @@
         <del>exe,argv</del>
     </rule>
 
-    <rule id="abc" name="abc" author="123">
+    <rule id="test" name="test">
+        <filter field="age">30</filter>
+    </rule>
+
+    <rule id="abc" name="abc">
         <filter field="data_type">59</filter>
         <checklist>
             <node type="EQU" field="EXE">a</node>
          </checklist>
     </rule>
 
-    <rule id="c2_connect_02" name="测试" author="test">
+    <rule id="c2_connect_02" name="测试">
         <filter field="data_type">59</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
@@ -25,7 +29,7 @@
         </checklist>
     </rule>
 
-    <rule id="reverse_shell_03" name="测试" author="test">
+    <rule id="reverse_shell_03" name="测试">
         <filter field="data_type">59</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
@@ -33,7 +37,7 @@
         </checklist>
     </rule>
 
-    <rule id="reverse_shell_04" name="测试" author="test">
+    <rule id="reverse_shell_04" name="测试">
         <filter field="data_type">59</filter>
         <checklist>
             <node type="REGEX" field="exe">will</node>

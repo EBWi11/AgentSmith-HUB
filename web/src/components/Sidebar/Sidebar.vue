@@ -32,7 +32,7 @@
             <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
             <span class="truncate">{{ section.title }}</span>
           </button>
-          <div class="relative">
+          <div class="relative mr-3">
             <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
             </button>
@@ -152,6 +152,26 @@
                     
                     <!-- View Sample Data for inputs -->
                     <a v-if="type === 'inputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openSampleDataModal(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      View Sample Data
+                    </a>
+                    
+                    <!-- View Sample Data for rulesets -->
+                    <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                       @click.prevent.stop="openSampleDataModal(item)">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      View Sample Data
+                    </a>
+                    
+                    <!-- View Sample Data for outputs -->
+                    <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                        @click.prevent.stop="openSampleDataModal(item)">
                       <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -649,9 +669,9 @@
 
     <!-- Sample Data Modal -->
     <div v-if="showSampleDataModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl">
+      <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-6xl">
         <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-          <h3 class="text-lg font-medium">Sample Data - INPUT ({{ sampleDataInputId }})</h3>
+          <h3 class="text-lg font-medium">Sample Data - {{ sampleDataComponentType.toUpperCase() }} ({{ sampleDataComponentId }})</h3>
           <button @click="closeSampleDataModal" class="text-gray-400 hover:text-gray-500">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -674,12 +694,28 @@
               </div>
             </div>
           </div>
-          <div v-else-if="!sampleData || sampleData.length === 0" class="text-center text-gray-500 py-8">
+          <div v-else-if="!sampleData || Object.keys(sampleData).length === 0" class="text-center text-gray-500 py-8">
             No sample data available
           </div>
-          <div v-else class="space-y-4">
-            <div v-for="(sample, index) in sampleData" :key="index" class="border border-gray-200 rounded-lg p-4">
-              <pre class="bg-gray-50 rounded p-3 text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
+          <div v-else class="space-y-6">
+            <!-- Grouped by ProjectNodeSequence -->
+            <div v-for="(samples, projectNodeSequence) in sampleData" :key="projectNodeSequence" class="border border-gray-200 rounded-lg p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <h4 class="text-sm font-medium text-gray-700">Project Node Sequence: {{ projectNodeSequence }}</h4>
+                <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{{ samples.length }} samples</span>
+              </div>
+              <div class="space-y-3">
+                <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="bg-gray-50 rounded p-3">
+                  <div class="text-xs text-gray-500 mb-2 flex justify-between">
+                    <span>Sample {{ index + 1 }}</span>
+                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString() }}</span>
+                  </div>
+                  <JsonViewer :value="sample.data || sample" height="auto" />
+                </div>
+                <div v-if="samples.length > 5" class="text-center">
+                  <span class="text-xs text-gray-500">... and {{ samples.length - 5 }} more samples</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -692,6 +728,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick } from 'vue'
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
+import JsonViewer from '@/components/JsonViewer.vue'
 
 // 获取路由器实例
 const router = useRouter()
@@ -820,10 +857,11 @@ const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
 // Sample Data Modal states
 const showSampleDataModal = ref(false)
-const sampleDataInputId = ref('')
+const sampleDataComponentType = ref('')
+const sampleDataComponentId = ref('')
 const sampleDataLoading = ref(false)
 const sampleDataError = ref(null)
-const sampleData = ref([])
+const sampleData = ref({})
 
 // Flag variable to track if ESC key listener is added
 const escKeyListenerAdded = ref(false)
@@ -1704,26 +1742,40 @@ function toggleMenu(item) {
 // Open sample data modal
 function openSampleDataModal(item) {
   closeAllMenus()
-  sampleDataInputId.value = item.id || item.name
+  
+  // Detect component type based on context
+  let componentType = 'input' // default
+  
+  // Find the component type by checking which section this item belongs to
+  for (const [type, itemList] of Object.entries(items)) {
+    if (itemList.some(i => (i.id || i.name) === (item.id || item.name))) {
+      componentType = type.slice(0, -1) // Remove the 's' at the end (inputs -> input)
+      break
+    }
+  }
+  
+  sampleDataComponentType.value = componentType
+  sampleDataComponentId.value = item.id || item.name
   sampleDataLoading.value = true
   sampleDataError.value = null
-  sampleData.value = []
+  sampleData.value = {}
   showSampleDataModal.value = true
   activeModal.value = 'sampleData'
   
   addEscKeyListener()
   
   // Fetch sample data
-  fetchSampleData(item.id || item.name)
+  fetchSampleData(componentType, item.id || item.name)
 }
 
 // Close sample data modal
 function closeSampleDataModal() {
   showSampleDataModal.value = false
-  sampleDataInputId.value = ''
+  sampleDataComponentType.value = ''
+  sampleDataComponentId.value = ''
   sampleDataLoading.value = false
   sampleDataError.value = null
-  sampleData.value = []
+  sampleData.value = {}
   activeModal.value = null
   
   if (!isAnyModalOpen()) {
@@ -1732,17 +1784,19 @@ function closeSampleDataModal() {
 }
 
 // Fetch sample data
-async function fetchSampleData(id) {
+async function fetchSampleData(componentType, id) {
   try {
+    // Get all sample data for this component type and ID across all projects
     const response = await hubApi.getSamplerData({
-      name: 'input',
-      projectNodeSequence: `input.${id}`
+      name: componentType,
+      projectNodeSequence: `${componentType}.${id}`
     })
     
-    if (response && response.input) {
-      sampleData.value = response.input[`input.${id}`] || []
+    if (response && response[componentType]) {
+      // The response structure is: { [componentType]: { [projectNodeSequence]: [samples] } }
+      sampleData.value = response[componentType]
     } else {
-      sampleData.value = []
+      sampleData.value = {}
     }
   } catch (error) {
     sampleDataError.value = error.message || 'Failed to fetch sample data'
@@ -1762,8 +1816,12 @@ function shouldShowConnectCheck(type, item) {
     // 检查item的raw配置中是否包含type: print
     if (item && item.raw) {
       try {
-        // 简单的字符串检查，看配置中是否包含 type: print
-        if (item.raw.includes('type: print') || item.raw.includes('type:print')) {
+        const yamlContent = item.raw;
+        // 更全面的字符串检查，包括带引号的情况
+        if (yamlContent.includes('type: print') || 
+            yamlContent.includes('type: "print"') || 
+            yamlContent.includes("type: 'print'") ||
+            yamlContent.includes('type:print')) {
           return false; // print类型不显示Connect Check
         }
       } catch (error) {

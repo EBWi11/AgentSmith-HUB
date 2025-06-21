@@ -78,7 +78,7 @@ kafka:
   topic: "kafka_output_demo"`
 
 const NewRulesetData = `<root name="test2" type="DETECTION">
-    <rule id="reverse_shell_01" name="测试" author="test">
+    <rule id="reverse_shell_01" name="测试">
         <filter field="data_type">_$data_type</filter>
         <checklist condition="a and c and d and e">
             <node id="a" type="REGEX" field="exe">testcases</node>
@@ -933,37 +933,49 @@ func verifyComponent(c echo.Context) error {
 		}
 	}
 
+	// Helper function to convert simple error to ValidationResult format
+	createSimpleResult := func(err error) *rules_engine.ValidationResult {
+		if err == nil {
+			return &rules_engine.ValidationResult{
+				IsValid:  true,
+				Errors:   []rules_engine.ValidationError{},
+				Warnings: []rules_engine.ValidationWarning{},
+			}
+		}
+		return &rules_engine.ValidationResult{
+			IsValid: false,
+			Errors: []rules_engine.ValidationError{
+				{
+					Message: err.Error(),
+				},
+			},
+			Warnings: []rules_engine.ValidationWarning{},
+		}
+	}
+
 	switch singularType {
 	case "input":
 		err := input.Verify("", req.Raw)
-		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			})
-		}
+		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"valid": true,
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
 		})
 	case "output":
 		err := output.Verify("", req.Raw)
-		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			})
-		}
+		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"valid": true,
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
 		})
 	case "ruleset":
 		// Use detailed validation for rulesets
 		result, err := rules_engine.ValidateWithDetails("", req.Raw)
 		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			})
+			// If detailed validation fails, fall back to simple error
+			result = createSimpleResult(err)
 		}
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":    result.IsValid,
@@ -972,25 +984,19 @@ func verifyComponent(c echo.Context) error {
 		})
 	case "project":
 		err := project.Verify("", req.Raw)
-		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			})
-		}
+		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"valid": true,
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
 		})
 	case "plugin":
 		err := plugin.Verify("", req.Raw, id)
-		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			})
-		}
+		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"valid": true,
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
 		})
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
@@ -1081,7 +1087,7 @@ func cancelPluginUpgrade(c echo.Context) error {
 // GetSamplerData retrieves sample data from project components
 func GetSamplerData(c echo.Context) error {
 	componentName := c.QueryParam("name")               // e.g., "input", "output", "ruleset"
-	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.kafka1", "ruleset.rule1"
+	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.123", "ruleset.test"
 
 	logger.Info("GetSamplerData request", "componentName", componentName, "nodeSequence", nodeSequence)
 
@@ -1106,99 +1112,21 @@ func GetSamplerData(c echo.Context) error {
 
 	logger.Info("Parsed component info", "componentType", componentType, "componentId", componentId)
 
-	// Initialize response structure
-	response := map[string]interface{}{
-		componentName: map[string]interface{}{
-			nodeSequence: []interface{}{},
-		},
-	}
-
-	// Get sample data based on component type
+	// Check if the component exists
+	componentExists := false
 	switch componentType {
 	case "input":
-		// Check with read lock
 		common.GlobalMu.RLock()
-		input := project.GlobalProject.Inputs[componentId]
-		inputCount := len(project.GlobalProject.Inputs)
+		_, componentExists = project.GlobalProject.Inputs[componentId]
 		common.GlobalMu.RUnlock()
-
-		logger.Info("Checking input component", "componentId", componentId, "found", input != nil, "totalInputs", inputCount)
-
-		if input != nil {
-			// For inputs, we can provide sample data based on the input type
-			sampleData := generateInputSampleData(input)
-			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
-			logger.Info("Generated input sample data", "componentId", componentId, "sampleCount", len(sampleData))
-		} else {
-			// List available inputs for debugging
-			common.GlobalMu.RLock()
-			availableInputs := make([]string, 0, len(project.GlobalProject.Inputs))
-			for k := range project.GlobalProject.Inputs {
-				availableInputs = append(availableInputs, k)
-			}
-			common.GlobalMu.RUnlock()
-
-			logger.Error("Input component not found", "componentId", componentId, "availableInputs", availableInputs)
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": fmt.Sprintf("Input component '%s' not found. Available inputs: %v", componentId, availableInputs),
-			})
-		}
 	case "output":
-		// Check with read lock
 		common.GlobalMu.RLock()
-		output := project.GlobalProject.Outputs[componentId]
-		outputCount := len(project.GlobalProject.Outputs)
+		_, componentExists = project.GlobalProject.Outputs[componentId]
 		common.GlobalMu.RUnlock()
-
-		logger.Info("Checking output component", "componentId", componentId, "found", output != nil, "totalOutputs", outputCount)
-
-		if output != nil {
-			// For outputs, provide sample data that would be sent
-			sampleData := generateOutputSampleData(output)
-			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
-			logger.Info("Generated output sample data", "componentId", componentId, "sampleCount", len(sampleData))
-		} else {
-			// List available outputs for debugging
-			common.GlobalMu.RLock()
-			availableOutputs := make([]string, 0, len(project.GlobalProject.Outputs))
-			for k := range project.GlobalProject.Outputs {
-				availableOutputs = append(availableOutputs, k)
-			}
-			common.GlobalMu.RUnlock()
-
-			logger.Error("Output component not found", "componentId", componentId, "availableOutputs", availableOutputs)
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": fmt.Sprintf("Output component '%s' not found. Available outputs: %v", componentId, availableOutputs),
-			})
-		}
 	case "ruleset":
-		// Check with read lock
 		common.GlobalMu.RLock()
-		ruleset := project.GlobalProject.Rulesets[componentId]
-		rulesetCount := len(project.GlobalProject.Rulesets)
+		_, componentExists = project.GlobalProject.Rulesets[componentId]
 		common.GlobalMu.RUnlock()
-
-		logger.Info("Checking ruleset component", "componentId", componentId, "found", ruleset != nil, "totalRulesets", rulesetCount)
-
-		if ruleset != nil {
-			// For rulesets, provide sample data that would trigger rules
-			sampleData := generateRulesetSampleData(ruleset)
-			response[componentName].(map[string]interface{})[nodeSequence] = sampleData
-			logger.Info("Generated ruleset sample data", "componentId", componentId, "sampleCount", len(sampleData))
-		} else {
-			// List available rulesets for debugging
-			common.GlobalMu.RLock()
-			availableRulesets := make([]string, 0, len(project.GlobalProject.Rulesets))
-			for k := range project.GlobalProject.Rulesets {
-				availableRulesets = append(availableRulesets, k)
-			}
-			common.GlobalMu.RUnlock()
-
-			logger.Error("Ruleset component not found", "componentId", componentId, "availableRulesets", availableRulesets)
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": fmt.Sprintf("Ruleset component '%s' not found. Available rulesets: %v", componentId, availableRulesets),
-			})
-		}
 	default:
 		logger.Error("Unsupported component type", "componentType", componentType)
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -1206,7 +1134,78 @@ func GetSamplerData(c echo.Context) error {
 		})
 	}
 
-	logger.Info("GetSamplerData response ready", "componentName", componentName, "nodeSequence", nodeSequence)
+	if !componentExists {
+		logger.Error("Component not found", "componentType", componentType, "componentId", componentId)
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("Component '%s' of type '%s' not found", componentId, componentType),
+		})
+	}
+
+	// Collect samples from all samplers that contain this component in their flow path
+	result := make(map[string][]interface{})
+
+	// Get potential sampler names based on component types and IDs
+	samplerNames := []string{}
+	common.GlobalMu.RLock()
+	for inputId := range project.GlobalProject.Inputs {
+		samplerNames = append(samplerNames, "input."+inputId)
+	}
+	for rulesetId := range project.GlobalProject.Rulesets {
+		samplerNames = append(samplerNames, "ruleset."+rulesetId)
+	}
+	for outputId := range project.GlobalProject.Outputs {
+		samplerNames = append(samplerNames, "output."+outputId)
+	}
+	common.GlobalMu.RUnlock()
+
+	// Search through all samplers for flow paths ending with our target component (suffix matching)
+	for _, samplerName := range samplerNames {
+		sampler := common.GetSampler(samplerName)
+		if sampler != nil {
+			samples := sampler.GetSamples()
+			for projectNodeSequence, sampleData := range samples {
+				// IMPORTANT: Use suffix matching instead of contains matching
+				// This ensures we get samples for the specific component position in the flow
+				// e.g., for "ruleset.test", match "input.123.ruleset.test" but not "ruleset.test.output.print"
+				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
+					logger.Info("Found matching sample data with suffix",
+						"projectNodeSequence", projectNodeSequence,
+						"nodeSequence", nodeSequence,
+						"sampleCount", len(sampleData))
+
+					// Convert SampleData to interface{} for JSON response
+					convertedSamples := make([]interface{}, len(sampleData))
+					for i, sample := range sampleData {
+						convertedSamples[i] = map[string]interface{}{
+							"data":                  sample.Data,
+							"timestamp":             sample.Timestamp.Format(time.RFC3339),
+							"source":                sample.Source,
+							"project_node_sequence": sample.ProjectNodeSequence,
+						}
+					}
+					result[projectNodeSequence] = convertedSamples
+				}
+			}
+		}
+	}
+
+	// Initialize response structure
+	response := map[string]interface{}{
+		componentName: result,
+	}
+
+	logger.Info("GetSamplerData response ready",
+		"componentName", componentName,
+		"componentId", componentId,
+		"totalFlowPaths", len(result),
+		"totalSamples", func() int {
+			total := 0
+			for _, samples := range result {
+				total += len(samples)
+			}
+			return total
+		}())
+
 	return c.JSON(http.StatusOK, response)
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
@@ -659,89 +660,200 @@ func loadSingleLocalChange(c echo.Context) error {
 // loadComponentDirectly loads a component directly into official storage
 // This bypasses the temporary file system and *New mappings
 func loadComponentDirectly(componentType, id, content string) error {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
 	switch componentType {
 	case "input":
+		// Check if old component exists and count projects using it (using centralized counter)
+		common.GlobalMu.RLock()
+		oldInput, exists := project.GlobalProject.Inputs[id]
+		common.GlobalMu.RUnlock()
+
+		var projectsUsingInput int
+		if exists {
+			projectsUsingInput = project.UsageCounter.CountProjectsUsingInput(id)
+
+			// Only stop old component if no running projects are using it
+			if projectsUsingInput == 0 {
+				logger.Info("Stopping old input component for direct load", "id", id, "projects_using", projectsUsingInput)
+				oldInput.Stop()
+			} else {
+				logger.Info("Input component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingInput)
+			}
+		}
+
 		// Use the existing NewInput constructor
 		inputInstance, err := input.NewInput("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create input: %w", err)
 		}
 
+		// Store directly in official storage with proper locking
+		common.GlobalMu.Lock()
 		// Ensure global inputs map exists
 		if project.GlobalProject.Inputs == nil {
 			project.GlobalProject.Inputs = make(map[string]*input.Input)
 		}
-
-		// Store directly in official storage
 		project.GlobalProject.Inputs[id] = inputInstance
+		// Clear any temporary version to avoid confusion
+		delete(project.GlobalProject.InputsNew, id)
+		common.GlobalMu.Unlock()
+
+		// Start the new input component if no projects are currently using it
+		// (running projects will start it when needed)
+		if projectsUsingInput == 0 {
+			logger.Info("Starting new input component after direct load", "id", id)
+			if err := inputInstance.Start(); err != nil {
+				logger.Error("Failed to start new input component after direct load", "id", id, "error", err)
+				return fmt.Errorf("failed to start new input component: %w", err)
+			}
+		}
 
 	case "output":
+		// Check if old component exists and count projects using it (using centralized counter)
+		common.GlobalMu.RLock()
+		oldOutput, exists := project.GlobalProject.Outputs[id]
+		common.GlobalMu.RUnlock()
+
+		var projectsUsingOutput int
+		if exists {
+			projectsUsingOutput = project.UsageCounter.CountProjectsUsingOutput(id)
+
+			// Only stop old component if no running projects are using it
+			if projectsUsingOutput == 0 {
+				logger.Info("Stopping old output component for direct load", "id", id, "projects_using", projectsUsingOutput)
+				oldOutput.Stop()
+			} else {
+				logger.Info("Output component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingOutput)
+			}
+		}
+
 		// Use the existing NewOutput constructor
 		outputInstance, err := output.NewOutput("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create output: %w", err)
 		}
 
+		// Store directly in official storage with proper locking
+		common.GlobalMu.Lock()
 		// Ensure global outputs map exists
 		if project.GlobalProject.Outputs == nil {
 			project.GlobalProject.Outputs = make(map[string]*output.Output)
 		}
-
-		// Store directly in official storage
 		project.GlobalProject.Outputs[id] = outputInstance
+		// Clear any temporary version to avoid confusion
+		delete(project.GlobalProject.OutputsNew, id)
+		common.GlobalMu.Unlock()
+
+		// Start the new output component if no projects are currently using it
+		// (running projects will start it when needed)
+		if projectsUsingOutput == 0 {
+			logger.Info("Starting new output component after direct load", "id", id)
+			if err := outputInstance.Start(); err != nil {
+				logger.Error("Failed to start new output component after direct load", "id", id, "error", err)
+				return fmt.Errorf("failed to start new output component: %w", err)
+			}
+		}
 
 	case "ruleset":
+		// Check if old component exists and count projects using it (using centralized counter)
+		common.GlobalMu.RLock()
+		oldRuleset, exists := project.GlobalProject.Rulesets[id]
+		common.GlobalMu.RUnlock()
+
+		var projectsUsingRuleset int
+		if exists {
+			projectsUsingRuleset = project.UsageCounter.CountProjectsUsingRuleset(id)
+
+			// Only stop old component if no running projects are using it
+			if projectsUsingRuleset == 0 {
+				logger.Info("Stopping old ruleset component for direct load", "id", id, "projects_using", projectsUsingRuleset)
+				oldRuleset.Stop()
+			} else {
+				logger.Info("Ruleset component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingRuleset)
+			}
+		}
+
 		// Use the existing NewRuleset constructor
 		rulesetInstance, err := rules_engine.NewRuleset("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create ruleset: %w", err)
 		}
 
+		// Store directly in official storage with proper locking
+		common.GlobalMu.Lock()
 		// Ensure global rulesets map exists
 		if project.GlobalProject.Rulesets == nil {
 			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
 		}
-
-		// Store directly in official storage
 		project.GlobalProject.Rulesets[id] = rulesetInstance
+		// Clear any temporary version to avoid confusion
+		delete(project.GlobalProject.RulesetsNew, id)
+		common.GlobalMu.Unlock()
+
+		// Start the new ruleset component if no projects are currently using it
+		// (running projects will start it when needed)
+		if projectsUsingRuleset == 0 {
+			logger.Info("Starting new ruleset component after direct load", "id", id)
+			if err := rulesetInstance.Start(); err != nil {
+				logger.Error("Failed to start new ruleset component after direct load", "id", id, "error", err)
+				return fmt.Errorf("failed to start new ruleset component: %w", err)
+			}
+		}
 
 	case "project":
+		// Stop old project if it exists (projects are not shared between other projects)
+		common.GlobalMu.RLock()
+		oldProject, exists := project.GlobalProject.Projects[id]
+		common.GlobalMu.RUnlock()
+
+		if exists {
+			logger.Info("Stopping old project for direct load", "id", id)
+			oldProject.Stop()
+		}
+
 		// Use the existing NewProject constructor
 		projectInstance, err := project.NewProject("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create project: %w", err)
 		}
 
+		// Store directly in official storage with proper locking
+		common.GlobalMu.Lock()
 		// Ensure global projects map exists
 		if project.GlobalProject.Projects == nil {
 			project.GlobalProject.Projects = make(map[string]*project.Project)
 		}
-
-		// Store directly in official storage
 		project.GlobalProject.Projects[id] = projectInstance
+		// Clear any temporary version to avoid confusion
+		delete(project.GlobalProject.ProjectsNew, id)
+		common.GlobalMu.Unlock()
 
 	case "plugin":
-		// Create plugin directly (plugins are simpler)
-		newPlugin := &plugin.Plugin{
-			Name:    id,
-			Type:    plugin.YAEGI_PLUGIN,
-			Payload: []byte(content),
+		// Remove existing plugin from memory before loading new one
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, id)
+		common.GlobalMu.Unlock()
+
+		// Use the existing NewPlugin constructor to properly compile and initialize the plugin
+		err := plugin.NewPlugin("", content, id, plugin.YAEGI_PLUGIN)
+		if err != nil {
+			return fmt.Errorf("failed to create plugin: %w", err)
 		}
 
-		// Ensure global plugins map exists
-		if plugin.Plugins == nil {
-			plugin.Plugins = make(map[string]*plugin.Plugin)
-		}
+		// Plugin is automatically added to plugin.Plugins by NewPlugin function
+		// No need to manually add it to the map
 
-		// Store directly in official storage
-		plugin.Plugins[id] = newPlugin
+		// Clear any temporary version to avoid confusion
+		common.GlobalMu.Lock()
+		delete(plugin.PluginsNew, id)
+		common.GlobalMu.Unlock()
 
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
+
+	// Sync component to follower nodes after successful loading
+	// Use a goroutine to avoid blocking, similar to other component sync operations
+	go syncComponentToFollowers(componentType, id)
 
 	return nil
 }

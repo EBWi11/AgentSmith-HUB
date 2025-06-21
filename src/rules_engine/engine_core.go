@@ -73,16 +73,26 @@ func (r *Ruleset) Start() error {
 					}
 
 					task := func() {
-						results := r.EngineCheck(data)
-						for _, res := range results {
-							// Sample the result with source data
-							sampleData := map[string]interface{}{
-								"source": data,
-								"result": res,
-							}
-							r.sampler.Sample(sampleData, "rule_check", r.ProjectNodeSequence)
+						// IMPORTANT: Sample the input data BEFORE rule checking starts
+						// This ensures we capture the raw data entering the ruleset for analysis
+						if r.sampler != nil {
+							success := r.sampler.Sample(data, "rule_input", r.ProjectNodeSequence)
+							logger.Info("Ruleset input sampler call",
+								"rulesetID", r.RulesetID,
+								"projectNodeSequence", r.ProjectNodeSequence,
+								"success", success)
+						}
 
-							// Send to downstream channels
+						// Now perform rule checking on the input data
+						results := r.EngineCheck(data)
+						logger.Info("Ruleset processing",
+							"rulesetID", r.RulesetID,
+							"projectNodeSequence", r.ProjectNodeSequence,
+							"resultsCount", len(results),
+							"samplerExists", r.sampler != nil)
+
+						// Send results to downstream channels
+						for _, res := range results {
 							for _, downCh := range r.DownStream {
 								*downCh <- res
 							}

@@ -189,19 +189,96 @@ func handleComponentSync(c echo.Context) error {
 	if strings.HasSuffix(request.Type, "_delete") {
 		componentType := strings.TrimSuffix(request.Type, "_delete")
 
-		// Lock only for memory operations
-		common.GlobalMu.Lock()
+		// Stop and remove component instances on follower
+		p := project.GlobalProject
+
 		switch componentType {
 		case "ruleset":
+			// Lock only for memory operations
+			common.GlobalMu.Lock()
 			delete(common.AllRulesetsRawConfig, request.ID)
+			if ruleset, exists := p.Rulesets[request.ID]; exists {
+				delete(p.Rulesets, request.ID)
+				common.GlobalMu.Unlock()
+
+				// Check if any projects are using this ruleset before stopping
+				projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(request.ID)
+				if projectsUsingRuleset == 0 {
+					logger.Info("Stopping deleted ruleset component on follower", "id", request.ID)
+					if err := ruleset.Stop(); err != nil {
+						logger.Error("Failed to stop deleted ruleset on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					logger.Warn("Cannot stop deleted ruleset - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingRuleset)
+				}
+			} else {
+				common.GlobalMu.Unlock()
+			}
 		case "input":
+			common.GlobalMu.Lock()
 			delete(common.AllInputsRawConfig, request.ID)
+			if input, exists := p.Inputs[request.ID]; exists {
+				delete(p.Inputs, request.ID)
+				common.GlobalMu.Unlock()
+
+				// Check if any projects are using this input before stopping
+				projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(request.ID)
+				if projectsUsingInput == 0 {
+					logger.Info("Stopping deleted input component on follower", "id", request.ID)
+					if err := input.Stop(); err != nil {
+						logger.Error("Failed to stop deleted input on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					logger.Warn("Cannot stop deleted input - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingInput)
+				}
+			} else {
+				common.GlobalMu.Unlock()
+			}
 		case "output":
+			common.GlobalMu.Lock()
 			delete(common.AllOutputsRawConfig, request.ID)
+			if output, exists := p.Outputs[request.ID]; exists {
+				delete(p.Outputs, request.ID)
+				common.GlobalMu.Unlock()
+
+				// Check if any projects are using this output before stopping
+				projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(request.ID)
+				if projectsUsingOutput == 0 {
+					logger.Info("Stopping deleted output component on follower", "id", request.ID)
+					if err := output.Stop(); err != nil {
+						logger.Error("Failed to stop deleted output on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					logger.Warn("Cannot stop deleted output - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingOutput)
+				}
+			} else {
+				common.GlobalMu.Unlock()
+			}
 		case "project":
+			common.GlobalMu.Lock()
 			delete(common.AllProjectRawConfig, request.ID)
+			if proj, exists := p.Projects[request.ID]; exists {
+				delete(p.Projects, request.ID)
+				common.GlobalMu.Unlock()
+
+				// Always stop projects when deleted
+				logger.Info("Stopping deleted project on follower", "id", request.ID)
+				if err := proj.Stop(); err != nil {
+					logger.Error("Failed to stop deleted project on follower", "id", request.ID, "error", err)
+				}
+			} else {
+				common.GlobalMu.Unlock()
+			}
+		default:
+			// Lock only for memory operations
+			common.GlobalMu.Lock()
+			// Clean up any remaining config references
+			delete(common.AllRulesetsRawConfig, request.ID)
+			delete(common.AllInputsRawConfig, request.ID)
+			delete(common.AllOutputsRawConfig, request.ID)
+			delete(common.AllProjectRawConfig, request.ID)
+			common.GlobalMu.Unlock()
 		}
-		common.GlobalMu.Unlock()
 
 		return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
 	}
@@ -239,11 +316,21 @@ func handleComponentSync(c echo.Context) error {
 		in, exists := p.Inputs[request.ID]
 		common.GlobalMu.Unlock()
 
-		// Update running input if it exists (without holding global lock)
+		// Update running input if it exists (respecting shared component architecture)
 		if exists {
-			if err := in.Stop(); err != nil {
-				logger.Error("failed to stop input on follower", "error", err)
+			// Count how many running projects are using this input (using centralized counter)
+			projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(request.ID)
+
+			// Only stop input if no running projects are using it
+			if projectsUsingInput == 0 {
+				logger.Info("Stopping old input component on follower for reload", "id", request.ID, "projects_using", projectsUsingInput)
+				if err := in.Stop(); err != nil {
+					logger.Error("failed to stop input on follower", "error", err)
+				}
+			} else {
+				logger.Info("Input component still in use on follower, skipping stop during reload", "id", request.ID, "projects_using", projectsUsingInput)
 			}
+
 			if newInput, err := input.NewInput("", request.Raw, request.ID); err != nil {
 				logger.Error("failed to create new input on follower", "error", err)
 			} else {
@@ -252,8 +339,13 @@ func handleComponentSync(c echo.Context) error {
 				p.Inputs[request.ID] = newInput
 				common.GlobalMu.Unlock()
 
-				if err := newInput.Start(); err != nil {
-					logger.Error("failed to start new input on follower", "error", err)
+				// Only start if no projects are currently using it (they will start it when needed)
+				if projectsUsingInput == 0 {
+					if err := newInput.Start(); err != nil {
+						logger.Error("failed to start new input on follower", "error", err)
+					}
+				} else {
+					logger.Info("Input component in use, will be started by projects on follower", "id", request.ID)
 				}
 
 				// Restart affected projects on follower
@@ -268,11 +360,21 @@ func handleComponentSync(c echo.Context) error {
 		out, exists := p.Outputs[request.ID]
 		common.GlobalMu.Unlock()
 
-		// Update running output if it exists (without holding global lock)
+		// Update running output if it exists (respecting shared component architecture)
 		if exists {
-			if err := out.Stop(); err != nil {
-				logger.Error("failed to stop output on follower", "error", err)
+			// Count how many running projects are using this output (using centralized counter)
+			projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(request.ID)
+
+			// Only stop output if no running projects are using it
+			if projectsUsingOutput == 0 {
+				logger.Info("Stopping old output component on follower for reload", "id", request.ID, "projects_using", projectsUsingOutput)
+				if err := out.Stop(); err != nil {
+					logger.Error("failed to stop output on follower", "error", err)
+				}
+			} else {
+				logger.Info("Output component still in use on follower, skipping stop during reload", "id", request.ID, "projects_using", projectsUsingOutput)
 			}
+
 			if newOutput, err := output.NewOutput("", request.Raw, request.ID); err != nil {
 				logger.Error("failed to create new output on follower", "error", err)
 			} else {
@@ -281,8 +383,13 @@ func handleComponentSync(c echo.Context) error {
 				p.Outputs[request.ID] = newOutput
 				common.GlobalMu.Unlock()
 
-				if err := newOutput.Start(); err != nil {
-					logger.Error("failed to start new output on follower", "error", err)
+				// Only start if no projects are currently using it (they will start it when needed)
+				if projectsUsingOutput == 0 {
+					if err := newOutput.Start(); err != nil {
+						logger.Error("failed to start new output on follower", "error", err)
+					}
+				} else {
+					logger.Info("Output component in use, will be started by projects on follower", "id", request.ID)
 				}
 
 				// Restart affected projects on follower
@@ -317,13 +424,11 @@ func handleComponentSync(c echo.Context) error {
 				p.Projects[request.ID] = newProject
 				common.GlobalMu.Unlock()
 
-				// Restart project if it was previously running
+				// IMPORTANT: Do not automatically restart project during cluster sync
+				// The project status should only be determined by user intention in .project_status file
+				// StartAllProject() will handle starting projects based on user's saved intentions
 				if wasRunning {
-					if err := newProject.Start(); err != nil {
-						logger.Error("failed to restart project on follower", "id", request.ID, "error", err)
-					} else {
-						logger.Info("Successfully restarted project on follower", "id", request.ID)
-					}
+					logger.Info("Project was previously running, but will not auto-start during sync", "id", request.ID, "note", "StartAllProject will handle starting based on user intention")
 				}
 			}
 		} else {
@@ -417,6 +522,7 @@ func syncToFollowers(method, path string, body []byte) {
 }
 
 // restartAffectedProjectsOnFollower restarts projects affected by component changes on follower nodes
+// Uses the same individual restart approach as leader to respect component sharing
 func restartAffectedProjectsOnFollower(affectedProjects []string) {
 	if len(affectedProjects) == 0 {
 		return
@@ -424,27 +530,11 @@ func restartAffectedProjectsOnFollower(affectedProjects []string) {
 
 	logger.Info("Restarting affected projects on follower", "count", len(affectedProjects))
 
-	// First stop all affected projects
-	for _, projectID := range affectedProjects {
-		if proj, exists := project.GlobalProject.Projects[projectID]; exists {
-			if proj.Status == project.ProjectStatusRunning {
-				logger.Info("Stopping project for restart on follower", "id", projectID)
-				if err := proj.Stop(); err != nil {
-					logger.Error("Failed to stop project on follower", "id", projectID, "error", err)
-				}
-			}
-		}
+	// Use unified restart function for better maintainability and consistency
+	restartedCount, err := project.RestartProjectsSafely(affectedProjects)
+	if err != nil {
+		logger.Error("Error during affected projects restart on follower", "error", err)
 	}
 
-	// Then start all affected projects
-	for _, projectID := range affectedProjects {
-		if proj, exists := project.GlobalProject.Projects[projectID]; exists {
-			if proj.Status == project.ProjectStatusStopped {
-				logger.Info("Starting project after changes on follower", "id", projectID)
-				if err := proj.Start(); err != nil {
-					logger.Error("Failed to start project on follower", "id", projectID, "error", err)
-				}
-			}
-		}
-	}
+	logger.Info("Batch restart completed on follower", "total_affected", len(affectedProjects), "restarted", restartedCount)
 }

@@ -23,8 +23,7 @@
       </template>
 
       <Background :pattern-color="'#e5e7eb'" :gap="10" />
-      <MiniMap />
-      <Controls />
+      <Controls :position="'top-right'" />
     </VueFlow>
 
     <!-- Right-click menu -->
@@ -58,18 +57,31 @@
           <div v-if="loadingSamples" class="flex justify-center items-center py-8">
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
-          <div v-else-if="!samples || samples.length === 0" class="text-center text-gray-500 py-8">
+          <div v-else-if="!sampleDataGrouped || Object.keys(sampleDataGrouped).length === 0" class="text-center text-gray-500 py-8">
             No sample data available
           </div>
-          <div v-else class="space-y-4">
-            <div v-for="(sample, index) in samples" :key="index" class="border border-gray-200 rounded-lg p-4">
-              <div class="mb-2 text-sm text-gray-500">
-                Time: {{ new Date(sample.timestamp).toLocaleString() }}
+          <div v-else class="space-y-6">
+            <!-- Grouped by ProjectNodeSequence -->
+            <div v-for="(samples, projectNodeSequence) in sampleDataGrouped" :key="projectNodeSequence" class="border border-gray-200 rounded-lg p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <h4 class="text-sm font-medium text-gray-700">Project Node Sequence: {{ projectNodeSequence }}</h4>
+                <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{{ samples.length }} samples</span>
               </div>
-              <div class="mb-2 text-sm text-gray-500">
-                Source: {{ sample.source }}
+              <div class="space-y-3">
+                <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="bg-gray-50 rounded p-3">
+                  <div class="text-xs text-gray-500 mb-2 flex justify-between">
+                    <span>Sample {{ index + 1 }}</span>
+                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString() }}</span>
+                  </div>
+                  <div class="text-xs text-gray-500 mb-2">
+                    Source: {{ sample.source }}
+                  </div>
+                  <pre class="text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
+                </div>
+                <div v-if="samples.length > 5" class="text-center">
+                  <span class="text-xs text-gray-500">... and {{ samples.length - 5 }} more samples</span>
+                </div>
               </div>
-              <pre class="bg-gray-50 rounded p-3 text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
             </div>
           </div>
         </div>
@@ -79,11 +91,10 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { VueFlow } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
-import { MiniMap } from '@vue-flow/minimap';
 import { useRouter } from 'vue-router';
 import dagre from 'dagre';
 import yaml from 'js-yaml';
@@ -114,7 +125,12 @@ const selectedNode = ref(null);
 // Sample data related
 const showSampleModal = ref(false);
 const loadingSamples = ref(false);
-const samples = ref([]);
+const sampleDataRaw = ref({});
+
+// Computed property to group sample data by ProjectNodeSequence
+const sampleDataGrouped = computed(() => {
+  return sampleDataRaw.value;
+});
 
 // VueFlow node click handler (keeping compatibility)
 function onNodeClick(event, node) {
@@ -182,14 +198,27 @@ function onGlobalClick(event) {
   showContextMenu.value = false;
 }
 
+// Handle ESC key press
+function handleEscKey(event) {
+  if (event.key === 'Escape') {
+    if (showSampleModal.value) {
+      closeSampleModal();
+    } else if (showContextMenu.value) {
+      showContextMenu.value = false;
+    }
+  }
+}
+
 // Add global click event listener on component mount
 onMounted(() => {
   document.addEventListener('click', onGlobalClick);
+  document.addEventListener('keydown', handleEscKey);
 });
 
 // Remove global click event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick);
+  document.removeEventListener('keydown', handleEscKey);
 });
 
 // View sample data
@@ -199,16 +228,19 @@ async function viewSampleData() {
   loadingSamples.value = true;
   
   try {
+    const nodeType = selectedNode.value.data.nodeType.toLowerCase();
+    const componentId = selectedNode.value.data.componentId;
+    
     const response = await hubApi.getSamplerData({
-      name: selectedNode.value.data.nodeType.toLowerCase(),
-      projectNodeSequence: selectedNode.value.id
+      name: nodeType,
+      projectNodeSequence: `${nodeType}.${componentId}`
     });
     
-    if (response && response[selectedNode.value.data.nodeType.toLowerCase()]) {
-      const nodeData = response[selectedNode.value.data.nodeType.toLowerCase()];
-      samples.value = nodeData[selectedNode.value.id] || [];
+    if (response && response[nodeType]) {
+      // Store the grouped sample data directly
+      sampleDataRaw.value = response[nodeType];
     } else {
-      samples.value = [];
+      sampleDataRaw.value = {};
     }
   } catch (error) {
     console.error('Failed to fetch sample data:', error);
@@ -221,7 +253,7 @@ async function viewSampleData() {
 // Close sample data modal
 function closeSampleModal() {
   showSampleModal.value = false;
-  samples.value = [];
+  sampleDataRaw.value = {};
 }
 
 const parseAndLayoutWorkflow = (rawProjectContent) => {
@@ -271,9 +303,9 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
         id: `e-${fromId}-${toId}-${index}`, 
         source: fromId, 
         target: toId,
-        type: 'smoothstep',
-        style: { stroke: '#a1a1aa', strokeWidth: 1.5 },
-        markerEnd: { type: 'arrowclosed', color: '#a1a1aa' }
+        type: 'default',
+        style: { stroke: '#9ca3af', strokeWidth: 1.2 },
+        markerEnd: { type: 'arrowclosed', color: '#9ca3af' }
       });
     });
 
@@ -281,10 +313,10 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
     
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'TB', nodesep: 15, ranksep: 20 });
+    g.setGraph({ rankdir: 'TB', nodesep: 80, ranksep: 100 });
 
     newNodes.forEach(node => {
-      g.setNode(node.id, { width: 90, height: 45 });
+      g.setNode(node.id, { width: 75, height: 38 });
     });
     tempEdges.forEach(edge => {
       g.setEdge(edge.source, edge.target);
@@ -296,7 +328,7 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
       const nodeWithPosition = g.node(node.id);
       return {
         ...node,
-        position: { x: nodeWithPosition.x - 45, y: nodeWithPosition.y - 22.5 },
+        position: { x: nodeWithPosition.x - 37.5, y: nodeWithPosition.y - 19 },
       };
     });
 
@@ -317,7 +349,6 @@ watch(() => props.projectContent, (newVal) => {
 <style>
 @import '@vue-flow/core/dist/style.css';
 @import '@vue-flow/controls/dist/style.css';
-@import '@vue-flow/minimap/dist/style.css';
 
 .vue-flow__attribution {
     display: none;
@@ -336,5 +367,21 @@ watch(() => props.projectContent, (newVal) => {
 
 .context-menu {
   z-index: 1000;
+}
+
+/* 限制控制按钮在预览区域内 */
+.vue-flow__controls {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  left: auto !important;
+  max-width: calc(100% - 20px) !important;
+  z-index: 100 !important;
+}
+
+/* 确保控制按钮不会溢出到右侧 */
+.vue-flow__controls .vue-flow__controls-button {
+  display: inline-block !important;
+  margin-right: 5px !important;
 }
 </style> 

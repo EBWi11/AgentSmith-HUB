@@ -11,7 +11,7 @@
  */
 export function generateRulesetTemplate(id) {
   return `<root type="DETECTION">
-    <rule id="${id}_01" name="Example Rule" author="user">
+    <rule id="${id}_01" name="Example Rule">
         <filter field="data_type">59</filter>
         <checklist condition="a and (b or c)">
             <node id="a" type="INCL" field="data" logic="or" delimiter="|">test1|test2</node>

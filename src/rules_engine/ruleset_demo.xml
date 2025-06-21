@@ -1,5 +1,5 @@
 <root type="detection">
-    <rule id="reverse_shell_01" name="反弹shell检测" author="test">
+    <rule id="reverse_shell_01" name="反弹shell检测">
         <filter field="data_typedd">59</filter>
         <checklist condition="a and (b or c) ">
             <node id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</node>

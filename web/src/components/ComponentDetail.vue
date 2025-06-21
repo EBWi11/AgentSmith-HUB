@@ -4,7 +4,26 @@
   
   <!-- Create Mode -->
   <div v-else-if="props.item && props.item.isNew" class="h-full flex flex-col">
-    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" />
+    <!-- Special layout for projects: Split view with live preview -->
+    <div v-if="isProject" class="flex h-full">
+      <div class="w-3/5 h-full">
+        <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" />
+      </div>
+      <div class="w-2/5 h-full border-l border-gray-200">
+        <div class="p-3 bg-gray-50 border-b border-gray-200">
+          <h3 class="text-sm font-medium text-gray-700 flex items-center">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            Live Preview
+          </h3>
+        </div>
+        <ProjectWorkflow :projectContent="editorValue" />
+      </div>
+    </div>
+    <!-- Default full-screen editor for other component types -->
+          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Test Buttons -->
       <button 
@@ -108,24 +127,24 @@
 
   <!-- Edit Mode -->
   <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col relative">
-    <!-- Floating Validation Status (for Rulesets, Plugins, Outputs, and Inputs) -->
-    <div v-if="(isRuleset || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
-         class="absolute top-4 right-4 z-50 max-w-md bg-white/95 border border-gray-200/60 rounded-xl shadow-2xl backdrop-blur-md">
+    <!-- Floating Validation Status (for Rulesets, Projects, Plugins, Outputs, and Inputs) -->
+    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
+         class="absolute top-4 right-4 z-50 max-w-lg bg-white/95 border border-gray-200/60 rounded-xl shadow-2xl backdrop-blur-md">
       <!-- Validation Errors -->
       <div v-if="validationResult.errors.length > 0" class="validation-errors p-4 bg-red-50/60 border-l-4 border-red-400/70 text-red-800 rounded-t-xl backdrop-blur-sm">
         <div class="flex justify-between items-start mb-3">
-          <h3 class="font-semibold text-sm text-red-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Errors</h3>
+          <h3 class="font-semibold text-sm text-red-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : (isProject ? 'Project Validation' : 'Validation'))) }} Errors</h3>
           <button @click="showValidationPanel = false" class="text-red-400 hover:text-red-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
           </button>
         </div>
-        <ul class="text-xs space-y-1">
+        <ul class="text-xs space-y-2">
           <li v-for="(error, index) in validationResult.errors" :key="index" class="flex flex-col">
             <span class="font-medium text-red-900">Line {{ error.line }}:</span> 
-            <span class="text-red-700 ml-1">{{ error.message }}</span>
-            <span v-if="error.detail" class="text-red-600 text-xs mt-1 ml-4 italic opacity-80">{{ error.detail }}</span>
+            <span class="text-red-700 ml-1 break-words leading-relaxed">{{ error.message }}</span>
+            <span v-if="error.detail" class="text-red-600 text-xs mt-1 ml-4 italic opacity-80 break-words">{{ error.detail }}</span>
           </li>
         </ul>
       </div>
@@ -135,26 +154,26 @@
            class="validation-warnings p-4 bg-amber-50/60 border-l-4 border-amber-400/70 text-amber-800 backdrop-blur-sm"
            :class="{ 'rounded-t-xl': validationResult.errors.length === 0, 'rounded-b-xl': true }">
         <div v-if="validationResult.errors.length === 0" class="flex justify-between items-start mb-3">
-          <h3 class="font-semibold text-sm text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
+          <h3 class="font-semibold text-sm text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : (isProject ? 'Project Validation' : 'Validation'))) }} Warnings</h3>
           <button @click="showValidationPanel = false" class="text-amber-400 hover:text-amber-600 ml-2 transition-colors duration-150">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
             </svg>
           </button>
         </div>
-        <h3 v-else class="font-semibold text-sm mb-3 text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : 'Validation')) }} Warnings</h3>
-        <ul class="text-xs space-y-1">
+        <h3 v-else class="font-semibold text-sm mb-3 text-amber-900">{{ isPlugin ? 'Compilation' : (isOutput ? 'Output Validation' : (isInput ? 'Input Validation' : (isProject ? 'Project Validation' : 'Validation'))) }} Warnings</h3>
+        <ul class="text-xs space-y-2">
           <li v-for="(warning, index) in validationResult.warnings" :key="index" class="flex flex-col">
             <span class="font-medium text-amber-900">Line {{ warning.line }}:</span> 
-            <span class="text-amber-700 ml-1">{{ warning.message }}</span>
-            <span v-if="warning.detail" class="text-amber-600 text-xs mt-1 ml-4 italic opacity-80">{{ warning.detail }}</span>
+            <span class="text-amber-700 ml-1 break-words leading-relaxed">{{ warning.message }}</span>
+            <span v-if="warning.detail" class="text-amber-600 text-xs mt-1 ml-4 italic opacity-80 break-words">{{ warning.detail }}</span>
           </li>
         </ul>
       </div>
     </div>
 
     <!-- Validation Status Indicator -->
-    <div v-if="(isRuleset || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && !showValidationPanel"
+    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && !showValidationPanel"
          class="absolute top-4 right-4 z-50">
       <button @click="showValidationPanel = true" 
               class="flex items-center space-x-1 px-2 py-1 rounded-full text-white text-xs shadow-lg transition-all hover:scale-105"
@@ -166,7 +185,26 @@
       </button>
     </div>
     
-    <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" />
+         <!-- Special layout for projects: Split view with live preview -->
+     <div v-if="isProject" class="flex h-full">
+       <div class="w-3/5 h-full">
+         <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" />
+       </div>
+       <div class="w-2/5 h-full border-l border-gray-200">
+        <div class="p-3 bg-gray-50 border-b border-gray-200">
+          <h3 class="text-sm font-medium text-gray-700 flex items-center">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            Live Preview
+          </h3>
+        </div>
+        <ProjectWorkflow :projectContent="editorValue" />
+      </div>
+    </div>
+    <!-- Default full-screen editor for other component types -->
+           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Cancel Button -->
       <button 
@@ -305,10 +343,10 @@
 
   <!-- Special layout for projects -->
   <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="flex h-full">
-    <div class="w-1/2 h-full">
+    <div class="w-3/5 h-full">
        <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" />
     </div>
-    <div class="w-1/2 h-full border-l border-gray-200">
+    <div class="w-2/5 h-full border-l border-gray-200">
       <ProjectWorkflow :projectContent="detail.raw" />
     </div>
   </div>
@@ -483,6 +521,7 @@ const verifyLoading = ref(false)
 const connectCheckLoading = ref(false)
 const showValidationPanel = ref(true) // Show validation panel by default when there are errors/warnings
 const pluginVerifyTimeout = ref(null) // Timeout for plugin auto-verification
+const projectValidationTimeout = ref(null) // Timeout for project auto-verification
 const isRuleset = computed(() => {
   return props.item?.type === 'rulesets'
 })
@@ -508,8 +547,11 @@ const supportsConnectCheck = computed(() => {
     // Parse output config to check if it's print type
     try {
       const yamlContent = detail.value.raw
-      // Simple check for print type in YAML
-      if (yamlContent.includes('type: print') || yamlContent.includes('type: "print"') || yamlContent.includes("type: 'print'")) {
+      // More comprehensive check for print type in YAML
+      if (yamlContent.includes('type: print') || 
+          yamlContent.includes('type: "print"') || 
+          yamlContent.includes("type: 'print'") ||
+          yamlContent.includes('type:print')) {
         return false // Print output doesn't need connect check
       }
       return true // Other output types support connect check
@@ -589,15 +631,47 @@ function extractLineNumber(errorMessage) {
   if (!errorMessage) return null;
   
   // Try to extract line number from error message
-  const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
+  const lineMatches = errorMessage.match(/at\s+line\s+(\d+)/i) ||
+                      errorMessage.match(/line\s+(\d+)/i) || 
                       errorMessage.match(/line:\s*(\d+)/i) ||
-                      errorMessage.match(/location:.*line\s*(\d+)/i);
+                      errorMessage.match(/location:.*line\s*(\d+)/i) ||
+                      errorMessage.match(/\(line:\s*(\d+)\)/i);
   
   if (lineMatches && lineMatches[1]) {
-    return parseInt(lineMatches[1]);
+    let lineNumber = parseInt(lineMatches[1]);
+    
+    // For project validation errors, adjust line number to account for YAML structure
+    // Backend parses only the content part (after 'content: |'), but frontend shows full YAML
+    if (isProject.value && editorValue.value) {
+      // Check if this is a YAML file with 'content: |' structure
+      const lines = editorValue.value.split('\n');
+      for (let i = 0; i < Math.min(5, lines.length); i++) {
+        if (lines[i].trim().startsWith('content:')) {
+          // Found 'content:' line, backend line numbers need to be offset
+          lineNumber += i + 1; // +1 for the content line itself
+          break;
+        }
+      }
+    }
+    
+    return lineNumber;
   }
   
   return null;
+}
+
+// Fix error message line numbers for project validation
+function fixProjectErrorMessage(errorMessage) {
+  if (!isProject.value || !errorMessage || !errorMessage.includes('at line')) {
+    return errorMessage;
+  }
+  
+  const lineNumber = extractLineNumber(errorMessage);
+  if (lineNumber) {
+    return errorMessage.replace(/at line \d+/i, `at line ${lineNumber}`);
+  }
+  
+  return errorMessage;
 }
 
 // Methods
@@ -782,9 +856,63 @@ const validateRulesetRealtime = async () => {
   return true;
 }
 
+// Real-time validation function for projects (no messages, silent)
+const validateProjectRealtime = async () => {
+  if (isProject.value && editorValue.value && props.item?.id) {
+    try {
+      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
+      
+      if (response.data && response.data.valid !== undefined) {
+        if (response.data.valid) {
+          validationResult.value = { isValid: true, errors: [], warnings: [] };
+          errorLines.value = [];
+          showValidationPanel.value = false;
+        } else {
+          // For invalid responses, show error
+          const errorMessage = response.data.error || 'Project validation failed';
+          
+          // Try to extract line number from error message
+          const lineNumber = extractLineNumber(errorMessage);
+          
+          // Fix the error message to show correct line number
+          const displayMessage = fixProjectErrorMessage(errorMessage);
+          
+          validationResult.value = {
+            isValid: false,
+            errors: [{ 
+              line: lineNumber || 'Unknown', 
+              message: displayMessage,
+              detail: response.data?.detail || null
+            }],
+            warnings: []
+          };
+          
+          errorLines.value = lineNumber ? [lineNumber] : [];
+          showValidationPanel.value = true;
+        }
+        return response.data.valid;
+      } else {
+        // Clear validation
+        validationResult.value = { isValid: true, errors: [], warnings: [] };
+        errorLines.value = [];
+        showValidationPanel.value = false;
+        return true;
+      }
+    } catch (error) {
+      // Clear validation errors when validation request fails
+      validationResult.value = { isValid: true, errors: [], warnings: [] };
+      errorLines.value = [];
+      showValidationPanel.value = false;
+      return true;
+    }
+  }
+  return true;
+}
+
 // Watch for changes in editor content and perform real-time validation  
 const rulesetValidationTimeout = ref(null);
 
+// Real-time validation for rulesets only, projects use line-based validation
 watch(editorValue, (newContent) => {
   if (isRuleset.value && newContent) {
     // Debounce ruleset validation to avoid excessive API calls
@@ -800,6 +928,22 @@ watch(editorValue, (newContent) => {
     }, 2000) // Wait 2 seconds after user stops typing
   }
 }, { deep: true })
+
+// Track last cursor line for project validation
+const lastCursorLine = ref(1)
+
+// Handle line change for project validation
+function handleLineChange(newLineNumber) {
+  if (isProject.value && newLineNumber !== lastCursorLine.value) {
+    // User moved to a different line, validate the project
+    clearTimeout(projectValidationTimeout.value);
+    projectValidationTimeout.value = setTimeout(async () => {
+      await validateProjectRealtime();
+    }, 300); // Quick validation when changing lines
+    
+    lastCursorLine.value = newLineNumber;
+  }
+}
 
 
 
@@ -823,11 +967,13 @@ async function verifyProject() {
       $message?.success?.('Project configuration is valid');
     } else {
       const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
+      const fixedMessage = fixProjectErrorMessage(errorMessage);
+      $message?.error?.('Verification failed: ' + fixedMessage);
     }
   } catch (error) {
     const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
+    const fixedMessage = fixProjectErrorMessage(errorMessage);
+    $message?.error?.('Verification error: ' + fixedMessage);
   } finally {
     verifyLoading.value = false;
   }
@@ -1342,6 +1488,8 @@ onMounted(async () => {
   
   if (isRuleset.value && editorValue.value) {
     await validateRulesetRealtime()
+  } else if (isProject.value && editorValue.value) {
+    await validateProjectRealtime()
   }
   
   // If component type is project, fetch all components list
@@ -1367,6 +1515,14 @@ async function saveEdit(content) {
   if (isRuleset.value) {
     const isValid = await validateRulesetRealtime()
     if (!isValid && !confirm('Ruleset contains validation errors. Save anyway?')) {
+      return
+    }
+  }
+  
+  // Validate project configuration
+  if (isProject.value) {
+    const isValid = await validateProjectRealtime()
+    if (!isValid && !confirm('Project contains validation errors. Save anyway?')) {
       return
     }
   }
@@ -1482,6 +1638,14 @@ async function saveNew(content) {
   if (isRuleset.value) {
     const isValid = await validateRulesetRealtime()
     if (!isValid && !confirm('Ruleset contains validation errors. Create anyway?')) {
+      return
+    }
+  }
+  
+  // Validate project configuration
+  if (isProject.value) {
+    const isValid = await validateProjectRealtime()
+    if (!isValid && !confirm('Project contains validation errors. Create anyway?')) {
       return
     }
   }
@@ -1812,7 +1976,13 @@ watch(() => props.item?.id, (newVal, oldVal) => {
 // 组件卸载时清除定时刷新
 onBeforeUnmount(() => {
   clearStatusRefresh();
-  // Clear plugin verification timeout
+  // Clear validation timeouts
+  if (rulesetValidationTimeout.value) {
+    clearTimeout(rulesetValidationTimeout.value);
+  }
+  if (projectValidationTimeout.value) {
+    clearTimeout(projectValidationTimeout.value);
+  }
   if (pluginVerifyTimeout.value) {
     clearTimeout(pluginVerifyTimeout.value);
   }

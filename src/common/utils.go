@@ -389,3 +389,17 @@ func DeleteConfigFile(componentType string, id string) error {
 
 	return nil
 }
+
+// ReadContentFromPathOrRaw reads content from file path or returns raw content
+// This is a common utility function used by all component verification functions
+func ReadContentFromPathOrRaw(path string, raw string) ([]byte, error) {
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file at %s: %w", path, err)
+		}
+		return data, nil
+	} else {
+		return []byte(raw), nil
+	}
+}

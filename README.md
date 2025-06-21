@@ -79,7 +79,7 @@ Rules are defined in XML files under the `config_demo/ruleset` directory:
 
 ```xml
 <root name="Ruleset Name" type="DETECTION">
-  <rule id="rule1" name="Rule Name" author="Author">
+  <rule id="rule1" name="Rule Name">
     <filter field="field.path">value</filter>
     <checklist condition="(a AND b) OR c">
       <node id="a" type="EQU" field="field1">value1</node>

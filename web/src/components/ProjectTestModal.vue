@@ -87,7 +87,7 @@
                 
                 <div v-else class="space-y-2">
                   <div v-for="(result, index) in results" :key="index" class="border border-gray-100 rounded p-2">
-                    <pre class="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-60">{{ JSON.stringify(result, null, 2) }}</pre>
+                    <JsonViewer :value="result" height="240px" />
                   </div>
                 </div>
               </div>
@@ -130,6 +130,7 @@
 import { ref, watch, onMounted, computed, onUnmounted } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
+import JsonViewer from './JsonViewer.vue';
 
 // Props
 const props = defineProps({
