@@ -92,7 +92,7 @@
       
       <!-- Save Button -->
       <button 
-        @click="saveNew" 
+        @click="() => saveNew()" 
         class="btn btn-primary btn-md"
         :disabled="saving"
       >
@@ -289,7 +289,7 @@
       
       <!-- Save Button -->
       <button 
-        @click="saveEdit" 
+        @click="() => saveEdit()" 
         class="btn btn-primary btn-md"
         :disabled="saving"
       >
