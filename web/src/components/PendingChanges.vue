@@ -672,4 +672,73 @@ pre {
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+
+/* Button Styles - Minimal Design to match other components */
+.btn.btn-secondary {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-secondary:hover:not(:disabled) {
+  border-color: #9ca3af !important;
+  color: #4b5563 !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-verify {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-verify:hover:not(:disabled) {
+  border-color: #059669 !important;
+  color: #059669 !important;
+  background: rgba(236, 253, 245, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-primary {
+  background: transparent !important;
+  border: 1px solid #3b82f6 !important;
+  color: #3b82f6 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-primary:hover:not(:disabled) {
+  border-color: #2563eb !important;
+  color: #2563eb !important;
+  background: rgba(59, 130, 246, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-danger {
+  background: transparent !important;
+  border: 1px solid #dc2626 !important;
+  color: #dc2626 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-danger:hover:not(:disabled) {
+  border-color: #b91c1c !important;
+  color: #b91c1c !important;
+  background: rgba(220, 38, 38, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
 </style>

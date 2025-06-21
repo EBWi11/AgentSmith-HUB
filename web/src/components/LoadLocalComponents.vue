@@ -84,16 +84,40 @@
             </div>
             
             <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
-              <!-- For Load Local Components, NEVER show diff mode -->
-              <!-- Always show the local file content directly -->
-              <div style="height: 400px; margin: 0; padding: 0; border: none;">
+              <!-- New local file: display content directly -->
+              <div v-if="change.has_local && !change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
                 <MonacoEditor 
-                  :key="`local-${change.type}-${change.id}`"
+                  :key="`new-local-${change.type}-${change.id}`"
                   :value="change.local_content || ''" 
                   :language="getEditorLanguage(change.type)" 
                   :read-only="true" 
                   :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
                   :diff-mode="false"
+                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+                />
+              </div>
+              <!-- File deleted locally: show memory content -->
+              <div v-else-if="!change.has_local && change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
+                <MonacoEditor 
+                  :key="`deleted-${change.type}-${change.id}`"
+                  :value="change.memory_content || ''" 
+                  :language="getEditorLanguage(change.type)" 
+                  :read-only="true" 
+                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                  :diff-mode="false"
+                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+                />
+              </div>
+              <!-- File changed: show diff mode -->
+              <div v-else style="height: 400px; margin: 0; padding: 0; border: none;">
+                <MonacoEditor 
+                  :key="`diff-${change.type}-${change.id}`"
+                  :value="change.local_content || ''" 
+                  :original-value="change.memory_content || ''"
+                  :language="getEditorLanguage(change.type)" 
+                  :read-only="true" 
+                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                  :diff-mode="true"
                   style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
                 />
               </div>
@@ -469,5 +493,74 @@ function getLoadButtonText(change) {
 pre {
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* Button Styles - Minimal Design to match other components */
+.btn.btn-secondary {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-secondary:hover:not(:disabled) {
+  border-color: #9ca3af !important;
+  color: #4b5563 !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-verify {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-verify:hover:not(:disabled) {
+  border-color: #059669 !important;
+  color: #059669 !important;
+  background: rgba(236, 253, 245, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-primary {
+  background: transparent !important;
+  border: 1px solid #3b82f6 !important;
+  color: #3b82f6 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-primary:hover:not(:disabled) {
+  border-color: #2563eb !important;
+  color: #2563eb !important;
+  background: rgba(59, 130, 246, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-danger {
+  background: transparent !important;
+  border: 1px solid #dc2626 !important;
+  color: #dc2626 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-danger:hover:not(:disabled) {
+  border-color: #b91c1c !important;
+  color: #b91c1c !important;
+  background: rgba(220, 38, 38, 0.05) !important;
+  box-shadow: none !important;
+  transform: none !important;
 }
 </style> 
