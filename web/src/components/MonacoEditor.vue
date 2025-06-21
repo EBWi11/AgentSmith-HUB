@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance, computed } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { onBeforeUpdate } from 'vue';
@@ -19,10 +19,12 @@ const props = defineProps({
   diffMode: { type: Boolean, default: false }, // Enable diff mode
 });
 
+// 正确声明emits
+const emit = defineEmits(['update:value', 'save']);
+
 const container = ref(null);
 let editor = null;
 let diffEditor = null;
-const { emit } = getCurrentInstance();
 const store = useStore();
 
 
@@ -2092,7 +2094,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
           endColumn: position.column
         };
         
-        console.log('RULESET prefix detected, rulesetComponents:', rulesetComponents.value);
+
         
         if (rulesetComponents.value.length > 0) {
           // Suggest all RULESET components, but filter out temporary ones

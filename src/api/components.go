@@ -1210,45 +1210,6 @@ func GetSamplerData(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-// GetSamplerStats retrieves sampler statistics
-func GetSamplerStats(c echo.Context) error {
-	stats := map[string]interface{}{
-		"total_samples":   0,
-		"active_samplers": 0,
-		"components": map[string]interface{}{
-			"inputs":   len(project.GlobalProject.Inputs),
-			"outputs":  len(project.GlobalProject.Outputs),
-			"rulesets": len(project.GlobalProject.Rulesets),
-		},
-		"last_updated": time.Now().Format(time.RFC3339),
-	}
-
-	// Count active components
-	activeCount := 0
-	for _, proj := range project.GlobalProject.Projects {
-		if proj.Status == project.ProjectStatusRunning {
-			activeCount += len(proj.Inputs) + len(proj.Outputs) + len(proj.Rulesets)
-		}
-	}
-	stats["active_samplers"] = activeCount
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status": "success",
-		"stats":  stats,
-	})
-}
-
-// ResetSampler resets sampler data (placeholder for future implementation)
-func ResetSampler(c echo.Context) error {
-	// In a real implementation, this might clear cached sample data
-	// For now, just return success
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":    "success",
-		"message":   "Sampler data reset successfully",
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
-}
-
 // Helper function to generate sample data for inputs
 func generateInputSampleData(input *input.Input) []interface{} {
 	samples := make([]interface{}, 0)

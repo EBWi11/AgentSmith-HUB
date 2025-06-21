@@ -118,20 +118,16 @@ const samples = ref([]);
 
 // VueFlow node click handler (keeping compatibility)
 function onNodeClick(event, node) {
-  console.log('VueFlow node click!', event, node);
   handleNodeClick(node);
 }
 
 // VueFlow context menu handler (keeping compatibility)
 function onNodeContextMenu(event, node) {
-  console.log('VueFlow context menu!', event, node);
   handleNodeContextMenu(event, node);
 }
 
 // New node click handler
 function handleNodeClick(nodeProps) {
-  console.log('Direct node click!', nodeProps);
-  
   if (!nodeProps || !nodeProps.data) {
     console.warn('Invalid nodeProps:', nodeProps);
     return;
@@ -139,8 +135,6 @@ function handleNodeClick(nodeProps) {
   
   const type = nodeProps.data.nodeType?.toLowerCase();
   const id = nodeProps.data.componentId;
-  
-  console.log('Node type:', type, 'Node ID:', id);
   
   if (!type || !id) {
     console.warn('Invalid node data:', nodeProps.data);
@@ -165,14 +159,12 @@ function handleNodeClick(nodeProps) {
   }
 
   // Open component details page in new tab
-  console.log('Opening in new tab:', routePath);
   const url = window.location.origin + routePath;
   window.open(url, '_blank');
 }
 
 // New context menu handler
 function handleNodeContextMenu(event, nodeProps) {
-  console.log('Direct context menu!', event, nodeProps);
   event.preventDefault();
   event.stopPropagation();
   showContextMenu.value = true;

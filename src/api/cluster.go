@@ -22,44 +22,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-func getMetrics(c echo.Context) error {
-	p := project.GlobalProject
-	metrics := make(map[string]interface{})
-
-	for _, p := range p.Projects {
-		projectMetrics := p.GetMetrics()
-		metrics[p.Id] = map[string]interface{}{
-			"input_qps":  projectMetrics.InputQPS,
-			"output_qps": projectMetrics.OutputQPS,
-		}
-	}
-	return c.JSON(http.StatusOK, metrics)
-}
-
-func getProjectMetrics(c echo.Context) error {
-	id := c.Param("id")
-	p := project.GlobalProject.Projects[id]
-	if p == nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
-	}
-
-	metrics := p.GetMetrics()
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"input_qps":  metrics.InputQPS,
-		"output_qps": metrics.OutputQPS,
-	})
-}
-
-func getRedisMetrics(c echo.Context) error {
-	metrics, err := common.GetRedisMetrics()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("failed to get Redis metrics: %v", err),
-		})
-	}
-	return c.JSON(http.StatusOK, metrics)
-}
-
 func handleHeartbeat(c echo.Context) error {
 	var payload struct {
 		NodeID    string `json:"node_id"`
@@ -97,6 +59,38 @@ func getClusterStatus(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, cm.GetClusterStatus())
+}
+
+func tokenCheck(c echo.Context) error {
+	token := c.Request().Header.Get("token")
+	if token == "" {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "missing token",
+		})
+	}
+
+	if token == common.Config.Token {
+		return c.JSON(http.StatusOK, map[string]string{
+			"status": "Authentication successful",
+		})
+	} else {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"status": "Authentication failed",
+		})
+	}
+}
+
+func leaderConfig(c echo.Context) error {
+	if cluster.IsLeader {
+		return c.JSON(http.StatusOK, map[string]string{
+			"redis":          common.Config.Redis,
+			"redis_password": common.Config.RedisPassword,
+		})
+	} else {
+		return c.JSON(http.StatusUnauthorized, map[string]string{
+			"error": "no leader",
+		})
+	}
 }
 
 func downloadConfig(c echo.Context) error {
@@ -156,7 +150,7 @@ func downloadConfig(c echo.Context) error {
 		})
 	}
 
-	// Get zip sha256
+	// Calculate zip sha256
 	hash := sha256.New()
 	_, err = hash.Write(buf.Bytes())
 	if err != nil {
@@ -173,38 +167,6 @@ func downloadConfig(c echo.Context) error {
 
 	// Send the zip file
 	return c.Blob(http.StatusOK, "application/zip", buf.Bytes())
-}
-
-func tokenCheck(c echo.Context) error {
-	token := c.Request().Header.Get("token")
-	if token == "" {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "missing token",
-		})
-	}
-
-	if token == common.Config.Token {
-		return c.JSON(http.StatusOK, map[string]string{
-			"status": "Authentication successful",
-		})
-	} else {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"status": "Authentication failed",
-		})
-	}
-}
-
-func leaderConfig(c echo.Context) error {
-	if cluster.IsLeader {
-		return c.JSON(http.StatusOK, map[string]string{
-			"redis":          common.Config.Redis,
-			"redis_password": common.Config.RedisPassword,
-		})
-	} else {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "no leader",
-		})
-	}
 }
 
 func getCluster(c echo.Context) error {

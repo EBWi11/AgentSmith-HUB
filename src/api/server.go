@@ -105,18 +105,13 @@ func ServerStart(listener string) error {
 	e.POST("/test-output/:id", testOutput)
 	e.POST("/test-project/:id", testProject)
 
-	// Metrics endpoints
-	e.GET("/metrics", getMetrics)
-	e.GET("/metrics/project/:id", getProjectMetrics)
-	e.GET("/metrics/redis", getRedisMetrics)
-
 	// Cluster endpoints
 	e.GET("/cluster", getCluster)
 	e.GET("/cluster-status", getClusterStatus)
 	e.POST("/cluster/heartbeat", handleHeartbeat)
 	e.POST("/component-sync", handleComponentSync)
 	e.GET("/config_root", leaderConfig)
-	e.GET("/download-config", downloadConfig)
+	e.GET("/config/download", downloadConfig)
 
 	// Pending changes management (enhanced)
 	e.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
@@ -136,8 +131,6 @@ func ServerStart(listener string) error {
 
 	// Sampler endpoints
 	e.GET("/samplers/data", GetSamplerData)
-	e.GET("/samplers/stats", GetSamplerStats)
-	e.POST("/samplers/reset", ResetSampler)
 
 	// Cancel upgrade routes
 	e.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)
