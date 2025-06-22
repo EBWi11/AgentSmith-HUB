@@ -617,7 +617,6 @@ function initializeEditor() {
     // Remove all possible margins and padding
     padding: { top: 0, bottom: 0, left: 0, right: 0 },
     scrollBeyondLastColumn: 0,
-    scrollBeyondLastLine: false,
     wordWrapColumn: 80,
     wrappingIndent: 'none',
   };
@@ -627,7 +626,6 @@ function initializeEditor() {
     diffEditor = monaco.editor.createDiffEditor(container.value, {
       ...options,
       originalEditable: false,
-      renderSideBySide: true,
       ignoreTrimWhitespace: false,
       renderOverviewRuler: true,
       renderIndicators: true,
