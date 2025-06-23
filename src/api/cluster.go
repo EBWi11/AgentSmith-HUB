@@ -677,8 +677,8 @@ func getQPSData(c echo.Context) error {
 		// Return all components in a project
 		result = common.GlobalQPSManager.GetProjectQPS(projectID)
 	} else if nodeID != "" && projectID != "" && componentID != "" && componentType != "" {
-		// Return specific component QPS data
-		result = common.GlobalQPSManager.GetComponentQPS(nodeID, projectID, componentID, componentType)
+		// Return specific component QPS data using legacy method for backward compatibility
+		result = common.GlobalQPSManager.GetComponentQPSLegacy(nodeID, projectID, componentID, componentType)
 	} else if nodeID == "" && projectID == "" {
 		// Return all QPS data
 		result = common.GlobalQPSManager.GetAllQPS()

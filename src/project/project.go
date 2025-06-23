@@ -1805,12 +1805,13 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for inputID, input := range proj.Inputs {
 			qps := input.GetConsumeQPS()
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:        nodeID,
-				ProjectID:     projectID,
-				ComponentID:   inputID,
-				ComponentType: "input",
-				QPS:           qps,
-				Timestamp:     now,
+				NodeID:              nodeID,
+				ProjectID:           projectID,
+				ComponentID:         inputID,
+				ComponentType:       "input",
+				ProjectNodeSequence: input.ProjectNodeSequence,
+				QPS:                 qps,
+				Timestamp:           now,
 			})
 		}
 
@@ -1818,26 +1819,28 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for outputID, output := range proj.Outputs {
 			qps := output.GetProduceQPS()
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:        nodeID,
-				ProjectID:     projectID,
-				ComponentID:   outputID,
-				ComponentType: "output",
-				QPS:           qps,
-				Timestamp:     now,
+				NodeID:              nodeID,
+				ProjectID:           projectID,
+				ComponentID:         outputID,
+				ComponentType:       "output",
+				ProjectNodeSequence: output.ProjectNodeSequence,
+				QPS:                 qps,
+				Timestamp:           now,
 			})
 		}
 
 		// Collect ruleset QPS data for visualization purposes
 		// While rulesets don't directly produce QPS metrics, we include them
 		// with QPS=0 so they appear in frontend project flow diagrams
-		for rulesetID := range proj.Rulesets {
+		for rulesetID, ruleset := range proj.Rulesets {
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:        nodeID,
-				ProjectID:     projectID,
-				ComponentID:   rulesetID,
-				ComponentType: "ruleset",
-				QPS:           0, // Rulesets process data through input->ruleset->output flow
-				Timestamp:     now,
+				NodeID:              nodeID,
+				ProjectID:           projectID,
+				ComponentID:         rulesetID,
+				ComponentType:       "ruleset",
+				ProjectNodeSequence: ruleset.ProjectNodeSequence,
+				QPS:                 0, // Rulesets process data through input->ruleset->output flow
+				Timestamp:           now,
 			})
 		}
 	}

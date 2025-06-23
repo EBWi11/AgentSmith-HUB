@@ -395,26 +395,6 @@ watch(() => props.enableMessages, (newVal) => {
   }
 });
 
-// Fetch message data for the project
-async function fetchMessageData() {
-  if (!props.projectId || !props.enableMessages) return;
-  
-  try {
-    messageLoading.value = true;
-    // Use real message data
-    const response = await hubApi.getProjectHourlyMessages(props.projectId);
-    messageData.value = response.data || {};
-    
-    // Update nodes with message data
-    updateNodesWithMessages();
-  } catch (error) {
-    console.error('Failed to fetch message data:', error);
-    messageData.value = {};
-  } finally {
-    messageLoading.value = false;
-  }
-}
-
 // Update nodes with message information
 function updateNodesWithMessages() {
   nodes.value = nodes.value.map(node => {
@@ -423,24 +403,73 @@ function updateNodesWithMessages() {
     
     // Find message data for this component
     let totalMessages = 0;
+    let foundData = false;
     
-    // Message data format: key = "projectID_componentID_componentType"
-    const searchKey = `${props.projectId}_${componentId}_${componentType}`;
-    
-    if (messageData.value[searchKey]) {
-      const componentData = messageData.value[searchKey];
-      totalMessages = componentData.total_messages || 0;
+    // Search through all message data keys to find matches
+    // The new format uses ProjectNodeSequence as keys, which can be complex like:
+    // "input.api_sec.ruleset.test.output.print_demo"
+    for (const [key, componentData] of Object.entries(messageData.value)) {
+      if (componentData && typeof componentData === 'object') {
+        // Check if this key contains our component
+        // Format could be ProjectNodeSequence like "input.api_sec" or "input.api_sec.ruleset.test"
+        const keyParts = key.split('.');
+        const componentTypeInKey = keyParts[0]; // "input", "output", "ruleset"
+        const componentIdInKey = keyParts[1];   // component ID
+        
+        // Match both component type and ID
+        if (componentTypeInKey === componentType && componentIdInKey === componentId) {
+          totalMessages += componentData.total_messages || 0;
+          foundData = true;
+        }
+      }
     }
+    
+    // For running projects, always show message data (even if 0)
+    // This ensures that all components in a running project display MSG/H
+    const isRunningProject = props.projectId && props.enableMessages;
     
     return {
       ...node,
       data: {
         ...node.data,
-        messages: totalMessages, // Real message count for past hour
-        hasMessageData: totalMessages > 0
+        messages: totalMessages, // Real message count for past hour (could be 0)
+        hasMessageData: isRunningProject // Show MSG/H for all components in running projects
       }
     };
   });
+}
+
+// Fetch message data for the project
+async function fetchMessageData() {
+  if (!props.projectId || !props.enableMessages) {
+    // If not enabled, ensure all nodes have hasMessageData = false
+    nodes.value = nodes.value.map(node => ({
+      ...node,
+      data: {
+        ...node.data,
+        messages: 0,
+        hasMessageData: false
+      }
+    }));
+    return;
+  }
+  
+  try {
+    messageLoading.value = true;
+    // Use real message data
+    const response = await hubApi.getProjectHourlyMessages(props.projectId);
+    messageData.value = response.data || {};
+    
+    // Update nodes with message data (including 0 values)
+    updateNodesWithMessages();
+  } catch (error) {
+    console.error('Failed to fetch message data:', error);
+    messageData.value = {};
+    // Still update nodes to show 0 messages for running projects
+    updateNodesWithMessages();
+  } finally {
+    messageLoading.value = false;
+  }
 }
 
 // Start message data refresh interval

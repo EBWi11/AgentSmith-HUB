@@ -8,12 +8,13 @@ import (
 
 // QPSMetrics represents QPS data for a specific component
 type QPSMetrics struct {
-	NodeID        string    `json:"node_id"`
-	ProjectID     string    `json:"project_id"`
-	ComponentID   string    `json:"component_id"`
-	ComponentType string    `json:"component_type"` // "input", "output", "ruleset"
-	QPS           uint64    `json:"qps"`
-	Timestamp     time.Time `json:"timestamp"`
+	NodeID              string    `json:"node_id"`
+	ProjectID           string    `json:"project_id"`
+	ComponentID         string    `json:"component_id"`
+	ComponentType       string    `json:"component_type"`        // "input", "output", "ruleset"
+	ProjectNodeSequence string    `json:"project_node_sequence"` // e.g., "input.kafka1.ruleset.filter.output.es1"
+	QPS                 uint64    `json:"qps"`
+	Timestamp           time.Time `json:"timestamp"`
 }
 
 // QPSDataPoint represents a single QPS measurement
@@ -24,17 +25,18 @@ type QPSDataPoint struct {
 
 // ComponentQPSData holds time series data for a component
 type ComponentQPSData struct {
-	NodeID        string         `json:"node_id"`
-	ProjectID     string         `json:"project_id"`
-	ComponentID   string         `json:"component_id"`
-	ComponentType string         `json:"component_type"`
-	DataPoints    []QPSDataPoint `json:"data_points"`
-	LastUpdate    time.Time      `json:"last_update"`
+	NodeID              string         `json:"node_id"`
+	ProjectID           string         `json:"project_id"`
+	ComponentID         string         `json:"component_id"`
+	ComponentType       string         `json:"component_type"`
+	ProjectNodeSequence string         `json:"project_node_sequence"`
+	DataPoints          []QPSDataPoint `json:"data_points"`
+	LastUpdate          time.Time      `json:"last_update"`
 }
 
 // QPSManager manages QPS data collection and aggregation on leader node
 type QPSManager struct {
-	// Key format: "nodeID_projectID_componentID_componentType"
+	// Key format: "nodeID_projectNodeSequence" - Use ProjectNodeSequence as primary dimension
 	data      map[string]*ComponentQPSData
 	mutex     sync.RWMutex
 	stopChan  chan struct{}
@@ -71,9 +73,9 @@ func NewQPSManager() *QPSManager {
 	return qm
 }
 
-// generateKey creates a unique key for component QPS data
-func (qm *QPSManager) generateKey(nodeID, projectID, componentID, componentType string) string {
-	return fmt.Sprintf("%s_%s_%s_%s", nodeID, projectID, componentID, componentType)
+// generateKey creates a unique key for component QPS data based on ProjectNodeSequence
+func (qm *QPSManager) generateKey(nodeID, projectNodeSequence string) string {
+	return fmt.Sprintf("%s_%s", nodeID, projectNodeSequence)
 }
 
 // AddQPSData adds or updates QPS data for a component
@@ -85,17 +87,18 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 	qm.mutex.Lock()
 	defer qm.mutex.Unlock()
 
-	key := qm.generateKey(metrics.NodeID, metrics.ProjectID, metrics.ComponentID, metrics.ComponentType)
+	key := qm.generateKey(metrics.NodeID, metrics.ProjectNodeSequence)
 
 	// Get or create component data
 	componentData, exists := qm.data[key]
 	if !exists {
 		componentData = &ComponentQPSData{
-			NodeID:        metrics.NodeID,
-			ProjectID:     metrics.ProjectID,
-			ComponentID:   metrics.ComponentID,
-			ComponentType: metrics.ComponentType,
-			DataPoints:    make([]QPSDataPoint, 0),
+			NodeID:              metrics.NodeID,
+			ProjectID:           metrics.ProjectID,
+			ComponentID:         metrics.ComponentID,
+			ComponentType:       metrics.ComponentType,
+			ProjectNodeSequence: metrics.ProjectNodeSequence,
+			DataPoints:          make([]QPSDataPoint, 0),
 		}
 		qm.data[key] = componentData
 	}
@@ -120,24 +123,56 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 	componentData.DataPoints = validPoints
 }
 
-// GetComponentQPS returns QPS data for a specific component
-func (qm *QPSManager) GetComponentQPS(nodeID, projectID, componentID, componentType string) *ComponentQPSData {
+// GetComponentQPS returns QPS data for a specific component by ProjectNodeSequence
+func (qm *QPSManager) GetComponentQPS(nodeID, projectNodeSequence string) *ComponentQPSData {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	key := qm.generateKey(nodeID, projectID, componentID, componentType)
+	key := qm.generateKey(nodeID, projectNodeSequence)
 	if data, exists := qm.data[key]; exists {
 		// Create a copy to avoid race conditions
 		result := &ComponentQPSData{
-			NodeID:        data.NodeID,
-			ProjectID:     data.ProjectID,
-			ComponentID:   data.ComponentID,
-			ComponentType: data.ComponentType,
-			LastUpdate:    data.LastUpdate,
-			DataPoints:    make([]QPSDataPoint, len(data.DataPoints)),
+			NodeID:              data.NodeID,
+			ProjectID:           data.ProjectID,
+			ComponentID:         data.ComponentID,
+			ComponentType:       data.ComponentType,
+			ProjectNodeSequence: data.ProjectNodeSequence,
+			LastUpdate:          data.LastUpdate,
+			DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
 		}
 		copy(result.DataPoints, data.DataPoints)
 		return result
+	}
+	return nil
+}
+
+// GetComponentQPSLegacy returns QPS data for a specific component using legacy parameters
+// This method provides backward compatibility for API calls that use the old parameter format
+func (qm *QPSManager) GetComponentQPSLegacy(nodeID, projectID, componentID, componentType string) *ComponentQPSData {
+	qm.mutex.RLock()
+	defer qm.mutex.RUnlock()
+
+	// Search for matching component data by iterating through all entries
+	// Since ProjectNodeSequence can be complex (e.g., "input.kafka1.ruleset.filter.output.es1"),
+	// we need to find the entry that matches the legacy parameters
+	for _, data := range qm.data {
+		if data.NodeID == nodeID &&
+			data.ProjectID == projectID &&
+			data.ComponentID == componentID &&
+			data.ComponentType == componentType {
+			// Found matching component, create a copy
+			result := &ComponentQPSData{
+				NodeID:              data.NodeID,
+				ProjectID:           data.ProjectID,
+				ComponentID:         data.ComponentID,
+				ComponentType:       data.ComponentType,
+				ProjectNodeSequence: data.ProjectNodeSequence,
+				LastUpdate:          data.LastUpdate,
+				DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
+			}
+			copy(result.DataPoints, data.DataPoints)
+			return result
+		}
 	}
 	return nil
 }
@@ -153,12 +188,13 @@ func (qm *QPSManager) GetProjectQPS(projectID string) map[string]*ComponentQPSDa
 		if data.ProjectID == projectID {
 			// Create a copy
 			copied := &ComponentQPSData{
-				NodeID:        data.NodeID,
-				ProjectID:     data.ProjectID,
-				ComponentID:   data.ComponentID,
-				ComponentType: data.ComponentType,
-				LastUpdate:    data.LastUpdate,
-				DataPoints:    make([]QPSDataPoint, len(data.DataPoints)),
+				NodeID:              data.NodeID,
+				ProjectID:           data.ProjectID,
+				ComponentID:         data.ComponentID,
+				ComponentType:       data.ComponentType,
+				ProjectNodeSequence: data.ProjectNodeSequence,
+				LastUpdate:          data.LastUpdate,
+				DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
 			}
 			copy(copied.DataPoints, data.DataPoints)
 			result[key] = copied
@@ -178,12 +214,13 @@ func (qm *QPSManager) GetAllQPS() map[string]*ComponentQPSData {
 	for key, data := range qm.data {
 		// Create a copy
 		copied := &ComponentQPSData{
-			NodeID:        data.NodeID,
-			ProjectID:     data.ProjectID,
-			ComponentID:   data.ComponentID,
-			ComponentType: data.ComponentType,
-			LastUpdate:    data.LastUpdate,
-			DataPoints:    make([]QPSDataPoint, len(data.DataPoints)),
+			NodeID:              data.NodeID,
+			ProjectID:           data.ProjectID,
+			ComponentID:         data.ComponentID,
+			ComponentType:       data.ComponentType,
+			ProjectNodeSequence: data.ProjectNodeSequence,
+			LastUpdate:          data.LastUpdate,
+			DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
 		}
 		copy(copied.DataPoints, data.DataPoints)
 		result[key] = copied
@@ -197,32 +234,27 @@ func (qm *QPSManager) GetAggregatedQPS(projectID string) map[string]interface{} 
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	// Group by component (projectID_componentID_componentType)
-	componentGroups := make(map[string][]QPSDataPoint)
-	componentTypes := make(map[string]string)
+	// Group by ProjectNodeSequence instead of component only
+	sequenceGroups := make(map[string][]QPSDataPoint)
+	sequenceTypes := make(map[string]string)
 
 	for _, data := range qm.data {
 		if data.ProjectID == projectID {
-			componentKey := fmt.Sprintf("%s_%s_%s", data.ProjectID, data.ComponentID, data.ComponentType)
-			componentTypes[componentKey] = data.ComponentType
+			sequenceKey := data.ProjectNodeSequence
+			sequenceTypes[sequenceKey] = data.ComponentType
 
 			// Add all data points from this node
-			if _, exists := componentGroups[componentKey]; !exists {
-				componentGroups[componentKey] = make([]QPSDataPoint, 0)
+			if _, exists := sequenceGroups[sequenceKey]; !exists {
+				sequenceGroups[sequenceKey] = make([]QPSDataPoint, 0)
 			}
-			componentGroups[componentKey] = append(componentGroups[componentKey], data.DataPoints...)
+			sequenceGroups[sequenceKey] = append(sequenceGroups[sequenceKey], data.DataPoints...)
 		}
 	}
 
 	// Aggregate QPS by time window (group by minute)
 	result := make(map[string]interface{})
 
-	for componentKey, dataPoints := range componentGroups {
-		parts := []rune(componentKey)
-		if len(parts) < 3 {
-			continue
-		}
-
+	for sequenceKey, dataPoints := range sequenceGroups {
 		// Group data points by minute
 		minuteGroups := make(map[string][]QPSDataPoint)
 		for _, point := range dataPoints {
@@ -248,9 +280,10 @@ func (qm *QPSManager) GetAggregatedQPS(projectID string) map[string]interface{} 
 			})
 		}
 
-		result[componentKey] = map[string]interface{}{
-			"component_type": componentTypes[componentKey],
-			"data_points":    aggregatedPoints,
+		result[sequenceKey] = map[string]interface{}{
+			"component_type":        sequenceTypes[sequenceKey],
+			"project_node_sequence": sequenceKey,
+			"data_points":           aggregatedPoints,
 		}
 	}
 
@@ -349,27 +382,27 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 
 	const reportInterval = 10 // seconds - must match the collector report interval
 
-	// Group by component (projectID_componentID_componentType)
-	componentGroups := make(map[string][]QPSDataPoint)
-	componentTypes := make(map[string]string)
+	// Group by ProjectNodeSequence instead of component only
+	sequenceGroups := make(map[string][]QPSDataPoint)
+	sequenceTypes := make(map[string]string)
 
 	for _, data := range qm.data {
 		if projectID == "" || data.ProjectID == projectID {
-			componentKey := fmt.Sprintf("%s_%s_%s", data.ProjectID, data.ComponentID, data.ComponentType)
-			componentTypes[componentKey] = data.ComponentType
+			sequenceKey := data.ProjectNodeSequence
+			sequenceTypes[sequenceKey] = data.ComponentType
 
 			// Add all data points from this node
-			if _, exists := componentGroups[componentKey]; !exists {
-				componentGroups[componentKey] = make([]QPSDataPoint, 0)
+			if _, exists := sequenceGroups[sequenceKey]; !exists {
+				sequenceGroups[sequenceKey] = make([]QPSDataPoint, 0)
 			}
-			componentGroups[componentKey] = append(componentGroups[componentKey], data.DataPoints...)
+			sequenceGroups[sequenceKey] = append(sequenceGroups[sequenceKey], data.DataPoints...)
 		}
 	}
 
 	result := make(map[string]interface{})
 
-	for componentKey, dataPoints := range componentGroups {
-		// Calculate total messages for this component
+	for sequenceKey, dataPoints := range sequenceGroups {
+		// Calculate total messages for this ProjectNodeSequence
 		totalMessages := uint64(0)
 		for _, point := range dataPoints {
 			// Each data point represents QPS for a 10-second period
@@ -378,10 +411,11 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 			totalMessages += messages
 		}
 
-		result[componentKey] = map[string]interface{}{
-			"component_type":    componentTypes[componentKey],
-			"total_messages":    totalMessages,
-			"data_points_count": len(dataPoints),
+		result[sequenceKey] = map[string]interface{}{
+			"component_type":        sequenceTypes[sequenceKey],
+			"project_node_sequence": sequenceKey,
+			"total_messages":        totalMessages,
+			"data_points_count":     len(dataPoints),
 		}
 	}
 
@@ -395,7 +429,7 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 
 	const reportInterval = 10 // seconds
 
-	// Group by project and component type
+	// Group by project and component type, considering ProjectNodeSequence
 	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
 	totalMessages := uint64(0)
 
@@ -404,7 +438,7 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 			projectStats[data.ProjectID] = make(map[string]uint64)
 		}
 
-		// Calculate messages for this component
+		// Calculate messages for this ProjectNodeSequence
 		componentMessages := uint64(0)
 		for _, point := range data.DataPoints {
 			messages := point.QPS * reportInterval
@@ -432,13 +466,21 @@ func (qm *QPSManager) GetHourlyMessageCounts(projectID string) map[string]interf
 	}
 
 	// Filter cached data for specific project
+	// Since the cached data keys are ProjectNodeSequence, we need to look up the original data
+	// to get the correct ProjectID mapping
 	result := make(map[string]interface{})
-	for key, value := range qm.cachedMessages {
-		// Check if the key starts with projectID_
-		if len(key) > len(projectID)+1 && key[:len(projectID)+1] == projectID+"_" {
-			result[key] = value
+
+	// We need to access the original data to get accurate project filtering
+	qm.mutex.RLock()
+	for _, data := range qm.data {
+		if data.ProjectID == projectID {
+			// Check if this ProjectNodeSequence exists in cached messages
+			if cachedData, exists := qm.cachedMessages[data.ProjectNodeSequence]; exists {
+				result[data.ProjectNodeSequence] = cachedData
+			}
 		}
 	}
+	qm.mutex.RUnlock()
 
 	return result
 }
