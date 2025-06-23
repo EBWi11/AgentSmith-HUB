@@ -120,11 +120,14 @@ func ServerStart(listener string) error {
 	// Component verification and testing
 	e.POST("/verify/:type/:id", verifyComponent)
 	e.GET("/connect-check/:type/:id", connectCheck)
+	e.POST("/connect-check/:type/:id", connectCheck)
 	e.POST("/test-plugin/:id", testPlugin)
+	e.POST("/test-plugin-content", testPluginContent)
 	e.POST("/test-ruleset/:id", testRuleset)
 	e.POST("/test-ruleset-content", testRulesetContent)
 	e.POST("/test-output/:id", testOutput)
 	e.POST("/test-project/:id", testProject)
+	e.POST("/test-project-content/:inputNode", testProjectContent)
 
 	// Cluster endpoints
 	e.GET("/cluster", getCluster)

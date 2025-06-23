@@ -135,7 +135,8 @@ import JsonViewer from './JsonViewer.vue';
 // Props
 const props = defineProps({
   show: Boolean,
-  projectId: String
+  projectId: String,
+  projectContent: String  // Optional: if provided, test this content instead of saved project
 });
 
 // Emits
@@ -249,7 +250,15 @@ async function runTest() {
       
       for (let i = 0; i < data.length; i++) {
         try {
-          const response = await hubApi.testProject(props.projectId, selectedInputNode.value, data[i]);
+          let response;
+          if (props.projectContent) {
+            // Test with editor content
+            response = await hubApi.testProjectContent(props.projectContent, selectedInputNode.value, data[i]);
+          } else {
+            // Test with saved project
+            response = await hubApi.testProject(props.projectId, selectedInputNode.value, data[i]);
+          }
+          
           if (response.success) {
             totalProcessed++;
             
@@ -284,7 +293,14 @@ async function runTest() {
       outputResults.value = allOutputResults;
     } else {
       // Process single JSON object
-      const response = await hubApi.testProject(props.projectId, selectedInputNode.value, data);
+      let response;
+      if (props.projectContent) {
+        // Test with editor content
+        response = await hubApi.testProjectContent(props.projectContent, selectedInputNode.value, data);
+      } else {
+        // Test with saved project
+        response = await hubApi.testProject(props.projectId, selectedInputNode.value, data);
+      }
       
       if (response.success) {
         testResults.value = response;
@@ -306,7 +322,15 @@ async function fetchProjectInputs() {
   
   inputNodesLoading.value = true;
   try {
-    const response = await hubApi.getProjectInputs(props.projectId);
+    let response;
+    if (props.projectContent) {
+      // For editor content, we need to parse the project content to get input nodes
+      // This is a simplified approach - in a real implementation, you might want to
+      // create a separate API endpoint that accepts project content
+      response = await hubApi.getProjectInputs(props.projectId);
+    } else {
+      response = await hubApi.getProjectInputs(props.projectId);
+    }
     
     if (response.success && response.inputs) {
       inputNodes.value = response.inputs;

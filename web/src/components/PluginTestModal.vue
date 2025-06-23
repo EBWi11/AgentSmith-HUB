@@ -117,7 +117,8 @@ import JsonViewer from './JsonViewer.vue';
 // Props
 const props = defineProps({
   show: Boolean,
-  pluginId: String
+  pluginId: String,
+  pluginContent: String  // Optional: if provided, test this content instead of saved plugin
 });
 
 // Emits
@@ -212,8 +213,22 @@ async function runTest() {
       if (!isNaN(value)) return Number(value);
       return value;
     });
+
+    // Convert args array to map format expected by backend
+    const argsMap = {};
+    args.forEach((value, index) => {
+      argsMap[index.toString()] = value;
+    });
     
-    const result = await hubApi.testPlugin(props.pluginId, args);
+    let result;
+    if (props.pluginContent) {
+      // Test with editor content
+      result = await hubApi.testPluginContent(props.pluginContent, argsMap);
+    } else {
+      // Test with saved plugin
+      result = await hubApi.testPlugin(props.pluginId, args);
+    }
+    
     testResults.value = result;
     
     // Handle error message

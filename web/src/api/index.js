@@ -779,6 +779,50 @@ export const hubApi = {
       };
     }
   },
+
+  // Add connection check function with custom configuration
+  async connectCheckWithConfig(type, id, configContent) {
+    try {
+      // Normalize component type (remove trailing 's' if present)
+      let componentType = type;
+      if (componentType.endsWith('s')) {
+        componentType = componentType.slice(0, -1);
+      }
+      
+      // Basic validation
+      if (!componentType || !id || !configContent) {
+        throw new Error('Component type, ID, and configuration content are required');
+      }
+      
+      // Only input and output components support connection check
+      if (componentType !== 'input' && componentType !== 'output') {
+        return {
+          success: false,
+          error: 'Connection check is only supported for input and output components'
+        };
+      }
+      
+      // Send connection check request with configuration
+      const response = await api.post(`/connect-check/${componentType}/${id}`, { 
+        raw: configContent 
+      });
+      return response.data;
+    } catch (error) {
+      // If HTTP error, return error message with details
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || `Failed to check connection for ${type} ${id}`
+        };
+      }
+      
+      // If network error or other error
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding'
+      };
+    }
+  },
   
   // Test plugin component
   async testPlugin(id, data) {
@@ -853,11 +897,11 @@ export const hubApi = {
     }
   },
 
-  // Test ruleset with provided content (for editing mode)
+  // Test ruleset content
   async testRulesetContent(content, data) {
     try {
       // Basic validation
-      if (!content || typeof content !== 'string') {
+      if (!content) {
         throw new Error('Ruleset content is required');
       }
       
@@ -866,10 +910,7 @@ export const hubApi = {
       }
       
       // Use API instance to send request
-      const response = await api.post('/test-ruleset-content', { 
-        content: content,
-        data: data 
-      });
+      const response = await api.post('/test-ruleset-content', { content, data });
       return response.data;
     } catch (error) {
       // If HTTP error, return error message
@@ -885,6 +926,76 @@ export const hubApi = {
         success: false,
         error: error.message || 'Network error or server not responding',
         results: []
+      };
+    }
+  },
+
+  // Test plugin content
+  async testPluginContent(content, data) {
+    try {
+      // Basic validation
+      if (!content) {
+        throw new Error('Plugin content is required');
+      }
+      
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+      
+      // Use API instance to send request
+      const response = await api.post('/test-plugin-content', { content, data });
+      return response.data;
+    } catch (error) {
+      // If HTTP error, return error message
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to test plugin content',
+          result: null
+        };
+      }
+      // If network error or other error
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        result: null
+      };
+    }
+  },
+
+  // Test project content
+  async testProjectContent(content, inputNode, data) {
+    try {
+      // Basic validation
+      if (!content) {
+        throw new Error('Project content is required');
+      }
+      
+      if (!inputNode) {
+        throw new Error('Input node is required');
+      }
+      
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+      
+      // Use API instance to send request
+      const response = await api.post(`/test-project-content/${inputNode}`, { content, data });
+      return response.data;
+    } catch (error) {
+      // If HTTP error, return error message
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to test project content',
+          outputs: {}
+        };
+      }
+      // If network error or other error
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        outputs: {}
       };
     }
   },

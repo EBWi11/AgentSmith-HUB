@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-gray-50 min-h-full">
+  <div class="bg-gray-50 min-h-full max-h-screen overflow-y-auto">
     <!-- Header -->
     <div class="px-6 pt-6 pb-2">
       <h1 class="text-3xl font-bold text-gray-900">AgentSmith Hub Dashboard</h1>
@@ -8,7 +8,7 @@
     </div>
 
     <!-- Main Content with consistent padding -->
-    <div class="px-6 pb-6 space-y-6">
+    <div class="px-6 pb-6 space-y-4">
 
     <!-- Quick Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -97,61 +97,8 @@
       </div>
     </div>
 
-    <!-- Second Row: Development Status and Hub Total Statistics -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      <!-- Pending Changes & Local Changes -->
-      <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
-        <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Development Status</h3>
-        <div v-if="loading.changes && pendingChanges.length === 0 && localChanges.length === 0" class="flex justify-center items-center py-4">
-          <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-        </div>
-        <div v-else class="flex flex-col space-y-3">
-          <!-- Pending Changes -->
-          <div class="text-center p-4 bg-orange-50 rounded-lg hover:bg-orange-100 cursor-pointer transition-colors flex flex-col justify-center"
-               @click="navigateToPendingChanges">
-            <div class="text-xs text-orange-600 font-medium mb-1">Components to Push</div>
-            <div class="text-2xl font-bold text-orange-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ pendingChangesStats.total }}
-            </div>
-            <div class="text-xs text-orange-600">changes ready to apply</div>
-            
-            <!-- Breakdown details -->
-            <div v-if="pendingChangesStats.total > 0" class="mt-2 pt-2 border-t border-orange-200 space-y-1">
-              <div class="flex justify-between text-xs">
-                <span class="text-orange-600">Projects:</span>
-                <span class="font-medium transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ pendingChangesStats.projects }}</span>
-              </div>
-              <div class="flex justify-between text-xs">
-                <span class="text-orange-600">Inputs:</span>
-                <span class="font-medium transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ pendingChangesStats.inputs }}</span>
-              </div>
-              <div class="flex justify-between text-xs">
-                <span class="text-orange-600">Outputs:</span>
-                <span class="font-medium transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ pendingChangesStats.outputs }}</span>
-              </div>
-              <div class="flex justify-between text-xs">
-                <span class="text-orange-600">Rulesets:</span>
-                <span class="font-medium transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ pendingChangesStats.rulesets }}</span>
-              </div>
-              <div class="flex justify-between text-xs">
-                <span class="text-orange-600">Plugins:</span>
-                <span class="font-medium transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ pendingChangesStats.plugins }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Local Changes -->
-          <div class="text-center p-4 bg-purple-50 rounded-lg hover:bg-purple-100 cursor-pointer transition-colors flex flex-col justify-center"
-               @click="navigateToLocalChanges">
-            <div class="text-xs text-purple-600 font-medium mb-1">Components to Load</div>
-            <div class="text-2xl font-bold text-purple-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ localChangesStats.total }}
-            </div>
-            <div class="text-xs text-purple-600">local changes available</div>
-          </div>
-        </div>
-      </div>
-
+    <!-- Second Row: Hub Total Statistics and Development Status -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Hub Total Statistics -->
       <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
         <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Hub Total Message Statistics <span class="text-sm text-gray-500 font-normal">(All Nodes)</span></h3>
@@ -178,10 +125,39 @@
           </div>
         </div>
       </div>
+
+      <!-- Pending Changes & Local Changes -->
+      <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
+        <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Development Status</h3>
+        <div v-if="loading.changes && pendingChanges.length === 0 && localChanges.length === 0" class="flex justify-center items-center py-4">
+          <div class="animate-spin rounded-full h-6 w-6 border-primary"></div>
+        </div>
+        <div v-else class="flex flex-col space-y-3">
+          <!-- Pending Changes -->
+          <div class="text-center p-4 bg-orange-50 rounded-lg hover:bg-orange-100 cursor-pointer transition-colors flex flex-col justify-center"
+               @click="navigateToPendingChanges">
+            <div class="text-xs text-orange-600 font-medium mb-1">Components to Push</div>
+            <div class="text-2xl font-bold text-orange-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
+              {{ pendingChangesStats.total }}
+            </div>
+            <div class="text-xs text-orange-600">changes ready to apply</div>
+          </div>
+
+          <!-- Local Changes -->
+          <div class="text-center p-4 bg-purple-50 rounded-lg hover:bg-purple-100 cursor-pointer transition-colors flex flex-col justify-center"
+               @click="navigateToLocalChanges">
+            <div class="text-xs text-purple-600 font-medium mb-1">Components to Load</div>
+            <div class="text-2xl font-bold text-purple-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
+              {{ localChangesStats.total }}
+            </div>
+            <div class="text-xs text-purple-600">local changes available</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Third Row: Project Status Overview and Cluster Nodes -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Project Status Chart -->
       <div class="bg-white rounded-lg shadow-sm p-6">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Project Status Overview</h3>
@@ -299,13 +275,14 @@
       </div>
     </div>
 
-      <!-- Last Updated -->
-      <div class="text-center text-sm text-gray-500 flex items-center justify-center space-x-2">
-        <span>Last updated: {{ lastUpdated }}</span>
-        <div v-if="loading.stats" class="flex items-center">
-          <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-        </div>
+    <!-- Last Updated -->
+    <div class="text-center text-sm text-gray-500 flex items-center justify-center space-x-2">
+      <span>Last updated: {{ lastUpdated }}</span>
+      <div v-if="loading.stats" class="flex items-center">
+        <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
       </div>
+    </div>
+
     </div>
   </div>
 </template>
@@ -556,19 +533,19 @@ const pendingChangesStats = computed(() => {
   pendingChanges.value.forEach(change => {
     stats.total++
     switch (change.type) {
-      case 'projects':
+      case 'project':
         stats.projects++
         break
-      case 'inputs':
+      case 'input':
         stats.inputs++
         break
-      case 'outputs':
+      case 'output':
         stats.outputs++
         break
-      case 'rulesets':
+      case 'ruleset':
         stats.rulesets++
         break
-      case 'plugins':
+      case 'plugin':
         stats.plugins++
         break
     }
@@ -579,9 +556,37 @@ const pendingChangesStats = computed(() => {
 
 // Local changes statistics
 const localChangesStats = computed(() => {
-  return {
-    total: localChanges.value.length
+  const stats = {
+    total: 0,
+    projects: 0,
+    inputs: 0,
+    outputs: 0,
+    rulesets: 0,
+    plugins: 0
   }
+
+  localChanges.value.forEach(change => {
+    stats.total++
+    switch (change.type) {
+      case 'project':
+        stats.projects++
+        break
+      case 'input':
+        stats.inputs++
+        break
+      case 'output':
+        stats.outputs++
+        break
+      case 'ruleset':
+        stats.rulesets++
+        break
+      case 'plugin':
+        stats.plugins++
+        break
+    }
+  })
+
+  return stats
 })
 
 // Methods

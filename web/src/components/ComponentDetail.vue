@@ -447,12 +447,14 @@
     v-if="props.item && props.item.type === 'plugins'"
     :show="showPluginTestModal"
     :pluginId="props.item?.id"
+    :pluginContent="props.item?.isEdit ? editorValue : null"
     @close="showPluginTestModal = false"
   />
   <ProjectTestModal
     v-if="props.item && props.item.type === 'projects'"
     :show="showProjectTestModal"
     :projectId="props.item?.id"
+    :projectContent="props.item?.isEdit ? editorValue : null"
     @close="showProjectTestModal = false"
   />
 
@@ -867,26 +869,62 @@ const validateProjectRealtime = async () => {
           errorLines.value = [];
           showValidationPanel.value = false;
         } else {
-          // For invalid responses, show error
-          const errorMessage = response.data.error || 'Project validation failed';
+          // Handle errors array format from backend
+          let errorMessage = 'Project validation failed';
+          let lineNumber = null;
           
-          // Try to extract line number from error message
-          const lineNumber = extractLineNumber(errorMessage);
+          if (response.data.errors && Array.isArray(response.data.errors) && response.data.errors.length > 0) {
+            // Use the first error message
+            errorMessage = response.data.errors[0].message || errorMessage;
+            // Try to extract line number from error message
+            lineNumber = extractLineNumber(errorMessage);
+            
+            // Set up validation result with all errors
+            validationResult.value = {
+              isValid: false,
+              errors: response.data.errors.map(err => ({
+                line: extractLineNumber(err.message) || 'Unknown',
+                message: err.message,
+                detail: err.detail || null
+              })),
+              warnings: response.data.warnings || []
+            };
+            
+            // Collect all line numbers for highlighting
+            errorLines.value = response.data.errors
+              .map(err => extractLineNumber(err.message))
+              .filter(Boolean);
+          } else if (response.data.error) {
+            // Fallback to old error format
+            errorMessage = response.data.error;
+            lineNumber = extractLineNumber(errorMessage);
+            
+            validationResult.value = {
+              isValid: false,
+              errors: [{ 
+                line: lineNumber || 'Unknown', 
+                message: errorMessage,
+                detail: response.data?.detail || null
+              }],
+              warnings: []
+            };
+            
+            errorLines.value = lineNumber ? [lineNumber] : [];
+          } else {
+            // No specific error information
+            validationResult.value = {
+              isValid: false,
+              errors: [{ 
+                line: 'Unknown', 
+                message: errorMessage,
+                detail: null
+              }],
+              warnings: []
+            };
+            
+            errorLines.value = [];
+          }
           
-          // Fix the error message to show correct line number
-          const displayMessage = fixProjectErrorMessage(errorMessage);
-          
-          validationResult.value = {
-            isValid: false,
-            errors: [{ 
-              line: lineNumber || 'Unknown', 
-              message: displayMessage,
-              detail: response.data?.detail || null
-            }],
-            warnings: []
-          };
-          
-          errorLines.value = lineNumber ? [lineNumber] : [];
           showValidationPanel.value = true;
         }
         return response.data.valid;
@@ -1019,6 +1057,12 @@ watch(editorValue, (newContent) => {
     rulesetValidationTimeout.value = setTimeout(async () => {
       await validateRulesetRealtime();
     }, 800); // Wait 800ms after user stops typing for faster feedback
+  } else if (isProject.value && newContent) {
+    // Debounce project validation for better responsiveness
+    clearTimeout(projectValidationTimeout.value);
+    projectValidationTimeout.value = setTimeout(async () => {
+      await validateProjectRealtime();
+    }, 1000); // Wait 1s after user stops typing
   }
 }, { deep: true })
 
@@ -1083,15 +1127,79 @@ async function verifyProject() {
     
     if (response.data && response.data.valid) {
       $message?.success?.('Project configuration is valid');
+      // Clear validation errors on successful verification
+      validationResult.value = {
+        isValid: true,
+        errors: [],
+        warnings: []
+      };
+      errorLines.value = [];
+      showValidationPanel.value = false;
     } else {
       const errorMessage = response.data?.error || 'Unknown verification error';
-      const fixedMessage = fixProjectErrorMessage(errorMessage);
-      $message?.error?.('Verification failed: ' + fixedMessage);
+      $message?.error?.('Verification failed: ' + errorMessage);
+      
+      // Extract line number from error message for highlighting
+      const lineNumber = extractLineNumber(errorMessage);
+      if (lineNumber) {
+        errorLines.value = [lineNumber];
+        
+        // Add to validation result for display in the panel
+        validationResult.value = {
+          isValid: false,
+          errors: [{
+            line: lineNumber,
+            message: errorMessage,
+            detail: response.data?.detail || null
+          }],
+          warnings: []
+        };
+      } else {
+        // Add general error without line number
+        validationResult.value = {
+          isValid: false,
+          errors: [{
+            line: 'Unknown',
+            message: errorMessage,
+            detail: response.data?.detail || null
+          }],
+          warnings: []
+        };
+      }
+      showValidationPanel.value = true;
     }
   } catch (error) {
     const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    const fixedMessage = fixProjectErrorMessage(errorMessage);
-    $message?.error?.('Verification error: ' + fixedMessage);
+    $message?.error?.('Verification error: ' + errorMessage);
+    
+    // Extract line number from error message for highlighting
+    const lineNumber = extractLineNumber(errorMessage);
+    if (lineNumber) {
+      errorLines.value = [lineNumber];
+      
+      // Add to validation result for display in the panel
+      validationResult.value = {
+        isValid: false,
+        errors: [{
+          line: lineNumber,
+          message: errorMessage,
+          detail: error.response?.data?.detail || null
+        }],
+        warnings: []
+      };
+    } else {
+      // Add general error without line number
+      validationResult.value = {
+        isValid: false,
+        errors: [{
+          line: 'Unknown',
+          message: errorMessage,
+          detail: error.response?.data?.detail || null
+        }],
+        warnings: []
+      };
+    }
+    showValidationPanel.value = true;
   } finally {
     verifyLoading.value = false;
   }
@@ -1484,15 +1592,50 @@ async function connectCheck() {
     const componentType = isInput.value ? 'inputs' : 'outputs';
     const componentName = isInput.value ? 'Input' : 'Output';
     
-    // Call connect check API
-    const response = await hubApi.connectCheck(componentType, props.item.id);
+    // Get content to test (use editor value if editing, otherwise use saved config)
+    const contentToTest = props.item?.isEdit ? editorValue.value : detail.value?.raw;
+    
+    if (!contentToTest) {
+      $message?.warning?.('No content to test');
+      return;
+    }
+    
+    // Step 1: Verify configuration first
+    let verifyResponse;
+    try {
+      verifyResponse = await hubApi.verifyComponent(props.item.type, props.item.id, contentToTest);
+      
+      if (!verifyResponse.data || !verifyResponse.data.valid) {
+        const errorMessage = verifyResponse.data?.error || 'Configuration verification failed';
+        $message?.error?.(`Verification failed: ${errorMessage}. Please fix configuration before testing connection.`);
+        return;
+      }
+      
+      // Show success message for verification
+      if (props.item?.isEdit) {
+        $message?.success?.('Configuration verified successfully, proceeding with connection test...');
+      }
+    } catch (verifyError) {
+      const errorMessage = verifyError.response?.data?.error || verifyError.message || 'Configuration verification error';
+      $message?.error?.(`Verification error: ${errorMessage}. Please fix configuration before testing connection.`);
+      return;
+    }
+    
+    // Step 2: Perform connection check with the verified configuration
+    const response = await hubApi.connectCheckWithConfig(componentType, props.item.id, contentToTest);
     
     if (response.status === 'success') {
-      $message?.success?.(response.message || `${componentName} connection check passed`);
+      const message = response.message || `${componentName} connection check passed`;
+      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
+      $message?.success?.(finalMessage);
     } else if (response.status === 'warning') {
-      $message?.warning?.(response.message || `${componentName} connection check has warnings`);
+      const message = response.message || `${componentName} connection check has warnings`;
+      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
+      $message?.warning?.(finalMessage);
     } else {
-      $message?.error?.(response.message || `${componentName} connection check failed`);
+      const message = response.message || `${componentName} connection check failed`;
+      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
+      $message?.error?.(finalMessage);
     }
   } catch (error) {
     const errorMessage = error.response?.data?.error || error.message || 'Connection check error';
@@ -1598,6 +1741,20 @@ onMounted(async () => {
   // If component type is project, fetch all components list
   if (props.item && props.item.type === 'projects') {
     store.dispatch('fetchAllComponents')
+  }
+  
+  // Set up periodic validation for projects (every 3 seconds)
+  if (isProject.value) {
+    const periodicValidation = setInterval(async () => {
+      if (props.item?.isEdit && editorValue.value) {
+        await validateProjectRealtime();
+      }
+    }, 3000);
+    
+    // Clean up interval on component unmount
+    onBeforeUnmount(() => {
+      clearInterval(periodicValidation);
+    });
   }
 })
 

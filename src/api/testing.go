@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
@@ -855,9 +856,14 @@ func connectCheck(c echo.Context) error {
 		})
 	}
 
+	// Check if this is a POST request with custom configuration
+	if c.Request().Method == "POST" {
+		return connectCheckWithConfig(c, normalizedType, id)
+	}
+
 	// Check input component client connection
 	if normalizedType == "inputs" {
-		_, existsNew := project.GlobalProject.InputsNew[id]
+		tempContent, existsNew := project.GlobalProject.InputsNew[id]
 		inputComp := project.GlobalProject.Inputs[id]
 
 		if !existsNew && inputComp == nil {
@@ -866,30 +872,70 @@ func connectCheck(c echo.Context) error {
 			})
 		}
 
-		// Initialize result
-		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Connection check successful",
-			"details": map[string]interface{}{
-				"client_type":       "",
-				"connection_status": "unknown",
-				"connection_info":   map[string]interface{}{},
-				"connection_errors": []map[string]interface{}{},
-			},
-		}
+		var connectivityResult map[string]interface{}
+		var isTemp bool
 
-		// If the input is in pending changes, we can't check its connection
+		// If the input has pending changes, use the temporary configuration for testing
 		if existsNew {
-			result["status"] = "warning"
-			result["message"] = "Component has pending changes, cannot check connection"
-			return c.JSON(http.StatusOK, result)
+			// Create a temporary input instance for testing
+			tempInput, err := input.NewInput("", tempContent, "temp_test_"+id)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  "error",
+					"message": "Failed to create temporary input for testing: " + err.Error(),
+					"details": map[string]interface{}{
+						"client_type":       "",
+						"connection_status": "configuration_error",
+						"connection_info":   map[string]interface{}{},
+						"connection_errors": []map[string]interface{}{
+							{"message": "Failed to parse pending configuration: " + err.Error(), "severity": "error"},
+						},
+					},
+				})
+			}
+
+			// Test connectivity using the temporary input
+			connectivityResult = tempInput.CheckConnectivity()
+			isTemp = true
+
+			// Clean up the temporary input (stop it if it was started)
+			if stopErr := tempInput.Stop(); stopErr != nil {
+				logger.Warn("Failed to stop temporary input after connectivity test", "id", id, "error", stopErr)
+			}
+		} else {
+			// Use the existing input component
+			connectivityResult = inputComp.CheckConnectivity()
+			isTemp = false
 		}
 
-		// Use the enhanced connectivity check method from the input component
-		connectivityResult := inputComp.CheckConnectivity()
+		// Add metadata to indicate if this was tested with pending changes
+		if connectivityResult == nil {
+			connectivityResult = map[string]interface{}{
+				"status":  "error",
+				"message": "Connection check failed",
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "unknown",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Unknown error during connectivity check", "severity": "error"},
+					},
+				},
+			}
+		}
+
+		// Add indicator for temporary configuration testing
+		connectivityResult["isTemp"] = isTemp
+		if isTemp {
+			// Enhance the message to indicate this was tested with pending changes
+			if originalMessage, ok := connectivityResult["message"].(string); ok {
+				connectivityResult["message"] = originalMessage + " (tested with pending changes)"
+			}
+		}
+
 		return c.JSON(http.StatusOK, connectivityResult)
 	} else if normalizedType == "outputs" {
-		_, existsNew := project.GlobalProject.OutputsNew[id]
+		tempContent, existsNew := project.GlobalProject.OutputsNew[id]
 		outputComp := project.GlobalProject.Outputs[id]
 
 		if !existsNew && outputComp == nil {
@@ -898,27 +944,67 @@ func connectCheck(c echo.Context) error {
 			})
 		}
 
-		// Initialize result
-		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Connection check successful",
-			"details": map[string]interface{}{
-				"client_type":       "",
-				"connection_status": "unknown",
-				"connection_info":   map[string]interface{}{},
-				"connection_errors": []map[string]interface{}{},
-			},
-		}
+		var connectivityResult map[string]interface{}
+		var isTemp bool
 
-		// If the output is in pending changes, we can't check its connection
+		// If the output has pending changes, use the temporary configuration for testing
 		if existsNew {
-			result["status"] = "warning"
-			result["message"] = "Component has pending changes, cannot check connection"
-			return c.JSON(http.StatusOK, result)
+			// Create a temporary output instance for testing
+			tempOutput, err := output.NewOutput("", tempContent, "temp_test_"+id)
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, map[string]interface{}{
+					"status":  "error",
+					"message": "Failed to create temporary output for testing: " + err.Error(),
+					"details": map[string]interface{}{
+						"client_type":       "",
+						"connection_status": "configuration_error",
+						"connection_info":   map[string]interface{}{},
+						"connection_errors": []map[string]interface{}{
+							{"message": "Failed to parse pending configuration: " + err.Error(), "severity": "error"},
+						},
+					},
+				})
+			}
+
+			// Test connectivity using the temporary output
+			connectivityResult = tempOutput.CheckConnectivity()
+			isTemp = true
+
+			// Clean up the temporary output (stop it if it was started)
+			if stopErr := tempOutput.Stop(); stopErr != nil {
+				logger.Warn("Failed to stop temporary output after connectivity test", "id", id, "error", stopErr)
+			}
+		} else {
+			// Use the existing output component
+			connectivityResult = outputComp.CheckConnectivity()
+			isTemp = false
 		}
 
-		// Use the enhanced connectivity check method from the output component
-		connectivityResult := outputComp.CheckConnectivity()
+		// Add metadata to indicate if this was tested with pending changes
+		if connectivityResult == nil {
+			connectivityResult = map[string]interface{}{
+				"status":  "error",
+				"message": "Connection check failed",
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "unknown",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Unknown error during connectivity check", "severity": "error"},
+					},
+				},
+			}
+		}
+
+		// Add indicator for temporary configuration testing
+		connectivityResult["isTemp"] = isTemp
+		if isTemp {
+			// Enhance the message to indicate this was tested with pending changes
+			if originalMessage, ok := connectivityResult["message"].(string); ok {
+				connectivityResult["message"] = originalMessage + " (tested with pending changes)"
+			}
+		}
+
 		return c.JSON(http.StatusOK, connectivityResult)
 	}
 
@@ -1032,6 +1118,265 @@ func testRulesetContent(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
 		"results": results,
+	})
+}
+
+func testPluginContent(c echo.Context) error {
+	var req struct {
+		Content string                 `json:"content"`
+		Data    map[string]interface{} `json:"data"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	if req.Content == "" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Plugin content is required",
+			"result":  nil,
+		})
+	}
+
+	// Check if args data is provided
+	if req.Data == nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Args data is required",
+			"result":  nil,
+		})
+	}
+
+	// Create a temporary plugin for testing
+	tempPluginId := "temp_test_content"
+	err := plugin.NewPlugin("", req.Content, tempPluginId, plugin.YAEGI_PLUGIN)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create plugin: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Get the created plugin from the global registry
+	tempPlugin, exists := plugin.Plugins[tempPluginId]
+	if !exists {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to retrieve created plugin",
+			"result":  nil,
+		})
+	}
+
+	// Clean up the temporary plugin on exit
+	defer delete(plugin.Plugins, tempPluginId)
+
+	// Load the plugin
+	err = tempPlugin.YaegiLoad()
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to load plugin: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Convert input data to JSON string (plugins expect JSON string parameter)
+	jsonData, err := json.Marshal(req.Data)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to serialize input data: " + err.Error(),
+			"result":  nil,
+		})
+	}
+
+	// Create parameter array
+	args := []interface{}{string(jsonData)}
+
+	// Execute plugin with panic recovery
+	var result interface{}
+	var success bool
+	var errMsg string
+
+	defer func() {
+		if r := recover(); r != nil {
+			success = false
+			errMsg = fmt.Sprintf("Plugin execution panicked: %v", r)
+			result = nil
+		}
+	}()
+
+	// Execute plugin
+	boolResult := tempPlugin.FuncEvalCheckNode(args...)
+	result = boolResult
+	success = true
+
+	// Return the result
+	if errMsg != "" {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   errMsg,
+			"result":  result,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": success,
+		"result":  result,
+	})
+}
+
+func testProjectContent(c echo.Context) error {
+	inputNode := c.Param("inputNode")
+
+	var req struct {
+		Content string                 `json:"content"`
+		Data    map[string]interface{} `json:"data"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	if req.Content == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Project content is required",
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	if req.Data == nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input data is required",
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	if inputNode == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node is required",
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	// Create a temporary project for testing
+	tempProjectId := fmt.Sprintf("temp_test_content_%d", time.Now().UnixNano())
+	tempProject, err := project.NewProjectForTesting("", req.Content, tempProjectId)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to create project: " + err.Error(),
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	// Ensure cleanup on exit
+	defer func() {
+		if stopErr := tempProject.StopForTesting(); stopErr != nil {
+			logger.Warn("Failed to stop temporary project: %v", stopErr)
+		}
+	}()
+
+	// Check if the specified input exists in the project
+	if _, exists := tempProject.Inputs[inputNode]; !exists {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Input node '%s' not found in project", inputNode),
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	// Create a map to collect output results
+	outputResults := make(map[string][]map[string]interface{})
+	outputChannels := make(map[string]chan map[string]interface{})
+
+	// For each output component, create a test collection channel
+	for outputName, outputComp := range tempProject.Outputs {
+		// Create a channel for each output to collect test results
+		testChan := make(chan map[string]interface{}, 100)
+		outputChannels[outputName] = testChan
+
+		// Set the test collection channel for output component
+		outputComp.TestCollectionChan = &testChan
+
+		logger.Info("Created test collection channel for output", "output", outputName, "project", tempProjectId)
+	}
+
+	// Start the project
+	err = tempProject.StartForTesting()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start project: " + err.Error(),
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	// Find the input node and verify it has downstream connections
+	inputNodeInstance := tempProject.Inputs[inputNode]
+	if len(inputNodeInstance.DownStream) == 0 {
+		logger.Warn("Input node has no downstream connections", "input", inputNode, "project", tempProjectId)
+
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input node has no downstream connections. Please check project configuration.",
+			"outputs": map[string][]map[string]interface{}{},
+		})
+	}
+
+	// Send test data to all downstream channels of the input
+	logger.Info("Sending test data to input channels", "input", inputNode, "downstream_count", len(inputNodeInstance.DownStream))
+	for i, downChan := range inputNodeInstance.DownStream {
+		logger.Info("Sending data to downstream channel", "input", inputNode, "channel", i)
+		*downChan <- req.Data
+	}
+
+	// Wait for data to flow through the system and be collected
+	time.Sleep(500 * time.Millisecond)
+
+	// Collect results from output channels with timeout
+	collectTimeout := time.After(1000 * time.Millisecond)
+	for outputName, testChan := range outputChannels {
+		outputResults[outputName] = []map[string]interface{}{}
+
+		// Collect messages from this output channel
+		for {
+			select {
+			case result, ok := <-testChan:
+				if !ok {
+					// Channel is closed
+					goto nextOutput
+				}
+				outputResults[outputName] = append(outputResults[outputName], result)
+			case <-collectTimeout:
+				// Timeout reached
+				goto nextOutput
+			case <-time.After(100 * time.Millisecond):
+				// No more messages after 100ms, assume we're done with this output
+				goto nextOutput
+			}
+		}
+	nextOutput:
+	}
+
+	// Return the results
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"outputs": outputResults,
+		"isTemp":  true,
 	})
 }
 
@@ -1149,5 +1494,133 @@ func getProjectComponents(c echo.Context) error {
 			"outputs":  len(outputs),
 			"rulesets": len(rulesets),
 		},
+	})
+}
+
+// connectCheckWithConfig performs connectivity check using custom configuration
+func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
+	// Parse request body to get configuration
+	var req struct {
+		Raw string `json:"raw"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request body: " + err.Error(),
+		})
+	}
+
+	if req.Raw == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Configuration content is required",
+		})
+	}
+
+	// Generate unique test ID to avoid conflicts
+	testId := fmt.Sprintf("temp_connect_test_%s_%d", id, time.Now().UnixNano())
+
+	if normalizedType == "inputs" {
+		// Create a temporary input instance for testing
+		tempInput, err := input.NewInput("", req.Raw, testId)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  "error",
+				"message": "Failed to create temporary input for testing: " + err.Error(),
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "configuration_error",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Failed to parse configuration: " + err.Error(), "severity": "error"},
+					},
+				},
+			})
+		}
+
+		// Test connectivity using the temporary input
+		connectivityResult := tempInput.CheckConnectivity()
+
+		// Clean up the temporary input (stop it if it was started)
+		if stopErr := tempInput.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop temporary input after connectivity test", "id", testId, "error", stopErr)
+		}
+
+		// Add metadata to indicate this was tested with custom configuration
+		if connectivityResult == nil {
+			connectivityResult = map[string]interface{}{
+				"status":  "error",
+				"message": "Connection check failed",
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "unknown",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Unknown error during connectivity check", "severity": "error"},
+					},
+				},
+			}
+		}
+
+		// Add indicator for custom configuration testing
+		connectivityResult["isTemp"] = true
+		if originalMessage, ok := connectivityResult["message"].(string); ok {
+			connectivityResult["message"] = originalMessage + " (tested with custom configuration)"
+		}
+
+		return c.JSON(http.StatusOK, connectivityResult)
+
+	} else if normalizedType == "outputs" {
+		// Create a temporary output instance for testing
+		tempOutput, err := output.NewOutput("", req.Raw, testId)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status":  "error",
+				"message": "Failed to create temporary output for testing: " + err.Error(),
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "configuration_error",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Failed to parse configuration: " + err.Error(), "severity": "error"},
+					},
+				},
+			})
+		}
+
+		// Test connectivity using the temporary output
+		connectivityResult := tempOutput.CheckConnectivity()
+
+		// Clean up the temporary output (stop it if it was started)
+		if stopErr := tempOutput.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop temporary output after connectivity test", "id", testId, "error", stopErr)
+		}
+
+		// Add metadata to indicate this was tested with custom configuration
+		if connectivityResult == nil {
+			connectivityResult = map[string]interface{}{
+				"status":  "error",
+				"message": "Connection check failed",
+				"details": map[string]interface{}{
+					"client_type":       "",
+					"connection_status": "unknown",
+					"connection_info":   map[string]interface{}{},
+					"connection_errors": []map[string]interface{}{
+						{"message": "Unknown error during connectivity check", "severity": "error"},
+					},
+				},
+			}
+		}
+
+		// Add indicator for custom configuration testing
+		connectivityResult["isTemp"] = true
+		if originalMessage, ok := connectivityResult["message"].(string); ok {
+			connectivityResult["message"] = originalMessage + " (tested with custom configuration)"
+		}
+
+		return c.JSON(http.StatusOK, connectivityResult)
+	}
+
+	return c.JSON(http.StatusInternalServerError, map[string]string{
+		"error": "Unknown error occurred",
 	})
 }
