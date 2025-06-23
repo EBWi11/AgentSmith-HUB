@@ -131,6 +131,9 @@ func ServerStart(listener string) error {
 	e.POST("/cluster/heartbeat", handleHeartbeat)
 	e.POST("/component-sync", handleComponentSync)
 	e.POST("/project-status-sync", handleProjectStatusSync)
+	e.POST("/qps-sync", handleQPSSync)
+	e.GET("/qps-data", getQPSData)
+	e.GET("/qps-stats", getQPSStats)
 	e.GET("/config_root", leaderConfig)
 	e.GET("/config/download", downloadConfig)
 

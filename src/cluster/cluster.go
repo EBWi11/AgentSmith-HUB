@@ -7,12 +7,22 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 )
 
 // NodeStatus represents the status of a cluster node
 type NodeStatus string
 
 var IsLeader bool
+var NodeID string
+
+// ClusterConfig represents cluster configuration
+type ClusterConfig struct {
+	NodeID     string `json:"node_id"`
+	ListenAddr string `json:"listen_addr"`
+}
 
 const (
 	NodeStatusLeader   NodeStatus = "leader"
@@ -56,11 +66,14 @@ type ClusterManager struct {
 	Nodes map[string]*NodeInfo
 
 	// Configuration
-	HeartbeatInterval time.Duration
-	HeartbeatTimeout  time.Duration
-	CleanupInterval   time.Duration
-	MaxMissCount      int // Maximum allowed consecutive missed heartbeats
-	stopChan          chan struct{}
+	HeartbeatInterval     time.Duration
+	HeartbeatTimeout      time.Duration
+	CleanupInterval       time.Duration
+	MaxMissCount          int // Maximum allowed consecutive missed heartbeats
+	stopChan              chan struct{}
+	stopHeartbeatMonitor  chan struct{}
+	stopFollowerHeartbeat chan struct{}
+	startTime             time.Time
 }
 
 var (
@@ -295,8 +308,32 @@ func (cm *ClusterManager) StartCleanupLoop() {
 }
 
 // Stop stops all background processes
-func (cm *ClusterManager) Stop() {
-	close(cm.stopChan)
+func (cm *ClusterManager) Stop() error {
+	logger.Info("Stopping cluster manager")
+
+	cm.Mu.Lock()
+	defer cm.Mu.Unlock()
+
+	// Stop heartbeat monitoring
+	if cm.stopHeartbeatMonitor != nil {
+		close(cm.stopHeartbeatMonitor)
+		cm.stopHeartbeatMonitor = nil
+	}
+
+	// Stop QPS manager if this is the leader
+	if IsLeader {
+		common.StopQPSManager()
+		logger.Info("QPS manager stopped")
+	}
+
+	// Stop follower heartbeat if this is a follower
+	if cm.stopFollowerHeartbeat != nil {
+		close(cm.stopFollowerHeartbeat)
+		cm.stopFollowerHeartbeat = nil
+	}
+
+	logger.Info("Cluster manager stopped")
+	return nil
 }
 
 // Start starts all background processes
@@ -308,4 +345,66 @@ func (cm *ClusterManager) Start() {
 
 	// Start cleanup loop
 	cm.StartCleanupLoop()
+}
+
+// StartAsLeader starts this node as cluster leader
+func StartAsLeader(config *ClusterConfig) error {
+	logger.Info("Starting as cluster leader")
+
+	IsLeader = true
+	NodeID = config.NodeID
+
+	cm := &ClusterManager{
+		SelfID:                config.NodeID,
+		SelfAddress:           config.ListenAddr,
+		Status:                NodeStatusLeader,
+		Nodes:                 make(map[string]*NodeInfo),
+		HeartbeatInterval:     5 * time.Second,
+		HeartbeatTimeout:      15 * time.Second,
+		CleanupInterval:       10 * time.Second,
+		MaxMissCount:          3,
+		stopChan:              make(chan struct{}),
+		stopHeartbeatMonitor:  make(chan struct{}),
+		stopFollowerHeartbeat: make(chan struct{}),
+		startTime:             time.Now(),
+	}
+
+	ClusterInstance = cm
+
+	// Initialize QPS manager for leader
+	common.InitQPSManager()
+	logger.Info("QPS manager initialized for leader")
+
+	// Start heartbeat monitoring (for monitoring followers)
+	go cm.monitorHeartbeats()
+
+	logger.Info("Cluster leader started", "node_id", config.NodeID, "listen_addr", config.ListenAddr)
+	return nil
+}
+
+func (cm *ClusterManager) monitorHeartbeats() {
+	ticker := time.NewTicker(cm.HeartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := cm.SendHeartbeat(); err != nil {
+				// Log error but continue
+				fmt.Printf("Failed to send heartbeat: %v\n", err)
+
+				// If we're a follower and can't reach the leader, we might need to start an election
+				cm.Mu.Lock()
+				isFollower := cm.Status == NodeStatusFollower
+				cm.Mu.Unlock()
+
+				if isFollower {
+					// TODO: Implement leader election logic
+					fmt.Printf("Lost connection to leader, might need to start election\n")
+				}
+			}
+		case <-cm.stopHeartbeatMonitor:
+			return
+		}
+	}
 }

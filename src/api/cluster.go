@@ -616,3 +616,100 @@ func handleProjectStatusSync(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
+
+// handleQPSSync handles QPS data synchronization from followers
+func handleQPSSync(c echo.Context) error {
+	// Only accept QPS data on leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "QPS data can only be sent to leader nodes",
+		})
+	}
+
+	var qpsDataList []common.QPSMetrics
+	if err := c.Bind(&qpsDataList); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid QPS data format: %v", err),
+		})
+	}
+
+	// Add each QPS metric to the global QPS manager
+	if common.GlobalQPSManager != nil {
+		for _, qpsData := range qpsDataList {
+			common.GlobalQPSManager.AddQPSData(&qpsData)
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":           "success",
+		"received_metrics": len(qpsDataList),
+		"timestamp":        time.Now(),
+	})
+}
+
+// getQPSData returns QPS data for query
+func getQPSData(c echo.Context) error {
+	// Only provide QPS data from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "QPS data is only available from leader nodes",
+		})
+	}
+
+	if common.GlobalQPSManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "QPS manager not initialized",
+		})
+	}
+
+	projectID := c.QueryParam("project_id")
+	nodeID := c.QueryParam("node_id")
+	componentID := c.QueryParam("component_id")
+	componentType := c.QueryParam("component_type")
+	aggregated := c.QueryParam("aggregated") == "true"
+
+	var result interface{}
+
+	if aggregated && projectID != "" {
+		// Return aggregated QPS data for a project
+		result = common.GlobalQPSManager.GetAggregatedQPS(projectID)
+	} else if projectID != "" && nodeID == "" {
+		// Return all components in a project
+		result = common.GlobalQPSManager.GetProjectQPS(projectID)
+	} else if nodeID != "" && projectID != "" && componentID != "" && componentType != "" {
+		// Return specific component QPS data
+		result = common.GlobalQPSManager.GetComponentQPS(nodeID, projectID, componentID, componentType)
+	} else if nodeID == "" && projectID == "" {
+		// Return all QPS data
+		result = common.GlobalQPSManager.GetAllQPS()
+	} else {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid query parameters. Use 'project_id' for project data, or specify 'node_id', 'project_id', 'component_id', and 'component_type' for specific component data",
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":      result,
+		"timestamp": time.Now(),
+		"stats":     common.GlobalQPSManager.GetStats(),
+	})
+}
+
+// getQPSStats returns QPS manager statistics
+func getQPSStats(c echo.Context) error {
+	// Only provide QPS stats from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "QPS statistics are only available from leader nodes",
+		})
+	}
+
+	if common.GlobalQPSManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "QPS manager not initialized",
+		})
+	}
+
+	stats := common.GlobalQPSManager.GetStats()
+	return c.JSON(http.StatusOK, stats)
+}

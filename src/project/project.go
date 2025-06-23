@@ -1785,3 +1785,52 @@ func RestartSingleProjectSafely(projectID string) error {
 	logger.Info("Successfully restarted single project", "id", projectID, "duration", time.Since(startTime))
 	return nil
 }
+
+// GetQPSDataForNode collects QPS data from all running projects and components for this node
+func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
+	var qpsMetrics []common.QPSMetrics
+	now := time.Now()
+
+	// Lock to read project data safely
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	// Collect data from all projects
+	for projectID, proj := range GlobalProject.Projects {
+		if proj.Status != ProjectStatusRunning {
+			continue // Skip non-running projects
+		}
+
+		// Collect input QPS data
+		for inputID, input := range proj.Inputs {
+			qps := input.GetConsumeQPS()
+			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
+				NodeID:        nodeID,
+				ProjectID:     projectID,
+				ComponentID:   inputID,
+				ComponentType: "input",
+				QPS:           qps,
+				Timestamp:     now,
+			})
+		}
+
+		// Collect output QPS data
+		for outputID, output := range proj.Outputs {
+			qps := output.GetProduceQPS()
+			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
+				NodeID:        nodeID,
+				ProjectID:     projectID,
+				ComponentID:   outputID,
+				ComponentType: "output",
+				QPS:           qps,
+				Timestamp:     now,
+			})
+		}
+
+		// Note: Rulesets don't have direct QPS metrics like inputs/outputs
+		// They process data through input -> ruleset -> output flow
+		// The QPS is captured at input and output stages
+	}
+
+	return qpsMetrics
+}
