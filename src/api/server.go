@@ -130,6 +130,7 @@ func ServerStart(listener string) error {
 	e.GET("/cluster-status", getClusterStatus)
 	e.POST("/cluster/heartbeat", handleHeartbeat)
 	e.POST("/component-sync", handleComponentSync)
+	e.POST("/project-status-sync", handleProjectStatusSync)
 	e.GET("/config_root", leaderConfig)
 	e.GET("/config/download", downloadConfig)
 

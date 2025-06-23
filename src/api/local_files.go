@@ -851,9 +851,8 @@ func loadComponentDirectly(componentType, id, content string) error {
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
 
-	// Sync component to follower nodes after successful loading
-	// Use a goroutine to avoid blocking, similar to other component sync operations
-	go syncComponentToFollowers(componentType, id)
+	// NOTE: loadComponentDirectly is for local operations only, no need to sync to followers
+	// Followers will get updates when changes are formally applied via ApplyPendingChanges
 
 	return nil
 }

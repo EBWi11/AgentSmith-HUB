@@ -1120,6 +1120,14 @@ func cancelPluginUpgrade(c echo.Context) error {
 
 // GetSamplerData retrieves sample data from project components
 func GetSamplerData(c echo.Context) error {
+	// Only leader nodes collect sample data for performance reasons
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message": "Sample data collection is only available on leader node",
+			"data":    map[string]interface{}{},
+		})
+	}
+
 	componentName := c.QueryParam("name")               // e.g., "input", "output", "ruleset"
 	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.123", "ruleset.test"
 
@@ -1245,6 +1253,16 @@ func GetSamplerData(c echo.Context) error {
 
 // GetRulesetFields extracts field keys from sample data for intelligent completion in ruleset editing
 func GetRulesetFields(c echo.Context) error {
+	// Only leader nodes collect sample data for performance reasons
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"componentId": c.Param("id"),
+			"fieldKeys":   []string{},
+			"sampleCount": 0,
+			"message":     "Sample data collection is only available on leader node",
+		})
+	}
+
 	componentId := c.Param("id")
 	if componentId == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{

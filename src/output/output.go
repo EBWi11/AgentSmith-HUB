@@ -1,6 +1,7 @@
 package output
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
@@ -188,7 +189,12 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
 		Config:           &cfg,
-		sampler:          common.GetSampler("output." + id),
+		sampler:          nil, // Will be set below based on cluster role
+	}
+
+	// Only create sampler on leader node for performance
+	if cluster.IsLeader {
+		out.sampler = common.GetSampler("output." + id)
 	}
 	return out, nil
 }

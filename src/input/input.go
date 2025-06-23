@@ -1,6 +1,7 @@
 package input
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"fmt"
@@ -166,7 +167,12 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 		kafkaCfg:     cfg.Kafka,
 		aliyunSLSCfg: cfg.AliyunSLS,
 		Config:       &cfg,
-		sampler:      common.GetSampler("input." + id),
+		sampler:      nil, // Will be set below based on cluster role
+	}
+
+	// Only create sampler on leader node for performance
+	if cluster.IsLeader {
+		in.sampler = common.GetSampler("input." + id)
 	}
 	return in, nil
 }

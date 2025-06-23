@@ -42,6 +42,16 @@ func handleHeartbeat(c echo.Context) error {
 		})
 	}
 
+	// Check if this is a new node and register it
+	cm.Mu.RLock()
+	_, nodeExists := cm.Nodes[payload.NodeID]
+	cm.Mu.RUnlock()
+
+	if !nodeExists {
+		logger.Info("Registering new follower node", "node_id", payload.NodeID, "node_addr", payload.NodeAddr)
+		cm.RegisterNode(payload.NodeID, payload.NodeAddr)
+	}
+
 	// Update node heartbeat
 	cm.UpdateNodeHeartbeat(payload.NodeID)
 
@@ -176,9 +186,10 @@ func getCluster(c echo.Context) error {
 
 func handleComponentSync(c echo.Context) error {
 	var request struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Raw  string `json:"raw"`
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		Raw       string `json:"raw"`
+		IsRunning bool   `json:"is_running,omitempty"` // Add running status for projects
 	}
 
 	if err := c.Bind(&request); err != nil {
@@ -398,7 +409,7 @@ func handleComponentSync(c echo.Context) error {
 			}
 		}
 	case "project":
-		// Lock only for memory operations
+		// Update config map with lock
 		common.GlobalMu.Lock()
 		common.AllProjectRawConfig[request.ID] = request.Raw
 		proj, exists := p.Projects[request.ID]
@@ -406,10 +417,8 @@ func handleComponentSync(c echo.Context) error {
 
 		// Handle project lifecycle on follower
 		if exists {
-			wasRunning := (proj.Status == project.ProjectStatusRunning)
-
 			// Stop the old project if it's running
-			if wasRunning {
+			if proj.Status == project.ProjectStatusRunning {
 				if err := proj.Stop(); err != nil {
 					logger.Error("failed to stop project on follower", "id", request.ID, "error", err)
 				}
@@ -424,22 +433,34 @@ func handleComponentSync(c echo.Context) error {
 				p.Projects[request.ID] = newProject
 				common.GlobalMu.Unlock()
 
-				// IMPORTANT: Do not automatically restart project during cluster sync
-				// The project status should only be determined by user intention in .project_status file
-				// StartAllProject() will handle starting projects based on user's saved intentions
-				if wasRunning {
-					logger.Info("Project was previously running, but will not auto-start during sync", "id", request.ID, "note", "StartAllProject will handle starting based on user intention")
+				// Start project based on leader's running status
+				if request.IsRunning {
+					logger.Info("Starting project on follower based on leader status", "id", request.ID)
+					if err := newProject.Start(); err != nil {
+						logger.Error("Failed to start project on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					logger.Info("Project not running on leader, keeping stopped on follower", "id", request.ID)
 				}
 			}
 		} else {
-			// New project, just create it but don't start automatically
+			// New project, create it and start if needed
 			if newProject, err := project.NewProject("", request.Raw, request.ID); err != nil {
 				logger.Error("failed to create new project on follower", "id", request.ID, "error", err)
 			} else {
 				common.GlobalMu.Lock()
 				p.Projects[request.ID] = newProject
 				common.GlobalMu.Unlock()
-				logger.Info("Created new project on follower", "id", request.ID)
+
+				// Start project based on leader's running status
+				if request.IsRunning {
+					logger.Info("Starting new project on follower based on leader status", "id", request.ID)
+					if err := newProject.Start(); err != nil {
+						logger.Error("Failed to start new project on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					logger.Info("Created new project on follower (not running on leader)", "id", request.ID)
+				}
 			}
 		}
 	default:
@@ -537,4 +558,61 @@ func restartAffectedProjectsOnFollower(affectedProjects []string) {
 	}
 
 	logger.Info("Batch restart completed on follower", "total_affected", len(affectedProjects), "restarted", restartedCount)
+}
+
+func handleProjectStatusSync(c echo.Context) error {
+	var request struct {
+		ProjectID string `json:"project_id"`
+		Action    string `json:"action"`
+	}
+
+	if err := c.Bind(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	// Get project
+	common.GlobalMu.RLock()
+	proj, exists := project.GlobalProject.Projects[request.ProjectID]
+	common.GlobalMu.RUnlock()
+
+	if !exists {
+		logger.Warn("Project not found on follower for status sync", "project_id", request.ProjectID)
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
+	}
+
+	// Execute the action
+	switch request.Action {
+	case "start":
+		if proj.Status != project.ProjectStatusRunning {
+			logger.Info("Starting project on follower based on leader command", "project_id", request.ProjectID)
+			if err := proj.Start(); err != nil {
+				logger.Error("Failed to start project on follower", "project_id", request.ProjectID, "error", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to start project"})
+			}
+		}
+	case "stop":
+		if proj.Status == project.ProjectStatusRunning {
+			logger.Info("Stopping project on follower based on leader command", "project_id", request.ProjectID)
+			if err := proj.Stop(); err != nil {
+				logger.Error("Failed to stop project on follower", "project_id", request.ProjectID, "error", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to stop project"})
+			}
+		}
+	case "restart":
+		logger.Info("Restarting project on follower based on leader command", "project_id", request.ProjectID)
+		if proj.Status == project.ProjectStatusRunning {
+			if err := proj.Stop(); err != nil {
+				logger.Error("Failed to stop project during restart on follower", "project_id", request.ProjectID, "error", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to stop project during restart"})
+			}
+		}
+		if err := proj.Start(); err != nil {
+			logger.Error("Failed to start project during restart on follower", "project_id", request.ProjectID, "error", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to start project during restart"})
+		}
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported action"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }

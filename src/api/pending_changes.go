@@ -224,9 +224,10 @@ type SingleChangeRequest struct {
 
 // ComponentSyncRequest represents a request to sync a component to follower nodes
 type ComponentSyncRequest struct {
-	Type    string `json:"type"`
-	ID      string `json:"id"`
-	Content string `json:"content"`
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	Content   string `json:"content"`
+	IsRunning bool   `json:"is_running,omitempty"` // Add running status for projects
 }
 
 // GetPendingChanges returns all components with pending changes (.new files)
@@ -1879,6 +1880,15 @@ func syncComponentToFollowers(componentType string, id string) {
 		Type:    componentType,
 		ID:      id,
 		Content: string(data),
+	}
+
+	// For projects, also check and sync running status
+	if componentType == "project" {
+		common.GlobalMu.RLock()
+		if proj, exists := project.GlobalProject.Projects[id]; exists {
+			syncData.IsRunning = (proj.Status == project.ProjectStatusRunning)
+		}
+		common.GlobalMu.RUnlock()
 	}
 
 	// Sync to followers
