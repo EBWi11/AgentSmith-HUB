@@ -8,6 +8,12 @@
     <div class="node-content">
       {{ nodeName }}
     </div>
+    <!-- QPS Display -->
+    <div v-if="hasQPSData" class="node-qps" :style="{ backgroundColor: qpsBackgroundColor, color: qpsTextColor }">
+      <span class="qps-label">QPS:</span>
+      <span class="qps-value">{{ formattedQPS }}</span>
+      <span v-if="nodeCount > 1" class="qps-nodes">({{ nodeCount }} nodes)</span>
+    </div>
     <Handle type="target" :position="Position.Top" />
     <Handle type="source" :position="Position.Bottom" />
   </div>
@@ -25,6 +31,18 @@ const props = defineProps({
   nodeName: {
     type: String,
     required: true,
+  },
+  qps: {
+    type: Number,
+    default: 0,
+  },
+  nodeCount: {
+    type: Number,
+    default: 0,
+  },
+  hasQPSData: {
+    type: Boolean,
+    default: false,
   }
 });
 
@@ -49,6 +67,28 @@ const headerColor = computed(() => colors.value.header);
 const borderColor = computed(() => colors.value.border);
 const textColor = computed(() => colors.value.text);
 const isBold = computed(() => colors.value.bold || false);
+
+// QPS related computed properties
+const formattedQPS = computed(() => {
+  if (props.qps >= 1000) {
+    return (props.qps / 1000).toFixed(1) + 'k';
+  }
+  return props.qps.toString();
+});
+
+const qpsBackgroundColor = computed(() => {
+  if (props.qps === 0) return '#f3f4f6'; // Gray for no activity
+  if (props.qps < 10) return '#ecfdf5'; // Light green for low QPS
+  if (props.qps < 100) return '#fef3c7'; // Light yellow for medium QPS
+  return '#fef2f2'; // Light red for high QPS
+});
+
+const qpsTextColor = computed(() => {
+  if (props.qps === 0) return '#6b7280'; // Gray text
+  if (props.qps < 10) return '#065f46'; // Dark green text
+  if (props.qps < 100) return '#92400e'; // Dark yellow text
+  return '#991b1b'; // Dark red text
+});
 </script>
 
 <style>
@@ -70,20 +110,69 @@ const isBold = computed(() => colors.value.bold || false);
 }
 
 .node-header {
-  padding: 1px 4px;
-  font-weight: 500;
-  font-size: 7px;
-  border-bottom: 1px solid;
+  padding: 2px 4px;
+  text-align: center;
+  font-size: 8px;
+  line-height: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid;
 }
 
 .node-content {
-  padding: 3px 4px;
+  padding: 3px 2px;
+  text-align: center;
   font-size: 9px;
-  color: #334155;
-  min-height: 13px;
-  word-wrap: break-word;
+  line-height: 11px;
+  color: #374151;
   font-weight: 500;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.node-qps {
+  padding: 2px 3px;
+  text-align: center;
+  font-size: 7px;
+  line-height: 8px;
+  font-weight: 600;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.qps-label {
+  font-size: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.qps-value {
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.qps-nodes {
+  font-size: 6px;
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+/* Handle positioning adjustments for taller nodes */
+.vue-flow__handle {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.vue-flow__handle.vue-flow__handle-top {
+  top: -3px !important;
+}
+
+.vue-flow__handle.vue-flow__handle-bottom {
+  bottom: -3px !important;
 }
 </style> 

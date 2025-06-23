@@ -17,6 +17,9 @@
           <CustomNode 
             :node-type="nodeProps.data.nodeType" 
             :node-name="nodeProps.data.nodeName"
+            :qps="nodeProps.data.qps || 0"
+            :node-count="nodeProps.data.nodeCount || 0"
+            :has-q-p-s-data="nodeProps.data.hasQPSData || false"
             class="cursor-pointer hover:shadow-md transition-shadow duration-200"
           />
         </div>
@@ -108,10 +111,23 @@ const props = defineProps({
       type: String,
       required: true,
     },
+    projectId: {
+      type: String,
+      required: false,
+    },
+    enableQPS: {
+      type: Boolean,
+      default: true,
+    },
 });
 
 const nodes = ref([]);
 const edges = ref([]);
+
+// QPS Data related
+const qpsData = ref({});
+const qpsLoading = ref(false);
+const qpsRefreshInterval = ref(null);
 
 // Right-click menu related
 const showContextMenu = ref(false);
@@ -213,12 +229,20 @@ function handleEscKey(event) {
 onMounted(() => {
   document.addEventListener('click', onGlobalClick);
   document.addEventListener('keydown', handleEscKey);
+  
+  // Start QPS data refresh if enabled and projectId is provided
+  if (props.enableQPS && props.projectId) {
+    startQPSRefresh();
+  }
 });
 
 // Remove global click event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick);
   document.removeEventListener('keydown', handleEscKey);
+  
+  // Stop QPS data refresh
+  stopQPSRefresh();
 });
 
 // View sample data
@@ -334,6 +358,11 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 
     edges.value = tempEdges;
 
+    // Update nodes with QPS data if available
+    if (props.enableQPS && props.projectId && Object.keys(qpsData.value).length > 0) {
+      updateNodesWithQPS();
+    }
+
   } catch (e) {
     console.error('Error parsing workflow:', e);
     nodes.value = [];
@@ -344,6 +373,100 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 watch(() => props.projectContent, (newVal) => {
   parseAndLayoutWorkflow(newVal);
 }, { immediate: true, deep: true });
+
+// Watch for projectId changes
+watch(() => props.projectId, (newVal, oldVal) => {
+  if (newVal !== oldVal) {
+    // Stop old refresh interval
+    stopQPSRefresh();
+    
+    // Start new refresh if enabled and projectId is provided
+    if (props.enableQPS && newVal) {
+      startQPSRefresh();
+    }
+  }
+}, { immediate: false });
+
+// Watch for enableQPS changes
+watch(() => props.enableQPS, (newVal) => {
+  if (newVal && props.projectId) {
+    startQPSRefresh();
+  } else {
+    stopQPSRefresh();
+  }
+});
+
+// Fetch QPS data for the project
+async function fetchQPSData() {
+  if (!props.projectId || !props.enableQPS) return;
+  
+  try {
+    qpsLoading.value = true;
+    const response = await hubApi.getProjectQPS(props.projectId);
+    qpsData.value = response.data || {};
+    
+    // Update nodes with QPS data
+    updateNodesWithQPS();
+  } catch (error) {
+    console.error('Failed to fetch QPS data:', error);
+    qpsData.value = {};
+  } finally {
+    qpsLoading.value = false;
+  }
+}
+
+// Update nodes with QPS information
+function updateNodesWithQPS() {
+  nodes.value = nodes.value.map(node => {
+    const componentType = node.data.nodeType.toLowerCase();
+    const componentId = node.data.componentId;
+    
+    // Find QPS data for this component
+    let totalQPS = 0;
+    let nodeCount = 0;
+    
+    Object.entries(qpsData.value).forEach(([key, componentData]) => {
+      if (componentData.component_type === componentType && 
+          componentData.component_id === componentId) {
+        // Get latest QPS value
+        if (componentData.data_points && componentData.data_points.length > 0) {
+          const latestPoint = componentData.data_points[componentData.data_points.length - 1];
+          totalQPS += latestPoint.qps;
+          nodeCount++;
+        }
+      }
+    });
+    
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        qps: totalQPS,
+        nodeCount: nodeCount,
+        hasQPSData: nodeCount > 0
+      }
+    };
+  });
+}
+
+// Start QPS data refresh interval
+function startQPSRefresh() {
+  // Initial fetch
+  fetchQPSData();
+  
+  // Set up interval for periodic refresh (every 15 seconds)
+  qpsRefreshInterval.value = setInterval(() => {
+    fetchQPSData();
+  }, 15000);
+}
+
+// Stop QPS data refresh interval
+function stopQPSRefresh() {
+  if (qpsRefreshInterval.value) {
+    clearInterval(qpsRefreshInterval.value);
+    qpsRefreshInterval.value = null;
+  }
+}
 </script> 
 
 <style>

@@ -1115,8 +1115,43 @@ export const hubApi = {
       const response = await api.get(`/plugin-parameters/${id}`);
       return response.data;
     } catch (error) {
-      console.warn(`Failed to fetch plugin parameters for ${id}:`, error);
-      return { success: false, parameters: [] };
+      console.error(`Error fetching plugin parameters for ${id}:`, error);
+      throw error;
+    }
+  },
+
+  // QPS Data APIs
+  async getQPSData(params = {}) {
+    try {
+      const response = await api.get('/qps-data', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching QPS data:', error);
+      throw error;
+    }
+  },
+
+  async getQPSStats() {
+    try {
+      const response = await api.get('/qps-stats');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching QPS stats:', error);
+      throw error;
+    }
+  },
+
+  async getProjectQPS(projectId, aggregated = false) {
+    try {
+      const params = { project_id: projectId };
+      if (aggregated) {
+        params.aggregated = true;
+      }
+      const response = await api.get('/qps-data', { params });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching QPS data for project ${projectId}:`, error);
+      throw error;
     }
   }
 };

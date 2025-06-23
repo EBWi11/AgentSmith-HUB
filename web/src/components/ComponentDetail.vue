@@ -19,7 +19,7 @@
             Live Preview
           </h3>
         </div>
-        <ProjectWorkflow :projectContent="editorValue" />
+        <ProjectWorkflow :projectContent="editorValue" :projectId="props.item?.id" :enableQPS="true" />
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
@@ -200,7 +200,7 @@
             Live Preview
           </h3>
         </div>
-        <ProjectWorkflow :projectContent="editorValue" />
+        <ProjectWorkflow :projectContent="editorValue" :projectId="props.item?.id" :enableQPS="true" />
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
@@ -347,7 +347,7 @@
        <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" :component-id="props.item?.id" :component-type="props.item?.type" />
     </div>
     <div class="w-2/5 h-full border-l border-gray-200">
-      <ProjectWorkflow :projectContent="detail.raw" />
+      <ProjectWorkflow :projectContent="detail.raw" :projectId="props.item?.id || detail.id" :enableQPS="true" />
     </div>
   </div>
 
