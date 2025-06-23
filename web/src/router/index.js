@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import Login from '../views/Login.vue';
 import MainLayout from '../views/MainLayout.vue';
+import Dashboard from '../views/Dashboard.vue';
 import ComponentDetail from '../components/ComponentDetail.vue';
 import { hubApi } from '../api/index.js';
 
@@ -19,6 +20,12 @@ const routes = [
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
+      {
+        path: '',
+        name: 'Dashboard',
+        component: Dashboard,
+        meta: { requiresAuth: true, componentType: 'home' }
+      },
       {
         path: 'inputs/:id',
         name: 'InputDetail',

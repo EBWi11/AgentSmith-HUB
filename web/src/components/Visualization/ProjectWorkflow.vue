@@ -17,9 +17,8 @@
           <CustomNode 
             :node-type="nodeProps.data.nodeType" 
             :node-name="nodeProps.data.nodeName"
-            :qps="nodeProps.data.qps || 0"
-            :node-count="nodeProps.data.nodeCount || 0"
-            :has-q-p-s-data="nodeProps.data.hasQPSData || false"
+            :messages="nodeProps.data.messages || 0"
+            :has-message-data="nodeProps.data.hasMessageData || false"
             class="cursor-pointer hover:shadow-md transition-shadow duration-200"
           />
         </div>
@@ -115,7 +114,7 @@ const props = defineProps({
       type: String,
       required: false,
     },
-    enableQPS: {
+    enableMessages: {
       type: Boolean,
       default: true,
     },
@@ -124,10 +123,10 @@ const props = defineProps({
 const nodes = ref([]);
 const edges = ref([]);
 
-// QPS Data related
-const qpsData = ref({});
-const qpsLoading = ref(false);
-const qpsRefreshInterval = ref(null);
+// Message Data related  
+const messageData = ref({});
+const messageLoading = ref(false);
+const messageRefreshInterval = ref(null);
 
 // Right-click menu related
 const showContextMenu = ref(false);
@@ -230,9 +229,9 @@ onMounted(() => {
   document.addEventListener('click', onGlobalClick);
   document.addEventListener('keydown', handleEscKey);
   
-  // Start QPS data refresh if enabled and projectId is provided
-  if (props.enableQPS && props.projectId) {
-    startQPSRefresh();
+  // Start message data refresh if enabled and projectId is provided
+  if (props.enableMessages && props.projectId) {
+    startMessageRefresh();
   }
 });
 
@@ -241,8 +240,8 @@ onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick);
   document.removeEventListener('keydown', handleEscKey);
   
-  // Stop QPS data refresh
-  stopQPSRefresh();
+  // Stop message data refresh
+  stopMessageRefresh();
 });
 
 // View sample data
@@ -358,9 +357,9 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 
     edges.value = tempEdges;
 
-    // Update nodes with QPS data if available
-    if (props.enableQPS && props.projectId && Object.keys(qpsData.value).length > 0) {
-      updateNodesWithQPS();
+    // Update nodes with message data if available
+    if (props.enableMessages && props.projectId && Object.keys(messageData.value).length > 0) {
+      updateNodesWithMessages();
     }
 
   } catch (e) {
@@ -378,93 +377,88 @@ watch(() => props.projectContent, (newVal) => {
 watch(() => props.projectId, (newVal, oldVal) => {
   if (newVal !== oldVal) {
     // Stop old refresh interval
-    stopQPSRefresh();
+    stopMessageRefresh();
     
     // Start new refresh if enabled and projectId is provided
-    if (props.enableQPS && newVal) {
-      startQPSRefresh();
+    if (props.enableMessages && newVal) {
+      startMessageRefresh();
     }
   }
 }, { immediate: false });
 
-// Watch for enableQPS changes
-watch(() => props.enableQPS, (newVal) => {
+// Watch for enableMessages changes
+watch(() => props.enableMessages, (newVal) => {
   if (newVal && props.projectId) {
-    startQPSRefresh();
+    startMessageRefresh();
   } else {
-    stopQPSRefresh();
+    stopMessageRefresh();
   }
 });
 
-// Fetch QPS data for the project
-async function fetchQPSData() {
-  if (!props.projectId || !props.enableQPS) return;
+// Fetch message data for the project
+async function fetchMessageData() {
+  if (!props.projectId || !props.enableMessages) return;
   
   try {
-    qpsLoading.value = true;
-    const response = await hubApi.getProjectQPS(props.projectId);
-    qpsData.value = response.data || {};
+    messageLoading.value = true;
+    // Use real message data
+    const response = await hubApi.getProjectHourlyMessages(props.projectId);
+    messageData.value = response.data || {};
     
-    // Update nodes with QPS data
-    updateNodesWithQPS();
+    // Update nodes with message data
+    updateNodesWithMessages();
   } catch (error) {
-    console.error('Failed to fetch QPS data:', error);
-    qpsData.value = {};
+    console.error('Failed to fetch message data:', error);
+    messageData.value = {};
   } finally {
-    qpsLoading.value = false;
+    messageLoading.value = false;
   }
 }
 
-// Update nodes with QPS information
-function updateNodesWithQPS() {
+// Update nodes with message information
+function updateNodesWithMessages() {
   nodes.value = nodes.value.map(node => {
     const componentType = node.data.nodeType.toLowerCase();
     const componentId = node.data.componentId;
     
-    // Find QPS data for this component
-    let totalQPS = 0;
-    let nodeCount = 0;
+    // Find message data for this component
+    let totalMessages = 0;
     
-    Object.entries(qpsData.value).forEach(([key, componentData]) => {
-      if (componentData.component_type === componentType && 
-          componentData.component_id === componentId) {
-        // Get latest QPS value
-        if (componentData.data_points && componentData.data_points.length > 0) {
-          const latestPoint = componentData.data_points[componentData.data_points.length - 1];
-          totalQPS += latestPoint.qps;
-          nodeCount++;
-        }
-      }
-    });
+    // Message data format: key = "projectID_componentID_componentType"
+    const searchKey = `${props.projectId}_${componentId}_${componentType}`;
+    
+    if (messageData.value[searchKey]) {
+      const componentData = messageData.value[searchKey];
+      totalMessages = componentData.total_messages || 0;
+    }
     
     return {
       ...node,
       data: {
         ...node.data,
-        qps: totalQPS,
-        nodeCount: nodeCount,
-        hasQPSData: nodeCount > 0
+        messages: totalMessages, // Real message count for past hour
+        hasMessageData: totalMessages > 0
       }
     };
   });
 }
 
-// Start QPS data refresh interval
-function startQPSRefresh() {
+// Start message data refresh interval
+function startMessageRefresh() {
   // Initial fetch
-  fetchQPSData();
+  fetchMessageData();
   
   // Set up interval for periodic refresh (every 15 seconds)
-  qpsRefreshInterval.value = setInterval(() => {
-    fetchQPSData();
+  messageRefreshInterval.value = setInterval(() => {
+    fetchMessageData();
   }, 15000);
 }
 
-// Stop QPS data refresh interval
-function stopQPSRefresh() {
-  if (qpsRefreshInterval.value) {
-    clearInterval(qpsRefreshInterval.value);
-    qpsRefreshInterval.value = null;
+// Stop message data refresh interval
+function stopMessageRefresh() {
+  if (messageRefreshInterval.value) {
+    clearInterval(messageRefreshInterval.value);
+    messageRefreshInterval.value = null;
   }
 }
 </script> 

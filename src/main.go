@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -530,8 +531,79 @@ func main() {
 	LoadComponents()
 	LoadProject()
 
+	// Initialize QPS system based on node role
+	if cluster.IsLeader {
+		// Initialize QPS manager for leader nodes
+		common.InitQPSManager()
+		logger.Info("QPS manager initialized for leader", "node_id", cluster.NodeID)
+
+		// Initialize cluster system manager for leader nodes
+		common.InitClusterSystemManager()
+		logger.Info("Cluster system manager initialized for leader", "node_id", cluster.NodeID)
+
+		// Start local QPS data collection for leader node
+		go func() {
+			ticker := time.NewTicker(10 * time.Second) // Collect every 10 seconds
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					// Collect local QPS data and add to QPS manager
+					qpsMetrics := project.GetQPSDataForNode(cluster.NodeID)
+					if common.GlobalQPSManager != nil {
+						for _, qpsData := range qpsMetrics {
+							common.GlobalQPSManager.AddQPSData(&qpsData)
+						}
+					}
+				}
+			}
+		}()
+		logger.Info("Local QPS data collection started for leader", "node_id", cluster.NodeID)
+
+		// Start local system metrics collection for leader node
+		go func() {
+			ticker := time.NewTicker(30 * time.Second) // Collect every 30 seconds
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					// Collect local system metrics and add to cluster system manager
+					if common.GlobalSystemMonitor != nil && common.GlobalClusterSystemManager != nil {
+						systemMetrics := common.GlobalSystemMonitor.GetCurrentMetrics()
+						if systemMetrics != nil {
+							common.GlobalClusterSystemManager.AddSystemMetrics(systemMetrics)
+						}
+					}
+				}
+			}
+		}()
+		logger.Info("Local system metrics collection started for leader", "node_id", cluster.NodeID)
+	} else if common.Config.Leader != "" {
+		// Initialize QPS collector for follower nodes
+		common.InitQPSCollector(
+			cluster.NodeID,
+			common.Config.Leader,
+			func() []common.QPSMetrics {
+				return project.GetQPSDataForNode(cluster.NodeID)
+			},
+			func() *common.SystemMetrics {
+				if common.GlobalSystemMonitor != nil {
+					return common.GlobalSystemMonitor.GetCurrentMetrics()
+				}
+				return nil
+			},
+		)
+		logger.Info("QPS collector initialized for follower", "node_id", cluster.NodeID, "leader", common.Config.Leader)
+	}
+
 	// start all projects
 	StartAllProject()
+
+	// Initialize system monitor for both leader and follower
+	common.InitSystemMonitor(cluster.NodeID)
+	logger.Info("System monitor initialized", "node_id", cluster.NodeID)
 
 	// start Api
 	err = api.ServerStart(common.Config.Listen)

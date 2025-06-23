@@ -398,7 +398,7 @@ export const hubApi = {
   },
 
   async fetchClusterInfo() {
-    const response = await api.get('/cluster');
+    const response = await api.get('/cluster-status');
     return response.data;
   },
 
@@ -964,6 +964,37 @@ export const hubApi = {
     }
   },
 
+  // Get project components (inputs, outputs, rulesets)
+  async getProjectComponents(id) {
+    try {
+      // Basic validation
+      if (!id) {
+        throw new Error('Project ID is required');
+      }
+      
+      // Use API instance to send request
+      const response = await api.get(`/project-components/${id}`);
+      return response.data;
+    } catch (error) {
+      // If HTTP error, return error message
+      if (error.response && error.response.data) {
+        return {
+          success: false,
+          error: error.response.data.error || 'Failed to get project components',
+          totalComponents: 0,
+          componentCounts: { inputs: 0, outputs: 0, rulesets: 0 }
+        };
+      }
+      // If network error or other error
+      return {
+        success: false,
+        error: error.message || 'Network error or server not responding',
+        totalComponents: 0,
+        componentCounts: { inputs: 0, outputs: 0, rulesets: 0 }
+      };
+    }
+  },
+
   // Add a method to check if component has temporary files
   async checkTemporaryFile(type, id) {
     try {
@@ -1120,13 +1151,13 @@ export const hubApi = {
     }
   },
 
-  // QPS Data APIs
+  // Component Data APIs (backend still uses QPS endpoints for component enumeration)
   async getQPSData(params = {}) {
     try {
       const response = await api.get('/qps-data', { params });
       return response.data;
     } catch (error) {
-      console.error('Error fetching QPS data:', error);
+      console.error('Error fetching component data:', error);
       throw error;
     }
   },
@@ -1136,7 +1167,7 @@ export const hubApi = {
       const response = await api.get('/qps-stats');
       return response.data;
     } catch (error) {
-      console.error('Error fetching QPS stats:', error);
+      console.error('Error fetching component stats:', error);
       throw error;
     }
   },
@@ -1150,7 +1181,153 @@ export const hubApi = {
       const response = await api.get('/qps-data', { params });
       return response.data;
     } catch (error) {
-      console.error(`Error fetching QPS data for project ${projectId}:`, error);
+      console.error(`Error fetching component data for project ${projectId}:`, error);
+      throw error;
+    }
+  },
+
+  // Hourly Messages APIs (real message counts for the past hour)
+  async getHourlyMessages(projectId = null, aggregated = false) {
+    try {
+      const params = {};
+      if (projectId) {
+        params.project_id = projectId;
+      }
+      if (aggregated) {
+        params.aggregated = true;
+      }
+      const response = await api.get('/hourly-messages', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching hourly messages:', error);
+      throw error;
+    }
+  },
+
+  async getProjectHourlyMessages(projectId) {
+    try {
+      const response = await api.get('/hourly-messages', { 
+        params: { project_id: projectId } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching hourly messages for project ${projectId}:`, error);
+      throw error;
+    }
+  },
+
+  async getAggregatedHourlyMessages() {
+    try {
+      const response = await api.get('/hourly-messages', { 
+        params: { aggregated: true } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching aggregated hourly messages:', error);
+      throw error;
+    }
+  },
+
+  async getNodeHourlyMessages(nodeId) {
+    try {
+      const response = await api.get('/hourly-messages', { 
+        params: { by_node: true, node_id: nodeId } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching hourly messages for node ${nodeId}:`, error);
+      throw error;
+    }
+  },
+
+  async getAllNodeHourlyMessages() {
+    try {
+      const response = await api.get('/hourly-messages', { 
+        params: { by_node: true } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching hourly messages for all nodes:', error);
+      throw error;
+    }
+  },
+
+  // System Metrics APIs
+  async getSystemMetrics(params = {}) {
+    try {
+      const response = await api.get('/system-metrics', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching system metrics:', error);
+      throw error;
+    }
+  },
+
+  async getCurrentSystemMetrics() {
+    try {
+      const response = await api.get('/system-metrics', { params: { current: true } });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching current system metrics:', error);
+      throw error;
+    }
+  },
+
+  async getSystemStats() {
+    try {
+      const response = await api.get('/system-stats');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching system stats:', error);
+      throw error;
+    }
+  },
+
+  async getHistoricalSystemMetrics(since) {
+    try {
+      const params = {};
+      if (since) {
+        params.since = since;
+      }
+      const response = await api.get('/system-metrics', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching historical system metrics:', error);
+      throw error;
+    }
+  },
+
+  // Cluster System Metrics APIs (only available from leader)
+  async getClusterSystemMetrics(nodeId = null) {
+    try {
+      const params = {};
+      if (nodeId) {
+        params.node_id = nodeId;
+      }
+      const response = await api.get('/cluster-system-metrics', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching cluster system metrics:', error);
+      throw error;
+    }
+  },
+
+  async getClusterSystemStats() {
+    try {
+      const response = await api.get('/cluster-system-stats');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching cluster system stats:', error);
+      throw error;
+    }
+  },
+
+  async getAggregatedSystemMetrics() {
+    try {
+      const response = await api.get('/cluster-system-metrics', { params: { aggregated: true } });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching aggregated system metrics:', error);
       throw error;
     }
   }

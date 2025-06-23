@@ -186,7 +186,7 @@ export default createStore({
     },
     async fetchClusterInfo({ commit }) {
       try {
-        const info = await hubApi.fetchClusterInfo()
+        const info = await hubApi.fetchClusterStatus()
         commit('setClusterInfo', info)
       } catch (error) {
         commit('setClusterInfo', {})

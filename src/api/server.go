@@ -85,6 +85,7 @@ func ServerStart(listener string) error {
 	e.POST("/restart-all-projects", RestartAllProjects)
 	e.GET("/project-error/:id", getProjectError)
 	e.GET("/project-inputs/:id", getProjectInputs)
+	e.GET("/project-components/:id", getProjectComponents)
 
 	// Ruleset endpoints (use plural form for consistency)
 	e.GET("/rulesets", getRulesets)
@@ -171,6 +172,22 @@ func ServerStart(listener string) error {
 	e.GET("/local-changes", getLocalChanges)
 	e.POST("/load-local-changes", loadLocalChanges)
 	e.POST("/load-single-local-change", loadSingleLocalChange)
+
+	// QPS endpoints (only on leader)
+	e.GET("/qps-data", getQPSData)
+	e.GET("/qps-stats", getQPSStats)
+	e.GET("/hourly-messages", getHourlyMessages)
+
+	// System metrics endpoints (available on all nodes)
+	e.GET("/system-metrics", getSystemMetrics)
+	e.GET("/system-stats", getSystemStats)
+
+	// Combined metrics sync endpoint (only on leader)
+	e.POST("/metrics-sync", handleMetricsSync)
+
+	// Cluster system metrics endpoints (only on leader)
+	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
+	e.GET("/cluster-system-stats", getClusterSystemStats)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

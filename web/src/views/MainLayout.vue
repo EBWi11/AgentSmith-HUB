@@ -14,8 +14,9 @@
         ref="sidebarRef"
       />
       <main class="flex-1 bg-gray-50">
+        <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components'" 
+          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -88,7 +89,13 @@ onMounted(() => {
   // Check if we have component type in the route
   const { params, meta } = route
   if (meta.componentType) {
-    if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components') {
+    if (meta.componentType === 'home') {
+      // For home page, show dashboard
+      selected.value = {
+        type: 'home',
+        _timestamp: Date.now()
+      }
+    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components') {
       // For cluster, pending-changes, and load-local-components, no ID needed
       selected.value = {
         type: meta.componentType,
@@ -114,7 +121,15 @@ watch(
     const componentType = newMeta.componentType
     
     if (componentType) {
-      if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components') {
+      if (componentType === 'home') {
+        // For home page, show dashboard
+        if (!selected.value || selected.value.type !== componentType) {
+          selected.value = {
+            type: 'home',
+            _timestamp: Date.now()
+          }
+        }
+      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components') {
         // For cluster, pending-changes, and load-local-components, no ID needed
         if (!selected.value || selected.value.type !== componentType) {
           selected.value = {
@@ -143,7 +158,10 @@ watch(
       const currentPath = router.currentRoute.value.path
       let expectedPath
       
-      if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components') {
+      if (newVal.type === 'home') {
+        // For home page, use base app path
+        expectedPath = '/app'
+      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components') {
         // For cluster, pending-changes, and load-local-components, no ID in URL
         expectedPath = `/app/${newVal.type}`
       } else if (newVal.id) {
@@ -162,7 +180,9 @@ watch(
 // Methods
 function onSelectItem(item) {
   // Use router navigation for better URL management
-  if (item.type === 'cluster') {
+  if (item.type === 'home') {
+    router.push('/app')
+  } else if (item.type === 'cluster') {
     router.push('/app/cluster')
   } else if (item.type === 'pending-changes') {
     router.push('/app/pending-changes')

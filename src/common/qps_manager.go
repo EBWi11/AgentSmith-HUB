@@ -39,18 +39,34 @@ type QPSManager struct {
 	mutex     sync.RWMutex
 	stopChan  chan struct{}
 	cleanupWg sync.WaitGroup
+
+	// Cached message counts (updated every minute)
+	cachedMessages     map[string]interface{}
+	cachedAggregated   map[string]interface{}
+	cachedNodeMessages map[string]interface{} // nodeID -> message stats
+	cacheUpdateTime    time.Time
+	cacheMutex         sync.RWMutex
+	cacheWg            sync.WaitGroup
 }
 
 // NewQPSManager creates a new QPS manager instance
 func NewQPSManager() *QPSManager {
 	qm := &QPSManager{
-		data:     make(map[string]*ComponentQPSData),
-		stopChan: make(chan struct{}),
+		data:               make(map[string]*ComponentQPSData),
+		stopChan:           make(chan struct{}),
+		cachedMessages:     make(map[string]interface{}),
+		cachedAggregated:   make(map[string]interface{}),
+		cachedNodeMessages: make(map[string]interface{}),
+		cacheUpdateTime:    time.Now(),
 	}
 
 	// Start cleanup goroutine to remove old data
 	qm.cleanupWg.Add(1)
 	go qm.cleanupLoop()
+
+	// Start cache update goroutine
+	qm.cacheWg.Add(1)
+	go qm.cacheUpdateLoop()
 
 	return qm
 }
@@ -283,10 +299,232 @@ func (qm *QPSManager) cleanup() {
 	}
 }
 
+// cacheUpdateLoop periodically updates the cached message counts every minute
+func (qm *QPSManager) cacheUpdateLoop() {
+	defer qm.cacheWg.Done()
+
+	ticker := time.NewTicker(1 * time.Minute) // Update cache every minute
+	defer ticker.Stop()
+
+	// Initial cache update
+	qm.updateMessageCache()
+
+	for {
+		select {
+		case <-qm.stopChan:
+			return
+		case <-ticker.C:
+			qm.updateMessageCache()
+		}
+	}
+}
+
+// updateMessageCache updates the cached message counts
+func (qm *QPSManager) updateMessageCache() {
+	// Calculate message counts for all projects
+	allMessages := qm.calculateHourlyMessageCounts("")
+	aggregatedMessages := qm.calculateAggregatedHourlyMessages()
+	nodeMessages := qm.calculateNodeHourlyMessages()
+
+	// Update cache with write lock
+	qm.cacheMutex.Lock()
+	qm.cachedMessages = allMessages
+	qm.cachedAggregated = aggregatedMessages
+	qm.cachedNodeMessages = nodeMessages
+	qm.cacheUpdateTime = time.Now()
+	qm.cacheMutex.Unlock()
+}
+
 // Stop stops the QPS manager and cleanup goroutine
 func (qm *QPSManager) Stop() {
 	close(qm.stopChan)
 	qm.cleanupWg.Wait()
+	qm.cacheWg.Wait()
+}
+
+// calculateHourlyMessageCounts calculates the real message counts for the past hour (internal method)
+func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]interface{} {
+	qm.mutex.RLock()
+	defer qm.mutex.RUnlock()
+
+	const reportInterval = 10 // seconds - must match the collector report interval
+
+	// Group by component (projectID_componentID_componentType)
+	componentGroups := make(map[string][]QPSDataPoint)
+	componentTypes := make(map[string]string)
+
+	for _, data := range qm.data {
+		if projectID == "" || data.ProjectID == projectID {
+			componentKey := fmt.Sprintf("%s_%s_%s", data.ProjectID, data.ComponentID, data.ComponentType)
+			componentTypes[componentKey] = data.ComponentType
+
+			// Add all data points from this node
+			if _, exists := componentGroups[componentKey]; !exists {
+				componentGroups[componentKey] = make([]QPSDataPoint, 0)
+			}
+			componentGroups[componentKey] = append(componentGroups[componentKey], data.DataPoints...)
+		}
+	}
+
+	result := make(map[string]interface{})
+
+	for componentKey, dataPoints := range componentGroups {
+		// Calculate total messages for this component
+		totalMessages := uint64(0)
+		for _, point := range dataPoints {
+			// Each data point represents QPS for a 10-second period
+			// So messages in this period = QPS * 10
+			messages := point.QPS * reportInterval
+			totalMessages += messages
+		}
+
+		result[componentKey] = map[string]interface{}{
+			"component_type":    componentTypes[componentKey],
+			"total_messages":    totalMessages,
+			"data_points_count": len(dataPoints),
+		}
+	}
+
+	return result
+}
+
+// calculateAggregatedHourlyMessages calculates aggregated message counts across all nodes (internal method)
+func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{} {
+	qm.mutex.RLock()
+	defer qm.mutex.RUnlock()
+
+	const reportInterval = 10 // seconds
+
+	// Group by project and component type
+	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
+	totalMessages := uint64(0)
+
+	for _, data := range qm.data {
+		if _, exists := projectStats[data.ProjectID]; !exists {
+			projectStats[data.ProjectID] = make(map[string]uint64)
+		}
+
+		// Calculate messages for this component
+		componentMessages := uint64(0)
+		for _, point := range data.DataPoints {
+			messages := point.QPS * reportInterval
+			componentMessages += messages
+		}
+
+		projectStats[data.ProjectID][data.ComponentType] += componentMessages
+		totalMessages += componentMessages
+	}
+
+	return map[string]interface{}{
+		"total_messages":    totalMessages,
+		"project_breakdown": projectStats,
+	}
+}
+
+// GetHourlyMessageCounts returns cached message counts for the past hour
+func (qm *QPSManager) GetHourlyMessageCounts(projectID string) map[string]interface{} {
+	qm.cacheMutex.RLock()
+	defer qm.cacheMutex.RUnlock()
+
+	if projectID == "" {
+		// Return all cached messages
+		return qm.cachedMessages
+	}
+
+	// Filter cached data for specific project
+	result := make(map[string]interface{})
+	for key, value := range qm.cachedMessages {
+		// Check if the key starts with projectID_
+		if len(key) > len(projectID)+1 && key[:len(projectID)+1] == projectID+"_" {
+			result[key] = value
+		}
+	}
+
+	return result
+}
+
+// GetAggregatedHourlyMessages returns cached aggregated message counts across all nodes
+func (qm *QPSManager) GetAggregatedHourlyMessages() map[string]interface{} {
+	qm.cacheMutex.RLock()
+	defer qm.cacheMutex.RUnlock()
+
+	return qm.cachedAggregated
+}
+
+// GetCacheUpdateTime returns the last cache update time
+func (qm *QPSManager) GetCacheUpdateTime() time.Time {
+	qm.cacheMutex.RLock()
+	defer qm.cacheMutex.RUnlock()
+
+	return qm.cacheUpdateTime
+}
+
+// calculateNodeHourlyMessages calculates message counts by node (internal method)
+func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
+	qm.mutex.RLock()
+	defer qm.mutex.RUnlock()
+
+	const reportInterval = 10 // seconds
+
+	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> totalMessages
+
+	for _, data := range qm.data {
+		if _, exists := nodeStats[data.NodeID]; !exists {
+			nodeStats[data.NodeID] = make(map[string]uint64)
+		}
+
+		// Calculate messages for this component on this node
+		componentMessages := uint64(0)
+		for _, point := range data.DataPoints {
+			messages := point.QPS * reportInterval
+			componentMessages += messages
+		}
+
+		nodeStats[data.NodeID][data.ComponentType] += componentMessages
+	}
+
+	// Convert to final format
+	result := make(map[string]interface{})
+	for nodeID, stats := range nodeStats {
+		inputMessages := stats["input"]
+		outputMessages := stats["output"]
+		rulesetMessages := stats["ruleset"]
+
+		result[nodeID] = map[string]interface{}{
+			"input_messages":   inputMessages,
+			"output_messages":  outputMessages,
+			"ruleset_messages": rulesetMessages,
+			"total_messages":   inputMessages + outputMessages + rulesetMessages,
+		}
+	}
+
+	return result
+}
+
+// GetNodeHourlyMessages returns cached message counts for a specific node
+func (qm *QPSManager) GetNodeHourlyMessages(nodeID string) map[string]interface{} {
+	qm.cacheMutex.RLock()
+	defer qm.cacheMutex.RUnlock()
+
+	if nodeData, exists := qm.cachedNodeMessages[nodeID]; exists {
+		return nodeData.(map[string]interface{})
+	}
+
+	// Return empty result if node not found
+	return map[string]interface{}{
+		"input_messages":   uint64(0),
+		"output_messages":  uint64(0),
+		"ruleset_messages": uint64(0),
+		"total_messages":   uint64(0),
+	}
+}
+
+// GetAllNodeHourlyMessages returns cached message counts for all nodes
+func (qm *QPSManager) GetAllNodeHourlyMessages() map[string]interface{} {
+	qm.cacheMutex.RLock()
+	defer qm.cacheMutex.RUnlock()
+
+	return qm.cachedNodeMessages
 }
 
 // GetStats returns statistics about the QPS manager

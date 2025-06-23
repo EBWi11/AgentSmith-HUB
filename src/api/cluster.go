@@ -713,3 +713,223 @@ func getQPSStats(c echo.Context) error {
 	stats := common.GlobalQPSManager.GetStats()
 	return c.JSON(http.StatusOK, stats)
 }
+
+// getHourlyMessages returns real message counts for the past hour
+func getHourlyMessages(c echo.Context) error {
+	// Only provide message data from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Message data is only available from leader nodes",
+		})
+	}
+
+	if common.GlobalQPSManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "QPS manager not initialized",
+		})
+	}
+
+	projectID := c.QueryParam("project_id")
+	nodeID := c.QueryParam("node_id")
+	aggregated := c.QueryParam("aggregated") == "true"
+	byNode := c.QueryParam("by_node") == "true"
+
+	var result interface{}
+
+	if byNode {
+		if nodeID != "" {
+			// Return message counts for a specific node
+			result = common.GlobalQPSManager.GetNodeHourlyMessages(nodeID)
+		} else {
+			// Return message counts for all nodes
+			result = common.GlobalQPSManager.GetAllNodeHourlyMessages()
+		}
+	} else if aggregated {
+		// Return aggregated message counts across all projects and nodes
+		result = common.GlobalQPSManager.GetAggregatedHourlyMessages()
+	} else {
+		// Return message counts for a specific project (or all if projectID is empty)
+		result = common.GlobalQPSManager.GetHourlyMessageCounts(projectID)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":              result,
+		"timestamp":         time.Now(),
+		"period":            "past_hour",
+		"cache_updated_at":  common.GlobalQPSManager.GetCacheUpdateTime(),
+		"cache_update_note": "Message counts are calculated every minute to optimize performance",
+	})
+}
+
+// getSystemMetrics returns current and historical system metrics for this node
+func getSystemMetrics(c echo.Context) error {
+	if common.GlobalSystemMonitor == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "System monitor not initialized",
+		})
+	}
+
+	// Parse query parameters
+	sinceParam := c.QueryParam("since")
+	currentOnly := c.QueryParam("current") == "true"
+
+	if currentOnly {
+		// Return only current metrics
+		current := common.GlobalSystemMonitor.GetCurrentMetrics()
+		if current == nil {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": "No system metrics available",
+			})
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"current":   current,
+			"timestamp": time.Now(),
+		})
+	}
+
+	var historical []common.SystemDataPoint
+	if sinceParam != "" {
+		// Parse since timestamp
+		since, err := time.Parse(time.RFC3339, sinceParam)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("Invalid since parameter format: %v", err),
+			})
+		}
+		historical = common.GlobalSystemMonitor.GetHistoricalMetrics(since)
+	} else {
+		// Return all historical data
+		historical = common.GlobalSystemMonitor.GetAllMetrics()
+	}
+
+	current := common.GlobalSystemMonitor.GetCurrentMetrics()
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"current":    current,
+		"historical": historical,
+		"timestamp":  time.Now(),
+		"stats":      common.GlobalSystemMonitor.GetStats(),
+	})
+}
+
+// getSystemStats returns system monitor statistics
+func getSystemStats(c echo.Context) error {
+	if common.GlobalSystemMonitor == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "System monitor not initialized",
+		})
+	}
+
+	stats := common.GlobalSystemMonitor.GetStats()
+	return c.JSON(http.StatusOK, stats)
+}
+
+// handleMetricsSync handles combined QPS and system metrics synchronization from followers
+func handleMetricsSync(c echo.Context) error {
+	// Only accept metrics data on leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Metrics data can only be sent to leader nodes",
+		})
+	}
+
+	var payload struct {
+		QPSData       []common.QPSMetrics   `json:"qps_data"`
+		SystemMetrics *common.SystemMetrics `json:"system_metrics"`
+	}
+
+	if err := c.Bind(&payload); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("invalid metrics data format: %v", err),
+		})
+	}
+
+	var processedQPS, processedSystem int
+
+	// Process QPS data
+	if common.GlobalQPSManager != nil && len(payload.QPSData) > 0 {
+		for _, qpsData := range payload.QPSData {
+			common.GlobalQPSManager.AddQPSData(&qpsData)
+			processedQPS++
+		}
+	}
+
+	// Process system metrics
+	if common.GlobalClusterSystemManager != nil && payload.SystemMetrics != nil {
+		common.GlobalClusterSystemManager.AddSystemMetrics(payload.SystemMetrics)
+		processedSystem = 1
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"status":           "success",
+		"processed_qps":    processedQPS,
+		"processed_system": processedSystem,
+		"timestamp":        time.Now(),
+	})
+}
+
+// getClusterSystemMetrics returns system metrics for all cluster nodes
+func getClusterSystemMetrics(c echo.Context) error {
+	// Only provide cluster system metrics from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Cluster system metrics are only available from leader nodes",
+		})
+	}
+
+	if common.GlobalClusterSystemManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Cluster system manager not initialized",
+		})
+	}
+
+	nodeID := c.QueryParam("node_id")
+	aggregated := c.QueryParam("aggregated") == "true"
+
+	if aggregated {
+		// Return aggregated metrics across all nodes
+		aggregatedMetrics := common.GlobalClusterSystemManager.GetAggregatedMetrics()
+		return c.JSON(http.StatusOK, aggregatedMetrics)
+	} else if nodeID != "" {
+		// Return metrics for specific node
+		metrics := common.GlobalClusterSystemManager.GetNodeMetrics(nodeID)
+		if metrics == nil {
+			return c.JSON(http.StatusNotFound, map[string]string{
+				"error": fmt.Sprintf("No metrics found for node: %s", nodeID),
+			})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"node_id":   nodeID,
+			"metrics":   metrics,
+			"timestamp": time.Now(),
+		})
+	} else {
+		// Return metrics for all nodes
+		allMetrics := common.GlobalClusterSystemManager.GetAllMetrics()
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"metrics":   allMetrics,
+			"timestamp": time.Now(),
+			"stats":     common.GlobalClusterSystemManager.GetStats(),
+		})
+	}
+}
+
+// getClusterSystemStats returns cluster system manager statistics
+func getClusterSystemStats(c echo.Context) error {
+	// Only provide cluster system stats from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Cluster system statistics are only available from leader nodes",
+		})
+	}
+
+	if common.GlobalClusterSystemManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Cluster system manager not initialized",
+		})
+	}
+
+	stats := common.GlobalClusterSystemManager.GetStats()
+	return c.JSON(http.StatusOK, stats)
+}

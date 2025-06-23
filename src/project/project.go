@@ -1827,9 +1827,19 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 			})
 		}
 
-		// Note: Rulesets don't have direct QPS metrics like inputs/outputs
-		// They process data through input -> ruleset -> output flow
-		// The QPS is captured at input and output stages
+		// Collect ruleset QPS data for visualization purposes
+		// While rulesets don't directly produce QPS metrics, we include them
+		// with QPS=0 so they appear in frontend project flow diagrams
+		for rulesetID := range proj.Rulesets {
+			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
+				NodeID:        nodeID,
+				ProjectID:     projectID,
+				ComponentID:   rulesetID,
+				ComponentType: "ruleset",
+				QPS:           0, // Rulesets process data through input->ruleset->output flow
+				Timestamp:     now,
+			})
+		}
 	}
 
 	return qpsMetrics

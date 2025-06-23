@@ -8,11 +8,10 @@
     <div class="node-content">
       {{ nodeName }}
     </div>
-    <!-- QPS Display -->
-    <div v-if="hasQPSData" class="node-qps" :style="{ backgroundColor: qpsBackgroundColor, color: qpsTextColor }">
-      <span class="qps-label">QPS:</span>
-      <span class="qps-value">{{ formattedQPS }}</span>
-      <span v-if="nodeCount > 1" class="qps-nodes">({{ nodeCount }} nodes)</span>
+    <!-- Message Count Display -->
+    <div v-if="hasMessageData" class="node-messages" :style="{ backgroundColor: messagesBackgroundColor, color: messagesTextColor }">
+      <span class="messages-label">MSG/H:</span>
+      <span class="messages-value">{{ formattedMessagesPerHour }}</span>
     </div>
     <Handle type="target" :position="Position.Top" />
     <Handle type="source" :position="Position.Bottom" />
@@ -32,15 +31,11 @@ const props = defineProps({
     type: String,
     required: true,
   },
-  qps: {
+  messages: {
     type: Number,
     default: 0,
   },
-  nodeCount: {
-    type: Number,
-    default: 0,
-  },
-  hasQPSData: {
+  hasMessageData: {
     type: Boolean,
     default: false,
   }
@@ -68,25 +63,33 @@ const borderColor = computed(() => colors.value.border);
 const textColor = computed(() => colors.value.text);
 const isBold = computed(() => colors.value.bold || false);
 
-// QPS related computed properties
-const formattedQPS = computed(() => {
-  if (props.qps >= 1000) {
-    return (props.qps / 1000).toFixed(1) + 'k';
+// Message display related computed properties
+const formattedMessagesPerHour = computed(() => {
+  // Format real message counts for past hour
+  const messages = props.messages;
+  
+  if (messages >= 1000000) {
+    return (messages / 1000000).toFixed(1) + 'M';
   }
-  return props.qps.toString();
+  if (messages >= 1000) {
+    return (messages / 1000).toFixed(1) + 'K';
+  }
+  return messages.toString();
 });
 
-const qpsBackgroundColor = computed(() => {
-  if (props.qps === 0) return '#f3f4f6'; // Gray for no activity
-  if (props.qps < 10) return '#ecfdf5'; // Light green for low QPS
-  if (props.qps < 100) return '#fef3c7'; // Light yellow for medium QPS
-  return '#fef2f2'; // Light red for high QPS
+const messagesBackgroundColor = computed(() => {
+  const messages = props.messages;
+  if (messages === 0) return '#f3f4f6'; // Gray for no activity
+  if (messages < 36000) return '#ecfdf5'; // Light green for low message count (< 10/h equivalent)
+  if (messages < 360000) return '#fef3c7'; // Light yellow for medium message count (< 100/h equivalent)
+  return '#fef2f2'; // Light red for high message count (>= 100/h equivalent)
 });
 
-const qpsTextColor = computed(() => {
-  if (props.qps === 0) return '#6b7280'; // Gray text
-  if (props.qps < 10) return '#065f46'; // Dark green text
-  if (props.qps < 100) return '#92400e'; // Dark yellow text
+const messagesTextColor = computed(() => {
+  const messages = props.messages;
+  if (messages === 0) return '#6b7280'; // Gray text
+  if (messages < 36000) return '#065f46'; // Dark green text
+  if (messages < 360000) return '#92400e'; // Dark yellow text
   return '#991b1b'; // Dark red text
 });
 </script>
@@ -131,33 +134,33 @@ const qpsTextColor = computed(() => {
   hyphens: auto;
 }
 
-.node-qps {
-  padding: 2px 3px;
+.node-messages {
+  padding: 1px 2px;
   text-align: center;
-  font-size: 7px;
-  line-height: 8px;
+  font-size: 5px;
+  line-height: 5px;
   font-weight: 600;
   border-top: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
+  gap: 0px;
 }
 
-.qps-label {
-  font-size: 6px;
+.messages-label {
+  font-size: 4px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   opacity: 0.8;
 }
 
-.qps-value {
-  font-size: 8px;
+.messages-value {
+  font-size: 5px;
   font-weight: 700;
 }
 
-.qps-nodes {
-  font-size: 6px;
+.messages-nodes {
+  font-size: 4px;
   opacity: 0.7;
   font-weight: 400;
 }

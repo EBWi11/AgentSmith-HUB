@@ -1034,3 +1034,120 @@ func testRulesetContent(c echo.Context) error {
 		"results": results,
 	})
 }
+
+func getProjectComponents(c echo.Context) error {
+	id := c.Param("id")
+
+	// Check if project exists
+	var projectContent string
+	var isTemp bool
+
+	// First check if there is a temporary file
+	tempPath, tempExists := GetComponentPath("project", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			projectContent = content
+			isTemp = true
+		}
+	}
+
+	// If no temporary file, check formal file
+	if projectContent == "" {
+		formalPath, formalExists := GetComponentPath("project", id, false)
+		if !formalExists {
+			// Check if project exists in memory
+			proj := project.GlobalProject.Projects[id]
+			if proj == nil {
+				// Check if project exists in new projects
+				content, ok := project.GlobalProject.ProjectsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Project not found: " + id,
+					})
+				}
+				projectContent = content
+			} else {
+				projectContent = proj.Config.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read project: " + err.Error(),
+				})
+			}
+			projectContent = content
+		}
+	}
+
+	// Create temporary project to parse configuration (test version, no real component initialization)
+	// Generate unique test project ID to avoid conflicts
+	testProjectId := fmt.Sprintf("test_components_%s_%d", id, time.Now().UnixNano())
+	tempProject, err := project.NewProjectForTesting("", projectContent, testProjectId)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse project: " + err.Error(),
+		})
+	}
+
+	// Collect component information
+	inputs := []map[string]string{}
+	for name := range tempProject.Inputs {
+		inputs = append(inputs, map[string]string{
+			"id":   name,
+			"name": name,
+			"type": "input",
+		})
+	}
+
+	outputs := []map[string]string{}
+	for name := range tempProject.Outputs {
+		outputs = append(outputs, map[string]string{
+			"id":   name,
+			"name": name,
+			"type": "output",
+		})
+	}
+
+	rulesets := []map[string]string{}
+	for name := range tempProject.Rulesets {
+		rulesets = append(rulesets, map[string]string{
+			"id":   name,
+			"name": name,
+			"type": "ruleset",
+		})
+	}
+
+	// Calculate total component count
+	totalComponents := len(inputs) + len(outputs) + len(rulesets)
+
+	// Sort component lists by name
+	sort.Slice(inputs, func(i, j int) bool {
+		return inputs[i]["name"] < inputs[j]["name"]
+	})
+	sort.Slice(outputs, func(i, j int) bool {
+		return outputs[i]["name"] < outputs[j]["name"]
+	})
+	sort.Slice(rulesets, func(i, j int) bool {
+		return rulesets[i]["name"] < rulesets[j]["name"]
+	})
+
+	// Return result
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success":         true,
+		"isTemp":          isTemp,
+		"inputs":          inputs,
+		"outputs":         outputs,
+		"rulesets":        rulesets,
+		"totalComponents": totalComponents,
+		"componentCounts": map[string]int{
+			"inputs":   len(inputs),
+			"outputs":  len(outputs),
+			"rulesets": len(rulesets),
+		},
+	})
+}

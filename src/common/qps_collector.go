@@ -14,6 +14,9 @@ import (
 // QPSDataProvider is a function type that provides QPS data for collection
 type QPSDataProvider func() []QPSMetrics
 
+// SystemDataProvider is a function type that provides system metrics for collection
+type SystemDataProvider func() *SystemMetrics
+
 // QPSCollector collects QPS data from local components and sends to leader
 type QPSCollector struct {
 	nodeID         string
@@ -22,16 +25,18 @@ type QPSCollector struct {
 	stopChan       chan struct{}
 	wg             sync.WaitGroup
 	dataProvider   QPSDataProvider
+	systemProvider SystemDataProvider
 }
 
 // NewQPSCollector creates a new QPS collector instance
-func NewQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider) *QPSCollector {
+func NewQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) *QPSCollector {
 	return &QPSCollector{
 		nodeID:         nodeID,
 		leaderAddr:     leaderAddr,
 		reportInterval: 10 * time.Second, // Report every 10 seconds
 		stopChan:       make(chan struct{}),
 		dataProvider:   dataProvider,
+		systemProvider: systemProvider,
 	}
 }
 
@@ -70,7 +75,7 @@ func (qc *QPSCollector) collectAndReportLoop() {
 	}
 }
 
-// collectAndReport collects current QPS data and sends to leader
+// collectAndReport collects current QPS data and system metrics, then sends to leader
 func (qc *QPSCollector) collectAndReport() {
 	// Collect QPS data using the provided data provider function
 	var qpsData []QPSMetrics
@@ -78,35 +83,46 @@ func (qc *QPSCollector) collectAndReport() {
 		qpsData = qc.dataProvider()
 	}
 
-	if len(qpsData) == 0 {
-		// No data to report
-		return
+	// Collect system metrics using the provided system provider function
+	var systemMetrics *SystemMetrics
+	if qc.systemProvider != nil {
+		systemMetrics = qc.systemProvider()
+	}
+
+	// Prepare combined data payload
+	payload := map[string]interface{}{
+		"qps_data": qpsData,
+	}
+
+	if systemMetrics != nil {
+		payload["system_metrics"] = systemMetrics
 	}
 
 	// Send data to leader
-	if err := qc.sendQPSDataToLeader(qpsData); err != nil {
-		logger.Error("Failed to send QPS data to leader", "error", err, "node_id", qc.nodeID)
+	if err := qc.sendDataToLeader(payload); err != nil {
+		logger.Error("Failed to send data to leader", "error", err, "node_id", qc.nodeID)
 	} else {
-		logger.Debug("Successfully sent QPS data to leader",
+		logger.Debug("Successfully sent data to leader",
 			"node_id", qc.nodeID,
-			"metrics_count", len(qpsData))
+			"qps_metrics_count", len(qpsData),
+			"has_system_metrics", systemMetrics != nil)
 	}
 }
 
-// sendQPSDataToLeader sends QPS data to the leader node
-func (qc *QPSCollector) sendQPSDataToLeader(qpsData []QPSMetrics) error {
+// sendDataToLeader sends combined QPS and system data to the leader node
+func (qc *QPSCollector) sendDataToLeader(payload map[string]interface{}) error {
 	if qc.leaderAddr == "" {
 		return fmt.Errorf("leader address not set")
 	}
 
-	// Marshal QPS data to JSON
-	jsonData, err := json.Marshal(qpsData)
+	// Marshal data to JSON
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal QPS data: %w", err)
+		return fmt.Errorf("failed to marshal data: %w", err)
 	}
 
-	// Send POST request to leader
-	url := fmt.Sprintf("http://%s/qps-sync", qc.leaderAddr)
+	// Send POST request to leader (use combined endpoint)
+	url := fmt.Sprintf("http://%s/metrics-sync", qc.leaderAddr)
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to send HTTP request: %w", err)
@@ -130,9 +146,9 @@ func (qc *QPSCollector) UpdateLeaderAddr(leaderAddr string) {
 var GlobalQPSCollector *QPSCollector
 
 // InitQPSCollector initializes the global QPS collector (only call on followers)
-func InitQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider) {
+func InitQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) {
 	if GlobalQPSCollector == nil {
-		GlobalQPSCollector = NewQPSCollector(nodeID, leaderAddr, dataProvider)
+		GlobalQPSCollector = NewQPSCollector(nodeID, leaderAddr, dataProvider, systemProvider)
 		GlobalQPSCollector.Start()
 		logger.Info("QPS collector initialized and started", "node_id", nodeID)
 	}

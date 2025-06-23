@@ -324,7 +324,14 @@ func (cm *ClusterManager) Stop() error {
 	if IsLeader {
 		common.StopQPSManager()
 		logger.Info("QPS manager stopped")
+
+		common.StopClusterSystemManager()
+		logger.Info("Cluster system manager stopped")
 	}
+
+	// Stop system monitor
+	common.StopSystemMonitor()
+	logger.Info("System monitor stopped")
 
 	// Stop follower heartbeat if this is a follower
 	if cm.stopFollowerHeartbeat != nil {
@@ -374,6 +381,10 @@ func StartAsLeader(config *ClusterConfig) error {
 	// Initialize QPS manager for leader
 	common.InitQPSManager()
 	logger.Info("QPS manager initialized for leader")
+
+	// Initialize cluster system manager for leader
+	common.InitClusterSystemManager()
+	logger.Info("Cluster system manager initialized for leader")
 
 	// Start heartbeat monitoring (for monitoring followers)
 	go cm.monitorHeartbeats()

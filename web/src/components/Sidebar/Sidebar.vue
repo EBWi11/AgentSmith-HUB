@@ -13,243 +13,285 @@
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       <div v-for="(section, type) in sections" :key="type" class="mb-4">
-        <div class="flex items-center justify-between mb-1.5">
-          <button
-            @click="toggleCollapse(type)"
-            class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
-            style="min-width:0;"
-          >
-            <svg
-              class="w-4 h-4 mr-1.5 transition-transform duration-200"
-              :class="{ 'rotate-90': !collapsed[type] }"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        <!-- Dashboard special button -->
+        <div v-if="type === 'dashboard'">
+          <div class="flex items-center justify-between mb-1.5">
+            <button
+              @click="$emit('select-item', { type: 'home' })"
+              class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+              :class="{ 'text-blue-600': selected && selected.type === 'home' }"
+              style="min-width:0;"
             >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-            <!-- Add section icon -->
-            <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
-            <span class="truncate">{{ section.title }}</span>
-          </button>
-          <div class="relative mr-3">
-            <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+              <!-- Empty space for arrow alignment -->
+              <div class="w-4 h-4 mr-1.5"></div>
+              <!-- Add section icon -->
+              <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
+              <span class="truncate">{{ section.title }}</span>
             </button>
           </div>
         </div>
-        <div v-if="!collapsed[type]" class="space-y-0.5">
-          <div v-if="section.children">
-            <!-- 已经将Push Changes整合到section.children中，不再需要单独的部分 -->
-            <div v-for="child in section.children" :key="child.type"
-                 class="flex items-center justify-between py-1 px-3 rounded-md group cursor-pointer transition-all hover:bg-gray-100"
-                 :class="{ 'bg-blue-50': selected && selected.type === child.type }"
-                 @click="$emit('select-item', { type: child.type })">
-              <div class="flex items-center min-w-0 flex-1">
-                <!-- 移除所有子组件的图标 -->
-                <span class="text-sm truncate">{{ child.title }}</span>
-              </div>
+        <!-- Regular sections -->
+        <div v-else>
+          <div class="flex items-center justify-between mb-1.5">
+            <button
+              @click="toggleCollapse(type)"
+              class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+              style="min-width:0;"
+            >
+              <svg
+                class="w-4 h-4 mr-1.5 transition-transform duration-200"
+                :class="{ 'rotate-90': !collapsed[type] }"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+              <!-- Add section icon -->
+              <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
+              <span class="truncate">{{ section.title }}</span>
+            </button>
+            <div class="relative mr-3">
+              <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+              </button>
             </div>
           </div>
-          <div v-else-if="!loading[type] && !error[type]">
-            <div v-for="item in filteredItems(type)" :key="item.id" 
-                 class="flex items-center justify-between py-1 px-3 hover:bg-gray-100 rounded-md cursor-pointer group"
-                 :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
-                 @click="handleItemClick(type, item)">
-              <div class="flex items-center min-w-0 flex-1">
-                <span class="text-sm truncate">{{ item.id }}</span>
-                <!-- Plugin type badge -->
-                <span v-if="type === 'plugins' && item.type === 'local'" 
-                      class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                      @mouseenter="showTooltip($event, 'Built-in Plugin')"
-                      @mouseleave="hideTooltip">
-                  L
-                </span>
-                <!-- Temporary file badge -->
-                <span v-if="item.hasTemp" 
-                      class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                      @mouseenter="showTooltip($event, 'Temporary Version')"
-                      @mouseleave="hideTooltip">
-                  T
-                </span>
-                <!-- Project status badge -->
-                <span v-if="type === 'projects' && item.status" 
-                      class="ml-2 text-xs w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                      :class="{
-                        'bg-green-100 text-green-800': item.status === 'running',
-                        'bg-gray-100 text-gray-800': item.status === 'stopped',
-                        'bg-red-100 text-red-800': item.status === 'error'
-                      }"
-                      @mouseenter="showTooltip($event, getStatusTitle(item))"
-                      @mouseleave="hideTooltip">
-                  {{ getStatusLabel(item.status) }}
-                </span>
+          <div v-if="!collapsed[type]" class="space-y-0.5">
+            <div v-if="section.children" class="relative">
+              <!-- 已经将Push Changes整合到section.children中，不再需要单独的部分 -->
+              <div v-for="(child, index) in section.children" :key="child.type"
+                   class="relative flex items-center justify-between py-1 rounded-md group cursor-pointer transition-all hover:bg-gray-100"
+                   :class="{ 'bg-blue-50': selected && selected.type === child.type }"
+                   @click="$emit('select-item', { type: child.type })">
+                <!-- Tree lines for children -->
+                <!-- Vertical line connecting to next item (except for last item) -->
+                <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < section.children.length - 1"></div>
+                <!-- Horizontal line to item -->
+                <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                <!-- Vertical line from top to current item (all items have this) -->
+                <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                
+                <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                  <!-- 移除所有子组件的图标 -->
+                  <span class="text-sm truncate">{{ child.title }}</span>
+                </div>
               </div>
-              
-              <!-- Actions menu -->
-              <div class="relative">
-                <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
-                        @click.stop="toggleMenu(item)">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-                  </svg>
-                </button>
-                <!-- Dropdown menu -->
-                <div v-if="item.menuOpen" 
-                     class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
-                     @click.stop>
-                  <div class="py-1">
-                    <!-- Edit action -->
-                    <a v-if="!(type === 'plugins' && item.type === 'local')" 
-                       href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type, id: item.id, isEdit: true })">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                      </svg>
-                      Edit
-                    </a>
-                    
-                    <!-- Project specific actions -->
-                    <template v-if="type === 'projects'">
-                      <!-- Start action -->
-                      <a v-if="item.status === 'stopped' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                         @click.prevent.stop="startProject(item)">
+            </div>
+            <div v-else-if="!loading[type] && !error[type]" class="relative">
+              <!-- Empty state: show only short vertical line when no components -->
+              <div v-if="filteredItems(type).length === 0" class="relative py-1">
+                <!-- Short vertical line for empty state -->
+                <div class="absolute left-5 top-0 h-3 w-px bg-gray-300"></div>
+              </div>
+              <!-- Normal component list -->
+              <div v-else v-for="(item, index) in filteredItems(type)" :key="item.id" 
+                   class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                   :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
+                   @click="handleItemClick(type, item)">
+                <!-- Tree lines -->
+                <!-- Vertical line connecting to next item (except for last item) -->
+                <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < filteredItems(type).length - 1"></div>
+                <!-- Horizontal line to item -->
+                <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                <!-- Vertical line from top to current item (all items have this) -->
+                <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                
+                <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                  <span class="text-sm truncate">{{ item.id }}</span>
+                  <!-- Plugin type badge -->
+                  <span v-if="type === 'plugins' && item.type === 'local'" 
+                        class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                        @mouseenter="showTooltip($event, 'Built-in Plugin')"
+                        @mouseleave="hideTooltip">
+                    L
+                  </span>
+                  <!-- Temporary file badge -->
+                  <span v-if="item.hasTemp" 
+                        class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                        @mouseenter="showTooltip($event, 'Temporary Version')"
+                        @mouseleave="hideTooltip">
+                    T
+                  </span>
+                  <!-- Project status badge -->
+                  <span v-if="type === 'projects' && item.status" 
+                        class="ml-2 text-xs w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                        :class="{
+                          'bg-green-100 text-green-800': item.status === 'running',
+                          'bg-gray-100 text-gray-800': item.status === 'stopped',
+                          'bg-red-100 text-red-800': item.status === 'error'
+                        }"
+                        @mouseenter="showTooltip($event, getStatusTitle(item))"
+                        @mouseleave="hideTooltip">
+                    {{ getStatusLabel(item.status) }}
+                  </span>
+                </div>
+                
+                <!-- Actions menu -->
+                <div class="relative mr-3">
+                  <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                          @click.stop="toggleMenu(item)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                    </svg>
+                  </button>
+                  <!-- Dropdown menu -->
+                  <div v-if="item.menuOpen" 
+                       class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                       @click.stop>
+                    <div class="py-1">
+                      <!-- Edit action -->
+                      <a v-if="!(type === 'plugins' && item.type === 'local')" 
+                         href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type, id: item.id, isEdit: true })">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                         </svg>
-                        Start
+                        Edit
                       </a>
                       
-                      <!-- Stop action -->
-                      <a v-if="item.status === 'running' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                         @click.prevent.stop="stopProject(item)">
+                      <!-- Project specific actions -->
+                      <template v-if="type === 'projects'">
+                        <!-- Start action -->
+                        <a v-if="item.status === 'stopped' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="startProject(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Start
+                        </a>
+                        
+                        <!-- Stop action -->
+                        <a v-if="item.status === 'running' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="stopProject(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                          </svg>
+                          Stop
+                        </a>
+                        
+                        <!-- Restart action -->
+                        <a v-if="item.status === 'running' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="restartProject(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Restart
+                        </a>
+                      </template>
+                      
+                      <!-- Test actions for different component types -->
+                      <a v-if="shouldShowConnectCheck(type, item)" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="checkConnection(type, item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                         </svg>
-                        Stop
+                        Connect Check
                       </a>
                       
-                      <!-- Restart action -->
-                      <a v-if="item.status === 'running' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                         @click.prevent.stop="restartProject(item)">
+                      <!-- View Sample Data for inputs -->
+                      <a v-if="type === 'inputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openSampleDataModal(item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                         </svg>
-                        Restart
+                        View Sample Data
                       </a>
-                    </template>
-                    
-                    <!-- Test actions for different component types -->
-                    <a v-if="shouldShowConnectCheck(type, item)" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="checkConnection(type, item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                      Connect Check
-                    </a>
-                    
-                    <!-- View Sample Data for inputs -->
-                    <a v-if="type === 'inputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openSampleDataModal(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      View Sample Data
-                    </a>
-                    
-                    <!-- View Sample Data for rulesets -->
-                    <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openSampleDataModal(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      View Sample Data
-                    </a>
-                    
-                    <!-- View Sample Data for outputs -->
-                    <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openSampleDataModal(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      View Sample Data
-                    </a>
-                    
-                    <!-- 添加查看使用情况选项，仅对input、output和ruleset类型显示 -->
-                    <a v-if="type === 'inputs' || type === 'outputs' || type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openUsageModal(type, item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                      View Usage
-                    </a>
-                    
-                    <a v-if="type === 'plugins'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openTestPlugin(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      Test Plugin
-                    </a>
-                    
-                    <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openTestRuleset(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      Test Ruleset
-                    </a>
-                    
-                    <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openTestOutput(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      Test Output
-                    </a>
-                    
-                    <a v-if="type === 'projects'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="openTestProject(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                      Test Project
-                    </a>
-                    
-                    <!-- Copy name action -->
-                    <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
-                       @click.prevent.stop="copyName(item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
-                      </svg>
-                      Copy Name
-                    </a>
-                    
-                    <!-- Delete action -->
-                    <div v-if="!(type === 'plugins' && item.type === 'local')" class="border-t border-gray-100 my-1"></div>
-                    <a v-if="!(type === 'plugins' && item.type === 'local')" 
-                       href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
-                       @click.prevent.stop="openDeleteModal(type, item)">
-                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                      Delete
-                    </a>
+                      
+                      <!-- View Sample Data for rulesets -->
+                      <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openSampleDataModal(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        View Sample Data
+                      </a>
+                      
+                      <!-- View Sample Data for outputs -->
+                      <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openSampleDataModal(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        View Sample Data
+                      </a>
+                      
+                      <!-- 添加查看使用情况选项，仅对input、output和ruleset类型显示 -->
+                      <a v-if="type === 'inputs' || type === 'outputs' || type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openUsageModal(type, item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        View Usage
+                      </a>
+                      
+                      <a v-if="type === 'plugins'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestPlugin(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Plugin
+                      </a>
+                      
+                      <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestRuleset(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Ruleset
+                      </a>
+                      
+                      <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestOutput(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Output
+                      </a>
+                      
+                      <a v-if="type === 'projects'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestProject(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Project
+                      </a>
+                      
+                      <!-- Copy name action -->
+                      <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="copyName(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                        </svg>
+                        Copy Name
+                      </a>
+                      
+                      <!-- Delete action -->
+                      <div v-if="!(type === 'plugins' && item.type === 'local')" class="border-t border-gray-100 my-1"></div>
+                      <a v-if="!(type === 'plugins' && item.type === 'local')" 
+                         href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
+                         @click.prevent.stop="openDeleteModal(type, item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        Delete
+                      </a>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div v-if="loading[type]" class="py-1 text-center text-gray-400">
-            <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mx-auto"></div>
-          </div>
-          <div v-else-if="error[type]" class="text-red-500 text-xs py-1">
-            {{ error[type] }}
+            <div v-if="loading[type]" class="py-1 text-center text-gray-400">
+              <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mx-auto"></div>
+            </div>
+            <div v-else-if="error[type]" class="text-red-500 text-xs py-1">
+              {{ error[type] }}
+            </div>
           </div>
         </div>
       </div>
@@ -781,6 +823,7 @@ const items = reactive({
 })
 
 const collapsed = reactive({
+  dashboard: false,
   inputs: true,
   outputs: true,
   rulesets: true,
@@ -790,6 +833,10 @@ const collapsed = reactive({
 })
 
 const sections = reactive({
+  dashboard: {
+    title: 'DASHBOARD',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>'
+  },
   inputs: { 
     title: 'Input', 
     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 
