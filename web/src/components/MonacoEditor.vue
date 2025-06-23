@@ -2312,7 +2312,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         label: '->',
         kind: monaco.languages.CompletionItemKind.Operator,
         documentation: 'Flow operator',
-        insertText: '-> ',
+        insertText: 'image.png-> ',
         range: range
       });
     }
