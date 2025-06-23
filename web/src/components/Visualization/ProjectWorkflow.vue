@@ -405,19 +405,45 @@ function updateNodesWithMessages() {
     let totalMessages = 0;
     let foundData = false;
     
-    // Search through all message data keys to find matches
-    // The new format uses ProjectNodeSequence as keys, which can be complex like:
-    // "input.api_sec.ruleset.test.output.print_demo"
+    // UPDATED: Now include ruleset processing statistics while still avoiding double-counting
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object') {
-        // Check if this key contains our component
-        // Format could be ProjectNodeSequence like "input.api_sec" or "input.api_sec.ruleset.test"
-        const keyParts = key.split('.');
-        const componentTypeInKey = keyParts[0]; // "input", "output", "ruleset"
-        const componentIdInKey = keyParts[1];   // component ID
+        let shouldCount = false;
         
-        // Match both component type and ID
-        if (componentTypeInKey === componentType && componentIdInKey === componentId) {
+        // Check if this key represents the actual component we're looking for
+        const keyParts = key.split('.');
+        
+        if (componentType === 'input') {
+          // For input components, only count if ProjectNodeSequence is exactly "input.componentId"
+          // This avoids counting downstream sequences like "input.componentId.ruleset.test.output.print"
+          if (keyParts.length === 2 && keyParts[0] === 'input' && keyParts[1] === componentId) {
+            shouldCount = true;
+          }
+        } else if (componentType === 'output') {
+          // For output components, only count if ProjectNodeSequence ends with "output.componentId"
+          // This ensures we count the final output stage, not intermediate processing
+          if (keyParts.length >= 2 && 
+              keyParts[keyParts.length - 2] === 'output' && 
+              keyParts[keyParts.length - 1] === componentId) {
+            shouldCount = true;
+          }
+        } else if (componentType === 'ruleset') {
+          // For ruleset components, show processing load by finding sequences that contain this ruleset
+          // Look for ProjectNodeSequence patterns like "input.api_sec.ruleset.componentId.output.print" 
+          // where this ruleset is in the processing chain
+          const rulesetPattern = `ruleset.${componentId}`;
+          if (key.includes(rulesetPattern)) {
+            // Only count if this represents actual ruleset processing, not just presence in sequence
+            // Check that ruleset.componentId is followed by more components or is at the end
+            const rulesetIndex = key.indexOf(rulesetPattern);
+            if (rulesetIndex !== -1) {
+              // This ruleset is part of the processing chain, count its processing load
+              shouldCount = true;
+            }
+          }
+        }
+        
+        if (shouldCount) {
           totalMessages += componentData.total_messages || 0;
           foundData = true;
         }

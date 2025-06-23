@@ -1050,7 +1050,7 @@ func ApplyPendingChanges(c echo.Context) error {
 		// Verify plugin configuration
 		err := plugin.Verify("", content, name)
 		if err != nil {
-			logger.Error("Plugin verification failed", "name", name, "error", err)
+			logger.PluginError("Plugin verification failed", "name", name, "error", err)
 			failureCount++
 			verifyFailures = append(verifyFailures, map[string]string{
 				"type":  "plugin",
@@ -1062,7 +1062,7 @@ func ApplyPendingChanges(c echo.Context) error {
 
 		err = mergePluginFile(name)
 		if err != nil {
-			logger.Error("Failed to apply plugin changes", "name", name, "error", err)
+			logger.PluginError("Failed to apply plugin changes", "name", name, "error", err)
 			failureCount++
 		} else {
 			// Reload the plugin into memory after successful merge
@@ -1070,7 +1070,7 @@ func ApplyPendingChanges(c echo.Context) error {
 			pluginPath := path.Join(configRoot, "plugin", name+".go")
 			reloadErr := plugin.NewPlugin(pluginPath, "", name, plugin.YAEGI_PLUGIN)
 			if reloadErr != nil {
-				logger.Error("Failed to reload plugin after merge", "name", name, "error", reloadErr)
+				logger.PluginError("Failed to reload plugin after merge", "name", name, "error", reloadErr)
 				failureCount++
 			} else {
 				// Clear the memory map entry after successful merge
@@ -1498,7 +1498,7 @@ func ApplySingleChange(c echo.Context) error {
 			pluginPath := path.Join(configRoot, "plugin", req.ID+".go")
 			err = plugin.NewPlugin(pluginPath, "", req.ID, plugin.YAEGI_PLUGIN)
 			if err != nil {
-				logger.Error("Failed to reload plugin after merge", "id", req.ID, "error", err)
+				logger.PluginError("Failed to reload plugin after merge", "id", req.ID, "error", err)
 			}
 		}
 	case "input", "output", "ruleset", "project":
@@ -1818,7 +1818,7 @@ func mergePluginFile(name string) error {
 	// Delete the temp file
 	err = os.Remove(tempPath)
 	if err != nil {
-		logger.Warn("Failed to delete temp plugin file after merging", "path", tempPath, "error", err)
+		logger.PluginWarn("Failed to delete temp plugin file after merging", "path", tempPath, "error", err)
 	}
 
 	return nil
@@ -2113,7 +2113,7 @@ func CreateTempFile(c echo.Context) error {
 			content = string(p.Payload)
 		} else {
 			common.GlobalMu.RUnlock()
-			logger.Error("Plugin not found", "id", id)
+			logger.PluginError("Plugin not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 		}
 

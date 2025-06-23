@@ -68,7 +68,7 @@ func init() {
 			p.parsePluginParameters()
 			Plugins[name] = p
 		} else {
-			logger.Error("plugin_init error", "plugin name conflict: %s already exists", name)
+			logger.PluginError("plugin_init error", "plugin name conflict: %s already exists", name)
 		}
 	}
 
@@ -84,7 +84,7 @@ func init() {
 			p.parsePluginParameters()
 			Plugins[name] = p
 		} else {
-			logger.Error("plugin_init error", "plugin name conflict: %s already exists", name)
+			logger.PluginError("plugin_init error", "plugin name conflict: %s already exists", name)
 		}
 	}
 
@@ -347,11 +347,11 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) bool {
 		if f, ok := local_plugin.LocalPluginBoolRes[p.Name]; ok {
 			res, err := f(funcArgs...)
 			if err != nil {
-				logger.Error("local plugin returned error:", "plugin", p.Name, "error", err)
+				logger.PluginError("local plugin returned error:", "plugin", p.Name, "error", err)
 			}
 			return res
 		} else {
-			logger.Error("local plugin not found", "plugin", p.Name)
+			logger.PluginError("local plugin not found", "plugin", p.Name)
 			return false
 		}
 	case 1: // yaegi plugin
@@ -371,17 +371,17 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) bool {
 		}
 
 		if len(out) != 2 {
-			logger.Error("plugin returned unexpected number of results", "name", p.Name, "len of out", len(out))
+			logger.PluginError("plugin returned unexpected number of results", "name", p.Name, "len of out", len(out))
 			return false
 		}
 
 		if res1, ok = out[0].Interface().(bool); !ok {
-			logger.Error("plugin returned unexpected type", "plugin", p.Name, "type", reflect.TypeOf(res1))
+			logger.PluginError("plugin returned unexpected type", "plugin", p.Name, "type", reflect.TypeOf(res1))
 			return false
 		}
 
 		if res2, ok = out[1].Interface().(error); ok {
-			logger.Error("plugin returned error", "plugin", p.Name, "error", res2)
+			logger.PluginError("plugin returned error", "plugin", p.Name, "error", res2)
 		}
 
 		return res1
@@ -397,12 +397,12 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool) {
 		if f, ok := local_plugin.LocalPluginInterfaceAndBoolRes[p.Name]; ok {
 			res1, res2, err := f(funcArgs...)
 			if err != nil {
-				logger.Error("local plugin %s returned error:", "plugin", p.Name, "error", err)
+				logger.PluginError("local plugin %s returned error:", "plugin", p.Name, "error", err)
 				return nil, false
 			}
 			return res1, res2
 		} else {
-			logger.Error("local plugin not found", "plugin", p.Name)
+			logger.PluginError("local plugin not found", "plugin", p.Name)
 			return nil, false
 		}
 	case 1: // yaegi plugin
@@ -422,16 +422,16 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool) {
 		}
 
 		if len(out) != 3 {
-			logger.Error("plugin returned unexpected number of results", "plugin", p.Name, "len of out", len(out))
+			logger.PluginError("plugin returned unexpected number of results", "plugin", p.Name, "len of out", len(out))
 		}
 
 		if res2, ok = out[1].Interface().(bool); !ok {
-			logger.Error("plugin returned unexpected type for first result", "plugin", p.Name, "type", reflect.TypeOf(out[2].Interface()))
+			logger.PluginError("plugin returned unexpected type for first result", "plugin", p.Name, "type", reflect.TypeOf(out[2].Interface()))
 			return nil, false
 		}
 
 		if res3, ok = out[2].Interface().(error); ok {
-			logger.Error("plugin returned error", "name", p.Name, "error", res3)
+			logger.PluginError("plugin returned error", "name", p.Name, "error", res3)
 		}
 
 		return out[0].Interface(), res2

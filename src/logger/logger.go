@@ -12,6 +12,7 @@ import (
 
 var l *slog.Logger
 var accessLogger *lumberjack.Logger
+var pluginLogger *slog.Logger
 
 func InitLogger() *slog.Logger {
 	logFile := &lumberjack.Logger{
@@ -30,6 +31,62 @@ func InitLogger() *slog.Logger {
 	slog.SetDefault(logger)
 
 	return logger
+}
+
+// InitPluginLogger initializes the plugin-specific logger for plugin failures
+func InitPluginLogger() *slog.Logger {
+	// Get current working directory for debugging
+	pwd, _ := os.Getwd()
+	if l != nil {
+		l.Info("initializing plugin logger", "working_directory", pwd, "target_path", "./logs/plugin.log")
+	}
+
+	// Create logs directory if it doesn't exist
+	if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+		if err := os.Mkdir("./logs", 0755); err != nil {
+			// If failed to create logs directory, log the error and use stderr as fallback
+			if l != nil {
+				l.Error("failed to create logs directory for plugin logger", "error", err, "working_directory", pwd)
+			}
+			// Return a logger that writes to stderr as fallback
+			handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+				Level: slog.LevelInfo,
+			})
+			return slog.New(handler)
+		}
+		if l != nil {
+			l.Info("created logs directory for plugin logger", "path", "./logs")
+		}
+	}
+
+	pluginLogFile := &lumberjack.Logger{
+		Filename:   "./logs/plugin.log",
+		MaxSize:    100, // Same as hub.log
+		MaxBackups: 30,  // Same as hub.log
+		MaxAge:     15,  // Same as hub.log
+		Compress:   true,
+	}
+
+	handler := slog.NewJSONHandler(pluginLogFile, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	logger := slog.New(handler)
+
+	// Log successful initialization
+	if l != nil {
+		l.Info("plugin logger initialized", "filename", "./logs/plugin.log", "working_directory", pwd)
+	}
+
+	return logger
+}
+
+// GetPluginLogger returns the plugin logger instance
+func GetPluginLogger() *slog.Logger {
+	if pluginLogger == nil {
+		pluginLogger = InitPluginLogger()
+	}
+	return pluginLogger
 }
 
 // InitAccessLogger initializes the access logger for API requests
@@ -98,6 +155,22 @@ func TestAccessLogger() error {
 		l.Info("access logger test successful")
 	}
 	return nil
+}
+
+// Plugin-specific logging functions
+func PluginError(msg string, args ...any) {
+	pluginLog := GetPluginLogger()
+	pluginLog.Error(msg, args...)
+}
+
+func PluginWarn(msg string, args ...any) {
+	pluginLog := GetPluginLogger()
+	pluginLog.Warn(msg, args...)
+}
+
+func PluginInfo(msg string, args ...any) {
+	pluginLog := GetPluginLogger()
+	pluginLog.Info(msg, args...)
 }
 
 func Debug(msg string, args ...any) {

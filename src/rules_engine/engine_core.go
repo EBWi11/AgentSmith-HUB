@@ -474,7 +474,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				res, ok := p.Plugin.FuncEvalOther(args...)
 				if ok {
 					if dataCopy, ok = res.(map[string]interface{}); !ok {
-						logger.Error("Plugin execution error: expected map[string]interface{}, got", fmt.Sprintf("%T", res), "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
+						logger.PluginError("Plugin execution error: expected map[string]interface{}, got", fmt.Sprintf("%T", res), "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
 					}
 				}
 			}

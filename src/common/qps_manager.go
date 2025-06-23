@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -429,9 +430,11 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 
 	const reportInterval = 10 // seconds
 
-	// Group by project and component type, considering ProjectNodeSequence
+	// Group by project and component type for individual component statistics
+	// BUT for total messages, only count actual input/output to avoid double-counting
 	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
-	totalMessages := uint64(0)
+	totalInputMessages := uint64(0)                    // Only count actual inputs for total
+	totalOutputMessages := uint64(0)                   // Only count actual outputs for total
 
 	for _, data := range qm.data {
 		if _, exists := projectStats[data.ProjectID]; !exists {
@@ -445,13 +448,35 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 			componentMessages += messages
 		}
 
+		// FIXED: Count ALL component types for individual statistics (including ruleset)
+		// but only count input/output for total messages to avoid double-counting
 		projectStats[data.ProjectID][data.ComponentType] += componentMessages
-		totalMessages += componentMessages
+
+		// For global totals, only count actual inputs and final outputs to avoid double-counting
+		parts := strings.Split(data.ProjectNodeSequence, ".")
+
+		switch data.ComponentType {
+		case "input":
+			// Only count input if this ProjectNodeSequence represents the actual input component
+			if len(parts) == 2 && parts[0] == "input" && parts[1] == data.ComponentID {
+				totalInputMessages += componentMessages
+			}
+		case "output":
+			// Only count output if this ProjectNodeSequence represents the final output component
+			if len(parts) >= 2 && parts[len(parts)-2] == "output" && parts[len(parts)-1] == data.ComponentID {
+				totalOutputMessages += componentMessages
+			}
+		case "ruleset":
+			// Don't count ruleset for total messages (to avoid triple-counting)
+			// But it's already counted in projectStats above for individual component statistics
+		}
 	}
 
 	return map[string]interface{}{
-		"total_messages":    totalMessages,
-		"project_breakdown": projectStats,
+		"total_messages":        totalInputMessages + totalOutputMessages, // Only input + output for total
+		"total_input_messages":  totalInputMessages,                       // Track input separately
+		"total_output_messages": totalOutputMessages,                      // Track output separately
+		"project_breakdown":     projectStats,                             // Includes input, output, AND ruleset stats
 	}
 }
 
@@ -522,6 +547,8 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 			componentMessages += messages
 		}
 
+		// FIXED: Count ALL component types (including ruleset) for node statistics
+		// This shows processing load per component type on each node
 		nodeStats[data.NodeID][data.ComponentType] += componentMessages
 	}
 
@@ -530,13 +557,15 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	for nodeID, stats := range nodeStats {
 		inputMessages := stats["input"]
 		outputMessages := stats["output"]
-		rulesetMessages := stats["ruleset"]
+		rulesetMessages := stats["ruleset"] // Now include ruleset processing statistics
 
+		// For total messages on node, still only count input + output to avoid triple-counting
+		// But show individual component processing loads separately
 		result[nodeID] = map[string]interface{}{
 			"input_messages":   inputMessages,
 			"output_messages":  outputMessages,
-			"ruleset_messages": rulesetMessages,
-			"total_messages":   inputMessages + outputMessages + rulesetMessages,
+			"ruleset_messages": rulesetMessages,                // Now shows actual ruleset processing load
+			"total_messages":   inputMessages + outputMessages, // Still only input + output for total
 		}
 	}
 

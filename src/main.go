@@ -93,13 +93,13 @@ func LoadComponents() {
 	if cluster.IsLeader {
 		pluginList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "plugin"), ".go")
 		if err != nil {
-			logger.Error("travers plugin error", "error", err)
+			logger.PluginError("travers plugin error", "error", err)
 		}
 		for _, v := range pluginList {
 			name := common.GetFileNameWithoutExt(v)
 			err := plugin.NewPlugin(v, "", name, plugin.YAEGI_PLUGIN)
 			if err != nil {
-				logger.Error("failed to create input instance", "error", err, "path", v)
+				logger.PluginError("failed to create plugin instance", "error", err, "path", v)
 			}
 		}
 
@@ -149,7 +149,7 @@ func LoadComponents() {
 		// read new components
 		pluginNewList, err := traverseComponents(path.Join(common.Config.ConfigRoot, "plugin"), ".go.new")
 		if err != nil {
-			logger.Error("travers plugin new error", "error", err)
+			logger.PluginError("travers plugin new error", "error", err)
 		}
 		for _, v := range pluginNewList {
 			name := common.GetFileNameWithoutExt(v)
@@ -233,7 +233,7 @@ func LoadComponents() {
 		for name, raw := range pluginsConfig {
 			err := plugin.NewPlugin("", raw, name, plugin.YAEGI_PLUGIN)
 			if err != nil {
-				logger.Error("failed to new plugin", "error", err)
+				logger.PluginError("failed to new plugin", "error", err)
 				continue
 			}
 		}
@@ -392,7 +392,7 @@ func LoadLeaderConfigAndComponents() error {
 
 	plugins, err := api.GetAllComponents("plugin")
 	if err != nil {
-		logger.Error("load leader plugins error", "error", err.Error())
+		logger.PluginError("load leader plugins error", "error", err.Error())
 	}
 	common.AllPluginsRawConfig = make(map[string]string, len(plugins))
 	for _, v := range plugins {
