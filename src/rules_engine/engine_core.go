@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	regexp "github.com/BurntSushi/rure-go"
@@ -21,6 +22,14 @@ func (r *Ruleset) Start() error {
 		return fmt.Errorf("already started: %v", r.RulesetID)
 	}
 	r.stopChan = make(chan struct{})
+
+	// Start metric collection goroutine
+	r.metricStop = make(chan struct{})
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.metricLoop()
+	}()
 
 	var err error
 	r.antsPool, err = ants.NewPool(MinPoolSize)
@@ -73,6 +82,10 @@ func (r *Ruleset) Start() error {
 					}
 
 					task := func() {
+						// Increment process counter for each message processed
+						atomic.AddUint64(&r.processTotal, 1)
+						atomic.AddUint64(&r.processQPS, 1)
+
 						// IMPORTANT: Sample the input data BEFORE rule checking starts
 						// This ensures we capture the raw data entering the ruleset for analysis
 						if r.sampler != nil {
@@ -114,6 +127,12 @@ func (r *Ruleset) Stop() error {
 
 	logger.Info("Stopping ruleset", "ruleset", r.RulesetID, "upstream_count", len(r.UpStream), "downstream_count", len(r.DownStream))
 	close(r.stopChan)
+
+	// Stop metrics collection
+	if r.metricStop != nil {
+		close(r.metricStop)
+		r.metricStop = nil
+	}
 
 	// Overall timeout for ruleset stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
@@ -208,6 +227,9 @@ func (r *Ruleset) Stop() error {
 	}
 	r.stopChan = nil
 
+	// Wait for metric goroutine to finish
+	r.wg.Wait()
+
 	if r.Cache != nil {
 		r.Cache.Close()
 	}
@@ -228,12 +250,21 @@ func (r *Ruleset) StopForTesting() error {
 	logger.Info("Quick stopping test ruleset", "ruleset", r.RulesetID)
 	close(r.stopChan)
 
+	// Stop metrics collection quickly
+	if r.metricStop != nil {
+		close(r.metricStop)
+		r.metricStop = nil
+	}
+
 	// Quick cleanup without waiting
 	if r.antsPool != nil {
 		r.antsPool.Release()
 		r.antsPool = nil
 	}
 	r.stopChan = nil
+
+	// Wait for metric goroutine to finish quickly
+	r.wg.Wait()
 
 	if r.Cache != nil {
 		r.Cache.Close()
@@ -533,4 +564,31 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 	} else {
 		data[HitRuleIdFieldName] = data[HitRuleIdFieldName].(string) + "," + ruleID
 	}
+}
+
+// metricLoop calculates QPS and can be extended for more metrics.
+func (r *Ruleset) metricLoop() {
+	var lastTotal uint64
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.metricStop:
+			return
+		case <-ticker.C:
+			cur := atomic.LoadUint64(&r.processTotal)
+			atomic.StoreUint64(&r.processQPS, cur-lastTotal)
+			lastTotal = cur
+		}
+	}
+}
+
+// GetProcessQPS returns the latest processing QPS.
+func (r *Ruleset) GetProcessQPS() uint64 {
+	return atomic.LoadUint64(&r.processQPS)
+}
+
+// GetProcessTotal returns the total processed message count.
+func (r *Ruleset) GetProcessTotal() uint64 {
+	return atomic.LoadUint64(&r.processTotal)
 }

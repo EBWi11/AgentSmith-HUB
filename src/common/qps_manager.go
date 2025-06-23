@@ -15,13 +15,15 @@ type QPSMetrics struct {
 	ComponentType       string    `json:"component_type"`        // "input", "output", "ruleset"
 	ProjectNodeSequence string    `json:"project_node_sequence"` // e.g., "input.kafka1.ruleset.filter.output.es1"
 	QPS                 uint64    `json:"qps"`
+	TotalMessages       uint64    `json:"total_messages"` // Real total message count
 	Timestamp           time.Time `json:"timestamp"`
 }
 
 // QPSDataPoint represents a single QPS measurement
 type QPSDataPoint struct {
-	QPS       uint64    `json:"qps"`
-	Timestamp time.Time `json:"timestamp"`
+	QPS           uint64    `json:"qps"`
+	TotalMessages uint64    `json:"total_messages"` // Real total message count at this point
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // ComponentQPSData holds time series data for a component
@@ -33,6 +35,7 @@ type ComponentQPSData struct {
 	ProjectNodeSequence string         `json:"project_node_sequence"`
 	DataPoints          []QPSDataPoint `json:"data_points"`
 	LastUpdate          time.Time      `json:"last_update"`
+	CurrentTotal        uint64         `json:"current_total"` // Current total message count
 }
 
 // QPSManager manages QPS data collection and aggregation on leader node
@@ -106,12 +109,14 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 
 	// Add new data point
 	dataPoint := QPSDataPoint{
-		QPS:       metrics.QPS,
-		Timestamp: metrics.Timestamp,
+		QPS:           metrics.QPS,
+		TotalMessages: metrics.TotalMessages,
+		Timestamp:     metrics.Timestamp,
 	}
 
 	componentData.DataPoints = append(componentData.DataPoints, dataPoint)
 	componentData.LastUpdate = metrics.Timestamp
+	componentData.CurrentTotal = metrics.TotalMessages // Update current total
 
 	// Keep only data from the last hour (3600 seconds)
 	cutoffTime := time.Now().Add(-time.Hour)
@@ -381,10 +386,8 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	const reportInterval = 10 // seconds - must match the collector report interval
-
-	// Group by ProjectNodeSequence instead of component only
-	sequenceGroups := make(map[string][]QPSDataPoint)
+	// Group by ProjectNodeSequence
+	sequenceGroups := make(map[string]*ComponentQPSData)
 	sequenceTypes := make(map[string]string)
 
 	for _, data := range qm.data {
@@ -392,31 +395,40 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 			sequenceKey := data.ProjectNodeSequence
 			sequenceTypes[sequenceKey] = data.ComponentType
 
-			// Add all data points from this node
-			if _, exists := sequenceGroups[sequenceKey]; !exists {
-				sequenceGroups[sequenceKey] = make([]QPSDataPoint, 0)
+			// Use the latest component data for each sequence
+			if existing, exists := sequenceGroups[sequenceKey]; !exists || data.LastUpdate.After(existing.LastUpdate) {
+				sequenceGroups[sequenceKey] = data
 			}
-			sequenceGroups[sequenceKey] = append(sequenceGroups[sequenceKey], data.DataPoints...)
 		}
 	}
 
 	result := make(map[string]interface{})
 
-	for sequenceKey, dataPoints := range sequenceGroups {
-		// Calculate total messages for this ProjectNodeSequence
-		totalMessages := uint64(0)
-		for _, point := range dataPoints {
-			// Each data point represents QPS for a 10-second period
-			// So messages in this period = QPS * 10
-			messages := point.QPS * reportInterval
-			totalMessages += messages
+	for sequenceKey, componentData := range sequenceGroups {
+		// Use real current total messages - this is the actual cumulative count
+		totalMessages := componentData.CurrentTotal
+
+		// Calculate hourly message rate based on recent data points (for rate calculation)
+		var hourlyRate uint64 = 0
+		if len(componentData.DataPoints) > 1 {
+			// Find the oldest and newest data points within the hour
+			oldestPoint := componentData.DataPoints[0]
+			newestPoint := componentData.DataPoints[len(componentData.DataPoints)-1]
+
+			// Calculate time difference in hours
+			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
+			if timeDiff > 0 {
+				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+			}
 		}
 
 		result[sequenceKey] = map[string]interface{}{
 			"component_type":        sequenceTypes[sequenceKey],
 			"project_node_sequence": sequenceKey,
-			"total_messages":        totalMessages,
-			"data_points_count":     len(dataPoints),
+			"total_messages":        totalMessages, // Real cumulative total
+			"hourly_rate":           hourlyRate,    // Messages per hour rate
+			"data_points_count":     len(componentData.DataPoints),
 		}
 	}
 
@@ -428,31 +440,24 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	const reportInterval = 10 // seconds
-
 	// Group by project and component type for individual component statistics
-	// BUT for total messages, only count actual input/output to avoid double-counting
 	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
-	totalInputMessages := uint64(0)                    // Only count actual inputs for total
-	totalOutputMessages := uint64(0)                   // Only count actual outputs for total
+	totalInputMessages := uint64(0)                    // Total input messages across all projects
+	totalOutputMessages := uint64(0)                   // Total output messages across all projects
+	totalRulesetMessages := uint64(0)                  // Total ruleset processed messages
 
 	for _, data := range qm.data {
 		if _, exists := projectStats[data.ProjectID]; !exists {
 			projectStats[data.ProjectID] = make(map[string]uint64)
 		}
 
-		// Calculate messages for this ProjectNodeSequence
-		componentMessages := uint64(0)
-		for _, point := range data.DataPoints {
-			messages := point.QPS * reportInterval
-			componentMessages += messages
-		}
+		// Use real current total messages
+		componentMessages := data.CurrentTotal
 
-		// FIXED: Count ALL component types for individual statistics (including ruleset)
-		// but only count input/output for total messages to avoid double-counting
+		// Count ALL component types for individual statistics
 		projectStats[data.ProjectID][data.ComponentType] += componentMessages
 
-		// For global totals, only count actual inputs and final outputs to avoid double-counting
+		// For global totals, count actual messages by component type
 		parts := strings.Split(data.ProjectNodeSequence, ".")
 
 		switch data.ComponentType {
@@ -467,16 +472,17 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 				totalOutputMessages += componentMessages
 			}
 		case "ruleset":
-			// Don't count ruleset for total messages (to avoid triple-counting)
-			// But it's already counted in projectStats above for individual component statistics
+			// Now count ruleset processing - this shows actual processing volume
+			totalRulesetMessages += componentMessages
 		}
 	}
 
 	return map[string]interface{}{
-		"total_messages":        totalInputMessages + totalOutputMessages, // Only input + output for total
-		"total_input_messages":  totalInputMessages,                       // Track input separately
-		"total_output_messages": totalOutputMessages,                      // Track output separately
-		"project_breakdown":     projectStats,                             // Includes input, output, AND ruleset stats
+		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages, // All real messages
+		"total_input_messages":   totalInputMessages,                                              // Real input messages
+		"total_output_messages":  totalOutputMessages,                                             // Real output messages
+		"total_ruleset_messages": totalRulesetMessages,                                            // Real ruleset processed messages
+		"project_breakdown":      projectStats,                                                    // Includes all component real stats
 	}
 }
 
@@ -531,8 +537,6 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	const reportInterval = 10 // seconds
-
 	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> totalMessages
 
 	for _, data := range qm.data {
@@ -540,15 +544,10 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 			nodeStats[data.NodeID] = make(map[string]uint64)
 		}
 
-		// Calculate messages for this component on this node
-		componentMessages := uint64(0)
-		for _, point := range data.DataPoints {
-			messages := point.QPS * reportInterval
-			componentMessages += messages
-		}
+		// Use real current total messages
+		componentMessages := data.CurrentTotal
 
-		// FIXED: Count ALL component types (including ruleset) for node statistics
-		// This shows processing load per component type on each node
+		// Count ALL component types for node statistics - shows real processing load
 		nodeStats[data.NodeID][data.ComponentType] += componentMessages
 	}
 
@@ -557,15 +556,13 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	for nodeID, stats := range nodeStats {
 		inputMessages := stats["input"]
 		outputMessages := stats["output"]
-		rulesetMessages := stats["ruleset"] // Now include ruleset processing statistics
+		rulesetMessages := stats["ruleset"] // Real ruleset processing statistics
 
-		// For total messages on node, still only count input + output to avoid triple-counting
-		// But show individual component processing loads separately
 		result[nodeID] = map[string]interface{}{
 			"input_messages":   inputMessages,
 			"output_messages":  outputMessages,
-			"ruleset_messages": rulesetMessages,                // Now shows actual ruleset processing load
-			"total_messages":   inputMessages + outputMessages, // Still only input + output for total
+			"ruleset_messages": rulesetMessages,                                  // Real ruleset processing load
+			"total_messages":   inputMessages + outputMessages + rulesetMessages, // Total real messages processed
 		}
 	}
 

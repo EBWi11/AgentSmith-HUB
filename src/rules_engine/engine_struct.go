@@ -55,6 +55,12 @@ type Ruleset struct {
 
 	RawConfig string
 	sampler   *common.Sampler
+
+	// Add metrics fields for QPS and message counting
+	processTotal uint64         // Total processed messages
+	processQPS   uint64         // Current QPS
+	metricStop   chan struct{}  // Channel to stop metric collection
+	wg           sync.WaitGroup // WaitGroup for goroutine management
 }
 
 type RulesByFilter struct {
