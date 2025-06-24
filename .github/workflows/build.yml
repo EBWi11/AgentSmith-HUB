@@ -49,22 +49,24 @@ jobs:
     - name: Get version info
       id: version
       run: |
-        VERSION=$(cat VERSION 2>/dev/null || echo "unknown")
+        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         
         # Set release name based on tag or branch
         if [[ $GITHUB_REF == refs/tags/* ]]; then
           RELEASE_NAME=${GITHUB_REF#refs/tags/}
         else
-          RELEASE_NAME="$VERSION-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          RELEASE_NAME="${VERSION}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
         fi
+        # Remove any spaces and newlines from release name
+        RELEASE_NAME=$(echo "$RELEASE_NAME" | tr -d '\n\r ')
         echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
     
     - name: Create deployment archive
       run: |
         # Create a clean directory structure for the archive
         RELEASE_NAME="${{ steps.version.outputs.release_name }}"
-        ARCHIVE_DIR="agentsmith-hub-${RELEASE_NAME}"
+        ARCHIVE_DIR="agentsmith-hub"
         ARCHIVE_NAME="agentsmith-hub.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
@@ -125,7 +127,7 @@ jobs:
           1. Download and extract the archive:
              ```bash
              tar -xzf agentsmith-hub.tar.gz
-             cd agentsmith-hub-${{ github.ref_name }}
+             cd agentsmith-hub
              ```
           2. Configure your settings in `config/config.yaml`
           3. Run `./start.sh` to start the application

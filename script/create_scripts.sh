@@ -186,16 +186,30 @@ This directory contains a complete AgentSmith-HUB deployment package.
 
 ## Quick Start
 
-1. Make sure you're on a Linux amd64 system
+1. Extract and enter the directory:
+   ```bash
+   tar -xzf agentsmith-hub.tar.gz
+   cd agentsmith-hub
+   ```
 2. Start the services:
    ```bash
    ./start.sh
    ```
-3. Open your browser and navigate to: http://localhost:8080
-4. To stop the services:
+3. Wait for the services to start (usually takes 10-15 seconds)
+4. Open your browser and navigate to: http://localhost:8080
+   - You should see the login page
+   - Default login token can be configured in `config/config.yaml`
+5. To stop the services:
    ```bash
    ./stop.sh
    ```
+
+## Important Notes
+
+- **Login Page**: The web interface should show a login page at startup
+- **Backend Status**: Ensure the backend service starts successfully before accessing the web interface
+- **Port 8080**: Make sure port 8080 is available and not blocked by firewall
+- **Configuration**: Check `config/config.yaml` for authentication and other settings
 
 ## Advanced Usage
 
