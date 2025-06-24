@@ -133,9 +133,14 @@
 import { ref, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
+import { useApiOperations } from '../composables/useApi'
+import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
+
+// Use composables
+const { loading: apiLoading, error: apiError } = useApiOperations()
 
 // State
 const changes = ref([])
@@ -244,34 +249,7 @@ function refreshEditorsLayout() {
   }, 300)
 }
 
-function getEditorLanguage(type) {
-  switch (type) {
-    case 'rulesets':
-      return 'xml'
-    case 'plugins':
-      return 'go'
-    default:
-      return 'yaml'
-  }
-}
-
-// Convert singular component type to plural form (for API calls)
-function getApiComponentType(type) {
-  switch (type) {
-    case 'input':
-      return 'inputs'
-    case 'output':
-      return 'outputs'
-    case 'ruleset':
-      return 'rulesets'
-    case 'project':
-      return 'projects'
-    case 'plugin':
-      return 'plugins'
-    default:
-      return type + 's' // Default: add 's'
-  }
-}
+// 这些函数现在从 utils/common.js 导入
 
 async function verifyChanges() {
   if (!changes.value.length) return
@@ -298,13 +276,7 @@ async function verifyChanges() {
           
           // Try to extract line number from error message
           if (!verifyResult.valid && verifyResult.error) {
-            const lineMatches = verifyResult.error.match(/line\s*(\d+)/i) || 
-                               verifyResult.error.match(/line:\s*(\d+)/i) ||
-                               verifyResult.error.match(/location:.*line\s*(\d+)/i);
-            
-            if (lineMatches && lineMatches[1]) {
-              change.errorLine = parseInt(lineMatches[1]);
-            }
+            change.errorLine = extractLineNumber(verifyResult.error)
           } else {
             change.errorLine = null;
           }
@@ -346,18 +318,10 @@ async function verifySingleChange(change) {
       change.verifyError = errorMessage || 'Unknown verification error'
       
       // Try to extract line number from error message
-      if (errorMessage && typeof errorMessage === 'string') {
-        const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
-                           errorMessage.match(/line:\s*(\d+)/i) ||
-                           errorMessage.match(/location:.*line\s*(\d+)/i);
-        
-        if (lineMatches && lineMatches[1]) {
-          const lineNum = parseInt(lineMatches[1]);
-          change.errorLine = lineNum;
-          $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
-        } else {
-          $message?.error?.(`Verification failed: ${errorMessage}`)
-        }
+      const lineNum = extractLineNumber(errorMessage)
+      if (lineNum) {
+        change.errorLine = lineNum
+        $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
       } else {
         $message?.error?.(`Verification failed: ${errorMessage || 'Unknown error'}`)
       }
@@ -372,20 +336,12 @@ async function verifySingleChange(change) {
     
     // Try to extract line number from error message
     const errorMessage = e.message || ''
-    if (errorMessage && typeof errorMessage === 'string') {
-      const lineMatches = errorMessage.match(/line\s*(\d+)/i) || 
-                         errorMessage.match(/line:\s*(\d+)/i) ||
-                         errorMessage.match(/location:.*line\s*(\d+)/i);
-      
-      if (lineMatches && lineMatches[1]) {
-        const lineNum = parseInt(lineMatches[1]);
-        change.errorLine = lineNum;
-        $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
-      } else {
-        $message?.error?.('Failed to verify change: ' + errorMessage)
-      }
+    const lineNum = extractLineNumber(errorMessage)
+    if (lineNum) {
+      change.errorLine = lineNum
+      $message?.error?.(`Verification failed at line ${lineNum}: ${errorMessage}`)
     } else {
-      $message?.error?.('Failed to verify change: Unknown error')
+      $message?.error?.(`Failed to verify change: ${errorMessage || 'Unknown error'}`)
     }
     
     // Refresh editor layout
@@ -530,11 +486,7 @@ async function applySingleChange(change) {
   }
 }
 
-// Check if a component change requires project restart
-function needsRestart(change) {
-  // Rulesets support hot reload, other components require restart
-  return change.type !== 'ruleset'
-}
+// needsRestart 函数现在从 utils/common.js 导入
 
 // Find projects that need to be restarted based on all pending changes
 function findProjectsToRestart() {
@@ -580,17 +532,7 @@ async function restartProjects(projectIds) {
   }
 }
 
-function getComponentTypeLabel(type) {
-  const labels = {
-    'input': 'Input',
-    'output': 'Output',
-    'ruleset': 'Ruleset',
-    'project': 'Project',
-    'plugin': 'Plugin'
-  }
-  
-  return labels[type] || type
-}
+// 这个函数现在从 utils/common.js 导入
 
 
 

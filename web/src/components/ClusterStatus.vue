@@ -163,7 +163,7 @@
             <!-- Far Right: Last Seen -->
             <div class="text-right flex-shrink-0 ml-6">
               <span class="text-xs text-gray-500">
-                {{ formatLastSeen(node.lastSeen) }}
+                {{ formatTimeAgo(node.lastSeen) }}
               </span>
             </div>
           </div>
@@ -199,6 +199,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { hubApi } from '../api'
+import { formatMessagesPerHour, formatTimeAgo, getCPUColor, getCPUBarColor, getMemoryColor, getMemoryBarColor } from '../utils/common'
 
 // Reactive state
 const searchQuery = ref('')
@@ -343,60 +344,8 @@ function getIssueDescription(node) {
   return issues.join(', ')
 }
 
-function getCPUColor(cpuPercent) {
-  if (cpuPercent > 80) return 'text-red-600'
-  if (cpuPercent > 60) return 'text-yellow-600'
-  return 'text-green-600'
-}
-
-function getCPUBarColor(cpuPercent) {
-  if (cpuPercent > 80) return 'bg-red-500'
-  if (cpuPercent > 60) return 'bg-yellow-500'
-  return 'bg-green-500'
-}
-
-function getMemoryColor(memoryPercent) {
-  if (memoryPercent > 85) return 'text-red-600'
-  if (memoryPercent > 70) return 'text-yellow-600'
-  return 'text-green-600'
-}
-
-function getMemoryBarColor(memoryPercent) {
-  if (memoryPercent > 85) return 'bg-red-500'
-  if (memoryPercent > 70) return 'bg-yellow-500'
-  return 'bg-green-500'
-}
-
-
-
-function formatMessagesPerHour(messages) {
-  // Format real message counts (no conversion needed)
-  if (messages >= 1000000) {
-    return (messages / 1000000).toFixed(1) + 'M'
-  }
-  if (messages >= 1000) {
-    return (messages / 1000).toFixed(1) + 'K'
-  }
-  return messages.toString()
-}
-
-function formatLastSeen(lastSeen) {
-  const now = new Date()
-  const diff = now - lastSeen
-  
-  if (diff < 60000) { // Less than 1 minute
-    return 'Just now'
-  } else if (diff < 3600000) { // Less than 1 hour
-    const minutes = Math.floor(diff / 60000)
-    return `${minutes}m ago`
-  } else if (diff < 86400000) { // Less than 1 day
-    const hours = Math.floor(diff / 3600000)
-    return `${hours}h ago`
-  } else {
-    const days = Math.floor(diff / 86400000)
-    return `${days}d ago`
-  }
-}
+// 这些函数现在从 utils/common.js 导入
+// formatLastSeen 使用 formatTimeAgo 替代
 
 async function fetchAllData() {
   try {

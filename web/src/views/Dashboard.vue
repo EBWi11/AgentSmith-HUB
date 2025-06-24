@@ -291,6 +291,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { hubApi } from '../api'
+import { formatNumber, formatPercent, formatMessagesPerHour, formatTimeAgo } from '../utils/common'
 
 // Router
 const router = useRouter()
@@ -589,21 +590,7 @@ const localChangesStats = computed(() => {
   return stats
 })
 
-// Methods
-function formatMessagesPerHour(messages) {
-  // Format real message counts (no conversion needed)
-  if (messages >= 1000000) {
-    return (messages / 1000000).toFixed(1) + 'M'
-  }
-  if (messages >= 1000) {
-    return (messages / 1000).toFixed(1) + 'K'
-  }
-  return messages.toString()
-}
-
-function formatPercent(value) {
-  return Math.round(value * 100) / 100
-}
+// Methods - 格式化函数现在从 utils/common.js 导入
 
 function navigateToProject(projectId) {
   router.push(`/app/projects/${projectId}`)

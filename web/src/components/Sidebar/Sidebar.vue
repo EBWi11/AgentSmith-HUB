@@ -771,6 +771,9 @@ import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick } from 'vue
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
+import { useComponentOperations } from '../../composables/useApi'
+import { useDeleteConfirmModal } from '../../composables/useModal'
+import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard } from '../../utils/common'
 
 // 获取路由器实例
 const router = useRouter()
@@ -1229,20 +1232,13 @@ async function confirmAddName() {
   }
 }
 
-function copyName(item) {
+async function copyName(item) {
   const text = item.id || item.name
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text)
-  } else {
-    const input = document.createElement('input')
-    input.value = text
-    document.body.appendChild(input)
-    input.select()
-    document.execCommand('copy')
-    document.body.removeChild(input)
+  const success = await copyToClipboard(text)
+  if (success) {
+    // 可选：显示复制成功提示
+    // $message?.success?.('Name copied to clipboard')
   }
-  // Removed copy success notification to reduce unnecessary alerts
-  // Close all menus
   closeAllMenus()
 }
 
@@ -1669,34 +1665,7 @@ function handleOutsideClick(event) {
   closeAllMenus()
 }
 
-// Get status title based on project status
-function getStatusTitle(item) {
-  switch (item.status) {
-    case 'running':
-      return 'Running'
-    case 'stopped':
-      return 'Stopped'
-    case 'error':
-      // 如果有错误信息，则显示错误信息
-      return item.errorMessage ? `Error: ${item.errorMessage}` : 'Error'
-    default:
-      return 'Unknown'
-  }
-}
-
-// Get status label based on project status
-function getStatusLabel(status) {
-  switch (status) {
-    case 'running':
-      return 'R'
-    case 'stopped':
-      return 'S'
-    case 'error':
-      return 'E'
-    default:
-      return '?'
-  }
-}
+// 这些函数现在从 utils/common.js 导入
 
 // Show tooltip
 function showTooltip(event, text) {
