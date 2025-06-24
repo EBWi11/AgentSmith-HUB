@@ -42,12 +42,32 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    // 移除自动跳转逻辑，防止无限刷新
     if (error.response?.status === 401) {
       localStorage.removeItem('auth_token');
-      // 不再自动跳转
-      // window.location.href = '/';
       console.error('Authentication failed: Token invalid or expired');
+      
+      // 安全地跳转到登录页面
+      if (typeof window !== 'undefined') {
+        // 检查当前路径，如果不是登录页则跳转
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath === '/' || currentPath === '/login' || 
+                           currentPath.startsWith('/#/') || currentPath.includes('/login');
+        
+        if (!isLoginPage) {
+          if (window.router) {
+            // 如果在Vue Router环境中，使用路由跳转
+            try {
+              window.router.push({ name: 'Login' });
+            } catch (routerError) {
+              // 路由跳转失败时使用location跳转
+              window.location.replace('/');
+            }
+          } else {
+            // 使用replace避免在历史记录中留下记录
+            window.location.replace('/');
+          }
+        }
+      }
     }
     if (typeof window !== 'undefined' && window.$toast) {
       let msg = error.response?.data?.error || error.message || 'Unknown error';

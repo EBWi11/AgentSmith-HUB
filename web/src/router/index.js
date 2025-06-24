@@ -13,6 +13,11 @@ const routes = [
     component: Login,
   },
   {
+    path: '/login',
+    name: 'LoginPage',
+    component: Login,
+  },
+  {
     path: '/dashboard',
     redirect: '/app'
   },
@@ -116,16 +121,32 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from, next) => {
-  const loggedIn = !!localStorage.getItem('auth_token');
-
+  const token = localStorage.getItem('auth_token');
+  
   if (to.matched.some(record => record.meta.requiresAuth)) {
-    if (!loggedIn) {
+    if (!token) {
       next({ name: 'Login' });
     } else {
+      // 验证token是否有效
+      try {
+        await hubApi.verifyToken();
+        next();
+      } catch (error) {
+        // Token无效，清除并跳转到登录页
+        hubApi.clearToken();
+        next({ name: 'Login' });
+      }
+    }
+  } else if (to.name === 'Login' && token) {
+    // 如果访问登录页面但有token，验证token有效性
+    try {
+      await hubApi.verifyToken();
+      next({ path: '/app' });
+    } catch (error) {
+      // Token无效，清除并显示登录页
+      hubApi.clearToken();
       next();
     }
-  } else if (to.name === 'Login' && loggedIn) {
-    next({ path: '/app' });
   } else {
     next();
   }

@@ -8,4 +8,8 @@ import './monaco-loader.js'
 const app = createApp(App)
 app.use(router)
 app.use(store)
+
+// Make router globally accessible for API interceptors
+window.router = router
+
 app.mount('#app') 
