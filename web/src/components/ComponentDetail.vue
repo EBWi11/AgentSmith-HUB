@@ -60,7 +60,7 @@
       <!-- Verify Buttons -->
       <button 
         v-if="isRuleset"
-        @click="verifyRuleset" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -72,7 +72,7 @@
       </button>
       <button 
         v-if="isOutput"
-        @click="verifyOutput" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -84,7 +84,7 @@
       </button>
       <button 
         v-if="isInput"
-        @click="verifyInput" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -252,7 +252,7 @@
       <!-- Verify Buttons -->
       <button 
         v-if="isRuleset"
-        @click="verifyRuleset" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -264,7 +264,7 @@
       </button>
       <button 
         v-if="isProject"
-        @click="verifyProject" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -276,7 +276,7 @@
       </button>
       <button 
         v-if="isPlugin"
-        @click="verifyPlugin" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -288,7 +288,7 @@
       </button>
       <button 
         v-if="isOutput"
-        @click="verifyOutput" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -300,7 +300,7 @@
       </button>
       <button 
         v-if="isInput"
-        @click="verifyInput" 
+        @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
       >
@@ -418,7 +418,7 @@
         <!-- Keep only Verify button for projects -->
         <div v-if="isProject" class="flex">
           <button 
-            @click="verifyProject"
+            @click="verifyCurrentComponent"
             class="btn btn-verify btn-sm"
             :disabled="verifyLoading"
           >
@@ -493,6 +493,9 @@ import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
 import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
+import { useComponentValidation } from '../composables/useComponentValidation'
+import { useComponentSave } from '../composables/useComponentSave'
+import { extractLineNumber } from '../utils/common'
 
 import { getDefaultTemplate } from '../utils/templateGenerator'
 
@@ -504,24 +507,34 @@ const props = defineProps({
 // Emits
 const emit = defineEmits(['created', 'updated', 'cancel-edit'])
 
+// Use composables for validation and save operations
+const {
+  validationResult,
+  errorLines,
+  showValidationPanel,
+  verifyLoading,
+  clearValidation,
+  validateRealtime,
+  verifyComponent,
+  validateBeforeSave,
+  verifyAfterSave
+} = useComponentValidation()
+
+const {
+  saving,
+  saveError,
+  preventRefetch,
+  saveEdit: saveEditComponent,
+  saveNew: saveNewComponent
+} = useComponentSave()
+
 // Reactive state
 const loading = ref(false)
 const error = ref(null)
 const detail = ref(null)
 const editorValue = ref('')
-const saveError = ref('')
-const saving = ref(false)
 const originalContent = ref('') // Save original content for restoring when canceling edit
-const errorLines = ref([]) // Array of error lines
-const preventRefetch = ref(false) // Flag to prevent unnecessary re-fetching
-const validationResult = ref({
-  isValid: true,
-  errors: [],
-  warnings: []
-})
-const verifyLoading = ref(false)
 const connectCheckLoading = ref(false)
-const showValidationPanel = ref(true) // Show validation panel by default when there are errors/warnings
 const projectValidationTimeout = ref(null) // Timeout for project auto-verification
 const isRuleset = computed(() => {
   return props.item?.type === 'rulesets'
@@ -593,9 +606,7 @@ watch(
     
     if (!newVal) {
       detail.value = null;
-      errorLines.value = [];
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      showValidationPanel.value = false;
+      clearValidation();
       return;
     }
     
@@ -608,72 +619,20 @@ watch(
     if (newVal && newVal.isNew) {
       detail.value = null;
       editorValue.value = getTemplateForComponent(newVal.type, newVal.id);
-      errorLines.value = [];
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      showValidationPanel.value = false;
+      clearValidation();
     } else if (newVal && newVal.isEdit) {
       fetchDetail(newVal, true);
-      errorLines.value = [];
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      showValidationPanel.value = false;
+      clearValidation();
     } else if (newVal && (typeChanged || idChanged || timestampChanged || editModeChanged)) {
       // If component ID, type, timestamp or edit mode changes, refresh details
       fetchDetail(newVal);
-      errorLines.value = [];
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      showValidationPanel.value = false;
+      clearValidation();
     }
   },
   { immediate: true, deep: true }
 )
 
-// Extract line number from error message
-function extractLineNumber(errorMessage) {
-  if (!errorMessage) return null;
-  
-  // Try to extract line number from error message
-  const lineMatches = errorMessage.match(/at\s+line\s+(\d+)/i) ||
-                      errorMessage.match(/line\s+(\d+)/i) || 
-                      errorMessage.match(/line:\s*(\d+)/i) ||
-                      errorMessage.match(/location:.*line\s*(\d+)/i) ||
-                      errorMessage.match(/\(line:\s*(\d+)\)/i);
-  
-  if (lineMatches && lineMatches[1]) {
-    let lineNumber = parseInt(lineMatches[1]);
-    
-    // For project validation errors, adjust line number to account for YAML structure
-    // Backend parses only the content part (after 'content: |'), but frontend shows full YAML
-    if (isProject.value && editorValue.value) {
-      // Check if this is a YAML file with 'content: |' structure
-      const lines = editorValue.value.split('\n');
-      for (let i = 0; i < Math.min(5, lines.length); i++) {
-        if (lines[i].trim().startsWith('content:')) {
-          // Found 'content:' line, backend line numbers need to be offset
-          lineNumber += i + 1; // +1 for the content line itself
-          break;
-        }
-      }
-    }
-    
-    return lineNumber;
-  }
-  
-  return null;
-}
-
-// Fix error message line numbers for project validation
-function fixProjectErrorMessage(errorMessage) {
-  if (!isProject.value || !errorMessage || !errorMessage.includes('at line')) {
-    return errorMessage;
-  }
-  
-  const lineNumber = extractLineNumber(errorMessage);
-  if (lineNumber) {
-    return errorMessage.replace(/at line \d+/i, `at line ${lineNumber}`);
-  }
-  
-  return errorMessage;
-}
+// Functions now imported from utils/common.js and composables
 
 // Methods
 async function fetchDetail(item, forEdit = false) {
@@ -752,39 +711,14 @@ async function fetchDetail(item, forEdit = false) {
       originalContent.value = data.raw || '';
     }
     
-    // 如果是ruleset，进行后端验证（初始加载时静默验证）
+    // Perform initial validation for rulesets (silent)
     if (item.type === 'rulesets' && data.raw) {
       try {
-        const response = await hubApi.verifyComponent(item.type, item.id, data.raw);
-        if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
-          // Backend returned structured validation result
-          validationResult.value = {
-            isValid: response.data.valid || false,
-            errors: response.data.errors || [],
-            warnings: response.data.warnings || []
-          };
-          
-          // Extract error lines for highlighting
-          errorLines.value = response.data.errors.map(err => err.line).filter(Boolean);
-          
-          // Show validation panel if there are errors or warnings
-          if (response.data.errors.length > 0 || (response.data.warnings && response.data.warnings.length > 0)) {
-            showValidationPanel.value = true;
-          } else {
-            showValidationPanel.value = false;
-          }
-        } else {
-          // Clear validation if no structured response
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        }
+        await validateRealtime(item.type, item.id, data.raw);
       } catch (verifyError) {
         console.warn('Initial ruleset verification failed:', verifyError);
         // Don't show errors on initial load, just clear validation
-        validationResult.value = { isValid: true, errors: [], warnings: [] };
-        errorLines.value = [];
-        showValidationPanel.value = false;
+        clearValidation();
       }
     }
   } catch (e) {
@@ -795,274 +729,27 @@ async function fetchDetail(item, forEdit = false) {
   }
 }
 
-// Real-time validation function (no messages, silent)
-const validateRulesetRealtime = async () => {
-  if (isRuleset.value && editorValue.value && props.item?.id) {
-    try {
-      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
-      
-      if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
-        // Backend returned structured validation result
-        validationResult.value = {
-          isValid: response.data.valid || false,
-          errors: response.data.errors || [],
-          warnings: response.data.warnings || []
-        };
-        
-        // Update error line highlights
-        errorLines.value = response.data.errors.map(error => error.line).filter(Boolean);
-        
-        // Show/hide validation panel based on results
-        if (response.data.errors.length > 0 || (response.data.warnings && response.data.warnings.length > 0)) {
-          showValidationPanel.value = true;
-        } else {
-          showValidationPanel.value = false;
-        }
-        
-
-        return response.data.valid || false;
-      } else if (response.data && response.data.hasOwnProperty('valid')) {
-        // Handle simple valid/invalid response
-        if (response.data.valid) {
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        } else {
-          // For invalid responses without detailed errors, show generic error
-          const errorMessage = response.data.error || 'Validation failed';
-          validationResult.value = {
-            isValid: false,
-            errors: [{ line: 'Unknown', message: errorMessage }],
-            warnings: []
-          };
-          errorLines.value = [];
-          showValidationPanel.value = true;
-        }
-        return response.data.valid;
-      } else {
-        // Clear validation
-        validationResult.value = { isValid: true, errors: [], warnings: [] };
-        errorLines.value = [];
-        showValidationPanel.value = false;
-        return true;
-      }
-    } catch (error) {
-      // Clear validation errors when validation request fails
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-      return true;
-    }
-  }
-  return true;
-}
-
-// Real-time validation function for projects (no messages, silent)
-const validateProjectRealtime = async () => {
-  if (isProject.value && editorValue.value && props.item?.id) {
-    try {
-      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
-      
-      if (response.data && response.data.valid !== undefined) {
-        if (response.data.valid) {
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        } else {
-          // Handle errors array format from backend
-          let errorMessage = 'Project validation failed';
-          let lineNumber = null;
-          
-          if (response.data.errors && Array.isArray(response.data.errors) && response.data.errors.length > 0) {
-            // Use the first error message
-            errorMessage = response.data.errors[0].message || errorMessage;
-            // Try to extract line number from error message
-            lineNumber = extractLineNumber(errorMessage);
-            
-            // Set up validation result with all errors
-            validationResult.value = {
-              isValid: false,
-              errors: response.data.errors.map(err => ({
-                line: extractLineNumber(err.message) || 'Unknown',
-                message: err.message,
-                detail: err.detail || null
-              })),
-              warnings: response.data.warnings || []
-            };
-            
-            // Collect all line numbers for highlighting
-            errorLines.value = response.data.errors
-              .map(err => extractLineNumber(err.message))
-              .filter(Boolean);
-          } else if (response.data.error) {
-            // Fallback to old error format
-            errorMessage = response.data.error;
-            lineNumber = extractLineNumber(errorMessage);
-            
-            validationResult.value = {
-              isValid: false,
-              errors: [{ 
-                line: lineNumber || 'Unknown', 
-                message: errorMessage,
-                detail: response.data?.detail || null
-              }],
-              warnings: []
-            };
-            
-            errorLines.value = lineNumber ? [lineNumber] : [];
-          } else {
-            // No specific error information
-            validationResult.value = {
-              isValid: false,
-              errors: [{ 
-                line: 'Unknown', 
-                message: errorMessage,
-                detail: null
-              }],
-              warnings: []
-            };
-            
-            errorLines.value = [];
-          }
-          
-          showValidationPanel.value = true;
-        }
-        return response.data.valid;
-      } else {
-        // Clear validation
-        validationResult.value = { isValid: true, errors: [], warnings: [] };
-        errorLines.value = [];
-        showValidationPanel.value = false;
-        return true;
-      }
-    } catch (error) {
-      // Clear validation errors when validation request fails
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-      return true;
-    }
-  }
-  return true;
-}
-
-// Real-time validation function for inputs (no messages, silent)
-const validateInputRealtime = async () => {
-  if (isInput.value && editorValue.value && props.item?.id) {
-    try {
-      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
-      
-      if (response.data && response.data.valid !== undefined) {
-        if (response.data.valid) {
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        } else {
-          // For invalid responses, show error
-          const errorMessage = response.data.error || 'Input validation failed';
-          
-          // Try to extract line number from error message
-          const lineNumber = extractLineNumber(errorMessage);
-          
-          validationResult.value = {
-            isValid: false,
-            errors: [{ 
-              line: lineNumber || 'Unknown', 
-              message: errorMessage,
-              detail: response.data?.detail || null
-            }],
-            warnings: []
-          };
-          
-          errorLines.value = lineNumber ? [lineNumber] : [];
-          showValidationPanel.value = true;
-        }
-        return response.data.valid;
-      } else {
-        // Clear validation
-        validationResult.value = { isValid: true, errors: [], warnings: [] };
-        errorLines.value = [];
-        showValidationPanel.value = false;
-        return true;
-      }
-    } catch (error) {
-      // Clear validation errors when validation request fails
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-      return true;
-    }
-  }
-  return true;
-}
-
-// Real-time validation function for outputs (no messages, silent)
-const validateOutputRealtime = async () => {
-  if (isOutput.value && editorValue.value && props.item?.id) {
-    try {
-      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
-      
-      if (response.data && response.data.valid !== undefined) {
-        if (response.data.valid) {
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        } else {
-          // For invalid responses, show error
-          const errorMessage = response.data.error || 'Output validation failed';
-          
-          // Try to extract line number from error message
-          const lineNumber = extractLineNumber(errorMessage);
-          
-          validationResult.value = {
-            isValid: false,
-            errors: [{ 
-              line: lineNumber || 'Unknown', 
-              message: errorMessage,
-              detail: response.data?.detail || null
-            }],
-            warnings: []
-          };
-          
-          errorLines.value = lineNumber ? [lineNumber] : [];
-          showValidationPanel.value = true;
-        }
-        return response.data.valid;
-      } else {
-        // Clear validation
-        validationResult.value = { isValid: true, errors: [], warnings: [] };
-        errorLines.value = [];
-        showValidationPanel.value = false;
-        return true;
-      }
-    } catch (error) {
-      // Clear validation errors when validation request fails
-      validationResult.value = { isValid: true, errors: [], warnings: [] };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-      return true;
-    }
-  }
-  return true;
-}
+// Real-time validation functions are now centralized in useComponentValidation composable
 
 // Watch for changes in editor content and perform real-time validation  
 const rulesetValidationTimeout = ref(null);
 
-// Real-time validation for rulesets only, other components use line-based validation
+// Real-time validation for all component types
 watch(editorValue, (newContent) => {
-  if (isRuleset.value && newContent) {
-    // Debounce ruleset validation to avoid excessive API calls
-    clearTimeout(rulesetValidationTimeout.value);
-    rulesetValidationTimeout.value = setTimeout(async () => {
-      await validateRulesetRealtime();
-    }, 800); // Wait 800ms after user stops typing for faster feedback
-  } else if (isProject.value && newContent) {
-    // Debounce project validation for better responsiveness
-    clearTimeout(projectValidationTimeout.value);
-    projectValidationTimeout.value = setTimeout(async () => {
-      await validateProjectRealtime();
-    }, 1000); // Wait 1s after user stops typing
+  if (props.item?.type && props.item?.id && newContent) {
+    if (isRuleset.value) {
+      // Debounce ruleset validation to avoid excessive API calls
+      clearTimeout(rulesetValidationTimeout.value);
+      rulesetValidationTimeout.value = setTimeout(async () => {
+        await validateRealtime(props.item.type, props.item.id, newContent);
+      }, 800); // Wait 800ms after user stops typing for faster feedback
+    } else if (isProject.value) {
+      // Debounce project validation for better responsiveness
+      clearTimeout(projectValidationTimeout.value);
+      projectValidationTimeout.value = setTimeout(async () => {
+        await validateRealtime(props.item.type, props.item.id, newContent);
+      }, 1000); // Wait 1s after user stops typing
+    }
   }
 }, { deep: true })
 
@@ -1076,30 +763,30 @@ const pluginValidationTimeout = ref(null)
 
 // Handle line change for real-time validation (project, input, output, plugin)
 function handleLineChange(newLineNumber) {
-  if (newLineNumber !== lastCursorLine.value) {
+  if (newLineNumber !== lastCursorLine.value && props.item?.type && props.item?.id && editorValue.value) {
     if (isProject.value) {
       // User moved to a different line in project, validate the project
       clearTimeout(projectValidationTimeout.value);
       projectValidationTimeout.value = setTimeout(async () => {
-        await validateProjectRealtime();
+        await validateRealtime(props.item.type, props.item.id, editorValue.value);
       }, 300); // Quick validation when changing lines
     } else if (isInput.value) {
       // User moved to a different line in input, validate the input
       clearTimeout(inputValidationTimeout.value);
       inputValidationTimeout.value = setTimeout(async () => {
-        await validateInputRealtime();
+        await validateRealtime(props.item.type, props.item.id, editorValue.value);
       }, 300); // Quick validation when changing lines
     } else if (isOutput.value) {
       // User moved to a different line in output, validate the output
       clearTimeout(outputValidationTimeout.value);
       outputValidationTimeout.value = setTimeout(async () => {
-        await validateOutputRealtime();
+        await validateRealtime(props.item.type, props.item.id, editorValue.value);
       }, 300); // Quick validation when changing lines
     } else if (isPlugin.value) {
       // User moved to a different line in plugin, validate the plugin
       clearTimeout(pluginValidationTimeout.value);
       pluginValidationTimeout.value = setTimeout(async () => {
-        await validatePluginRealtime();
+        await validateRealtime(props.item.type, props.item.id, editorValue.value);
       }, 300); // Quick validation when changing lines
     }
     
@@ -1109,477 +796,15 @@ function handleLineChange(newLineNumber) {
 
 
 
-// Verify project function
-async function verifyProject() {
-  if (!isProject.value) return;
+// Generic verify function using composable
+async function verifyCurrentComponent() {
+  if (!props.item?.type || !props.item?.id) return;
   
-  verifyLoading.value = true;
-  
-  try {
-    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
-    
-    if (!contentToVerify) {
-      $message?.warning?.('No content to verify');
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      $message?.success?.('Project configuration is valid');
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-    } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
-      
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
-        
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      } else {
-        // Add general error without line number
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      }
-      showValidationPanel.value = true;
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
-    
-    // Extract line number from error message for highlighting
-    const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
-      
-      // Add to validation result for display in the panel
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber,
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    }
-    showValidationPanel.value = true;
-  } finally {
-    verifyLoading.value = false;
-  }
+  const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
+  await verifyComponent(props.item.type, props.item.id, contentToVerify);
 }
 
-// Verify plugin function
-async function verifyPlugin() {
-  if (!isPlugin.value) return;
-  
-  verifyLoading.value = true;
-  
-  try {
-    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
-    
-    if (!contentToVerify) {
-      $message?.warning?.('No content to verify');
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      $message?.success?.('Plugin code is valid');
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-    } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
-      
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
-        
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      } else {
-        // Add general error without line number
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      }
-      showValidationPanel.value = true;
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
-    
-    // Extract line number from error message for highlighting
-    const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
-      
-      // Add to validation result for display in the panel
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber,
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    }
-    showValidationPanel.value = true;
-  } finally {
-    verifyLoading.value = false;
-  }
-}
-
-// Verify ruleset function
-async function verifyRuleset() {
-  if (!isRuleset.value) return;
-  
-  verifyLoading.value = true;
-  
-  try {
-    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
-    
-    if (!contentToVerify) {
-      $message?.warning?.('No content to verify');
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      $message?.success?.('Ruleset XML is valid');
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-      showValidationPanel.value = false;
-    } else {
-      // Handle structured response from backend
-      if (response.data && response.data.errors && Array.isArray(response.data.errors)) {
-        // Backend returned structured validation result
-        validationResult.value = {
-          isValid: response.data.valid || false,
-          errors: response.data.errors || [],
-          warnings: response.data.warnings || []
-        };
-        
-        // Extract error lines for highlighting
-        errorLines.value = response.data.errors.map(err => err.line).filter(Boolean);
-        
-        const errorCount = response.data.errors.length;
-        const warningCount = (response.data.warnings || []).length;
-        
-        if (errorCount > 0) {
-          $message?.error?.(`Verification failed: ${errorCount} error${errorCount > 1 ? 's' : ''} found`);
-        } else if (warningCount > 0) {
-          $message?.warning?.(`Verification completed with ${warningCount} warning${warningCount > 1 ? 's' : ''}`);
-        }
-        
-        showValidationPanel.value = true;
-      } else {
-        // Fallback to old format
-        const errorMessage = response.data?.error || 'Unknown verification error';
-        $message?.error?.('Verification failed: ' + errorMessage);
-        
-        const lineNumber = extractLineNumber(errorMessage);
-        errorLines.value = lineNumber ? [lineNumber] : [];
-        
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber || 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-        showValidationPanel.value = true;
-      }
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
-    
-    const lineNumber = extractLineNumber(errorMessage);
-    errorLines.value = lineNumber ? [lineNumber] : [];
-    
-    validationResult.value = {
-      isValid: false,
-      errors: [{
-        line: lineNumber || 'Unknown',
-        message: errorMessage,
-        detail: error.response?.data?.detail || null
-      }],
-      warnings: []
-    };
-    showValidationPanel.value = true;
-  } finally {
-    verifyLoading.value = false;
-  }
-}
-
-// Verify output function
-async function verifyOutput() {
-  if (!isOutput.value) return;
-  
-  verifyLoading.value = true;
-  
-  try {
-    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
-    
-    if (!contentToVerify) {
-      $message?.warning?.('No content to verify');
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      $message?.success?.('Output configuration is valid');
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-    } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
-      
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
-        
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      } else {
-        // Add general error without line number
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      }
-      showValidationPanel.value = true;
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
-    
-    // Extract line number from error message for highlighting
-    const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
-      
-      // Add to validation result for display in the panel
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber,
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    }
-    showValidationPanel.value = true;
-  } finally {
-    verifyLoading.value = false;
-  }
-}
-
-// Verify input function
-async function verifyInput() {
-  if (!isInput.value) return;
-  
-  verifyLoading.value = true;
-  
-  try {
-    const contentToVerify = props.item?.isEdit ? editorValue.value : detail.value?.raw;
-    
-    if (!contentToVerify) {
-      $message?.warning?.('No content to verify');
-      return;
-    }
-    
-    const response = await hubApi.verifyComponent(props.item.type, props.item.id, contentToVerify);
-    
-    if (response.data && response.data.valid) {
-      $message?.success?.('Input configuration is valid');
-      // Clear validation errors on successful verification
-      validationResult.value = {
-        isValid: true,
-        errors: [],
-        warnings: []
-      };
-      errorLines.value = [];
-    } else {
-      const errorMessage = response.data?.error || 'Unknown verification error';
-      $message?.error?.('Verification failed: ' + errorMessage);
-      
-      // Extract line number from error message for highlighting
-      const lineNumber = extractLineNumber(errorMessage);
-      if (lineNumber) {
-        errorLines.value = [lineNumber];
-        
-        // Add to validation result for display in the panel
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: lineNumber,
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      } else {
-        // Add general error without line number
-        validationResult.value = {
-          isValid: false,
-          errors: [{
-            line: 'Unknown',
-            message: errorMessage,
-            detail: response.data?.detail || null
-          }],
-          warnings: []
-        };
-      }
-      showValidationPanel.value = true;
-    }
-  } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Unknown verification error';
-    $message?.error?.('Verification error: ' + errorMessage);
-    
-    // Extract line number from error message for highlighting
-    const lineNumber = extractLineNumber(errorMessage);
-    if (lineNumber) {
-      errorLines.value = [lineNumber];
-      
-      // Add to validation result for display in the panel
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber,
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    } else {
-      // Add general error without line number
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: 'Unknown',
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-    }
-    showValidationPanel.value = true;
-  } finally {
-    verifyLoading.value = false;
-  }
-}
+// All specific verification functions replaced with generic verifyCurrentComponent()
 
 // Connect check function for both input and output components
 async function connectCheck() {
@@ -1645,97 +870,17 @@ async function connectCheck() {
   }
 }
 
-// Real-time validation function for plugins (no messages, silent)
-const validatePluginRealtime = async () => {
-  if (isPlugin.value && editorValue.value && props.item?.id) {
-    try {
-      const response = await hubApi.verifyComponent(props.item.type, props.item.id, editorValue.value);
-      
-      if (response.data && response.data.valid !== undefined) {
-        if (response.data.valid) {
-          validationResult.value = { isValid: true, errors: [], warnings: [] };
-          errorLines.value = [];
-          showValidationPanel.value = false;
-        } else {
-          // For invalid responses, show error
-          let errorMessage = 'Plugin validation failed';
-          if (response.data && response.data.error) {
-            errorMessage = response.data.error;
-          } else if (response.data && !response.data.valid) {
-            errorMessage = 'Plugin validation failed - check your code syntax';
-          }
-          
-          // Try to extract line number from error message
-          const lineNumber = extractLineNumber(errorMessage);
-          
-          errorLines.value = lineNumber ? [lineNumber] : [];
-          
-          validationResult.value = {
-            isValid: false,
-            errors: [{
-              line: lineNumber || 'Unknown',
-              message: errorMessage,
-              detail: response.data?.detail || null
-            }],
-            warnings: []
-          };
-          showValidationPanel.value = true;
-        }
-      }
-      return response.data?.valid || false;
-    } catch (error) {
-      // Handle API errors silently for real-time validation
-      console.error('Plugin validation error:', error);
-      
-      let errorMessage = 'Plugin verification failed';
-      if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
-      } else if (error.response?.status === 404) {
-        errorMessage = 'Plugin verification service not available';
-      } else if (error.response?.status >= 500) {
-        errorMessage = 'Server error during plugin verification';
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      const lineNumber = extractLineNumber(errorMessage);
-      errorLines.value = lineNumber ? [lineNumber] : [];
-      
-      validationResult.value = {
-        isValid: false,
-        errors: [{
-          line: lineNumber || 'Unknown', 
-          message: errorMessage,
-          detail: error.response?.data?.detail || null
-        }],
-        warnings: []
-      };
-      showValidationPanel.value = true;
-      return false;
-    }
-  }
-  return true;
-}
+// validatePluginRealtime function removed - now handled by composable
 
 
 
 // Perform initial validation when component is mounted
 onMounted(async () => {
   // Clear any previous validation state first
-  validationResult.value = { isValid: true, errors: [], warnings: [] };
-  errorLines.value = [];
-  showValidationPanel.value = false;
+  clearValidation();
   
-  if (isRuleset.value && editorValue.value) {
-    await validateRulesetRealtime()
-  } else if (isProject.value && editorValue.value) {
-    await validateProjectRealtime()
-  } else if (isInput.value && editorValue.value) {
-    await validateInputRealtime()
-  } else if (isOutput.value && editorValue.value) {
-    await validateOutputRealtime()
-  } else if (isPlugin.value && editorValue.value) {
-    await validatePluginRealtime()
+  if (props.item?.type && props.item?.id && editorValue.value) {
+    await validateRealtime(props.item.type, props.item.id, editorValue.value);
   }
   
   // If component type is project, fetch all components list
@@ -1746,8 +891,8 @@ onMounted(async () => {
   // Set up periodic validation for projects (every 3 seconds)
   if (isProject.value) {
     const periodicValidation = setInterval(async () => {
-      if (props.item?.isEdit && editorValue.value) {
-        await validateProjectRealtime();
+      if (props.item?.isEdit && props.item?.type && props.item?.id && editorValue.value) {
+        await validateRealtime(props.item.type, props.item.id, editorValue.value);
       }
     }, 3000);
     
@@ -1771,83 +916,16 @@ async function saveEdit(content) {
     return
   }
   
-  // Validate ruleset using XML validator
-  if (isRuleset.value) {
-    const isValid = await validateRulesetRealtime()
-    if (!isValid && !confirm('Ruleset contains validation errors. Save anyway?')) {
-      return
-    }
-  }
+  // Use the new composable for save operation
+  const success = await saveEditComponent(currentItem.type, currentItem.id, contentToSave, {
+    validateBeforeSave,
+    verifyAfterSave,
+    fetchDetail,
+    onSuccess: (item) => emit('updated', item)
+  })
   
-  // Validate project configuration
-  if (isProject.value) {
-    const isValid = await validateProjectRealtime()
-    if (!isValid && !confirm('Project contains validation errors. Save anyway?')) {
-      return
-    }
-  }
-  
-  // Validate input configuration
-  if (isInput.value) {
-    const isValid = await validateInputRealtime()
-    if (!isValid && !confirm('Input contains validation errors. Save anyway?')) {
-      return
-    }
-  }
-  
-  // Validate output configuration
-  if (isOutput.value) {
-    const isValid = await validateOutputRealtime()
-    if (!isValid && !confirm('Output contains validation errors. Save anyway?')) {
-      return
-    }
-  }
-  
-  // Validate plugin configuration
-  if (isPlugin.value) {
-    const isValid = await validatePluginRealtime()
-    if (!isValid && !confirm('Plugin contains validation errors. Save anyway?')) {
-      return
-    }
-  }
-  
-  saveError.value = ''
-  saving.value = true
-  
-  try {
-    // Set flag to prevent unnecessary re-fetching during save
-    preventRefetch.value = true
-    
-    // Save component directly - the backend will handle whether to create .new file or not
-    // based on content comparison
-    
-    // Pre-save verification for all component types
-    try {
-      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id, contentToSave)
-
-      // If verification failed, ask user if they want to proceed
-      if (verifyRes.data && !verifyRes.data.valid) {
-        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
-        if (!confirm(`Verification failed: ${errorMessage}\n\nSave anyway?`)) {
-          saving.value = false
-          return
-        }
-      }
-    } catch (verifyErr) {
-      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
-      if (!confirm(`Verification error: ${errorMessage}\n\nSave anyway?`)) {
-        saving.value = false
-        return
-      }
-    }
-    
-    // Save component
-    const response = await hubApi.saveEdit(currentItem.type, currentItem.id, contentToSave)
-    
-    // Add a small delay to ensure backend has processed the save
-    await new Promise(resolve => setTimeout(resolve, 200))
-    
-    // Force refresh by clearing current detail first
+  if (success) {
+    // Force refresh by clearing current detail first and reloading
     detail.value = null
     editorValue.value = ''
     
@@ -1862,46 +940,6 @@ async function saveEdit(content) {
         originalContent.value = detail.value.raw
       }
     }
-    
-    // Post-save verification
-    try {
-      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id)
-      if (verifyRes.data && verifyRes.data.valid) {
-        $message?.success?.('Saved and verified successfully')
-      } else {
-        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
-        $message?.warning?.('Saved but verification failed: ' + errorMessage)
-        
-        // Extract line number from error message
-        const lineNumber = extractLineNumber(errorMessage)
-        if (lineNumber) {
-          errorLines.value = [lineNumber]
-        }
-      }
-    } catch (verifyErr) {
-      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
-      $message?.warning?.('Saved but verification failed: ' + errorMessage)
-      
-      const lineNumber = extractLineNumber(errorMessage)
-      if (lineNumber) {
-        errorLines.value = [lineNumber]
-      }
-    }
-    
-    // Update component list (but don't emit immediately to avoid re-render issues)
-    setTimeout(() => {
-      emit('updated', currentItem)
-      // Clear the prevent refetch flag after a delay
-      setTimeout(() => {
-        preventRefetch.value = false
-      }, 500)
-    }, 100)
-  } catch (err) {
-    saveError.value = err.response?.data?.error || err.message || 'Failed to save'
-    $message?.error?.('Error: ' + saveError.value)
-  } finally {
-    saving.value = false
-    // Don't clear the flag here, let the timeout handle it
   }
 }
 
@@ -1918,116 +956,12 @@ async function saveNew(content) {
     return
   }
   
-  // Validate ruleset using XML validator
-  if (isRuleset.value) {
-    const isValid = await validateRulesetRealtime()
-    if (!isValid && !confirm('Ruleset contains validation errors. Create anyway?')) {
-      return
-    }
-  }
-  
-  // Validate project configuration
-  if (isProject.value) {
-    const isValid = await validateProjectRealtime()
-    if (!isValid && !confirm('Project contains validation errors. Create anyway?')) {
-      return
-    }
-  }
-  
-  // Validate input configuration
-  if (isInput.value) {
-    const isValid = await validateInputRealtime()
-    if (!isValid && !confirm('Input contains validation errors. Create anyway?')) {
-      return
-    }
-  }
-  
-  // Validate output configuration
-  if (isOutput.value) {
-    const isValid = await validateOutputRealtime()
-    if (!isValid && !confirm('Output contains validation errors. Create anyway?')) {
-      return
-    }
-  }
-  
-  // Validate plugin configuration
-  if (isPlugin.value) {
-    const isValid = await validatePluginRealtime()
-    if (!isValid && !confirm('Plugin contains validation errors. Create anyway?')) {
-      return
-    }
-  }
-  
-  saveError.value = ''
-  saving.value = true
-  
-  try {
-    // Set flag to prevent unnecessary re-fetching during save
-    preventRefetch.value = true
-    
-    // Pre-save verification for all component types
-    try {
-      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id, contentToSave)
-
-      // If verification failed, ask user if they want to proceed
-      if (verifyRes.data && !verifyRes.data.valid) {
-        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
-        if (!confirm(`Verification failed: ${errorMessage}\n\nCreate anyway?`)) {
-          saving.value = false
-          return
-        }
-      }
-    } catch (verifyErr) {
-      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
-      if (!confirm(`Verification error: ${errorMessage}\n\nCreate anyway?`)) {
-        saving.value = false
-        return
-      }
-    }
-    
-    // Create new component
-    const response = await hubApi.saveNew(currentItem.type, currentItem.id, contentToSave)
-    
-    // Post-save verification
-    try {
-      const verifyRes = await hubApi.verifyComponent(currentItem.type, currentItem.id)
-      if (verifyRes.data && verifyRes.data.valid) {
-        $message?.success?.('Created and verified successfully')
-      } else {
-        const errorMessage = verifyRes.data?.error || 'Unknown verification error'
-        $message?.warning?.('Created but verification failed: ' + errorMessage)
-        
-        // Extract line number from error message
-        const lineNumber = extractLineNumber(errorMessage)
-        if (lineNumber) {
-          errorLines.value = [lineNumber]
-        }
-      }
-    } catch (verifyErr) {
-      const errorMessage = verifyErr.response?.data?.error || verifyErr.message || 'Unknown verification error'
-      $message?.warning?.('Created but verification failed: ' + errorMessage)
-      
-      const lineNumber = extractLineNumber(errorMessage)
-      if (lineNumber) {
-        errorLines.value = [lineNumber]
-      }
-    }
-    
-    // Notify parent component of successful creation
-    setTimeout(() => {
-      emit('created', currentItem)
-      // Clear the prevent refetch flag after a delay
-      setTimeout(() => {
-        preventRefetch.value = false
-      }, 500)
-    }, 100)
-  } catch (err) {
-    saveError.value = err.response?.data?.error || err.message || 'Failed to create'
-    $message?.error?.('Error: ' + saveError.value)
-  } finally {
-    saving.value = false
-    // Don't clear the flag here, let the timeout handle it
-  }
+  // Use the new composable for save operation
+  await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
+    validateBeforeSave,
+    verifyAfterSave,
+    onSuccess: (item) => emit('created', item)
+  })
 }
 
 function cancelEdit() {
