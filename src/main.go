@@ -21,6 +21,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var (
+	Version = "0.1.1"
+)
+
 func traverseComponents(dir string, suffix string) ([]string, error) {
 	var files []string
 
@@ -462,9 +466,7 @@ func main() {
 
 	// Handle version flag
 	if *version {
-		fmt.Printf("%s %s\n", AppName, Version)
-		fmt.Printf("Build Time: %s\n", BuildTime)
-		fmt.Printf("Git Commit: %s\n", GitCommit)
+		fmt.Printf("%s %s\n", Version)
 		return
 	}
 

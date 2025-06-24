@@ -1,5 +1,52 @@
 <template>
-  <header class="h-16 border-b border-gray-200 flex items-center justify-end px-6">
+  <header class="h-16 border-b border-gray-200 flex items-center justify-between px-6">
+    <!-- Logo and Title -->
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="w-full h-full">
+          <defs>
+            <linearGradient id="mainGrad" cx="50%" cy="30%" r="70%">
+              <stop offset="0%" style="stop-color:#6366f1"/>
+              <stop offset="100%" style="stop-color:#4f46e5"/>
+            </linearGradient>
+            <linearGradient id="accentGrad" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" style="stop-color:#06b6d4"/>
+              <stop offset="100%" style="stop-color:#0891b2"/>
+            </linearGradient>
+          </defs>
+          
+          <!-- Main Container -->
+          <rect x="4" y="4" width="24" height="24" rx="6" 
+                fill="url(#mainGrad)"/>
+          
+          <!-- Central Hub -->
+          <circle cx="16" cy="16" r="5" fill="url(#accentGrad)" opacity="0.9"/>
+          
+          <!-- Hub Connections -->
+          <g fill="url(#accentGrad)" opacity="0.7">
+            <circle cx="16" cy="9" r="1.5"/>   <!-- Top -->
+            <circle cx="23" cy="16" r="1.5"/>  <!-- Right -->
+            <circle cx="16" cy="23" r="1.5"/>  <!-- Bottom -->
+            <circle cx="9" cy="16" r="1.5"/>   <!-- Left -->
+          </g>
+          
+          <!-- Connection Lines -->
+          <g stroke="url(#accentGrad)" stroke-width="1" opacity="0.5" fill="none">
+            <line x1="16" y1="11" x2="16" y2="10.5"/>  <!-- Top -->
+            <line x1="21" y1="16" x2="21.5" y2="16"/>  <!-- Right -->
+            <line x1="16" y1="21" x2="16" y2="21.5"/>  <!-- Bottom -->
+            <line x1="11" y1="16" x2="10.5" y2="16"/>  <!-- Left -->
+          </g>
+          
+          <!-- Central Intelligence Indicator -->
+          <circle cx="16" cy="16" r="2" fill="#ffffff" opacity="0.9"/>
+          <circle cx="16" cy="16" r="0.8" fill="url(#mainGrad)"/>
+        </svg>
+      </div>
+      <h1 class="text-xl font-semibold text-gray-800">AgentSmith-HUB</h1>
+    </div>
+    
+    <!-- Action Buttons -->
     <div class="flex items-center space-x-3">
       <button @click="openGitHub" class="btn btn-ghost-primary btn-sm flex items-center">
         <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">

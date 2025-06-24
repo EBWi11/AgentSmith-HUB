@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="mainGradient" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="accentGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#06b6d4"/>
+      <stop offset="100%" style="stop-color:#0891b2"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  
+  <!-- Main Container -->
+  <rect x="30" y="30" width="140" height="140" rx="28" 
+        fill="url(#mainGradient)" 
+        filter="url(#softShadow)"/>
+  
+  <!-- Central Hub Symbol -->
+  <circle cx="100" cy="100" r="25" fill="url(#accentGradient)" opacity="0.9"/>
+  
+  <!-- Hub Connections -->
+  <g fill="url(#accentGradient)" opacity="0.7">
+    <!-- Four cardinal directions -->
+    <circle cx="100" cy="60" r="6"/>  <!-- Top -->
+    <circle cx="140" cy="100" r="6"/> <!-- Right -->
+    <circle cx="100" cy="140" r="6"/> <!-- Bottom -->
+    <circle cx="60" cy="100" r="6"/>  <!-- Left -->
+  </g>
+  
+  <!-- Connection Lines -->
+  <g stroke="url(#accentGradient)" stroke-width="3" opacity="0.5" fill="none">
+    <line x1="100" y1="75" x2="100" y2="66"/>  <!-- Top -->
+    <line x1="125" y1="100" x2="134" y2="100"/> <!-- Right -->
+    <line x1="100" y1="125" x2="100" y2="134"/> <!-- Bottom -->
+    <line x1="75" y1="100" x2="66" y2="100"/>   <!-- Left -->
+  </g>
+  
+  <!-- Central Intelligence Indicator -->
+  <circle cx="100" cy="100" r="8" fill="#ffffff" opacity="0.9"/>
+  <circle cx="100" cy="100" r="3" fill="url(#mainGradient)"/>
+</svg> 
