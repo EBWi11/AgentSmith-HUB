@@ -78,7 +78,7 @@
                   <div class="text-xs text-gray-500 mb-2">
                     Source: {{ sample.source }}
                   </div>
-                  <pre class="text-sm overflow-x-auto">{{ JSON.stringify(sample.data, null, 2) }}</pre>
+                  <JsonViewer :value="sample.data || sample" height="auto" />
                 </div>
                 <div v-if="samples.length > 5" class="text-center">
                   <span class="text-xs text-gray-500">... and {{ samples.length - 5 }} more samples</span>
@@ -101,6 +101,7 @@ import { useRouter } from 'vue-router';
 import dagre from 'dagre';
 import yaml from 'js-yaml';
 import CustomNode from './CustomNode.vue';
+import JsonViewer from '../JsonViewer.vue';
 import { hubApi } from '../../api';
 
 const router = useRouter();

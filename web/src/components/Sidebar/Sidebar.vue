@@ -529,7 +529,9 @@
             <div class="text-sm">
               <div v-if="testPluginResult.result !== null" class="mt-2">
                 <div class="font-medium text-gray-700">Result value:</div>
-                <pre class="whitespace-pre-wrap mt-1 text-gray-800">{{ JSON.stringify(testPluginResult.result, null, 2) }}</pre>
+                <div class="mt-1">
+                  <JsonViewer :value="testPluginResult.result" height="auto" />
+                </div>
               </div>
               <div v-else class="text-gray-500 italic">
                 No result value returned
