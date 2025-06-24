@@ -88,8 +88,8 @@ func readErrorLogsFromFile(filePath string, source string, filter ErrorLogFilter
 	scanner := bufio.NewScanner(file)
 
 	// Increase the scanner buffer size to handle long log lines
-	// Default buffer size is 64KB, we increase it to 1MB
-	const maxCapacity = 1024 * 1024 * 5 // 1MB
+	// Default buffer size is 64KB, we increase it to 5MB
+	const maxCapacity = 1024 * 1024 * 5 // 5MB
 	buf := make([]byte, 0, maxCapacity)
 	scanner.Buffer(buf, maxCapacity)
 
