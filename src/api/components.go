@@ -1154,9 +1154,10 @@ func GetSamplerData(c echo.Context) error {
 
 	logger.Info("Parsed component info", "componentType", componentType, "componentId", componentId)
 
-	// Check if the component exists
+	// Check if the component exists - 支持大小写
 	componentExists := false
-	switch componentType {
+	normalizedType := strings.ToLower(componentType) // 统一转为小写处理
+	switch normalizedType {
 	case "input":
 		common.GlobalMu.RLock()
 		_, componentExists = project.GlobalProject.Inputs[componentId]
@@ -1170,14 +1171,22 @@ func GetSamplerData(c echo.Context) error {
 		_, componentExists = project.GlobalProject.Rulesets[componentId]
 		common.GlobalMu.RUnlock()
 	default:
-		logger.Error("Unsupported component type", "componentType", componentType)
+		logger.Error("Unsupported component type in GetSamplerData",
+			"componentType", componentType,
+			"normalizedType", normalizedType,
+			"componentId", componentId,
+			"nodeSequence", nodeSequence,
+			"supportedTypes", []string{"input", "output", "ruleset"})
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Unsupported component type: " + componentType,
+			"error": fmt.Sprintf("Unsupported component type: '%s'. Supported types: input, output, ruleset", componentType),
 		})
 	}
 
 	if !componentExists {
-		logger.Error("Component not found", "componentType", componentType, "componentId", componentId)
+		logger.Warn("Component not found for sample data request",
+			"componentType", componentType,
+			"componentId", componentId,
+			"nodeSequence", nodeSequence)
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": fmt.Sprintf("Component '%s' of type '%s' not found", componentId, componentType),
 		})
@@ -1201,6 +1210,7 @@ func GetSamplerData(c echo.Context) error {
 	common.GlobalMu.RUnlock()
 
 	// Search through all samplers for flow paths ending with our target component (suffix matching)
+	totalSamples := 0
 	for _, samplerName := range samplerNames {
 		sampler := common.GetSampler(samplerName)
 		if sampler != nil {
@@ -1226,9 +1236,19 @@ func GetSamplerData(c echo.Context) error {
 						}
 					}
 					result[projectNodeSequence] = convertedSamples
+					totalSamples += len(sampleData)
 				}
 			}
 		}
+	}
+
+	// 改进空数据处理：无论有没有数据都返回成功响应
+	if totalSamples == 0 {
+		logger.Info("No sample data found for component",
+			"componentType", componentType,
+			"componentId", componentId,
+			"nodeSequence", nodeSequence,
+			"message", "This is normal if the component hasn't processed any data yet")
 	}
 
 	// Initialize response structure
@@ -1240,13 +1260,7 @@ func GetSamplerData(c echo.Context) error {
 		"componentName", componentName,
 		"componentId", componentId,
 		"totalFlowPaths", len(result),
-		"totalSamples", func() int {
-			total := 0
-			for _, samples := range result {
-				total += len(samples)
-			}
-			return total
-		}())
+		"totalSamples", totalSamples)
 
 	return c.JSON(http.StatusOK, response)
 }
