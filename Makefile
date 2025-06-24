@@ -100,8 +100,21 @@ package: backend frontend
 
 deploy: package
 	@echo "Creating deployment archive..."
-	cd $(DIST_DIR) && tar czf ../agentsmith-hub-deployment.tar.gz *
-	@echo "Deployment archive created: agentsmith-hub-deployment.tar.gz"
+	mkdir -p agentsmith-hub-$(VERSION)
+	cp -r $(DIST_DIR)/* agentsmith-hub-$(VERSION)/
+	tar czf agentsmith-hub-$(VERSION)-deployment.tar.gz agentsmith-hub-$(VERSION)
+	rm -rf agentsmith-hub-$(VERSION)
+	@echo "Deployment archive created: agentsmith-hub-$(VERSION)-deployment.tar.gz"
+	@echo ""
+	@echo "Archive contents:"
+	@echo "  agentsmith-hub-$(VERSION)/"
+	@echo "  ├── agentsmith-hub          (binary)"
+	@echo "  ├── web/                    (frontend files)"
+	@echo "  ├── lib/                    (libraries)"
+	@echo "  ├── config/                 (configuration)"
+	@echo "  ├── start.sh                (start script)"
+	@echo "  ├── stop.sh                 (stop script)"
+	@echo "  └── README.md               (documentation)"
 
 clean:
 	@echo "Cleaning build artifacts..."

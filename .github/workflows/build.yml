@@ -62,17 +62,36 @@ jobs:
     
     - name: Create deployment archive
       run: |
-        cd dist
-        ls -la
-        ARCHIVE_NAME="agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz"
+        # Create a clean directory structure for the archive
+        RELEASE_NAME="${{ steps.version.outputs.release_name }}"
+        ARCHIVE_DIR="agentsmith-hub-${RELEASE_NAME}"
+        ARCHIVE_NAME="${ARCHIVE_DIR}-linux-amd64.tar.gz"
+        
         echo "Creating archive: $ARCHIVE_NAME"
-        tar --version
-        tar -czf "../$ARCHIVE_NAME" .
-        cd ..
+        echo "Archive directory: $ARCHIVE_DIR"
+        
+        # Create the archive directory and copy all files
+        mkdir -p "$ARCHIVE_DIR"
+        cp -r dist/* "$ARCHIVE_DIR/"
+        
+        # Show what we're packaging
+        echo "Contents to be archived:"
+        ls -la "$ARCHIVE_DIR"
+        
+        # Create the tar.gz archive with proper directory structure
+        tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
         
         # Create checksum
         sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
+        
+        # Clean up
+        rm -rf "$ARCHIVE_DIR"
+        
+        echo "Archive created successfully: $ARCHIVE_NAME"
+        ls -la *.tar.gz*
     
+    # Note: GitHub Actions will automatically zip the artifacts
+    # The actual deployment file is the .tar.gz inside the zip
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -103,7 +122,11 @@ jobs:
           
           ### Quick Start
           
-          1. Download and extract the archive
+          1. Download and extract the archive:
+             ```bash
+             tar -xzf agentsmith-hub-${{ github.ref_name }}-linux-amd64.tar.gz
+             cd agentsmith-hub-${{ github.ref_name }}
+             ```
           2. Configure your settings in `config/config.yaml`
           3. Run `./start.sh` to start the application
           4. Access the web interface at http://localhost:8080
