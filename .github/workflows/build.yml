@@ -65,7 +65,7 @@ jobs:
         # Create a clean directory structure for the archive
         RELEASE_NAME="${{ steps.version.outputs.release_name }}"
         ARCHIVE_DIR="agentsmith-hub-${RELEASE_NAME}"
-        ARCHIVE_NAME="${ARCHIVE_DIR}-linux-amd64.tar.gz"
+        ARCHIVE_NAME="agentsmith-hub.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
         echo "Archive directory: $ARCHIVE_DIR"
@@ -95,10 +95,10 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64
+        name: agentsmith-hub-${{ steps.version.outputs.release_name }}
         path: |
-          agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz
-          agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz.sha256
+          agentsmith-hub.tar.gz
+          agentsmith-hub.tar.gz.sha256
         retention-days: 30
     
     - name: Create Release (on tag)
@@ -106,8 +106,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz
-          agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz.sha256
+          agentsmith-hub.tar.gz
+          agentsmith-hub.tar.gz.sha256
         body: |
           ## AgentSmith-HUB Release ${{ github.ref_name }}
           
@@ -124,7 +124,7 @@ jobs:
           
           1. Download and extract the archive:
              ```bash
-             tar -xzf agentsmith-hub-${{ github.ref_name }}-linux-amd64.tar.gz
+             tar -xzf agentsmith-hub.tar.gz
              cd agentsmith-hub-${{ github.ref_name }}
              ```
           2. Configure your settings in `config/config.yaml`

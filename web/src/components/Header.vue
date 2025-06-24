@@ -5,42 +5,28 @@
       <div class="w-8 h-8">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="w-full h-full">
           <defs>
-            <linearGradient id="mainGrad" cx="50%" cy="30%" r="70%">
-              <stop offset="0%" style="stop-color:#6366f1"/>
-              <stop offset="100%" style="stop-color:#4f46e5"/>
-            </linearGradient>
-            <linearGradient id="accentGrad" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" style="stop-color:#06b6d4"/>
-              <stop offset="100%" style="stop-color:#0891b2"/>
+            <linearGradient id="triangleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#4facfe"/>
+              <stop offset="50%" style="stop-color:#00b4db"/>
+              <stop offset="100%" style="stop-color:#0083b0"/>
             </linearGradient>
           </defs>
           
-          <!-- Main Container -->
-          <rect x="4" y="4" width="24" height="24" rx="6" 
-                fill="url(#mainGrad)"/>
+          <!-- 主三角形 -->
+          <path d="M16 4 L26 24 L6 24 Z" fill="url(#triangleGrad)"/>
           
-          <!-- Central Hub -->
-          <circle cx="16" cy="16" r="5" fill="url(#accentGrad)" opacity="0.9"/>
-          
-          <!-- Hub Connections -->
-          <g fill="url(#accentGrad)" opacity="0.7">
-            <circle cx="16" cy="9" r="1.5"/>   <!-- Top -->
-            <circle cx="23" cy="16" r="1.5"/>  <!-- Right -->
-            <circle cx="16" cy="23" r="1.5"/>  <!-- Bottom -->
-            <circle cx="9" cy="16" r="1.5"/>   <!-- Left -->
+          <!-- 智能指示器 -->
+          <g fill="#ffffff" opacity="0.9">
+            <circle cx="16" cy="18" r="1.5"/>
+            <circle cx="13" cy="20" r="1"/>
+            <circle cx="19" cy="20" r="1"/>
           </g>
           
-          <!-- Connection Lines -->
-          <g stroke="url(#accentGrad)" stroke-width="1" opacity="0.5" fill="none">
-            <line x1="16" y1="11" x2="16" y2="10.5"/>  <!-- Top -->
-            <line x1="21" y1="16" x2="21.5" y2="16"/>  <!-- Right -->
-            <line x1="16" y1="21" x2="16" y2="21.5"/>  <!-- Bottom -->
-            <line x1="11" y1="16" x2="10.5" y2="16"/>  <!-- Left -->
+          <!-- 连接线 -->
+          <g stroke="#ffffff" stroke-width="0.8" opacity="0.6" fill="none">
+            <line x1="16" y1="18" x2="13" y2="20"/>
+            <line x1="16" y1="18" x2="19" y2="20"/>
           </g>
-          
-          <!-- Central Intelligence Indicator -->
-          <circle cx="16" cy="16" r="2" fill="#ffffff" opacity="0.9"/>
-          <circle cx="16" cy="16" r="0.8" fill="url(#mainGrad)"/>
         </svg>
       </div>
       <h1 class="text-xl font-semibold text-gray-800">AgentSmith-HUB</h1>

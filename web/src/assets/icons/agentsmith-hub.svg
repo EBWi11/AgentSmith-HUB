@@ -1,44 +1,60 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
   <defs>
-    <linearGradient id="mainGradient" cx="50%" cy="30%" r="70%">
-      <stop offset="0%" style="stop-color:#6366f1"/>
-      <stop offset="100%" style="stop-color:#4f46e5"/>
+    <!-- 主渐变 - 蓝色三角形 -->
+    <linearGradient id="triangleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe"/>
+      <stop offset="50%" style="stop-color:#00b4db"/>
+      <stop offset="100%" style="stop-color:#0083b0"/>
     </linearGradient>
-    <linearGradient id="accentGradient" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" style="stop-color:#06b6d4"/>
-      <stop offset="100%" style="stop-color:#0891b2"/>
+    
+    <!-- 内部渐变 -->
+    <linearGradient id="innerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff" stop-opacity="0.3"/>
+      <stop offset="100%" style="stop-color:#ffffff" stop-opacity="0.1"/>
     </linearGradient>
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.12"/>
+    
+    <!-- 阴影滤镜 -->
+    <filter id="dropShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.15"/>
+    </filter>
+    
+    <!-- 内部光效 -->
+    <filter id="innerGlow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
   
-  <!-- Main Container -->
-  <rect x="30" y="30" width="140" height="140" rx="28" 
-        fill="url(#mainGradient)" 
-        filter="url(#softShadow)"/>
+  <!-- 主三角形 -->
+  <path d="M100 20 L170 160 L30 160 Z" 
+        fill="url(#triangleGradient)" 
+        filter="url(#dropShadow)"/>
   
-  <!-- Central Hub Symbol -->
-  <circle cx="100" cy="100" r="25" fill="url(#accentGradient)" opacity="0.9"/>
+  <!-- 内部高光三角形 -->
+  <path d="M100 35 L155 145 L45 145 Z" 
+        fill="url(#innerGradient)"/>
   
-  <!-- Hub Connections -->
-  <g fill="url(#accentGradient)" opacity="0.7">
-    <!-- Four cardinal directions -->
-    <circle cx="100" cy="60" r="6"/>  <!-- Top -->
-    <circle cx="140" cy="100" r="6"/> <!-- Right -->
-    <circle cx="100" cy="140" r="6"/> <!-- Bottom -->
-    <circle cx="60" cy="100" r="6"/>  <!-- Left -->
+  <!-- 智能代理指示器 - 三个小点 -->
+  <g fill="#ffffff" opacity="0.9" filter="url(#innerGlow)">
+    <!-- 中心点 -->
+    <circle cx="100" cy="110" r="4"/>
+    <!-- 左侧点 -->
+    <circle cx="85" cy="125" r="3"/>
+    <!-- 右侧点 -->
+    <circle cx="115" cy="125" r="3"/>
   </g>
   
-  <!-- Connection Lines -->
-  <g stroke="url(#accentGradient)" stroke-width="3" opacity="0.5" fill="none">
-    <line x1="100" y1="75" x2="100" y2="66"/>  <!-- Top -->
-    <line x1="125" y1="100" x2="134" y2="100"/> <!-- Right -->
-    <line x1="100" y1="125" x2="100" y2="134"/> <!-- Bottom -->
-    <line x1="75" y1="100" x2="66" y2="100"/>   <!-- Left -->
+  <!-- 连接线表示网络 -->
+  <g stroke="#ffffff" stroke-width="1.5" opacity="0.6" fill="none">
+    <line x1="100" y1="110" x2="85" y2="125"/>
+    <line x1="100" y1="110" x2="115" y2="125"/>
   </g>
   
-  <!-- Central Intelligence Indicator -->
-  <circle cx="100" cy="100" r="8" fill="#ffffff" opacity="0.9"/>
-  <circle cx="100" cy="100" r="3" fill="url(#mainGradient)"/>
+  <!-- 顶部智能指示 -->
+  <circle cx="100" cy="50" r="2" fill="#ffffff" opacity="0.8">
+    <animate attributeName="opacity" values="0.4;0.8;0.4" dur="2s" repeatCount="indefinite"/>
+  </circle>
 </svg> 
