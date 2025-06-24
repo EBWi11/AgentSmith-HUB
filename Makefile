@@ -5,6 +5,12 @@ DIST_DIR=dist
 FRONTEND_DIR=web
 BACKEND_DIR=src
 
+# Version information
+VERSION=$(shell cat VERSION 2>/dev/null || echo "unknown")
+BUILD_TIME=$(shell date -u '+%Y-%m-%d %H:%M:%S UTC')
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+LDFLAGS=-ldflags "-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'"
+
 # Build configuration - always target Linux
 UNAME_S := $(shell uname -s)
 TARGET_GOOS=linux
@@ -30,7 +36,7 @@ backend:
 		echo "Attempting CGO cross-compilation (may fail, use 'make backend-docker' if needed)..."; \
 		cd $(BACKEND_DIR) && \
 		CGO_ENABLED=0 GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
-		go build -ldflags "-s -w" -o ../$(BUILD_DIR)/$(BINARY_NAME) . || \
+		go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME) . || \
 		(echo "Cross-compilation failed. Please use: make backend-docker" && exit 1); \
 	else \
 		echo "Building on Linux natively..."; \
@@ -38,7 +44,7 @@ backend:
 		CGO_ENABLED=1 \
 		CGO_LDFLAGS="-L$(PWD)/$(LIB_PATH) -lrure" \
 		GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
-		go build -ldflags "-s -w" -o ../$(BUILD_DIR)/$(BINARY_NAME) .; \
+		go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME) .; \
 	fi
 
 # Build backend using Docker (recommended for macOS)
@@ -55,7 +61,7 @@ backend-docker:
 		-e GOARCH=amd64 \
 		-e CGO_LDFLAGS="-L/workspace/lib/linux -lrure" \
 		golang:1.24.3 \
-		sh -c "apt-get update && apt-get install -y build-essential && go build -ldflags '-s -w' -o ../$(BUILD_DIR)/$(BINARY_NAME) ."
+		sh -c "apt-get update && apt-get install -y build-essential && go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME) ."
 
 frontend:
 	@echo "Building frontend..."
@@ -105,7 +111,7 @@ clean:
 
 dev-backend:
 	@echo "Starting backend in development mode (current platform)..."
-	cd $(BACKEND_DIR) && go run . -config_root ../config
+	cd $(BACKEND_DIR) && go run $(LDFLAGS) . -config_root ../config
 
 dev-frontend:
 	@echo "Starting frontend in development mode..."

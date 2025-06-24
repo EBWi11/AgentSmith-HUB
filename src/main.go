@@ -449,6 +449,7 @@ func main() {
 	// Define our application flags
 	configRoot := fs.String("config_root", "", "agent smith hub config path, only leader need")
 	leaderAddr := fs.String("leader", "", "hub cluster leader address")
+	version := fs.Bool("version", false, "show version information")
 
 	// Custom usage function
 	fs.Usage = func() {
@@ -458,6 +459,14 @@ func main() {
 
 	// Parse command line flags
 	_ = fs.Parse(os.Args[1:])
+
+	// Handle version flag
+	if *version {
+		fmt.Printf("%s %s\n", AppName, Version)
+		fmt.Printf("Build Time: %s\n", BuildTime)
+		fmt.Printf("Git Commit: %s\n", GitCommit)
+		return
+	}
 
 	logger.Info("hub_starting", "config_root", *configRoot, "leader", *leaderAddr)
 
