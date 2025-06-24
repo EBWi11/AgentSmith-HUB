@@ -1377,6 +1377,27 @@ export const hubApi = {
       console.error('Error fetching aggregated system metrics:', error);
       throw error;
     }
+  },
+
+  // Error log endpoints
+  async getErrorLogs(params = {}) {
+    try {
+      const response = await api.get('/error-logs', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching error logs:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch error logs');
+    }
+  },
+
+  async getClusterErrorLogs(params = {}) {
+    try {
+      const response = await api.get('/cluster-error-logs', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching cluster error logs:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch cluster error logs');
+    }
   }
 };
 

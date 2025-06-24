@@ -192,6 +192,10 @@ func ServerStart(listener string) error {
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
 	e.GET("/cluster-system-stats", getClusterSystemStats)
 
+	// Error log endpoints
+	e.GET("/error-logs", getErrorLogs)
+	e.GET("/cluster-error-logs", getClusterErrorLogs)
+
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

@@ -1,4 +1,0 @@
-content: |
-  INPUT.kafka -> RULESET.test
-  INPUT.kafka  -> OUTPUT.print_demo
-  RULESET.test -> OUTPUT.print_demo

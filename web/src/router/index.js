@@ -3,6 +3,7 @@ import Login from '../views/Login.vue';
 import MainLayout from '../views/MainLayout.vue';
 import Dashboard from '../views/Dashboard.vue';
 import ComponentDetail from '../components/ComponentDetail.vue';
+import ErrorLogs from '../views/ErrorLogs.vue';
 import { hubApi } from '../api/index.js';
 
 const routes = [
@@ -84,20 +85,26 @@ const routes = [
       {
         path: 'cluster',
         name: 'Cluster',
-        component: { template: '<router-view />' },
+        component: () => import('../components/ClusterStatus.vue'),
         meta: { requiresAuth: true, componentType: 'cluster' }
       },
       {
         path: 'pending-changes',
         name: 'PendingChanges',
-        component: { template: '<router-view />' },
+        component: () => import('../components/PendingChanges.vue'),
         meta: { requiresAuth: true, componentType: 'pending-changes' }
       },
       {
         path: 'load-local-components',
         name: 'LoadLocalComponents',
-        component: { template: '<router-view />' },
+        component: () => import('../components/LoadLocalComponents.vue'),
         meta: { requiresAuth: true, componentType: 'load-local-components' }
+      },
+      {
+        path: 'error-logs',
+        name: 'ErrorLogs',
+        component: ErrorLogs,
+        meta: { requiresAuth: true, componentType: 'error-logs' }
       }
     ]
   }

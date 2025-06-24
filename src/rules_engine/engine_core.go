@@ -14,7 +14,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 )
 
-const HitRuleIdFieldName = "_HUB_HIT_RULE_ID"
+const HitRuleIdFieldName = "_hub_hit_rule_id"
 
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
@@ -82,7 +82,7 @@ func (r *Ruleset) Start() error {
 					}
 
 					task := func() {
-						// 优化：只增加总数，QPS由metricLoop计算
+						// Optimization: only increment total count, QPS is calculated by metricLoop
 						atomic.AddUint64(&r.processTotal, 1)
 
 						// IMPORTANT: Sample the input data BEFORE rule checking starts
@@ -577,13 +577,13 @@ func (r *Ruleset) metricLoop() {
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&r.processTotal)
 
-			// 简单处理：如果当前值小于上次值，重置为上次值
+			// Simple handling: if current value is less than last value, reset to last value
 			if cur < lastTotal {
 				logger.Warn("Counter decreased, possibly due to overflow or restart",
 					"ruleset", r.RulesetID,
 					"lastTotal", lastTotal,
 					"currentTotal", cur)
-				cur = lastTotal // 这次QPS为0，等待下次正常计算
+				cur = lastTotal // This time QPS is 0, wait for next normal calculation
 			}
 
 			qps := cur - lastTotal

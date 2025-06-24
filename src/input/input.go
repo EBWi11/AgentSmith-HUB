@@ -111,12 +111,12 @@ func Verify(path string, raw string) error {
 		return fmt.Errorf("YAML parse error: %v", err)
 	}
 
-	// 验证必要字段
+	// Validate required fields
 	if cfg.Type == "" {
 		return fmt.Errorf("missing required field 'type' (line: unknown)")
 	}
 
-	// 根据类型验证特定字段
+	// Validate type-specific fields
 	switch cfg.Type {
 	case InputTypeKafka:
 		if cfg.Kafka == nil {
@@ -132,7 +132,7 @@ func Verify(path string, raw string) error {
 		if cfg.AliyunSLS == nil {
 			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS input (line: unknown)")
 		}
-		// 添加更多AliyunSLS特定字段验证
+		// Add more AliyunSLS specific field validation
 	default:
 		return fmt.Errorf("unsupported input type: %s (line: unknown)", cfg.Type)
 	}
@@ -233,7 +233,7 @@ func (in *Input) Start() error {
 						return
 					}
 
-					// 优化：只增加总数，QPS由metricLoop计算
+					// Optimization: only increment total count, QPS is calculated by metricLoop
 					atomic.AddUint64(&in.consumeTotal, 1)
 
 					// Sample the message
@@ -378,13 +378,13 @@ func (in *Input) metricLoop() {
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&in.consumeTotal)
 
-			// 简单处理：如果当前值小于上次值，重置为上次值
+			// Simple handling: if current value is less than last value, reset to last value
 			if cur < lastTotal {
 				logger.Warn("Counter decreased, possibly due to overflow or restart",
 					"input", in.Id,
 					"lastTotal", lastTotal,
 					"currentTotal", cur)
-				cur = lastTotal // 这次QPS为0，等待下次正常计算
+				cur = lastTotal // This time QPS is 0, wait for next normal calculation
 			}
 
 			qps := cur - lastTotal

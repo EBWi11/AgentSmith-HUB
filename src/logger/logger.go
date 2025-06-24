@@ -20,7 +20,7 @@ func InitLogger() *slog.Logger {
 		MaxSize:    100,
 		MaxBackups: 30,
 		MaxAge:     15,
-		Compress:   true,
+		Compress:   false, // Disable compression to allow error log reading
 	}
 
 	handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
@@ -61,10 +61,10 @@ func InitPluginLogger() *slog.Logger {
 
 	pluginLogFile := &lumberjack.Logger{
 		Filename:   "./logs/plugin.log",
-		MaxSize:    100, // Same as hub.log
-		MaxBackups: 30,  // Same as hub.log
-		MaxAge:     15,  // Same as hub.log
-		Compress:   true,
+		MaxSize:    100,   // Same as hub.log
+		MaxBackups: 30,    // Same as hub.log
+		MaxAge:     15,    // Same as hub.log
+		Compress:   false, // Disable compression to allow error log reading
 	}
 
 	handler := slog.NewJSONHandler(pluginLogFile, &slog.HandlerOptions{
