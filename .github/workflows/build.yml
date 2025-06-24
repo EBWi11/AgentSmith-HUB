@@ -23,7 +23,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24.3'
+        go-version: '1.21'
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -46,148 +46,6 @@ jobs:
       run: |
         make all
     
-    - name: Create deployment scripts
-      run: |
-        mkdir -p dist/script
-        cat > dist/script/run.sh << 'EOF'
-        #!/bin/bash
-        
-        # AgentSmith-HUB Run Script
-        # This script starts the AgentSmith-HUB services
-        
-        set -e
-        
-        # Get script directory
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        cd "$SCRIPT_DIR"
-        
-        # Check if config directory exists
-        if [ ! -d "config" ]; then
-            echo "Error: config directory not found!"
-            echo "Please ensure the config directory is present with proper configuration files."
-            exit 1
-        fi
-        
-        # Set library path for rure library
-        export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
-        
-        # Check if binary exists
-        if [ ! -f "agentsmith-hub" ]; then
-            echo "Error: agentsmith-hub binary not found!"
-            exit 1
-        fi
-        
-        # Make binary executable
-        chmod +x agentsmith-hub
-        
-        echo "Starting AgentSmith-HUB..."
-        echo "Version: $(./agentsmith-hub -version 2>/dev/null | head -1 || echo 'unknown')"
-        echo "Working directory: $SCRIPT_DIR"
-        echo "Library path: $LD_LIBRARY_PATH"
-        echo ""
-        
-        # Start the hub as leader with config_root pointing to config directory
-        echo "Starting AgentSmith-HUB as leader..."
-        exec ./agentsmith-hub -config_root config
-        EOF
-        
-        cat > dist/script/stop.sh << 'EOF'
-        #!/bin/bash
-        
-        # AgentSmith-HUB Stop Script
-        
-        echo "Stopping AgentSmith-HUB..."
-        
-        # Find and kill agentsmith-hub processes
-        if pgrep -f "agentsmith-hub" > /dev/null; then
-            echo "Found running AgentSmith-HUB processes, stopping them..."
-            pkill -TERM -f "agentsmith-hub"
-            
-            # Wait a bit for graceful shutdown
-            sleep 3
-            
-            # Force kill if still running
-            if pgrep -f "agentsmith-hub" > /dev/null; then
-                echo "Force stopping remaining processes..."
-                pkill -KILL -f "agentsmith-hub"
-            fi
-            
-            echo "AgentSmith-HUB stopped."
-        else
-            echo "No running AgentSmith-HUB processes found."
-        fi
-        EOF
-        
-        chmod +x dist/script/run.sh dist/script/stop.sh
-    
-    - name: Create README for deployment
-      run: |
-        cat > dist/README.md << 'EOF'
-        # AgentSmith-HUB Deployment Package
-        
-        This package contains a pre-built AgentSmith-HUB for Linux (amd64) deployment.
-        
-        ## Contents
-        
-        - `agentsmith-hub` - Main binary executable
-        - `web/` - Frontend web files
-        - `lib/` - Required libraries (librure.so)
-        - `config/` - Configuration files
-        - `run.sh` - Start script
-        - `stop.sh` - Stop script
-        
-        ## Quick Start
-        
-        1. Extract this package to your target directory
-        2. Ensure your configuration files are properly set in the `config/` directory
-        3. Run the application:
-           ```bash
-           ./run.sh
-           ```
-        4. Stop the application:
-           ```bash
-           ./stop.sh
-           ```
-        
-        ## Configuration
-        
-        - Main configuration: `config/config.yaml`
-        - Input configurations: `config/input/`
-        - Output configurations: `config/output/`
-        - Plugin configurations: `config/plugin/`
-        - Project configurations: `config/project/`
-        - Ruleset configurations: `config/ruleset/`
-        
-        ## Requirements
-        
-        - Linux x86_64
-        - Port 8080 available (or as configured in config.yaml)
-        - Proper network access for Redis and other external services
-        
-        ## Version Information
-        
-        To check the version:
-        ```bash
-        ./agentsmith-hub -version
-        ```
-        
-        ## Troubleshooting
-        
-        1. **Permission denied**: Ensure the binary is executable
-           ```bash
-           chmod +x agentsmith-hub
-           ```
-        
-        2. **Library not found**: Ensure LD_LIBRARY_PATH includes the lib directory
-           ```bash
-           export LD_LIBRARY_PATH="$(pwd)/lib:$LD_LIBRARY_PATH"
-           ```
-        
-        3. **Configuration errors**: Check your config files in the `config/` directory
-        
-        For more information, visit: https://github.com/your-repo/AgentSmith-HUB
-        EOF
-    
     - name: Get version info
       id: version
       run: |
@@ -205,7 +63,7 @@ jobs:
     - name: Create deployment archive
       run: |
         cd dist
-        tar -czf ../agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz .
+        tar --create --gzip --file=../agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz .
         cd ..
         
         # Create checksum
@@ -236,14 +94,14 @@ jobs:
           - Frontend web application
           - Required libraries (librure.so)
           - Configuration templates
-          - Run and stop scripts
+          - Start and stop scripts
           - Deployment documentation
           
           ### Quick Start
           
           1. Download and extract the archive
           2. Configure your settings in `config/config.yaml`
-          3. Run `./run.sh` to start the application
+          3. Run `./start.sh` to start the application
           4. Access the web interface at http://localhost:8080
           
           ### Version Information

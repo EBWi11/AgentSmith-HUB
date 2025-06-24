@@ -13,7 +13,7 @@ if [ $# -ne 1 ]; then
 fi
 
 TARGET_DIR="$1"
-SCRIPT_DIR="script"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors for output
 GREEN='\033[0;32m'

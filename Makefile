@@ -60,7 +60,7 @@ backend-docker:
 		-e GOOS=linux \
 		-e GOARCH=amd64 \
 		-e CGO_LDFLAGS="-L/workspace/lib/linux -lrure" \
-		golang:1.24.3 \
+		golang:1.21 \
 		sh -c "apt-get update && apt-get install -y build-essential && go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME) ."
 
 frontend:
