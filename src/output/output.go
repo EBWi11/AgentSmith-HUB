@@ -79,9 +79,9 @@ type Output struct {
 	elasticsearchCfg *ElasticsearchOutputConfig
 	aliyunSLSCfg     *AliyunSLSOutputConfig
 
-	// metrics
-	produceTotal uint64
-	produceQPS   uint64
+	// metrics - 优化后只需要两个变量：总数和计算出的QPS
+	produceTotal uint64 // 累计生产总数
+	produceQPS   uint64 // 通过metricLoop计算得出的QPS
 	metricStop   chan struct{}
 
 	// sampler
@@ -234,8 +234,8 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for msg := range msgChan {
+				// 优化：只增加总数，QPS由metricLoop计算
 				atomic.AddUint64(&out.produceTotal, 1)
-				atomic.AddUint64(&out.produceQPS, 1)
 
 				// Sample the message
 				if out.sampler != nil {
@@ -298,8 +298,8 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for msg := range msgChan {
+				// 优化：只增加总数，QPS由metricLoop计算
 				atomic.AddUint64(&out.produceTotal, 1)
-				atomic.AddUint64(&out.produceQPS, 1)
 
 				// Sample the message
 				if out.sampler != nil {
@@ -345,8 +345,8 @@ func (out *Output) Start() error {
 								// Channel is closed, skip this channel
 								continue
 							}
+							// 优化：只增加总数，QPS由metricLoop计算
 							atomic.AddUint64(&out.produceTotal, 1)
-							atomic.AddUint64(&out.produceQPS, 1)
 
 							// Sample the message
 							if out.sampler != nil {
@@ -578,7 +578,18 @@ func (out *Output) metricLoop() {
 			return
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&out.produceTotal)
-			atomic.StoreUint64(&out.produceQPS, cur-lastTotal)
+
+			// 简单处理：如果当前值小于上次值，重置为上次值
+			if cur < lastTotal {
+				logger.Warn("Counter decreased, possibly due to overflow or restart",
+					"output", out.Id,
+					"lastTotal", lastTotal,
+					"currentTotal", cur)
+				cur = lastTotal // 这次QPS为0，等待下次正常计算
+			}
+
+			qps := cur - lastTotal
+			atomic.StoreUint64(&out.produceQPS, qps)
 			lastTotal = cur
 		}
 	}
@@ -681,8 +692,8 @@ func (out *Output) StartForTesting() error {
 							// Channel is closed, skip this channel
 							continue
 						}
+						// 优化：只增加总数，QPS由metricLoop计算
 						atomic.AddUint64(&out.produceTotal, 1)
-						atomic.AddUint64(&out.produceQPS, 1)
 
 						// Sample the message for test mode
 						if out.sampler != nil {

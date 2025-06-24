@@ -70,7 +70,6 @@ type Input struct {
 	kafkaCfg     *KafkaInputConfig
 	aliyunSLSCfg *AliyunSLSInputConfig
 
-	// metrics
 	consumeTotal uint64
 	consumeQPS   uint64
 	metricStop   chan struct{}
@@ -234,8 +233,8 @@ func (in *Input) Start() error {
 						return
 					}
 
+					// 优化：只增加总数，QPS由metricLoop计算
 					atomic.AddUint64(&in.consumeTotal, 1)
-					atomic.AddUint64(&in.consumeQPS, 1)
 
 					// Sample the message
 					if in.sampler != nil {
@@ -301,7 +300,6 @@ func (in *Input) Start() error {
 					}
 
 					atomic.AddUint64(&in.consumeTotal, 1)
-					atomic.AddUint64(&in.consumeQPS, 1)
 
 					// Sample the message
 					if in.sampler != nil {
@@ -379,7 +377,18 @@ func (in *Input) metricLoop() {
 			return
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&in.consumeTotal)
-			atomic.StoreUint64(&in.consumeQPS, cur-lastTotal)
+
+			// 简单处理：如果当前值小于上次值，重置为上次值
+			if cur < lastTotal {
+				logger.Warn("Counter decreased, possibly due to overflow or restart",
+					"input", in.Id,
+					"lastTotal", lastTotal,
+					"currentTotal", cur)
+				cur = lastTotal // 这次QPS为0，等待下次正常计算
+			}
+
+			qps := cur - lastTotal
+			atomic.StoreUint64(&in.consumeQPS, qps)
 			lastTotal = cur
 		}
 	}

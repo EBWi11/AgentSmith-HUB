@@ -56,10 +56,10 @@ type Ruleset struct {
 	RawConfig string
 	sampler   *common.Sampler
 
-	// Add metrics fields for QPS and message counting
-	processTotal uint64         // Total processed messages
-	processQPS   uint64         // Current QPS
-	metricStop   chan struct{}  // Channel to stop metric collection
+	// metrics - 优化后只需要两个变量：总数和计算出的QPS
+	processTotal uint64         // 累计处理消息总数
+	processQPS   uint64         // 通过metricLoop计算得出的QPS
+	metricStop   chan struct{}  // Metric loop stop channel
 	wg           sync.WaitGroup // WaitGroup for goroutine management
 }
 

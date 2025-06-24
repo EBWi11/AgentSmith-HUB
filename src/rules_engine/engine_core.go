@@ -82,9 +82,8 @@ func (r *Ruleset) Start() error {
 					}
 
 					task := func() {
-						// Increment process counter for each message processed
+						// 优化：只增加总数，QPS由metricLoop计算
 						atomic.AddUint64(&r.processTotal, 1)
-						atomic.AddUint64(&r.processQPS, 1)
 
 						// IMPORTANT: Sample the input data BEFORE rule checking starts
 						// This ensures we capture the raw data entering the ruleset for analysis
@@ -577,7 +576,18 @@ func (r *Ruleset) metricLoop() {
 			return
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&r.processTotal)
-			atomic.StoreUint64(&r.processQPS, cur-lastTotal)
+
+			// 简单处理：如果当前值小于上次值，重置为上次值
+			if cur < lastTotal {
+				logger.Warn("Counter decreased, possibly due to overflow or restart",
+					"ruleset", r.RulesetID,
+					"lastTotal", lastTotal,
+					"currentTotal", cur)
+				cur = lastTotal // 这次QPS为0，等待下次正常计算
+			}
+
+			qps := cur - lastTotal
+			atomic.StoreUint64(&r.processQPS, qps)
 			lastTotal = cur
 		}
 	}
