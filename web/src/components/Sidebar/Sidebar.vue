@@ -1805,7 +1805,7 @@ async function fetchSampleData(componentType, id) {
     // Get all sample data for this component type and ID across all projects
     const response = await hubApi.getSamplerData({
       name: componentType,
-      projectNodeSequence: `${componentType}.${id}`
+      projectNodeSequence: `${componentType.toUpperCase()}.${id}`
     })
     
     if (response && response[componentType]) {

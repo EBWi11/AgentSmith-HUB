@@ -256,7 +256,7 @@ async function viewSampleData() {
     
     const response = await hubApi.getSamplerData({
       name: nodeType,
-      projectNodeSequence: `${nodeType}.${componentId}`
+      projectNodeSequence: `${nodeType.toUpperCase()}.${componentId}`
     });
     
     if (response && response[nodeType]) {

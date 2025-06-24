@@ -1611,7 +1611,7 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 	// Set ProjectNodeSequence for each component
 	for _, in := range p.Inputs {
 		in.DownStream = []*chan map[string]interface{}{}
-		componentKey := "input." + in.Id
+		componentKey := "INPUT." + in.Id
 		if sequence, exists := componentSequences[componentKey]; exists {
 			in.ProjectNodeSequence = sequence
 		} else {
@@ -1622,7 +1622,7 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 	for _, rs := range p.Rulesets {
 		rs.UpStream = make(map[string]*chan map[string]interface{})
 		rs.DownStream = make(map[string]*chan map[string]interface{})
-		componentKey := "ruleset." + rs.RulesetID
+		componentKey := "RULESET." + rs.RulesetID
 		if sequence, exists := componentSequences[componentKey]; exists {
 			rs.ProjectNodeSequence = sequence
 		} else {
@@ -1632,7 +1632,7 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 
 	for _, out := range p.Outputs {
 		out.UpStream = []*chan map[string]interface{}{}
-		componentKey := "output." + out.Id
+		componentKey := "OUTPUT." + out.Id
 		if sequence, exists := componentSequences[componentKey]; exists {
 			out.ProjectNodeSequence = sequence
 		} else {
