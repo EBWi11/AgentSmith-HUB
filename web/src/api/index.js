@@ -244,104 +244,40 @@ export const hubApi = {
     return response.data;
   },
 
-  async deleteInput(id) {
+  // Generic component deletion function
+  async deleteComponent(type, id) {
     try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('inputs', id);
-      // Delete the component
-      const response = await api.delete(`/inputs/${id}`);
-      // If temporary file exists, also try to delete it
-      if (tempInfo.hasTemp && tempInfo.data && tempInfo.data.path) {
-        try {
-          await api.delete(`/temp-file/inputs/${id}`);
-        } catch (tempError) {
-          console.warn(`Failed to delete temporary file for input ${id}:`, tempError);
-        }
+      // Ensure type is plural for API call
+      let componentType = type;
+      if (!componentType.endsWith('s')) {
+        componentType = componentType + 's';
       }
+      
+      const response = await api.delete(`/${componentType}/${id}`);
       return response.data;
     } catch (error) {
       throw error;
     }
+  },
+
+  async deleteInput(id) {
+    return this.deleteComponent('inputs', id);
   },
 
   async deleteOutput(id) {
-    try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('outputs', id);
-      // Delete the component
-      const response = await api.delete(`/outputs/${id}`);
-      // If temporary file exists, also try to delete it
-      if (tempInfo.hasTemp && tempInfo.data && tempInfo.data.path) {
-        try {
-          await api.delete(`/temp-file/outputs/${id}`);
-        } catch (tempError) {
-          console.warn(`Failed to delete temporary file for output ${id}:`, tempError);
-        }
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    return this.deleteComponent('outputs', id);
   },
 
   async deleteRuleset(id) {
-    try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('rulesets', id);
-      // Delete the component
-      const response = await api.delete(`/rulesets/${id}`);
-      // If temporary file exists, also try to delete it
-      if (tempInfo.hasTemp && tempInfo.data && tempInfo.data.path) {
-        try {
-          await api.delete(`/temp-file/rulesets/${id}`);
-        } catch (tempError) {
-          console.warn(`Failed to delete temporary file for ruleset ${id}:`, tempError);
-        }
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    return this.deleteComponent('rulesets', id);
   },
 
   async deleteProject(id) {
-    try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('projects', id);
-      // Delete the component
-      const response = await api.delete(`/projects/${id}`);
-      // If temporary file exists, also try to delete it
-      if (tempInfo.hasTemp && tempInfo.data && tempInfo.data.path) {
-        try {
-          await api.delete(`/temp-file/projects/${id}`);
-        } catch (tempError) {
-          console.warn(`Failed to delete temporary file for project ${id}:`, tempError);
-        }
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    return this.deleteComponent('projects', id);
   },
 
   async deletePlugin(id) {
-    try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('plugins', id);
-      // Delete the component
-      const response = await api.delete(`/plugins/${id}`);
-      // If temporary file exists, also try to delete it
-      if (tempInfo.hasTemp && tempInfo.data && tempInfo.data.path) {
-        try {
-          await api.delete(`/temp-file/plugins/${id}`);
-        } catch (tempError) {
-          console.warn(`Failed to delete temporary file for plugin ${id}:`, tempError);
-        }
-      }
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    return this.deleteComponent('plugins', id);
   },
 
   async startProject(id) {
