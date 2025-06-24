@@ -83,7 +83,7 @@ package: backend frontend
 	@echo "Copying config directory..."
 	cp -r config $(DIST_DIR)/
 	@echo "Creating scripts..."
-	./create_scripts.sh $(DIST_DIR)
+	./script/create_scripts.sh $(DIST_DIR)
 	@echo ""
 	@echo "=== Linux Package Complete ==="
 	@echo "Deployment files are ready in: $(DIST_DIR)/"
