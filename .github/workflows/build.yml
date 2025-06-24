@@ -63,11 +63,15 @@ jobs:
     - name: Create deployment archive
       run: |
         cd dist
-        tar --create --gzip --file=../agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz .
+        ls -la
+        ARCHIVE_NAME="agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz"
+        echo "Creating archive: $ARCHIVE_NAME"
+        tar --version
+        tar -czf "../$ARCHIVE_NAME" .
         cd ..
         
         # Create checksum
-        sha256sum agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz > agentsmith-hub-${{ steps.version.outputs.release_name }}-linux-amd64.tar.gz.sha256
+        sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
