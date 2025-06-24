@@ -253,3 +253,75 @@ func (c *ComponentUsageCounter) IsAnyComponentInUse(
 
 	return false
 }
+
+// CountProjectsUsingOutputInstance counts how many running projects are using the specified output instance
+// This is used for independent output instances created with different ProjectNodeSequence
+func (c *ComponentUsageCounter) CountProjectsUsingOutputInstance(outputID string, projectNodeSequence string, excludeProjectID ...string) int {
+	count := 0
+	var excludeID string
+	if len(excludeProjectID) > 0 {
+		excludeID = excludeProjectID[0]
+	}
+
+	// Use dedicated project lock to reduce contention with configuration operations
+	GlobalProject.ProjectMu.RLock()
+	defer GlobalProject.ProjectMu.RUnlock()
+
+	for projectID, proj := range GlobalProject.Projects {
+		if projectID != excludeID && proj.Status == ProjectStatusRunning {
+			if output, exists := proj.Outputs[outputID]; exists {
+				// Check if this is the exact same instance by comparing ProjectNodeSequence
+				if output.ProjectNodeSequence == projectNodeSequence {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+// CountProjectsUsingRulesetInstance counts how many running projects are using the specified ruleset instance
+// This is used for independent ruleset instances created with different ProjectNodeSequence
+func (c *ComponentUsageCounter) CountProjectsUsingRulesetInstance(rulesetID string, projectNodeSequence string, excludeProjectID ...string) int {
+	count := 0
+	var excludeID string
+	if len(excludeProjectID) > 0 {
+		excludeID = excludeProjectID[0]
+	}
+
+	// Use dedicated project lock to reduce contention with configuration operations
+	GlobalProject.ProjectMu.RLock()
+	defer GlobalProject.ProjectMu.RUnlock()
+
+	for projectID, proj := range GlobalProject.Projects {
+		if projectID != excludeID && proj.Status == ProjectStatusRunning {
+			if ruleset, exists := proj.Rulesets[rulesetID]; exists {
+				// Check if this is the exact same instance by comparing ProjectNodeSequence
+				if ruleset.ProjectNodeSequence == projectNodeSequence {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+// IsComponentInstanceInUse checks if a specific component instance is currently in use
+// Returns the count of projects using it and a boolean indicating if it's in use
+func (c *ComponentUsageCounter) IsComponentInstanceInUse(componentType, componentID, projectNodeSequence string, excludeProjectID ...string) (int, bool) {
+	var count int
+
+	switch componentType {
+	case "input":
+		// For inputs, we still use the original logic since inputs are typically shared
+		count = c.CountProjectsUsingInput(componentID, excludeProjectID...)
+	case "output":
+		count = c.CountProjectsUsingOutputInstance(componentID, projectNodeSequence, excludeProjectID...)
+	case "ruleset":
+		count = c.CountProjectsUsingRulesetInstance(componentID, projectNodeSequence, excludeProjectID...)
+	default:
+		return 0, false
+	}
+
+	return count, count > 0
+}

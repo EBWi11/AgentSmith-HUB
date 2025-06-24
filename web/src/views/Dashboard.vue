@@ -103,7 +103,7 @@
       <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
         <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Hub Total Message Statistics <span class="text-sm text-gray-500 font-normal">(All Nodes)</span></h3>
         <div v-if="loading.messages && Object.keys(messageData).length === 0" class="flex justify-center items-center py-4">
-          <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+          <div class="animate-spin rounded-full h-6 w-6 border-primary"></div>
         </div>
         <div v-else class="flex flex-col space-y-3">
           <!-- Total Input -->
@@ -470,7 +470,7 @@ function getProjectMessageStats(projectId) {
     }
   }
   
-  // UPDATED: Fallback logic now includes ruleset statistics while avoiding double-counting
+  // UPDATED: Fallback logic now handles new ProjectNodeSequence format
   // This might happen if we're using project-specific message API endpoints
   let input = 0
   let output = 0
@@ -480,25 +480,45 @@ function getProjectMessageStats(projectId) {
   if (messageData.value && typeof messageData.value === 'object') {
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object' && componentData.component_type) {
-        const totalMessages = componentData.total_messages || 0
+        const totalMessages = componentData.total_messages || componentData.current_total || 0
         
-        // Apply the same exact matching logic as ProjectWorkflow.vue
+        // Apply updated matching logic for new ProjectNodeSequence format
         const keyParts = key.split('.')
         
         if (componentData.component_type === 'input') {
-          // Only count input if ProjectNodeSequence is exactly "input.componentId"
-          if (keyParts.length === 2 && keyParts[0] === 'input') {
+          // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
+          // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
+          if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
             input += totalMessages
           }
         } else if (componentData.component_type === 'output') {
-          // Only count output if ProjectNodeSequence ends with "output.componentId"
+          // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
+          // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
           if (keyParts.length >= 2 && 
-              keyParts[keyParts.length - 2] === 'output') {
+              keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT') {
             output += totalMessages
           }
         } else if (componentData.component_type === 'ruleset') {
-          // Count ruleset processing load - this shows how much work rulesets are doing
-          ruleset += totalMessages
+          // Count ruleset processing load - matches patterns like "INPUT.api_sec.RULESET.test"
+          // but ONLY count the RULESET's own processing, not downstream components
+          for (let i = 0; i < keyParts.length - 1; i++) {
+            if (keyParts[i].toUpperCase() === 'RULESET') {
+              // Only count if this is the RULESET's own ProjectNodeSequence
+              // Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+              
+              // Check if there are more components after this RULESET in the sequence
+              const hasDownstream = (i + 2) < keyParts.length;
+              
+              if (!hasDownstream) {
+                // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
+                ruleset += totalMessages;
+              }
+              // If hasDownstream is true, this means it's a downstream component's sequence
+              // that happens to contain this RULESET in its path - we don't count it
+              
+              break;
+            }
+          }
         }
       }
     }

@@ -56,9 +56,9 @@ type Ruleset struct {
 	RawConfig string
 	sampler   *common.Sampler
 
-	// metrics - 优化后只需要两个变量：总数和计算出的QPS
-	processTotal uint64         // 累计处理消息总数
-	processQPS   uint64         // 通过metricLoop计算得出的QPS
+	// metrics - optimized to only need two variables: total count and calculated QPS
+	processTotal uint64         // cumulative message processing total
+	processQPS   uint64         // QPS calculated by metricLoop
 	metricStop   chan struct{}  // Metric loop stop channel
 	wg           sync.WaitGroup // WaitGroup for goroutine management
 }
@@ -1199,9 +1199,38 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	return ruleset, nil
 }
 
-// ParseFunctionCall parses a function call string into its components
-// input: Function call string in format "func(arg1, arg2, ...)"
-// Returns: function name, arguments, and any error
+// NewFromExisting creates a new Ruleset instance from an existing one with a different ProjectNodeSequence
+// This is used when multiple projects use the same ruleset component but with different data flow sequences
+func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset, error) {
+	if existing == nil {
+		return nil, fmt.Errorf("existing ruleset is nil")
+	}
+
+	// Create a new Ruleset instance with the same configuration but different ProjectNodeSequence
+	newRuleset := &Ruleset{
+		Path:                existing.Path,
+		RulesetID:           existing.RulesetID,
+		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
+		Type:                existing.Type,
+		IsDetection:         existing.IsDetection,
+		Rules:               existing.Rules,         // Share the same rules
+		RulesByFilter:       existing.RulesByFilter, // Share the same rule mappings
+		UpStream:            make(map[string]*chan map[string]interface{}),
+		DownStream:          make(map[string]*chan map[string]interface{}),
+		Cache:               existing.Cache,            // Share the same cache
+		CacheForClassify:    existing.CacheForClassify, // Share the same classify cache
+		RawConfig:           existing.RawConfig,
+	}
+
+	// Only create sampler on leader node for performance
+	if cluster.IsLeader {
+		newRuleset.sampler = common.GetSampler("ruleset." + existing.RulesetID)
+	}
+
+	return newRuleset, nil
+}
+
+// ParseFunctionCall parses a function call of the form "functionName(arg1, arg2, ...)"
 func ParseFunctionCall(input string) (string, []*PluginArg, error) {
 	input = strings.TrimSpace(input)
 

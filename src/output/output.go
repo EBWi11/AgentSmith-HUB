@@ -79,9 +79,9 @@ type Output struct {
 	elasticsearchCfg *ElasticsearchOutputConfig
 	aliyunSLSCfg     *AliyunSLSOutputConfig
 
-	// metrics - 优化后只需要两个变量：总数和计算出的QPS
-	produceTotal uint64 // 累计生产总数
-	produceQPS   uint64 // 通过metricLoop计算得出的QPS
+	// metrics - optimized to only need two variables: total count and calculated QPS
+	produceTotal uint64 // cumulative production total
+	produceQPS   uint64 // QPS calculated by metricLoop
 	metricStop   chan struct{}
 
 	// sampler
@@ -199,6 +199,21 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 	return out, nil
 }
 
+// enhanceMessageWithProjectNodeSequence adds ProjectNodeSequence and output metadata to the message
+func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interface{}) map[string]interface{} {
+	// Create a copy of the original message to avoid modifying the original
+	enhancedMsg := make(map[string]interface{})
+	for k, v := range msg {
+		enhancedMsg[k] = v
+	}
+
+	// Add ProjectNodeSequence information
+	enhancedMsg["_hub_project_node_sequence"] = out.ProjectNodeSequence
+	enhancedMsg["_hub_output_timestamp"] = time.Now().UTC().Format(time.RFC3339)
+
+	return enhancedMsg
+}
+
 // Start initializes and starts the output component based on its type
 // Returns an error if the component is already running or if initialization fails
 func (out *Output) Start() error {
@@ -234,7 +249,7 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for msg := range msgChan {
-				// 优化：只增加总数，QPS由metricLoop计算
+				// Optimization: only increment total count, QPS is calculated by metricLoop
 				atomic.AddUint64(&out.produceTotal, 1)
 
 				// Sample the message
@@ -245,11 +260,7 @@ func (out *Output) Start() error {
 				// If test collection channel is set, also send data there
 				if out.TestCollectionChan != nil {
 					// Add output ID to the message for test collection
-					msgWithId := make(map[string]interface{})
-					for k, v := range msg {
-						msgWithId[k] = v
-					}
-					msgWithId["_HUB_OUTPUT_ID"] = out.Id
+					msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
 
 					select {
 					case *out.TestCollectionChan <- msgWithId:
@@ -258,6 +269,40 @@ func (out *Output) Start() error {
 						// Test collection channel is full, log warning
 						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
 					}
+				}
+			}
+		}()
+
+		// Start goroutine to read from UpStream and send enhanced messages to msgChan
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			defer close(msgChan) // Close msgChan when UpStream processing is done
+
+			for {
+				// Non-blocking check for messages from any upstream channel
+				processed := false
+				for _, up := range out.UpStream {
+					select {
+					case msg, ok := <-*up:
+						if !ok {
+							// Channel is closed, skip this channel
+							continue
+						}
+
+						// Enhance message with ProjectNodeSequence information before sending to Kafka
+						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						// Send enhanced message to msgChan for Kafka producer
+						msgChan <- enhancedMsg
+						processed = true
+					default:
+						// No message available from this channel, continue to next
+					}
+				}
+				// If no messages were processed, sleep briefly to avoid busy waiting
+				if !processed {
+					time.Sleep(10 * time.Millisecond)
 				}
 			}
 		}()
@@ -298,7 +343,7 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			for msg := range msgChan {
-				// 优化：只增加总数，QPS由metricLoop计算
+				// Optimization: only increment total count, QPS is calculated by metricLoop
 				atomic.AddUint64(&out.produceTotal, 1)
 
 				// Sample the message
@@ -309,11 +354,7 @@ func (out *Output) Start() error {
 				// If test collection channel is set, also send data there
 				if out.TestCollectionChan != nil {
 					// Add output ID to the message for test collection
-					msgWithId := make(map[string]interface{})
-					for k, v := range msg {
-						msgWithId[k] = v
-					}
-					msgWithId["_HUB_OUTPUT_ID"] = out.Id
+					msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
 
 					select {
 					case *out.TestCollectionChan <- msgWithId:
@@ -322,6 +363,40 @@ func (out *Output) Start() error {
 						// Test collection channel is full, log warning
 						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
 					}
+				}
+			}
+		}()
+
+		// Start goroutine to read from UpStream and send enhanced messages to msgChan
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			defer close(msgChan) // Close msgChan when UpStream processing is done
+
+			for {
+				// Non-blocking check for messages from any upstream channel
+				processed := false
+				for _, up := range out.UpStream {
+					select {
+					case msg, ok := <-*up:
+						if !ok {
+							// Channel is closed, skip this channel
+							continue
+						}
+
+						// Enhance message with ProjectNodeSequence information before sending to Elasticsearch
+						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						// Send enhanced message to msgChan for Elasticsearch producer
+						msgChan <- enhancedMsg
+						processed = true
+					default:
+						// No message available from this channel, continue to next
+					}
+				}
+				// If no messages were processed, sleep briefly to avoid busy waiting
+				if !processed {
+					time.Sleep(10 * time.Millisecond)
 				}
 			}
 		}()
@@ -345,7 +420,7 @@ func (out *Output) Start() error {
 								// Channel is closed, skip this channel
 								continue
 							}
-							// 优化：只增加总数，QPS由metricLoop计算
+							// Optimization: only increment total count, QPS is calculated by metricLoop
 							atomic.AddUint64(&out.produceTotal, 1)
 
 							// Sample the message
@@ -356,11 +431,7 @@ func (out *Output) Start() error {
 							// If test collection channel is set, also send data there
 							if out.TestCollectionChan != nil {
 								// Add output ID to the message for test collection
-								msgWithId := make(map[string]interface{})
-								for k, v := range msg {
-									msgWithId[k] = v
-								}
-								msgWithId["_HUB_OUTPUT_ID"] = out.Id
+								msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
 
 								select {
 								case *out.TestCollectionChan <- msgWithId:
@@ -371,7 +442,9 @@ func (out *Output) Start() error {
 								}
 							}
 
-							data, _ := json.Marshal(msg)
+							// Enhance message with ProjectNodeSequence information for actual output
+							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+							data, _ := json.Marshal(enhancedMsg)
 							logger.Info("[Print Output]", "data", string(data))
 							processed = true
 						default:
@@ -467,8 +540,7 @@ func (out *Output) Stop() error {
 						time.Sleep(50 * time.Millisecond)
 					}
 				}
-				// Close the channel we own
-				close(out.kafkaProducer.MsgChan)
+				// Note: msgChan is closed by the UpStream processing goroutine, not here
 				out.kafkaProducer.Close()
 				out.kafkaProducer = nil
 			}
@@ -495,8 +567,7 @@ func (out *Output) Stop() error {
 						time.Sleep(50 * time.Millisecond)
 					}
 				}
-				// Close the channel we own
-				close(out.elasticsearchProducer.MsgChan)
+				// Note: msgChan is closed by the UpStream processing goroutine, not here
 				out.elasticsearchProducer.Close()
 				out.elasticsearchProducer = nil
 			}
@@ -522,17 +593,13 @@ func (out *Output) Stop() error {
 		switch out.Type {
 		case OutputTypeKafka:
 			if out.kafkaProducer != nil {
-				if out.kafkaProducer.MsgChan != nil {
-					close(out.kafkaProducer.MsgChan)
-				}
+				// Note: msgChan is closed by the UpStream processing goroutine, not here
 				out.kafkaProducer.Close()
 				out.kafkaProducer = nil
 			}
 		case OutputTypeElasticsearch:
 			if out.elasticsearchProducer != nil {
-				if out.elasticsearchProducer.MsgChan != nil {
-					close(out.elasticsearchProducer.MsgChan)
-				}
+				// Note: msgChan is closed by the UpStream processing goroutine, not here
 				out.elasticsearchProducer.Close()
 				out.elasticsearchProducer = nil
 			}
@@ -579,13 +646,13 @@ func (out *Output) metricLoop() {
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&out.produceTotal)
 
-			// 简单处理：如果当前值小于上次值，重置为上次值
+			// Simple handling: if current value is less than last value, reset to last value
 			if cur < lastTotal {
 				logger.Warn("Counter decreased, possibly due to overflow or restart",
 					"output", out.Id,
 					"lastTotal", lastTotal,
 					"currentTotal", cur)
-				cur = lastTotal // 这次QPS为0，等待下次正常计算
+				cur = lastTotal // This time QPS is 0, wait for next normal calculation
 			}
 
 			qps := cur - lastTotal
@@ -622,17 +689,13 @@ func (out *Output) StopForTesting() error {
 	switch out.Type {
 	case OutputTypeKafka:
 		if out.kafkaProducer != nil {
-			if out.kafkaProducer.MsgChan != nil {
-				close(out.kafkaProducer.MsgChan)
-			}
+			// Note: msgChan is closed by the UpStream processing goroutine, not here
 			out.kafkaProducer.Close()
 			out.kafkaProducer = nil
 		}
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
-			if out.elasticsearchProducer.MsgChan != nil {
-				close(out.elasticsearchProducer.MsgChan)
-			}
+			// Note: msgChan is closed by the UpStream processing goroutine, not here
 			out.elasticsearchProducer.Close()
 			out.elasticsearchProducer = nil
 		}
@@ -692,7 +755,7 @@ func (out *Output) StartForTesting() error {
 							// Channel is closed, skip this channel
 							continue
 						}
-						// 优化：只增加总数，QPS由metricLoop计算
+						// Optimization: only increment total count, QPS is calculated by metricLoop
 						atomic.AddUint64(&out.produceTotal, 1)
 
 						// Sample the message for test mode
@@ -703,11 +766,7 @@ func (out *Output) StartForTesting() error {
 						// In test mode, also send to collection channel if available
 						if out.TestCollectionChan != nil {
 							// Add output ID to the message for test collection
-							msgWithId := make(map[string]interface{})
-							for k, v := range msg {
-								msgWithId[k] = v
-							}
-							msgWithId["_HUB_OUTPUT_ID"] = out.Id
+							msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
 
 							select {
 							case *out.TestCollectionChan <- msgWithId:
@@ -996,4 +1055,33 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 	}
 
 	return result
+}
+
+// NewFromExisting creates a new Output instance from an existing one with a different ProjectNodeSequence
+// This is used when multiple projects use the same output component but with different data flow sequences
+func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, error) {
+	if existing == nil {
+		return nil, fmt.Errorf("existing output is nil")
+	}
+
+	// Create a new Output instance with the same configuration but different ProjectNodeSequence
+	newOutput := &Output{
+		Id:                  existing.Id,
+		Path:                existing.Path,
+		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
+		Type:                existing.Type,
+		UpStream:            make([]*chan map[string]interface{}, 0),
+		kafkaCfg:            existing.kafkaCfg,
+		elasticsearchCfg:    existing.elasticsearchCfg,
+		aliyunSLSCfg:        existing.aliyunSLSCfg,
+		Config:              existing.Config,
+		TestCollectionChan:  nil, // Reset for new instance
+	}
+
+	// Only create sampler on leader node for performance
+	if cluster.IsLeader {
+		newOutput.sampler = common.GetSampler("output." + existing.Id)
+	}
+
+	return newOutput, nil
 }

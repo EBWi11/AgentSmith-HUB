@@ -405,46 +405,56 @@ function updateNodesWithMessages() {
     let totalMessages = 0;
     let foundData = false;
     
-    // UPDATED: Now include ruleset processing statistics while still avoiding double-counting
+    // UPDATED: Handle new ProjectNodeSequence format like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object') {
         let shouldCount = false;
         
-        // Check if this key represents the actual component we're looking for
+        // Parse the ProjectNodeSequence to understand the component structure
         const keyParts = key.split('.');
         
         if (componentType === 'input') {
-          // For input components, only count if ProjectNodeSequence is exactly "input.componentId"
-          // This avoids counting downstream sequences like "input.componentId.ruleset.test.output.print"
-          if (keyParts.length === 2 && keyParts[0] === 'input' && keyParts[1] === componentId) {
+          // For input components, match ProjectNodeSequence that starts with "INPUT.componentId"
+          // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
+          if (keyParts.length === 2 && 
+              keyParts[0].toUpperCase() === 'INPUT' && 
+              keyParts[1] === componentId) {
             shouldCount = true;
           }
         } else if (componentType === 'output') {
-          // For output components, only count if ProjectNodeSequence ends with "output.componentId"
-          // This ensures we count the final output stage, not intermediate processing
+          // For output components, match ProjectNodeSequence that ends with "OUTPUT.componentId"
+          // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
           if (keyParts.length >= 2 && 
-              keyParts[keyParts.length - 2] === 'output' && 
+              keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT' && 
               keyParts[keyParts.length - 1] === componentId) {
             shouldCount = true;
           }
         } else if (componentType === 'ruleset') {
-          // For ruleset components, show processing load by finding sequences that contain this ruleset
-          // Look for ProjectNodeSequence patterns like "input.api_sec.ruleset.componentId.output.print" 
-          // where this ruleset is in the processing chain
-          const rulesetPattern = `ruleset.${componentId}`;
-          if (key.includes(rulesetPattern)) {
-            // Only count if this represents actual ruleset processing, not just presence in sequence
-            // Check that ruleset.componentId is followed by more components or is at the end
-            const rulesetIndex = key.indexOf(rulesetPattern);
-            if (rulesetIndex !== -1) {
-              // This ruleset is part of the processing chain, count its processing load
-              shouldCount = true;
+          // For ruleset components, match ProjectNodeSequence that contains "RULESET.componentId" 
+          // but ONLY count the RULESET's own processing, not downstream components
+          for (let i = 0; i < keyParts.length - 1; i++) {
+            if (keyParts[i].toUpperCase() === 'RULESET' && keyParts[i + 1] === componentId) {
+              // Only count if this is the RULESET's own ProjectNodeSequence or the immediate next step
+              // Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+              // We want to count: "INPUT.api_sec.RULESET.test" but not "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+              
+              // Check if there are more components after this RULESET in the sequence
+              const hasDownstream = (i + 2) < keyParts.length;
+              
+              if (!hasDownstream) {
+                // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
+                shouldCount = true;
+              }
+              // If hasDownstream is true, this means it's a downstream component's sequence
+              // that happens to contain this RULESET in its path - we don't count it
+              
+              break;
             }
           }
         }
         
         if (shouldCount) {
-          totalMessages += componentData.total_messages || 0;
+          totalMessages += componentData.total_messages || componentData.current_total || 0;
           foundData = true;
         }
       }

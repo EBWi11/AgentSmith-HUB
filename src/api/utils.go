@@ -18,41 +18,45 @@ func GetComponentUsage(c echo.Context) error {
 
 	usage := make([]map[string]interface{}, 0)
 
-	// Simple implementation - check usage based on component type
+	// Enhanced implementation - check usage based on component type and ProjectNodeSequence
+	// This ensures we only show projects that are actually using specific component instances
 	switch componentType {
 	case "rulesets":
-		// Check which projects use this ruleset
+		// Check which projects use this ruleset (consider ProjectNodeSequence for independent instances)
 		for _, p := range project.GlobalProject.Projects {
-			if _, exists := p.Rulesets[id]; exists {
+			if ruleset, exists := p.Rulesets[id]; exists {
 				usage = append(usage, map[string]interface{}{
-					"type":   "project",
-					"id":     p.Id,
-					"name":   p.Id,
-					"status": p.Status,
+					"type":                  "project",
+					"id":                    p.Id,
+					"name":                  p.Id,
+					"status":                p.Status,
+					"project_node_sequence": ruleset.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
 		}
 	case "inputs":
-		// Check which projects use this input
+		// Check which projects use this input (inputs are typically shared, so check by ID)
 		for _, p := range project.GlobalProject.Projects {
-			if _, exists := p.Inputs[id]; exists {
+			if input, exists := p.Inputs[id]; exists {
 				usage = append(usage, map[string]interface{}{
-					"type":   "project",
-					"id":     p.Id,
-					"name":   p.Id,
-					"status": p.Status,
+					"type":                  "project",
+					"id":                    p.Id,
+					"name":                  p.Id,
+					"status":                p.Status,
+					"project_node_sequence": input.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
 		}
 	case "outputs":
-		// Check which projects use this output
+		// Check which projects use this output (consider ProjectNodeSequence for independent instances)
 		for _, p := range project.GlobalProject.Projects {
-			if _, exists := p.Outputs[id]; exists {
+			if output, exists := p.Outputs[id]; exists {
 				usage = append(usage, map[string]interface{}{
-					"type":   "project",
-					"id":     p.Id,
-					"name":   p.Id,
-					"status": p.Status,
+					"type":                  "project",
+					"id":                    p.Id,
+					"name":                  p.Id,
+					"status":                p.Status,
+					"project_node_sequence": output.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
 		}
@@ -62,5 +66,6 @@ func GetComponentUsage(c echo.Context) error {
 		"component_type": componentType,
 		"component_id":   id,
 		"usage":          usage,
+		"note":           "Usage shows actual project-specific component instances, not shared component IDs",
 	})
 }

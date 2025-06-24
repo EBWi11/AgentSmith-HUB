@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	// 使用位运算优化采样率计算
-	SamplingMask = 63 // 2^6 - 1，对应六十四分之一的采样率（每64个消息采样1个）
+	// Use bitwise operation to optimize sampling rate calculation
+	SamplingMask = 63 // 2^6 - 1, corresponding to 1/64 sampling rate (sample 1 out of every 64 messages)
 )
 
 // SampleData represents a single sample with its metadata
@@ -21,12 +21,12 @@ type SampleData struct {
 	ProjectNodeSequence string      `json:"project_node_sequence"`
 }
 
-// ProjectSamples 使用无锁环形缓冲区
+// ProjectSamples uses lock-free ring buffer
 type ProjectSamples struct {
-	samples     [100]SampleData // 固定大小的环形缓冲区
-	writeIdx    uint32          // 写入位置
-	sampleCount uint32          // 当前样本数量
-	mu          sync.RWMutex    // 读写锁保护数据一致性
+	samples     [100]SampleData // Fixed-size ring buffer
+	writeIdx    uint32          // Write position
+	sampleCount uint32          // Current sample count
+	mu          sync.RWMutex    // Read-write lock to protect data consistency
 }
 
 // SamplerStats represents statistics about sampling
@@ -47,15 +47,15 @@ type Sampler struct {
 	totalCount   uint64
 	sampledCount uint64
 	maxSamples   int
-	pool         *ants.Pool // 用于异步处理采样数据
-	closed       int32      // 标记是否已关闭
+	pool         *ants.Pool // Used for asynchronous processing of sampling data
+	closed       int32      // Mark whether it's closed
 }
 
 // NewSampler creates a new sampler instance
 func NewSampler(name string) *Sampler {
 	pool, err := ants.NewPool(8, ants.WithPreAlloc(true))
 	if err != nil {
-		// 如果创建协程池失败，使用默认池
+		// If creating goroutine pool fails, use default pool
 		pool = nil
 	}
 	return &Sampler{
@@ -65,7 +65,7 @@ func NewSampler(name string) *Sampler {
 	}
 }
 
-// getOrCreateProjectSamples 获取或创建项目采样器
+// getOrCreateProjectSamples gets or creates project sampler
 func (s *Sampler) getOrCreateProjectSamples(projectNodeSequence string) *ProjectSamples {
 	value, _ := s.samples.LoadOrStore(projectNodeSequence, &ProjectSamples{})
 	return value.(*ProjectSamples)
@@ -73,29 +73,44 @@ func (s *Sampler) getOrCreateProjectSamples(projectNodeSequence string) *Project
 
 // Sample attempts to sample the data based on sampling rate
 func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence string) bool {
-	// 检查是否已关闭
+	// Check if already closed
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return false
 	}
 
-	// 检查参数有效性
+	// Check parameter validity
 	if data == nil || source == "" || projectNodeSequence == "" {
 		return false
 	}
 
-	// 增加计数器，使用原子操作
+	// Increment counter using atomic operations
 	total := atomic.AddUint64(&s.totalCount, 1)
 
-	// 使用位运算快速判断是否需要采样
-	// 这里使用 total & SamplingMask 代替随机数，可以保证均匀分布
-	if total&SamplingMask != 0 {
+	// Check if it's the first data or the first data for this ProjectNodeSequence
+	shouldSampleFirst := false
+
+	// Check if it's the first data for this ProjectNodeSequence
+	ps := s.getOrCreateProjectSamples(projectNodeSequence)
+	ps.mu.RLock()
+	isEmpty := ps.sampleCount == 0
+	ps.mu.RUnlock()
+
+	if isEmpty {
+		// If this ProjectNodeSequence has no samples yet, force collection of the first one
+		shouldSampleFirst = true
+	}
+
+	// Sampling decision: force collection of first data, or collect according to sampling rate
+	shouldSample := shouldSampleFirst || (total&SamplingMask == 0)
+
+	if !shouldSample {
 		return false
 	}
 
-	// 增加采样计数
+	// Increment sampling count
 	atomic.AddUint64(&s.sampledCount, 1)
 
-	// 创建采样数据
+	// Create sample data
 	sample := SampleData{
 		Data:                data,
 		Timestamp:           time.Now(),
@@ -103,9 +118,9 @@ func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence st
 		ProjectNodeSequence: projectNodeSequence,
 	}
 
-	// 如果有协程池，异步处理；否则同步处理
+	// If there's a goroutine pool, process asynchronously; otherwise process synchronously
 	if s.pool != nil {
-		// 检查协程池是否已关闭
+		// Check if goroutine pool is closed
 		if s.pool.IsClosed() {
 			s.storeSample(sample, projectNodeSequence)
 		} else {
@@ -113,7 +128,7 @@ func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence st
 				s.storeSample(sample, projectNodeSequence)
 			})
 			if err != nil {
-				// 如果提交失败，同步处理
+				// If submission fails, process synchronously
 				s.storeSample(sample, projectNodeSequence)
 			}
 		}
@@ -124,21 +139,21 @@ func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence st
 	return true
 }
 
-// storeSample 存储采样数据到环形缓冲区
+// storeSample stores sample data to ring buffer
 func (s *Sampler) storeSample(sample SampleData, projectNodeSequence string) {
-	// 获取项目采样器
+	// Get project sampler
 	ps := s.getOrCreateProjectSamples(projectNodeSequence)
 
-	// 使用写锁保护写入操作
+	// Use write lock to protect write operations
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// 写入采样数据到环形缓冲区
+	// Write sample data to ring buffer
 	writeIdx := ps.writeIdx % 100
 	ps.samples[writeIdx] = sample
 	ps.writeIdx++
 
-	// 更新样本数量
+	// Update sample count
 	if ps.sampleCount < 100 {
 		ps.sampleCount++
 	}
@@ -152,7 +167,7 @@ func (s *Sampler) GetSamples() map[string][]SampleData {
 		projectNodeSequence := key.(string)
 		ps := value.(*ProjectSamples)
 
-		// 使用读锁保护读取操作
+		// Use read lock to protect read operations
 		ps.mu.RLock()
 		count := ps.sampleCount
 		writeIdx := ps.writeIdx
@@ -162,19 +177,19 @@ func (s *Sampler) GetSamples() map[string][]SampleData {
 			return true
 		}
 
-		// 复制样本数据
+		// Copy sample data
 		samples := make([]SampleData, count)
 
-		// 从最旧的数据开始复制（如果缓冲区满了）
+		// Start copying from oldest data (if buffer is full)
 		if count == 100 {
-			// 缓冲区已满，从最旧的数据开始
+			// Buffer is full, start from oldest data
 			startIdx := writeIdx % 100
 			for i := uint32(0); i < count; i++ {
 				idx := (startIdx + i) % 100
 				samples[i] = ps.samples[idx]
 			}
 		} else {
-			// 缓冲区未满，从索引0开始
+			// Buffer is not full, start from index 0
 			for i := uint32(0); i < count; i++ {
 				samples[i] = ps.samples[i]
 			}
@@ -193,7 +208,7 @@ func (s *Sampler) GetSamplesByProject(projectNodeSequence string) []SampleData {
 	if value, ok := s.samples.Load(projectNodeSequence); ok {
 		ps := value.(*ProjectSamples)
 
-		// 使用读锁保护读取操作
+		// Use read lock to protect read operations
 		ps.mu.RLock()
 		defer ps.mu.RUnlock()
 
@@ -204,19 +219,19 @@ func (s *Sampler) GetSamplesByProject(projectNodeSequence string) []SampleData {
 			return nil
 		}
 
-		// 复制样本数据
+		// Copy sample data
 		samples := make([]SampleData, count)
 
-		// 从最旧的数据开始复制（如果缓冲区满了）
+		// Start copying from oldest data (if buffer is full)
 		if count == 100 {
-			// 缓冲区已满，从最旧的数据开始
+			// Buffer is full, start from oldest data
 			startIdx := writeIdx % 100
 			for i := uint32(0); i < count; i++ {
 				idx := (startIdx + i) % 100
 				samples[i] = ps.samples[idx]
 			}
 		} else {
-			// 缓冲区未满，从索引0开始
+			// Buffer is not full, start from index 0
 			for i := uint32(0); i < count; i++ {
 				samples[i] = ps.samples[i]
 			}
@@ -270,10 +285,10 @@ func (s *Sampler) ResetProject(projectNodeSequence string) {
 
 // Close releases resources
 func (s *Sampler) Close() {
-	// 标记为已关闭
+	// Mark as closed
 	atomic.StoreInt32(&s.closed, 1)
 
-	// 关闭协程池
+	// Close goroutine pool
 	if s.pool != nil {
 		s.pool.Release()
 		s.pool = nil

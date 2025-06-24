@@ -1129,7 +1129,7 @@ func GetSamplerData(c echo.Context) error {
 	}
 
 	componentName := c.QueryParam("name")               // e.g., "input", "output", "ruleset"
-	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "input.123", "ruleset.test"
+	nodeSequence := c.QueryParam("projectNodeSequence") // e.g., "INPUT.api_sec.RULESET.test" or "ruleset.test" (legacy)
 
 	logger.Info("GetSamplerData request", "componentName", componentName, "nodeSequence", nodeSequence)
 
@@ -1140,23 +1140,55 @@ func GetSamplerData(c echo.Context) error {
 		})
 	}
 
-	// Parse node sequence to get component type and ID
-	parts := strings.Split(nodeSequence, ".")
-	if len(parts) < 2 {
-		logger.Error("Invalid projectNodeSequence format", "nodeSequence", nodeSequence)
+	// Enhanced parsing to handle both old and new ProjectNodeSequence formats
+	var componentType, componentId string
+
+	// Check if this is a full ProjectNodeSequence (new format) or simple type.id (legacy format)
+	if strings.Contains(nodeSequence, ".") {
+		parts := strings.Split(nodeSequence, ".")
+
+		// For full ProjectNodeSequence like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+		// Extract the component info based on the requested componentName
+		normalizedName := strings.ToUpper(componentName) // Convert to uppercase for matching
+
+		// Find the position of the requested component type in the sequence
+		for i, part := range parts {
+			if strings.ToUpper(part) == normalizedName {
+				componentType = strings.ToLower(part) // Use lowercase for consistency
+				if i+1 < len(parts) {
+					componentId = parts[i+1]
+				}
+				break
+			}
+		}
+
+		// If not found in full sequence, try legacy format (type.id)
+		if componentType == "" && len(parts) == 2 {
+			componentType = strings.ToLower(parts[0])
+			componentId = parts[1]
+		}
+	} else {
+		// Single component name without dots - assume it's the ID and use componentName as type
+		componentType = strings.ToLower(componentName)
+		componentId = nodeSequence
+	}
+
+	if componentType == "" || componentId == "" {
+		logger.Error("Failed to parse component info from nodeSequence",
+			"nodeSequence", nodeSequence,
+			"componentName", componentName,
+			"parsedType", componentType,
+			"parsedId", componentId)
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid projectNodeSequence format, expected 'type.id'",
+			"error": "Failed to parse component information from projectNodeSequence",
 		})
 	}
 
-	componentType := parts[0]
-	componentId := strings.Join(parts[1:], ".")
-
 	logger.Info("Parsed component info", "componentType", componentType, "componentId", componentId)
 
-	// Check if the component exists - 支持大小写
+	// Check if the component exists - support case insensitive
 	componentExists := false
-	normalizedType := strings.ToLower(componentType) // 统一转为小写处理
+	normalizedType := strings.ToLower(componentType) // Normalize to lowercase for processing
 	switch normalizedType {
 	case "input":
 		common.GlobalMu.RLock()
@@ -1216,11 +1248,36 @@ func GetSamplerData(c echo.Context) error {
 		if sampler != nil {
 			samples := sampler.GetSamples()
 			for projectNodeSequence, sampleData := range samples {
-				// IMPORTANT: Use suffix matching instead of contains matching
-				// This ensures we get samples for the specific component position in the flow
-				// e.g., for "ruleset.test", match "input.123.ruleset.test" but not "ruleset.test.output.print"
+				// Enhanced matching logic to handle both legacy and new ProjectNodeSequence formats
+				// Support both "RULESET.test" (legacy) and "INPUT.api_sec.RULESET.test" (new format)
+				matched := false
+
+				// Method 1: Direct suffix matching (for backward compatibility)
 				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
-					logger.Info("Found matching sample data with suffix",
+					matched = true
+				}
+
+				// Method 2: Component position matching (for new ProjectNodeSequence format)
+				if !matched {
+					// Parse the requested nodeSequence to extract component type and ID
+					parts := strings.Split(nodeSequence, ".")
+					if len(parts) == 2 {
+						requestedType := strings.ToUpper(parts[0])
+						requestedID := parts[1]
+
+						// Check if the ProjectNodeSequence contains this component in the right position
+						sequenceParts := strings.Split(projectNodeSequence, ".")
+						for i := 0; i < len(sequenceParts)-1; i++ {
+							if strings.ToUpper(sequenceParts[i]) == requestedType && sequenceParts[i+1] == requestedID {
+								matched = true
+								break
+							}
+						}
+					}
+				}
+
+				if matched {
+					logger.Info("Found matching sample data",
 						"projectNodeSequence", projectNodeSequence,
 						"nodeSequence", nodeSequence,
 						"sampleCount", len(sampleData))
@@ -1242,7 +1299,7 @@ func GetSamplerData(c echo.Context) error {
 		}
 	}
 
-	// 改进空数据处理：无论有没有数据都返回成功响应
+	// Improve empty data handling: return success response regardless of whether there is data
 	if totalSamples == 0 {
 		logger.Info("No sample data found for component",
 			"componentType", componentType,

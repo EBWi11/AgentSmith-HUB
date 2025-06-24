@@ -220,9 +220,9 @@ func (p *Project) loadComponents(inputNames []string, outputNames []string, rule
 	}
 
 	for _, v := range outputNames {
-		// 检查正式组件是否存在
+		// Check if formal components exist
 		if _, ok := GlobalProject.Outputs[v]; !ok {
-			// 检查是否为临时组件，临时组件不应该被引用
+			// Check if it's a temporary component, temporary components should not be referenced
 			if _, tempExists := GlobalProject.OutputsNew[v]; tempExists {
 				return fmt.Errorf("cannot reference temporary output component '%s', please save it first", v)
 			}
@@ -231,9 +231,9 @@ func (p *Project) loadComponents(inputNames []string, outputNames []string, rule
 	}
 
 	for _, v := range rulesetNames {
-		// 检查正式组件是否存在
+		// Check if formal components exist
 		if _, ok := GlobalProject.Rulesets[v]; !ok {
-			// 检查是否为临时组件，临时组件不应该被引用
+			// Check if it's a temporary component, temporary components should not be referenced
 			if _, tempExists := GlobalProject.RulesetsNew[v]; tempExists {
 				return fmt.Errorf("cannot reference temporary ruleset component '%s', please save it first", v)
 			}
@@ -525,7 +525,7 @@ func (p *Project) initComponentsForTesting() error {
 func (p *Project) parseContent() (map[string][]string, error) {
 	flowGraph := make(map[string][]string)
 	lines := strings.Split(p.Config.Content, "\n")
-	edgeSet := make(map[string]struct{}) // 用于检测重复流向
+	edgeSet := make(map[string]struct{}) // Used to detect duplicate flows
 
 	for lineNum, line := range lines {
 		line = strings.TrimSpace(line)
@@ -571,7 +571,7 @@ func (p *Project) parseContent() (map[string][]string, error) {
 			return nil, fmt.Errorf("OUTPUT node %q cannot be a source at line %d", from, lineNum+1)
 		}
 
-		// 检查是否有重复的流向
+		// Check for duplicate flows
 		edgeKey := from + "->" + to
 		if _, exists := edgeSet[edgeKey]; exists {
 			return nil, fmt.Errorf("duplicate data flow detected at line %d: %s", lineNum+1, edgeKey)
@@ -781,35 +781,35 @@ func (p *Project) Start() error {
 
 	// Start rulesets after inputs - only if not already running in other projects
 	for _, rs := range p.Rulesets {
-		runningCount := UsageCounter.CountProjectsUsingRuleset(rs.RulesetID, p.Id)
+		runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 		if runningCount == 0 {
-			// No other project is using this ruleset - start it
-			logger.Info("Starting shared ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "running_projects", runningCount)
+			// No other project is using this ruleset instance - start it
+			logger.Info("Starting ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
 			if err := rs.Start(); err != nil {
 				p.Status = ProjectStatusError
 				p.Err = err
 				_ = p.SaveProjectStatus()
-				return fmt.Errorf("failed to start shared ruleset %s: %v", rs.RulesetID, err)
+				return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 			}
 		} else {
-			logger.Info("Reusing already running ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "running_projects", runningCount)
+			logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
 	// Start outputs last - only if not already running in other projects
 	for _, out := range p.Outputs {
-		runningCount := UsageCounter.CountProjectsUsingOutput(out.Id, p.Id)
+		runningCount := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 		if runningCount == 0 {
-			// No other project is using this output - start it
-			logger.Info("Starting shared output component", "project", p.Id, "output", out.Id, "running_projects", runningCount)
+			// No other project is using this output instance - start it
+			logger.Info("Starting output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
 			if err := out.Start(); err != nil {
 				p.Status = ProjectStatusError
 				p.Err = err
 				_ = p.SaveProjectStatus()
-				return fmt.Errorf("failed to start shared output %s: %v", out.Id, err)
+				return fmt.Errorf("failed to start output %s: %v", out.Id, err)
 			}
 		} else {
-			logger.Info("Reusing already running output component", "project", p.Id, "output", out.Id, "running_projects", runningCount)
+			logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
@@ -883,9 +883,9 @@ func (p *Project) Stop() error {
 		// Step 3: Stop rulesets (only if not used by other projects)
 		logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 		for _, rs := range p.Rulesets {
-			otherProjectsUsing := UsageCounter.CountProjectsUsingRuleset(rs.RulesetID, p.Id)
+			otherProjectsUsing := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 			if otherProjectsUsing == 0 {
-				logger.Info("Stopping ruleset component", "project", p.Id, "ruleset", rs.RulesetID, "other_projects_using", otherProjectsUsing)
+				logger.Info("Stopping ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "other_projects_using", otherProjectsUsing)
 				startTime := time.Now()
 				if err := rs.Stop(); err != nil {
 					logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
@@ -894,16 +894,16 @@ func (p *Project) Stop() error {
 					logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
 				}
 			} else {
-				logger.Info("Ruleset component still used by other projects, skipping stop", "project", p.Id, "ruleset", rs.RulesetID, "other_projects_using", otherProjectsUsing)
+				logger.Info("Ruleset instance still used by other projects, skipping stop", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "other_projects_using", otherProjectsUsing)
 			}
 		}
 
 		// Step 4: Stop outputs last (only if not used by other projects)
 		logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 		for _, out := range p.Outputs {
-			otherProjectsUsing := UsageCounter.CountProjectsUsingOutput(out.Id, p.Id)
+			otherProjectsUsing := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 			if otherProjectsUsing == 0 {
-				logger.Info("Stopping output component", "project", p.Id, "output", out.Id, "other_projects_using", otherProjectsUsing)
+				logger.Info("Stopping output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "other_projects_using", otherProjectsUsing)
 				startTime := time.Now()
 				if err := out.Stop(); err != nil {
 					logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
@@ -912,7 +912,7 @@ func (p *Project) Stop() error {
 					logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
 				}
 			} else {
-				logger.Info("Output component still used by other projects, skipping stop", "project", p.Id, "output", out.Id, "other_projects_using", otherProjectsUsing)
+				logger.Info("Output instance still used by other projects, skipping stop", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "other_projects_using", otherProjectsUsing)
 			}
 		}
 
@@ -1030,9 +1030,9 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	return p.metrics
 }
 
-// 在文件中添加一个新函数，用于分析项目依赖关系
+// Add a new function to analyze project dependencies
 func AnalyzeProjectDependencies() {
-	// 清除所有项目的依赖关系
+	// Clear all project dependencies
 	for _, p := range GlobalProject.Projects {
 		p.DependsOn = []string{}
 		p.DependedBy = []string{}
@@ -1041,89 +1041,91 @@ func AnalyzeProjectDependencies() {
 		p.SharedRulesets = []string{}
 	}
 
-	// 构建组件使用映射
-	inputUsage := make(map[string][]string)   // 输入组件ID -> 使用它的项目ID列表
-	outputUsage := make(map[string][]string)  // 输出组件ID -> 使用它的项目ID列表
-	rulesetUsage := make(map[string][]string) // 规则集ID -> 使用它的项目ID列表
+	// Build component instance usage mapping - now distinguished by ProjectNodeSequence
+	instanceUsage := make(map[string][]string) // ProjectNodeSequence -> list of project IDs using it
 
-	// 分析每个项目使用的组件
+	// Analyze component instances used by each project
 	for projectID, p := range GlobalProject.Projects {
-		// 记录输入组件使用情况
-		for inputID := range p.Inputs {
-			inputUsage[inputID] = append(inputUsage[inputID], projectID)
+		// Record input component instance usage
+		for _, input := range p.Inputs {
+			sequence := input.ProjectNodeSequence
+			if sequence != "" {
+				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
+			}
 		}
 
-		// 记录输出组件使用情况
-		for outputID := range p.Outputs {
-			outputUsage[outputID] = append(outputUsage[outputID], projectID)
+		// Record output component instance usage
+		for _, output := range p.Outputs {
+			sequence := output.ProjectNodeSequence
+			if sequence != "" {
+				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
+			}
 		}
 
-		// 记录规则集使用情况
-		for rulesetID := range p.Rulesets {
-			rulesetUsage[rulesetID] = append(rulesetUsage[rulesetID], projectID)
-		}
-	}
-
-	// 更新共享组件信息
-	for inputID, projects := range inputUsage {
-		if len(projects) > 1 {
-			// 这是一个共享输入组件
-			for _, projectID := range projects {
-				GlobalProject.Projects[projectID].SharedInputs = append(
-					GlobalProject.Projects[projectID].SharedInputs,
-					inputID,
-				)
+		// Record ruleset instance usage
+		for _, ruleset := range p.Rulesets {
+			sequence := ruleset.ProjectNodeSequence
+			if sequence != "" {
+				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
 			}
 		}
 	}
 
-	for outputID, projects := range outputUsage {
+	// Update real shared component information (only components with the same ProjectNodeSequence are shared)
+	for sequence, projects := range instanceUsage {
 		if len(projects) > 1 {
-			// 这是一个共享输出组件
-			for _, projectID := range projects {
-				GlobalProject.Projects[projectID].SharedOutputs = append(
-					GlobalProject.Projects[projectID].SharedOutputs,
-					outputID,
-				)
+			// This is a truly shared component instance
+			parts := strings.Split(sequence, ".")
+			if len(parts) >= 2 {
+				componentType := strings.ToLower(parts[len(parts)-2])
+				componentID := parts[len(parts)-1]
+
+				for _, projectID := range projects {
+					switch componentType {
+					case "input":
+						GlobalProject.Projects[projectID].SharedInputs = append(
+							GlobalProject.Projects[projectID].SharedInputs,
+							componentID,
+						)
+					case "output":
+						GlobalProject.Projects[projectID].SharedOutputs = append(
+							GlobalProject.Projects[projectID].SharedOutputs,
+							componentID,
+						)
+					case "ruleset":
+						GlobalProject.Projects[projectID].SharedRulesets = append(
+							GlobalProject.Projects[projectID].SharedRulesets,
+							componentID,
+						)
+					}
+				}
 			}
 		}
 	}
 
-	for rulesetID, projects := range rulesetUsage {
-		if len(projects) > 1 {
-			// 这是一个共享规则集
-			for _, projectID := range projects {
-				GlobalProject.Projects[projectID].SharedRulesets = append(
-					GlobalProject.Projects[projectID].SharedRulesets,
-					rulesetID,
-				)
-			}
-		}
-	}
-
-	// 分析项目之间的依赖关系
+	// Analyze dependencies between projects
 	for projectID, p := range GlobalProject.Projects {
-		// 解析项目配置以获取数据流
+		// Parse project configuration to get data flow
 		flowGraph, err := p.parseContent()
 		if err != nil {
 			logger.Error("Failed to parse project content", "id", projectID, "error", err)
 			continue
 		}
 
-		// 分析数据流中的项目间依赖
+		// Analyze inter-project dependencies in data flow
 		for fromNode, toNodes := range flowGraph {
 			fromType, fromID := parseNode(fromNode)
 
-			// 检查是否存在跨项目依赖
+			// Check if there are cross-project dependencies
 			for _, toNode := range toNodes {
 				toType, toID := parseNode(toNode)
 
-				// 如果源节点是一个项目的输出，目标节点是另一个项目的输入，则存在项目间依赖
+				// If source node is output of one project and target node is input of another project, there is inter-project dependency
 				if fromType == "OUTPUT" && toType == "INPUT" {
-					// 找出拥有这些组件的项目
+					// Find projects that own these components
 					var fromProjectID, toProjectID string
 
-					// 查找拥有源输出的项目
+					// Find project that owns the source output
 					for pid, proj := range GlobalProject.Projects {
 						if _, exists := proj.Outputs[fromID]; exists {
 							fromProjectID = pid
@@ -1131,7 +1133,7 @@ func AnalyzeProjectDependencies() {
 						}
 					}
 
-					// 查找拥有目标输入的项目
+					// Find project that owns the target input
 					for pid, proj := range GlobalProject.Projects {
 						if _, exists := proj.Inputs[toID]; exists {
 							toProjectID = pid
@@ -1139,9 +1141,9 @@ func AnalyzeProjectDependencies() {
 						}
 					}
 
-					// 如果找到了两个不同的项目，则存在项目间依赖
+					// If two different projects are found, there is inter-project dependency
 					if fromProjectID != "" && toProjectID != "" && fromProjectID != toProjectID {
-						// 更新依赖关系
+						// Update dependency relationship
 						GlobalProject.Projects[toProjectID].DependsOn = append(
 							GlobalProject.Projects[toProjectID].DependsOn,
 							fromProjectID,
@@ -1156,7 +1158,7 @@ func AnalyzeProjectDependencies() {
 		}
 	}
 
-	// 记录依赖关系信息
+	// Record dependency relationship information
 	for projectID, p := range GlobalProject.Projects {
 		if len(p.DependsOn) > 0 || len(p.DependedBy) > 0 ||
 			len(p.SharedInputs) > 0 || len(p.SharedOutputs) > 0 || len(p.SharedRulesets) > 0 {
@@ -1196,6 +1198,60 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		for projectID, p := range GlobalProject.Projects {
 			if _, exists := p.Rulesets[componentID]; exists {
 				affectedProjects[projectID] = struct{}{}
+			}
+		}
+	case "project":
+		// The project itself is affected
+		affectedProjects[componentID] = struct{}{}
+
+		// Find other projects that depend on this project
+		if p, exists := GlobalProject.Projects[componentID]; exists {
+			for _, depID := range p.DependedBy {
+				affectedProjects[depID] = struct{}{}
+			}
+		}
+	}
+
+	// Convert to string slice
+	result := make([]string, 0, len(affectedProjects))
+	for projectID := range affectedProjects {
+		result = append(result, projectID)
+	}
+
+	return result
+}
+
+// GetAffectedProjectsByInstance returns the list of project IDs affected by specific component instance changes
+// This is used when we need to identify projects using a specific component instance with a particular ProjectNodeSequence
+func GetAffectedProjectsByInstance(componentType string, componentID string, projectNodeSequence string) []string {
+	affectedProjects := make(map[string]struct{})
+
+	switch componentType {
+	case "input":
+		// Find all projects using this input (inputs are typically shared, so we check by ID)
+		for projectID, p := range GlobalProject.Projects {
+			if _, exists := p.Inputs[componentID]; exists {
+				affectedProjects[projectID] = struct{}{}
+			}
+		}
+	case "output":
+		// Find all projects using this specific output instance
+		for projectID, p := range GlobalProject.Projects {
+			if output, exists := p.Outputs[componentID]; exists {
+				// Check if this is the exact same instance by comparing ProjectNodeSequence
+				if output.ProjectNodeSequence == projectNodeSequence {
+					affectedProjects[projectID] = struct{}{}
+				}
+			}
+		}
+	case "ruleset":
+		// Find all projects using this specific ruleset instance
+		for projectID, p := range GlobalProject.Projects {
+			if ruleset, exists := p.Rulesets[componentID]; exists {
+				// Check if this is the exact same instance by comparing ProjectNodeSequence
+				if ruleset.ProjectNodeSequence == projectNodeSequence {
+					affectedProjects[projectID] = struct{}{}
+				}
 			}
 		}
 	case "project":
@@ -1449,6 +1505,61 @@ func (p *Project) waitForDataDrain() {
 func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error {
 	logger.Info("Loading components from global registry", "project", p.Id)
 
+	// Build ProjectNodeSequence mapping first
+	componentSequences := make(map[string]string)
+	hasUpstream := make(map[string]bool)
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			hasUpstream[to] = true
+		}
+	}
+
+	// Build ProjectNodeSequence recursively
+	var buildSequence func(component string, visited map[string]bool) string
+	buildSequence = func(component string, visited map[string]bool) string {
+		if visited[component] {
+			return component // Break cycle
+		}
+		if seq, exists := componentSequences[component]; exists {
+			return seq
+		}
+		visited[component] = true
+		defer delete(visited, component)
+
+		var upstreamComponent string
+		for from, tos := range flowGraph {
+			for _, to := range tos {
+				if to == component {
+					upstreamComponent = from
+					break
+				}
+			}
+			if upstreamComponent != "" {
+				break
+			}
+		}
+
+		var sequence string
+		if upstreamComponent == "" {
+			sequence = component
+		} else {
+			upstreamSequence := buildSequence(upstreamComponent, visited)
+			sequence = upstreamSequence + "." + component
+		}
+		componentSequences[component] = sequence
+		return sequence
+	}
+
+	// Build sequences for all components
+	for from := range flowGraph {
+		buildSequence(from, make(map[string]bool))
+	}
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			buildSequence(to, make(map[string]bool))
+		}
+	}
+
 	// Collect component names
 	inputNames := []string{}
 	outputNames := []string{}
@@ -1508,28 +1619,113 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 
-	// Load components from global registry
+	// Load input components from global registry (inputs can be shared safely)
 	for _, name := range inputNames {
 		if globalInput, ok := GlobalProject.Inputs[name]; ok {
 			p.Inputs[name] = globalInput
+			// For shared input components, don't overwrite ProjectNodeSequence if it's already set
+			// Multiple projects may use the same input with different sequences in their flow
+			componentKey := "INPUT." + name
+			if expectedSequence, exists := componentSequences[componentKey]; exists {
+				// Only set ProjectNodeSequence if it's empty or if this is the canonical sequence
+				if globalInput.ProjectNodeSequence == "" {
+					globalInput.ProjectNodeSequence = expectedSequence
+					logger.Info("Set input ProjectNodeSequence", "project", p.Id, "input", name, "sequence", expectedSequence)
+				} else if globalInput.ProjectNodeSequence != expectedSequence {
+					// Log warning if different projects expect different sequences for the same input
+					logger.Warn("Input component used with different ProjectNodeSequence",
+						"project", p.Id,
+						"input", name,
+						"existing_sequence", globalInput.ProjectNodeSequence,
+						"expected_sequence", expectedSequence)
+				}
+			} else {
+				// Set default sequence if none exists
+				if globalInput.ProjectNodeSequence == "" {
+					globalInput.ProjectNodeSequence = componentKey
+					logger.Info("Set default input ProjectNodeSequence", "project", p.Id, "input", name, "sequence", componentKey)
+				}
+			}
 		} else {
 			return fmt.Errorf("input component %s not found in global registry", name)
 		}
 	}
 
+	// Load output components with proper instance management
 	for _, name := range outputNames {
-		if globalOutput, ok := GlobalProject.Outputs[name]; ok {
-			p.Outputs[name] = globalOutput
+		componentKey := "OUTPUT." + name
+		expectedSequence := componentSequences[componentKey]
+		if expectedSequence == "" {
+			expectedSequence = componentKey
+		}
+
+		// Check if there's already an output instance with this exact ProjectNodeSequence
+		var foundOutput *output.Output
+		for _, existingProject := range GlobalProject.Projects {
+			if existingOutput, exists := existingProject.Outputs[name]; exists {
+				if existingOutput.ProjectNodeSequence == expectedSequence {
+					foundOutput = existingOutput
+					break
+				}
+			}
+		}
+
+		if foundOutput != nil {
+			// Found existing instance with same ProjectNodeSequence, can share
+			p.Outputs[name] = foundOutput
+			logger.Info("Reusing existing output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
 		} else {
-			return fmt.Errorf("output component %s not found in global registry", name)
+			// Need to create a new instance from global template
+			if globalOutput, ok := GlobalProject.Outputs[name]; ok {
+				// Create a copy of the global output for this project's specific sequence
+				newOutput, err := output.NewFromExisting(globalOutput, expectedSequence)
+				if err != nil {
+					return fmt.Errorf("failed to create output instance for %s: %v", name, err)
+				}
+				p.Outputs[name] = newOutput
+				logger.Info("Created new output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
+			} else {
+				return fmt.Errorf("output component %s not found in global registry", name)
+			}
 		}
 	}
 
+	// Load ruleset components with proper instance management
 	for _, name := range rulesetNames {
-		if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
-			p.Rulesets[name] = globalRuleset
+		componentKey := "RULESET." + name
+		expectedSequence := componentSequences[componentKey]
+		if expectedSequence == "" {
+			expectedSequence = componentKey
+		}
+
+		// Check if there's already a ruleset instance with this exact ProjectNodeSequence
+		var foundRuleset *rules_engine.Ruleset
+		for _, existingProject := range GlobalProject.Projects {
+			if existingRuleset, exists := existingProject.Rulesets[name]; exists {
+				if existingRuleset.ProjectNodeSequence == expectedSequence {
+					foundRuleset = existingRuleset
+					break
+				}
+			}
+		}
+
+		if foundRuleset != nil {
+			// Found existing instance with same ProjectNodeSequence, can share
+			p.Rulesets[name] = foundRuleset
+			logger.Info("Reusing existing ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
 		} else {
-			return fmt.Errorf("ruleset component %s not found in global registry", name)
+			// Need to create a new instance from global template
+			if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
+				// Create a copy of the global ruleset for this project's specific sequence
+				newRuleset, err := rules_engine.NewFromExisting(globalRuleset, expectedSequence)
+				if err != nil {
+					return fmt.Errorf("failed to create ruleset instance for %s: %v", name, err)
+				}
+				p.Rulesets[name] = newRuleset
+				logger.Info("Created new ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
+			} else {
+				return fmt.Errorf("ruleset component %s not found in global registry", name)
+			}
 		}
 	}
 
@@ -1541,103 +1737,18 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 func (p *Project) createChannelConnections(flowGraph map[string][]string) error {
 	logger.Info("Creating channel connections", "project", p.Id)
 
-	// Build ProjectNodeSequence for each component based on data flow paths
-	// This enables component reuse across different logical projects
-	componentSequences := make(map[string]string)
-
-	// First, find all components that have no upstream (entry points)
-	hasUpstream := make(map[string]bool)
-	for _, tos := range flowGraph {
-		for _, to := range tos {
-			hasUpstream[to] = true
-		}
-	}
-
-	// Build ProjectNodeSequence recursively
-	var buildSequence func(component string, visited map[string]bool) string
-	buildSequence = func(component string, visited map[string]bool) string {
-		// Check for cycles
-		if visited[component] {
-			return component // Break cycle
-		}
-
-		// If already computed, return cached result
-		if seq, exists := componentSequences[component]; exists {
-			return seq
-		}
-
-		// Mark as visited
-		visited[component] = true
-		defer delete(visited, component)
-
-		// Find upstream components
-		var upstreamComponent string
-		for from, tos := range flowGraph {
-			for _, to := range tos {
-				if to == component {
-					upstreamComponent = from
-					break
-				}
-			}
-			if upstreamComponent != "" {
-				break
-			}
-		}
-
-		var sequence string
-		if upstreamComponent == "" {
-			// No upstream, this is an entry point
-			sequence = component
-		} else {
-			// Has upstream, build sequence
-			upstreamSequence := buildSequence(upstreamComponent, visited)
-			sequence = upstreamSequence + "." + component
-		}
-
-		componentSequences[component] = sequence
-		return sequence
-	}
-
-	// Build sequences for all components
-	for from := range flowGraph {
-		buildSequence(from, make(map[string]bool))
-	}
-	for _, tos := range flowGraph {
-		for _, to := range tos {
-			buildSequence(to, make(map[string]bool))
-		}
-	}
-
-	// Set ProjectNodeSequence for each component
+	// Reset connection state for all components (but keep ProjectNodeSequence as set in loadComponentsFromGlobal)
 	for _, in := range p.Inputs {
 		in.DownStream = []*chan map[string]interface{}{}
-		componentKey := "INPUT." + in.Id
-		if sequence, exists := componentSequences[componentKey]; exists {
-			in.ProjectNodeSequence = sequence
-		} else {
-			in.ProjectNodeSequence = componentKey
-		}
 	}
 
 	for _, rs := range p.Rulesets {
 		rs.UpStream = make(map[string]*chan map[string]interface{})
 		rs.DownStream = make(map[string]*chan map[string]interface{})
-		componentKey := "RULESET." + rs.RulesetID
-		if sequence, exists := componentSequences[componentKey]; exists {
-			rs.ProjectNodeSequence = sequence
-		} else {
-			rs.ProjectNodeSequence = componentKey
-		}
 	}
 
 	for _, out := range p.Outputs {
 		out.UpStream = []*chan map[string]interface{}{}
-		componentKey := "OUTPUT." + out.Id
-		if sequence, exists := componentSequences[componentKey]; exists {
-			out.ProjectNodeSequence = sequence
-		} else {
-			out.ProjectNodeSequence = componentKey
-		}
 	}
 
 	// Create new channel connections
@@ -1687,18 +1798,17 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 		}
 	}
 
-	// Log the final ProjectNodeSequence for each component
-	for id, in := range p.Inputs {
-		logger.Info("Input component sequence", "project", p.Id, "input", id, "ProjectNodeSequence", in.ProjectNodeSequence)
+	// Log the final ProjectNodeSequence for each component (already set in loadComponentsFromGlobal)
+	for _, in := range p.Inputs {
+		logger.Info("Input component sequence", "project", p.Id, "input", in.Id, "sequence", in.ProjectNodeSequence)
 	}
-	for id, rs := range p.Rulesets {
-		logger.Info("Ruleset component sequence", "project", p.Id, "ruleset", id, "ProjectNodeSequence", rs.ProjectNodeSequence)
+	for _, out := range p.Outputs {
+		logger.Info("Output component sequence", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence)
 	}
-	for id, out := range p.Outputs {
-		logger.Info("Output component sequence", "project", p.Id, "output", id, "ProjectNodeSequence", out.ProjectNodeSequence)
+	for _, rs := range p.Rulesets {
+		logger.Info("Ruleset component sequence", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence)
 	}
 
-	logger.Info("Channel connections created", "project", p.Id, "total_channels", len(p.MsgChannels))
 	return nil
 }
 
