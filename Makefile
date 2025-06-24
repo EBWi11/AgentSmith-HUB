@@ -100,7 +100,7 @@ package: backend frontend
 
 deploy: package
 	@echo "Creating deployment archive..."
-	cd $(DIST_DIR) && tar -czf ../agentsmith-hub-deployment.tar.gz .
+	cd $(DIST_DIR) && tar --create --gzip --file=../agentsmith-hub-deployment.tar.gz .
 	@echo "Deployment archive created: agentsmith-hub-deployment.tar.gz"
 
 clean:
