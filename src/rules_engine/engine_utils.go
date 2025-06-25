@@ -144,7 +144,7 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 				res[i] = v.RealValue
 			}
 		case 2:
-			res[i] = data
+			res[i] = common.MapDeepCopy(data)
 		}
 	}
 	return res
