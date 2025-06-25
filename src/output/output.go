@@ -648,18 +648,21 @@ func (out *Output) metricLoop() {
 		case <-ticker.C:
 			cur := atomic.LoadUint64(&out.produceTotal)
 
-			// Simple handling: if current value is less than last value, reset to last value
+			var qps uint64
+			// Safe handling: if current value is less than last value, set QPS to 0
 			if cur < lastTotal {
 				logger.Warn("Counter decreased, possibly due to overflow or restart",
 					"output", out.Id,
 					"lastTotal", lastTotal,
 					"currentTotal", cur)
-				cur = lastTotal // This time QPS is 0, wait for next normal calculation
+				qps = 0         // Set QPS to 0 to avoid underflow
+				lastTotal = cur // Reset lastTotal to current value
+			} else {
+				qps = cur - lastTotal
+				lastTotal = cur
 			}
 
-			qps := cur - lastTotal
 			atomic.StoreUint64(&out.produceQPS, qps)
-			lastTotal = cur
 		}
 	}
 }

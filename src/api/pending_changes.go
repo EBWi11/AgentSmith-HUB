@@ -783,7 +783,11 @@ func CancelAllPendingChanges(c echo.Context) error {
 func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart map[string]struct{}) error {
 	switch change.Type {
 	case "plugin":
-		return applyPluginChange(change)
+		affectedProjects := applyPluginChange(change)
+		for _, projectID := range affectedProjects {
+			projectsToRestart[projectID] = struct{}{}
+		}
+		return nil
 	case "input":
 		affectedProjects := applyInputChange(change)
 		for _, projectID := range affectedProjects {
@@ -810,7 +814,7 @@ func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart 
 }
 
 // Component-specific apply functions
-func applyPluginChange(change *EnhancedPendingChange) error {
+func applyPluginChange(change *EnhancedPendingChange) []string {
 	// Remove existing plugin from memory before applying
 	common.GlobalMu.Lock()
 	delete(plugin.Plugins, change.ID)
@@ -822,13 +826,15 @@ func applyPluginChange(change *EnhancedPendingChange) error {
 
 	err := os.WriteFile(pluginPath, []byte(change.NewContent), 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write plugin file: %w", err)
+		logger.Error("Failed to apply plugin change", "id", change.ID, "error", err)
+		return nil
 	}
 
 	// Reload plugin into memory
 	reloadErr := plugin.NewPlugin(pluginPath, "", change.ID, plugin.YAEGI_PLUGIN)
 	if reloadErr != nil {
-		return fmt.Errorf("failed to reload plugin: %w", reloadErr)
+		logger.Error("Failed to reload plugin after merge", "id", change.ID, "error", reloadErr)
+		return nil
 	}
 
 	// Clear from legacy storage
@@ -836,11 +842,14 @@ func applyPluginChange(change *EnhancedPendingChange) error {
 	delete(plugin.PluginsNew, change.ID)
 	common.GlobalMu.Unlock()
 
+	// Get affected projects
+	affectedProjects := project.GetAffectedProjects("plugin", change.ID)
+
 	// Sync to followers
 	syncComponentToFollowers("plugin", change.ID)
 
-	logger.Info("Plugin change applied successfully", "id", change.ID)
-	return nil
+	logger.Info("Plugin change applied successfully", "id", change.ID, "affected_projects", len(affectedProjects))
+	return affectedProjects
 }
 
 // Generic component application with type-specific handling
@@ -1082,8 +1091,12 @@ func ApplyPendingChanges(c echo.Context) error {
 				// Sync to follower nodes
 				syncComponentToFollowers("plugin", name)
 
-				// Plugin changes may affect all projects, but we don't automatically restart projects
-				logger.Info("Plugin updated, manual restart of affected projects may be required", "name", name)
+				// Get affected projects and add them to restart list
+				affectedProjects := project.GetAffectedProjects("plugin", name)
+				for _, projectID := range affectedProjects {
+					projectsToRestart[projectID] = struct{}{}
+				}
+				logger.Info("Plugin updated, affected projects will be restarted", "name", name, "affected_projects", len(affectedProjects))
 			}
 		}
 	}
@@ -1669,16 +1682,7 @@ func ApplySingleChange(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
 	}
 
-	// For rulesets, we can reload them directly
-	if req.Type == "ruleset" {
-		// Reload just this ruleset
-		if ruleset, ok := project.GlobalProject.Rulesets[req.ID]; ok {
-			err := ruleset.Reload()
-			if err != nil {
-				logger.Error("Failed to reload ruleset", "id", req.ID, "error", err)
-			}
-		}
-	}
+	// Note: We don't perform hot reload here as we will restart affected projects instead
 
 	// Sync changes to follower nodes
 	syncComponentToFollowers(req.Type, req.ID)

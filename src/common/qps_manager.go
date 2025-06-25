@@ -418,8 +418,14 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
 			if timeDiff > 0 {
-				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				// Safe calculation: check for underflow before subtraction
+				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
+					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+					hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				} else {
+					// Handle restart case: use current total as rate indicator
+					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
+				}
 			}
 		}
 
@@ -461,8 +467,14 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
 			if timeDiff > 0 {
-				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				// Safe calculation: check for underflow before subtraction
+				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
+					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+					hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				} else {
+					// Handle restart case: use current total as rate indicator
+					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
+				}
 			}
 		}
 
@@ -566,8 +578,14 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
 			if timeDiff > 0 {
-				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				// Safe calculation: check for underflow before subtraction
+				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
+					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+					hourlyRate = uint64(float64(messageDiff) / timeDiff)
+				} else {
+					// Handle restart case: use current total as rate indicator
+					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
+				}
 			}
 		}
 
