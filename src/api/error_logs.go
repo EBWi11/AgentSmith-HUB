@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,6 +72,45 @@ var (
 	// Error level patterns
 	errorLevels = []string{"ERROR", "error", "Error", "FATAL", "fatal", "Fatal"}
 )
+
+// getLogDir returns the appropriate log directory based on the operating system
+// This mirrors the function in logger package to ensure consistency
+func getLogDir() string {
+	if runtime.GOOS == "darwin" {
+		return "/tmp/hub_logs"
+	}
+	return "/var/log/hub_logs"
+}
+
+// getLogPath returns the full path for a specific log file
+// It ensures the directory exists and creates it if necessary
+func getLogPath(filename string) string {
+	logDir := getLogDir()
+
+	// Try to ensure system log directory exists
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			// Successfully created system log directory
+			return filepath.Join(logDir, filename)
+		}
+		// Failed to create system directory, fall back to local
+	} else if err == nil {
+		// System log directory exists
+		return filepath.Join(logDir, filename)
+	}
+
+	// Fallback to local directory - ensure it exists
+	localLogDir := "./logs"
+	if _, err := os.Stat(localLogDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(localLogDir, 0755); err != nil {
+			// If we can't create any directory, still return the path
+			// The file operations will fail later with appropriate errors
+			logger.Error("Failed to create any log directory", "system_dir", logDir, "local_dir", localLogDir, "error", err)
+		}
+	}
+
+	return filepath.Join(localLogDir, filename)
+}
 
 // readErrorLogsFromFile reads error logs from a specific file
 func readErrorLogsFromFile(filePath string, source string, filter ErrorLogFilter) ([]ErrorLogEntry, error) {
@@ -267,7 +308,7 @@ func getLocalErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, error) {
 
 	// Read hub.log
 	if filter.Source == "" || filter.Source == "all" || filter.Source == "hub" {
-		hubLogPath := "./logs/hub.log"
+		hubLogPath := getLogPath("hub.log")
 		hubLogs, err := readErrorLogsFromFile(hubLogPath, "hub", filter)
 		if err != nil {
 			logger.Error("Failed to read hub logs", "error", err)
@@ -279,7 +320,7 @@ func getLocalErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, error) {
 
 	// Read plugin.log
 	if filter.Source == "" || filter.Source == "all" || filter.Source == "plugin" {
-		pluginLogPath := "./logs/plugin.log"
+		pluginLogPath := getLogPath("plugin.log")
 		pluginLogs, err := readErrorLogsFromFile(pluginLogPath, "plugin", filter)
 		if err != nil {
 			logger.Error("Failed to read plugin logs", "error", err)

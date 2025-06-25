@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Configuration
-CONFIG_ROOT="config"
+CONFIG_ROOT="/opt/config"
 BINARY_NAME="agentsmith-hub"
 BUILD_DIR="build"
 DIST_DIR="dist"
@@ -77,19 +77,29 @@ setup_library_path() {
 check_config() {
     local binary_dir="$(dirname "$1")"
     
-    # Check for config directory relative to binary
-    if [ -d "$binary_dir/$CONFIG_ROOT" ]; then
-        CONFIG_ROOT="$binary_dir/$CONFIG_ROOT"
+    # Check for absolute config path first (preferred)
+    if [ -d "$CONFIG_ROOT" ]; then
         print_info "Using config directory: $CONFIG_ROOT"
-    elif [ -d "$CONFIG_ROOT" ]; then
-        print_info "Using config directory: $(pwd)/$CONFIG_ROOT"
+    # Check for config directory relative to binary (backward compatibility)
+    elif [ -d "$binary_dir/config" ]; then
+        CONFIG_ROOT="$binary_dir/config"
+        print_info "Using config directory: $CONFIG_ROOT (relative to binary)"
+    # Check for config directory in current working directory (backward compatibility)
+    elif [ -d "config" ]; then
+        CONFIG_ROOT="$(pwd)/config"
+        print_info "Using config directory: $CONFIG_ROOT (current directory)"
     else
         print_error "Config directory not found!"
         print_error "Please ensure the config directory is present with proper configuration files."
         echo ""
-        echo "Expected locations:"
-        echo "  - $binary_dir/$CONFIG_ROOT"
-        echo "  - $(pwd)/$CONFIG_ROOT"
+        echo "Expected locations (in order of preference):"
+        echo "  - $CONFIG_ROOT (preferred)"
+        echo "  - $binary_dir/config (relative to binary)"
+        echo "  - $(pwd)/config (current directory)"
+        echo ""
+        echo "To create the default config directory:"
+        echo "  sudo mkdir -p $CONFIG_ROOT"
+        echo "  sudo chown \$(whoami):\$(whoami) $CONFIG_ROOT"
         exit 1
     fi
 }
@@ -165,13 +175,21 @@ main() {
         print_info "Press Ctrl+C to stop"
         echo ""
         
-        # Calculate relative config path from binary location
+        # Calculate config path for binary
         BINARY_DIR="$(dirname "$BINARY_PATH")"
-        RELATIVE_CONFIG_ROOT=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
+        
+        # If CONFIG_ROOT is absolute, use it directly; otherwise calculate relative path
+        if [[ "$CONFIG_ROOT" = /* ]]; then
+            # Absolute path - use as is
+            CONFIG_ARG="$CONFIG_ROOT"
+        else
+            # Relative path - calculate relative to binary location
+            CONFIG_ARG=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
+        fi
         
         # Start as leader
         cd "$(dirname "$BINARY_PATH")"
-        exec "./$BINARY_NAME" -config_root "$RELATIVE_CONFIG_ROOT"
+        exec "./$BINARY_NAME" -config_root "$CONFIG_ARG"
     fi
 }
 
@@ -198,6 +216,11 @@ while [[ $# -gt 0 ]]; do
             echo "  1. $DIST_DIR/$BINARY_NAME (production build)"
             echo "  2. $BUILD_DIR/$BINARY_NAME (development build)"
             echo "  3. ./$BINARY_NAME (current directory)"
+            echo ""
+            echo "Configuration directory search order:"
+            echo "  1. /opt/config (preferred system location)"
+            echo "  2. <binary_dir>/config (relative to binary)"
+            echo "  3. ./config (current directory)"
             echo ""
             echo "Examples:"
             echo "  $0                           # Start as leader (default)"
@@ -231,10 +254,22 @@ while [[ $# -gt 0 ]]; do
             fi
             
             # Check config
-            if check_config "${BINARY_PATH:-./}" 2>/dev/null; then
+            # Save original CONFIG_ROOT
+            ORIGINAL_CONFIG_ROOT="$CONFIG_ROOT"
+            
+            # Try to find config
+            if [ -d "$CONFIG_ROOT" ]; then
                 print_info "✓ Config directory found: $CONFIG_ROOT"
+            elif [ -d "$(dirname "${BINARY_PATH:-./}")/config" ]; then
+                print_info "✓ Config directory found: $(dirname "${BINARY_PATH:-./}")/config (relative to binary)"
+            elif [ -d "config" ]; then
+                print_info "✓ Config directory found: $(pwd)/config (current directory)"
             else
                 print_error "✗ Config directory not found"
+                echo "    Expected locations:"
+                echo "      - $ORIGINAL_CONFIG_ROOT (preferred)"
+                echo "      - $(dirname "${BINARY_PATH:-./}")/config (relative to binary)"
+                echo "      - $(pwd)/config (current directory)"
             fi
             
             # Check libraries

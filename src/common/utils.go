@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -402,4 +403,89 @@ func ReadContentFromPathOrRaw(path string, raw string) ([]byte, error) {
 	} else {
 		return []byte(raw), nil
 	}
+}
+
+// getConfigDir returns the appropriate config directory based on the operating system
+func GetConfigDir() string {
+	if runtime.GOOS == "darwin" {
+		return "." // Current directory for macOS
+	}
+	return "/etc/hub" // /etc/hub for Linux
+}
+
+// ensureConfigDir creates the config directory if it doesn't exist
+func EnsureConfigDir() error {
+	configDir := GetConfigDir()
+	if configDir == "." {
+		// For macOS (current directory), no need to create
+		return nil
+	}
+
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetConfigPath returns the full path for a specific config file
+// It ensures the directory exists and creates it if necessary
+func GetConfigPath(filename string) string {
+	configDir := GetConfigDir()
+
+	// For macOS (current directory), just return the path
+	if configDir == "." {
+		return filepath.Join(configDir, filename)
+	}
+
+	// For Linux, ensure the directory exists
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		// Try to create the directory
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			// Log the failure and fallback to current directory
+			if Config != nil && Config.LocalIP != "" {
+				// If logging is available, log the error
+				fmt.Printf("Failed to create config directory %s: %v, falling back to current directory\n", configDir, err)
+			}
+			configDir = "."
+		} else {
+			// Successfully created directory
+			if Config != nil && Config.LocalIP != "" {
+				fmt.Printf("Created config directory: %s\n", configDir)
+			}
+		}
+	} else if err != nil {
+		// Other error accessing directory (permission issues, etc.)
+		if Config != nil && Config.LocalIP != "" {
+			fmt.Printf("Error accessing config directory %s: %v, falling back to current directory\n", configDir, err)
+		}
+		configDir = "."
+	}
+
+	return filepath.Join(configDir, filename)
+}
+
+// EnsureConfigDirExists explicitly ensures the config directory exists
+// This can be called during initialization to set up directories proactively
+func EnsureConfigDirExists() error {
+	configDir := GetConfigDir()
+
+	// For macOS (current directory), no need to create
+	if configDir == "." {
+		return nil
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		// Create directory with proper permissions
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return fmt.Errorf("failed to create config directory %s: %w", configDir, err)
+		}
+		fmt.Printf("Successfully created config directory: %s\n", configDir)
+	} else if err != nil {
+		return fmt.Errorf("error accessing config directory %s: %w", configDir, err)
+	}
+
+	return nil
 }

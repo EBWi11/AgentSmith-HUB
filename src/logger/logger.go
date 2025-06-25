@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -14,9 +16,61 @@ var l *slog.Logger
 var accessLogger *lumberjack.Logger
 var pluginLogger *slog.Logger
 
+// getLogDir returns the appropriate log directory based on the operating system
+func getLogDir() string {
+	if runtime.GOOS == "darwin" {
+		return "/tmp/hub_logs"
+	}
+	return "/var/log/hub_logs"
+}
+
+// ensureLogDir creates the log directory if it doesn't exist
+func ensureLogDir() error {
+	logDir := getLogDir()
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func InitLogger() *slog.Logger {
+	// Ensure log directory exists
+	if err := ensureLogDir(); err != nil {
+		// Fallback to current directory if unable to create system log directory
+		logFile := &lumberjack.Logger{
+			Filename:   "./logs/hub.log",
+			MaxSize:    100,
+			MaxBackups: 30,
+			MaxAge:     15,
+			Compress:   false,
+		}
+
+		// Create local logs directory if it doesn't exist
+		if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+			if err := os.MkdirAll("./logs", 0755); err != nil {
+				// If we can't create any log directory, write to stderr
+				handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+					Level: slog.LevelInfo,
+				})
+				logger := slog.New(handler)
+				slog.SetDefault(logger)
+				logger.Warn("Failed to create any log directory, logging to stderr", "local_dir_error", err.Error())
+				return logger
+			}
+		}
+
+		handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+		logger := slog.New(handler)
+		slog.SetDefault(logger)
+		return logger
+	}
+
 	logFile := &lumberjack.Logger{
-		Filename:   "./logs/hub.log",
+		Filename:   filepath.Join(getLogDir(), "hub.log"),
 		MaxSize:    100,
 		MaxBackups: 30,
 		MaxAge:     15,
@@ -37,30 +91,33 @@ func InitLogger() *slog.Logger {
 func InitPluginLogger() *slog.Logger {
 	// Get current working directory for debugging
 	pwd, _ := os.Getwd()
+	logDir := getLogDir()
+	pluginLogPath := filepath.Join(logDir, "plugin.log")
+
 	if l != nil {
-		l.Info("initializing plugin logger", "working_directory", pwd, "target_path", "./logs/plugin.log")
+		l.Info("initializing plugin logger", "working_directory", pwd, "target_path", pluginLogPath)
 	}
 
-	// Create logs directory if it doesn't exist
-	if _, err := os.Stat("./logs"); os.IsNotExist(err) {
-		if err := os.Mkdir("./logs", 0755); err != nil {
-			// If failed to create logs directory, log the error and use stderr as fallback
-			if l != nil {
-				l.Error("failed to create logs directory for plugin logger", "error", err, "working_directory", pwd)
-			}
-			// Return a logger that writes to stderr as fallback
-			handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
-			})
-			return slog.New(handler)
-		}
+	// Ensure log directory exists
+	if err := ensureLogDir(); err != nil {
 		if l != nil {
-			l.Info("created logs directory for plugin logger", "path", "./logs")
+			l.Error("failed to create log directory for plugin logger", "error", err, "working_directory", pwd, "log_dir", logDir)
 		}
+		// Fallback to local directory
+		if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+			if err := os.MkdirAll("./logs", 0755); err != nil {
+				// Return a logger that writes to stderr as fallback
+				handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+					Level: slog.LevelInfo,
+				})
+				return slog.New(handler)
+			}
+		}
+		pluginLogPath = "./logs/plugin.log"
 	}
 
 	pluginLogFile := &lumberjack.Logger{
-		Filename:   "./logs/plugin.log",
+		Filename:   pluginLogPath,
 		MaxSize:    100,   // Same as hub.log
 		MaxBackups: 30,    // Same as hub.log
 		MaxAge:     15,    // Same as hub.log
@@ -75,7 +132,7 @@ func InitPluginLogger() *slog.Logger {
 
 	// Log successful initialization
 	if l != nil {
-		l.Info("plugin logger initialized", "filename", "./logs/plugin.log", "working_directory", pwd)
+		l.Info("plugin logger initialized", "filename", pluginLogPath, "working_directory", pwd)
 	}
 
 	return logger
@@ -93,26 +150,32 @@ func GetPluginLogger() *slog.Logger {
 func InitAccessLogger() io.Writer {
 	// Get current working directory for debugging
 	pwd, _ := os.Getwd()
+	logDir := getLogDir()
+	accessLogPath := filepath.Join(logDir, "access.log")
+
 	if l != nil {
-		l.Info("initializing access logger", "working_directory", pwd, "target_path", "./logs/access.log")
+		l.Info("initializing access logger", "working_directory", pwd, "target_path", accessLogPath)
 	}
 
-	// Create logs directory if it doesn't exist
-	if _, err := os.Stat("./logs"); os.IsNotExist(err) {
-		if err := os.Mkdir("./logs", 0755); err != nil {
-			// If failed to create logs directory, log the error and use stderr as fallback
-			if l != nil {
-				l.Error("failed to create logs directory", "error", err, "working_directory", pwd)
-			}
-			return os.Stderr
-		}
+	// Ensure log directory exists
+	if err := ensureLogDir(); err != nil {
 		if l != nil {
-			l.Info("created logs directory", "path", "./logs")
+			l.Error("failed to create log directory", "error", err, "working_directory", pwd, "log_dir", logDir)
 		}
+		// Fallback to local directory
+		if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+			if err := os.MkdirAll("./logs", 0755); err != nil {
+				if l != nil {
+					l.Error("failed to create local logs directory", "error", err, "working_directory", pwd)
+				}
+				return os.Stderr
+			}
+		}
+		accessLogPath = "./logs/access.log"
 	}
 
 	accessLogger = &lumberjack.Logger{
-		Filename:   "./logs/access.log",
+		Filename:   accessLogPath,
 		MaxSize:    50, // 50MB per file
 		MaxBackups: 30, // Keep 30 backup files
 		MaxAge:     15, // Keep files for 15 days
@@ -121,7 +184,7 @@ func InitAccessLogger() io.Writer {
 
 	// Log successful initialization
 	if l != nil {
-		l.Info("access logger initialized", "filename", "./logs/access.log", "working_directory", pwd)
+		l.Info("access logger initialized", "filename", accessLogPath, "working_directory", pwd)
 	}
 
 	return accessLogger

@@ -1277,7 +1277,7 @@ func GetAffectedProjectsByInstance(componentType string, componentID string, pro
 
 // SaveProjectStatus saves the current status of a project to a file
 func (p *Project) SaveProjectStatus() error {
-	statusFile := ".project_status"
+	statusFile := common.GetConfigPath(".project_status")
 
 	// Read existing statuses
 	projectStatuses := make(map[string]string)
@@ -1332,7 +1332,7 @@ func (p *Project) SaveProjectStatus() error {
 
 // LoadProjectStatus loads the project status from a file
 func (p *Project) LoadProjectStatus() (ProjectStatus, error) {
-	statusFile := ".project_status"
+	statusFile := common.GetConfigPath(".project_status")
 
 	// Check if the file exists
 	if _, err := os.Stat(statusFile); os.IsNotExist(err) {

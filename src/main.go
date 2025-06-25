@@ -42,7 +42,7 @@ func traverseComponents(dir string, suffix string) ([]string, error) {
 }
 
 func readToken(create bool) (string, error) {
-	tokenPath := ".token"
+	tokenPath := common.GetConfigPath(".token")
 	data, err := os.ReadFile(tokenPath)
 	if err == nil {
 		return string(data), nil
@@ -50,6 +50,11 @@ func readToken(create bool) (string, error) {
 
 	// Leader creates a new token
 	if create {
+		// Ensure directory exists before creating the file
+		if err := os.MkdirAll(filepath.Dir(tokenPath), 0755); err != nil {
+			return "", fmt.Errorf("failed to create token directory: %w", err)
+		}
+
 		f, err := os.Create(tokenPath)
 		if err != nil {
 			return "", err
@@ -471,6 +476,11 @@ func main() {
 	}
 
 	logger.Info("hub_starting", "config_root", *configRoot, "leader", *leaderAddr)
+
+	// Ensure config directory exists early
+	if err := common.EnsureConfigDirExists(); err != nil {
+		logger.Warn("Failed to create config directory, will fallback to current directory", "error", err)
+	}
 
 	if (*configRoot != "" && *leaderAddr != "") || (*configRoot == "" && *leaderAddr == "") {
 		fmt.Println("If the instance is a Leader, only 'config_root' needs to be given; if it is a Follower, only 'leader' needs to be given")
