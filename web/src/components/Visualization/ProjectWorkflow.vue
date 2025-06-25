@@ -455,7 +455,8 @@ function updateNodesWithMessages() {
         }
         
         if (shouldCount) {
-          totalMessages += componentData.total_messages || componentData.current_total || 0;
+          // Use hourly_rate for MSG/H display instead of cumulative totals
+          totalMessages += componentData.hourly_rate || 0;
           foundData = true;
         }
       }

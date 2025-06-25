@@ -2,33 +2,6 @@
   <header class="h-16 border-b border-gray-200 flex items-center justify-between px-6">
     <!-- Logo and Title -->
     <div class="flex items-center space-x-3">
-      <div class="w-8 h-8">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="w-full h-full">
-          <defs>
-            <linearGradient id="triangleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" style="stop-color:#4facfe"/>
-              <stop offset="50%" style="stop-color:#00b4db"/>
-              <stop offset="100%" style="stop-color:#0083b0"/>
-            </linearGradient>
-          </defs>
-          
-          <!-- 主三角形 -->
-          <path d="M16 4 L26 24 L6 24 Z" fill="url(#triangleGrad)"/>
-          
-          <!-- 智能指示器 -->
-          <g fill="#ffffff" opacity="0.9">
-            <circle cx="16" cy="18" r="1.5"/>
-            <circle cx="13" cy="20" r="1"/>
-            <circle cx="19" cy="20" r="1"/>
-          </g>
-          
-          <!-- 连接线 -->
-          <g stroke="#ffffff" stroke-width="0.8" opacity="0.6" fill="none">
-            <line x1="16" y1="18" x2="13" y2="20"/>
-            <line x1="16" y1="18" x2="19" y2="20"/>
-          </g>
-        </svg>
-      </div>
       <h1 class="text-xl font-semibold text-gray-800">AgentSmith-HUB</h1>
     </div>
     

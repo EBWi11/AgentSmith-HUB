@@ -3,7 +3,6 @@
     <!-- Header -->
     <div class="px-6 pt-6 pb-2">
       <h1 class="text-3xl font-bold text-gray-900">AgentSmith Hub Dashboard</h1>
-      <p class="text-gray-600 mt-2">Real-time overview of your hub cluster and projects</p>
       <p class="text-sm text-blue-600 mt-1">📊 All message statistics show aggregated data from all cluster nodes</p>
     </div>
 
@@ -480,7 +479,8 @@ function getProjectMessageStats(projectId) {
   if (messageData.value && typeof messageData.value === 'object') {
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object' && componentData.component_type) {
-        const totalMessages = componentData.total_messages || componentData.current_total || 0
+        // Use hourly_rate for MSG/H display instead of cumulative totals
+        const hourlyMessages = componentData.hourly_rate || 0
         
         // Apply updated matching logic for new ProjectNodeSequence format
         const keyParts = key.split('.')
@@ -489,14 +489,14 @@ function getProjectMessageStats(projectId) {
           // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
           // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
           if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
-            input += totalMessages
+            input += hourlyMessages
           }
         } else if (componentData.component_type === 'output') {
           // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
           // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
           if (keyParts.length >= 2 && 
               keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT') {
-            output += totalMessages
+            output += hourlyMessages
           }
         } else if (componentData.component_type === 'ruleset') {
           // Count ruleset processing load - matches patterns like "INPUT.api_sec.RULESET.test"
@@ -511,7 +511,7 @@ function getProjectMessageStats(projectId) {
               
               if (!hasDownstream) {
                 // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
-                ruleset += totalMessages;
+                ruleset += hourlyMessages;
               }
               // If hasDownstream is true, this means it's a downstream component's sequence
               // that happens to contain this RULESET in its path - we don't count it

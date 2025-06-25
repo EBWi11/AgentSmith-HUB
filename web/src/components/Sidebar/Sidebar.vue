@@ -1021,7 +1021,7 @@ function startProjectPolling() {
   // Refresh project status every 5 seconds
   projectRefreshInterval.value = setInterval(async () => {
     if (!collapsed.projects) {
-      await fetchItems('projects')
+      await refreshProjectStatus()
     }
   }, 5000)
 }
@@ -1058,7 +1058,12 @@ async function toggleCollapse(type) {
   collapsed[type] = !collapsed[type]
   // If expanding, refresh the list
   if (!collapsed[type]) {
-    await fetchItems(type)
+    if (type === 'projects') {
+      // 对于projects，先使用惰性刷新，如果列表为空则进行完整刷新
+      await refreshProjectStatus()
+    } else {
+      await fetchItems(type)
+    }
   }
 }
 
@@ -1080,6 +1085,11 @@ async function fetchAllItems() {
 }
 
 async function fetchItems(type) {
+  // 对于projects类型，优先使用惰性刷新
+  if (type === 'projects') {
+    return await refreshProjectStatus()
+  }
+  
   loading[type] = true
   error[type] = null
   try {
@@ -1137,6 +1147,129 @@ async function fetchItems(type) {
           }
         }
       }).filter(Boolean) // 过滤掉null项
+      
+      // 对列表按照ID排序
+      items[type].sort((a, b) => {
+        const idA = a.id || a.name || ''
+        const idB = b.id || b.name || ''
+        return idA.localeCompare(idB)
+      })
+    } else {
+      items[type] = []
+    }
+  } catch (err) {
+    error[type] = `Failed to load ${type}: ${err.message}`
+  } finally {
+    loading[type] = false
+  }
+}
+
+// 惰性刷新project状态，只更新已存在项目的状态，不重建列表
+async function refreshProjectStatus() {
+  // 如果项目列表为空或加载中，则进行完整刷新
+  if (!items.projects || items.projects.length === 0 || loading.projects) {
+    return await fetchProjectsComplete()
+  }
+  
+  try {
+    // 获取最新的项目数据
+    const response = await hubApi.fetchComponentsWithTempInfo('projects')
+    
+    if (Array.isArray(response)) {
+      const newProjects = response.map(item => {
+        if (!item.id) return null
+        return {
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          hasTemp: item.hasTemp,
+          errorMessage: item.errorMessage || ''
+        }
+      }).filter(Boolean)
+      
+      // 检查是否有项目增删
+      const currentIds = new Set(items.projects.map(p => p.id))
+      const newIds = new Set(newProjects.map(p => p.id))
+      
+      // 如果项目数量发生变化或有新/删除的项目，进行完整刷新
+      if (currentIds.size !== newIds.size || 
+          !Array.from(currentIds).every(id => newIds.has(id)) ||
+          !Array.from(newIds).every(id => currentIds.has(id))) {
+        return await fetchProjectsComplete()
+      }
+      
+      // 只更新现有项目的状态，不重建列表
+      items.projects.forEach(currentProject => {
+        const updatedProject = newProjects.find(p => p.id === currentProject.id)
+        if (updatedProject) {
+          // 只更新状态相关字段，保持DOM稳定
+          currentProject.status = updatedProject.status
+          currentProject.hasTemp = updatedProject.hasTemp
+          currentProject.errorMessage = updatedProject.errorMessage
+        }
+      })
+      
+      // 异步获取error项目的详细错误信息
+      items.projects.forEach(async (project) => {
+        if (project.status === 'error' && !project.errorMessage) {
+          try {
+            const projectDetails = await hubApi.getProject(project.id)
+            if (projectDetails && projectDetails.errorMessage) {
+              project.errorMessage = projectDetails.errorMessage
+            }
+          } catch (err) {
+            console.error(`Failed to fetch error details for project ${project.id}:`, err)
+          }
+        }
+      })
+    }
+  } catch (err) {
+    console.error('Failed to refresh project status:', err)
+    // 如果状态刷新失败，不显示错误，静默处理
+  }
+}
+
+// 完整刷新项目列表（用于初始加载和项目增删时）
+async function fetchProjectsComplete() {
+  const type = 'projects'
+  loading[type] = true
+  error[type] = null
+  
+  try {
+    const response = await hubApi.fetchComponentsWithTempInfo(type)
+    
+    if (Array.isArray(response)) {
+      items[type] = response.map(item => {
+        if (!item.id) {
+          console.warn(`Skipping invalid ${type} item:`, item)
+          return null
+        }
+        
+        // 如果是项目且状态为error，异步获取错误信息
+        if (item.status === 'error') {
+          (async () => {
+            try {
+              const projectDetails = await hubApi.getProject(item.id)
+              if (projectDetails && projectDetails.errorMessage) {
+                const index = items[type].findIndex(p => p.id === item.id)
+                if (index !== -1) {
+                  items[type][index].errorMessage = projectDetails.errorMessage
+                }
+              }
+            } catch (err) {
+              console.error(`Failed to fetch error details for project ${item.id}:`, err)
+            }
+          })()
+        }
+        
+        return {
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          hasTemp: item.hasTemp,
+          errorMessage: item.errorMessage || ''
+        }
+      }).filter(Boolean)
       
       // 对列表按照ID排序
       items[type].sort((a, b) => {
@@ -1218,8 +1351,12 @@ async function confirmAddName() {
         throw new Error('Unsupported type')
     }
     
-    // Refresh the list
-    await fetchItems(addType.value)
+    // Refresh the list - for creation, we need to rebuild the list structure
+    if (addType.value === 'projects') {
+      await fetchProjectsComplete()
+    } else {
+      await fetchItems(addType.value)
+    }
     
     // Close the modal
     showAddModal.value = false
@@ -1291,8 +1428,12 @@ async function confirmDelete() {
     else if (type === 'projects') await hubApi.deleteProject(item.id)
     else if (type === 'plugins') await hubApi.deletePlugin(item.id)
     
-    // Refresh the list
-    await fetchItems(type)
+    // Refresh the list - for project deletion, we need to rebuild the list structure
+    if (type === 'projects') {
+      await fetchProjectsComplete()
+    } else {
+      await fetchItems(type)
+    }
     
     // Show success message
     $message?.success?.('Deleted successfully!')
@@ -1474,7 +1615,9 @@ function getArgumentTypeHint() {
 // Expose methods to parent component
 defineExpose({
   fetchItems,
-  fetchAllItems
+  fetchAllItems,
+  refreshProjectStatus,
+  fetchProjectsComplete
 })
 
 function handleItemClick(type, item) {
@@ -1503,8 +1646,8 @@ async function startProject(item) {
       $message?.success?.('Project started successfully')
       // Update project status
       item.status = 'running'
-      // Refresh project list
-      await fetchItems('projects')
+      // Refresh project status only, no need to rebuild list
+      await refreshProjectStatus()
     } else if (result.error) {
       // Start failed
       $message?.error?.('Failed to start project: ' + result.error)
@@ -1536,8 +1679,8 @@ async function stopProject(item) {
       $message?.success?.('Project stopped successfully')
       // Update project status
       item.status = 'stopped'
-      // Refresh project list
-      await fetchItems('projects')
+      // Refresh project status only, no need to rebuild list
+      await refreshProjectStatus()
     } else if (result.error) {
       // Stop failed
       $message?.error?.('Failed to stop project: ' + result.error)
@@ -1569,8 +1712,8 @@ async function restartProject(item) {
       $message?.success?.('Project restarted successfully')
       // Update project status
       item.status = 'running'
-      // Refresh project list
-      await fetchItems('projects')
+      // Refresh project status only, no need to rebuild list
+      await refreshProjectStatus()
     } else if (result.error) {
       // Restart failed
       $message?.error?.('Failed to restart project: ' + result.error)
@@ -1637,8 +1780,8 @@ async function continueProjectOperation() {
         item.status = 'stopped'
       }
       
-      // Refresh project list
-      await fetchItems('projects')
+      // Refresh project status only, no need to rebuild list
+      await refreshProjectStatus()
     }
   } catch (error) {
     $message?.error?.(`Error ${operationType}ing project: ` + (error.message || 'Unknown error'))

@@ -441,48 +441,60 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 	defer qm.mutex.RUnlock()
 
 	// Group by project and component type for individual component statistics
-	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
-	totalInputMessages := uint64(0)                    // Total input messages across all projects
-	totalOutputMessages := uint64(0)                   // Total output messages across all projects
-	totalRulesetMessages := uint64(0)                  // Total ruleset processed messages
+	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> hourlyRate
+	totalInputMessages := uint64(0)                    // Total hourly input messages across all projects
+	totalOutputMessages := uint64(0)                   // Total hourly output messages across all projects
+	totalRulesetMessages := uint64(0)                  // Total hourly ruleset processed messages
 
 	for _, data := range qm.data {
 		if _, exists := projectStats[data.ProjectID]; !exists {
 			projectStats[data.ProjectID] = make(map[string]uint64)
 		}
 
-		// Use real current total messages
-		componentMessages := data.CurrentTotal
+		// Calculate hourly message rate based on recent data points
+		var hourlyRate uint64 = 0
+		if len(data.DataPoints) > 1 {
+			// Find the oldest and newest data points within the hour
+			oldestPoint := data.DataPoints[0]
+			newestPoint := data.DataPoints[len(data.DataPoints)-1]
 
-		// Count ALL component types for individual statistics
-		projectStats[data.ProjectID][data.ComponentType] += componentMessages
+			// Calculate time difference in hours
+			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
+			if timeDiff > 0 {
+				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+			}
+		}
 
-		// For global totals, count actual messages by component type
+		// Count hourly rates for individual statistics
+		projectStats[data.ProjectID][data.ComponentType] += hourlyRate
+
+		// For global totals, count hourly rates by component type
 		parts := strings.Split(data.ProjectNodeSequence, ".")
 
 		switch data.ComponentType {
 		case "input":
 			// Only count input if this ProjectNodeSequence represents the actual input component
 			if len(parts) == 2 && parts[0] == "input" && parts[1] == data.ComponentID {
-				totalInputMessages += componentMessages
+				totalInputMessages += hourlyRate
 			}
 		case "output":
 			// Only count output if this ProjectNodeSequence represents the final output component
 			if len(parts) >= 2 && parts[len(parts)-2] == "output" && parts[len(parts)-1] == data.ComponentID {
-				totalOutputMessages += componentMessages
+				totalOutputMessages += hourlyRate
 			}
 		case "ruleset":
-			// Now count ruleset processing - this shows actual processing volume
-			totalRulesetMessages += componentMessages
+			// Now count ruleset processing - this shows hourly processing rate
+			totalRulesetMessages += hourlyRate
 		}
 	}
 
 	return map[string]interface{}{
-		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages, // All real messages
-		"total_input_messages":   totalInputMessages,                                              // Real input messages
-		"total_output_messages":  totalOutputMessages,                                             // Real output messages
-		"total_ruleset_messages": totalRulesetMessages,                                            // Real ruleset processed messages
-		"project_breakdown":      projectStats,                                                    // Includes all component real stats
+		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages, // All hourly messages
+		"total_input_messages":   totalInputMessages,                                              // Hourly input messages
+		"total_output_messages":  totalOutputMessages,                                             // Hourly output messages
+		"total_ruleset_messages": totalRulesetMessages,                                            // Hourly ruleset processed messages
+		"project_breakdown":      projectStats,                                                    // Includes all component hourly rates
 	}
 }
 
@@ -537,18 +549,30 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> totalMessages
+	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> hourlyRate
 
 	for _, data := range qm.data {
 		if _, exists := nodeStats[data.NodeID]; !exists {
 			nodeStats[data.NodeID] = make(map[string]uint64)
 		}
 
-		// Use real current total messages
-		componentMessages := data.CurrentTotal
+		// Calculate hourly message rate based on recent data points
+		var hourlyRate uint64 = 0
+		if len(data.DataPoints) > 1 {
+			// Find the oldest and newest data points within the hour
+			oldestPoint := data.DataPoints[0]
+			newestPoint := data.DataPoints[len(data.DataPoints)-1]
 
-		// Count ALL component types for node statistics - shows real processing load
-		nodeStats[data.NodeID][data.ComponentType] += componentMessages
+			// Calculate time difference in hours
+			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
+			if timeDiff > 0 {
+				messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
+				hourlyRate = uint64(float64(messageDiff) / timeDiff)
+			}
+		}
+
+		// Count hourly rates for node statistics - shows actual message processing rate
+		nodeStats[data.NodeID][data.ComponentType] += hourlyRate
 	}
 
 	// Convert to final format
@@ -556,13 +580,13 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	for nodeID, stats := range nodeStats {
 		inputMessages := stats["input"]
 		outputMessages := stats["output"]
-		rulesetMessages := stats["ruleset"] // Real ruleset processing statistics
+		rulesetMessages := stats["ruleset"] // Hourly ruleset processing rate
 
 		result[nodeID] = map[string]interface{}{
 			"input_messages":   inputMessages,
 			"output_messages":  outputMessages,
-			"ruleset_messages": rulesetMessages,                                  // Real ruleset processing load
-			"total_messages":   inputMessages + outputMessages + rulesetMessages, // Total real messages processed
+			"ruleset_messages": rulesetMessages,                                  // Hourly ruleset processing rate
+			"total_messages":   inputMessages + outputMessages + rulesetMessages, // Total hourly message processing rate
 		}
 	}
 
