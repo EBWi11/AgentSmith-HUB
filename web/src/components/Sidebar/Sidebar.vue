@@ -477,71 +477,97 @@
         </div>
         
         <!-- Plugin Arguments -->
-        <div class="mb-4">
-          <h4 class="text-sm font-medium text-gray-700 mb-2">Arguments:</h4>
-          <div class="space-y-2">
-            <div v-for="(arg, index) in testPluginArgs" :key="index" class="flex items-center space-x-2">
+        <div class="mb-6">
+          <h3 class="text-lg font-medium text-gray-800 mb-4">Plugin Arguments</h3>
+          <div class="space-y-3">
+            <div v-for="(arg, index) in testPluginArgs" :key="index" class="flex items-center space-x-3">
               <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  Argument {{ index + 1 }}
+                </label>
                 <input 
                   v-model="arg.value" 
-                  :placeholder="`Argument ${index + 1} (string)`"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  :placeholder="`Enter argument ${index + 1} value...`"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
-                <div class="text-xs text-gray-500 mt-0.5">
-                  {{ getArgumentTypeHint(testPluginName, index) }}
+                <div class="text-xs text-gray-500 mt-1">
+                  String, number, or boolean value
                 </div>
               </div>
-              <button @click="removePluginArg(index)" class="p-1 rounded-full bg-red-50 text-red-500 hover:bg-red-100">
+              <button 
+                @click="removePluginArg(index)" 
+                class="btn btn-icon btn-danger-ghost"
+                :disabled="testPluginArgs.length === 1"
+              >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
               </button>
             </div>
           </div>
-          <button @click="addPluginArg" class="mt-2 flex items-center text-sm text-primary hover:text-primary-dark">
+          
+          <button @click="addPluginArg" class="btn btn-secondary-ghost btn-sm mt-3">
             <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
             </svg>
             Add Argument
           </button>
         </div>
-        
-        <!-- Test Button -->
-        <div class="mb-4">
-          <button 
-            @click="testPlugin" 
-            class="btn btn-test-plugin btn-md w-full"
-            :class="{ 'btn-loading': testPluginLoading }"
-            :disabled="testPluginLoading"
-          >
-            <span v-if="!testPluginLoading">Test Plugin</span>
-            <div v-else class="animate-spin rounded-full h-4 w-4 border-2 border-white"></div>
-          </button>
-        </div>
-        
+
         <!-- Test Results -->
-        <div v-if="testPluginResult !== null" class="mb-4">
-          <h4 class="text-sm font-medium text-gray-700 mb-2">Result:</h4>
-          <div class="p-3 rounded-md overflow-x-auto" :class="testPluginResult.success ? 'bg-green-50 border border-green-100' : 'bg-red-50 border border-red-100'">
-            <div v-if="testPluginError" class="text-red-600 text-sm mb-2 font-medium">
-              Error: {{ testPluginError }}
+        <div v-if="testPluginExecuted" class="mb-6">
+          <h3 class="text-lg font-medium text-gray-800 mb-4">Test Results</h3>
+          
+          <div v-if="testPluginLoading" class="flex items-center justify-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <span class="ml-3 text-gray-600">Running test...</span>
+          </div>
+          
+          <div v-else-if="testPluginError" class="bg-red-50 border-l-4 border-red-500 p-4 rounded-md">
+            <div class="text-red-700 font-medium mb-2">Error</div>
+            <pre class="text-red-600 text-sm whitespace-pre-wrap">{{ testPluginError }}</pre>
+          </div>
+          
+          <div v-else class="bg-gray-50 border border-gray-200 rounded-md p-4">
+            <div class="mb-3">
+              <div class="text-sm font-medium text-gray-700 mb-2">Status:</div>
+              <span :class="testPluginResult.success ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'" 
+                    class="px-2 py-1 rounded text-sm font-medium">
+                {{ testPluginResult.success ? 'Success' : 'Failed' }}
+              </span>
             </div>
-            <div class="text-sm">
-              <div v-if="testPluginResult.result !== null" class="mt-2">
-                <div class="font-medium text-gray-700">Result value:</div>
-                <div class="mt-1">
-                  <JsonViewer :value="testPluginResult.result" height="auto" />
-                </div>
+            
+            <div v-if="testPluginResult.result !== null && testPluginResult.result !== undefined">
+              <div class="text-sm font-medium text-gray-700 mb-2">Result:</div>
+              <div class="bg-white border border-gray-200 rounded overflow-hidden">
+                <JsonViewer :value="testPluginResult.result" height="200px" />
               </div>
-              <div v-else class="text-gray-500 italic">
-                No result value returned
-              </div>
+            </div>
+            
+            <div v-else class="text-gray-500 italic text-sm">
+              No result value returned
             </div>
           </div>
         </div>
         
-        <div class="flex justify-end mt-4">
-          <button @click="closeTestPluginModal" class="btn btn-secondary btn-md">Close</button>
+        <div v-else class="mb-6">
+          <div class="text-center py-8 text-gray-400">
+            Configure arguments and run test to see results
+          </div>
+        </div>
+        
+        <div class="flex justify-end space-x-3">
+          <button 
+            @click="testPlugin" 
+            class="btn btn-test-plugin btn-md"
+            :disabled="testPluginLoading"
+          >
+            <span v-if="testPluginLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
+            {{ testPluginLoading ? 'Running...' : 'Run Test' }}
+          </button>
+          <button @click="closeTestPluginModal" class="btn btn-secondary btn-md">
+            Close
+          </button>
         </div>
       </div>
     </div>
@@ -894,6 +920,7 @@ const testPluginArgs = ref([{ value: '' }])
 const testPluginLoading = ref(false)
 const testPluginResult = ref(null)
 const testPluginError = ref(null)
+const testPluginExecuted = ref(false)
 
 // Delete confirmation related reactive variables
 const showDeleteModal = ref(false)
@@ -1524,6 +1551,7 @@ function openTestPlugin(item) {
   testPluginArgs.value = [{ value: '' }]
   testPluginResult.value = null
   testPluginError.value = null
+  testPluginExecuted.value = false
   showTestPluginModal.value = true
   activeModal.value = 'testPlugin'
   
@@ -1588,11 +1616,12 @@ function removePluginArg(index) {
 
 // Test plugin
 async function testPlugin() {
+  testPluginLoading.value = true
+  testPluginError.value = null
+  testPluginResult.value = {}
+  testPluginExecuted.value = true
+  
   try {
-    testPluginLoading.value = true
-    testPluginResult.value = null
-    testPluginError.value = null
-    
     // Process parameter values, try to convert to appropriate types
     const args = testPluginArgs.value.map(arg => {
       const value = arg.value.trim()
