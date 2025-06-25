@@ -9,7 +9,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"reflect"
 	regexpgo "regexp"
 	"strings"
@@ -22,9 +21,6 @@ const (
 	LOCAL_PLUGIN = 0
 	YAEGI_PLUGIN = 1
 )
-
-// Directory where yaegi plugins are stored
-const PluginDir = "config/plugin"
 
 type Plugin struct {
 	Name    string
@@ -339,126 +335,192 @@ func (p *Plugin) formatTypeString(t reflect.Type) string {
 	}
 }
 
-func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) bool {
+func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 	var realArgs []reflect.Value
 
 	switch p.Type {
 	case 0: // local plugin
 		if f, ok := local_plugin.LocalPluginBoolRes[p.Name]; ok {
-			res, err := f(funcArgs...)
-			if err != nil {
-				logger.PluginError("local plugin returned error:", "plugin", p.Name, "error", err)
-			}
-			return res
+			// Execute with panic recovery
+			var result bool
+			var err error
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.PluginError("local plugin execution panicked", "plugin", p.Name, "panic", r)
+						result = false
+						err = fmt.Errorf("local plugin execution panicked: %v", r)
+					}
+				}()
+
+				result, err = f(funcArgs...)
+				if err != nil {
+					logger.PluginError("local plugin returned error:", "plugin", p.Name, "error", err)
+				}
+			}()
+
+			return result, err
 		} else {
+			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
-			return false
+			return false, err
 		}
 	case 1: // yaegi plugin
-		var res1 bool
-		var res2 error
-		var ok bool
-		var out []reflect.Value
+		// Execute with panic recovery
+		var result bool
+		var err error
 
-		for _, v := range funcArgs {
-			realArgs = append(realArgs, reflect.ValueOf(v))
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.PluginError("plugin execution panicked", "plugin", p.Name, "panic", r)
+					result = false
+					err = fmt.Errorf("plugin execution panicked: %v", r)
+				}
+			}()
 
-		if len(realArgs) == 0 {
-			out = p.f.Call(nil)
-		} else {
-			out = p.f.Call(realArgs)
-		}
+			var res1 bool
+			var res2 error
+			var ok bool
+			var out []reflect.Value
 
-		if len(out) != 2 {
-			logger.PluginError("plugin returned unexpected number of results", "name", p.Name, "len of out", len(out))
-			return false
-		}
+			for _, v := range funcArgs {
+				realArgs = append(realArgs, reflect.ValueOf(v))
+			}
 
-		if res1, ok = out[0].Interface().(bool); !ok {
-			logger.PluginError("plugin returned unexpected type", "plugin", p.Name, "type", reflect.TypeOf(res1))
-			return false
-		}
+			if len(realArgs) == 0 {
+				out = p.f.Call(nil)
+			} else {
+				out = p.f.Call(realArgs)
+			}
 
-		if res2, ok = out[1].Interface().(error); ok {
-			logger.PluginError("plugin returned error", "plugin", p.Name, "error", res2)
-		}
+			if len(out) != 2 {
+				err = fmt.Errorf("plugin returned unexpected number of results: %d", len(out))
+				logger.PluginError("plugin returned unexpected number of results", "name", p.Name, "len of out", len(out))
+				result = false
+				return
+			}
 
-		return res1
+			if res1, ok = out[0].Interface().(bool); !ok {
+				err = fmt.Errorf("plugin returned unexpected type: %v", reflect.TypeOf(out[0].Interface()))
+				logger.PluginError("plugin returned unexpected type", "plugin", p.Name, "type", reflect.TypeOf(out[0].Interface()))
+				result = false
+				return
+			}
+
+			if res2, ok = out[1].Interface().(error); ok && res2 != nil {
+				logger.PluginError("plugin returned error", "plugin", p.Name, "error", res2)
+				result = res1
+				err = res2
+				return
+			}
+
+			result = res1
+			err = nil
+		}()
+
+		return result, err
 	}
-	return false
+	return false, fmt.Errorf("unknown plugin type")
 }
 
-func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool) {
+func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, error) {
 	var realArgs []reflect.Value
 
 	switch p.Type {
 	case 0: // local plugin
 		if f, ok := local_plugin.LocalPluginInterfaceAndBoolRes[p.Name]; ok {
-			res1, res2, err := f(funcArgs...)
-			if err != nil {
-				logger.PluginError("local plugin %s returned error:", "plugin", p.Name, "error", err)
-				return nil, false
-			}
-			return res1, res2
+			// Execute with panic recovery
+			var result interface{}
+			var success bool
+			var err error
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.PluginError("local plugin execution panicked", "plugin", p.Name, "panic", r)
+						result = nil
+						success = false
+						err = fmt.Errorf("local plugin execution panicked: %v", r)
+					}
+				}()
+
+				result, success, err = f(funcArgs...)
+				if err != nil {
+					logger.PluginError("local plugin %s returned error:", "plugin", p.Name, "error", err)
+				}
+			}()
+
+			return result, success, err
 		} else {
+			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
-			return nil, false
+			return nil, false, err
 		}
 	case 1: // yaegi plugin
-		var out []reflect.Value
-		var res2 bool
-		var res3 error
-		var ok bool
+		// Execute with panic recovery
+		var result interface{}
+		var success bool
+		var err error
 
-		for _, v := range funcArgs {
-			realArgs = append(realArgs, reflect.ValueOf(v))
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.PluginError("plugin execution panicked", "plugin", p.Name, "panic", r)
+					result = nil
+					success = false
+					err = fmt.Errorf("plugin execution panicked: %v", r)
+				}
+			}()
 
-		if len(realArgs) == 0 {
-			out = p.f.Call(nil)
-		} else {
-			out = p.f.Call(realArgs)
-		}
+			var out []reflect.Value
+			var res2 bool
+			var res3 error
+			var ok bool
 
-		if len(out) != 3 {
-			logger.PluginError("plugin returned unexpected number of results", "plugin", p.Name, "len of out", len(out))
-		}
+			for _, v := range funcArgs {
+				realArgs = append(realArgs, reflect.ValueOf(v))
+			}
 
-		if res2, ok = out[1].Interface().(bool); !ok {
-			logger.PluginError("plugin returned unexpected type for first result", "plugin", p.Name, "type", reflect.TypeOf(out[2].Interface()))
-			return nil, false
-		}
+			if len(realArgs) == 0 {
+				out = p.f.Call(nil)
+			} else {
+				out = p.f.Call(realArgs)
+			}
 
-		if res3, ok = out[2].Interface().(error); ok {
-			logger.PluginError("plugin returned error", "name", p.Name, "error", res3)
-		}
+			if len(out) != 3 {
+				err = fmt.Errorf("plugin returned unexpected number of results: %d", len(out))
+				logger.PluginError("plugin returned unexpected number of results", "plugin", p.Name, "len of out", len(out))
+				result = nil
+				success = false
+				return
+			}
 
-		return out[0].Interface(), res2
+			if res2, ok = out[1].Interface().(bool); !ok {
+				err = fmt.Errorf("plugin returned unexpected type for second result: %v", reflect.TypeOf(out[1].Interface()))
+				logger.PluginError("plugin returned unexpected type for second result", "plugin", p.Name, "type", reflect.TypeOf(out[1].Interface()))
+				result = nil
+				success = false
+				return
+			}
+
+			if res3, ok = out[2].Interface().(error); ok && res3 != nil {
+				logger.PluginError("plugin returned error", "name", p.Name, "error", res3)
+				result = out[0].Interface()
+				success = res2
+				err = res3
+				return
+			}
+
+			result = out[0].Interface()
+			success = res2
+			err = nil
+		}()
+
+		return result, success, err
 	}
-	return nil, false
-}
-
-// LoadPlugin loads a yaegi plugin from the given path
-func LoadPlugin(path string) (*Plugin, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	name := filepath.Base(path)
-	if len(name) > 3 && name[len(name)-3:] == ".go" {
-		name = name[:len(name)-3]
-	}
-	p := &Plugin{
-		Name:    name,
-		Path:    path,
-		Payload: content,
-		Type:    YAEGI_PLUGIN,
-	}
-	if err := p.yaegiLoad(); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return nil, false, fmt.Errorf("unknown plugin type")
 }
 
 // YaegiLoad is a public wrapper for yaegiLoad to allow external access

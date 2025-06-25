@@ -489,8 +489,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				} else {
 					// Plugin
 					args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
-					res, ok := tmpAppend.Plugin.FuncEvalOther(args...)
-					if ok {
+					res, ok, err := tmpAppend.Plugin.FuncEvalOther(args...)
+					if err == nil && ok {
 						dataCopy[tmpAppend.FieldName] = res
 					}
 				}
@@ -501,8 +501,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				p := rule.Plugins[i]
 				args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
-				res, ok := p.Plugin.FuncEvalOther(args...)
-				if ok {
+				res, ok, err := p.Plugin.FuncEvalOther(args...)
+				if err == nil && ok {
 					if dataCopy, ok = res.(map[string]interface{}); !ok {
 						logger.PluginError("Plugin execution error: expected map[string]interface{}, got", fmt.Sprintf("%T", res), "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
 					}
@@ -543,7 +543,11 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		}
 	case "PLUGIN":
 		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
-		return checkNode.Plugin.FuncEvalCheckNode(args...)
+		result, err := checkNode.Plugin.FuncEvalCheckNode(args...)
+		if err != nil {
+			return false
+		}
+		return result
 
 	default:
 		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)

@@ -241,6 +241,12 @@ func (in *Input) Start() error {
 						in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
 					}
 
+					// Add input ID to message data
+					if msg == nil {
+						msg = make(map[string]interface{})
+					}
+					msg["_hub_input"] = in.Id
+
 					// Forward to downstream
 					for _, ch := range in.DownStream {
 						*ch <- msg
@@ -305,6 +311,12 @@ func (in *Input) Start() error {
 					if in.sampler != nil {
 						in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
 					}
+
+					// Add input ID to message data
+					if msg == nil {
+						msg = make(map[string]interface{})
+					}
+					msg["_hub_input"] = in.Id
 
 					// Forward to downstream
 					for _, ch := range in.DownStream {

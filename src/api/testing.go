@@ -9,7 +9,6 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -119,19 +118,17 @@ func testPlugin(c echo.Context) error {
 		isTemporary = true
 	}
 
-	// Convert input data to string parameter
-	// Plugins typically accept JSON string as input
-	jsonData, err := json.Marshal(req.Data)
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to serialize input data: " + err.Error(),
-			"result":  nil,
-		})
+	// Process parameter values, try to convert to appropriate types
+	args := make([]interface{}, 0)
+	for _, value := range req.Data {
+		// Convert to appropriate types
+		if str, ok := value.(string); ok {
+			args = append(args, str)
+		} else {
+			// Convert other types to string
+			args = append(args, fmt.Sprintf("%v", value))
+		}
 	}
-
-	// Create parameter array, only passing one JSON string parameter
-	args := []interface{}{string(jsonData)}
 
 	// Determine plugin type and execute
 	var result interface{}
@@ -168,15 +165,6 @@ func testPlugin(c echo.Context) error {
 		}
 	case plugin.YAEGI_PLUGIN:
 		// For Yaegi plugins, we need to determine the return type
-		// We need to catch panics that might occur during plugin execution
-		defer func() {
-			if r := recover(); r != nil {
-				success = false
-				errMsg = fmt.Sprintf("Plugin execution panicked: %v", r)
-				result = nil
-			}
-		}()
-
 		if isTemporary {
 			// For temporary plugins, we need to load them first since they're not in the global registry
 			err := pluginToTest.YaegiLoad()
@@ -189,12 +177,15 @@ func testPlugin(c echo.Context) error {
 			}
 		}
 
-		// Execute plugin
-		boolResult := pluginToTest.FuncEvalCheckNode(args...)
+		// Execute plugin (panic is already handled inside plugin functions)
+		boolResult, err := pluginToTest.FuncEvalCheckNode(args...)
 		result = boolResult
-		success = true
-
-		// Note: For Yaegi plugins, errors are logged but not returned
+		if err != nil {
+			success = false
+			errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+		} else {
+			success = true
+		}
 	default:
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"success": false,
@@ -1186,36 +1177,32 @@ func testPluginContent(c echo.Context) error {
 		})
 	}
 
-	// Convert input data to JSON string (plugins expect JSON string parameter)
-	jsonData, err := json.Marshal(req.Data)
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to serialize input data: " + err.Error(),
-			"result":  nil,
-		})
+	// Process parameter values, try to convert to appropriate types
+	args := make([]interface{}, 0)
+	for _, value := range req.Data {
+		// Convert to appropriate types
+		if str, ok := value.(string); ok {
+			args = append(args, str)
+		} else {
+			// Convert other types to string
+			args = append(args, fmt.Sprintf("%v", value))
+		}
 	}
 
-	// Create parameter array
-	args := []interface{}{string(jsonData)}
-
-	// Execute plugin with panic recovery
+	// Execute plugin (panic is already handled inside plugin functions)
 	var result interface{}
 	var success bool
 	var errMsg string
 
-	defer func() {
-		if r := recover(); r != nil {
-			success = false
-			errMsg = fmt.Sprintf("Plugin execution panicked: %v", r)
-			result = nil
-		}
-	}()
-
 	// Execute plugin
-	boolResult := tempPlugin.FuncEvalCheckNode(args...)
+	boolResult, err := tempPlugin.FuncEvalCheckNode(args...)
 	result = boolResult
-	success = true
+	if err != nil {
+		success = false
+		errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+	} else {
+		success = true
+	}
 
 	// Return the result
 	if errMsg != "" {
