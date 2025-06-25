@@ -1365,19 +1365,26 @@ function parseYamlContext(fullText, lineText, position) {
   if (colonIndex !== -1) {
     const afterColon = beforeCursor.substring(colonIndex + 1);
     // 检查冒号后是否有内容（空格或实际值都算在值位置）
-    if (afterColon.length === 0 || afterColon.match(/^\s/)) {
+    if (afterColon.length === 0 || afterColon.match(/^\s*$/)) {
+      // 冒号后没有内容或只有空格，明确在值位置
       context.isInValue = true;
       // 提取键名
       const beforeColon = beforeCursor.substring(0, colonIndex).trim();
       context.currentKey = beforeColon.split(/\s+/).pop() || '';
       // 提取当前值（用于过滤）
       context.currentValue = afterColon.trim();
-    } else {
-      // 冒号后有非空格内容，仍然认为在值位置
+    } else if (afterColon.match(/^\s+/)) {
+      // 冒号后有空格开头，用户正在输入值
       context.isInValue = true;
       const beforeColon = beforeCursor.substring(0, colonIndex).trim();
       context.currentKey = beforeColon.split(/\s+/).pop() || '';
       context.currentValue = afterColon.trim();
+    } else {
+      // 冒号后有非空格内容，用户正在编辑值
+      context.isInValue = true;
+      const beforeColon = beforeCursor.substring(0, colonIndex).trim();
+      context.currentKey = beforeColon.split(/\s+/).pop() || '';
+      context.currentValue = afterColon;
     }
   } else {
     // 在键位置
@@ -1432,17 +1439,26 @@ function getInputValueCompletions(context, range, fullText) {
     // 获取当前已输入的部分，用于过滤
     const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
-    availableInputTypes.forEach(type => {
+    availableInputTypes.forEach((type, index) => {
       // 如果没有输入或者当前类型包含输入的文本
       if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
         if (!suggestions.some(s => s.label === type.value)) {
+          // 计算排序权重：完全匹配 > 前缀匹配 > 包含匹配
+          let sortWeight = '2'; // 默认包含匹配
+          if (currentValue && type.value.toLowerCase() === currentValue) {
+            sortWeight = '0'; // 完全匹配
+          } else if (currentValue && type.value.toLowerCase().startsWith(currentValue)) {
+            sortWeight = '1'; // 前缀匹配
+          }
+          
           suggestions.push({
             label: type.value,
             kind: monaco.languages.CompletionItemKind.EnumMember,
             documentation: type.description,
             insertText: type.value,
             range: range,
-            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+            sortText: `${sortWeight}_${String(index).padStart(2, '0')}_${type.value}`,
+            detail: `Input Type: ${type.value}` // 添加详细信息以便区分
           });
         }
       }
@@ -1537,8 +1553,7 @@ function getInputValueCompletions(context, range, fullText) {
       label: 'region.log.aliyuncs.com',
       kind: monaco.languages.CompletionItemKind.Snippet,
       documentation: 'Aliyun SLS endpoint format',
-      insertText: '${1:cn-beijing}.log.aliyuncs.com',
-      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      insertText: 'cn-beijing.log.aliyuncs.com',
       range: range
     });
   }
@@ -1549,8 +1564,7 @@ function getInputValueCompletions(context, range, fullText) {
       label: 'broker-address:port',
       kind: monaco.languages.CompletionItemKind.Snippet,
       documentation: 'Kafka broker address format',
-      insertText: '${1:broker-host}:${2:9092}',
-      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      insertText: 'localhost:9092',
       range: range
     });
   }
@@ -1568,14 +1582,15 @@ function getInputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Input source type',
-        insertText: 'type: ${1|kafka,aliyun_sls|}',
+        documentation: 'Input source type - choose from: kafka, aliyun_sls',
+        insertText: 'type: kafka',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        range: range,
+        sortText: '000_type' // Ensure type property is displayed with priority
       });
     }
     
-    // 根据type提供相应的配置段
+    // Provide corresponding configuration sections based on type
     const typeMatch = fullText.match(/type:\s*(kafka|aliyun_sls)/);
     if (typeMatch) {
       const inputType = typeMatch[1];
@@ -1791,17 +1806,26 @@ function getOutputValueCompletions(context, range, fullText) {
     // 获取当前已输入的部分，用于过滤
     const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
-    availableOutputTypes.forEach(type => {
+    availableOutputTypes.forEach((type, index) => {
       // 如果没有输入或者当前类型包含输入的文本
       if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
         if (!suggestions.some(s => s.label === type.value)) {
+          // 计算排序权重：完全匹配 > 前缀匹配 > 包含匹配
+          let sortWeight = '2'; // 默认包含匹配
+          if (currentValue && type.value.toLowerCase() === currentValue) {
+            sortWeight = '0'; // 完全匹配
+          } else if (currentValue && type.value.toLowerCase().startsWith(currentValue)) {
+            sortWeight = '1'; // 前缀匹配
+          }
+          
           suggestions.push({
             label: type.value,
             kind: monaco.languages.CompletionItemKind.EnumMember,
             documentation: type.description,
             insertText: type.value,
             range: range,
-            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+            sortText: `${sortWeight}_${String(index).padStart(2, '0')}_${type.value}`,
+            detail: `Output Type: ${type.value}` // 添加详细信息以便区分
           });
         }
       }
@@ -1837,8 +1861,7 @@ function getOutputValueCompletions(context, range, fullText) {
       label: 'region.log.aliyuncs.com',
       kind: monaco.languages.CompletionItemKind.Snippet,
       documentation: 'Aliyun SLS endpoint format',
-      insertText: '${1:cn-beijing}.log.aliyuncs.com',
-      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      insertText: 'cn-beijing.log.aliyuncs.com',
       range: range
     });
   }
@@ -1859,8 +1882,7 @@ function getOutputValueCompletions(context, range, fullText) {
         label: 'http://host:port',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Elasticsearch host URL format',
-        insertText: '${1|http,https|}://${2:elasticsearch-host}:${3:9200}',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'http://localhost:9200',
         range: range
       });
     }
@@ -1911,10 +1933,11 @@ function getOutputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Output destination type',
-        insertText: 'type: ${1|kafka,elasticsearch,aliyun_sls,print|}',
+        documentation: 'Output destination type - choose from: kafka, elasticsearch, aliyun_sls, print',
+        insertText: 'type: kafka',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        range: range,
+        sortText: '000_type' // Ensure type property is displayed with priority
       });
     }
     
@@ -1923,7 +1946,7 @@ function getOutputKeyCompletions(context, range, fullText) {
         label: 'name',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Output component name',
-        insertText: 'name: "${1:output-name}"',
+        insertText: 'name: "output-name"',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -1950,7 +1973,14 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: 'elasticsearch',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Elasticsearch output configuration section',
-          insertText: 'elasticsearch:\n  ${1}',
+          insertText: [
+            'elasticsearch:',
+            '  hosts:',
+            '    - "http://localhost:9200"',
+            '  index: "index-name"',
+            '  batch_size: 1000',
+            '  flush_dur: "5s"'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1961,7 +1991,14 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: 'aliyun_sls',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Aliyun SLS output configuration section',
-          insertText: 'aliyun_sls:\n  ${1}',
+          insertText: [
+            'aliyun_sls:',
+            '  endpoint: "cn-beijing.log.aliyuncs.com"',
+            '  access_key_id: "YOUR_ACCESS_KEY_ID"',
+            '  access_key_secret: "YOUR_ACCESS_KEY_SECRET"',
+            '  project: "project-name"',
+            '  logstore: "logstore-name"'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -2051,12 +2088,12 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Kafka output configuration',
         insertText: [
           'type: kafka',
-          'name: "${1:kafka-output}"',
+          'name: "kafka-output"',
           'kafka:',
           '  brokers:',
-          '    - "${2:broker-host}:${3:9092}"',
-          '  topic: "${4:topic-name}"',
-          '  compression: "${5|none,gzip,snappy,lz4,zstd|}"'
+          '    - "localhost:9092"',
+          '  topic: "topic-name"',
+          '  compression: "none"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -2067,13 +2104,13 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Elasticsearch output configuration',
         insertText: [
           'type: elasticsearch',
-          'name: "${1:es-output}"',
+          'name: "es-output"',
           'elasticsearch:',
           '  hosts:',
-          '    - ""',
-          '  index: ""',
-          '  batch_size: ',
-          '  flush_dur: ""'
+          '    - "http://localhost:9200"',
+          '  index: "index-name"',
+          '  batch_size: 1000',
+          '  flush_dur: "5s"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -2084,13 +2121,13 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Aliyun SLS output configuration',
         insertText: [
           'type: aliyun_sls',
-          'name: ""',
+          'name: "sls-output"',
           'aliyun_sls:',
-          '  endpoint: ""',
-          '  access_key_id: ""',
-          '  access_key_secret: ""',
-          '  project: ""',
-          '  logstore: ""'
+          '  endpoint: "cn-beijing.log.aliyuncs.com"',
+          '  access_key_id: "YOUR_ACCESS_KEY_ID"',
+          '  access_key_secret: "YOUR_ACCESS_KEY_SECRET"',
+          '  project: "project-name"',
+          '  logstore: "logstore-name"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -2122,7 +2159,7 @@ function getProjectCompletions(fullText, lineText, range, position) {
       documentation: 'Project data flow definition',
       insertText: [
         'content: |',
-        '  INPUT.${1:input-name} -> ${2|RULESET,OUTPUT|}.${3:component-name}'
+        '  INPUT.input-name -> OUTPUT.output-name'
       ].join('\n'),
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
       range: range
@@ -3566,17 +3603,26 @@ function getBaseYamlValueCompletions(context, range, fullText) {
     // 获取当前已输入的部分，用于过滤
     const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
     
-    availableTypes.forEach(type => {
+    availableTypes.forEach((type, index) => {
       // 如果没有输入或者当前类型包含输入的文本
       if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
         if (!suggestions.some(s => s.label === type.value)) {
+          // 计算排序权重：完全匹配 > 前缀匹配 > 包含匹配
+          let sortWeight = '2'; // 默认包含匹配
+          if (currentValue && type.value.toLowerCase() === currentValue) {
+            sortWeight = '0'; // 完全匹配
+          } else if (currentValue && type.value.toLowerCase().startsWith(currentValue)) {
+            sortWeight = '1'; // 前缀匹配
+          }
+          
           suggestions.push({
             label: type.value,
             kind: monaco.languages.CompletionItemKind.EnumMember,
             documentation: type.description,
             insertText: type.value,
             range: range,
-            sortText: type.value.toLowerCase().startsWith(currentValue) ? `0_${type.value}` : `1_${type.value}` // 前缀匹配优先
+            sortText: `${sortWeight}_${String(index).padStart(2, '0')}_${type.value}`,
+            detail: `Component Type: ${type.value}` // 添加详细信息以便区分
           });
         }
       }
@@ -3596,10 +3642,11 @@ function getBaseYamlKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Component type specification',
-        insertText: 'type:',
+        documentation: 'Component type specification - available types will be suggested after ":"',
+        insertText: 'type: ',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        range: range,
+        sortText: '000_type' // Ensure type property is displayed with priority
       });
     }
     
@@ -3630,8 +3677,8 @@ function getDefaultBaseYamlCompletions(fullText, context, range) {
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Basic component configuration template',
         insertText: [
-          'type: ${1|kafka,aliyun_sls,elasticsearch,print|}',
-          'name: "${2:component-name}"'
+          'type: kafka',
+          'name: "component-name"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range

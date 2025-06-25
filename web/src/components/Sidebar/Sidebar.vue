@@ -1484,6 +1484,22 @@ async function checkConnection(type, item) {
     const id = item.id || item.name
     const result = await hubApi.connectCheck(type, id)
     connectionResult.value = result
+    
+    // Handle error response format
+    if (result && result.status === 'error') {
+      // Try to get detailed error information
+      let errorMessage = result.message || 'Connection check failed';
+      
+      // Check if detailed connection error information is available
+      if (result.details && result.details.connection_errors && result.details.connection_errors.length > 0) {
+        const detailError = result.details.connection_errors[0].message;
+        if (detailError && detailError !== errorMessage) {
+          errorMessage = `${errorMessage}: ${detailError}`;
+        }
+      }
+      
+      connectionError.value = errorMessage;
+    }
   } catch (error) {
     connectionError.value = error.message || 'Failed to check connection'
   } finally {

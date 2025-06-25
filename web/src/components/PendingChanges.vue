@@ -438,11 +438,11 @@ async function applyChanges() {
 }
 
 async function applySingleChange(change) {
-  // 如果验证失败，不允许应用
-  if (change.verifyStatus === 'error') {
-    $message?.error?.('Cannot apply invalid change. Please fix the errors first.')
-    return
-  }
+      // If verification failed, do not allow application
+    if (change.verifyStatus === 'error') {
+      $message?.error?.('Cannot apply invalid change. Please fix the errors first.')
+      return
+    }
   
   applying.value = true
   
@@ -473,7 +473,7 @@ async function applySingleChange(change) {
 
     // Handle verification failure cases
     if (e.isVerificationError) {
-      $message?.error?.(`验证失败，无法应用更改: ${e.message}`, { timeout: 5000 });
+      $message?.error?.(`Verification failed, unable to apply change: ${e.message}`, { timeout: 5000 });
     } else {
       $message?.error?.('Failed to apply change: ' + (e?.message || 'Unknown error'))
     }

@@ -849,21 +849,44 @@ async function connectCheck() {
     // Step 2: Perform connection check with the verified configuration
     const response = await hubApi.connectCheckWithConfig(componentType, props.item.id, contentToTest);
     
+    // Helper function to format message with edit suffix
+    const formatMessage = (message) => {
+      // If not in edit mode, return original message
+      if (!props.item?.isEdit) {
+        return message;
+      }
+      
+      // If message already contains test-related suffix, don't add duplicate
+      if (message.includes('(tested with') || message.includes('(using current')) {
+        return message;
+      }
+      
+      return `${message} (tested with current editor content)`;
+    };
+
     if (response.status === 'success') {
       const message = response.message || `${componentName} connection check passed`;
-      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
-      $message?.success?.(finalMessage);
+      $message?.success?.(formatMessage(message));
     } else if (response.status === 'warning') {
       const message = response.message || `${componentName} connection check has warnings`;
-      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
-      $message?.warning?.(finalMessage);
+      $message?.warning?.(formatMessage(message));
     } else {
-      const message = response.message || `${componentName} connection check failed`;
-      const finalMessage = props.item?.isEdit ? `${message} (tested with current editor content)` : message;
-      $message?.error?.(finalMessage);
+      // Try to get detailed error information
+      let message = response.message || `${componentName} connection check failed`;
+      
+      // Check if detailed connection error information is available
+      if (response.details && response.details.connection_errors && response.details.connection_errors.length > 0) {
+        const detailError = response.details.connection_errors[0].message;
+        if (detailError && detailError !== message) {
+          message = `${message}: ${detailError}`;
+        }
+      }
+      
+      $message?.error?.(formatMessage(message));
     }
   } catch (error) {
-    const errorMessage = error.response?.data?.error || error.message || 'Connection check error';
+    // 网络请求异常或其他JavaScript错误
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Connection check error';
     $message?.error?.('Connection check error: ' + errorMessage);
   } finally {
     connectCheckLoading.value = false;

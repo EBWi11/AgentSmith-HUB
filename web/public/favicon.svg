@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="faviconTriangleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe"/>
+      <stop offset="50%" style="stop-color:#00b4db"/>
+      <stop offset="100%" style="stop-color:#0083b0"/>
+    </linearGradient>
+    <filter id="faviconShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  
+  <!-- 主三角形 -->
+  <path d="M32 8 L52 48 L12 48 Z" 
+        fill="url(#faviconTriangleGrad)" 
+        filter="url(#faviconShadow)"/>
+  
+  <!-- 智能指示器 -->
+  <g fill="#ffffff" opacity="0.9">
+    <circle cx="32" cy="36" r="3"/>
+    <circle cx="26" cy="40" r="2"/>
+    <circle cx="38" cy="40" r="2"/>
+  </g>
+  
+  <!-- 连接线 -->
+  <g stroke="#ffffff" stroke-width="1.5" opacity="0.6" fill="none">
+    <line x1="32" y1="36" x2="26" y2="40"/>
+    <line x1="32" y1="36" x2="38" y2="40"/>
+  </g>
+  
+  <!-- 顶部智能指示 -->
+  <circle cx="32" cy="20" r="1.5" fill="#ffffff" opacity="0.8"/>
+</svg> 
