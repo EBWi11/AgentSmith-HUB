@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Configuration
-CONFIG_ROOT="/opt/config"
+CONFIG_ROOT="/opt/hub_config"
 BINARY_NAME="agentsmith-hub"
 BUILD_DIR="build"
 DIST_DIR="dist"
@@ -218,7 +218,7 @@ while [[ $# -gt 0 ]]; do
             echo "  3. ./$BINARY_NAME (current directory)"
             echo ""
             echo "Configuration directory search order:"
-            echo "  1. /opt/config (preferred system location)"
+            echo "  1. /opt/hub_config (preferred system location)"
             echo "  2. <binary_dir>/config (relative to binary)"
             echo "  3. ./config (current directory)"
             echo ""
