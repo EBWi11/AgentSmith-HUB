@@ -22,6 +22,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/labstack/echo/v4"
+	"gopkg.in/yaml.v2"
 )
 
 // Constants for file extensions
@@ -361,6 +362,19 @@ func getInputs(c echo.Context) error {
 	return c.JSON(http.StatusOK, inputs)
 }
 
+// parseOutputType extracts the type field from output YAML configuration
+func parseOutputType(rawConfig string) string {
+	var config struct {
+		Type string `yaml:"type"`
+	}
+
+	if err := yaml.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return ""
+	}
+
+	return config.Type
+}
+
 func getInput(c echo.Context) error {
 	id := c.Param("id")
 	in_raw, ok := project.GlobalProject.InputsNew[id]
@@ -555,16 +569,26 @@ func getOutputs(c echo.Context) error {
 		outputs = append(outputs, map[string]interface{}{
 			"id":      out.Id,
 			"hasTemp": hasTemp,
+			"type":    string(out.Type), // Include output type
 		})
 		processedIDs[out.Id] = true
 	}
 
 	// Add components that only exist in temporary files
-	for id := range p.OutputsNew {
+	for id, rawConfig := range p.OutputsNew {
 		if !processedIDs[id] {
+			// Parse the temporary file to get type information
+			outputType := "unknown"
+			if rawConfig != "" {
+				if parsedType := parseOutputType(rawConfig); parsedType != "" {
+					outputType = parsedType
+				}
+			}
+
 			outputs = append(outputs, map[string]interface{}{
 				"id":      id,
 				"hasTemp": true,
+				"type":    outputType,
 			})
 		}
 	}
@@ -576,10 +600,13 @@ func getOutput(c echo.Context) error {
 	out_raw, ok := project.GlobalProject.OutputsNew[id]
 	if ok {
 		tempPath, _ := GetComponentPath("output", id, true)
+		// Parse type from temporary file content
+		outputType := parseOutputType(out_raw)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"id":   id,
 			"raw":  out_raw,
 			"path": tempPath,
+			"type": outputType,
 		})
 	}
 
@@ -591,6 +618,7 @@ func getOutput(c echo.Context) error {
 			"id":   out.Id,
 			"raw":  out.Config.RawConfig,
 			"path": formalPath,
+			"type": string(out.Type), // Include output type
 		})
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})

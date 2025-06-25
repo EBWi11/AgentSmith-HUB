@@ -375,14 +375,9 @@ function getNodeSystemMetrics(nodeId) {
     goroutine_count: 0
   }
   
-  // Debug logging
-  console.log('Getting system metrics for node:', nodeId)
-  console.log('Available systemData:', systemData.value)
-  
   // Get system metrics from cluster system metrics API
   if (systemData.value && systemData.value[nodeId]) {
     const nodeSystemMetrics = systemData.value[nodeId]
-    console.log('Found system metrics for node:', nodeId, nodeSystemMetrics)
     return {
       cpu_percent: nodeSystemMetrics.cpu_percent || 0,
       memory_percent: nodeSystemMetrics.memory_percent || 0,
@@ -391,7 +386,6 @@ function getNodeSystemMetrics(nodeId) {
     }
   }
   
-  console.log('No system metrics found for node:', nodeId, 'using defaults')
   return defaultMetrics
 }
 

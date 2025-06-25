@@ -557,21 +557,18 @@ const supportsConnectCheck = computed(() => {
   if (isInput.value) {
     return true // All input types support connect check
   }
-  if (isOutput.value && detail.value?.raw) {
-    // Parse output config to check if it's print type
-    try {
-      const yamlContent = detail.value.raw
-      // More comprehensive check for print type in YAML
-      if (yamlContent.includes('type: print') || 
-          yamlContent.includes('type: "print"') || 
-          yamlContent.includes("type: 'print'") ||
-          yamlContent.includes('type:print')) {
+  if (isOutput.value && detail.value) {
+    // Use the type information returned by backend API
+    if (detail.value.type) {
+      const outputType = detail.value.type.toLowerCase()
+      if (outputType === 'print') {
         return false // Print output doesn't need connect check
       }
-      return true // Other output types support connect check
-    } catch (e) {
-      return true // Default to supporting connect check if parse fails
+      // For other types (kafka, elasticsearch, aliyun_sls), support connect check
+      return true
     }
+    // Fallback: if no type info, don't support connect check (safer)
+    return false
   }
   return false
 })

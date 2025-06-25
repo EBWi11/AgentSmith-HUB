@@ -108,7 +108,6 @@ onMounted(async () => {
       .map(plugin => getPluginParameters(plugin.id));
     
     await Promise.allSettled(parameterPromises);
-    console.log(`✅ Preloaded parameters for ${Object.keys(pluginParametersCache.value).length} plugins`);
   } catch (error) {
     console.warn('Some plugin parameters could not be preloaded:', error);
   }

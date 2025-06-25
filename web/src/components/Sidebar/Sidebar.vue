@@ -1984,33 +1984,28 @@ async function fetchSampleData(componentType, id) {
 }
 
 function shouldShowConnectCheck(type, item) {
-  // 对于inputs，总是显示Connect Check
+  // For inputs, always show Connect Check
   if (type === 'inputs') {
     return true;
   }
   
-  // 对于outputs，需要检查是否为print类型
+  // For outputs, check if it's NOT a print type
   if (type === 'outputs') {
-    // 检查item的raw配置中是否包含type: print
-    if (item && item.raw) {
-      try {
-        const yamlContent = item.raw;
-        // 更全面的字符串检查，包括带引号的情况
-        if (yamlContent.includes('type: print') || 
-            yamlContent.includes('type: "print"') || 
-            yamlContent.includes("type: 'print'") ||
-            yamlContent.includes('type:print')) {
-          return false; // print类型不显示Connect Check
-        }
-      } catch (error) {
-        // 如果检查出错，默认显示
-        console.warn('Error checking output type:', error);
+    // Use the type information returned by backend API
+    if (item && item.type) {
+      const outputType = item.type.toLowerCase();
+      if (outputType === 'print') {
+        return false; // Print type does NOT show Connect Check
       }
+      // For other types (kafka, elasticsearch, aliyun_sls), show Connect Check
+      return true;
     }
-    return true;
+    
+    // Fallback: if no type info, don't show Connect Check (safer)
+    return false;
   }
   
-  // 其他类型不显示Connect Check
+  // Other types do NOT show Connect Check
   return false;
 }
 </script>

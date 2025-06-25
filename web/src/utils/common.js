@@ -15,7 +15,7 @@ export const COMPONENT_TYPES = {
     label: 'Output', 
     icon: '📤',
     language: 'yaml',
-    supportsConnectCheck: true
+    supportsConnectCheck: false  // Let individual components decide based on type
   },
   rulesets: {
     label: 'Ruleset',
