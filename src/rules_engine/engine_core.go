@@ -491,6 +491,15 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 					args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
 					res, ok, err := tmpAppend.Plugin.FuncEvalOther(args...)
 					if err == nil && ok {
+						if tmpAppend.FieldName == PluginArgFromRawSymbol {
+							if r, ok := res.(map[string]interface{}); ok {
+								res = common.MapDeepCopy(r)
+							} else {
+								logger.Error("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
+								res = nil
+							}
+						}
+
 						dataCopy[tmpAppend.FieldName] = res
 					}
 				}
@@ -501,11 +510,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				p := rule.Plugins[i]
 				args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
-				res, ok, err := p.Plugin.FuncEvalOther(args...)
-				if err == nil && ok {
-					if dataCopy, ok = res.(map[string]interface{}); !ok {
-						logger.PluginError("Plugin execution error: expected map[string]interface{}, got", fmt.Sprintf("%T", res), "Plugin:", p.Plugin.Name, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
-					}
+				ok, err := p.Plugin.FuncEvalCheckNode(args...)
+				if err != nil {
+					logger.Error("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
+				}
+
+				if !ok {
+					logger.Info("Plugin check failed", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
 				}
 			}
 
