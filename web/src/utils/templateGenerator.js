@@ -55,10 +55,36 @@ config:
 export function generateOutputTemplate(id) {
   return `name: ${id}
 type: kafka
-config:
+kafka:
   brokers:
-    - localhost:9092
-  topic: output-topic`;
+    - "localhost:9092"
+  topic: "output-topic"
+  compression: "none"
+  # Uncomment below for SASL authentication
+  # sasl:
+  #   enable: true
+  #   mechanism: "plain"
+  #   username: "your_username"
+  #   password: "your_password"
+
+# Alternative Elasticsearch output example:
+# name: ${id}
+# type: elasticsearch
+# elasticsearch:
+#   hosts:
+#     - "https://localhost:9200"  # HTTPS supported, TLS cert verification skipped by default
+#   index: "${id}-index"
+#   batch_size: 1000
+#   flush_dur: "5s"
+#   # Uncomment below for authentication
+#   # auth:
+#   #   type: basic  # or api_key, bearer
+#   #   username: "elastic"
+#   #   password: "password"
+#   #   # For API key auth:
+#   #   # api_key: "your-api-key"
+#   #   # For bearer token auth:
+#   #   # token: "your-bearer-token"`;
 }
 
 /**
@@ -150,4 +176,4 @@ export function getDefaultTemplate(type, id, store) {
     default:
       return `# New ${type} component: ${id}\n`;
   }
-} 
+}

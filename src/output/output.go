@@ -46,10 +46,11 @@ type KafkaOutputConfig struct {
 
 // ElasticsearchOutputConfig holds Elasticsearch-specific config.
 type ElasticsearchOutputConfig struct {
-	Hosts     []string `yaml:"hosts"`
-	Index     string   `yaml:"index"`
-	BatchSize int      `yaml:"batch_size,omitempty"`
-	FlushDur  string   `yaml:"flush_dur,omitempty"`
+	Hosts     []string                        `yaml:"hosts"`
+	Index     string                          `yaml:"index"`
+	BatchSize int                             `yaml:"batch_size,omitempty"`
+	FlushDur  string                          `yaml:"flush_dur,omitempty"`
+	Auth      *common.ElasticsearchAuthConfig `yaml:"auth,omitempty"`
 }
 
 // AliyunSLSOutputConfig holds Aliyun SLS-specific config.
@@ -332,6 +333,7 @@ func (out *Output) Start() error {
 			msgChan,
 			batchSize,
 			flushDur,
+			out.elasticsearchCfg.Auth,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create elasticsearch producer for output %s: %v", out.Id, err)
@@ -897,7 +899,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
 		// Test actual connectivity to Elasticsearch cluster
-		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts)
+		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "error"
 			result["message"] = "Failed to connect to Elasticsearch cluster"
@@ -909,7 +911,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Test if index exists (this is optional for ES as indices can be auto-created)
-		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index)
+		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "warning"
 			result["message"] = "Connected to Elasticsearch but failed to verify index"
@@ -930,7 +932,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Get cluster info for additional details
-		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts)
+		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
 		if err == nil {
 			result["details"].(map[string]interface{})["cluster_info"] = clusterInfo
 		}

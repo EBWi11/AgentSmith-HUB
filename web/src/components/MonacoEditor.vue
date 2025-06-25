@@ -1394,6 +1394,10 @@ function parseYamlContext(fullText, lineText, position) {
   context.parentSections = getYamlSections(lines, currentLineIndex);
   if (context.parentSections.length > 0) {
     context.currentSection = context.parentSections[context.parentSections.length - 1];
+    // 添加父配置段信息，用于嵌套配置段的判断
+    if (context.parentSections.length > 1) {
+      context.parentSection = context.parentSections[context.parentSections.length - 2];
+    }
   }
   
   return context;
@@ -1918,6 +1922,40 @@ function getOutputValueCompletions(context, range, fullText) {
       }
     });
   }
+
+  // ES auth type属性值补全
+  else if (context.currentKey === 'type' && context.currentSection === 'auth') {
+    const authTypes = ['basic', 'api_key', 'bearer'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    authTypes.forEach(type => {
+      if (!currentValue || type.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === type)) {
+          let description = '';
+          switch (type) {
+            case 'basic':
+              description = 'Basic authentication with username/password';
+              break;
+            case 'api_key':
+              description = 'API key authentication';
+              break;
+            case 'bearer':
+              description = 'Bearer token authentication';
+              break;
+          }
+          
+          suggestions.push({
+            label: type,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: description,
+            insertText: type,
+            range: range,
+            sortText: type.toLowerCase().startsWith(currentValue) ? `0_${type}` : `1_${type}` // 前缀匹配优先
+          });
+        }
+      }
+    });
+  }
   
   return { suggestions };
 }
@@ -1971,14 +2009,18 @@ function getOutputKeyCompletions(context, range, fullText) {
         suggestions.push({
           label: 'elasticsearch',
           kind: monaco.languages.CompletionItemKind.Module,
-          documentation: 'Elasticsearch output configuration section',
+          documentation: 'Elasticsearch output configuration section with auth example',
           insertText: [
             'elasticsearch:',
             '  hosts:',
-            '    - "http://localhost:9200"',
+            '    - "https://localhost:9200"',
             '  index: "index-name"',
             '  batch_size: 1000',
-            '  flush_dur: "5s"'
+            '  flush_dur: "5s"',
+            '  # auth:',
+            '  #   type: basic',
+            '  #   username: "elastic"',
+            '  #   password: "password"'
           ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
@@ -2032,10 +2074,34 @@ function getOutputKeyCompletions(context, range, fullText) {
       { key: 'hosts', desc: 'Elasticsearch cluster hosts' },
       { key: 'index', desc: 'Elasticsearch index name' },
       { key: 'batch_size', desc: 'Batch size for bulk operations' },
-      { key: 'flush_dur', desc: 'Flush duration for batching' }
+      { key: 'flush_dur', desc: 'Flush duration for batching' },
+      { key: 'auth', desc: 'Authentication configuration (basic, api_key, bearer)' }
     ];
     
     esKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // ES Auth配置段内部
+  else if (context.currentSection === 'auth' && context.parentSection === 'elasticsearch') {
+    const authKeys = [
+      { key: 'type', desc: 'Authentication type: basic, api_key, bearer' },
+      { key: 'username', desc: 'Username for basic authentication' },
+      { key: 'password', desc: 'Password for basic authentication' },
+      { key: 'api_key', desc: 'API key for api_key authentication' },
+      { key: 'token', desc: 'Bearer token for bearer authentication' }
+    ];
+    
+    authKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
@@ -2100,7 +2166,7 @@ function getDefaultOutputCompletions(fullText, context, range) {
       {
         label: 'Elasticsearch Output Template',
         kind: monaco.languages.CompletionItemKind.Snippet,
-        documentation: 'Complete Elasticsearch output configuration',
+        documentation: 'Complete Elasticsearch output configuration with auth example',
         insertText: [
           'type: elasticsearch',
           'name: "es-output"',
@@ -2109,7 +2175,12 @@ function getDefaultOutputCompletions(fullText, context, range) {
           '    - "http://localhost:9200"',
           '  index: "index-name"',
           '  batch_size: 1000',
-          '  flush_dur: "5s"'
+          '  flush_dur: "5s"',
+          '  # Uncomment below for authentication',
+          '  # auth:',
+          '  #   type: basic  # or api_key, bearer',
+          '  #   username: "elastic"',
+          '  #   password: "password"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range

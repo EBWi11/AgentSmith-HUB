@@ -3,12 +3,23 @@ package common
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
 )
+
+// ElasticsearchAuthConfig represents authentication configuration for Elasticsearch
+type ElasticsearchAuthConfig struct {
+	Type     string `yaml:"type"`               // auth type: basic, api_key, bearer
+	Username string `yaml:"username,omitempty"` // for basic auth
+	Password string `yaml:"password,omitempty"` // for basic auth
+	APIKey   string `yaml:"api_key,omitempty"`  // for api_key auth
+	Token    string `yaml:"token,omitempty"`    // for bearer token auth
+}
 
 // ElasticsearchProducer wraps the Elasticsearch client with a channel-based interface
 type ElasticsearchProducer struct {
@@ -22,11 +33,37 @@ type ElasticsearchProducer struct {
 }
 
 // NewElasticsearchProducer creates a new Elasticsearch producer
-func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[string]interface{}, batchSize int, flushDur time.Duration) (*ElasticsearchProducer, error) {
+func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[string]interface{}, batchSize int, flushDur time.Duration, auth *ElasticsearchAuthConfig) (*ElasticsearchProducer, error) {
 	cfg := elasticsearch.Config{
 		Addresses:     hosts,
 		MaxRetries:    3,
 		RetryOnStatus: []int{502, 503, 504, 429},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Skip TLS certificate verification
+			},
+		},
+	}
+
+	// Configure authentication if provided
+	if auth != nil {
+		switch auth.Type {
+		case "basic":
+			if auth.Username != "" && auth.Password != "" {
+				cfg.Username = auth.Username
+				cfg.Password = auth.Password
+			}
+		case "api_key":
+			if auth.APIKey != "" {
+				cfg.APIKey = auth.APIKey
+			}
+		case "bearer":
+			if auth.Token != "" {
+				cfg.Header = http.Header{
+					"Authorization": []string{"Bearer " + auth.Token},
+				}
+			}
+		}
 	}
 
 	client, err := elasticsearch.NewClient(cfg)
@@ -145,11 +182,37 @@ func (p *ElasticsearchProducer) Close() {
 
 // TestConnection tests the connection to Elasticsearch cluster
 // This method creates a temporary client to test connectivity without affecting the main producer
-func TestElasticsearchConnection(hosts []string) error {
+func TestElasticsearchConnection(hosts []string, auth *ElasticsearchAuthConfig) error {
 	cfg := elasticsearch.Config{
 		Addresses:     hosts,
 		MaxRetries:    1,
 		RetryOnStatus: []int{502, 503, 504, 429},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Skip TLS certificate verification
+			},
+		},
+	}
+
+	// Configure authentication if provided
+	if auth != nil {
+		switch auth.Type {
+		case "basic":
+			if auth.Username != "" && auth.Password != "" {
+				cfg.Username = auth.Username
+				cfg.Password = auth.Password
+			}
+		case "api_key":
+			if auth.APIKey != "" {
+				cfg.APIKey = auth.APIKey
+			}
+		case "bearer":
+			if auth.Token != "" {
+				cfg.Header = http.Header{
+					"Authorization": []string{"Bearer " + auth.Token},
+				}
+			}
+		}
 	}
 
 	// Create a temporary client for testing
@@ -176,11 +239,37 @@ func TestElasticsearchConnection(hosts []string) error {
 }
 
 // TestIndexExists tests if a specific index exists in Elasticsearch
-func TestElasticsearchIndexExists(hosts []string, index string) (bool, error) {
+func TestElasticsearchIndexExists(hosts []string, index string, auth *ElasticsearchAuthConfig) (bool, error) {
 	cfg := elasticsearch.Config{
 		Addresses:     hosts,
 		MaxRetries:    1,
 		RetryOnStatus: []int{502, 503, 504, 429},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Skip TLS certificate verification
+			},
+		},
+	}
+
+	// Configure authentication if provided
+	if auth != nil {
+		switch auth.Type {
+		case "basic":
+			if auth.Username != "" && auth.Password != "" {
+				cfg.Username = auth.Username
+				cfg.Password = auth.Password
+			}
+		case "api_key":
+			if auth.APIKey != "" {
+				cfg.APIKey = auth.APIKey
+			}
+		case "bearer":
+			if auth.Token != "" {
+				cfg.Header = http.Header{
+					"Authorization": []string{"Bearer " + auth.Token},
+				}
+			}
+		}
 	}
 
 	// Create a temporary client for testing
@@ -210,11 +299,37 @@ func TestElasticsearchIndexExists(hosts []string, index string) (bool, error) {
 }
 
 // GetElasticsearchClusterInfo gets basic cluster information
-func GetElasticsearchClusterInfo(hosts []string) (map[string]interface{}, error) {
+func GetElasticsearchClusterInfo(hosts []string, auth *ElasticsearchAuthConfig) (map[string]interface{}, error) {
 	cfg := elasticsearch.Config{
 		Addresses:     hosts,
 		MaxRetries:    1,
 		RetryOnStatus: []int{502, 503, 504, 429},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // Skip TLS certificate verification
+			},
+		},
+	}
+
+	// Configure authentication if provided
+	if auth != nil {
+		switch auth.Type {
+		case "basic":
+			if auth.Username != "" && auth.Password != "" {
+				cfg.Username = auth.Username
+				cfg.Password = auth.Password
+			}
+		case "api_key":
+			if auth.APIKey != "" {
+				cfg.APIKey = auth.APIKey
+			}
+		case "bearer":
+			if auth.Token != "" {
+				cfg.Header = http.Header{
+					"Authorization": []string{"Bearer " + auth.Token},
+				}
+			}
+		}
 	}
 
 	// Create a temporary client for testing
