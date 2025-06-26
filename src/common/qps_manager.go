@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -118,7 +119,7 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 	componentData.LastUpdate = metrics.Timestamp
 	componentData.CurrentTotal = metrics.TotalMessages // Update current total
 
-	// Keep only data from the last hour (3600 seconds)
+	// Keep only data from the last hour (3600 seconds) and ensure sorted order
 	cutoffTime := time.Now().Add(-time.Hour)
 	var validPoints []QPSDataPoint
 	for _, point := range componentData.DataPoints {
@@ -126,6 +127,12 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 			validPoints = append(validPoints, point)
 		}
 	}
+
+	// Sort data points by timestamp to ensure correct ordering
+	sort.Slice(validPoints, func(i, j int) bool {
+		return validPoints[i].Timestamp.Before(validPoints[j].Timestamp)
+	})
+
 	componentData.DataPoints = validPoints
 }
 
@@ -410,14 +417,18 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 
 		// Calculate hourly message rate based on recent data points (for rate calculation)
 		var hourlyRate uint64 = 0
-		if len(componentData.DataPoints) > 1 {
+
+		if len(componentData.DataPoints) >= 2 {
 			// Find the oldest and newest data points within the hour
+			// DataPoints should now be sorted by timestamp due to AddQPSData fix
 			oldestPoint := componentData.DataPoints[0]
 			newestPoint := componentData.DataPoints[len(componentData.DataPoints)-1]
 
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-			if timeDiff > 0 {
+
+			// Only calculate rate if we have sufficient time span (at least 5 minutes)
+			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
 				// Safe calculation: check for underflow before subtraction
 				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
 					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
@@ -426,6 +437,18 @@ func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]
 					// Handle restart case: use current total as rate indicator
 					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
 				}
+			}
+		} else if len(componentData.DataPoints) == 1 {
+			// Single data point: estimate rate based on component runtime
+			// Assume component has been running for at least 1 minute if we have data
+			dataPoint := componentData.DataPoints[0]
+			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
+			if runtimeHours > 0 {
+				// Use a minimum runtime of 1 minute to avoid extreme rates
+				if runtimeHours < 1.0/60.0 {
+					runtimeHours = 1.0 / 60.0
+				}
+				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
 			}
 		}
 
@@ -459,14 +482,18 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 
 		// Calculate hourly message rate based on recent data points
 		var hourlyRate uint64 = 0
-		if len(data.DataPoints) > 1 {
+
+		if len(data.DataPoints) >= 2 {
 			// Find the oldest and newest data points within the hour
+			// DataPoints should now be sorted by timestamp due to AddQPSData fix
 			oldestPoint := data.DataPoints[0]
 			newestPoint := data.DataPoints[len(data.DataPoints)-1]
 
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-			if timeDiff > 0 {
+
+			// Only calculate rate if we have sufficient time span (at least 5 minutes)
+			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
 				// Safe calculation: check for underflow before subtraction
 				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
 					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
@@ -475,6 +502,18 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 					// Handle restart case: use current total as rate indicator
 					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
 				}
+			}
+		} else if len(data.DataPoints) == 1 {
+			// Single data point: estimate rate based on component runtime
+			// Assume component has been running for at least 1 minute if we have data
+			dataPoint := data.DataPoints[0]
+			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
+			if runtimeHours > 0 {
+				// Use a minimum runtime of 1 minute to avoid extreme rates
+				if runtimeHours < 1.0/60.0 {
+					runtimeHours = 1.0 / 60.0
+				}
+				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
 			}
 		}
 
@@ -487,12 +526,14 @@ func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{}
 		switch data.ComponentType {
 		case "input":
 			// Only count input if this ProjectNodeSequence represents the actual input component
-			if len(parts) == 2 && parts[0] == "input" && parts[1] == data.ComponentID {
+			// Fix: Use uppercase "INPUT" to match actual ProjectNodeSequence format
+			if len(parts) == 2 && strings.ToUpper(parts[0]) == "INPUT" && parts[1] == data.ComponentID {
 				totalInputMessages += hourlyRate
 			}
 		case "output":
 			// Only count output if this ProjectNodeSequence represents the final output component
-			if len(parts) >= 2 && parts[len(parts)-2] == "output" && parts[len(parts)-1] == data.ComponentID {
+			// Fix: Use uppercase "OUTPUT" to match actual ProjectNodeSequence format
+			if len(parts) >= 2 && strings.ToUpper(parts[len(parts)-2]) == "OUTPUT" && parts[len(parts)-1] == data.ComponentID {
 				totalOutputMessages += hourlyRate
 			}
 		case "ruleset":
@@ -570,14 +611,18 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 
 		// Calculate hourly message rate based on recent data points
 		var hourlyRate uint64 = 0
-		if len(data.DataPoints) > 1 {
+
+		if len(data.DataPoints) >= 2 {
 			// Find the oldest and newest data points within the hour
+			// DataPoints should now be sorted by timestamp due to AddQPSData fix
 			oldestPoint := data.DataPoints[0]
 			newestPoint := data.DataPoints[len(data.DataPoints)-1]
 
 			// Calculate time difference in hours
 			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-			if timeDiff > 0 {
+
+			// Only calculate rate if we have sufficient time span (at least 5 minutes)
+			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
 				// Safe calculation: check for underflow before subtraction
 				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
 					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
@@ -586,6 +631,18 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 					// Handle restart case: use current total as rate indicator
 					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
 				}
+			}
+		} else if len(data.DataPoints) == 1 {
+			// Single data point: estimate rate based on component runtime
+			// Assume component has been running for at least 1 minute if we have data
+			dataPoint := data.DataPoints[0]
+			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
+			if runtimeHours > 0 {
+				// Use a minimum runtime of 1 minute to avoid extreme rates
+				if runtimeHours < 1.0/60.0 {
+					runtimeHours = 1.0 / 60.0
+				}
+				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
 			}
 		}
 
