@@ -34,6 +34,7 @@ type Ruleset struct {
 	Path                string
 	XMLName             xml.Name `xml:"root"`
 	Name                string   `xml:"name,attr"`
+	Author              string   `xml:"author,attr"`
 	RulesetID           string   `json:"Id"`
 	ProjectNodeSequence string
 	Type                string `xml:"type,attr"`

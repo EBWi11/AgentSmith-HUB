@@ -83,8 +83,8 @@ kafka:
     - "192.168.27.130:9092"
   topic: "kafka_output_demo"`
 
-const NewRulesetData = `<root>
-    <rule id="reverse_shell_01">
+const NewRulesetData = `<root author="name">
+    <rule id="rule_id">
         <filter field="key">vaule</filter>
         <checklist>
             <node type="REGEX" field="exe">testcases</node>
