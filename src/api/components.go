@@ -83,16 +83,17 @@ kafka:
     - "192.168.27.130:9092"
   topic: "kafka_output_demo"`
 
-const NewRulesetData = `<root name="test2" type="DETECTION">
-    <rule id="reverse_shell_01" name="测试">
-        <filter field="data_type">_$data_type</filter>
-        <checklist condition="a and c and d and e">
-            <node id="a" type="REGEX" field="exe">testcases</node>
-            <node id="c" type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>
-            <node id="d" type="EQU" field="sessionid">_$sessionid</node>
+const NewRulesetData = `<root>
+    <rule id="reverse_shell_01">
+        <filter field="key">vaule</filter>
+        <checklist>
+            <node type="REGEX" field="exe">testcases</node>
+            <node type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>
+			<node type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</node>
         </checklist>
         <append field="abc">123</append>
         <del>exe,argv</del>
+		<plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>
     </rule>
 </root>`
 

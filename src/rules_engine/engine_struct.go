@@ -33,6 +33,7 @@ var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 type Ruleset struct {
 	Path                string
 	XMLName             xml.Name `xml:"root"`
+	Name                string   `xml:"name,attr"`
 	RulesetID           string   `json:"Id"`
 	ProjectNodeSequence string
 	Type                string `xml:"type,attr"`
@@ -473,14 +474,6 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    ruleLine,
 			Message: "Rule id cannot be empty",
-		})
-	}
-
-	if rule.Name == "" || strings.TrimSpace(rule.Name) == "" {
-		result.IsValid = false
-		result.Errors = append(result.Errors, ValidationError{
-			Line:    ruleLine,
-			Message: "Rule name cannot be empty",
 		})
 	}
 
@@ -1387,10 +1380,6 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if strings.TrimSpace(ruleset.Rules[i2].ID) == strings.TrimSpace(rule.ID) && i != i2 {
 				return errors.New("rule id cannot be repeated")
 			}
-		}
-
-		if strings.TrimSpace(rule.Name) == "" {
-			return errors.New("rule name cannot be empty")
 		}
 
 		if strings.TrimSpace(rule.Checklist.Condition) != "" {
