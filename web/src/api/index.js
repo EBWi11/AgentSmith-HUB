@@ -1440,6 +1440,19 @@ export const hubApi = {
       console.error(`Error fetching component sequences for project ${projectId}:`, error);
       throw error;
     }
+  },
+
+  // Search components configuration
+  async searchComponents(query) {
+    try {
+      const response = await api.get('/search-components', { 
+        params: { q: query } 
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error searching components:', error);
+      throw error;
+    }
   }
 };
 

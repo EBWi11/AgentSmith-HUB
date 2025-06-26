@@ -6,9 +6,14 @@
           type="text"
           placeholder="Search"
           v-model="search"
-          class="w-full pl-7 pr-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+          @input="debouncedSearch(search)"
+          class="w-full pl-7 pr-8 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
         />
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        <!-- Search loading indicator -->
+        <div v-if="searchLoading" class="absolute right-2.5 top-1/2 -translate-y-1/2">
+          <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+        </div>
       </div>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
@@ -98,7 +103,31 @@
                 <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
                 
                 <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
-                  <span class="text-sm truncate">{{ item.id }}</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center">
+                      <span class="text-sm truncate">{{ item.id }}</span>
+                      <!-- Search match indicators -->
+                      <div v-if="item.searchMatch" class="ml-1 flex items-center space-x-1">
+                        <span v-if="item.searchMatch.nameMatch" 
+                              class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full cursor-help"
+                              @mouseenter="showTooltip($event, 'Name match')"
+                              @mouseleave="hideTooltip">
+                          N
+                        </span>
+                        <span v-if="item.searchMatch.type === 'content' || item.searchMatch.type === 'both'" 
+                              class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full cursor-help"
+                              @mouseenter="showTooltip($event, `Content match: Line ${item.searchMatch.lineNumber}`)"
+                              @mouseleave="hideTooltip">
+                          C
+                        </span>
+                      </div>
+                    </div>
+                    <!-- Show matching content line for content matches -->
+                    <div v-if="item.searchMatch && (item.searchMatch.type === 'content' || item.searchMatch.type === 'both') && item.searchMatch.lineContent" 
+                         class="text-xs text-gray-500 truncate mt-0.5">
+                      Line {{ item.searchMatch.lineNumber }}: {{ item.searchMatch.lineContent }}
+                    </div>
+                  </div>
                   <!-- Plugin type badge -->
                   <span v-if="type === 'plugins' && item.type === 'local'" 
                         class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
@@ -795,13 +824,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick, watch } from 'vue'
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
 import { useComponentOperations } from '../../composables/useApi'
 import { useDeleteConfirmModal } from '../../composables/useModal'
-import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard } from '../../utils/common'
+import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, debounce } from '../../utils/common'
 
 // 获取路由器实例
 const router = useRouter()
@@ -948,6 +977,56 @@ const escKeyListenerAdded = ref(false)
 
 // Search
 const search = ref('')
+const searchResults = ref([])
+const searchLoading = ref(false)
+
+// Debounced search function
+const debouncedSearch = debounce(async (query) => {
+  if (!query || query.length < 2) {
+    searchResults.value = []
+    return
+  }
+  
+  try {
+    searchLoading.value = true
+    const response = await hubApi.searchComponents(query)
+    searchResults.value = response.results || []
+    
+    // Auto-expand sections that have search results
+    const hasResults = new Set()
+    
+    // Add sections that have content search results
+    searchResults.value.forEach(result => {
+      const componentType = result.component_type + 's' // Convert to plural for section keys
+      hasResults.add(componentType)
+    })
+    
+    // Add sections that have name matches
+    Object.keys(items).forEach(type => {
+      if (items[type] && Array.isArray(items[type])) {
+        const hasNameMatch = items[type].some(item => {
+          const id = item.id || item.name || ''
+          return id.toLowerCase().includes(query.toLowerCase())
+        })
+        if (hasNameMatch) {
+          hasResults.add(type)
+        }
+      }
+    })
+    
+    // Expand all sections with results
+    hasResults.forEach(type => {
+      if (collapsed[type] !== undefined) {
+        collapsed[type] = false
+      }
+    })
+  } catch (error) {
+    console.error('Search failed:', error)
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}, 300)
 
 // Centralized modal management
 const activeModal = ref(null) // Tracks which modal is currently active
@@ -1043,6 +1122,14 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
 })
 
+// Watch for search input changes
+watch(search, (newVal) => {
+  if (!newVal || newVal.length < 2) {
+    searchResults.value = []
+    searchLoading.value = false
+  }
+})
+
 // Methods
 function startProjectPolling() {
   // Refresh project status every 5 seconds
@@ -1100,10 +1187,83 @@ function filteredItems(type) {
   if (!items[type] || !Array.isArray(items[type])) return []
   if (!search.value) return items[type]
   
-  return items[type].filter(item => {
+  // First, filter by name matches
+  const nameMatches = items[type].filter(item => {
     const id = item.id || item.name || ''
     return id.toLowerCase().includes(search.value.toLowerCase())
   })
+  
+  // Add search match info to name matches
+  const nameMatchesWithInfo = nameMatches.map(item => ({
+    ...item,
+    searchMatch: {
+      type: 'name',
+      nameMatch: true
+    }
+  }))
+  
+  // If we have search results from content search, add them
+  if (searchResults.value.length > 0) {
+    const contentMatches = searchResults.value
+      .filter(result => {
+        const componentType = type === 'inputs' ? 'input' : 
+                            type === 'outputs' ? 'output' :
+                            type === 'rulesets' ? 'ruleset' :
+                            type === 'projects' ? 'project' :
+                            type === 'plugins' ? 'plugin' : ''
+        return result.component_type === componentType
+      })
+      .map(result => {
+        // Find the original item
+        const originalItem = items[type].find(item => 
+          (item.id || item.name) === result.component_id
+        )
+        
+        if (originalItem) {
+          return {
+            ...originalItem,
+            searchMatch: {
+              type: 'content',
+              lineNumber: result.line_number,
+              lineContent: result.line_content,
+              isTemporary: result.is_temporary
+            }
+          }
+        }
+        return null
+      })
+      .filter(Boolean)
+    
+    // Combine results, avoid duplicates
+    const allResults = [...nameMatchesWithInfo]
+    
+    contentMatches.forEach(contentMatch => {
+      const existingIndex = allResults.findIndex(item => 
+        (item.id || item.name) === (contentMatch.id || contentMatch.name)
+      )
+      
+      if (existingIndex >= 0) {
+        // Item already exists from name match, mark as both
+        allResults[existingIndex] = {
+          ...allResults[existingIndex],
+          searchMatch: {
+            type: 'both',
+            nameMatch: true,
+            lineNumber: contentMatch.searchMatch.lineNumber,
+            lineContent: contentMatch.searchMatch.lineContent,
+            isTemporary: contentMatch.searchMatch.isTemporary
+          }
+        }
+      } else {
+        // New item from content search only
+        allResults.push(contentMatch)
+      }
+    })
+    
+    return allResults
+  }
+  
+  return nameMatchesWithInfo
 }
 
 async function fetchAllItems() {
