@@ -228,11 +228,18 @@ func getProjects(c echo.Context) error {
 		// Check if there is a temporary file
 		_, hasTemp := p.ProjectsNew[proj.Id]
 
-		result = append(result, map[string]interface{}{
+		projectData := map[string]interface{}{
 			"id":      proj.Id,
 			"status":  proj.Status,
 			"hasTemp": hasTemp,
-		})
+		}
+
+		// Include error message if project status is error
+		if proj.Status == project.ProjectStatusError && proj.Err != nil {
+			projectData["error"] = proj.Err.Error()
+		}
+
+		result = append(result, projectData)
 		processedIDs[proj.Id] = true
 	}
 

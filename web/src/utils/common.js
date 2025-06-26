@@ -153,7 +153,7 @@ export function getStatusTitle(item) {
   const statusMap = {
     running: 'Running',
     stopped: 'Stopped', 
-    error: item.errorMessage ? `Error: ${item.errorMessage}` : 'Error'
+    error: item.error ? `Error: ${item.error}` : 'Error'
   }
   
   return statusMap[item.status] || item.status
