@@ -86,6 +86,7 @@ func ServerStart(listener string) error {
 	e.GET("/project-error/:id", getProjectError)
 	e.GET("/project-inputs/:id", getProjectInputs)
 	e.GET("/project-components/:id", getProjectComponents)
+	e.GET("/project-component-sequences/:id", getProjectComponentSequences)
 
 	// Ruleset endpoints (use plural form for consistency)
 	e.GET("/rulesets", getRulesets)

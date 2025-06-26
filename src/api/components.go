@@ -1317,7 +1317,6 @@ func GetSamplerData(c echo.Context) error {
 						convertedSamples[i] = map[string]interface{}{
 							"data":                  sample.Data,
 							"timestamp":             sample.Timestamp.Format(time.RFC3339),
-							"source":                sample.Source,
 							"project_node_sequence": sample.ProjectNodeSequence,
 						}
 					}

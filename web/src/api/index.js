@@ -1271,7 +1271,7 @@ export const hubApi = {
     }
   },
 
-  async getProjectDailyMessages(projectId) {
+    async getProjectDailyMessages(projectId) {
     try {
       const response = await api.get('/daily-messages', { 
         params: { project_id: projectId } 
@@ -1279,6 +1279,17 @@ export const hubApi = {
       return response.data;
     } catch (error) {
       console.error(`Error fetching daily messages for project ${projectId}:`, error);
+      throw error;
+    }
+  },
+
+  // Get project component sequences - returns each component's projectNodeSequence list in current project
+  async getProjectComponentSequences(projectId) {
+    try {
+      const response = await api.get(`/project-component-sequences/${projectId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching component sequences for project ${projectId}:`, error);
       throw error;
     }
   },
@@ -1417,6 +1428,17 @@ export const hubApi = {
     } catch (error) {
       console.error('Error fetching cluster error logs:', error);
       throw new Error(error.response?.data?.error || error.message || 'Failed to fetch cluster error logs');
+    }
+  },
+
+  // Get project component sequences - returns each component's projectNodeSequence list in current project
+  async getProjectComponentSequences(projectId) {
+    try {
+      const response = await api.get(`/project-component-sequences/${projectId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching component sequences for project ${projectId}:`, error);
+      throw error;
     }
   }
 };

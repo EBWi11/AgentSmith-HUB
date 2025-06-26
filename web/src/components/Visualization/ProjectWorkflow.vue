@@ -75,9 +75,6 @@
                     <span>Sample {{ index + 1 }}</span>
                     <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString() }}</span>
                   </div>
-                  <div class="text-xs text-gray-500 mb-2">
-                    Source: {{ sample.source }}
-                  </div>
                   <JsonViewer :value="sample.data || sample" height="auto" />
                 </div>
                 <div v-if="samples.length > 5" class="text-center">
@@ -128,6 +125,9 @@ const edges = ref([]);
 const messageData = ref({});
 const messageLoading = ref(false);
 const messageRefreshInterval = ref(null);
+
+// Component sequences data
+const componentSequences = ref({});
 
 // Right-click menu related
 const showContextMenu = ref(false);
@@ -254,21 +254,47 @@ async function viewSampleData() {
   try {
     const nodeType = selectedNode.value.data.nodeType.toLowerCase();
     const componentId = selectedNode.value.data.componentId;
+    const projectNodeSequences = selectedNode.value.data.projectNodeSequences || [];
     
-    const response = await hubApi.getSamplerData({
-      name: nodeType,
-      projectNodeSequence: `${nodeType.toUpperCase()}.${componentId}`
-    });
+    // If we have project node sequences for this component in the current project, use them
+    // Otherwise fall back to the simple construction (for components not yet processed with message data)
+    let allSampleData = {};
     
-    if (response && response[nodeType]) {
-      // Store the grouped sample data directly
-      sampleDataRaw.value = response[nodeType];
+    if (projectNodeSequences.length > 0) {
+      // Use the actual project node sequences for this component in the current project
+      for (const projectNodeSequence of projectNodeSequences) {
+        try {
+          const response = await hubApi.getSamplerData({
+            name: nodeType,
+            projectNodeSequence: projectNodeSequence
+          });
+          
+          if (response && response[nodeType]) {
+            // Merge sample data from all project node sequences
+            Object.assign(allSampleData, response[nodeType]);
+          }
+        } catch (error) {
+          console.warn(`Failed to fetch sample data for ${projectNodeSequence}:`, error);
+        }
+      }
     } else {
-      sampleDataRaw.value = {};
+      // Fallback to simple construction if project node sequences are not available
+      // This might happen if messageData hasn't been loaded yet
+      const response = await hubApi.getSamplerData({
+        name: nodeType,
+        projectNodeSequence: `${nodeType.toUpperCase()}.${componentId}`
+      });
+      
+      if (response && response[nodeType]) {
+        allSampleData = response[nodeType];
+      }
     }
+    
+    // Store the grouped sample data
+    sampleDataRaw.value = allSampleData;
   } catch (error) {
     console.error('Failed to fetch sample data:', error);
-    samples.value = [];
+    sampleDataRaw.value = {};
   } finally {
     loadingSamples.value = false;
   }
@@ -314,7 +340,8 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
               nodeType: type.toUpperCase(), 
               nodeName: name,
               componentId: name,
-              originalId: id
+              originalId: id,
+              projectNodeSequences: [] // Initialize empty array, will be populated by updateNodesWithMessages
             }
           });
         }
@@ -358,9 +385,12 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
 
     edges.value = tempEdges;
 
-    // Update nodes with message data if available
+    // Update nodes with message data if available, or set basic project node sequences
     if (props.enableMessages && props.projectId && Object.keys(messageData.value).length > 0) {
       updateNodesWithMessages();
+    } else {
+      // Set basic project node sequences for components even without message data
+      setBasicProjectNodeSequences();
     }
 
   } catch (e) {
@@ -396,69 +426,53 @@ watch(() => props.enableMessages, (newVal) => {
   }
 });
 
-// Update nodes with message information
+// Set basic project node sequences for components when backend data is not available
+function setBasicProjectNodeSequences() {
+  nodes.value = nodes.value.map(node => {
+    const componentType = node.data.nodeType.toLowerCase();
+    const componentId = node.data.componentId;
+    
+    // Try to get sequences from backend data first
+    let projectNodeSequences = [];
+    if (componentSequences.value && componentSequences.value[componentType] && componentSequences.value[componentType][componentId]) {
+      projectNodeSequences = componentSequences.value[componentType][componentId];
+    } else {
+      // Fallback to basic sequence only if backend data is not available
+      projectNodeSequences = [`${componentType.toUpperCase()}.${componentId}`];
+    }
+    
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        messages: 0,
+        hasMessageData: false,
+        projectNodeSequences: projectNodeSequences
+      }
+    };
+  });
+}
+
+// Update nodes with message information using backend-provided component sequences
 function updateNodesWithMessages() {
   nodes.value = nodes.value.map(node => {
     const componentType = node.data.nodeType.toLowerCase();
     const componentId = node.data.componentId;
     
-    // Find message data for this component
-    let totalMessages = 0;
-    let foundData = false;
+    // Get project node sequences from backend data
+    let projectNodeSequences = [];
+    if (componentSequences.value && componentSequences.value[componentType] && componentSequences.value[componentType][componentId]) {
+      projectNodeSequences = componentSequences.value[componentType][componentId];
+    } else {
+      // Fallback to basic sequence if backend data is not available
+      projectNodeSequences = [`${componentType.toUpperCase()}.${componentId}`];
+    }
     
-    // UPDATED: Handle new ProjectNodeSequence format like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-    for (const [key, componentData] of Object.entries(messageData.value)) {
-      if (componentData && typeof componentData === 'object') {
-        let shouldCount = false;
-        
-        // Parse the ProjectNodeSequence to understand the component structure
-        const keyParts = key.split('.');
-        
-        if (componentType === 'input') {
-          // For input components, match ProjectNodeSequence that starts with "INPUT.componentId"
-          // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
-          if (keyParts.length === 2 && 
-              keyParts[0].toUpperCase() === 'INPUT' && 
-              keyParts[1] === componentId) {
-            shouldCount = true;
-          }
-        } else if (componentType === 'output') {
-          // For output components, match ProjectNodeSequence that ends with "OUTPUT.componentId"
-          // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-          if (keyParts.length >= 2 && 
-              keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT' && 
-              keyParts[keyParts.length - 1] === componentId) {
-            shouldCount = true;
-          }
-        } else if (componentType === 'ruleset') {
-          // For ruleset components, match ProjectNodeSequence that contains "RULESET.componentId" 
-          // but ONLY count the RULESET's own processing, not downstream components
-          for (let i = 0; i < keyParts.length - 1; i++) {
-            if (keyParts[i].toUpperCase() === 'RULESET' && keyParts[i + 1] === componentId) {
-              // Only count if this is the RULESET's own ProjectNodeSequence or the immediate next step
-              // Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-              // We want to count: "INPUT.api_sec.RULESET.test" but not "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-              
-              // Check if there are more components after this RULESET in the sequence
-              const hasDownstream = (i + 2) < keyParts.length;
-              
-              if (!hasDownstream) {
-                // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
-                shouldCount = true;
-              }
-              // If hasDownstream is true, this means it's a downstream component's sequence
-              // that happens to contain this RULESET in its path - we don't count it
-              
-              break;
-            }
-          }
-        }
-        
-        if (shouldCount) {
-          // Use daily_messages for MSG/D display instead of cumulative totals
-          totalMessages += componentData.daily_messages || 0;
-          foundData = true;
-        }
+    // Calculate total messages using the project node sequences from backend
+    let totalMessages = 0;
+    for (const sequence of projectNodeSequences) {
+      if (messageData.value[sequence] && typeof messageData.value[sequence] === 'object') {
+        totalMessages += messageData.value[sequence].daily_messages || 0;
       }
     }
     
@@ -471,13 +485,14 @@ function updateNodesWithMessages() {
       data: {
         ...node.data,
         messages: totalMessages, // Real message count for today (could be 0)
-        hasMessageData: isRunningProject // Show MSG/D for all components in running projects
+        hasMessageData: isRunningProject, // Show MSG/D for all components in running projects
+        projectNodeSequences: projectNodeSequences // Store the actual project node sequences from backend
       }
     };
   });
 }
 
-// Fetch message data for the project
+// Fetch message data and component sequences for the project
 async function fetchMessageData() {
   if (!props.projectId || !props.enableMessages) {
     // If not enabled, ensure all nodes have hasMessageData = false
@@ -486,7 +501,8 @@ async function fetchMessageData() {
       data: {
         ...node.data,
         messages: 0,
-        hasMessageData: false
+        hasMessageData: false,
+        projectNodeSequences: []
       }
     }));
     return;
@@ -494,15 +510,22 @@ async function fetchMessageData() {
   
   try {
     messageLoading.value = true;
-    // Use real message data
-    const response = await hubApi.getProjectDailyMessages(props.projectId);
-    messageData.value = response.data || {};
+    
+    // Fetch both message data and component sequences in parallel
+    const [messageResponse, sequenceResponse] = await Promise.all([
+      hubApi.getProjectDailyMessages(props.projectId),
+      hubApi.getProjectComponentSequences(props.projectId)
+    ]);
+    
+    messageData.value = messageResponse.data || {};
+    componentSequences.value = sequenceResponse.data || {};
     
     // Update nodes with message data (including 0 values)
     updateNodesWithMessages();
   } catch (error) {
-    console.error('Failed to fetch message data:', error);
+    console.error('Failed to fetch project data:', error);
     messageData.value = {};
+    componentSequences.value = {};
     // Still update nodes to show 0 messages for running projects
     updateNodesWithMessages();
   } finally {

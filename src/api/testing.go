@@ -1611,3 +1611,188 @@ func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
 		"error": "Unknown error occurred",
 	})
 }
+
+// getProjectComponentSequences returns project node sequences for each component in the project
+func getProjectComponentSequences(c echo.Context) error {
+	id := c.Param("id")
+
+	// Check if project exists and get project content
+	var projectContent string
+	var isTemp bool
+
+	// First check if there is a temporary file
+	tempPath, tempExists := GetComponentPath("project", id, true)
+	if tempExists {
+		content, err := ReadComponent(tempPath)
+		if err == nil {
+			projectContent = content
+			isTemp = true
+		}
+	}
+
+	// If no temporary file, check formal file
+	if projectContent == "" {
+		formalPath, formalExists := GetComponentPath("project", id, false)
+		if !formalExists {
+			// Check if project exists in memory
+			proj := project.GlobalProject.Projects[id]
+			if proj == nil {
+				// Check if project exists in new projects
+				content, ok := project.GlobalProject.ProjectsNew[id]
+				if !ok {
+					return c.JSON(http.StatusNotFound, map[string]interface{}{
+						"success": false,
+						"error":   "Project not found: " + id,
+					})
+				}
+				projectContent = content
+			} else {
+				projectContent = proj.Config.RawConfig
+			}
+		} else {
+			content, err := ReadComponent(formalPath)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+					"success": false,
+					"error":   "Failed to read project: " + err.Error(),
+				})
+			}
+			projectContent = content
+		}
+	}
+
+	// Create temporary project to parse configuration
+	testProjectId := fmt.Sprintf("test_sequences_%s_%d", id, time.Now().UnixNano())
+	tempProject, err := project.NewProjectForTesting("", projectContent, testProjectId)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse project: " + err.Error(),
+		})
+	}
+
+	// Parse the data flow graph
+	flowGraph, err := tempProject.ParseContentForVisualization()
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse project flow: " + err.Error(),
+		})
+	}
+
+	// Build component sequences using the same logic as loadComponentsFromGlobal
+	componentSequences := make(map[string]string)
+	hasUpstream := make(map[string]bool)
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			hasUpstream[to] = true
+		}
+	}
+
+	// Build ProjectNodeSequence recursively
+	var buildSequence func(component string, visited map[string]bool) string
+	buildSequence = func(component string, visited map[string]bool) string {
+		if visited[component] {
+			return component // Break cycle
+		}
+		if seq, exists := componentSequences[component]; exists {
+			return seq
+		}
+		visited[component] = true
+		defer delete(visited, component)
+
+		var upstreamComponent string
+		for from, tos := range flowGraph {
+			for _, to := range tos {
+				if to == component {
+					upstreamComponent = from
+					break
+				}
+			}
+			if upstreamComponent != "" {
+				break
+			}
+		}
+
+		var sequence string
+		if upstreamComponent == "" {
+			sequence = component
+		} else {
+			upstreamSequence := buildSequence(upstreamComponent, visited)
+			sequence = upstreamSequence + "." + component
+		}
+		componentSequences[component] = sequence
+		return sequence
+	}
+
+	// Build sequences for all components
+	for from := range flowGraph {
+		buildSequence(from, make(map[string]bool))
+	}
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			buildSequence(to, make(map[string]bool))
+		}
+	}
+
+	// Group components by type and collect their sequences
+	result := map[string]map[string][]string{
+		"input":   make(map[string][]string),
+		"output":  make(map[string][]string),
+		"ruleset": make(map[string][]string),
+	}
+
+	// Process each component and its sequence
+	for component, sequence := range componentSequences {
+		parts := strings.Split(component, ".")
+		if len(parts) != 2 {
+			continue
+		}
+
+		componentType := strings.ToLower(parts[0])
+		componentId := parts[1]
+
+		switch componentType {
+		case "input":
+			if result["input"][componentId] == nil {
+				result["input"][componentId] = []string{}
+			}
+			result["input"][componentId] = append(result["input"][componentId], sequence)
+		case "output":
+			if result["output"][componentId] == nil {
+				result["output"][componentId] = []string{}
+			}
+			result["output"][componentId] = append(result["output"][componentId], sequence)
+		case "ruleset":
+			if result["ruleset"][componentId] == nil {
+				result["ruleset"][componentId] = []string{}
+			}
+			result["ruleset"][componentId] = append(result["ruleset"][componentId], sequence)
+		}
+	}
+
+	// Remove duplicates and sort sequences for each component
+	for componentType := range result {
+		for componentId := range result[componentType] {
+			sequences := result[componentType][componentId]
+			// Remove duplicates
+			uniqueSequences := make(map[string]bool)
+			for _, seq := range sequences {
+				uniqueSequences[seq] = true
+			}
+			// Convert back to slice and sort
+			result[componentType][componentId] = []string{}
+			for seq := range uniqueSequences {
+				result[componentType][componentId] = append(result[componentType][componentId], seq)
+			}
+			sort.Strings(result[componentType][componentId])
+		}
+	}
+
+	// Return the result
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"data":    result,
+	})
+}
