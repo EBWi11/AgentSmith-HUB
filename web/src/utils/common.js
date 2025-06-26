@@ -103,9 +103,9 @@ export function formatPercent(num) {
 }
 
 /**
- * 格式化每小时消息数
+ * 格式化每日消息数
  */
-export function formatMessagesPerHour(messages) {
+export function formatMessagesPerDay(messages) {
   return formatNumber(messages || 0)
 }
 

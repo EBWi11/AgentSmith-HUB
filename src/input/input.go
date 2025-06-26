@@ -238,7 +238,7 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						in.sampler.Sample(msg, "kafka", in.ProjectNodeSequence)
+						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
 					// Add input ID to message data
@@ -309,7 +309,7 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						in.sampler.Sample(msg, "sls", in.ProjectNodeSequence)
+						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
 					// Add input ID to message data

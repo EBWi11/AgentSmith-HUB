@@ -455,23 +455,23 @@ function updateNodesWithMessages() {
         }
         
         if (shouldCount) {
-          // Use hourly_rate for MSG/H display instead of cumulative totals
-          totalMessages += componentData.hourly_rate || 0;
+          // Use daily_messages for MSG/D display instead of cumulative totals
+          totalMessages += componentData.daily_messages || 0;
           foundData = true;
         }
       }
     }
     
     // For running projects, always show message data (even if 0)
-    // This ensures that all components in a running project display MSG/H
+    // This ensures that all components in a running project display MSG/D
     const isRunningProject = props.projectId && props.enableMessages;
     
     return {
       ...node,
       data: {
         ...node.data,
-        messages: totalMessages, // Real message count for past hour (could be 0)
-        hasMessageData: isRunningProject // Show MSG/H for all components in running projects
+        messages: totalMessages, // Real message count for today (could be 0)
+        hasMessageData: isRunningProject // Show MSG/D for all components in running projects
       }
     };
   });
@@ -495,7 +495,7 @@ async function fetchMessageData() {
   try {
     messageLoading.value = true;
     // Use real message data
-    const response = await hubApi.getProjectHourlyMessages(props.projectId);
+    const response = await hubApi.getProjectDailyMessages(props.projectId);
     messageData.value = response.data || {};
     
     // Update nodes with message data (including 0 values)

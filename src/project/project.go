@@ -428,11 +428,14 @@ func (p *Project) initComponentsForTesting() error {
 	// For testing, create virtual input nodes (just placeholders for flow graph validation)
 	// We don't need actual input component instances - users will provide test data directly
 	for _, name := range inputNames {
-		// Create a minimal input placeholder for testing
-		p.Inputs[name] = &input.Input{
-			Id:         name,
-			DownStream: make([]*chan map[string]interface{}, 0),
+		// Create a completely isolated input placeholder for testing
+		testInputId := fmt.Sprintf("test_%s_%s_%d", p.Id, name, time.Now().UnixNano())
+		testInput := &input.Input{
+			Id:                  testInputId,
+			DownStream:          make([]*chan map[string]interface{}, 0),
+			ProjectNodeSequence: fmt.Sprintf("TEST.%s.%s", p.Id, name),
 		}
+		p.Inputs[name] = testInput
 	}
 
 	// Create independent output instances for testing
@@ -449,11 +452,20 @@ func (p *Project) initComponentsForTesting() error {
 			return fmt.Errorf("output %s not found", name)
 		}
 
-		// Create a new independent output instance
-		testOutput, err := output.NewOutput("", outputConfig, "test_"+name)
+		// Create a completely isolated output instance for testing
+		// Use unique ID with timestamp to avoid any conflicts
+		testOutputId := fmt.Sprintf("test_%s_%s_%d", p.Id, name, time.Now().UnixNano())
+		testOutput, err := output.NewOutput("", outputConfig, testOutputId)
 		if err != nil {
 			return fmt.Errorf("failed to create test output %s: %v", name, err)
 		}
+
+		// Mark this as a test instance to prevent it from affecting global state
+		testOutput.ProjectNodeSequence = fmt.Sprintf("TEST.%s.%s", p.Id, name)
+
+		// Disable sampler for test instances to avoid affecting global sampling state
+		testOutput.SetTestMode()
+
 		p.Outputs[name] = testOutput
 	}
 
@@ -471,11 +483,20 @@ func (p *Project) initComponentsForTesting() error {
 			return fmt.Errorf("ruleset %s not found", name)
 		}
 
-		// Create a new independent ruleset instance
-		testRuleset, err := rules_engine.NewRuleset("", rulesetConfig, "test_"+name)
+		// Create a completely isolated ruleset instance for testing
+		// Use unique ID with timestamp to avoid any conflicts
+		testRulesetId := fmt.Sprintf("test_%s_%s_%d", p.Id, name, time.Now().UnixNano())
+		testRuleset, err := rules_engine.NewRuleset("", rulesetConfig, testRulesetId)
 		if err != nil {
 			return fmt.Errorf("failed to create test ruleset %s: %v", name, err)
 		}
+
+		// Mark this as a test instance to prevent it from affecting global state
+		testRuleset.ProjectNodeSequence = fmt.Sprintf("TEST.%s.%s", p.Id, name)
+
+		// Disable sampler for test instances to avoid affecting global sampling state
+		testRuleset.SetTestMode()
+
 		p.Rulesets[name] = testRuleset
 	}
 
@@ -726,11 +747,27 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 
 // Start starts the project and manages shared components safely
 func (p *Project) Start() error {
-	if p.Status == ProjectStatusRunning {
-		return fmt.Errorf("project is already running %s", p.Id)
+	// Check if this is test mode (any output has TestCollectionChan set)
+	isTestMode := false
+	for _, out := range p.Outputs {
+		if out.TestCollectionChan != nil {
+			isTestMode = true
+			break
+		}
 	}
-	if p.Status == ProjectStatusError {
-		return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
+
+	// In test mode, bypass status checks but in production mode, enforce them
+	if !isTestMode {
+		if p.Status == ProjectStatusRunning {
+			return fmt.Errorf("project is already running %s", p.Id)
+		}
+		if p.Status == ProjectStatusError {
+			return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
+		}
+	} else {
+		// Force set status to stopped to allow starting in test mode
+		p.Status = ProjectStatusStopped
+		logger.Info("Starting project in test mode (bypassing status checks)", "id", p.Id)
 	}
 
 	// Initialize project control channels
@@ -762,54 +799,87 @@ func (p *Project) Start() error {
 
 	// Use centralized component usage counter for better performance and code maintainability
 
-	// Start inputs first - only if not already running in other projects
+	// Start inputs first
 	for _, in := range p.Inputs {
-		runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
-		if runningCount == 0 {
-			// No other project is using this input - start it
-			logger.Info("Starting shared input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+		if isTestMode {
+			// In test mode, directly start all inputs
+			logger.Info("Starting input in test mode", "project", p.Id, "input", in.Id)
 			if err := in.Start(); err != nil {
 				p.Status = ProjectStatusError
 				p.Err = err
-				_ = p.SaveProjectStatus()
-				return fmt.Errorf("failed to start shared input %s: %v", in.Id, err)
+				return fmt.Errorf("failed to start input %s: %v", in.Id, err)
 			}
 		} else {
-			logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+			// In production mode, check component sharing
+			runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
+			if runningCount == 0 {
+				// No other project is using this input - start it
+				logger.Info("Starting shared input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+				if err := in.Start(); err != nil {
+					p.Status = ProjectStatusError
+					p.Err = err
+					_ = p.SaveProjectStatus()
+					return fmt.Errorf("failed to start shared input %s: %v", in.Id, err)
+				}
+			} else {
+				logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+			}
 		}
 	}
 
-	// Start rulesets after inputs - only if not already running in other projects
+	// Start rulesets after inputs
 	for _, rs := range p.Rulesets {
-		runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
-		if runningCount == 0 {
-			// No other project is using this ruleset instance - start it
-			logger.Info("Starting ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
+		if isTestMode {
+			// In test mode, directly start all rulesets
+			logger.Info("Starting ruleset in test mode", "project", p.Id, "ruleset", rs.RulesetID)
 			if err := rs.Start(); err != nil {
 				p.Status = ProjectStatusError
 				p.Err = err
-				_ = p.SaveProjectStatus()
 				return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 			}
 		} else {
-			logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
+			// In production mode, check component sharing
+			runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
+			if runningCount == 0 {
+				// No other project is using this ruleset instance - start it
+				logger.Info("Starting ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
+				if err := rs.Start(); err != nil {
+					p.Status = ProjectStatusError
+					p.Err = err
+					_ = p.SaveProjectStatus()
+					return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+				}
+			} else {
+				logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
+			}
 		}
 	}
 
-	// Start outputs last - only if not already running in other projects
+	// Start outputs last (will automatically use test mode if TestCollectionChan is set)
 	for _, out := range p.Outputs {
-		runningCount := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
-		if runningCount == 0 {
-			// No other project is using this output instance - start it
-			logger.Info("Starting output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
+		if isTestMode {
+			// In test mode, directly start all outputs (they will automatically detect test mode)
+			logger.Info("Starting output in test mode", "project", p.Id, "output", out.Id)
 			if err := out.Start(); err != nil {
 				p.Status = ProjectStatusError
 				p.Err = err
-				_ = p.SaveProjectStatus()
 				return fmt.Errorf("failed to start output %s: %v", out.Id, err)
 			}
 		} else {
-			logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
+			// In production mode, check component sharing
+			runningCount := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
+			if runningCount == 0 {
+				// No other project is using this output instance - start it
+				logger.Info("Starting output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
+				if err := out.Start(); err != nil {
+					p.Status = ProjectStatusError
+					p.Err = err
+					_ = p.SaveProjectStatus()
+					return fmt.Errorf("failed to start output %s: %v", out.Id, err)
+				}
+			} else {
+				logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
+			}
 		}
 	}
 
@@ -823,13 +893,19 @@ func (p *Project) Start() error {
 
 	p.Status = ProjectStatusRunning
 
-	// Save the running status to file
-	err = p.SaveProjectStatus()
-	if err != nil {
-		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+	// Save the running status to file (skip in test mode)
+	if !isTestMode {
+		err = p.SaveProjectStatus()
+		if err != nil {
+			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+		}
 	}
 
-	logger.Info("Project started successfully with shared components", "project", p.Id)
+	if isTestMode {
+		logger.Info("Project started successfully in test mode", "project", p.Id)
+	} else {
+		logger.Info("Project started successfully with shared components", "project", p.Id)
+	}
 	return nil
 }
 
@@ -1376,50 +1452,9 @@ func (p *Project) LoadProjectStatus() (ProjectStatus, error) {
 	return ProjectStatusStopped, nil
 }
 
-// StartForTesting starts the project for testing purposes, bypassing normal status checks
-func (p *Project) StartForTesting() error {
-	// Force set status to stopped to allow starting
-	p.Status = ProjectStatusStopped
-
-	// Start inputs
-	for _, in := range p.Inputs {
-		if err := in.Start(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			return fmt.Errorf("failed to start input %s: %v", in.Id, err)
-		}
-	}
-
-	// Start rulesets
-	for _, rs := range p.Rulesets {
-		if err := rs.Start(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			return fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
-		}
-	}
-
-	// Start outputs in test mode
-	for _, out := range p.Outputs {
-		if err := out.StartForTesting(); err != nil {
-			p.Status = ProjectStatusError
-			p.Err = err
-			return fmt.Errorf("failed to start output %s: %v", out.Id, err)
-		}
-	}
-
-	// Start metrics collection
-	p.metricsStop = make(chan struct{})
-	go p.collectMetrics()
-
-	p.Status = ProjectStatusRunning
-	return nil
-}
-
-// StopForTesting stops the project quickly for testing purposes
+// StopForTesting stops the project quickly for testing purposes and ensures complete cleanup
 func (p *Project) StopForTesting() error {
-	// Quick stop without extensive timeouts for testing
-	logger.Info("Quick stopping test project", "project", p.Id)
+	logger.Info("Stopping and destroying test project", "project", p.Id)
 
 	// Stop metrics collection first
 	if p.metricsStop != nil {
@@ -1428,10 +1463,11 @@ func (p *Project) StopForTesting() error {
 	}
 
 	// Stop components quickly without waiting for channel drainage
+	// Note: Test components are completely isolated, so stopping them won't affect production
 	for _, in := range p.Inputs {
-		if err := in.Stop(); err != nil {
-			logger.Warn("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
-		}
+		// Test inputs are virtual, just clear their downstream connections
+		in.DownStream = []*chan map[string]interface{}{}
+		logger.Debug("Cleared test input", "project", p.Id, "input", in.Id)
 	}
 
 	for _, rs := range p.Rulesets {
@@ -1439,6 +1475,7 @@ func (p *Project) StopForTesting() error {
 		if err := rs.StopForTesting(); err != nil {
 			logger.Warn("Failed to stop test ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 		}
+		logger.Debug("Stopped test ruleset", "project", p.Id, "ruleset", rs.RulesetID)
 	}
 
 	for _, out := range p.Outputs {
@@ -1446,11 +1483,110 @@ func (p *Project) StopForTesting() error {
 		if err := out.StopForTesting(); err != nil {
 			logger.Warn("Failed to stop test output", "project", p.Id, "output", out.Id, "error", err)
 		}
+		logger.Debug("Stopped test output", "project", p.Id, "output", out.Id)
 	}
 
+	// Wait for any remaining goroutines to finish with short timeout
+	waitDone := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		logger.Debug("All test project goroutines finished", "project", p.Id)
+	case <-time.After(2 * time.Second): // Very short timeout for test cleanup
+		logger.Warn("Timeout waiting for test project goroutines, proceeding with cleanup", "project", p.Id)
+	}
+
+	// Complete cleanup: destroy all test instances to prevent any memory leaks
+	p.destroyTestInstances()
+
 	p.Status = ProjectStatusStopped
-	logger.Info("Test project stopped", "project", p.Id)
+	logger.Info("Test project completely destroyed", "project", p.Id)
 	return nil
+}
+
+// destroyTestInstances completely destroys all test component instances
+func (p *Project) destroyTestInstances() {
+	logger.Debug("Destroying test instances", "project", p.Id)
+
+	// Close and clear all channels first
+	for _, in := range p.Inputs {
+		// Close all downstream channels safely
+		for _, ch := range in.DownStream {
+			if ch != nil {
+				// Close channel safely by checking if it's already closed
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel already closed, ignore the panic
+						}
+					}()
+					close(*ch)
+				}()
+			}
+		}
+		in.DownStream = nil
+	}
+
+	for _, rs := range p.Rulesets {
+		// Clear upstream and downstream connections safely
+		for _, ch := range rs.UpStream {
+			if ch != nil {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel already closed, ignore the panic
+						}
+					}()
+					close(*ch)
+				}()
+			}
+		}
+		for _, ch := range rs.DownStream {
+			if ch != nil {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel already closed, ignore the panic
+						}
+					}()
+					close(*ch)
+				}()
+			}
+		}
+		rs.UpStream = nil
+		rs.DownStream = nil
+	}
+
+	for _, out := range p.Outputs {
+		// Clear upstream connections and test collection channel
+		out.UpStream = nil
+		out.TestCollectionChan = nil
+	}
+
+	// Clear all component references to allow garbage collection
+	p.Inputs = make(map[string]*input.Input)
+	p.Outputs = make(map[string]*output.Output)
+	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.MsgChannels = []string{}
+
+	// Clear project channels safely
+	if p.stopChan != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Channel already closed, ignore the panic
+				}
+			}()
+			close(p.stopChan)
+		}()
+		p.stopChan = nil
+	}
+
+	logger.Debug("Test instances destroyed", "project", p.Id)
 }
 
 // ParseContentForVisualization parses the project content for visualization purposes

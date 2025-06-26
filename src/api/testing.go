@@ -657,8 +657,8 @@ func testProject(c echo.Context) error {
 		logger.Info("Created test collection channel for output", "output", outputName, "project", testProjectId)
 	}
 
-	// Start the project
-	err = tempProject.StartForTesting()
+	// Start the project (will automatically use test mode since TestCollectionChan is set)
+	err = tempProject.Start()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
@@ -1302,8 +1302,8 @@ func testProjectContent(c echo.Context) error {
 		logger.Info("Created test collection channel for output", "output", outputName, "project", tempProjectId)
 	}
 
-	// Start the project
-	err = tempProject.StartForTesting()
+	// Start the project (will automatically use test mode since TestCollectionChan is set)
+	err = tempProject.Start()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"success": false,

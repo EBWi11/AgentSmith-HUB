@@ -217,12 +217,23 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 
 // Start initializes and starts the output component based on its type
 // Returns an error if the component is already running or if initialization fails
+// If TestCollectionChan is set, it will run in test mode (using print mode to avoid external connections)
 func (out *Output) Start() error {
+	// Check if this is test mode (TestCollectionChan is set)
+	isTestMode := out.TestCollectionChan != nil
+
 	// Start metric goroutine
 	out.metricStop = make(chan struct{})
 	go out.metricLoop()
 
-	switch out.Type {
+	// In test mode, force use print mode to avoid external connections
+	effectiveType := out.Type
+	if isTestMode {
+		effectiveType = OutputTypePrint
+		logger.Info("Starting output in test mode (using print mode)", "id", out.Id, "original_type", out.Type)
+	}
+
+	switch effectiveType {
 	case OutputTypeKafka:
 		if out.kafkaProducer != nil {
 			return fmt.Errorf("kafka producer already running for output %s", out.Id)
@@ -245,36 +256,7 @@ func (out *Output) Start() error {
 		}
 		out.kafkaProducer = producer
 
-		// Start producer goroutine
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			for msg := range msgChan {
-				// Optimization: only increment total count, QPS is calculated by metricLoop
-				atomic.AddUint64(&out.produceTotal, 1)
-
-				// Sample the message
-				if out.sampler != nil {
-					out.sampler.Sample(msg, "kafka", out.ProjectNodeSequence)
-				}
-
-				// If test collection channel is set, also send data there
-				if out.TestCollectionChan != nil {
-					// Add output ID to the message for test collection
-					msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
-
-					select {
-					case *out.TestCollectionChan <- msgWithId:
-						// Successfully sent to test collection channel
-					default:
-						// Test collection channel is full, log warning
-						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
-					}
-				}
-			}
-		}()
-
-		// Start goroutine to read from UpStream and send enhanced messages to msgChan
+		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Kafka producer
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
@@ -289,6 +271,18 @@ func (out *Output) Start() error {
 						if !ok {
 							// Channel is closed, skip this channel
 							continue
+						}
+
+						// Only count and sample in production mode (not test mode)
+						isTestMode := out.TestCollectionChan != nil
+						if !isTestMode {
+							// Count immediately at upstream read to ensure all messages are counted
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
+							}
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending to Kafka
@@ -317,11 +311,11 @@ func (out *Output) Start() error {
 		}
 
 		msgChan := make(chan map[string]interface{}, 1024)
-		batchSize := 1000
+		batchSize := 100
 		if out.elasticsearchCfg.BatchSize > 0 {
 			batchSize = out.elasticsearchCfg.BatchSize
 		}
-		flushDur := 5 * time.Second
+		flushDur := 3 * time.Second
 		if out.elasticsearchCfg.FlushDur != "" {
 			if d, err := time.ParseDuration(out.elasticsearchCfg.FlushDur); err == nil {
 				flushDur = d
@@ -340,36 +334,7 @@ func (out *Output) Start() error {
 		}
 		out.elasticsearchProducer = producer
 
-		// Start producer goroutine
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			for msg := range msgChan {
-				// Optimization: only increment total count, QPS is calculated by metricLoop
-				atomic.AddUint64(&out.produceTotal, 1)
-
-				// Sample the message
-				if out.sampler != nil {
-					out.sampler.Sample(msg, "elasticsearch", out.ProjectNodeSequence)
-				}
-
-				// If test collection channel is set, also send data there
-				if out.TestCollectionChan != nil {
-					// Add output ID to the message for test collection
-					msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
-
-					select {
-					case *out.TestCollectionChan <- msgWithId:
-						// Successfully sent to test collection channel
-					default:
-						// Test collection channel is full, log warning
-						logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
-					}
-				}
-			}
-		}()
-
-		// Start goroutine to read from UpStream and send enhanced messages to msgChan
+		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
@@ -384,6 +349,18 @@ func (out *Output) Start() error {
 						if !ok {
 							// Channel is closed, skip this channel
 							continue
+						}
+
+						// Only count and sample in production mode (not test mode)
+						isTestMode := out.TestCollectionChan != nil
+						if !isTestMode {
+							// Count immediately at upstream read to ensure all messages are counted
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
+							}
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending to Elasticsearch
@@ -422,12 +399,16 @@ func (out *Output) Start() error {
 								// Channel is closed, skip this channel
 								continue
 							}
-							// Optimization: only increment total count, QPS is calculated by metricLoop
-							atomic.AddUint64(&out.produceTotal, 1)
+							// Only count and sample in production mode (not test mode)
+							isTestMode := out.TestCollectionChan != nil
+							if !isTestMode {
+								// Optimization: only increment total count, QPS is calculated by metricLoop
+								atomic.AddUint64(&out.produceTotal, 1)
 
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, "print", out.ProjectNodeSequence)
+								// Sample the message
+								if out.sampler != nil {
+									out.sampler.Sample(msg, out.ProjectNodeSequence)
+								}
 							}
 
 							// If test collection channel is set, also send data there
@@ -728,81 +709,6 @@ func (out *Output) StopForTesting() error {
 	return nil
 }
 
-// StartForTesting starts the output component in test mode
-// In test mode, instead of sending data to external systems,
-// data is processed directly from upstream channels for collection
-func (out *Output) StartForTesting() error {
-	logger.Info("Starting output in test mode", "id", out.Id, "type", out.Type)
-
-	// Start metric goroutine
-	out.metricStop = make(chan struct{})
-	go out.metricLoop()
-
-	// In test mode, we process all upstream channels directly without external connections
-	// This applies to all output types (kafka, elasticsearch, print, aliyun_sls)
-
-	out.wg.Add(1)
-	go func() {
-		defer out.wg.Done()
-
-		for {
-			select {
-			case <-out.metricStop:
-				logger.Info("Test output stopping due to metric stop signal", "id", out.Id)
-				return
-			default:
-				// Process messages from all upstream channels
-				processed := false
-				for i, upChan := range out.UpStream {
-					select {
-					case msg, ok := <-*upChan:
-						if !ok {
-							// Channel is closed, skip this channel
-							continue
-						}
-						// Optimization: only increment total count, QPS is calculated by metricLoop
-						atomic.AddUint64(&out.produceTotal, 1)
-
-						// Sample the message for test mode
-						if out.sampler != nil {
-							out.sampler.Sample(msg, fmt.Sprintf("test_%s", out.Type), out.ProjectNodeSequence)
-						}
-
-						// In test mode, also send to collection channel if available
-						if out.TestCollectionChan != nil {
-							// Add output ID to the message for test collection
-							msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
-
-							select {
-							case *out.TestCollectionChan <- msgWithId:
-								// Successfully sent to test collection channel
-							default:
-								// Test collection channel is full, log warning
-								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", out.Type)
-							}
-						}
-
-						// In test mode, log the message processing
-						logger.Debug("Test output processed message", "id", out.Id, "type", out.Type, "channel", i)
-						processed = true
-
-					default:
-						// No message available from this channel, continue to next
-					}
-				}
-
-				// If no messages were processed, sleep briefly to avoid busy waiting
-				if !processed {
-					time.Sleep(1 * time.Millisecond)
-				}
-			}
-		}
-	}()
-
-	logger.Info("Output started in test mode successfully", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
-	return nil
-}
-
 // CheckConnectivity performs a real connectivity test for the output component
 // This method tests actual connection to external systems (Kafka, ES, etc.)
 func (out *Output) CheckConnectivity() map[string]interface{} {
@@ -1089,4 +995,9 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 	}
 
 	return newOutput, nil
+}
+
+// SetTestMode configures the output for test mode by disabling sampling and other global state interactions
+func (out *Output) SetTestMode() {
+	out.sampler = nil // Disable sampling for test instances
 }

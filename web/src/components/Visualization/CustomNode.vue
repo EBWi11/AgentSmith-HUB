@@ -10,8 +10,8 @@
     </div>
     <!-- Message Count Display -->
     <div v-if="hasMessageData" class="node-messages" :style="{ backgroundColor: messagesBackgroundColor, color: messagesTextColor }">
-      <span class="messages-label">MSG/H:</span>
-      <span class="messages-value">{{ formattedMessagesPerHour }}</span>
+              <span class="messages-label">MSG/D:</span>
+              <span class="messages-value">{{ formattedMessagesPerDay }}</span>
     </div>
     <Handle type="target" :position="Position.Top" />
     <Handle type="source" :position="Position.Bottom" />
@@ -64,8 +64,8 @@ const textColor = computed(() => colors.value.text);
 const isBold = computed(() => colors.value.bold || false);
 
 // Message display related computed properties
-const formattedMessagesPerHour = computed(() => {
-  // Format real message counts for past hour
+const formattedMessagesPerDay = computed(() => {
+  // Format real message counts for today
   const messages = props.messages;
   
   if (messages >= 1000000) {
@@ -80,16 +80,16 @@ const formattedMessagesPerHour = computed(() => {
 const messagesBackgroundColor = computed(() => {
   const messages = props.messages;
   if (messages === 0) return '#f3f4f6'; // Gray for no activity
-  if (messages < 36000) return '#ecfdf5'; // Light green for low message count (< 10/h equivalent)
-  if (messages < 360000) return '#fef3c7'; // Light yellow for medium message count (< 100/h equivalent)
-  return '#fef2f2'; // Light red for high message count (>= 100/h equivalent)
+  if (messages < 240) return '#ecfdf5'; // Light green for low message count (< 240/day equivalent to ~10/h)
+  if (messages < 2400) return '#fef3c7'; // Light yellow for medium message count (< 2400/day equivalent to ~100/h)
+  return '#fef2f2'; // Light red for high message count (>= 2400/day equivalent to ~100/h)
 });
 
 const messagesTextColor = computed(() => {
   const messages = props.messages;
   if (messages === 0) return '#6b7280'; // Gray text
-  if (messages < 36000) return '#065f46'; // Dark green text
-  if (messages < 360000) return '#92400e'; // Dark yellow text
+  if (messages < 240) return '#065f46'; // Dark green text
+  if (messages < 2400) return '#92400e'; // Dark yellow text
   return '#991b1b'; // Dark red text
 });
 </script>

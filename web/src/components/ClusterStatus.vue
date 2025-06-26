@@ -102,17 +102,17 @@
             <div class="flex items-center space-x-6 mx-8 flex-shrink-0">
               <!-- Input Messages -->
               <div class="text-center">
-                <div class="text-xs text-blue-600 font-medium mb-1">Input/h</div>
+                                  <div class="text-xs text-blue-600 font-medium mb-1">Input/d</div>
                 <div class="text-xl font-bold text-blue-800">
-                  {{ formatMessagesPerHour(node.metrics.inputMessages) }}
+                  {{ formatMessagesPerDay(node.metrics.inputMessages) }}
                 </div>
               </div>
               
               <!-- Output Messages -->
               <div class="text-center">
-                <div class="text-xs text-green-600 font-medium mb-1">Output/h</div>
+                                  <div class="text-xs text-green-600 font-medium mb-1">Output/d</div>
                 <div class="text-xl font-bold text-green-800">
-                  {{ formatMessagesPerHour(node.metrics.outputMessages) }}
+                  {{ formatMessagesPerDay(node.metrics.outputMessages) }}
                 </div>
               </div>
             </div>
@@ -199,7 +199,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { hubApi } from '../api'
-import { formatMessagesPerHour, formatTimeAgo, getCPUColor, getCPUBarColor, getMemoryColor, getMemoryBarColor } from '../utils/common'
+import { formatMessagesPerDay, formatTimeAgo, getCPUColor, getCPUBarColor, getMemoryColor, getMemoryBarColor } from '../utils/common'
 
 // Reactive state
 const searchQuery = ref('')
@@ -359,7 +359,7 @@ async function fetchAllData() {
     // Fetch node-level message data (only from leader)
     if (cluster.status === 'leader') {
       try {
-        const nodeMessagesResponse = await hubApi.getAllNodeHourlyMessages()
+        const nodeMessagesResponse = await hubApi.getAllNodeDailyMessages()
         nodeMessageData.value = nodeMessagesResponse.data || {}
       } catch (messageError) {
         console.warn('Failed to fetch node message data:', messageError)

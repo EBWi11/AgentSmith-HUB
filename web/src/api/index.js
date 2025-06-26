@@ -1253,8 +1253,8 @@ export const hubApi = {
     }
   },
 
-  // Hourly Messages APIs (real message counts for the past hour)
-  async getHourlyMessages(projectId = null, aggregated = false) {
+  // Daily Messages APIs (real message counts for today from 00:00)
+  async getDailyMessages(projectId = null, aggregated = false) {
     try {
       const params = {};
       if (projectId) {
@@ -1263,58 +1263,58 @@ export const hubApi = {
       if (aggregated) {
         params.aggregated = true;
       }
-      const response = await api.get('/hourly-messages', { params });
+      const response = await api.get('/daily-messages', { params });
       return response.data;
     } catch (error) {
-      console.error('Error fetching hourly messages:', error);
+      console.error('Error fetching daily messages:', error);
       throw error;
     }
   },
 
-  async getProjectHourlyMessages(projectId) {
+  async getProjectDailyMessages(projectId) {
     try {
-      const response = await api.get('/hourly-messages', { 
+      const response = await api.get('/daily-messages', { 
         params: { project_id: projectId } 
       });
       return response.data;
     } catch (error) {
-      console.error(`Error fetching hourly messages for project ${projectId}:`, error);
+      console.error(`Error fetching daily messages for project ${projectId}:`, error);
       throw error;
     }
   },
 
-  async getAggregatedHourlyMessages() {
+  async getAggregatedDailyMessages() {
     try {
-      const response = await api.get('/hourly-messages', { 
+      const response = await api.get('/daily-messages', { 
         params: { aggregated: true } 
       });
       return response.data;
     } catch (error) {
-      console.error('Error fetching aggregated hourly messages:', error);
+      console.error('Error fetching aggregated daily messages:', error);
       throw error;
     }
   },
 
-  async getNodeHourlyMessages(nodeId) {
+  async getNodeDailyMessages(nodeId) {
     try {
-      const response = await api.get('/hourly-messages', { 
+      const response = await api.get('/daily-messages', { 
         params: { by_node: true, node_id: nodeId } 
       });
       return response.data;
     } catch (error) {
-      console.error(`Error fetching hourly messages for node ${nodeId}:`, error);
+      console.error(`Error fetching daily messages for node ${nodeId}:`, error);
       throw error;
     }
   },
 
-  async getAllNodeHourlyMessages() {
+  async getAllNodeDailyMessages() {
     try {
-      const response = await api.get('/hourly-messages', { 
+      const response = await api.get('/daily-messages', { 
         params: { by_node: true } 
       });
       return response.data;
     } catch (error) {
-      console.error('Error fetching hourly messages for all nodes:', error);
+      console.error('Error fetching daily messages for all nodes:', error);
       throw error;
     }
   },

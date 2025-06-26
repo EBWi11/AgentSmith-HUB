@@ -126,7 +126,11 @@ func NewPlugin(path string, raw string, name string, pluginType int) error {
 
 	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
 
-	_ = p.yaegiLoad()
+	err = p.yaegiLoad()
+	if err != nil {
+		return fmt.Errorf("plugin yaegi load err %s: %w", name, err)
+	}
+
 	Plugins[p.Name] = p
 	return nil
 }

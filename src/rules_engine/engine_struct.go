@@ -1223,6 +1223,11 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 	return newRuleset, nil
 }
 
+// SetTestMode configures the ruleset for test mode by disabling sampling and other global state interactions
+func (r *Ruleset) SetTestMode() {
+	r.sampler = nil // Disable sampling for test instances
+}
+
 // ParseFunctionCall parses a function call of the form "functionName(arg1, arg2, ...)"
 func ParseFunctionCall(input string) (string, []*PluginArg, error) {
 	input = strings.TrimSpace(input)

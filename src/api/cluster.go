@@ -761,6 +761,52 @@ func getHourlyMessages(c echo.Context) error {
 	})
 }
 
+// getDailyMessages returns real message counts for today (from 00:00)
+func getDailyMessages(c echo.Context) error {
+	// Only provide message data from leader nodes
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Message data is only available from leader nodes",
+		})
+	}
+
+	if common.GlobalQPSManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "QPS manager not initialized",
+		})
+	}
+
+	projectID := c.QueryParam("project_id")
+	nodeID := c.QueryParam("node_id")
+	aggregated := c.QueryParam("aggregated") == "true"
+	byNode := c.QueryParam("by_node") == "true"
+
+	var result interface{}
+
+	if byNode {
+		if nodeID != "" {
+			// Return message counts for a specific node
+			result = common.GlobalQPSManager.GetNodeDailyMessages(nodeID)
+		} else {
+			// Return message counts for all nodes
+			result = common.GlobalQPSManager.GetAllNodeDailyMessages()
+		}
+	} else if aggregated {
+		// Return aggregated message counts across all projects and nodes
+		result = common.GlobalQPSManager.GetAggregatedDailyMessages()
+	} else {
+		// Return message counts for a specific project (or all if projectID is empty)
+		result = common.GlobalQPSManager.GetDailyMessageCounts(projectID)
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":        result,
+		"timestamp":   time.Now(),
+		"period":      "today",
+		"period_note": "Message counts are calculated from 00:00 today to current time",
+	})
+}
+
 // getSystemMetrics returns current and historical system metrics for this node
 func getSystemMetrics(c echo.Context) error {
 	if common.GlobalSystemMonitor == nil {

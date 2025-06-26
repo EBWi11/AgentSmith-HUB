@@ -17,7 +17,6 @@ const (
 type SampleData struct {
 	Data                interface{} `json:"data"`
 	Timestamp           time.Time   `json:"timestamp"`
-	Source              string      `json:"source"`
 	ProjectNodeSequence string      `json:"project_node_sequence"`
 }
 
@@ -72,14 +71,14 @@ func (s *Sampler) getOrCreateProjectSamples(projectNodeSequence string) *Project
 }
 
 // Sample attempts to sample the data based on sampling rate
-func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence string) bool {
+func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Check if already closed
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return false
 	}
 
 	// Check parameter validity
-	if data == nil || source == "" || projectNodeSequence == "" {
+	if data == nil || projectNodeSequence == "" {
 		return false
 	}
 
@@ -114,7 +113,6 @@ func (s *Sampler) Sample(data interface{}, source string, projectNodeSequence st
 	sample := SampleData{
 		Data:                data,
 		Timestamp:           time.Now(),
-		Source:              source,
 		ProjectNodeSequence: projectNodeSequence,
 	}
 

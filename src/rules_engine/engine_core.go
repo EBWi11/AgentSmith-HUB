@@ -82,17 +82,22 @@ func (r *Ruleset) Start() error {
 					}
 
 					task := func() {
-						// Optimization: only increment total count, QPS is calculated by metricLoop
-						atomic.AddUint64(&r.processTotal, 1)
+						// Only count and sample in production mode (not test mode)
+						// Test mode is identified by ProjectNodeSequence starting with "TEST."
+						isTestMode := strings.HasPrefix(r.ProjectNodeSequence, "TEST.")
+						if !isTestMode {
+							// Optimization: only increment total count, QPS is calculated by metricLoop
+							atomic.AddUint64(&r.processTotal, 1)
 
-						// IMPORTANT: Sample the input data BEFORE rule checking starts
-						// This ensures we capture the raw data entering the ruleset for analysis
-						if r.sampler != nil {
-							success := r.sampler.Sample(data, "rule_input", r.ProjectNodeSequence)
-							logger.Info("Ruleset input sampler call",
-								"rulesetID", r.RulesetID,
-								"projectNodeSequence", r.ProjectNodeSequence,
-								"success", success)
+							// IMPORTANT: Sample the input data BEFORE rule checking starts
+							// This ensures we capture the raw data entering the ruleset for analysis
+							if r.sampler != nil {
+								success := r.sampler.Sample(data, r.ProjectNodeSequence)
+								logger.Info("Ruleset input sampler call",
+									"rulesetID", r.RulesetID,
+									"projectNodeSequence", r.ProjectNodeSequence,
+									"success", success)
+							}
 						}
 
 						// Now perform rule checking on the input data

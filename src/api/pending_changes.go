@@ -783,25 +783,37 @@ func CancelAllPendingChanges(c echo.Context) error {
 func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart map[string]struct{}) error {
 	switch change.Type {
 	case "plugin":
-		affectedProjects := applyPluginChange(change)
+		affectedProjects, err := applyPluginChange(change)
+		if err != nil {
+			return err
+		}
 		for _, projectID := range affectedProjects {
 			projectsToRestart[projectID] = struct{}{}
 		}
 		return nil
 	case "input":
-		affectedProjects := applyInputChange(change)
+		affectedProjects, err := applyInputChange(change)
+		if err != nil {
+			return err
+		}
 		for _, projectID := range affectedProjects {
 			projectsToRestart[projectID] = struct{}{}
 		}
 		return nil
 	case "output":
-		affectedProjects := applyOutputChange(change)
+		affectedProjects, err := applyOutputChange(change)
+		if err != nil {
+			return err
+		}
 		for _, projectID := range affectedProjects {
 			projectsToRestart[projectID] = struct{}{}
 		}
 		return nil
 	case "ruleset":
-		affectedProjects := applyRulesetChange(change)
+		affectedProjects, err := applyRulesetChange(change)
+		if err != nil {
+			return err
+		}
 		for _, projectID := range affectedProjects {
 			projectsToRestart[projectID] = struct{}{}
 		}
@@ -814,7 +826,7 @@ func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart 
 }
 
 // Component-specific apply functions
-func applyPluginChange(change *EnhancedPendingChange) []string {
+func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
 	// Remove existing plugin from memory before applying
 	common.GlobalMu.Lock()
 	delete(plugin.Plugins, change.ID)
@@ -827,14 +839,14 @@ func applyPluginChange(change *EnhancedPendingChange) []string {
 	err := os.WriteFile(pluginPath, []byte(change.NewContent), 0644)
 	if err != nil {
 		logger.Error("Failed to apply plugin change", "id", change.ID, "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to write plugin file: %w", err)
 	}
 
 	// Reload plugin into memory
 	reloadErr := plugin.NewPlugin(pluginPath, "", change.ID, plugin.YAEGI_PLUGIN)
 	if reloadErr != nil {
 		logger.Error("Failed to reload plugin after merge", "id", change.ID, "error", reloadErr)
-		return nil
+		return nil, fmt.Errorf("failed to reload plugin: %w", reloadErr)
 	}
 
 	// Clear from legacy storage
@@ -849,7 +861,7 @@ func applyPluginChange(change *EnhancedPendingChange) []string {
 	syncComponentToFollowers("plugin", change.ID)
 
 	logger.Info("Plugin change applied successfully", "id", change.ID, "affected_projects", len(affectedProjects))
-	return affectedProjects
+	return affectedProjects, nil
 }
 
 // Generic component application with type-specific handling
@@ -945,31 +957,31 @@ func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
 	return affectedProjects, nil
 }
 
-func applyInputChange(change *EnhancedPendingChange) []string {
+func applyInputChange(change *EnhancedPendingChange) ([]string, error) {
 	affectedProjects, err := applyComponentChange(change)
 	if err != nil {
 		logger.Error("Failed to apply input change", "id", change.ID, "error", err)
-		return nil
+		return nil, err
 	}
-	return affectedProjects
+	return affectedProjects, nil
 }
 
-func applyOutputChange(change *EnhancedPendingChange) []string {
+func applyOutputChange(change *EnhancedPendingChange) ([]string, error) {
 	affectedProjects, err := applyComponentChange(change)
 	if err != nil {
 		logger.Error("Failed to apply output change", "id", change.ID, "error", err)
-		return nil
+		return nil, err
 	}
-	return affectedProjects
+	return affectedProjects, nil
 }
 
-func applyRulesetChange(change *EnhancedPendingChange) []string {
+func applyRulesetChange(change *EnhancedPendingChange) ([]string, error) {
 	affectedProjects, err := applyComponentChange(change)
 	if err != nil {
 		logger.Error("Failed to apply ruleset change", "id", change.ID, "error", err)
-		return nil
+		return nil, err
 	}
-	return affectedProjects
+	return affectedProjects, nil
 }
 
 func applyProjectChange(change *EnhancedPendingChange) error {

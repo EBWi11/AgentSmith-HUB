@@ -109,18 +109,18 @@
           <div class="text-center p-4 bg-blue-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-blue-600 font-medium mb-1">Total Hub Input</div>
             <div class="text-2xl font-bold text-blue-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatMessagesPerHour(hubTotalStats.input) }}
+              {{ formatMessagesPerDay(hubTotalStats.input) }}
             </div>
-            <div class="text-xs text-blue-600">messages/hour (all nodes)</div>
+            <div class="text-xs text-blue-600">messages/day (all nodes)</div>
           </div>
           
           <!-- Total Output -->
           <div class="text-center p-4 bg-green-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-green-600 font-medium mb-1">Total Hub Output</div>
             <div class="text-2xl font-bold text-green-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatMessagesPerHour(hubTotalStats.output) }}
+              {{ formatMessagesPerDay(hubTotalStats.output) }}
             </div>
-            <div class="text-xs text-green-600">messages/hour (all nodes)</div>
+            <div class="text-xs text-green-600">messages/day (all nodes)</div>
           </div>
         </div>
       </div>
@@ -183,13 +183,13 @@
               <div class="flex items-center space-x-4">
                 <!-- Input Messages -->
                 <div class="text-center">
-                  <p class="text-xs text-blue-600 font-medium">Input/h</p>
-                  <p class="text-sm font-bold text-blue-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerHour(getProjectMessageStats(project.id).input) }}</p>
+                                      <p class="text-xs text-blue-600 font-medium">Input/d</p>
+                  <p class="text-sm font-bold text-blue-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerDay(getProjectMessageStats(project.id).input) }}</p>
                 </div>
                 <!-- Output Messages -->
                 <div class="text-center">
                   <p class="text-xs text-green-600 font-medium">Output/h</p>
-                  <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerHour(getProjectMessageStats(project.id).output) }}</p>
+                  <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerDay(getProjectMessageStats(project.id).output) }}</p>
                 </div>
                 <!-- Components Count -->
                 <div class="text-center">
@@ -290,7 +290,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { hubApi } from '../api'
-import { formatNumber, formatPercent, formatMessagesPerHour, formatTimeAgo } from '../utils/common'
+import { formatNumber, formatPercent, formatMessagesPerDay, formatTimeAgo } from '../utils/common'
 
 // Router
 const router = useRouter()
@@ -473,8 +473,8 @@ function getProjectMessageStats(projectId) {
   if (messageData.value && typeof messageData.value === 'object') {
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object' && componentData.component_type) {
-        // Use hourly_rate for MSG/H display instead of cumulative totals
-        const hourlyMessages = componentData.hourly_rate || 0
+              // Use daily_messages for MSG/D display instead of cumulative totals
+      const dailyMessages = componentData.daily_messages || 0
         
         // Apply updated matching logic for new ProjectNodeSequence format
         const keyParts = key.split('.')
@@ -483,14 +483,14 @@ function getProjectMessageStats(projectId) {
           // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
           // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
           if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
-            input += hourlyMessages
+            input += dailyMessages
           }
         } else if (componentData.component_type === 'output') {
           // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
           // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
           if (keyParts.length >= 2 && 
               keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT') {
-            output += hourlyMessages
+            output += dailyMessages
           }
         } else if (componentData.component_type === 'ruleset') {
           // Count ruleset processing load - matches patterns like "INPUT.api_sec.RULESET.test"
@@ -505,7 +505,7 @@ function getProjectMessageStats(projectId) {
               
               if (!hasDownstream) {
                 // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
-                ruleset += hourlyMessages;
+                ruleset += dailyMessages;
               }
               // If hasDownstream is true, this means it's a downstream component's sequence
               // that happens to contain this RULESET in its path - we don't count it
@@ -625,7 +625,7 @@ async function refreshStats() {
     
     // Fetch frequently changing data and component data for accurate counting
     const [messageResponse, systemResponse, componentResponse] = await Promise.all([
-      hubApi.getAggregatedHourlyMessages(),
+              hubApi.getAggregatedDailyMessages(),
       hubApi.getAggregatedSystemMetrics(),
       hubApi.getQPSData() // Also refresh component data to ensure accurate counting
     ])

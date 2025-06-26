@@ -180,6 +180,7 @@ func ServerStart(listener string) error {
 	e.GET("/qps-data", getQPSData)
 	e.GET("/qps-stats", getQPSStats)
 	e.GET("/hourly-messages", getHourlyMessages)
+	e.GET("/daily-messages", getDailyMessages)
 
 	// System metrics endpoints (available on all nodes)
 	e.GET("/system-metrics", getSystemMetrics)
