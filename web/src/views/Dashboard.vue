@@ -188,7 +188,7 @@
                 </div>
                 <!-- Output Messages -->
                 <div class="text-center">
-                  <p class="text-xs text-green-600 font-medium">Output/h</p>
+                  <p class="text-xs text-green-600 font-medium">Output/d</p>
                   <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerDay(getProjectMessageStats(project.id).output) }}</p>
                 </div>
                 <!-- Components Count -->
