@@ -337,14 +337,13 @@ function deduplicateCompletions(result, range, prefix) {
   return result || { suggestions: [], incomplete: false };
 }
 
-// Global-level provider registration flag - ensure entire app registers only once
+// Global registration flag to prevent conflicts
 window.monacoProvidersRegistered = window.monacoProvidersRegistered || false;
 
 // Register language providers
 function registerLanguageProviders() {
-  // Prevent duplicate registration - global level check
+  // Prevent duplicate registration to avoid Monaco internal conflicts
   if (window.monacoProvidersRegistered) {
-    
     return;
   }
   
@@ -436,8 +435,9 @@ function registerLanguageProviders() {
         
         let result;
         
-        // Use explicit component type from props instead of content detection
-        const componentType = props.componentType || 'unknown';
+        // Get componentType from the current Vue component props
+        // Use a global variable to store the current componentType
+        const componentType = window.currentMonacoComponentType || 'unknown';
         
         if (componentType === 'input' || componentType === 'inputs') {
           result = getInputCompletions(textUntilPosition, lineUntilPosition, range, position);
@@ -467,7 +467,12 @@ function registerLanguageProviders() {
       }
     },
     
-    triggerCharacters: [' ', ':', '\n', '\t', '-', '|', '.']
+    // Include starting letters of common prefixes to trigger suggestions quickly
+    triggerCharacters: [' ', ':', '\n', '\t', '-', '|', '.',
+      'I','i','O','o','R','r',  // component prefixes
+      'C','c',                  // content
+      'T','t'                   // type
+    ]
   });
   
 
@@ -494,9 +499,8 @@ function registerLanguageProviders() {
           endColumn: word.endColumn
         };
         
-        // Get component type from model metadata if available
-        const modelData = model._associatedResource || {};
-        const componentType = modelData.componentType || 'unknown';
+        // Get componentType from global variable
+        const componentType = window.currentMonacoComponentType || 'unknown';
         
         let result;
         if (componentType === 'ruleset' || componentType === 'rulesets' || componentType === 'unknown') {
@@ -558,7 +562,7 @@ function registerLanguageProviders() {
   // Use Monaco's built-in XML language with custom styling
   // Don't override the XML tokenizer, just rely on Monaco's default XML parsing
 
-  // Mark providers as registered - global level
+  // Mark providers as registered globally
   window.monacoProvidersRegistered = true;
   
 
@@ -567,6 +571,9 @@ function registerLanguageProviders() {
   // Initialize editor
 function initializeEditor() {
   if (!container.value) return;
+  
+  // Set current componentType globally for completion providers
+  window.currentMonacoComponentType = props.componentType;
   
   // Check container dimensions
   const containerRect = container.value.getBoundingClientRect();
@@ -672,11 +679,7 @@ function initializeEditor() {
     const originalModel = monaco.editor.createModel(props.originalValue || '', language);
     const modifiedModel = monaco.editor.createModel(props.value || '', language);
     
-    // Set component type metadata for XML completion
-    if (language === 'xml') {
-      originalModel._associatedResource = { componentType: props.componentType };
-      modifiedModel._associatedResource = { componentType: props.componentType };
-    }
+    // No need for metadata - using content-based detection
     
     diffEditor.setModel({
       original: originalModel,
@@ -721,11 +724,7 @@ function initializeEditor() {
     // Create regular editor
     editor = monaco.editor.create(container.value, options);
     
-    // Set component type metadata for XML completion
-    const model = editor.getModel();
-    if (model && getLanguage() === 'xml') {
-      model._associatedResource = { componentType: props.componentType };
-    }
+    // No need for metadata - using content-based detection
     
     // Reset decorations array for new editor
     currentDecorations = [];
@@ -932,26 +931,8 @@ watch(() => [props.componentType, props.componentId], ([newType, newId], [oldTyp
     store.dispatch('fetchRulesetFields', newId);
   }
   
-  // Update model metadata when componentType changes (for XML completion)
-  if (getLanguage() === 'xml' && newType !== oldType) {
-    try {
-      if (diffEditor) {
-        // Update both models in diff editor
-        const originalModel = diffEditor.getOriginalEditor().getModel();
-        const modifiedModel = diffEditor.getModifiedEditor().getModel();
-        if (originalModel) originalModel._associatedResource = { componentType: newType };
-        if (modifiedModel) modifiedModel._associatedResource = { componentType: newType };
-      } else if (editor && editor.getModel()) {
-        // Update single model in regular editor
-        const model = editor.getModel();
-        if (model) {
-          model._associatedResource = { componentType: newType };
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to update component type metadata:', error);
-    }
-  }
+  // Update global componentType for completion providers
+  window.currentMonacoComponentType = newType;
 });
 
 // Handle window size changes
@@ -1288,6 +1269,7 @@ function getInputCompletions(fullText, lineText, range, position) {
   
   // 解析当前YAML上下文
   const context = parseYamlContext(fullText, lineText, position);
+
   
   // 根据不同的上下文提供精确的补全
   let result;
@@ -1327,28 +1309,13 @@ function parseYamlContext(fullText, lineText, position) {
   const colonIndex = beforeCursor.lastIndexOf(':');
   if (colonIndex !== -1) {
     const afterColon = beforeCursor.substring(colonIndex + 1);
-    // 检查冒号后是否有内容（空格或实际值都算在值位置）
-    if (afterColon.length === 0 || afterColon.match(/^\s*$/)) {
-      // 冒号后没有内容或只有空格，明确在值位置
-      context.isInValue = true;
-      // 提取键名
-      const beforeColon = beforeCursor.substring(0, colonIndex).trim();
-      context.currentKey = beforeColon.split(/\s+/).pop() || '';
-      // 提取当前值（用于过滤）
-      context.currentValue = afterColon.trim();
-    } else if (afterColon.match(/^\s+/)) {
-      // 冒号后有空格开头，用户正在输入值
-      context.isInValue = true;
-      const beforeColon = beforeCursor.substring(0, colonIndex).trim();
-      context.currentKey = beforeColon.split(/\s+/).pop() || '';
-      context.currentValue = afterColon.trim();
-    } else {
-      // 冒号后有非空格内容，用户正在编辑值
-      context.isInValue = true;
-      const beforeColon = beforeCursor.substring(0, colonIndex).trim();
-      context.currentKey = beforeColon.split(/\s+/).pop() || '';
-      context.currentValue = afterColon;
-    }
+    // 冒号后面都算在值位置，统一处理
+    context.isInValue = true;
+    // 提取键名
+    const beforeColon = beforeCursor.substring(0, colonIndex).trim();
+    context.currentKey = beforeColon.split(/\s+/).pop() || '';
+    // 提取当前值（用于过滤），去除前后空格
+    context.currentValue = afterColon.trim();
   } else {
     // 在键位置
     context.isInKey = true;
@@ -1396,7 +1363,7 @@ function getInputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    console.log('Input type completion triggered', context);
+
     // 使用固定的输入类型列表，确保总是有枚举提示
     const availableInputTypes = [
       { value: 'kafka', description: 'Apache Kafka input source' },
@@ -1541,19 +1508,20 @@ function getInputValueCompletions(context, range, fullText) {
 
 // Input键补全
 function getInputKeyCompletions(context, range, fullText) {
-  const suggestions = [];
+  let suggestions = [];
   
   // 根级别配置
   if (context.indentLevel === 0) {
-    if (!fullText.includes('type:')) {
+    const hasType = fullText.includes('type:');
+    if (!hasType) {
+      // 'type' should be suggested first when absent
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Input source type - choose from: kafka, aliyun_sls',
-        insertText: 'type: kafka',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'type:',
         range: range,
-        sortText: '000_type' // Ensure type property is displayed with priority
+        sortText: '000_type'
       });
     }
     
@@ -1567,7 +1535,14 @@ function getInputKeyCompletions(context, range, fullText) {
           label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka input configuration section',
-          insertText: 'kafka\nkafka:\n  brokers:\n    - :9092\n  topic: test-topic\n  group: test',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "localhost:9092"',
+            '  topic: "topic-name"',
+            '  group: "group-name"',
+            '  compression:""'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1642,6 +1617,7 @@ function getInputKeyCompletions(context, range, fullText) {
       { key: 'consumer_group_name', desc: 'Consumer group name' },
       { key: 'consumer_name', desc: 'Consumer name' },
       { key: 'cursor_position', desc: 'Cursor start position' },
+      { key: 'cursor_start_time', desc: 'Unix timestamp (ms) for start cursor' },
       { key: 'query', desc: 'Log query filter' }
     ];
     
@@ -1656,6 +1632,11 @@ function getInputKeyCompletions(context, range, fullText) {
         });
       }
     });
+  }
+  
+  // Clean root-level meta suggestions if type already present
+  if (context.indentLevel === 0 && fullText.includes('type:')) {
+    suggestions = suggestions.filter(item => item.label !== 'name' && item.label !== 'enable');
   }
   
   return { suggestions };
@@ -1676,7 +1657,7 @@ function getDefaultInputCompletions(fullText, context, range) {
           'type: kafka',
           'kafka:',
           '  brokers:',
-          '    - ""',
+          '    - "localhost:9092"',
           '  topic: ""',
           '  group: ""',
           '  compression: ""'
@@ -1740,6 +1721,7 @@ function getOutputCompletions(fullText, lineText, range, position) {
   
   // 解析当前YAML上下文
   const context = parseYamlContext(fullText, lineText, position);
+
   
   // 根据不同的上下文提供精确的补全
   let result;
@@ -1761,7 +1743,7 @@ function getOutputValueCompletions(context, range, fullText) {
   
   // type属性值补全
   if (context.currentKey === 'type') {
-    console.log('Output type completion triggered', context);
+
     // 使用固定的输出类型列表，确保总是有枚举提示
     const availableOutputTypes = [
       { value: 'kafka', description: 'Apache Kafka output destination' },
@@ -1926,30 +1908,19 @@ function getOutputValueCompletions(context, range, fullText) {
 
 // Output键补全
 function getOutputKeyCompletions(context, range, fullText) {
-  const suggestions = [];
+  let suggestions = [];
   
   // 根级别配置
   if (context.indentLevel === 0) {
-    if (!fullText.includes('type:')) {
+    const hasType = fullText.includes('type:');
+    if (!hasType) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Output destination type - choose from: kafka, elasticsearch, aliyun_sls, print',
-        insertText: 'type: kafka',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'type:',
         range: range,
-        sortText: '000_type' // Ensure type property is displayed with priority
-      });
-    }
-    
-    if (!fullText.includes('name:')) {
-      suggestions.push({
-        label: 'name',
-        kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Output component name',
-        insertText: 'name: "output-name"',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-        range: range
+        sortText: '000_type'
       });
     }
     
@@ -1963,7 +1934,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka output configuration section',
-          insertText: 'kafka:\n  brokers:\n    - \n  topic: \n  group: ',
+          insertText: 'kafka:\n  brokers:\n    - "localhost:9092"\n  topic:\n  compression:',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -2016,7 +1987,9 @@ function getOutputKeyCompletions(context, range, fullText) {
     const kafkaKeys = [
       { key: 'brokers', desc: 'Kafka broker addresses' },
       { key: 'topic', desc: 'Kafka topic name' },
-      { key: 'compression', desc: 'Message compression type' }
+      { key: 'key', desc: 'Partition key for Kafka messages' },
+      { key: 'compression', desc: 'Message compression type' },
+      { key: 'sasl', desc: 'SASL authentication configuration' }
     ];
     
     kafkaKeys.forEach(item => {
@@ -2101,6 +2074,7 @@ function getOutputKeyCompletions(context, range, fullText) {
     });
   }
   
+  // Remove name/enable suggestions (not needed)
   return { suggestions };
 }
 
@@ -2117,11 +2091,11 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Kafka output configuration',
         insertText: [
           'type: kafka',
-          'name: "kafka-output"',
           'kafka:',
           '  brokers:',
           '    - "localhost:9092"',
           '  topic: "topic-name"',
+          '  key: "key-field"',
           '  compression: "none"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
@@ -2133,7 +2107,6 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Elasticsearch output configuration with auth example',
         insertText: [
           'type: elasticsearch',
-          'name: "es-output"',
           'elasticsearch:',
           '  hosts:',
           '    - "http://localhost:9200"',
@@ -2155,7 +2128,6 @@ function getDefaultOutputCompletions(fullText, context, range) {
         documentation: 'Complete Aliyun SLS output configuration',
         insertText: [
           'type: aliyun_sls',
-          'name: "sls-output"',
           'aliyun_sls:',
           '  endpoint: "cn-beijing.log.aliyuncs.com"',
           '  access_key_id: "YOUR_ACCESS_KEY_ID"',
@@ -2170,10 +2142,7 @@ function getDefaultOutputCompletions(fullText, context, range) {
         label: 'Print Output Template',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Simple print output for debugging',
-        insertText: [
-          'type: print'
-        ].join('\n'),
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'type: print',
         range: range
       }
     );
@@ -2383,7 +2352,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         label: '->',
         kind: monaco.languages.CompletionItemKind.Operator,
         documentation: 'Flow operator',
-        insertText: 'image.png-> ',
+        insertText: '-> ',
         range: range
       });
     }
@@ -2510,8 +2479,12 @@ function parseXmlContext(fullText, lineNumber, column) {
     context.currentAttribute = attributeName;
   } else {
     // 不在引号内
-    if (currentLine.includes('<') && !currentLine.includes('>')) {
-      // 在标签内
+    // 检查是否在输入标签名
+    if (beforeCursor.match(/<[a-zA-Z]*$/)) {
+      // 光标前是 < 加可选的字母（可能正在输入标签名）
+      context.isInTagName = true;
+    } else if (currentLine.includes('<') && !currentLine.includes('>')) {
+      // 在未完成的标签内
       if (beforeCursor.includes(' ')) {
         // 有空格，说明在属性区域
         context.isInAttributeName = true;
@@ -2519,9 +2492,6 @@ function parseXmlContext(fullText, lineNumber, column) {
         // 没有空格，还在标签名
         context.isInTagName = true;
       }
-    } else if (beforeCursor.trim().endsWith('<')) {
-      // 刚开始输入标签
-      context.isInTagName = true;
     } else {
       // 在标签内容中
       context.isInTagContent = true;

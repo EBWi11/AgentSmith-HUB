@@ -25,14 +25,7 @@
           <span v-if="cancelling" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
           Cancel All
         </button>
-        <button 
-          @click="applyChanges" 
-          class="btn btn-primary btn-sm"
-          :disabled="applying || !changes.length"
-        >
-          <span v-if="applying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
-          {{ applying ? 'Applying...' : 'Apply All Changes' }}
-        </button>
+
       </div>
     </div>
 
@@ -49,7 +42,7 @@
     </div>
     
     <div v-else class="flex-1 overflow-auto">
-      <div v-for="(change, index) in changes" :key="index" class="mb-4 border rounded-md overflow-hidden">
+      <div v-for="(change, index) in sortedChanges" :key="index" class="mb-4 border rounded-md overflow-hidden">
         <div class="bg-gray-50 p-3 flex justify-between items-center border-b">
           <div class="font-medium">
             <span class="text-gray-700">{{ getComponentTypeLabel(change.type) }}:</span>
@@ -130,7 +123,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
 import { useApiOperations } from '../composables/useApi'
@@ -153,6 +146,33 @@ const editorRefs = ref([]) // Store editor references
 
 // Global message component
 const $message = inject('$message', window?.$toast)
+
+// Computed properties
+const sortedChanges = computed(() => {
+  return [...changes.value].sort((a, b) => {
+    // Define component type priority (lower number = higher priority)
+    const getTypePriority = (type) => {
+      switch (type) {
+        case 'input': return 1
+        case 'output': return 2
+        case 'ruleset': return 3
+        case 'plugin': return 4
+        case 'project': return 5  // project goes last
+        default: return 6
+      }
+    }
+    
+    const priorityA = getTypePriority(a.type)
+    const priorityB = getTypePriority(b.type)
+    
+    // If same type, sort by id
+    if (priorityA === priorityB) {
+      return a.id.localeCompare(b.id)
+    }
+    
+    return priorityA - priorityB
+  })
+})
 
 // Lifecycle hooks
 onMounted(() => {

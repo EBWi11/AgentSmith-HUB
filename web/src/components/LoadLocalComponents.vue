@@ -18,13 +18,7 @@
         >
           {{ verifying ? 'Verifying...' : 'Verify' }}
         </button>
-        <button 
-          @click="loadAllChanges" 
-          :disabled="!changes.length || loading"
-          class="btn btn-primary btn-sm"
-        >
-          {{ loading ? 'Loading...' : 'Load All Changes' }}
-        </button>
+
       </div>
     </div>
 
@@ -43,7 +37,7 @@
       </div>
       
       <div v-else class="space-y-4 p-4">
-        <div v-for="change in changes" :key="`${change.type}-${change.id}`" class="border border-gray-200 rounded-lg overflow-hidden">
+        <div v-for="change in sortedChanges" :key="`${change.type}-${change.id}`" class="border border-gray-200 rounded-lg overflow-hidden">
           <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200">
             <div class="flex items-center space-x-3">
               <h3 class="font-medium text-gray-900">
@@ -130,7 +124,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
 
@@ -145,6 +139,33 @@ const verifying = ref(false)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
+
+// Computed properties
+const sortedChanges = computed(() => {
+  return [...changes.value].sort((a, b) => {
+    // Define component type priority (lower number = higher priority)
+    const getTypePriority = (type) => {
+      switch (type) {
+        case 'input': return 1
+        case 'output': return 2
+        case 'ruleset': return 3
+        case 'plugin': return 4
+        case 'project': return 5  // project goes last
+        default: return 6
+      }
+    }
+    
+    const priorityA = getTypePriority(a.type)
+    const priorityB = getTypePriority(b.type)
+    
+    // If same type, sort by id
+    if (priorityA === priorityB) {
+      return a.id.localeCompare(b.id)
+    }
+    
+    return priorityA - priorityB
+  })
+})
 
 // Lifecycle hooks
 onMounted(() => {
