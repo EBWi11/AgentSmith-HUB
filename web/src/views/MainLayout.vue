@@ -4,6 +4,7 @@
     <div class="flex flex-1 overflow-hidden">
       <Sidebar 
         :selected="selected" 
+        :collapsed="sidebarCollapsed"
         @select-item="onSelectItem" 
         @open-editor="onOpenEditor" 
         @item-deleted="handleItemDeleted"
@@ -11,9 +12,10 @@
         @test-ruleset="onTestRuleset"
         @test-output="onTestOutput"
         @test-project="onTestProject"
+        @toggle-collapse="toggleSidebarCollapse"
         ref="sidebarRef"
       />
-      <main class="flex-1 bg-gray-50">
+      <main class="flex-1 bg-gray-50 transition-all duration-300">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
           v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'error-logs'" 
@@ -75,6 +77,7 @@ import ProjectTestModal from '../components/ProjectTestModal.vue'
 // State
 const selected = ref(null)
 const sidebarRef = ref(null)
+const sidebarCollapsed = ref(false)
 const showTestRulesetModal = ref(false)
 const testRulesetId = ref('')
 const showTestOutputModal = ref(false)
@@ -351,5 +354,10 @@ function closeTestProjectModal() {
 function handleRefreshList(type) {
   // Refresh component list of specified type
   refreshSidebar(type)
+}
+
+// Toggle sidebar collapse
+function toggleSidebarCollapse() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
 }
 </script> 

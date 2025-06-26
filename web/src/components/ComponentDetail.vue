@@ -6,10 +6,10 @@
   <div v-else-if="props.item && props.item.isNew" class="h-full flex flex-col">
     <!-- Special layout for projects: Split view with live preview -->
     <div v-if="isProject" class="flex h-full">
-      <div class="w-3/5 h-full">
+      <div class="w-1/2 h-full">
         <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
       </div>
-      <div class="w-2/5 h-full border-l border-gray-200">
+      <div class="w-1/2 h-full border-l border-gray-200">
         <div class="p-3 bg-gray-50 border-b border-gray-200">
           <h3 class="text-sm font-medium text-gray-700 flex items-center">
             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -187,10 +187,10 @@
     
          <!-- Special layout for projects: Split view with live preview -->
      <div v-if="isProject" class="flex h-full">
-       <div class="w-3/5 h-full">
+       <div class="w-1/2 h-full">
          <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
        </div>
-       <div class="w-2/5 h-full border-l border-gray-200">
+       <div class="w-1/2 h-full border-l border-gray-200">
         <div class="p-3 bg-gray-50 border-b border-gray-200">
           <h3 class="text-sm font-medium text-gray-700 flex items-center">
             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -343,10 +343,10 @@
 
   <!-- Special layout for projects -->
   <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="flex h-full">
-    <div class="w-3/5 h-full">
+    <div class="w-1/2 h-full">
        <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" :component-id="props.item?.id" :component-type="props.item?.type" />
     </div>
-    <div class="w-2/5 h-full border-l border-gray-200">
+    <div class="w-1/2 h-full border-l border-gray-200">
       <ProjectWorkflow :projectContent="detail.raw" :projectId="props.item?.id || detail.id" :enableMessages="detail.status === 'running'" />
     </div>
   </div>

@@ -1,68 +1,120 @@
 <template>
-  <aside class="w-72 h-full bg-white shadow-sm flex flex-col px-3 pt-5 pb-3 font-sans">
-    <div class="mb-4">
-      <div class="relative">
-        <input
-          type="text"
-          placeholder="Search"
-          v-model="search"
-          @input="debouncedSearch(search)"
-          class="w-full pl-7 pr-8 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
-        />
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-        <!-- Search loading indicator -->
-        <div v-if="searchLoading" class="absolute right-2.5 top-1/2 -translate-y-1/2">
-          <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-        </div>
+  <aside class="h-full bg-white shadow-sm flex flex-col font-sans transition-all duration-300"
+         :class="props.collapsed ? 'w-16' : 'w-72'"
+         :style="props.collapsed ? 'min-width: 64px' : 'min-width: 288px'">
+    <!-- Header with toggle button -->
+    <div class="flex items-center justify-between px-3 pt-5 pb-3">
+      <div v-if="!props.collapsed" class="flex items-center flex-1">
+        <h1 class="text-lg font-bold text-gray-900 truncate">AgentSmith-HUB</h1>
+      </div>
+      <div class="relative" :class="props.collapsed ? 'mx-auto' : 'mr-3'">
+        <button 
+          @click="emit('toggle-collapse')"
+          class="p-1 rounded-full hover:bg-gray-100 transition-colors flex items-center justify-center w-6 h-6"
+          :title="props.collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        >
+          <svg class="w-4 h-4 transition-transform duration-200"
+               :class="{ 'rotate-180': props.collapsed }"
+               fill="none" 
+               stroke="currentColor" 
+               viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
+          </svg>
+        </button>
       </div>
     </div>
-    <div class="flex-1 overflow-y-auto custom-scrollbar">
-      <div v-for="(section, type) in sections" :key="type" class="mb-4">
-        <!-- Dashboard special button -->
-        <div v-if="type === 'dashboard'">
-          <div class="flex items-center justify-between mb-1.5">
-            <button
-              @click="$emit('select-item', { type: 'home' })"
-              class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
-              :class="{ 'text-blue-600': selected && selected.type === 'home' }"
-              style="min-width:0;"
-            >
-              <!-- Empty space for arrow alignment -->
-              <div class="w-4 h-4 mr-1.5"></div>
-              <!-- Add section icon -->
-              <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
-              <span class="truncate">{{ section.title }}</span>
-            </button>
+    
+    <!-- Content wrapper -->
+    <div class="flex-1 flex flex-col" :class="props.collapsed ? 'px-2' : 'px-3'">
+      <!-- Search bar - only show when not collapsed -->
+      <div v-if="!props.collapsed" class="mb-4">
+        <div class="relative">
+          <input
+            type="text"
+            placeholder="Search"
+            v-model="search"
+            @input="debouncedSearch(search)"
+            class="w-full pl-7 pr-8 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition"
+          />
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <!-- Search loading indicator -->
+          <div v-if="searchLoading" class="absolute right-2.5 top-1/2 -translate-y-1/2">
+            <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
           </div>
         </div>
+      </div>
+      <!-- Navigation -->
+      <div class="flex-1 overflow-y-auto custom-scrollbar">
+        <div v-for="(section, type) in sections" :key="type" class="mb-4">
+          <!-- Dashboard special button -->
+          <div v-if="type === 'dashboard'">
+            <div class="flex items-center justify-between mb-1.5">
+              <button
+                @click="$emit('select-item', { type: 'home' })"
+                class="text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+                :class="[
+                  { 'text-blue-600': selected && selected.type === 'home' },
+                  props.collapsed ? 'w-full flex justify-center' : 'flex items-center'
+                ]"
+                :title="props.collapsed ? section.title : ''"
+                style="min-width:0;"
+              >
+                <!-- Collapsed view: just icon centered -->
+                <template v-if="props.collapsed">
+                  <div class="w-8 h-8 flex items-center justify-center mx-auto text-gray-600" v-html="section.icon"></div>
+                </template>
+                <!-- Expanded view: normal layout -->
+                <template v-else>
+                  <div class="flex items-center w-full">
+                    <!-- Empty space for arrow alignment -->
+                    <div class="w-4 h-4 mr-1.5 flex-shrink-0"></div>
+                    <!-- Add section icon -->
+                    <div class="w-4 h-4 mr-1.5 text-gray-600 flex-shrink-0" v-html="section.icon"></div>
+                    <span class="truncate">{{ section.title }}</span>
+                  </div>
+                </template>
+              </button>
+            </div>
+          </div>
         <!-- Regular sections -->
         <div v-else>
           <div class="flex items-center justify-between mb-1.5">
             <button
               @click="toggleCollapse(type)"
-              class="flex items-center text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+              class="text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
+              :class="props.collapsed ? 'w-full flex justify-center' : 'flex items-center'"
+              :title="props.collapsed ? section.title : ''"
               style="min-width:0;"
             >
-              <svg
-                class="w-4 h-4 mr-1.5 transition-transform duration-200"
-                :class="{ 'rotate-90': !collapsed[type] }"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-              </svg>
-              <!-- Add section icon -->
-              <div class="w-4 h-4 mr-1.5 text-gray-600" v-html="section.icon"></div>
-              <span class="truncate">{{ section.title }}</span>
+              <!-- Collapsed view: just icon centered -->
+              <template v-if="props.collapsed">
+                <div class="w-8 h-8 flex items-center justify-center mx-auto text-gray-600" v-html="section.icon"></div>
+              </template>
+              <!-- Expanded view: normal layout -->
+              <template v-else>
+                <div class="flex items-center w-full">
+                  <svg
+                    class="w-4 h-4 mr-1.5 transition-transform duration-200 flex-shrink-0"
+                    :class="{ 'rotate-90': !collapsed[type] }"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                  </svg>
+                  <!-- Add section icon -->
+                  <div class="w-4 h-4 mr-1.5 text-gray-600 flex-shrink-0" v-html="section.icon"></div>
+                  <span class="truncate">{{ section.title }}</span>
+                </div>
+              </template>
             </button>
-            <div class="relative mr-3">
+            <div v-if="!props.collapsed" class="relative mr-3">
               <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
               </button>
             </div>
           </div>
-          <div v-if="!collapsed[type]" class="space-y-0.5">
+          <div v-if="!collapsed[type] && !props.collapsed" class="space-y-0.5">
             <div v-if="section.children" class="relative">
               <!-- 已经将Push Changes整合到section.children中，不再需要单独的部分 -->
               <div v-for="(child, index) in section.children" :key="child.type"
@@ -323,6 +375,7 @@
             </div>
           </div>
         </div>
+                      </div>
       </div>
     </div>
 
@@ -837,7 +890,11 @@ const router = useRouter()
 
 // Props
 const props = defineProps({
-  selected: Object
+  selected: Object,
+  collapsed: {
+    type: Boolean,
+    default: false
+  }
 })
 
 // Emits
@@ -848,7 +905,8 @@ const emit = defineEmits([
   'open-pending-changes',
   'test-ruleset',
   'test-output',
-  'test-project'
+  'test-project',
+  'toggle-collapse'
 ])
 
 // Global message component
