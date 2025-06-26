@@ -75,7 +75,7 @@
             <div v-if="testResults.result !== null && testResults.result !== undefined">
               <div class="text-sm font-medium text-gray-700 mb-2">Result:</div>
               <div class="bg-white border border-gray-200 rounded overflow-hidden">
-                <JsonViewer :value="testResults.result" height="200px" />
+                <JsonViewer :value="testResults.result" height="auto" />
               </div>
             </div>
             

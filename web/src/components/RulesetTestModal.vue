@@ -65,7 +65,7 @@
                       Rule: {{ result._HUB_HIT_RULE_ID }}
                     </span>
                   </div>
-                  <JsonViewer :value="result" height="320px" />
+                  <JsonViewer :value="result" height="auto" />
                 </div>
               </div>
             </div>

@@ -87,7 +87,7 @@
                 
                 <div v-else class="space-y-2">
                   <div v-for="(result, index) in results" :key="index" class="border border-gray-100 rounded p-2">
-                    <JsonViewer :value="result" height="240px" />
+                    <JsonViewer :value="result" height="auto" />
                   </div>
                 </div>
               </div>

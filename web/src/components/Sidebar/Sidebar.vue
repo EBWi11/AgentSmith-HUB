@@ -540,7 +540,7 @@
             <div v-if="testPluginResult.result !== null && testPluginResult.result !== undefined">
               <div class="text-sm font-medium text-gray-700 mb-2">Result:</div>
               <div class="bg-white border border-gray-200 rounded overflow-hidden">
-                <JsonViewer :value="testPluginResult.result" height="200px" />
+                <JsonViewer :value="testPluginResult.result" height="auto" />
               </div>
             </div>
             
