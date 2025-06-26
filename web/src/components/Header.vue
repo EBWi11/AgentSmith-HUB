@@ -1,8 +1,7 @@
 <template>
   <header class="h-16 border-b border-gray-200 flex items-center justify-between px-6">
-    <!-- Logo and Title -->
+    <!-- Empty left side -->
     <div class="flex items-center space-x-3">
-      <h1 class="text-xl font-semibold text-gray-800">AgentSmith-HUB</h1>
     </div>
     
     <!-- Action Buttons -->
