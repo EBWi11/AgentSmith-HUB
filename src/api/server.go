@@ -172,6 +172,9 @@ func ServerStart(listener string) error {
 	// Component usage analysis
 	e.GET("/component-usage/:type/:id", GetComponentUsage)
 
+	// Component configuration search
+	e.GET("/search-components", searchComponentsConfig)
+
 	// Load local components routes
 	e.GET("/local-changes", getLocalChanges)
 	e.POST("/load-local-changes", loadLocalChanges)

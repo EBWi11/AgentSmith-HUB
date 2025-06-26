@@ -1657,3 +1657,170 @@ import (
 
 	return content // Fallback to full content if extraction fails
 }
+
+// SearchResult represents a single search match
+type SearchResult struct {
+	ComponentType string `json:"component_type"`
+	ComponentID   string `json:"component_id"`
+	FileName      string `json:"file_name"`
+	FilePath      string `json:"file_path"`
+	LineNumber    int    `json:"line_number"`
+	LineContent   string `json:"line_content"`
+	IsTemporary   bool   `json:"is_temporary"`
+}
+
+// SearchResponse represents the search API response
+type SearchResponse struct {
+	Query   string         `json:"query"`
+	Results []SearchResult `json:"results"`
+	Total   int            `json:"total"`
+}
+
+// searchComponentsConfig handles the search API endpoint
+func searchComponentsConfig(c echo.Context) error {
+	query := c.QueryParam("q")
+	if query == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "query parameter 'q' is required",
+		})
+	}
+
+	// Component types to search
+	componentTypes := []string{"input", "output", "ruleset", "project", "plugin"}
+	var allResults []SearchResult
+
+	for _, componentType := range componentTypes {
+		// Search formal files
+		results := searchInComponentType(componentType, query, false)
+		allResults = append(allResults, results...)
+
+		// Search temporary files
+		tempResults := searchInComponentType(componentType, query, true)
+		allResults = append(allResults, tempResults...)
+	}
+
+	// Sort results by component type, then by component ID, then by line number
+	sort.Slice(allResults, func(i, j int) bool {
+		if allResults[i].ComponentType != allResults[j].ComponentType {
+			return allResults[i].ComponentType < allResults[j].ComponentType
+		}
+		if allResults[i].ComponentID != allResults[j].ComponentID {
+			return allResults[i].ComponentID < allResults[j].ComponentID
+		}
+		return allResults[i].LineNumber < allResults[j].LineNumber
+	})
+
+	response := SearchResponse{
+		Query:   query,
+		Results: allResults,
+		Total:   len(allResults),
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+// searchInComponentType searches within a specific component type
+func searchInComponentType(componentType, query string, isTemporary bool) []SearchResult {
+	var results []SearchResult
+	var componentMap map[string]string
+
+	// Get component content map based on type and temporary status
+	if isTemporary {
+		switch componentType {
+		case "input":
+			componentMap = project.GlobalProject.InputsNew
+		case "output":
+			componentMap = project.GlobalProject.OutputsNew
+		case "ruleset":
+			componentMap = project.GlobalProject.RulesetsNew
+		case "project":
+			componentMap = project.GlobalProject.ProjectsNew
+		case "plugin":
+			componentMap = plugin.PluginsNew
+		}
+	} else {
+		// For formal files, we need to read from the actual component instances
+		componentMap = make(map[string]string)
+		switch componentType {
+		case "input":
+			for _, comp := range project.GlobalProject.Inputs {
+				componentMap[comp.Id] = comp.Config.RawConfig
+			}
+		case "output":
+			for _, comp := range project.GlobalProject.Outputs {
+				componentMap[comp.Id] = comp.Config.RawConfig
+			}
+		case "ruleset":
+			for _, comp := range project.GlobalProject.Rulesets {
+				componentMap[comp.RulesetID] = comp.RawConfig
+			}
+		case "project":
+			for _, comp := range project.GlobalProject.Projects {
+				componentMap[comp.Id] = comp.Config.RawConfig
+			}
+		case "plugin":
+			for _, comp := range plugin.Plugins {
+				if comp.Type == plugin.YAEGI_PLUGIN {
+					componentMap[comp.Name] = string(comp.Payload)
+				} else if comp.Type == plugin.LOCAL_PLUGIN {
+					// Try to read local plugin source
+					if source, err := readLocalPluginSource(comp.Name); err == nil {
+						componentMap[comp.Name] = source
+					}
+				}
+			}
+		}
+	}
+
+	// Search within each component's content
+	for componentID, content := range componentMap {
+		matches := searchInContent(content, query)
+		for _, match := range matches {
+			filePath, _ := GetComponentPath(componentType, componentID, isTemporary)
+			fileName := filepath.Base(filePath)
+
+			result := SearchResult{
+				ComponentType: componentType,
+				ComponentID:   componentID,
+				FileName:      fileName,
+				FilePath:      filePath,
+				LineNumber:    match.LineNumber,
+				LineContent:   match.LineContent,
+				IsTemporary:   isTemporary,
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// ContentMatch represents a match within content
+type ContentMatch struct {
+	LineNumber  int
+	LineContent string
+}
+
+// searchInContent searches for query within content and returns matches
+func searchInContent(content, query string) []ContentMatch {
+	var matches []ContentMatch
+
+	if content == "" || query == "" {
+		return matches
+	}
+
+	lines := strings.Split(content, "\n")
+	queryLower := strings.ToLower(query)
+
+	for lineNum, line := range lines {
+		lineLower := strings.ToLower(line)
+		if strings.Contains(lineLower, queryLower) {
+			matches = append(matches, ContentMatch{
+				LineNumber:  lineNum + 1, // 1-based line numbers
+				LineContent: strings.TrimSpace(line),
+			})
+		}
+	}
+
+	return matches
+}
