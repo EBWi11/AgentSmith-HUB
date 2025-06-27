@@ -2,8 +2,11 @@ package mcp
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"sort"
 	"strings"
@@ -146,16 +149,41 @@ func (s *MCPServer) promptCreateProjectGuide(args map[string]interface{}) (commo
 	}
 
 	useCase, _ := args["use_case"].(string)
-	inputComponents, _ := args["input_components"].(string)
-	processingLogic, _ := args["processing_logic"].(string)
-	outputComponents, _ := args["output_components"].(string)
 
-	availableInputs := getComponentListForPrompt(project.GlobalProject.Inputs)
-	availableRulesets := getComponentListForPrompt(project.GlobalProject.Rulesets)
-	availableOutputs := getComponentListForPrompt(project.GlobalProject.Outputs)
+	getComponentList := func(componentMap interface{}) string {
+		var keys []string
+		switch m := componentMap.(type) {
+		case map[string]*input.Input:
+			for k := range m {
+				keys = append(keys, k)
+			}
+		case map[string]*output.Output:
+			for k := range m {
+				keys = append(keys, k)
+			}
+		case map[string]*rules_engine.Ruleset:
+			for k := range m {
+				keys = append(keys, k)
+			}
+		default:
+			return "    - (Unknown component type)"
+		}
+		if len(keys) == 0 {
+			return "    - (No components of this type available)"
+		}
+		sort.Strings(keys)
+		var builder strings.Builder
+		for _, k := range keys {
+			builder.WriteString(fmt.Sprintf("    - %s\n", k))
+		}
+		return strings.TrimRight(builder.String(), "\n")
+	}
 
-	promptText := fmt.Sprintf(promptDef.Template, useCase, inputComponents, processingLogic, outputComponents, availableInputs, availableRulesets, availableOutputs)
+	availableInputs := getComponentList(project.GlobalProject.Inputs)
+	availableRulesets := getComponentList(project.GlobalProject.Rulesets)
+	availableOutputs := getComponentList(project.GlobalProject.Outputs)
 
+	promptText := fmt.Sprintf(promptDef.Template, useCase, availableInputs, availableRulesets, availableOutputs)
 	return common.MCPGetPromptResult{
 		Description: promptDef.Description,
 		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},

@@ -48,7 +48,7 @@ func (s *MCPServer) getPluginContent(pluginName string) (string, string, error) 
 		return "", "", fmt.Errorf("plugin not found: %s", pluginName)
 	}
 
-	content := fmt.Sprintf("Plugin: %s\nType: %s\nPayload:\n%s",
+	content := fmt.Sprintf("Plugin: %s\nType: %d\nPayload:\n%s",
 		plugin.Name, plugin.Type, string(plugin.Payload))
 
 	return fmt.Sprintf("Plugin %s implementation", pluginName), content, nil
@@ -79,8 +79,8 @@ func (s *MCPServer) toolCreateProject(args map[string]interface{}) (common.MCPTo
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s already exists", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s already exists", projectID),
 				},
 			},
 			IsError: true,
@@ -91,8 +91,8 @@ func (s *MCPServer) toolCreateProject(args map[string]interface{}) (common.MCPTo
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: fmt.Sprintf("Request to create project %s has been received.", projectID),
+				Format: "text",
+				Text:   fmt.Sprintf("Request to create project %s has been received.", projectID),
 			},
 		},
 		IsError: false,
@@ -110,8 +110,8 @@ func (s *MCPServer) toolStartProject(args map[string]interface{}) (common.MCPToo
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s not found", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s not found", projectID),
 				},
 			},
 			IsError: true,
@@ -122,8 +122,8 @@ func (s *MCPServer) toolStartProject(args map[string]interface{}) (common.MCPToo
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s is already running", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s is already running", projectID),
 				},
 			},
 			IsError: false,
@@ -135,8 +135,8 @@ func (s *MCPServer) toolStartProject(args map[string]interface{}) (common.MCPToo
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Failed to start project %s: %v", projectID, err),
+					Format: "text",
+					Text:   fmt.Sprintf("Failed to start project %s: %v", projectID, err),
 				},
 			},
 			IsError: true,
@@ -146,8 +146,8 @@ func (s *MCPServer) toolStartProject(args map[string]interface{}) (common.MCPToo
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: fmt.Sprintf("Successfully started project %s", projectID),
+				Format: "text",
+				Text:   fmt.Sprintf("Successfully started project %s", projectID),
 			},
 		},
 		IsError: false,
@@ -165,8 +165,8 @@ func (s *MCPServer) toolStopProject(args map[string]interface{}) (common.MCPTool
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s not found", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s not found", projectID),
 				},
 			},
 			IsError: true,
@@ -177,8 +177,8 @@ func (s *MCPServer) toolStopProject(args map[string]interface{}) (common.MCPTool
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s is already stopped", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s is already stopped", projectID),
 				},
 			},
 			IsError: false,
@@ -190,8 +190,8 @@ func (s *MCPServer) toolStopProject(args map[string]interface{}) (common.MCPTool
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Failed to stop project %s: %v", projectID, err),
+					Format: "text",
+					Text:   fmt.Sprintf("Failed to stop project %s: %v", projectID, err),
 				},
 			},
 			IsError: true,
@@ -201,8 +201,8 @@ func (s *MCPServer) toolStopProject(args map[string]interface{}) (common.MCPTool
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: fmt.Sprintf("Successfully stopped project %s", projectID),
+				Format: "text",
+				Text:   fmt.Sprintf("Successfully stopped project %s", projectID),
 			},
 		},
 		IsError: false,
@@ -220,8 +220,8 @@ func (s *MCPServer) toolGetProjectStatus(args map[string]interface{}) (common.MC
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Project %s not found", projectID),
+					Format: "text",
+					Text:   fmt.Sprintf("Project %s not found", projectID),
 				},
 			},
 			IsError: true,
@@ -236,8 +236,8 @@ func (s *MCPServer) toolGetProjectStatus(args map[string]interface{}) (common.MC
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: status,
+				Format: "text",
+				Text:   status,
 			},
 		},
 		IsError: false,
@@ -285,7 +285,7 @@ func (s *MCPServer) toolSearchComponents(args map[string]interface{}) (common.MC
 		for pluginName, plugin := range plugin.Plugins {
 			if query == "" || strings.Contains(strings.ToLower(pluginName), strings.ToLower(query)) ||
 				strings.Contains(strings.ToLower(string(plugin.Payload)), strings.ToLower(query)) {
-				results = append(results, fmt.Sprintf("Plugin: %s (Type: %s)", pluginName, plugin.Type))
+				results = append(results, fmt.Sprintf("Plugin: %s (Type: %d)", pluginName, plugin.Type))
 			}
 		}
 	}
@@ -307,8 +307,8 @@ func (s *MCPServer) toolSearchComponents(args map[string]interface{}) (common.MC
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: strings.Join(results, "\n"),
+				Format: "text",
+				Text:   strings.Join(results, "\n"),
 			},
 		},
 		IsError: false,
@@ -368,7 +368,7 @@ func (s *MCPServer) toolValidateComponent(args map[string]interface{}) (common.M
 			validationResult = fmt.Sprintf("Plugin %s not found", componentID)
 			isValid = false
 		} else {
-			validationResult = fmt.Sprintf("Plugin %s is valid (Type: %s)", componentID, plugin.Type)
+			validationResult = fmt.Sprintf("Plugin %s is valid (Type: %d)", componentID, plugin.Type)
 			isValid = true
 		}
 	case "ruleset":
@@ -387,8 +387,8 @@ func (s *MCPServer) toolValidateComponent(args map[string]interface{}) (common.M
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Type: "text",
-				Text: validationResult,
+				Format: "text",
+				Text:   validationResult,
 			},
 		},
 		IsError: !isValid,

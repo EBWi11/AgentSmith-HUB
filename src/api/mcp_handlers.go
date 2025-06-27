@@ -9,6 +9,7 @@ import (
 	"AgentSmith-HUB/project"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -333,4 +334,302 @@ func getMCPStats(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, stats)
+}
+
+// getMCPInstallConfig provides MCP client installation configuration
+func getMCPInstallConfig(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "MCP services are only available on the leader node",
+		})
+	}
+
+	// Get server host information
+	host := c.Request().Host
+	if host == "" {
+		host = "localhost:8080"
+	}
+
+	// Determine protocol (http/https)
+	protocol := "http"
+	if c.Request().TLS != nil {
+		protocol = "https"
+	}
+	if forwardedProto := c.Request().Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		protocol = forwardedProto
+	}
+
+	baseURL := fmt.Sprintf("%s://%s", protocol, host)
+
+	// MCP server configuration for VSCode extension
+	mcpConfig := map[string]interface{}{
+		"name":        "AgentSmith-HUB",
+		"description": "AgentSmith-HUB MCP Server - Data Processing Pipeline Management",
+		"version":     "0.1.2",
+		"server": map[string]interface{}{
+			"type":    "http",
+			"baseUrl": baseURL,
+			"endpoints": map[string]interface{}{
+				"mcp":      "/mcp",
+				"batch":    "/mcp/batch",
+				"info":     "/mcp/info",
+				"manifest": "/mcp/manifest",
+				"stats":    "/mcp/stats",
+				"health":   "/mcp/health",
+				"install":  "/mcp/install", // This endpoint
+			},
+			"authentication": map[string]interface{}{
+				"type":   "header",
+				"header": "token",
+				"note":   "Obtain token from AgentSmith-HUB administrator",
+			},
+		},
+		"capabilities": map[string]interface{}{
+			"resources": map[string]interface{}{
+				"description": "Access to project configurations, inputs, outputs, rulesets, and plugins",
+				"supported":   true,
+			},
+			"tools": map[string]interface{}{
+				"description": "Complete API access to all AgentSmith-HUB functionality",
+				"count":       60, // Approximate number of tools available
+				"supported":   true,
+			},
+			"prompts": map[string]interface{}{
+				"description": "Intelligent prompts for project analysis, debugging, and optimization",
+				"count":       12, // Number of available prompts
+				"supported":   true,
+			},
+		},
+		"installation": map[string]interface{}{
+			"vscode": map[string]interface{}{
+				"extensionId": "your-extension-id", // Replace with actual VSCode extension ID
+				"settings": map[string]interface{}{
+					"mcp.servers": map[string]interface{}{
+						"agentsmith-hub": map[string]interface{}{
+							"name":        "AgentSmith-HUB",
+							"description": "Data Processing Pipeline Management",
+							"transport": map[string]interface{}{
+								"type": "http",
+								"host": host,
+								"port": getPortFromHost(host),
+								"path": "/mcp",
+								"ssl":  protocol == "https",
+							},
+							"authentication": map[string]interface{}{
+								"type":   "bearer",
+								"header": "token",
+							},
+							"timeout": 30000, // 30 seconds
+						},
+					},
+				},
+				"configuration": map[string]interface{}{
+					"steps": []string{
+						"1. Install the MCP extension for VSCode",
+						"2. Add the server configuration to your VSCode settings",
+						"3. Obtain authentication token from your AgentSmith-HUB administrator",
+						"4. Configure the token in VSCode MCP settings",
+						"5. Restart VSCode to apply the changes",
+					},
+				},
+			},
+			"claude_desktop": map[string]interface{}{
+				"settings": map[string]interface{}{
+					"mcpServers": map[string]interface{}{
+						"agentsmith-hub": map[string]interface{}{
+							"command": "node",
+							"args": []string{
+								"/path/to/mcp-http-client.js", // HTTP MCP client bridge
+								"--server", baseURL + "/mcp",
+								"--token", "${AGENTSMITH_TOKEN}", // Environment variable
+							},
+							"env": map[string]interface{}{
+								"AGENTSMITH_TOKEN": "your-token-here",
+							},
+						},
+					},
+				},
+				"configuration": map[string]interface{}{
+					"steps": []string{
+						"1. Set environment variable AGENTSMITH_TOKEN with your authentication token",
+						"2. Add the server configuration to Claude Desktop settings",
+						"3. Restart Claude Desktop to apply the changes",
+					},
+				},
+			},
+		},
+		"documentation": map[string]interface{}{
+			"apiDocs":    baseURL + "/api/docs",
+			"quickStart": baseURL + "/docs/quickstart",
+			"examples":   baseURL + "/docs/examples",
+			"github":     "https://github.com/your-org/agentsmith-hub",
+		},
+		"support": map[string]interface{}{
+			"email":   "support@your-domain.com",
+			"website": "https://your-domain.com",
+			"docs":    baseURL + "/docs",
+		},
+	}
+
+	return c.JSON(http.StatusOK, mcpConfig)
+}
+
+// getMCPQuickSetup provides a quick setup script for various MCP clients
+func getMCPQuickSetup(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "MCP services are only available on the leader node",
+		})
+	}
+
+	clientType := c.QueryParam("client") // vscode, claude, custom
+	if clientType == "" {
+		clientType = "vscode"
+	}
+
+	host := c.Request().Host
+	if host == "" {
+		host = "localhost:8080"
+	}
+
+	protocol := "http"
+	if c.Request().TLS != nil {
+		protocol = "https"
+	}
+	if forwardedProto := c.Request().Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		protocol = forwardedProto
+	}
+
+	baseURL := fmt.Sprintf("%s://%s", protocol, host)
+
+	var setupScript string
+
+	switch clientType {
+	case "vscode":
+		setupScript = fmt.Sprintf(`{
+  "mcp.servers": {
+    "agentsmith-hub": {
+      "name": "AgentSmith-HUB",
+      "description": "Data Processing Pipeline Management",
+      "transport": {
+        "type": "http",
+        "baseUrl": "%s",
+        "endpoint": "/mcp"
+      },
+      "authentication": {
+        "type": "header",
+        "header": "token",
+        "value": "YOUR_TOKEN_HERE"
+      }
+    }
+  }
+}
+
+// Add this to your VSCode settings.json
+// Replace YOUR_TOKEN_HERE with your actual token`, baseURL)
+
+	case "claude":
+		setupScript = fmt.Sprintf(`{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "command": "node",
+      "args": [
+        "/path/to/mcp-http-client.js",
+        "--server", "%s/mcp",
+        "--token", "${AGENTSMITH_TOKEN}"
+      ],
+      "env": {
+        "AGENTSMITH_TOKEN": "your-token-here"
+      }
+    }
+  }
+}
+
+// Add this to your Claude Desktop config.json
+// Set AGENTSMITH_TOKEN environment variable with your token`, baseURL)
+
+	case "curl":
+		setupScript = fmt.Sprintf(`# Test MCP connection with curl
+
+# 1. Health check (no auth required)
+curl -X GET "%s/mcp/health"
+
+# 2. Get server info (requires auth)
+curl -X POST "%s/mcp" \
+  -H "Content-Type: application/json" \
+  -H "token: YOUR_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+             "clientInfo": {
+         "name": "curl-test",
+         "version": "0.1.2"
+       }
+    }
+  }'
+
+# 3. List available tools
+curl -X POST "%s/mcp" \
+  -H "Content-Type: application/json" \
+  -H "token: YOUR_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list"
+  }'`, baseURL, baseURL, baseURL)
+
+	default:
+		setupScript = fmt.Sprintf(`# Custom MCP Client Setup
+
+Server URL: %s/mcp
+Authentication: Header "token"
+Protocol: JSON-RPC 2.0 over HTTP
+
+Required Headers:
+- Content-Type: application/json
+- token: YOUR_AUTH_TOKEN
+
+Example Initialize Request:
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-03-26",
+    "capabilities": {},
+         "clientInfo": {
+       "name": "your-client",
+       "version": "0.1.2"
+     }
+  }
+}`, baseURL)
+	}
+
+	return c.String(http.StatusOK, setupScript)
+}
+
+// getPortFromHost extracts port from host string
+func getPortFromHost(host string) int {
+	// Default ports
+	defaultPort := 8080
+
+	// Try to parse port from host
+	if len(host) > 0 {
+		for i := len(host) - 1; i >= 0; i-- {
+			if host[i] == ':' {
+				if portStr := host[i+1:]; len(portStr) > 0 {
+					if port, err := strconv.Atoi(portStr); err == nil {
+						return port
+					}
+				}
+				break
+			}
+		}
+	}
+
+	return defaultPort
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type PromptConfig struct {
@@ -32,27 +33,18 @@ type MCPServer struct {
 }
 
 func NewMCPServer() *MCPServer {
-	// Initialize API mapper with localhost (will be updated when config is available)
 	apiMapper := NewAPIMapper("http://localhost:8080", "")
 
 	s := &MCPServer{
 		initialized: false,
 		capabilities: common.MCPServerCapabilities{
-			Resources: &common.MCPResourceCapability{
-				Subscribe:   true,
-				ListChanged: true,
-			},
-			Tools: &common.MCPToolsCapability{
-				ListChanged: true,
-			},
-			Prompts: &common.MCPPromptsCapability{
-				ListChanged: true,
-			},
-			Logging: &common.MCPLoggingCapability{},
+			Resources: &common.MCPResourceCapability{},
+			Tools:     &common.MCPToolsCapability{},
+			Prompts:   &common.MCPPromptsCapability{},
 		},
 		serverInfo: common.MCPImplementationInfo{
 			Name:    "AgentSmith-HUB",
-			Version: "1.0.0",
+			Version: "0.1.2",
 		},
 		apiMapper:      apiMapper,
 		promptDefs:     make(map[string]PromptConfig),
@@ -90,13 +82,19 @@ func (s *MCPServer) loadPrompts(path string) error {
 		return fmt.Errorf("could not read prompt file: %w", err)
 	}
 
-	var promptFile PromptFile
+	var promptFile struct {
+		Prompts []common.MCPPrompt `json:"prompts"`
+	}
 	if err := json.Unmarshal(data, &promptFile); err != nil {
 		return fmt.Errorf("could not parse prompt file: %w", err)
 	}
 
 	for _, p := range promptFile.Prompts {
-		s.promptDefs[p.Name] = p
+		s.promptDefs[p.Name] = PromptConfig{
+			Name:        p.Name,
+			Description: p.Description,
+			Arguments:   p.Arguments,
+		}
 	}
 
 	logger.Info("Successfully loaded MCP prompts from file", "count", len(s.promptDefs))
@@ -179,13 +177,29 @@ func (s *MCPServer) handleListResources(message *common.MCPMessage) (*common.MCP
 
 	resources := []common.MCPResource{}
 
+	// Helper function to get file info
+	getFileInfo := func(path string) (*time.Time, int64) {
+		if path == "" {
+			return nil, 0
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			return nil, 0
+		}
+		mt := fi.ModTime()
+		return &mt, fi.Size()
+	}
+
 	// Add project resources
 	for _, proj := range project.GlobalProject.Projects {
+		modTime, size := getFileInfo(proj.Config.Path)
 		resources = append(resources, common.MCPResource{
-			URI:         fmt.Sprintf("hub://project/%s", proj.Id),
-			Name:        fmt.Sprintf("Project: %s", proj.Id),
-			Description: fmt.Sprintf("Project configuration and status for %s", proj.Id),
-			MimeType:    "application/yaml",
+			URI:          fmt.Sprintf("hub://project/%s", proj.Id),
+			Name:         fmt.Sprintf("Project: %s", proj.Id),
+			Description:  fmt.Sprintf("Project configuration and status for %s", proj.Id),
+			MimeType:     "application/yaml",
+			LastModified: modTime,
+			Size:         size,
 			Annotations: map[string]string{
 				"type":   "project",
 				"status": string(proj.Status),
@@ -195,55 +209,58 @@ func (s *MCPServer) handleListResources(message *common.MCPMessage) (*common.MCP
 
 	// Add input resources
 	for _, input := range project.GlobalProject.Inputs {
+		modTime, size := getFileInfo(input.Path)
 		resources = append(resources, common.MCPResource{
-			URI:         fmt.Sprintf("hub://input/%s", input.Id),
-			Name:        fmt.Sprintf("Input: %s", input.Id),
-			Description: fmt.Sprintf("Input configuration for %s", input.Id),
-			MimeType:    "application/yaml",
-			Annotations: map[string]string{
-				"type": "input",
-			},
+			URI:          fmt.Sprintf("hub://input/%s", input.Id),
+			Name:         fmt.Sprintf("Input: %s", input.Id),
+			Description:  fmt.Sprintf("Input configuration for %s", input.Id),
+			MimeType:     "application/yaml",
+			LastModified: modTime,
+			Size:         size,
+			Annotations:  map[string]string{"type": "input"},
 		})
 	}
 
 	// Add output resources
 	for _, output := range project.GlobalProject.Outputs {
+		modTime, size := getFileInfo(output.Path)
 		resources = append(resources, common.MCPResource{
-			URI:         fmt.Sprintf("hub://output/%s", output.Id),
-			Name:        fmt.Sprintf("Output: %s", output.Id),
-			Description: fmt.Sprintf("Output configuration for %s", output.Id),
-			MimeType:    "application/yaml",
-			Annotations: map[string]string{
-				"type": "output",
-			},
+			URI:          fmt.Sprintf("hub://output/%s", output.Id),
+			Name:         fmt.Sprintf("Output: %s", output.Id),
+			Description:  fmt.Sprintf("Output configuration for %s", output.Id),
+			MimeType:     "application/yaml",
+			LastModified: modTime,
+			Size:         size,
+			Annotations:  map[string]string{"type": "output"},
 		})
 	}
 
-	// Add plugin resources
-	for _, plugin := range plugin.Plugins {
+	// Add plugin resources (Plugins might not have a direct file path in the same way)
+	// For now, we omit LastModified and Size for plugins if path is not available.
+	for _, p := range plugin.Plugins {
 		resources = append(resources, common.MCPResource{
-			URI:         fmt.Sprintf("hub://plugin/%s", plugin.Name),
-			Name:        fmt.Sprintf("Plugin: %s", plugin.Name),
-			Description: fmt.Sprintf("Plugin implementation for %s", plugin.Name),
+			URI:         fmt.Sprintf("hub://plugin/%s", p.Name),
+			Name:        fmt.Sprintf("Plugin: %s", p.Name),
+			Description: fmt.Sprintf("Plugin implementation for %s", p.Name),
 			MimeType:    "text/plain",
 			Annotations: map[string]string{
 				"type":        "plugin",
-				"plugin_type": string(plugin.Type),
-				"return_type": plugin.ReturnType,
+				"plugin_type": fmt.Sprintf("%d", p.Type),
 			},
 		})
 	}
 
 	// Add ruleset resources
 	for _, ruleset := range project.GlobalProject.Rulesets {
+		modTime, size := getFileInfo(ruleset.Path)
 		resources = append(resources, common.MCPResource{
-			URI:         fmt.Sprintf("hub://ruleset/%s", ruleset.RulesetID),
-			Name:        fmt.Sprintf("Ruleset: %s", ruleset.RulesetID),
-			Description: fmt.Sprintf("Ruleset configuration for %s", ruleset.RulesetID),
-			MimeType:    "application/xml",
-			Annotations: map[string]string{
-				"type": "ruleset",
-			},
+			URI:          fmt.Sprintf("hub://ruleset/%s", ruleset.RulesetID),
+			Name:         fmt.Sprintf("Ruleset: %s", ruleset.RulesetID),
+			Description:  fmt.Sprintf("Ruleset configuration for %s", ruleset.RulesetID),
+			MimeType:     "application/xml",
+			LastModified: modTime,
+			Size:         size,
+			Annotations:  map[string]string{"type": "ruleset"},
 		})
 	}
 
@@ -377,8 +394,8 @@ func (s *MCPServer) handleCallTool(message *common.MCPMessage) (*common.MCPMessa
 		result = common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Type: "text",
-					Text: fmt.Sprintf("Error: %v", err),
+					Format: "text",
+					Text:   fmt.Sprintf("Error: %v", err),
 				},
 			},
 			IsError: true,
