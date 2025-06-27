@@ -494,6 +494,9 @@ func main() {
 	}
 	cl := cluster.ClusterInit(common.Config.LocalIP, common.Config.LocalIP)
 
+	// CRITICAL: Set global cluster.NodeID to ensure QPS data collection works correctly
+	cluster.NodeID = common.Config.LocalIP
+
 	if *configRoot != "" {
 		//set self is leader
 		common.Config.Leader = common.Config.LocalIP
