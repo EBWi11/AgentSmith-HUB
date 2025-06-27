@@ -197,6 +197,8 @@ func ServerStart(listener string) error {
 
 	// MCP (Model Context Protocol) endpoints - REQUIRE AUTH
 	auth.POST("/mcp", handleMCP)              // Main MCP JSON-RPC endpoint
+	auth.GET("/mcp", handleMCP)               // MCP SSE endpoint (for Cline and similar clients)
+	auth.DELETE("/mcp", handleMCP)            // MCP session termination endpoint
 	auth.POST("/mcp/batch", handleMCPBatch)   // Batch MCP requests
 	auth.GET("/mcp/info", getMCPInfo)         // MCP server information
 	auth.GET("/mcp/manifest", getMCPManifest) // MCP server manifest
