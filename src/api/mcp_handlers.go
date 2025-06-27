@@ -145,8 +145,8 @@ func getMCPManifest(c echo.Context) error {
 	manifest := map[string]interface{}{
 		"mcpVersion":  common.MCPVersion,
 		"name":        "AgentSmith-HUB MCP Server",
-		"version":     "1.0.0",
-		"description": "Model Context Protocol server for AgentSmith-HUB providing access to project configurations, components, and management tools (Leader node only)",
+		"version":     "0.1.2",
+		"description": "Model Context Protocol server for AgentSmith-HUB Security Data Pipe Platform (SDPP) providing access to security project configurations, components, and security management tools (Leader node only)",
 		"author":      "AgentSmith-HUB Team",
 		"license":     "MIT",
 		"homepage":    "https://github.com/your-org/AgentSmith-HUB",
@@ -206,7 +206,7 @@ func mcpHealthCheck(c echo.Context) error {
 	return c.JSON(httpStatus, map[string]interface{}{
 		"status":    status,
 		"service":   "AgentSmith-HUB MCP Server",
-		"version":   "1.0.0",
+		"version":   "0.1.2",
 		"uptime":    "running",
 		"is_leader": cluster.IsLeader,
 		"node_id":   cluster.NodeID,
@@ -364,7 +364,7 @@ func getMCPInstallConfig(c echo.Context) error {
 	// MCP server configuration for VSCode extension
 	mcpConfig := map[string]interface{}{
 		"name":        "AgentSmith-HUB",
-		"description": "AgentSmith-HUB MCP Server - Data Processing Pipeline Management",
+		"description": "AgentSmith-HUB MCP Server - Security Data Pipe Platform (SDPP) & Security Rules Engine",
 		"version":     "0.1.2",
 		"server": map[string]interface{}{
 			"type":    "http",
@@ -407,7 +407,7 @@ func getMCPInstallConfig(c echo.Context) error {
 					"mcp.servers": map[string]interface{}{
 						"agentsmith-hub": map[string]interface{}{
 							"name":        "AgentSmith-HUB",
-							"description": "Data Processing Pipeline Management",
+							"description": "Security Data Pipe Platform & Rules Engine",
 							"transport": map[string]interface{}{
 								"type": "http",
 								"host": host,
@@ -472,144 +472,6 @@ func getMCPInstallConfig(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, mcpConfig)
-}
-
-// getMCPQuickSetup provides a quick setup script for various MCP clients
-func getMCPQuickSetup(c echo.Context) error {
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusForbidden, map[string]string{
-			"error": "MCP services are only available on the leader node",
-		})
-	}
-
-	clientType := c.QueryParam("client") // vscode, claude, custom
-	if clientType == "" {
-		clientType = "vscode"
-	}
-
-	host := c.Request().Host
-	if host == "" {
-		host = "localhost:8080"
-	}
-
-	protocol := "http"
-	if c.Request().TLS != nil {
-		protocol = "https"
-	}
-	if forwardedProto := c.Request().Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
-		protocol = forwardedProto
-	}
-
-	baseURL := fmt.Sprintf("%s://%s", protocol, host)
-
-	var setupScript string
-
-	switch clientType {
-	case "vscode":
-		setupScript = fmt.Sprintf(`{
-  "mcp.servers": {
-    "agentsmith-hub": {
-      "name": "AgentSmith-HUB",
-      "description": "Data Processing Pipeline Management",
-      "transport": {
-        "type": "http",
-        "baseUrl": "%s",
-        "endpoint": "/mcp"
-      },
-      "authentication": {
-        "type": "header",
-        "header": "token",
-        "value": "YOUR_TOKEN_HERE"
-      }
-    }
-  }
-}
-
-// Add this to your VSCode settings.json
-// Replace YOUR_TOKEN_HERE with your actual token`, baseURL)
-
-	case "claude":
-		setupScript = fmt.Sprintf(`{
-  "mcpServers": {
-    "agentsmith-hub": {
-      "command": "node",
-      "args": [
-        "/path/to/mcp-http-client.js",
-        "--server", "%s/mcp",
-        "--token", "${AGENTSMITH_TOKEN}"
-      ],
-      "env": {
-        "AGENTSMITH_TOKEN": "your-token-here"
-      }
-    }
-  }
-}
-
-// Add this to your Claude Desktop config.json
-// Set AGENTSMITH_TOKEN environment variable with your token`, baseURL)
-
-	case "curl":
-		setupScript = fmt.Sprintf(`# Test MCP connection with curl
-
-# 1. Health check (no auth required)
-curl -X GET "%s/mcp/health"
-
-# 2. Get server info (requires auth)
-curl -X POST "%s/mcp" \
-  -H "Content-Type: application/json" \
-  -H "token: YOUR_TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2025-03-26",
-      "capabilities": {},
-             "clientInfo": {
-         "name": "curl-test",
-         "version": "0.1.2"
-       }
-    }
-  }'
-
-# 3. List available tools
-curl -X POST "%s/mcp" \
-  -H "Content-Type: application/json" \
-  -H "token: YOUR_TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/list"
-  }'`, baseURL, baseURL, baseURL)
-
-	default:
-		setupScript = fmt.Sprintf(`# Custom MCP Client Setup
-
-Server URL: %s/mcp
-Authentication: Header "token"
-Protocol: JSON-RPC 2.0 over HTTP
-
-Required Headers:
-- Content-Type: application/json
-- token: YOUR_AUTH_TOKEN
-
-Example Initialize Request:
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2025-03-26",
-    "capabilities": {},
-         "clientInfo": {
-       "name": "your-client",
-       "version": "0.1.2"
-     }
-  }
-}`, baseURL)
-	}
-
-	return c.String(http.StatusOK, setupScript)
 }
 
 // getPortFromHost extracts port from host string

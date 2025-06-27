@@ -471,7 +471,7 @@ func main() {
 
 	// Handle version flag
 	if *version {
-		fmt.Printf("%s %s\n", Version)
+		fmt.Printf("%s\n", Version)
 		return
 	}
 

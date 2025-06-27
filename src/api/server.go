@@ -206,7 +206,6 @@ func ServerStart(listener string) error {
 
 	// MCP Installation endpoints (public access for easy setup)
 	e.GET("/mcp/install", getMCPInstallConfig) // MCP installation configuration
-	e.GET("/mcp/setup", getMCPQuickSetup)      // Quick setup scripts for various clients
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
