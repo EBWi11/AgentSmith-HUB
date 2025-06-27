@@ -31,619 +31,638 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// === PUBLIC ENDPOINTS ===
 		{
 			Name:        "ping",
-			Description: "Health check endpoint for server connectivity and basic status verification.",
+			Description: "Health check endpoint that returns 'pong' to verify server connectivity and basic status.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "token_check",
-			Description: "Verify authentication token validity and retrieve current authentication status.",
+			Description: "Verify authentication token validity and retrieve current authentication status information.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_qps_data",
-			Description: "Retrieve current Queries Per Second (QPS) data for all components across the AgentSmith-HUB cluster. Dashboard uses this for real-time performance monitoring, displaying component throughput and identifying processing bottlenecks. Returns per-component QPS metrics, including input rates, output rates, and processing latencies. Supports filtering by project_id, component type, and time ranges. Critical for performance analysis, capacity planning, and troubleshooting high-load scenarios.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Description: "Retrieve current QPS (Queries Per Second) metrics for all components. Returns real-time throughput data including per-component processing rates, message counts, and performance statistics. Supports filtering by project_id, component_id, node_id, and aggregation options.",
+			InputSchema: map[string]common.MCPToolArg{
+				"project_id":     {Type: "string", Description: "Filter by specific project ID", Required: false},
+				"node_id":        {Type: "string", Description: "Filter by specific node ID", Required: false},
+				"component_id":   {Type: "string", Description: "Filter by specific component ID", Required: false},
+				"component_type": {Type: "string", Description: "Filter by component type (input, output, ruleset)", Required: false},
+				"aggregated":     {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
+			},
 		},
 		{
 			Name:        "get_qps_stats",
-			Description: "Get aggregated QPS statistics and historical performance metrics across the entire AgentSmith-HUB system. Provides statistical analysis including averages, peaks, trends, and comparative data over time periods. Dashboard uses this for performance trending charts and system health indicators. Returns min/max/avg QPS values, percentile distributions, and growth trends. Essential for capacity planning, performance optimization, and identifying usage patterns.",
+			Description: "Get statistical analysis of QPS data including averages, trends, and performance metrics over time.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_hourly_messages",
-			Description: "Retrieve hourly message processing statistics for detailed time-based analysis of system throughput. Used by Dashboard and monitoring tools to create hourly performance charts and detect usage patterns. Returns message counts broken down by hour, component type, and processing status. Supports filtering by project, date range, and aggregation level. Valuable for understanding peak usage times, planning maintenance windows, and analyzing system load distribution throughout the day.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Description: "Retrieve hourly message processing statistics for time-based performance analysis. Returns message counts by hour with breakdown by component type and processing status.",
+			InputSchema: map[string]common.MCPToolArg{
+				"project_id": {Type: "string", Description: "Filter by specific project ID", Required: false},
+				"node_id":    {Type: "string", Description: "Filter by specific node ID", Required: false},
+				"aggregated": {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
+				"by_node":    {Type: "string", Description: "Group results by node (true/false)", Required: false},
+			},
 		},
 		{
 			Name:        "get_daily_messages",
-			Description: "Get daily message processing totals and trends for long-term system analysis and reporting. Dashboard displays these metrics in summary cards and trend charts to show system growth and daily throughput. Returns daily totals by project, component type, success/failure rates, and comparative data. Essential for business reporting, capacity planning, and identifying long-term usage trends. Supports aggregation by project_id and node_id for cluster-wide analysis.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Description: "Get daily message processing totals and trends for long-term analysis. Returns daily totals by project and component type with comparative statistics.",
+			InputSchema: map[string]common.MCPToolArg{
+				"project_id": {Type: "string", Description: "Filter by specific project ID", Required: false},
+				"node_id":    {Type: "string", Description: "Filter by specific node ID", Required: false},
+				"aggregated": {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
+				"by_node":    {Type: "string", Description: "Group results by node (true/false)", Required: false},
+			},
 		},
 		{
 			Name:        "get_system_metrics",
-			Description: "Retrieve current system performance metrics including CPU, memory, disk usage, and network statistics from the local node. Dashboard uses this for real-time system health monitoring and resource utilization tracking. Returns detailed metrics like CPU percentage, memory usage, disk I/O, network throughput, and process counts. Critical for system administration, performance monitoring, and identifying resource constraints that might affect processing performance.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Description: "Retrieve current system performance metrics including CPU usage, memory consumption, goroutine count, and disk usage from the local node.",
+			InputSchema: map[string]common.MCPToolArg{
+				"since":   {Type: "string", Description: "Get metrics since specific timestamp (RFC3339 format)", Required: false},
+				"current": {Type: "string", Description: "Return only current metrics (true/false)", Required: false},
+			},
 		},
 		{
 			Name:        "get_system_stats",
-			Description: "Get aggregated system statistics and historical performance data for trend analysis and capacity planning. Provides statistical summaries including averages, peaks, and trends over configurable time periods. Used by Dashboard for system health indicators and performance trending. Returns statistical analysis of CPU, memory, and disk usage patterns. Essential for identifying performance degradation, planning hardware upgrades, and optimizing system configuration.",
+			Description: "Get statistical analysis of system performance metrics including averages, peaks, and trends over time.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_cluster_system_metrics",
-			Description: "Retrieve system performance metrics from all nodes in the AgentSmith-HUB cluster for comprehensive cluster monitoring. Dashboard displays cluster-wide system health, comparing performance across nodes and identifying potential issues. Returns per-node metrics including CPU, memory, disk usage, and network statistics. Supports node filtering and aggregation options. Critical for cluster administration, load balancing decisions, and identifying underperforming nodes.",
+			Description: "Retrieve system performance metrics from all nodes in the cluster for comprehensive cluster monitoring.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_cluster_system_stats",
-			Description: "Get statistical analysis of cluster-wide system performance including averages, trends, and comparative metrics across all nodes. Provides insights into cluster health, performance distribution, and resource utilization patterns. Dashboard uses this for cluster health overview and performance comparison charts. Returns statistical summaries, outlier detection, and performance rankings by node. Essential for cluster optimization, capacity planning, and identifying nodes requiring attention.",
+			Description: "Get statistical analysis of cluster-wide system performance including node comparisons and performance distribution.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_cluster_status",
-			Description: "Retrieve comprehensive cluster status information including node health, leader election status, and cluster topology. Dashboard displays cluster overview with node roles, connectivity status, and health indicators. Returns detailed information about each node including role (leader/follower), last heartbeat, active status, and version information. Critical for cluster administration, troubleshooting connectivity issues, and monitoring cluster stability and leadership changes.",
+			Description: "Retrieve cluster status information including node health, leader election status, and connectivity information.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_cluster",
-			Description: "Get detailed cluster configuration and membership information including node addresses, ports, and cluster settings. Provides comprehensive cluster topology data for administration and monitoring tools. Returns cluster configuration, node list with detailed connection info, cluster-wide settings, and membership status. Used for cluster setup verification, network troubleshooting, and configuration management. Essential for understanding cluster architecture and connectivity requirements.",
+			Description: "Get detailed cluster configuration and membership information including node addresses and cluster settings.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 
 		// === PROJECT ENDPOINTS ===
 		{
 			Name:        "get_projects",
-			Description: "Retrieve complete list of all projects in the AgentSmith-HUB system with their current status, configuration summary, and runtime information. Frontend uses this for project listing in sidebar, Dashboard overview, and project management interfaces. Returns project IDs, status (running/stopped/error), component counts, message throughput, and last activity timestamps. Includes temporary file indicators for projects with pending changes. Essential for project overview, status monitoring, and navigation.",
+			Description: "Retrieve list of all projects with their status, configuration summary, and metadata. Returns project IDs, running status, and temporary file indicators.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_project",
-			Description: "Get detailed configuration and status for a specific project.",
+			Description: "Get detailed configuration and status information for a specific project including YAML configuration and file paths.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "The unique identifier of the project to retrieve.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to retrieve", Required: true},
 			},
 		},
 		{
 			Name:        "create_project",
-			Description: "Create a new project from a YAML configuration string. Follows the 3-step update workflow.",
+			Description: "Create a new project with specified ID and YAML configuration. Creates temporary file that requires separate application step.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "A unique identifier for the new project.", Required: true},
-				"content": {Type: "string", Description: "The complete project configuration in YAML format.", Required: true},
+				"id":  {Type: "string", Description: "Unique project identifier", Required: true},
+				"raw": {Type: "string", Description: "Project YAML configuration content", Required: true},
 			},
 		},
 		{
 			Name:        "update_project",
-			Description: "Update existing project configuration with new settings, component mappings, or processing flow changes. Used by project editor to save configuration changes. Creates temporary file for validation before applying changes. Requires project ID and updated YAML content. Validates new configuration, checks component dependencies, and maintains processing state. Returns update status and validation results. Note: Updates create pending changes that must be applied via apply_single_change for safety.",
+			Description: "Update existing project configuration with modified YAML content. Creates temporary file that requires application via apply_single_change.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Existing project identifier to update.", Required: true},
-				"content": {Type: "string", Description: "Updated project configuration in YAML format with modified settings, components, or processing flow.", Required: true},
+				"id":  {Type: "string", Description: "Project identifier to update", Required: true},
+				"raw": {Type: "string", Description: "Updated project YAML configuration", Required: true},
 			},
 		},
 		{
 			Name:        "delete_project",
-			Description: "Delete specified project and all associated resources including configurations, temporary files, and runtime data. Used by project management interface with confirmation dialogs. Requires project ID parameter. Automatically stops project if running, removes all associated files, and cleans up cluster-wide references. Returns deletion status and cleanup summary. WARNING: This operation is irreversible and will permanently remove all project data, configurations, and historical statistics.",
+			Description: "Delete specified project and all associated resources including configurations and temporary files.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to delete permanently.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to delete", Required: true},
 			},
 		},
 		{
 			Name:        "start_project",
-			Description: "Start specified project and begin message processing according to its configuration. Frontend uses this for project control buttons and automated startup sequences. Applies any pending configuration changes automatically before starting. Requires project_id parameter. Initializes all input/output connections, loads rulesets, and begins message flow. Returns startup status, component initialization results, and any startup errors. Project status changes to 'running' on success or 'error' if startup fails.",
+			Description: "Start specified project and begin message processing. Applies pending changes automatically before starting.",
 			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to start. Must be in 'stopped' status and have valid configuration.", Required: true},
+				"project_id": {Type: "string", Description: "Project identifier to start", Required: true},
 			},
 		},
 		{
 			Name:        "stop_project",
-			Description: "Stop specified project gracefully, completing current message processing before shutdown. Used by project control interface and maintenance procedures. Applies pending changes before stopping to ensure latest configuration is saved. Requires project_id parameter. Gracefully closes all connections, completes in-flight messages, and updates project status. Returns stop status and final processing statistics. Project can be restarted later with same or updated configuration.",
+			Description: "Stop specified project gracefully, completing current message processing before shutdown.",
 			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to stop. Must be in 'running' status.", Required: true},
+				"project_id": {Type: "string", Description: "Project identifier to stop", Required: true},
 			},
 		},
 		{
 			Name:        "restart_project",
-			Description: "Restart specified project by stopping it gracefully and starting it again with latest configuration. Frontend uses this for applying configuration changes and recovering from errors. Automatically applies any pending changes before restart. Combines stop and start operations with proper error handling. Returns restart status, configuration reload results, and startup verification. More reliable than separate stop/start calls as it handles timing and state transitions automatically.",
+			Description: "Restart specified project by stopping it gracefully and starting it again with latest configuration.",
 			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to restart. Can be in any status - will be stopped first if running.", Required: true},
+				"project_id": {Type: "string", Description: "Project identifier to restart", Required: true},
 			},
 		},
 		{
 			Name:        "restart_all_projects",
-			Description: "Restart all projects in the system sequentially with proper dependency handling and error recovery. Used for system-wide configuration updates, maintenance procedures, and cluster synchronization. Processes projects in dependency order, handles failures gracefully, and provides comprehensive status reporting. Returns detailed restart results for each project including timing, errors, and final status. Critical for maintaining system consistency during updates or after cluster changes.",
+			Description: "Restart all projects in the system sequentially with proper error handling and status reporting.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_project_error",
-			Description: "Retrieve detailed error information for projects in error status including stack traces, configuration issues, and component failure details. Frontend displays this in project status indicators and error debugging interfaces. Requires project ID parameter. Returns comprehensive error details including error timestamps, affected components, configuration validation failures, and suggested remediation steps. Essential for troubleshooting project issues and identifying root causes of failures.",
+			Description: "Retrieve detailed error information for projects in error status including error messages and timestamps.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get error details for. Project should be in 'error' status.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to get error details for", Required: true},
 			},
 		},
 		{
 			Name:        "get_project_inputs",
-			Description: "Get list of input components and input nodes available for specified project, used for testing interfaces and project configuration validation. Frontend uses this to populate input selection dropdowns in test forms and workflow designers. Returns available input components with their types, connection status, and configuration details. Essential for project testing, debugging message flows, and validating input connectivity.",
+			Description: "Get list of input components and input nodes available for specified project, used for testing and validation.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get input components for.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to get input components for", Required: true},
 			},
 		},
 		{
 			Name:        "get_project_components",
-			Description: "Retrieve comprehensive component usage statistics for specified project including counts of inputs, outputs, rulesets, and plugins used. Dashboard uses this for project overview cards and component relationship visualization. Returns detailed component counts by type, component health status, dependency relationships, and usage statistics. Valuable for project analysis, dependency tracking, and identifying unused or problematic components.",
+			Description: "Retrieve component usage statistics for specified project including counts by component type and relationships.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to analyze components for.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to analyze components for", Required: true},
 			},
 		},
 		{
 			Name:        "get_project_component_sequences",
-			Description: "Get detailed component processing sequences and workflow paths for specified project showing how messages flow through the system. Used by workflow visualization tools and debugging interfaces to understand message processing paths. Returns component execution order, data flow paths, branching logic, and processing sequences. Critical for understanding project architecture, optimizing processing flows, and troubleshooting message routing issues.",
+			Description: "Get component processing sequences and workflow paths for specified project showing message flow order.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get component sequences for.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to get component sequences for", Required: true},
 			},
 		},
 
 		// === RULESET ENDPOINTS ===
 		{
 			Name:        "get_rulesets",
-			Description: "Retrieve complete list of all rulesets in the system with their status, usage information, and temporary file indicators. Sidebar component uses this for ruleset navigation and management interfaces. Returns ruleset IDs, descriptions, associated projects, rule counts, and modification timestamps. Includes indicators for rulesets with pending changes (.new files). Essential for ruleset management, dependency tracking, and identifying unused or problematic rule configurations.",
+			Description: "Retrieve list of all rulesets with their metadata and temporary file indicators. Returns ruleset IDs and hasTemp flags.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_ruleset",
-			Description: "Get detailed information for specific ruleset including complete XML configuration, rule definitions, field mappings, and usage statistics. Used by ruleset editor, testing interfaces, and debugging tools. Requires ruleset ID parameter. Returns full XML content, parsed rule structure, field requirements, associated projects, and performance metrics. Critical for ruleset editing, validation, and understanding rule logic and data processing requirements.",
+			Description: "Get detailed information for specific ruleset including complete XML configuration and file path information.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Unique ruleset identifier (e.g., 'security_rules', 'data_validation'). Must match existing ruleset name.", Required: true},
+				"id": {Type: "string", Description: "Ruleset identifier to retrieve", Required: true},
 			},
 		},
 		{
 			Name:        "create_ruleset",
-			Description: "Create new ruleset with specified XML configuration and rule definitions. Used by ruleset creation forms and import tools. Requires unique ruleset ID and XML content. Validates XML syntax, rule logic, and field requirements. Checks for rule conflicts and validates against schema. Returns creation status, validation results, and rule parsing summary. Created ruleset can be immediately used in project configurations and testing interfaces.",
+			Description: "Create new ruleset with specified ID and XML configuration. Creates temporary file that requires separate application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Unique ruleset identifier. Must be alphanumeric with underscores, no spaces or special characters.", Required: true},
-				"content": {Type: "string", Description: "Complete ruleset configuration in XML format with rule definitions, conditions, actions, and field mappings.", Required: true},
+				"id":  {Type: "string", Description: "Unique ruleset identifier", Required: true},
+				"raw": {Type: "string", Description: "Ruleset XML configuration content", Required: true},
 			},
 		},
 		{
 			Name:        "update_ruleset",
-			Description: "Update existing ruleset with modified XML configuration, rule changes, or field mapping updates. Ruleset editor uses this to save changes with validation. Creates temporary file for safety before applying changes. Validates XML syntax, rule logic consistency, and field compatibility. Returns update status, validation results, and change summary. Updates create pending changes that require explicit application for production use.",
+			Description: "Update existing ruleset with modified XML configuration. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Existing ruleset identifier to update.", Required: true},
-				"content": {Type: "string", Description: "Updated ruleset XML configuration with modified rules, conditions, or field mappings.", Required: true},
+				"id":  {Type: "string", Description: "Ruleset identifier to update", Required: true},
+				"raw": {Type: "string", Description: "Updated ruleset XML configuration", Required: true},
 			},
 		},
 		{
 			Name:        "delete_ruleset",
-			Description: "Delete specified ruleset and all associated resources including rule files and usage references. Used by ruleset management interface with dependency checking and confirmation. Checks for project dependencies before deletion and warns about impact. Removes ruleset files, cleans up references, and updates dependent projects. Returns deletion status and dependency impact summary. WARNING: Deleting active rulesets may cause project failures.",
+			Description: "Delete specified ruleset and all associated resources including configuration files and references.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to delete. System will check for dependencies in active projects.", Required: true},
+				"id": {Type: "string", Description: "Ruleset identifier to delete", Required: true},
 			},
 		},
 
 		// === INPUT ENDPOINTS ===
 		{
 			Name:        "get_inputs",
-			Description: "Retrieve complete list of all input components in the system with their configuration status, connection health, and usage information. Sidebar uses this for input component navigation and management interfaces. Returns input IDs, types (kafka, api, file, etc.), connection status, associated projects, and temporary file indicators. Includes health status, throughput metrics, and last activity timestamps. Essential for input management, troubleshooting connectivity issues, and monitoring data ingestion performance.",
+			Description: "Retrieve list of all input components with their metadata and temporary file indicators. Returns input IDs and hasTemp flags.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_input",
-			Description: "Get detailed information for specific input component including complete YAML configuration, connection parameters, health status, and performance metrics. Used by input editor, testing interfaces, and connection debugging tools. Requires input ID parameter. Returns full configuration content, connection details, authentication settings, message format specifications, and throughput statistics. Critical for input configuration editing, connection troubleshooting, and performance optimization.",
+			Description: "Get detailed information for specific input component including complete YAML configuration and file path.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Unique input component identifier (e.g., 'kafka_input', 'api_endpoint_1'). Must match existing input name.", Required: true},
+				"id": {Type: "string", Description: "Input component identifier to retrieve", Required: true},
 			},
 		},
 		{
 			Name:        "create_input",
-			Description: "Create new input component with specified configuration for data ingestion from external sources. Used by input creation forms and automated deployment tools. Requires unique input ID and YAML configuration. Validates connection parameters, authentication settings, and message format specifications. Tests connectivity during creation process. Returns creation status, validation results, and connection test outcomes. Created input can be immediately used in project configurations.",
+			Description: "Create new input component with specified ID and YAML configuration. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Unique input identifier. Must be alphanumeric with underscores, no spaces.", Required: true},
-				"content": {Type: "string", Description: "Complete input configuration in YAML format including connection details, authentication, message format, and processing settings.", Required: true},
+				"id":  {Type: "string", Description: "Unique input identifier", Required: true},
+				"raw": {Type: "string", Description: "Input YAML configuration content", Required: true},
 			},
 		},
 		{
 			Name:        "update_input",
-			Description: "Update existing input component with modified configuration, connection parameters, or processing settings. Input editor uses this to save configuration changes with validation and connection testing. Creates temporary file for safety before applying changes. Validates new configuration, tests connectivity, and checks compatibility with existing projects. Returns update status, validation results, and connection test outcomes. Updates create pending changes requiring explicit application.",
+			Description: "Update existing input component with modified YAML configuration. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Existing input identifier to update.", Required: true},
-				"content": {Type: "string", Description: "Updated input configuration in YAML format with modified connection details, authentication, or processing settings.", Required: true},
+				"id":  {Type: "string", Description: "Input identifier to update", Required: true},
+				"raw": {Type: "string", Description: "Updated input YAML configuration", Required: true},
 			},
 		},
 		{
 			Name:        "delete_input",
-			Description: "Delete specified input component and all associated resources including configuration files and connection references. Used by input management interface with dependency checking and confirmation. Checks for project dependencies before deletion and warns about impact on active projects. Removes input files, closes connections, and updates dependent projects. Returns deletion status and dependency impact summary. WARNING: Deleting active inputs may cause project failures and data loss.",
+			Description: "Delete specified input component and all associated resources including configuration files.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Input identifier to delete. System will check for dependencies in active projects.", Required: true},
+				"id": {Type: "string", Description: "Input identifier to delete", Required: true},
 			},
 		},
 
 		// === OUTPUT ENDPOINTS ===
 		{
 			Name:        "get_outputs",
-			Description: "Retrieve complete list of all output components in the system with their configuration status, connection health, and delivery performance metrics. Sidebar uses this for output component navigation and management. Returns output IDs, types (elasticsearch, kafka, webhook, etc.), connection status, associated projects, and temporary file indicators. Includes delivery success rates, throughput metrics, and error statistics. Essential for output management, delivery monitoring, and performance optimization.",
+			Description: "Retrieve list of all output components with their metadata, type information, and temporary file indicators.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_output",
-			Description: "Get detailed information for specific output component including complete YAML configuration, connection parameters, delivery settings, and performance statistics. Used by output editor, testing interfaces, and delivery monitoring tools. Requires output ID parameter. Returns full configuration content, connection details, authentication settings, delivery format specifications, retry policies, and success/failure metrics. Critical for output configuration editing and delivery troubleshooting.",
+			Description: "Get detailed information for specific output component including complete YAML configuration, type, and file path.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Unique output component identifier (e.g., 'es_output', 'webhook_alerts'). Must match existing output name.", Required: true},
+				"id": {Type: "string", Description: "Output component identifier to retrieve", Required: true},
 			},
 		},
 		{
 			Name:        "create_output",
-			Description: "Create new output component with specified configuration for data delivery to external systems. Used by output creation forms and deployment automation. Requires unique output ID and YAML configuration. Validates connection parameters, authentication credentials, and delivery format settings. Tests connectivity and delivery capability during creation. Returns creation status, validation results, and delivery test outcomes. Created output can be immediately used in project configurations.",
+			Description: "Create new output component with specified ID and YAML configuration. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Unique output identifier. Must be alphanumeric with underscores, no spaces.", Required: true},
-				"content": {Type: "string", Description: "Complete output configuration in YAML format including connection details, authentication, delivery format, retry policies, and performance settings.", Required: true},
+				"id":  {Type: "string", Description: "Unique output identifier", Required: true},
+				"raw": {Type: "string", Description: "Output YAML configuration content", Required: true},
 			},
 		},
 		{
 			Name:        "update_output",
-			Description: "Update existing output component with modified configuration, connection parameters, or delivery settings. Output editor uses this to save configuration changes with validation and delivery testing. Creates temporary file for safety before applying changes. Validates new configuration, tests connectivity and delivery capability, and checks compatibility with existing projects. Returns update status, validation results, and delivery test outcomes. Updates create pending changes requiring explicit application.",
+			Description: "Update existing output component with modified YAML configuration. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Existing output identifier to update.", Required: true},
-				"content": {Type: "string", Description: "Updated output configuration in YAML format with modified connection details, authentication, delivery settings, or retry policies.", Required: true},
+				"id":  {Type: "string", Description: "Output identifier to update", Required: true},
+				"raw": {Type: "string", Description: "Updated output YAML configuration", Required: true},
 			},
 		},
 		{
 			Name:        "delete_output",
-			Description: "Delete specified output component and all associated resources including configuration files and delivery connections. Used by output management interface with dependency checking and confirmation. Checks for project dependencies before deletion and warns about impact on active delivery pipelines. Removes output files, closes connections, and updates dependent projects. Returns deletion status and dependency impact summary. WARNING: Deleting active outputs may cause project failures and data delivery interruption.",
+			Description: "Delete specified output component and all associated resources including configuration files.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Output identifier to delete. System will check for dependencies in active projects.", Required: true},
+				"id": {Type: "string", Description: "Output identifier to delete", Required: true},
 			},
 		},
 
 		// === PLUGIN ENDPOINTS ===
 		{
 			Name:        "get_plugins",
-			Description: "Retrieve complete list of all plugin components in the system with their implementation status, runtime information, and usage statistics. Sidebar uses this for plugin navigation and management interfaces. Returns plugin names, types (data processor, formatter, validator, etc.), implementation language, associated projects, and temporary file indicators. Includes execution performance metrics, error rates, and dependency information. Essential for plugin management, performance monitoring, and identifying unused or problematic plugins.",
+			Description: "Retrieve list of all plugins with their type information (local, yaegi, new), return types, and temporary file indicators.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_plugin",
-			Description: "Get detailed information for specific plugin including complete source code, function signatures, runtime performance, and usage statistics. Used by plugin editor, testing interfaces, and debugging tools. Requires plugin ID parameter. Returns full source code content, function documentation, parameter specifications, return value descriptions, execution metrics, and associated projects. Critical for plugin development, debugging, and performance optimization.",
+			Description: "Get detailed information for specific plugin including source code, type information, and file path.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Unique plugin identifier (e.g., 'data_transformer', 'ip_validator'). Must match existing plugin name.", Required: true},
+				"id": {Type: "string", Description: "Plugin identifier to retrieve", Required: true},
 			},
 		},
 		{
 			Name:        "create_plugin",
-			Description: "Create new plugin with specified source code and function implementation for custom data processing logic. Used by plugin development interface and code import tools. Requires unique plugin ID and source code content. Validates syntax, compiles code, and tests basic functionality. Checks for security vulnerabilities and performance issues. Returns creation status, compilation results, and initial test outcomes. Created plugin can be immediately used in project configurations and tested with sample data.",
+			Description: "Create new plugin with specified ID and source code. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Unique plugin identifier. Must be alphanumeric with underscores, no spaces.", Required: true},
-				"content": {Type: "string", Description: "Complete plugin source code with function implementation, parameter definitions, and documentation comments.", Required: true},
+				"id":  {Type: "string", Description: "Unique plugin identifier", Required: true},
+				"raw": {Type: "string", Description: "Plugin source code content", Required: true},
 			},
 		},
 		{
 			Name:        "update_plugin",
-			Description: "Update existing plugin with modified source code, function logic, or parameter definitions. Plugin editor uses this to save code changes with compilation and testing. Creates temporary file for safety before applying changes. Validates syntax, compiles updated code, and tests functionality. Checks for breaking changes that might affect existing projects. Returns update status, compilation results, and compatibility analysis. Updates create pending changes requiring explicit application.",
+			Description: "Update existing plugin with modified source code. Creates temporary file that requires application.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":      {Type: "string", Description: "Existing plugin identifier to update.", Required: true},
-				"content": {Type: "string", Description: "Updated plugin source code with modified function implementation or parameter definitions.", Required: true},
+				"id":  {Type: "string", Description: "Plugin identifier to update", Required: true},
+				"raw": {Type: "string", Description: "Updated plugin source code", Required: true},
 			},
 		},
 		{
 			Name:        "delete_plugin",
-			Description: "Delete specified plugin and all associated resources including source code files and runtime references. Used by plugin management interface with dependency checking and confirmation. Checks for project dependencies before deletion and warns about impact on active processing pipelines. Removes plugin files, clears runtime cache, and updates dependent projects. Returns deletion status and dependency impact summary. WARNING: Deleting active plugins may cause project failures and processing errors.",
+			Description: "Delete specified plugin and all associated resources including source code files.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to delete. System will check for dependencies in active projects.", Required: true},
+				"id": {Type: "string", Description: "Plugin identifier to delete", Required: true},
 			},
 		},
 		{
 			Name:        "get_available_plugins",
-			Description: "Get list of available plugin templates and built-in plugins that can be used in project configurations. Used by plugin selection interfaces and project configuration tools. Returns plugin templates with descriptions, parameter specifications, usage examples, and compatibility information. Includes both system-provided plugins and user-created templates. Essential for plugin discovery, project configuration assistance, and understanding available data processing capabilities.",
+			Description: "Get list of available built-in plugins and plugin templates that can be used in configurations.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_plugin_parameters",
-			Description: "Get detailed parameter specifications and function signature information for specified plugin. Used by testing interfaces, project configuration tools, and code completion features. Returns parameter names, types, descriptions, validation rules, default values, and usage examples. Includes function return value specifications and error handling information. Critical for plugin integration, automated testing, and development assistance.",
+			Description: "Get parameter specifications and function signature information for specified plugin.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to get parameter information for.", Required: true},
+				"id": {Type: "string", Description: "Plugin identifier to get parameter information for", Required: true},
 			},
 		},
 
 		// === TESTING AND VERIFICATION ENDPOINTS ===
 		{
 			Name:        "verify_component",
-			Description: "Validate component configuration syntax, connectivity, and compatibility with system requirements. Used by component editors and validation interfaces to ensure configurations are correct before deployment. Requires component type and ID parameters. Performs comprehensive validation including syntax checking, connection testing, dependency verification, and compatibility analysis. Returns detailed validation results with specific error messages, warnings, and remediation suggestions. Essential for preventing configuration errors and ensuring reliable system operation.",
+			Description: "Validate component configuration syntax, connectivity, and compatibility. Returns detailed validation results with error messages and line numbers.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to validate (inputs, outputs, rulesets, plugins, projects).", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to validate.", Required: true},
+				"type": {Type: "string", Description: "Component type (input, output, ruleset, plugin, project)", Required: true},
+				"id":   {Type: "string", Description: "Component identifier to validate", Required: true},
 			},
 		},
 		{
 			Name:        "connect_check",
-			Description: "Test connectivity and authentication for input/output components to verify external system integration. Used by connection testing interfaces and troubleshooting tools. Requires component type and ID parameters. Performs actual connection attempts, authentication verification, and basic communication tests. Returns connection status, response times, authentication results, and any connectivity issues. Critical for troubleshooting connectivity problems, validating credentials, and ensuring external system availability.",
+			Description: "Test connectivity and authentication for input/output components. Performs actual connection attempts and returns status.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type (input or output) to test connectivity for.", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to test connection for.", Required: true},
+				"type": {Type: "string", Description: "Component type (input or output)", Required: true},
+				"id":   {Type: "string", Description: "Component identifier to test connection for", Required: true},
 			},
 		},
 		{
 			Name:        "test_plugin",
-			Description: "Execute plugin function with provided test data to validate plugin logic and performance. Frontend test interfaces use this to verify plugin implementations before deployment. Requires plugin ID and test data in JSON format. Executes plugin function, measures performance, and returns processing results with execution metrics. Returns function output, execution time, memory usage, and any runtime errors. Essential for plugin development, debugging function logic, and performance optimization. Supports complex data structures and validates return value formatting.",
+			Description: "Execute plugin function with provided test data and return processing results with execution metrics.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Plugin identifier to test with sample data.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through the plugin function.", Required: true},
+				"id":        {Type: "string", Description: "Plugin identifier to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 		{
 			Name:        "test_plugin_content",
-			Description: "Test plugin source code directly without saving it as a component, ideal for development and iteration. Used by plugin development interface for rapid testing during code writing. Requires plugin source code and test data. Compiles code temporarily, executes with test data, and returns results without persisting changes. Returns function output, compilation status, execution metrics, and error details. Perfect for testing code changes before committing, validating new plugin logic, and debugging compilation issues.",
+			Description: "Test plugin source code directly without saving. Compiles and executes code with test data temporarily.",
 			InputSchema: map[string]common.MCPToolArg{
-				"content":   {Type: "string", Description: "Complete plugin source code to test temporarily.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through the plugin function.", Required: true},
+				"content":   {Type: "string", Description: "Plugin source code to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 		{
 			Name:        "test_ruleset",
-			Description: "Execute ruleset processing with sample data to validate rule logic, field mappings, and conditional processing. Frontend testing interfaces use this to verify ruleset behavior before deployment. Requires ruleset ID and test data in JSON format. Processes data through all rules, evaluates conditions, and returns matching results with detailed rule execution trace. Returns matched rules, field transformations, processing statistics, and rule evaluation details. Critical for ruleset validation, debugging rule logic, and performance optimization.",
+			Description: "Execute ruleset processing with sample data and return rule matching results with execution trace.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Ruleset identifier to test with sample data.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through ruleset rules and conditions.", Required: true},
+				"id":        {Type: "string", Description: "Ruleset identifier to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 		{
 			Name:        "test_ruleset_content",
-			Description: "Test ruleset XML configuration directly without saving it as a component, perfect for ruleset development and debugging. Used by ruleset development interface for iterative testing during rule creation. Requires ruleset XML content and test data. Parses XML temporarily, executes rules with test data, and returns results without persisting changes. Returns rule matching results, field processing details, validation errors, and performance metrics. Essential for validating rule syntax, testing conditional logic, and debugging field mappings.",
+			Description: "Test ruleset XML configuration directly without saving. Parses XML and executes rules with test data temporarily.",
 			InputSchema: map[string]common.MCPToolArg{
-				"content":   {Type: "string", Description: "Complete ruleset XML configuration to test temporarily.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through ruleset rules and conditions.", Required: true},
+				"content":   {Type: "string", Description: "Ruleset XML configuration to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 		{
 			Name:        "test_output",
-			Description: "Test output component delivery functionality with sample data to validate connection, formatting, and delivery success. Frontend test interfaces use this to verify output configurations before deployment. Requires output ID and test data in JSON format. Attempts actual delivery to configured destination, validates formatting, and tests connection reliability. Returns delivery status, formatting results, response times, and any delivery errors. Critical for output validation, delivery troubleshooting, and performance testing.",
+			Description: "Test output component delivery functionality with sample data. Attempts actual delivery and returns results.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Output identifier to test delivery functionality.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to deliver through the output component.", Required: true},
+				"id":        {Type: "string", Description: "Output identifier to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to deliver", Required: true},
 			},
 		},
 		{
 			Name:        "test_project",
-			Description: "Execute complete project workflow with test data to validate end-to-end processing pipeline including inputs, rulesets, plugins, and outputs. Frontend project testing interface uses this for comprehensive project validation. Requires project ID, input node specification, and test data. Processes data through entire project pipeline, tracking each component's execution and data transformations. Returns complete processing results, component execution trace, performance metrics, and output results. Essential for project integration testing, workflow validation, and performance analysis.",
+			Description: "Execute complete project workflow with test data. Processes data through entire pipeline and returns execution trace.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Project identifier to test complete workflow.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through the entire project pipeline.", Required: true},
+				"id":        {Type: "string", Description: "Project identifier to test", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 		{
 			Name:        "test_project_content",
-			Description: "Test project configuration directly without saving it as a component, ideal for project development and workflow design validation. Used by project development interface for testing configuration changes before deployment. Requires project YAML content, input node specification, and test data. Executes project workflow temporarily with provided configuration and returns complete processing results. Returns component execution trace, data transformations, output results, and configuration validation details. Perfect for validating project architecture, testing workflow changes, and debugging processing issues.",
+			Description: "Test project configuration directly without saving. Executes project workflow temporarily with provided configuration.",
 			InputSchema: map[string]common.MCPToolArg{
-				"inputNode": {Type: "string", Description: "Input node identifier to start project workflow testing.", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process through the project workflow.", Required: true},
+				"inputNode": {Type: "string", Description: "Input node identifier to start workflow testing", Required: true},
+				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
 			},
 		},
 
 		// === CLUSTER MANAGEMENT ===
 		{
 			Name:        "cluster_heartbeat",
-			Description: "Send heartbeat signal to maintain cluster node health status and synchronize cluster membership. Used by cluster management systems for node health monitoring and leader election maintenance. Includes node status information, resource utilization data, and cluster coordination data. Returns heartbeat acknowledgment and cluster status updates. Critical for cluster stability, automatic failover, and maintaining distributed system consistency. Helps identify failed nodes and triggers cluster reconfiguration when necessary.",
+			Description: "Send heartbeat signal to maintain cluster node health status and coordinate cluster membership.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Heartbeat data including node status, resource metrics, and cluster coordination information.", Required: true},
+				"data": {Type: "object", Description: "Heartbeat data including node status and metrics", Required: true},
 			},
 		},
 		{
 			Name:        "component_sync",
-			Description: "Synchronize component configurations across cluster nodes to ensure consistency and prevent configuration drift. Used by cluster management systems during configuration updates and node synchronization. Propagates component changes, validates configuration consistency, and maintains cluster-wide component state. Returns synchronization status and any conflicts detected. Essential for maintaining configuration consistency, preventing split-brain scenarios, and ensuring all nodes have identical component definitions.",
+			Description: "Synchronize component configurations across cluster nodes to ensure consistency.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Component synchronization data including configurations, checksums, and version information.", Required: true},
+				"data": {Type: "object", Description: "Component synchronization data", Required: true},
 			},
 		},
 		{
 			Name:        "project_status_sync",
-			Description: "Synchronize project running status and state information across cluster nodes for consistent project management. Used by cluster management systems to coordinate project lifecycle and status reporting. Propagates project status changes, handles status conflicts, and maintains cluster-wide project state consistency. Returns synchronization results and status reconciliation data. Critical for coordinated project management, accurate status reporting, and preventing inconsistent project states across nodes.",
+			Description: "Synchronize project status information across cluster nodes for consistent state management.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Project status synchronization data including running states, timestamps, and status changes.", Required: true},
+				"data": {Type: "object", Description: "Project status synchronization data", Required: true},
 			},
 		},
 		{
 			Name:        "qps_sync",
-			Description: "Synchronize QPS (Queries Per Second) and performance metrics across cluster nodes for accurate system-wide performance monitoring. Used by monitoring systems to aggregate performance data and generate cluster-wide statistics. Collects and distributes QPS data, performance metrics, and throughput statistics. Returns aggregated performance data and synchronization status. Essential for cluster performance monitoring, capacity planning, and identifying performance bottlenecks across the distributed system.",
+			Description: "Synchronize QPS and performance metrics across cluster nodes for system-wide monitoring.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "QPS synchronization data including performance metrics, throughput statistics, and timing information.", Required: true},
+				"data": {Type: "object", Description: "QPS synchronization data", Required: true},
 			},
 		},
 		{
 			Name:        "get_config_root",
-			Description: "Retrieve cluster leader's configuration root directory path and configuration management settings. Used by follower nodes for configuration synchronization and by management tools for configuration discovery. Returns leader's configuration path, access permissions, and synchronization settings. Critical for cluster configuration management, automated synchronization, and ensuring follower nodes can access leader configurations for consistency maintenance.",
+			Description: "Retrieve cluster leader's configuration root directory path for follower node synchronization.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "download_config",
-			Description: "Download complete configuration package from cluster leader for node synchronization and configuration replication. Used by follower nodes during initial setup and periodic synchronization. Packages all configuration files, validates integrity, and provides secure configuration transfer. Returns configuration archive and verification data. Essential for cluster setup, configuration backup, and maintaining configuration consistency across all cluster nodes.",
+			Description: "Download complete configuration package from cluster leader for node synchronization.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 
 		// === PENDING CHANGES MANAGEMENT ===
 		{
 			Name:        "get_pending_changes",
-			Description: "Retrieve list of all pending configuration changes awaiting application to production components. Frontend pending changes interface uses this to display changes requiring approval and deployment. Returns change details, component types, modification summaries, and creation timestamps. Includes validation status and impact analysis for each pending change. Essential for change management workflows, configuration review processes, and coordinated deployment of component updates.",
+			Description: "Retrieve list of all pending configuration changes awaiting application to production components.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_enhanced_pending_changes",
-			Description: "Retrieve comprehensive pending changes information with enhanced details including validation results, dependency analysis, and impact assessment. Frontend uses this for detailed change review and approval workflows. Returns detailed change analysis, validation status, dependency trees, and risk assessment data. Includes component usage analysis and potential impact on running projects. Critical for enterprise change management, risk assessment, and informed deployment decisions.",
+			Description: "Retrieve comprehensive pending changes information with validation results and dependency analysis.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "apply_changes",
-			Description: "Apply all pending configuration changes to production components with validation and rollback capabilities. Frontend uses this for batch deployment of approved changes. Validates each change, applies configurations sequentially, and handles conflicts or failures gracefully. Returns detailed application results, success/failure status for each change, and rollback information if needed. Essential for coordinated deployment, change management workflows, and maintaining system stability during updates.",
+			Description: "Apply all pending configuration changes to production components with validation and rollback support.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "apply_changes_enhanced",
-			Description: "Apply pending changes with enhanced transaction support, dependency resolution, and advanced rollback capabilities. Used for enterprise-grade change management with complex dependency handling. Provides atomic transaction support, intelligent dependency ordering, and comprehensive rollback mechanisms. Returns detailed transaction results, dependency resolution logs, and complete rollback instructions. Critical for complex deployments, enterprise change management, and maintaining system consistency during large-scale updates.",
+			Description: "Apply pending changes with enhanced transaction support and dependency resolution.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "apply_single_change",
-			Description: "Apply specific individual pending change with focused validation and immediate feedback. Frontend uses this for selective change deployment and testing individual components. Validates single change, applies configuration, and provides immediate results with detailed success/failure information. Returns change application status, configuration validation results, and any integration issues. Perfect for incremental deployment, individual component testing, and selective change management.",
+			Description: "Apply specific individual pending change with focused validation and immediate feedback.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Specific change data including component type, identifier, and configuration details to apply.", Required: true},
+				"data": {Type: "object", Description: "Change data including component type and identifier", Required: true},
 			},
 		},
 		{
 			Name:        "verify_changes",
-			Description: "Validate all pending changes without applying them to production, providing comprehensive validation and impact analysis. Used by change review processes and automated validation pipelines. Performs syntax validation, dependency checking, compatibility analysis, and impact assessment. Returns detailed validation results, potential issues, and recommendations. Essential for change approval workflows, risk assessment, and ensuring change quality before deployment.",
+			Description: "Validate all pending changes without applying them, providing comprehensive validation results.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "verify_change",
-			Description: "Validate specific individual pending change with detailed analysis and compatibility checking. Frontend change review interface uses this for individual change assessment. Performs comprehensive validation including syntax checking, dependency analysis, and impact assessment. Returns detailed validation results, compatibility analysis, and potential issues or conflicts. Critical for change review processes, quality assurance, and individual change validation before deployment.",
+			Description: "Validate specific individual pending change with detailed analysis and compatibility checking.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type of the change to validate (inputs, outputs, rulesets, plugins, projects).", Required: true},
-				"id":   {Type: "string", Description: "Component identifier of the specific change to validate.", Required: true},
+				"type": {Type: "string", Description: "Component type to validate", Required: true},
+				"id":   {Type: "string", Description: "Component identifier to validate", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_change",
-			Description: "Cancel specific pending change and remove it from the deployment queue with cleanup of associated temporary files. Frontend change management interface uses this for selective change cancellation. Removes pending change, cleans up temporary files, and updates change tracking. Returns cancellation status and cleanup results. Essential for change management workflows, correcting mistakes, and maintaining clean change queues.",
+			Description: "Cancel specific pending change and remove it from deployment queue with cleanup.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type of the change to cancel.", Required: true},
-				"id":   {Type: "string", Description: "Component identifier of the specific change to cancel.", Required: true},
+				"type": {Type: "string", Description: "Component type of change to cancel", Required: true},
+				"id":   {Type: "string", Description: "Component identifier of change to cancel", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_all_changes",
-			Description: "Cancel all pending changes and clean up the entire deployment queue with comprehensive cleanup of temporary files and change tracking. Frontend uses this for bulk change cancellation and system reset. Removes all pending changes, performs comprehensive cleanup, and resets change management state. Returns detailed cleanup results and system state reset confirmation. Critical for emergency change management, system reset scenarios, and clearing problematic change queues.",
+			Description: "Cancel all pending changes and clean up the entire deployment queue with comprehensive cleanup.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 
 		// === TEMPORARY FILE MANAGEMENT ===
 		{
 			Name:        "create_temp_file",
-			Description: "Create temporary configuration file for safe editing and testing before applying changes to production components. Frontend editors use this for creating draft configurations and testing changes. Creates secure temporary file, tracks editing session, and maintains version control. Returns temporary file status and editing session information. Essential for safe configuration editing, change tracking, and preventing accidental production modifications during development.",
+			Description: "Create temporary configuration file for safe editing before applying changes to production.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type for temporary file creation (inputs, outputs, rulesets, plugins, projects).", Required: true},
-				"id":   {Type: "string", Description: "Component identifier for temporary file creation.", Required: true},
-				"data": {Type: "string", Description: "Configuration data to write to temporary file.", Required: true},
+				"type": {Type: "string", Description: "Component type for temporary file", Required: true},
+				"id":   {Type: "string", Description: "Component identifier", Required: true},
+				"data": {Type: "string", Description: "Configuration data to write", Required: true},
 			},
 		},
 		{
 			Name:        "check_temp_file",
-			Description: "Check status and existence of temporary configuration files for specific components. Frontend interfaces use this to determine if components have unsaved changes or pending modifications. Verifies temporary file existence, checks modification timestamps, and validates file integrity. Returns temporary file status, modification information, and content validation results. Critical for change tracking, unsaved work detection, and maintaining editing session consistency.",
+			Description: "Check status and existence of temporary configuration files for specific components.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to check for temporary files.", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to check for temporary files.", Required: true},
+				"type": {Type: "string", Description: "Component type to check", Required: true},
+				"id":   {Type: "string", Description: "Component identifier to check", Required: true},
 			},
 		},
 		{
 			Name:        "delete_temp_file",
-			Description: "Delete temporary configuration file and clean up associated editing session data. Frontend interfaces use this for canceling edits and cleaning up temporary changes. Removes temporary file, clears editing session data, and updates change tracking. Returns deletion status and cleanup confirmation. Essential for canceling unsaved changes, cleaning up editing sessions, and maintaining clean temporary file storage.",
+			Description: "Delete temporary configuration file and clean up associated editing session data.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type for temporary file deletion.", Required: true},
-				"id":   {Type: "string", Description: "Component identifier for temporary file deletion.", Required: true},
+				"type": {Type: "string", Description: "Component type for deletion", Required: true},
+				"id":   {Type: "string", Description: "Component identifier for deletion", Required: true},
 			},
 		},
 
 		// === SAMPLER ENDPOINTS ===
 		{
 			Name:        "get_samplers_data",
-			Description: "Retrieve sample data and field analysis from system components for ruleset development and data structure understanding. Frontend ruleset development interfaces use this to understand data patterns and field structures for rule creation. Returns sample messages, field distributions, data type analysis, and value patterns from recent system activity. Includes statistical analysis of field usage, common values, and data structure variations. Essential for ruleset development, field mapping creation, and understanding data patterns for effective rule design.",
+			Description: "Retrieve sample data and field analysis from system components for ruleset development.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_ruleset_fields",
-			Description: "Get detailed field mapping and schema information for specific rulesets including field types, usage patterns, and processing statistics. Frontend ruleset editor uses this for field autocomplete, validation, and schema assistance. Returns field names, data types, usage frequency, sample values, and processing statistics. Includes field relationship mapping and validation rules. Critical for ruleset development, field validation, and understanding data schema requirements for rule creation and debugging.",
+			Description: "Get detailed field mapping and schema information for specific rulesets for development assistance.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to get field mapping and schema information for.", Required: true},
+				"id": {Type: "string", Description: "Ruleset identifier to get field information for", Required: true},
 			},
 		},
 
 		// === CANCEL UPGRADE ROUTES ===
 		{
 			Name:        "cancel_ruleset_upgrade",
-			Description: "Cancel pending ruleset upgrade process and revert to previous stable version with complete rollback of changes. Frontend upgrade management interface uses this for aborting problematic upgrades. Stops upgrade process, reverts configuration changes, and restores previous working version. Returns cancellation status, rollback results, and system state restoration details. Critical for upgrade management, emergency rollback procedures, and maintaining system stability during failed upgrade attempts.",
+			Description: "Cancel pending ruleset upgrade process and revert to previous stable version.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to cancel upgrade process for.", Required: true},
+				"id": {Type: "string", Description: "Ruleset identifier to cancel upgrade for", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_input_upgrade",
-			Description: "Cancel pending input component upgrade process and revert to previous stable configuration with connection restoration. Frontend upgrade management uses this for aborting input component upgrades. Stops upgrade process, restores previous configuration, and re-establishes input connections. Returns cancellation status, connection restoration results, and configuration rollback details. Essential for input management, connection stability, and recovering from failed input component upgrades.",
+			Description: "Cancel pending input component upgrade process and revert to previous stable configuration.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Input component identifier to cancel upgrade process for.", Required: true},
+				"id": {Type: "string", Description: "Input identifier to cancel upgrade for", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_output_upgrade",
-			Description: "Cancel pending output component upgrade process and revert to previous stable configuration with delivery restoration. Frontend upgrade management uses this for aborting output component upgrades. Stops upgrade process, restores previous configuration, and re-establishes output delivery connections. Returns cancellation status, delivery restoration results, and configuration rollback details. Critical for output management, delivery continuity, and recovering from failed output component upgrades.",
+			Description: "Cancel pending output component upgrade process and revert to previous stable configuration.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Output component identifier to cancel upgrade process for.", Required: true},
+				"id": {Type: "string", Description: "Output identifier to cancel upgrade for", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_project_upgrade",
-			Description: "Cancel pending project upgrade process and revert to previous stable configuration with complete project state restoration. Frontend project management uses this for aborting project upgrades. Stops upgrade process, restores previous project configuration, and maintains project running state. Returns cancellation status, project state restoration results, and configuration rollback details. Essential for project management, service continuity, and recovering from failed project upgrades.",
+			Description: "Cancel pending project upgrade process and revert to previous stable configuration.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to cancel upgrade process for.", Required: true},
+				"id": {Type: "string", Description: "Project identifier to cancel upgrade for", Required: true},
 			},
 		},
 		{
 			Name:        "cancel_plugin_upgrade",
-			Description: "Cancel pending plugin upgrade process and revert to previous stable version with runtime restoration. Frontend plugin management uses this for aborting plugin upgrades. Stops upgrade process, restores previous plugin version, and re-initializes plugin runtime. Returns cancellation status, runtime restoration results, and version rollback details. Critical for plugin management, processing continuity, and recovering from failed plugin upgrades.",
+			Description: "Cancel pending plugin upgrade process and revert to previous stable version.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to cancel upgrade process for.", Required: true},
+				"id": {Type: "string", Description: "Plugin identifier to cancel upgrade for", Required: true},
 			},
 		},
 
 		// === COMPONENT USAGE ANALYSIS ===
 		{
 			Name:        "get_component_usage",
-			Description: "Analyze component usage patterns and dependencies across projects to understand component utilization and impact assessment. Frontend component management interface uses this for dependency tracking and impact analysis before component modifications. Returns detailed usage statistics, dependent projects list, usage patterns, and impact assessment data. Includes performance metrics, dependency graphs, and usage trends. Essential for component lifecycle management, impact analysis, and safe component modifications or deletions.",
+			Description: "Analyze component usage patterns and dependencies across projects for impact assessment.",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to analyze usage for (inputs, outputs, rulesets, plugins, projects).", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to analyze usage patterns and dependencies for.", Required: true},
+				"type": {Type: "string", Description: "Component type to analyze", Required: true},
+				"id":   {Type: "string", Description: "Component identifier to analyze", Required: true},
 			},
 		},
 
 		// === SEARCH ===
 		{
 			Name:        "search_components",
-			Description: "Search through component configurations, content, and metadata using flexible query patterns for component discovery and content analysis. Frontend global search interface uses this for finding components, configurations, and specific content patterns. Performs full-text search across component configurations, names, descriptions, and content. Returns matching components with relevance scoring, content snippets, and match context. Essential for component discovery, configuration debugging, and finding specific implementation patterns across the system.",
+			Description: "Search through component configurations and content using flexible query patterns for discovery.",
 			InputSchema: map[string]common.MCPToolArg{
-				"query": {Type: "string", Description: "Search query string for finding components, configurations, or content patterns across the system.", Required: true},
+				"query": {Type: "string", Description: "Search query string", Required: true},
 			},
 		},
 
 		// === LOCAL CHANGES ===
 		{
 			Name:        "get_local_changes",
-			Description: "Retrieve list of local configuration changes detected in filesystem that haven't been loaded into the system. Frontend local changes interface uses this to display available local changes for import. Scans local filesystem, detects configuration changes, and analyzes modification patterns. Returns list of changed files, modification details, and change analysis. Essential for development workflows, configuration import, and synchronizing local development changes with the running system.",
+			Description: "Retrieve list of local configuration changes detected in filesystem that haven't been loaded.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "load_local_changes",
-			Description: "Load all detected local configuration changes from filesystem into the system with validation and conflict detection. Frontend uses this for bulk import of local development changes. Validates each local change, detects conflicts with existing configurations, and loads changes into system. Returns loading results, validation status, and conflict resolution information. Critical for development workflows, configuration synchronization, and importing local changes into production system.",
+			Description: "Load all detected local configuration changes from filesystem into the system with validation.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "load_single_local_change",
-			Description: "Load specific individual local configuration change from filesystem with focused validation and immediate feedback. Frontend uses this for selective import of individual local changes. Validates single local change, checks for conflicts, and loads change into system. Returns detailed loading results, validation status, and integration information. Perfect for selective change import, testing individual modifications, and incremental development workflows.",
+			Description: "Load specific individual local configuration change from filesystem with validation.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Specific local change data including file path, component type, and modification details to load.", Required: true},
+				"data": {Type: "object", Description: "Local change data to load", Required: true},
 			},
 		},
 
 		// === METRICS SYNC ===
 		{
 			Name:        "metrics_sync",
-			Description: "Synchronize performance metrics and monitoring data across cluster nodes for consistent system-wide monitoring and reporting. Used by monitoring systems and cluster management tools for metric aggregation and consistency. Collects and distributes performance metrics, system statistics, and monitoring data across cluster nodes. Returns synchronization status and aggregated metric data. Essential for cluster monitoring, performance analysis, and maintaining consistent metric reporting across distributed system nodes.",
+			Description: "Synchronize performance metrics and monitoring data across cluster nodes for consistent reporting.",
 			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Metrics synchronization data including performance statistics, monitoring data, and system metrics.", Required: true},
+				"data": {Type: "object", Description: "Metrics synchronization data", Required: true},
 			},
 		},
 
 		// === ERROR LOGS ===
 		{
 			Name:        "get_error_logs",
-			Description: "Retrieve system error logs and diagnostic information from local node for troubleshooting and system monitoring. Frontend error log viewer uses this to display system errors, warnings, and diagnostic messages. Returns filtered error logs with timestamps, severity levels, component sources, and error details. Supports filtering by log level, time range, and component type. Essential for system troubleshooting, debugging component issues, and monitoring system health and stability.",
+			Description: "Retrieve system error logs and diagnostic information from local node for troubleshooting.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 		{
 			Name:        "get_cluster_error_logs",
-			Description: "Retrieve aggregated error logs and diagnostic information from all cluster nodes for comprehensive system monitoring and troubleshooting. Frontend cluster error log viewer uses this to display system-wide errors and issues. Returns consolidated error logs from all cluster nodes with node identification, timestamps, severity levels, and error correlation. Supports cluster-wide filtering and error pattern analysis. Critical for cluster troubleshooting, system-wide issue detection, and comprehensive distributed system monitoring.",
+			Description: "Retrieve aggregated error logs from all cluster nodes for comprehensive system monitoring.",
 			InputSchema: map[string]common.MCPToolArg{},
 		},
 	}
@@ -855,12 +874,11 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		}, nil
 	}
 
-	// Determine the format of the response and prettify if JSON
-	var responseFormat string
+	// Format the response as text, prettifying JSON if possible
 	var prettyResponseBody string
 	var jsonData interface{}
 	if json.Unmarshal(responseBody, &jsonData) == nil {
-		responseFormat = "json"
+		// It's valid JSON, format it nicely
 		prettyBytes, err := json.MarshalIndent(jsonData, "", "  ")
 		if err == nil {
 			prettyResponseBody = string(prettyBytes)
@@ -868,14 +886,14 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 			prettyResponseBody = string(responseBody) // Fallback to raw if re-marshalling fails
 		}
 	} else {
-		responseFormat = "text"
+		// Not JSON, return as-is
 		prettyResponseBody = string(responseBody)
 	}
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Format: responseFormat,
+				Format: "text", // MCP only supports "text" and "image" formats
 				Text:   prettyResponseBody,
 			},
 		},

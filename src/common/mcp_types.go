@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// MCP Protocol Version
-const MCPVersion = "2025-03-26"
+// MCP Protocol Version - using widely supported stable version
+const MCPVersion = "2024-11-05"
 
 // MCP Methods
 const (
@@ -128,7 +128,7 @@ type MCPToolResult struct {
 
 // MCPToolContent provides a structured format for tool output.
 type MCPToolContent struct {
-	Format string `json:"format"` // e.g., "text", "json", "table", "yaml"
+	Format string `json:"format"` // Only "text" and "image" are supported by MCP specification
 	Text   string `json:"text"`
 }
 
@@ -138,6 +138,7 @@ type MCPPrompt struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Arguments   []MCPPromptArg `json:"arguments,omitempty"`
+	Template    string         `json:"template,omitempty"`
 }
 
 // MCPPromptArg defines a strongly-typed argument for a prompt.

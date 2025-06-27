@@ -1,13 +1,13 @@
 {
   "mcpServers": {
     "agentsmith-hub": {
-      "url": "http://172.26.0.21:8080/mcp",
-      "headers": {
-        "token": "76bdd970-c17b-4500-980a-9cc37b33ac2a"
-      },
-      "alwaysAllow": [],
       "disabled": false,
-      "_comment": "Session management: Server will create session on initialize and return Mcp-Session-Id header. Subsequent requests should include this header."
+      "timeout": 60,
+      "type": "streamableHttp",
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "token": "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+      }
     }
   }
-} 
+}

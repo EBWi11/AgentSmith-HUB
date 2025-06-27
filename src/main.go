@@ -629,6 +629,20 @@ func main() {
 	common.InitSystemMonitor(cluster.NodeID)
 	logger.Info("System monitor initialized", "node_id", cluster.NodeID)
 
+	// Initialize MCP server (only for leader nodes as MCP service is leader-only)
+	if cluster.IsLeader {
+		baseURL := fmt.Sprintf("http://%s", common.Config.Listen)
+		api.InitializeMCPServer(baseURL, common.Config.Token)
+
+		// Start MCP migration to transfer all API tools to the new mcp-go server
+		err = api.StartMCPMigration()
+		if err != nil {
+			logger.Error("MCP migration failed", "error", err)
+		} else {
+			logger.Info("MCP server initialized and migration completed", "base_url", baseURL)
+		}
+	}
+
 	// start Api
 	err = api.ServerStart(common.Config.Listen)
 	if err != nil {
