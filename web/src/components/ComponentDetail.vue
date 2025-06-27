@@ -365,7 +365,7 @@
         <!-- Project control buttons -->
         <div v-if="isProject && !detail.isTemporary" class="flex space-x-2">
           <button 
-            v-if="detail.status === 'stopped'"
+            v-if="detail.status === 'stopped' || detail.status === 'error'"
             @click="startProject"
             class="btn btn-start btn-sm"
             :disabled="projectOperationLoading"

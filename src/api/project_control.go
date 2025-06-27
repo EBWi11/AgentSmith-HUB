@@ -179,6 +179,13 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
+	// Error projects cannot be restarted, they must be started instead
+	if p.Status == project.ProjectStatusError {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Error projects cannot be restarted. Please use start instead.",
+		})
+	}
+
 	// Check if project is running, if so stop it first
 	if p.Status == project.ProjectStatusRunning {
 		if err := p.Stop(); err != nil {
@@ -215,9 +222,14 @@ func getProjectError(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 
+	var errorMessage string
+	if p.Err != nil {
+		errorMessage = p.Err.Error()
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"project_id": id,
 		"status":     string(p.Status),
-		"error":      "", // Simple implementation
+		"error":      errorMessage,
 	})
 }

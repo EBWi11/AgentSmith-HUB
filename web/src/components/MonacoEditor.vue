@@ -1553,7 +1553,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: 'aliyun_sls',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Aliyun SLS input configuration section',
-          insertText: 'aliyun_sls\naliyun_sls:\n  endpoint: ""\n  access_key_id: ""\n  access_key_secret: ""\n  project: ""\n  logstore: ""\n  consumer_group_name: ""\n  consumer_name: ""\n  cursor_position: ""\n  query: ""',
+          insertText: 'aliyun_sls\naliyun_sls:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -1658,9 +1658,9 @@ function getDefaultInputCompletions(fullText, context, range) {
           'kafka:',
           '  brokers:',
           '    - "localhost:9092"',
-          '  topic: ""',
-          '  group: ""',
-          '  compression: ""'
+          '  topic: "topic-name"',
+          '  group: "consumer-group"',
+          '  compression: "none"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1672,13 +1672,13 @@ function getDefaultInputCompletions(fullText, context, range) {
         insertText: [
           'type: aliyun_sls',
           'aliyun_sls:',
-          '  endpoint: ""',
-          '  access_key_id: ""',
-          '  access_key_secret: ""',
-          '  project: ""',
-          '  logstore: ""',
-          '  consumer_group_name: ""',
-          '  consumer_name: ""'
+          '  endpoint: "cn-beijing.log.aliyuncs.com"',
+          '  access_key_id: "YOUR_ACCESS_KEY_ID"',
+          '  access_key_secret: "YOUR_ACCESS_KEY_SECRET"',
+          '  project: "project-name"',
+          '  logstore: "logstore-name"',
+          '  consumer_group_name: "consumer-group"',
+          '  consumer_name: "consumer-name"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1934,7 +1934,7 @@ function getOutputKeyCompletions(context, range, fullText) {
           label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka output configuration section',
-          insertText: 'kafka:\n  brokers:\n    - "localhost:9092"\n  topic:\n  compression:',
+          insertText: 'kafka:\n  brokers:\n    - "localhost:9092"\n  topic: "topic-name"\n  compression: "none"',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -2905,7 +2905,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'node',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Check node',
-        insertText: 'node id="" type="" field="" delimiter=""></node>',
+        insertText: 'node id="" type="" field=""></node>',
         range: range
       });
     }

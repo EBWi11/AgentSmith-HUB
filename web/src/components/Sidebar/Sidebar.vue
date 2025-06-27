@@ -234,7 +234,7 @@
                       <!-- Project specific actions -->
                       <template v-if="type === 'projects'">
                         <!-- Start action -->
-                        <a v-if="item.status === 'stopped' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                        <a v-if="(item.status === 'stopped' || item.status === 'error') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                            @click.prevent.stop="startProject(item)">
                           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />

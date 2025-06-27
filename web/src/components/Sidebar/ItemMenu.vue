@@ -14,7 +14,7 @@
       <template v-if="type === 'projects'">
         <!-- Start action -->
         <MenuItem 
-          v-if="item.status === 'stopped' && !item.hasTemp"
+          v-if="(item.status === 'stopped' || item.status === 'error') && !item.hasTemp"
           icon="start"
           text="Start"
           @click="$emit('action', 'start-project')"
@@ -36,13 +36,7 @@
           @click="$emit('action', 'restart-project')"
         />
         
-        <!-- Restart action for error projects -->
-        <MenuItem 
-          v-if="item.status === 'error' && !item.hasTemp"
-          icon="restart"
-          text="Restart"
-          @click="$emit('action', 'restart-project')"
-        />
+
       </template>
       
       <!-- Connect Check -->
