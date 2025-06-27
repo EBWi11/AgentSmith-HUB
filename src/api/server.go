@@ -45,13 +45,9 @@ func ServerStart(listener string) error {
 	}))
 	e.Use(middleware.Recover())
 
-	// Global authentication middleware (skip for health check and token check)
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+	// Authentication middleware function - will be applied selectively
+	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if c.Path() == "/ping" || c.Path() == "/token-check" {
-				return next(c)
-			}
-
 			token := c.Request().Header.Get("token")
 			if token == "" {
 				return c.JSON(http.StatusUnauthorized, map[string]string{
@@ -67,139 +63,137 @@ func ServerStart(listener string) error {
 
 			return next(c)
 		}
-	})
+	}
 
+	// Public endpoints (no authentication required)
 	// Health check and token verification
 	e.GET("/ping", ping)
 	e.GET("/token-check", tokenCheck)
 
-	// Project endpoints (use plural form for consistency)
-	e.GET("/projects", getProjects)
-	e.GET("/projects/:id", getProject)
-	e.POST("/projects", createProject)
-	e.DELETE("/projects/:id", deleteProject)
-	e.PUT("/projects/:id", updateProject)
-	e.POST("/start-project", StartProject)
-	e.POST("/stop-project", StopProject)
-	e.POST("/restart-project", RestartProject)
-	e.POST("/restart-all-projects", RestartAllProjects)
-	e.GET("/project-error/:id", getProjectError)
-	e.GET("/project-inputs/:id", getProjectInputs)
-	e.GET("/project-components/:id", getProjectComponents)
-	e.GET("/project-component-sequences/:id", getProjectComponentSequences)
-
-	// Ruleset endpoints (use plural form for consistency)
-	e.GET("/rulesets", getRulesets)
-	e.GET("/rulesets/:id", getRuleset)
-	e.POST("/rulesets", createRuleset)
-	e.PUT("/rulesets/:id", updateRuleset)
-	e.DELETE("/rulesets/:id", deleteRuleset)
-
-	// Input endpoints (use plural form for consistency)
-	e.GET("/inputs", getInputs)
-	e.GET("/inputs/:id", getInput)
-	e.POST("/inputs", createInput)
-	e.PUT("/inputs/:id", updateInput)
-	e.DELETE("/inputs/:id", deleteInput)
-
-	// Output endpoints (use plural form for consistency)
-	e.GET("/outputs", getOutputs)
-	e.GET("/outputs/:id", getOutput)
-	e.POST("/outputs", createOutput)
-	e.PUT("/outputs/:id", updateOutput)
-	e.DELETE("/outputs/:id", deleteOutput)
-
-	// Plugin endpoints (use plural form and :id for consistency)
-	e.GET("/plugins", getPlugins)
-	e.GET("/plugins/:id", getPlugin)
-	e.POST("/plugins", createPlugin)
-	e.PUT("/plugins/:id", updatePlugin)
-	e.DELETE("/plugins/:id", deletePlugin)
-	e.GET("/available-plugins", getAvailablePlugins)
-	e.GET("/plugin-parameters/:id", GetPluginParameters)
-
-	// Component verification and testing
-	e.POST("/verify/:type/:id", verifyComponent)
-	e.GET("/connect-check/:type/:id", connectCheck)
-	e.POST("/connect-check/:type/:id", connectCheck)
-	e.POST("/test-plugin/:id", testPlugin)
-	e.POST("/test-plugin-content", testPluginContent)
-	e.POST("/test-ruleset/:id", testRuleset)
-	e.POST("/test-ruleset-content", testRulesetContent)
-	e.POST("/test-output/:id", testOutput)
-	e.POST("/test-project/:id", testProject)
-	e.POST("/test-project-content/:inputNode", testProjectContent)
-
-	// Cluster endpoints
-	e.GET("/cluster", getCluster)
-	e.GET("/cluster-status", getClusterStatus)
-	e.POST("/cluster/heartbeat", handleHeartbeat)
-	e.POST("/component-sync", handleComponentSync)
-	e.POST("/project-status-sync", handleProjectStatusSync)
-	e.POST("/qps-sync", handleQPSSync)
-	e.GET("/qps-data", getQPSData)
-	e.GET("/qps-stats", getQPSStats)
-	e.GET("/config_root", leaderConfig)
-	e.GET("/config/download", downloadConfig)
-
-	// Pending changes management (enhanced)
-	e.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
-	e.GET("/pending-changes/enhanced", GetEnhancedPendingChanges)  // Enhanced endpoint with status info
-	e.POST("/apply-changes", ApplyPendingChanges)                  // Legacy endpoint
-	e.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Enhanced endpoint with transaction support
-	e.POST("/apply-single-change", ApplySingleChange)              // Legacy endpoint
-	e.POST("/verify-changes", VerifyPendingChanges)                // Verify all changes
-	e.POST("/verify-change/:type/:id", VerifySinglePendingChange)  // Verify single change
-	e.DELETE("/cancel-change/:type/:id", CancelPendingChange)      // Cancel single change
-	e.DELETE("/cancel-all-changes", CancelAllPendingChanges)       // Cancel all changes
-
-	// Temporary file management
-	e.POST("/temp-file/:type/:id", CreateTempFile)
-	e.GET("/temp-file/:type/:id", CheckTempFile)
-	e.DELETE("/temp-file/:type/:id", DeleteTempFile)
-
-	// Sampler endpoints
-	e.GET("/samplers/data", GetSamplerData)
-	e.GET("/ruleset-fields/:id", GetRulesetFields)
-
-	// Cancel upgrade routes
-	e.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)
-	e.POST("/cancel-upgrade/inputs/:id", cancelInputUpgrade)
-	e.POST("/cancel-upgrade/outputs/:id", cancelOutputUpgrade)
-	e.POST("/cancel-upgrade/projects/:id", cancelProjectUpgrade)
-	e.POST("/cancel-upgrade/plugins/:id", cancelPluginUpgrade)
-
-	// Component usage analysis
-	e.GET("/component-usage/:type/:id", GetComponentUsage)
-
-	// Component configuration search
-	e.GET("/search-components", searchComponentsConfig)
-
-	// Load local components routes
-	e.GET("/local-changes", getLocalChanges)
-	e.POST("/load-local-changes", loadLocalChanges)
-	e.POST("/load-single-local-change", loadSingleLocalChange)
-
-	// QPS endpoints (only on leader)
+	// Statistics and metrics endpoints (public access for monitoring)
 	e.GET("/qps-data", getQPSData)
 	e.GET("/qps-stats", getQPSStats)
 	e.GET("/hourly-messages", getHourlyMessages)
 	e.GET("/daily-messages", getDailyMessages)
-
-	// System metrics endpoints (available on all nodes)
 	e.GET("/system-metrics", getSystemMetrics)
 	e.GET("/system-stats", getSystemStats)
-
-	// Combined metrics sync endpoint (only on leader)
-	e.POST("/metrics-sync", handleMetricsSync)
-
-	// Cluster system metrics endpoints (only on leader)
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
 	e.GET("/cluster-system-stats", getClusterSystemStats)
+	e.GET("/cluster-status", getClusterStatus)
+	e.GET("/cluster", getCluster)
 
-	// Error log endpoints
-	e.GET("/error-logs", getErrorLogs)
-	e.GET("/cluster-error-logs", getClusterErrorLogs)
+	// Create authenticated group for management endpoints
+	auth := e.Group("", authMiddleware)
+
+	// Project endpoints (use plural form for consistency) - REQUIRE AUTH
+	auth.GET("/projects", getProjects)
+	auth.GET("/projects/:id", getProject)
+	auth.POST("/projects", createProject)
+	auth.DELETE("/projects/:id", deleteProject)
+	auth.PUT("/projects/:id", updateProject)
+	auth.POST("/start-project", StartProject)
+	auth.POST("/stop-project", StopProject)
+	auth.POST("/restart-project", RestartProject)
+	auth.POST("/restart-all-projects", RestartAllProjects)
+	auth.GET("/project-error/:id", getProjectError)
+	auth.GET("/project-inputs/:id", getProjectInputs)
+	auth.GET("/project-components/:id", getProjectComponents)
+	auth.GET("/project-component-sequences/:id", getProjectComponentSequences)
+
+	// Ruleset endpoints (use plural form for consistency) - REQUIRE AUTH
+	auth.GET("/rulesets", getRulesets)
+	auth.GET("/rulesets/:id", getRuleset)
+	auth.POST("/rulesets", createRuleset)
+	auth.PUT("/rulesets/:id", updateRuleset)
+	auth.DELETE("/rulesets/:id", deleteRuleset)
+
+	// Input endpoints (use plural form for consistency) - REQUIRE AUTH
+	auth.GET("/inputs", getInputs)
+	auth.GET("/inputs/:id", getInput)
+	auth.POST("/inputs", createInput)
+	auth.PUT("/inputs/:id", updateInput)
+	auth.DELETE("/inputs/:id", deleteInput)
+
+	// Output endpoints (use plural form for consistency) - REQUIRE AUTH
+	auth.GET("/outputs", getOutputs)
+	auth.GET("/outputs/:id", getOutput)
+	auth.POST("/outputs", createOutput)
+	auth.PUT("/outputs/:id", updateOutput)
+	auth.DELETE("/outputs/:id", deleteOutput)
+
+	// Plugin endpoints (use plural form and :id for consistency) - REQUIRE AUTH
+	auth.GET("/plugins", getPlugins)
+	auth.GET("/plugins/:id", getPlugin)
+	auth.POST("/plugins", createPlugin)
+	auth.PUT("/plugins/:id", updatePlugin)
+	auth.DELETE("/plugins/:id", deletePlugin)
+	auth.GET("/available-plugins", getAvailablePlugins)
+	auth.GET("/plugin-parameters/:id", GetPluginParameters)
+
+	// Component verification and testing - REQUIRE AUTH
+	auth.POST("/verify/:type/:id", verifyComponent)
+	auth.GET("/connect-check/:type/:id", connectCheck)
+	auth.POST("/connect-check/:type/:id", connectCheck)
+	auth.POST("/test-plugin/:id", testPlugin)
+	auth.POST("/test-plugin-content", testPluginContent)
+	auth.POST("/test-ruleset/:id", testRuleset)
+	auth.POST("/test-ruleset-content", testRulesetContent)
+	auth.POST("/test-output/:id", testOutput)
+	auth.POST("/test-project/:id", testProject)
+	auth.POST("/test-project-content/:inputNode", testProjectContent)
+
+	// Cluster management endpoints - REQUIRE AUTH
+	auth.POST("/cluster/heartbeat", handleHeartbeat)
+	auth.POST("/component-sync", handleComponentSync)
+	auth.POST("/project-status-sync", handleProjectStatusSync)
+	auth.POST("/qps-sync", handleQPSSync)
+	auth.GET("/config_root", leaderConfig)
+	auth.GET("/config/download", downloadConfig)
+
+	// Pending changes management (enhanced) - REQUIRE AUTH
+	auth.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
+	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges)  // Enhanced endpoint with status info
+	auth.POST("/apply-changes", ApplyPendingChanges)                  // Legacy endpoint
+	auth.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Enhanced endpoint with transaction support
+	auth.POST("/apply-single-change", ApplySingleChange)              // Legacy endpoint
+	auth.POST("/verify-changes", VerifyPendingChanges)                // Verify all changes
+	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange)  // Verify single change
+	auth.DELETE("/cancel-change/:type/:id", CancelPendingChange)      // Cancel single change
+	auth.DELETE("/cancel-all-changes", CancelAllPendingChanges)       // Cancel all changes
+
+	// Temporary file management - REQUIRE AUTH
+	auth.POST("/temp-file/:type/:id", CreateTempFile)
+	auth.GET("/temp-file/:type/:id", CheckTempFile)
+	auth.DELETE("/temp-file/:type/:id", DeleteTempFile)
+
+	// Sampler endpoints - REQUIRE AUTH
+	auth.GET("/samplers/data", GetSamplerData)
+	auth.GET("/ruleset-fields/:id", GetRulesetFields)
+
+	// Cancel upgrade routes - REQUIRE AUTH
+	auth.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)
+	auth.POST("/cancel-upgrade/inputs/:id", cancelInputUpgrade)
+	auth.POST("/cancel-upgrade/outputs/:id", cancelOutputUpgrade)
+	auth.POST("/cancel-upgrade/projects/:id", cancelProjectUpgrade)
+	auth.POST("/cancel-upgrade/plugins/:id", cancelPluginUpgrade)
+
+	// Component usage analysis - REQUIRE AUTH
+	auth.GET("/component-usage/:type/:id", GetComponentUsage)
+
+	// Component configuration search - REQUIRE AUTH
+	auth.GET("/search-components", searchComponentsConfig)
+
+	// Load local components routes - REQUIRE AUTH
+	auth.GET("/local-changes", getLocalChanges)
+	auth.POST("/load-local-changes", loadLocalChanges)
+	auth.POST("/load-single-local-change", loadSingleLocalChange)
+
+	// Combined metrics sync endpoint (only on leader) - REQUIRE AUTH
+	auth.POST("/metrics-sync", handleMetricsSync)
+
+	// Error log endpoints - REQUIRE AUTH
+	auth.GET("/error-logs", getErrorLogs)
+	auth.GET("/cluster-error-logs", getClusterErrorLogs)
 
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

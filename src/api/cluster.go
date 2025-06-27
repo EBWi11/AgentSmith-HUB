@@ -648,14 +648,8 @@ func handleQPSSync(c echo.Context) error {
 }
 
 // getQPSData returns QPS data for query
+// Each node can provide its own data - no leader restriction needed
 func getQPSData(c echo.Context) error {
-	// Only provide QPS data from leader nodes
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "QPS data is only available from leader nodes",
-		})
-	}
-
 	if common.GlobalQPSManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "QPS manager not initialized",
@@ -696,14 +690,8 @@ func getQPSData(c echo.Context) error {
 }
 
 // getQPSStats returns QPS manager statistics
+// Each node can provide its own data - no leader restriction needed
 func getQPSStats(c echo.Context) error {
-	// Only provide QPS stats from leader nodes
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "QPS statistics are only available from leader nodes",
-		})
-	}
-
 	if common.GlobalQPSManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "QPS manager not initialized",
@@ -715,14 +703,8 @@ func getQPSStats(c echo.Context) error {
 }
 
 // getHourlyMessages returns real message counts for the past hour
+// Each node can provide its own data - no leader restriction needed
 func getHourlyMessages(c echo.Context) error {
-	// Only provide message data from leader nodes
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Message data is only available from leader nodes",
-		})
-	}
-
 	if common.GlobalQPSManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "QPS manager not initialized",
@@ -762,14 +744,8 @@ func getHourlyMessages(c echo.Context) error {
 }
 
 // getDailyMessages returns real message counts for today (from 00:00)
+// Each node can provide its own data - no leader restriction needed
 func getDailyMessages(c echo.Context) error {
-	// Only provide message data from leader nodes
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Message data is only available from leader nodes",
-		})
-	}
-
 	if common.GlobalQPSManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
 			"error": "QPS manager not initialized",

@@ -9,6 +9,15 @@ const api = axios.create({
   },
 });
 
+// Create a separate axios instance for public APIs (no token required)
+const publicApi = axios.create({
+  baseURL: config.apiBaseUrl,
+  timeout: config.apiTimeout,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
 /**
  * Handles API errors consistently
  * @param {Error} error - The error object
@@ -349,12 +358,12 @@ export const hubApi = {
   },
 
   async fetchClusterStatus() {
-    const response = await api.get('/cluster-status');
+    const response = await publicApi.get('/cluster-status');
     return response.data;
   },
 
   async fetchClusterInfo() {
-    const response = await api.get('/cluster-status');
+    const response = await publicApi.get('/cluster-status');
     return response.data;
   },
 
@@ -1219,9 +1228,10 @@ export const hubApi = {
   },
 
   // Component Data APIs (backend still uses QPS endpoints for component enumeration)
+  // Use publicApi for statistics - no token required
   async getQPSData(params = {}) {
     try {
-      const response = await api.get('/qps-data', { params });
+      const response = await publicApi.get('/qps-data', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching component data:', error);
@@ -1231,7 +1241,7 @@ export const hubApi = {
 
   async getQPSStats() {
     try {
-      const response = await api.get('/qps-stats');
+      const response = await publicApi.get('/qps-stats');
       return response.data;
     } catch (error) {
       console.error('Error fetching component stats:', error);
@@ -1254,6 +1264,7 @@ export const hubApi = {
   },
 
   // Daily Messages APIs (real message counts for today from 00:00)
+  // Use publicApi for statistics - no token required
   async getDailyMessages(projectId = null, aggregated = false) {
     try {
       const params = {};
@@ -1263,7 +1274,7 @@ export const hubApi = {
       if (aggregated) {
         params.aggregated = true;
       }
-      const response = await api.get('/daily-messages', { params });
+      const response = await publicApi.get('/daily-messages', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching daily messages:', error);
@@ -1273,7 +1284,7 @@ export const hubApi = {
 
     async getProjectDailyMessages(projectId) {
     try {
-      const response = await api.get('/daily-messages', { 
+      const response = await publicApi.get('/daily-messages', { 
         params: { project_id: projectId } 
       });
       return response.data;
@@ -1296,7 +1307,7 @@ export const hubApi = {
 
   async getAggregatedDailyMessages() {
     try {
-      const response = await api.get('/daily-messages', { 
+      const response = await publicApi.get('/daily-messages', { 
         params: { aggregated: true } 
       });
       return response.data;
@@ -1308,7 +1319,7 @@ export const hubApi = {
 
   async getNodeDailyMessages(nodeId) {
     try {
-      const response = await api.get('/daily-messages', { 
+      const response = await publicApi.get('/daily-messages', { 
         params: { by_node: true, node_id: nodeId } 
       });
       return response.data;
@@ -1320,7 +1331,7 @@ export const hubApi = {
 
   async getAllNodeDailyMessages() {
     try {
-      const response = await api.get('/daily-messages', { 
+      const response = await publicApi.get('/daily-messages', { 
         params: { by_node: true } 
       });
       return response.data;
@@ -1330,10 +1341,11 @@ export const hubApi = {
     }
   },
 
-  // System Metrics APIs
+  // System Metrics APIs 
+  // Use publicApi for statistics - no token required
   async getSystemMetrics(params = {}) {
     try {
-      const response = await api.get('/system-metrics', { params });
+      const response = await publicApi.get('/system-metrics', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching system metrics:', error);
@@ -1343,7 +1355,7 @@ export const hubApi = {
 
   async getCurrentSystemMetrics() {
     try {
-      const response = await api.get('/system-metrics', { params: { current: true } });
+      const response = await publicApi.get('/system-metrics', { params: { current: true } });
       return response.data;
     } catch (error) {
       console.error('Error fetching current system metrics:', error);
@@ -1353,7 +1365,7 @@ export const hubApi = {
 
   async getSystemStats() {
     try {
-      const response = await api.get('/system-stats');
+      const response = await publicApi.get('/system-stats');
       return response.data;
     } catch (error) {
       console.error('Error fetching system stats:', error);
@@ -1367,7 +1379,7 @@ export const hubApi = {
       if (since) {
         params.since = since;
       }
-      const response = await api.get('/system-metrics', { params });
+      const response = await publicApi.get('/system-metrics', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching historical system metrics:', error);
@@ -1375,14 +1387,15 @@ export const hubApi = {
     }
   },
 
-  // Cluster System Metrics APIs (only available from leader)
+  // Cluster System Metrics APIs (now available from any node)
+  // Use publicApi for statistics - no token required
   async getClusterSystemMetrics(nodeId = null) {
     try {
       const params = {};
       if (nodeId) {
         params.node_id = nodeId;
       }
-      const response = await api.get('/cluster-system-metrics', { params });
+      const response = await publicApi.get('/cluster-system-metrics', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching cluster system metrics:', error);
@@ -1392,7 +1405,7 @@ export const hubApi = {
 
   async getClusterSystemStats() {
     try {
-      const response = await api.get('/cluster-system-stats');
+      const response = await publicApi.get('/cluster-system-stats');
       return response.data;
     } catch (error) {
       console.error('Error fetching cluster system stats:', error);
@@ -1402,7 +1415,7 @@ export const hubApi = {
 
   async getAggregatedSystemMetrics() {
     try {
-      const response = await api.get('/cluster-system-metrics', { params: { aggregated: true } });
+      const response = await publicApi.get('/cluster-system-metrics', { params: { aggregated: true } });
       return response.data;
     } catch (error) {
       console.error('Error fetching aggregated system metrics:', error);

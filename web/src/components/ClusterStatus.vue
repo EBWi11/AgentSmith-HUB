@@ -356,74 +356,13 @@ async function fetchAllData() {
     const cluster = await hubApi.fetchClusterStatus()
     clusterInfo.value = cluster
     
-    // Fetch node-level message data (only from leader)
-    if (cluster.status === 'leader') {
-      try {
-        const nodeMessagesResponse = await hubApi.getAllNodeDailyMessages()
-        nodeMessageData.value = nodeMessagesResponse.data || {}
-      } catch (messageError) {
-        console.warn('Failed to fetch node message data:', messageError)
-        nodeMessageData.value = {}
-        
-        // Fallback: try to get aggregated data and derive node data from it
-        try {
-          console.info('Attempting fallback: fetching aggregated daily messages for node data')
-          const aggregatedResponse = await hubApi.getAggregatedDailyMessages()
-          if (aggregatedResponse.data && aggregatedResponse.data.project_breakdown) {
-            // Convert project breakdown to node-level data approximation
-            const nodeData = {}
-            let totalInput = 0
-            let totalOutput = 0
-            
-            Object.values(aggregatedResponse.data.project_breakdown).forEach(projectData => {
-              totalInput += projectData.input || 0
-              totalOutput += projectData.output || 0
-            })
-            
-            // Assign all data to current node as approximation
-            nodeData[cluster.self_id] = {
-              input_messages: totalInput,
-              output_messages: totalOutput
-            }
-            
-            nodeMessageData.value = nodeData
-            console.info('Successfully used aggregated data as fallback for node message data')
-          }
-        } catch (fallbackError) {
-          console.warn('Fallback also failed:', fallbackError)
-        }
-      }
-    } else {
-      // When not leader, try to get available data anyway 
-      console.info('Current node is not leader, attempting to fetch available message data')
-      
-      try {
-        // Try aggregated data first as it might be available
-        const aggregatedResponse = await hubApi.getAggregatedDailyMessages()
-        if (aggregatedResponse.data && aggregatedResponse.data.project_breakdown) {
-          // Convert project breakdown to node-level data approximation
-          const nodeData = {}
-          let totalInput = 0
-          let totalOutput = 0
-          
-          Object.values(aggregatedResponse.data.project_breakdown).forEach(projectData => {
-            totalInput += projectData.input || 0
-            totalOutput += projectData.output || 0
-          })
-          
-          // Assign all data to current node as approximation
-          nodeData[cluster.self_id] = {
-            input_messages: totalInput,
-            output_messages: totalOutput
-          }
-          
-          nodeMessageData.value = nodeData
-          console.info('Successfully fetched aggregated data for non-leader node')
-        }
-      } catch (error) {
-        console.warn('Failed to fetch any message data on non-leader node:', error)
-        nodeMessageData.value = {}
-      }
+    // Fetch node-level message data from any node (no longer leader-only)
+    try {
+      const nodeMessagesResponse = await hubApi.getAllNodeDailyMessages()
+      nodeMessageData.value = nodeMessagesResponse.data || {}
+    } catch (messageError) {
+      console.warn('Failed to fetch node message data:', messageError)
+      nodeMessageData.value = {}
     }
     
     // Fetch system metrics for all nodes
