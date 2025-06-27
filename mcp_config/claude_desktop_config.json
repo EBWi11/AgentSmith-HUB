@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "command": "node",
+      "args": [
+        "/path/to/mcp-http-bridge.js",
+        "--server-url", "http://localhost:8080/mcp",
+        "--auth-header", "token",
+        "--auth-token", "${AGENTSMITH_TOKEN}"
+      ],
+      "env": {
+        "AGENTSMITH_TOKEN": "your-auth-token-here",
+        "NODE_ENV": "production"
+      }
+    }
+  }
+} 

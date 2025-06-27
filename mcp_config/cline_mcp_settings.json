@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "url": "http://172.26.0.21:8080/mcp",
+      "headers": {
+        "token": ""
+      },
+      "alwaysAllow": [],
+      "disabled": false
+    }
+  }
+} 

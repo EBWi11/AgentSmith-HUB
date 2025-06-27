@@ -1,0 +1,28 @@
+{
+  "mcp.servers": {
+    "agentsmith-hub": {
+      "name": "AgentSmith-HUB",
+      "description": "Security Data Pipe Platform (SDPP) & Security Rules Engine",
+      "transport": {
+        "type": "http",
+        "baseUrl": "http://localhost:8080",
+        "endpoint": "/mcp"
+      },
+      "authentication": {
+        "type": "header",
+        "header": "token",
+        "value": "YOUR_TOKEN_HERE"
+      },
+      "timeout": 30000,
+      "retryAttempts": 3,
+      "capabilities": {
+        "resources": true,
+        "tools": true,
+        "prompts": true
+      }
+    }
+  },
+  "mcp.logLevel": "info",
+  "mcp.enableAutoReconnect": true,
+  "mcp.connectionTimeout": 10000
+} 

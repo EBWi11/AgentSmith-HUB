@@ -2,7 +2,7 @@
   "mcpServers": {
     "agentsmith-hub": {
       "name": "AgentSmith-HUB",
-      "description": "Data Processing Pipeline Management System",
+      "description": "Security Data Pipe Platform (SDPP) & Security Rules Engine",
       "version": "0.1.2",
       "transport": {
         "type": "http",
@@ -41,7 +41,7 @@
         "mcp.servers": {
           "agentsmith-hub": {
             "name": "AgentSmith-HUB",
-            "description": "Data Processing Pipeline Management",
+            "description": "Security Data Pipe Platform & Rules Engine",
             "transport": {
               "type": "http",
               "baseUrl": "http://localhost:8080",

@@ -24,6 +24,9 @@ func (s *MCPServer) promptAnalyzeProject(args map[string]interface{}) (common.MC
 		return common.MCPGetPromptResult{}, fmt.Errorf("project_id is required")
 	}
 
+	analysisDepth, _ := args["analysis_depth"].(string)
+	focusAreas, _ := args["focus_areas"].(string)
+
 	proj := project.GlobalProject.Projects[projectID]
 	if proj == nil {
 		return common.MCPGetPromptResult{}, fmt.Errorf("project not found: %s", projectID)
@@ -40,7 +43,7 @@ func (s *MCPServer) promptAnalyzeProject(args map[string]interface{}) (common.MC
 		errorInfo = fmt.Sprintf("\n### Current Error:\n%s\n", proj.Err.Error())
 	}
 
-	promptText := fmt.Sprintf(promptDef.Template, proj.Id, proj.Status, componentDetails.String(), proj.Config.RawConfig, errorInfo)
+	promptText := fmt.Sprintf(promptDef.Template, projectID, analysisDepth, focusAreas, proj.Id, proj.Status, componentDetails.String(), proj.Config.RawConfig, errorInfo)
 
 	return common.MCPGetPromptResult{
 		Description: promptDef.Description,
@@ -58,40 +61,9 @@ func (s *MCPServer) promptDebugComponent(args map[string]interface{}) (common.MC
 	componentType, _ := args["component_type"].(string)
 	componentID, _ := args["component_id"].(string)
 	issueDescription, _ := args["issue_description"].(string)
-	errorLogs, _ := args["error_logs"].(string)
+	debugLevel, _ := args["debug_level"].(string)
 
-	var componentConfig, componentTypeDescription, codeBlockType, issueStr, errorStr string
-	codeBlockType = "yaml"
-
-	switch componentType {
-	case "input":
-		if c := project.GlobalProject.Inputs[componentID]; c != nil {
-			componentConfig = c.Config.RawConfig
-		}
-	case "output":
-		if c := project.GlobalProject.Outputs[componentID]; c != nil {
-			componentConfig = c.Config.RawConfig
-		}
-	case "plugin":
-		if p := plugin.Plugins[componentID]; p != nil {
-			componentConfig = string(p.Payload)
-			codeBlockType = "go"
-		}
-	case "ruleset":
-		if r := project.GlobalProject.Rulesets[componentID]; r != nil {
-			componentConfig = r.RawConfig
-			codeBlockType = "xml"
-		}
-	}
-
-	if issueDescription != "" {
-		issueStr = fmt.Sprintf("\n## Issue Description:\n%s", issueDescription)
-	}
-	if errorLogs != "" {
-		errorStr = fmt.Sprintf("\n## Error Logs:\n```\n%s\n```", errorLogs)
-	}
-
-	promptText := fmt.Sprintf(promptDef.Template, componentID, componentType, componentTypeDescription, codeBlockType, componentConfig, issueStr, errorStr)
+	promptText := fmt.Sprintf(promptDef.Template, componentType, componentID, issueDescription, debugLevel)
 
 	return common.MCPGetPromptResult{
 		Description: promptDef.Description,
@@ -386,4 +358,244 @@ func getComponentListForPrompt[T any](componentMap map[string]T) string {
 		builder.WriteString(fmt.Sprintf("    - %s\n", k))
 	}
 	return strings.TrimRight(builder.String(), "\n")
+}
+
+// promptCreatePluginGuide generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptCreatePluginGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["create_plugin_guide"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: create_plugin_guide")
+	}
+	pluginID, _ := args["plugin_id"].(string)
+	pluginPurpose, _ := args["plugin_purpose"].(string)
+	returnType, _ := args["return_type"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, pluginID, pluginPurpose, returnType)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptComponentWorkflowGuide generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptComponentWorkflowGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["component_workflow_guide"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: component_workflow_guide")
+	}
+	componentType, _ := args["component_type"].(string)
+	workflowStage, _ := args["workflow_stage"].(string)
+	componentID, _ := args["component_id"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, componentType, workflowStage, componentID)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptTestComponentsGuide generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptTestComponentsGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["test_components_guide"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: test_components_guide")
+	}
+	componentType, _ := args["component_type"].(string)
+	componentID, _ := args["component_id"].(string)
+	testType, _ := args["test_type"].(string)
+	testDataType, _ := args["test_data_type"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, componentType, componentID, testType, testDataType)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptTroubleshootConnectivity generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptTroubleshootConnectivity(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["troubleshoot_connectivity"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: troubleshoot_connectivity")
+	}
+	componentType, _ := args["component_type"].(string)
+	componentID, _ := args["component_id"].(string)
+	errorSymptoms, _ := args["error_symptoms"].(string)
+	networkEnvironment, _ := args["network_environment"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, componentType, componentID, errorSymptoms, networkEnvironment)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptAnalyzePerformanceIssues generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptAnalyzePerformanceIssues(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["analyze_performance_issues"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: analyze_performance_issues")
+	}
+	issueType, _ := args["issue_type"].(string)
+	componentScope, _ := args["component_scope"].(string)
+	analysisDepth, _ := args["analysis_depth"].(string)
+	timeRange, _ := args["time_range"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, issueType, componentScope, analysisDepth, timeRange)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptManageBulkOperations generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptManageBulkOperations(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["manage_bulk_operations"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: manage_bulk_operations")
+	}
+	operationType, _ := args["operation_type"].(string)
+	targetScope, _ := args["target_scope"].(string)
+	batchSize, _ := args["batch_size"].(string)
+	safetyLevel, _ := args["safety_level"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, operationType, targetScope, batchSize, safetyLevel)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptAssessChangeImpact generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptAssessChangeImpact(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["assess_change_impact"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: assess_change_impact")
+	}
+	changeType, _ := args["change_type"].(string)
+	componentType, _ := args["component_type"].(string)
+	componentID, _ := args["component_id"].(string)
+	assessmentDepth, _ := args["assessment_depth"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, changeType, componentType, componentID, assessmentDepth)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptDebugErrorLogs generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptDebugErrorLogs(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["debug_error_logs"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: debug_error_logs")
+	}
+	logScope, _ := args["log_scope"].(string)
+	componentFilter, _ := args["component_filter"].(string)
+	severityLevel, _ := args["severity_level"].(string)
+	timeRange, _ := args["time_range"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, logScope, componentFilter, severityLevel, timeRange)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptManageClusterOperations generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptManageClusterOperations(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["manage_cluster_operations"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: manage_cluster_operations")
+	}
+	operationType, _ := args["operation_type"].(string)
+	targetNodes, _ := args["target_nodes"].(string)
+	maintenanceWindow, _ := args["maintenance_window"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, operationType, targetNodes, maintenanceWindow)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptSearchSystemGuide generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptSearchSystemGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["search_system_guide"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: search_system_guide")
+	}
+	searchType, _ := args["search_type"].(string)
+	searchTarget, _ := args["search_target"].(string)
+	searchScope, _ := args["search_scope"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, searchType, searchTarget, searchScope)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptManageDataSampling generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptManageDataSampling(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["manage_data_sampling"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: manage_data_sampling")
+	}
+	samplingPurpose, _ := args["sampling_purpose"].(string)
+	dataSource, _ := args["data_source"].(string)
+	analysisDepth, _ := args["analysis_depth"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, samplingPurpose, dataSource, analysisDepth)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptManageUpgradeOperations generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptManageUpgradeOperations(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["manage_upgrade_operations"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: manage_upgrade_operations")
+	}
+	upgradeType, _ := args["upgrade_type"].(string)
+	componentType, _ := args["component_type"].(string)
+	safetyLevel, _ := args["safety_level"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, upgradeType, componentType, safetyLevel)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
+}
+
+// promptManageLocalFiles generates the final prompt text by injecting dynamic data into a template.
+func (s *MCPServer) promptManageLocalFiles(args map[string]interface{}) (common.MCPGetPromptResult, error) {
+	promptDef, ok := s.promptDefs["manage_local_files"]
+	if !ok {
+		return common.MCPGetPromptResult{}, fmt.Errorf("prompt definition not found: manage_local_files")
+	}
+	operationType, _ := args["operation_type"].(string)
+	fileScope, _ := args["file_scope"].(string)
+	syncStrategy, _ := args["sync_strategy"].(string)
+
+	promptText := fmt.Sprintf(promptDef.Template, operationType, fileScope, syncStrategy)
+
+	return common.MCPGetPromptResult{
+		Description: promptDef.Description,
+		Messages:    []common.MCPPromptMessage{{Role: "user", Content: common.MCPPromptContent{Type: "text", Text: promptText}}},
+	}, nil
 }
