@@ -44,12 +44,7 @@ export function getComponentTypeLabel(type) {
   return COMPONENT_TYPES[type]?.label || type
 }
 
-/**
- * 获取组件类型图标
- */
-export function getComponentTypeIcon(type) {
-  return COMPONENT_TYPES[type]?.icon || '📄'
-}
+// Note: getComponentTypeIcon was removed as it was unused
 
 /**
  * 获取编辑器语言
@@ -241,46 +236,9 @@ export function debounce(func, wait, immediate) {
   }
 }
 
-/**
- * 节流函数
- */
-export function throttle(func, limit) {
-  let inThrottle
-  return function executedFunction(...args) {
-    if (!inThrottle) {
-      func.apply(this, args)
-      inThrottle = true
-      setTimeout(() => inThrottle = false, limit)
-    }
-  }
-}
+// Note: throttle function was removed as it was unused
 
-/**
- * 深度克隆对象
- */
-export function deepClone(obj) {
-  if (obj === null || typeof obj !== 'object') {
-    return obj
-  }
-  
-  if (obj instanceof Date) {
-    return new Date(obj.getTime())
-  }
-  
-  if (obj instanceof Array) {
-    return obj.map(item => deepClone(item))
-  }
-  
-  if (typeof obj === 'object') {
-    const clonedObj = {}
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        clonedObj[key] = deepClone(obj[key])
-      }
-    }
-    return clonedObj
-  }
-}
+// Note: deepClone function was removed as it was unused
 
 /**
  * 检查是否需要重启的组件变更

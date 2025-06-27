@@ -1,0 +1,161 @@
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "command": "curl",
+      "args": [
+        "-X", "POST",
+        "http://localhost:8080/mcp",
+        "-H", "Content-Type: application/json",
+        "-H", "Token: YOUR_TOKEN_HERE",
+        "-d", "@-"
+      ],
+      "description": "AgentSmith-HUB is an SDPP (Security Data Pipeline Platform) with a powerful integrated Security Rule Engine. This MCP server provides comprehensive management capabilities.",
+      "capabilities": {
+        "resources": true,
+        "tools": true,
+        "prompts": true
+      }
+    }
+  },
+  "usage_examples": {
+    "resources": {
+      "description": "Access live configuration data for all components. Use URIs like `hub://<type>/<id>`.",
+      "examples": [
+        "hub://project/api_security - Read live project configuration.",
+        "hub://input/kafka_input - Read input component settings.",
+        "hub://output/es_output - Read output component configuration.",
+        "hub://plugin/data_transformer - Read plugin Go source code.",
+        "hub://ruleset/security_rules - Read ruleset XML configuration."
+      ]
+    },
+    "tools": {
+      "description": "Over 60 tools covering the complete API functionality, enabling full remote management of the system.",
+      "categories": {
+        "system_monitoring": [
+          "ping - A quick, unauthenticated health check to verify server connectivity and basic status. Ideal for automated monitoring.",
+          "get_qps_data - Retrieves detailed, real-time Queries Per Second (QPS) metrics for all components, essential for live performance monitoring.",
+          "get_system_metrics - Fetches current resource utilization (CPU, Memory, Disk) for the local node. Critical for identifying resource bottlenecks.",
+          "get_cluster_status - Provides a comprehensive overview of the cluster's health, including node roles, connectivity, and leader status."
+        ],
+        "project_management": [
+          "get_projects - Lists all projects with their current status (running, stopped, error), essential for system overview.",
+          "get_project - Retrieves the detailed YAML configuration and status for a specific project.",
+          "create_project - Creates a new project from a YAML configuration. **Note: This follows the 3-step update workflow.**",
+          "start_project - Starts a stopped project, activating its data processing pipeline. Automatically applies pending changes.",
+          "stop_project - Gracefully stops a running project, ensuring in-flight data is processed.",
+          "restart_project - **Recommended action for applying changes.** Stops and then starts a project, ensuring the new configuration is loaded."
+        ],
+        "component_management": [
+          "get_inputs - Lists all available input components.",
+          "update_input - Saves a new configuration for an input component, creating a pending change. **This is Step 1 of the update workflow.**",
+          "delete_input - **Irreversible action.** Permanently deletes an input component and its configuration file.",
+          "verify_component - Validates the syntax and semantic correctness of a component's configuration without applying it.",
+          "connect_check - Actively tests the connectivity of an input or output component to its external endpoint (e.g., Kafka, Elasticsearch)."
+        ],
+        "testing_validation": [
+          "test_plugin - Executes a plugin with sample data to verify its logic and performance. Returns the output and any errors.",
+          "test_ruleset - Processes sample data through a ruleset to validate its matching and transformation logic.",
+          "test_output - Sends sample data to an output to verify its delivery configuration and connectivity.",
+          "test_project - Performs an end-to-end test of an entire project pipeline with sample data."
+        ],
+        "change_management": [
+          "get_pending_changes - Shows a list of all configurations that have been updated but not yet applied.",
+          "apply_single_change - **This is Step 2 of the update workflow.** Applies a specific pending change, making it the active configuration.",
+          "verify_changes - Validates all pending changes to ensure they are correct before application.",
+          "cancel_change - Discards a pending change and deletes its associated `.new` temporary file."
+        ]
+      }
+    },
+    "prompts": {
+      "description": "13 specialized prompts that act as expert guides and Standard Operating Procedures (SOPs) for system management.",
+      "available_prompts": {
+        "analyze_project": {
+          "description": "Guides the AI to act as a security analyst, first understanding the data via `get_samplers_data`, then performing a deep analysis of a project's architecture, configuration, and security.",
+          "parameters": {
+            "project_id": "Required - The ID of the project to be analyzed."
+          }
+        },
+        "debug_component": {
+          "description": "A step-by-step SOP for debugging. Guides the AI to first gather context on project usage with `get_component_usage`, then analyze the config to find the root cause.",
+          "parameters": {
+            "component_type": "Required - The type of the component (e.g., 'input', 'ruleset').",
+            "component_id": "Required - The ID of the component to debug."
+          }
+        },
+        "optimize_performance": {
+          "description": "A data-driven SOP for performance analysis. Guides the AI to act as an SRE, using tools like `get_system_stats` and `get_qps_stats` to gather metrics before making recommendations.",
+          "parameters": {
+            "focus_area": "Optional - Specific area to focus on, like 'throughput' or 'cpu'."
+          }
+        },
+        "create_project_guide": {
+          "description": "An interactive guide for creating projects. Enforces a pre-flight check, requiring the AI to first use `search_components` to verify all required sub-components exist.",
+          "parameters": {
+            "use_case": "Required - A description of the project's goal."
+          }
+        },
+        "create_ruleset_guide": {
+          "description": "A comprehensive tutorial on writing Ruleset XML, covering all elements from `<filter>` to `<threshold>` and explaining the critical usage of `CDATA` sections.",
+          "parameters": {
+            "use_case": "Required - The security goal for the new ruleset."
+          }
+        },
+        "guide_ruleset_plugins": {
+          "description": "A detailed guide on using plugins in rulesets. Explains the three different use cases (`<node>`, `<append>`, `<plugin>`) and dynamically lists available plugins.",
+          "parameters": {
+            "goal": "Required - The objective to achieve with the plugin."
+          }
+        },
+        "security_audit": {
+          "description": "An evidence-based SOP for security audits. Guides the AI to use search and get tools to gather concrete evidence of misconfigurations before reporting findings.",
+          "parameters": {
+            "scope": "Optional - A specific area to focus the audit on, like 'authentication'."
+          }
+        },
+        "cluster_health_check": {
+          "description": "An SOP for checking cluster health. Guides the AI to use `get_cluster_status` and `get_projects` to generate a comprehensive health report.",
+          "parameters": {}
+        },
+        "capacity_planning": {
+          "description": "A data-driven SOP for capacity planning. Guides the AI to use tools like `get_daily_messages` to analyze historical trends and forecast future needs.",
+          "parameters": {
+            "time_horizon": "Required - The forecast period (e.g., '3_months')."
+          }
+        },
+        "guide_component_update_workflow": {
+          "description": "**Fundamental Knowledge.** Explains the mandatory, safe, three-step workflow (save->apply->restart) for updating any component configuration.",
+          "parameters": {}
+        },
+        "create_input_guide": {
+          "description": "A guide with examples for creating different types of Input components (e.g., Kafka, HTTP).",
+          "parameters": {
+            "input_type": "Required - The type of input to create, like 'kafka'.",
+            "use_case": "Required - The purpose of this input."
+          }
+        },
+        "create_output_guide": {
+          "description": "A guide with examples for creating different types of Output components (e.g., Elasticsearch, Webhook).",
+          "parameters": {
+            "output_type": "Required - The type of output to create, like 'elasticsearch'.",
+            "use_case": "Required - The purpose of this output."
+          }
+        },
+        "migration_guide": {
+          "description": "A guide for planning system or component migrations, outlining steps and risks.",
+          "parameters": {
+            "migration_type": "Optional - e.g., 'version_upgrade', 'cluster_migration'."
+          }
+        }
+      }
+    }
+  },
+  "integration_notes": {
+    "leader_only": "MCP services are only available on cluster leader nodes. All management operations should be sent to the leader.",
+    "authentication": "All requests require a valid token sent in the 'Token' header.",
+    "workflow": "All component updates MUST follow the three-step workflow. Use the `guide_component_update_workflow` prompt for details."
+  },
+  "clientInfo": {
+    "name": "AgentSmith-HUB MCP Client",
+    "version": "1.0.0"
+  }
+} 

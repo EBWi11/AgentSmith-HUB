@@ -1,215 +1,326 @@
-# AgentSmith-HUB
+# 🚀 AgentSmith-HUB
 
-AgentSmith-HUB is a high-performance data processing and rules engine system designed for real-time data analysis and event detection. It provides a flexible and scalable architecture for processing streaming data from various sources, applying complex rules, and outputting results to multiple destinations.
+> **An SDPP (Security Data Pipeline Platform) with a Powerful Integrated Security Rule Engine**
 
-## Features
+AgentSmith-HUB is a next-generation security platform designed for real-time threat detection, advanced alert processing, and flexible data pipeline management. It combines a high-performance stream processing engine with an intuitive web interface, empowering security teams to build and manage sophisticated detection and response workflows at enterprise scale.
 
-- **Multi-source Input Support**
-  - Kafka
-  - Aliyun SLS (Simple Log Service)
-  - Extensible input plugin system
+## ✨ Key Features
 
-- **Powerful Rules Engine**
-  - Complex condition evaluation
-  - Pattern matching with regex support
-  - Threshold-based aggregation
-  - Local and Redis-based caching
-  - Plugin system for custom logic
+### 🛡️ **Core Platform**
+- **Security Data Pipeline** - Ingest, parse, enrich, and route security data from any source (e.g., Kafka, Syslog, APIs).
+- **High-Performance Rule Engine** - Build complex detection logic with a powerful XML-based ruleset and custom Go plugins.
+- **Real-time Processing** - Detect and respond to threats as they happen with a low-latency, concurrent Go backend.
 
-- **Flexible Output Options**
-  - Kafka
-  - Elasticsearch
-  - Aliyun SLS
-  - Console printing
-  - Extensible output plugin system
+### 🌐 **Web Management Interface**
+- **Modern Vue3 Dashboard** - Intuitive management for all components (inputs, outputs, rulesets, projects).
+- **Real-time Monitoring** - Live QPS metrics and system statistics for full operational visibility.
+- **Visual Project Builder** - Design and visualize complex data flows connecting all your components.
+- **Integrated Code Editor** - Write and test rulesets and plugins directly in the browser with Monaco Editor.
 
-- **High Performance**
-  - Channel-based message passing
-  - Efficient caching mechanisms
-  - Batch processing support
-  - Concurrent rule evaluation
+### 🏗️ **Enterprise-Ready Architecture**
+- **Cluster Management** - Leader/Follower architecture with auto-failover ensures high availability.
+- **Safe Change Management** - A mandatory 3-step workflow (save, apply, restart) for all configuration changes prevents operational disruption.
+- **Centralized Logging & Auditing** - Comprehensive error logs and audit trails for compliance and troubleshooting.
 
-## Architecture
+### 🔄 **Stream Processing Engine**
+- **Multi-source Data Ingestion** - Kafka, Aliyun SLS, extensible plugins
+- **Real-time Rule Processing** - Complex event detection and filtering
+- **Flexible Output Routing** - Elasticsearch, Kafka, SLS, custom outputs
+- **High-performance Architecture** - Go-based backend with concurrent processing
 
-The system follows a modular architecture with three main components:
+### 📊 **Monitoring & Analytics**
+- **Real-time Metrics** - Message processing rates and system performance
+- **Cluster Status** - Node health monitoring and resource usage
+- **Historical Analytics** - Trending and capacity planning
+- **Alert Management** - Proactive issue detection
 
-1. **Input Components**: Consume data from various sources
-2. **Rules Engine**: Process and analyze data using configurable rules
-3. **Output Components**: Send processed data to different destinations
+## 🏛️ Architecture Overview
 
-Data flows through these components in a directed graph defined by project configuration.
-
-## Configuration
-
-### Project Configuration
-
-Projects are defined in YAML files under the `config_demo/project` directory:
-
-```yaml
-id: "project_id"
-name: "Project Name"
-content: |
-  INPUT.kafka1 -> RULESET.rules1
-  RULESET.rules1 -> OUTPUT.es1
+```mermaid
+graph TB
+    subgraph "Frontend (Vue3)"
+        UI[Web Dashboard]
+        Editor[Monaco Editor]
+        Monitor[Real-time Monitor]
+    end
+    
+    subgraph "Backend Cluster"
+        Leader[Leader Node]
+        Follower1[Follower Node 1]
+        Follower2[Follower Node N]
+    end
+    
+    subgraph "Data Processing"
+        Input[Input Components]
+        Rules[Rules Engine]
+        Output[Output Components]
+    end
+    
+    subgraph "External Systems"
+        Kafka[Apache Kafka]
+        ES[Elasticsearch]
+        SLS[Aliyun SLS]
+        Redis[Redis Cache]
+    end
+    
+    UI --> Leader
+    Leader --> Follower1
+    Leader --> Follower2
+    
+    Input --> Rules
+    Rules --> Output
+    
+    Input --> Kafka
+    Input --> SLS
+    Output --> ES
+    Output --> Kafka
+    Rules --> Redis
 ```
 
-### Input Configuration
+## 🚀 Quick Start
 
-Input configurations are defined in YAML files under the `config_demo/input` directory:
+### Prerequisites
 
+- **Go 1.21+** - Backend runtime
+- **Node.js 18+** - Frontend development  
+- **Redis** - Caching (optional)
+- **Kafka/Elasticsearch** - Data sources/sinks (optional)
+
+### 1. Clone & Build
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/AgentSmith-HUB.git
+cd AgentSmith-HUB
+
+# Build backend
+cd src && go build -o agentsmith-hub
+
+# Build frontend  
+cd ../web && npm install && npm run build
+```
+
+### 2. Start Leader Node
+
+```bash
+# Start as cluster leader
+./agentsmith-hub -config_root ./config
+
+# Access web interface
+open http://localhost:8080
+```
+
+### 3. Add Follower Nodes (Optional)
+
+```bash
+# Start as follower
+./agentsmith-hub -leader 192.168.1.100:8080
+```
+
+## 📱 Web Interface Guide
+
+### Dashboard Overview
+- **System Metrics** - CPU, Memory, Goroutines
+- **Message Statistics** - Daily/hourly processing rates
+- **Project Status** - Running/stopped projects overview
+- **Cluster Nodes** - Node health and resource usage
+
+### Component Management
+- **📥 Inputs** - Configure data sources (Kafka, SLS)
+- **📤 Outputs** - Set up data destinations (ES, Kafka)  
+- **📋 Rulesets** - Create XML-based processing rules
+- **🔌 Plugins** - Develop Go-based custom logic
+- **📁 Projects** - Orchestrate data flows
+
+### Advanced Features
+- **Pending Changes** - Review and apply configuration updates
+- **Error Logs** - Centralized error tracking and debugging
+- **Cluster Status** - Monitor distributed node performance
+- **Load Local Components** - Import configurations from filesystem
+
+## ⚙️ Configuration Guide
+
+### Project Configuration (YAML)
 ```yaml
-name: "Kafka Input"
+id: "data_pipeline"
+name: "Real-time Data Pipeline"
+content: |
+  INPUT.kafka_source -> RULESET.fraud_detection
+  RULESET.fraud_detection -> OUTPUT.elasticsearch_sink
+  RULESET.fraud_detection -> OUTPUT.alert_kafka
+```
+
+### Input Configuration (YAML)
+```yaml
+name: "Kafka Consumer"
 type: "kafka"
 kafka:
-  brokers:
-    - "localhost:9092"
-  group: "consumer-group"
-  topic: "input-topic"
+  brokers: ["kafka1:9092", "kafka2:9092"]
+  topic: "events"
+  group: "processing-group"
   compression: "snappy"
   sasl:
     enable: true
     mechanism: "plain"
-    username: "user"
-    password: "pass"
+    username: "${KAFKA_USER}"
+    password: "${KAFKA_PASS}"
 ```
 
-### Rules Configuration
-
-Rules are defined in XML files under the `config_demo/ruleset` directory:
-
+### Ruleset Configuration (XML)
 ```xml
-<root name="Ruleset Name" type="DETECTION">
-  <rule id="rule1" name="Rule Name">
-    <filter field="field.path">value</filter>
-    <checklist condition="(a AND b) OR c">
-      <node id="a" type="EQU" field="field1">value1</node>
-      <node id="b" type="REGEX" field="field2">pattern</node>
-      <node id="c" type="PLUGIN" field="field3">plugin_name(arg1, arg2)</node>
+<root name="Fraud Detection" type="DETECTION">
+  <rule id="high_value_transaction" name="High Value Alert">
+    <filter field="event_type">transaction</filter>
+    <checklist condition="amount_check AND location_check">
+      <node id="amount_check" type="MT" field="amount">10000</node>
+      <node id="location_check" type="PLUGIN" field="location">
+        is_high_risk_location(location.country, location.city)
+      </node>
     </checklist>
-    <threshold group_by="field1,field2" range="5m" count_type="SUM" count_field="field3" local_cache="true">10</threshold>
-    <append type="PLUGIN" field="result">plugin_name(arg1, arg2)</append>
+    <threshold group_by="user_id" range="1h" count_type="COUNT" local_cache="true">3</threshold>
+    <append type="STRING" field="alert_level">HIGH</append>
+    <append type="PLUGIN" field="risk_score">
+      calculate_risk_score(amount, location, user_history)
+    </append>
   </rule>
 </root>
 ```
 
-### Output Configuration
-
-Output configurations are defined in YAML files under the `config_demo/output` directory:
-
+### Output Configuration (YAML)
 ```yaml
-name: "Elasticsearch Output"
+name: "Elasticsearch Sink"
 type: "elasticsearch"
 elasticsearch:
-  hosts:
-    - "http://localhost:9200"
-  index: "output-index"
+  hosts: ["http://es1:9200", "http://es2:9200"]
+  index: "fraud-alerts"
   batch_size: 1000
-  flush_dur: "5s"
+  flush_dur: "30s"
+  auth:
+    username: "${ES_USER}"
+    password: "${ES_PASS}"
 ```
 
-## Usage
+## 🔧 Development
 
-1. **Setup Configuration**
-   - Create project configuration in `config_demo/project/`
-   - Define input configurations in `config_demo/input/`
-   - Create rules in `config_demo/ruleset/`
-   - Configure outputs in `config_demo/output/`
+### Backend Development
+```bash
+cd src
 
-2. **Start the System**
-   ```go
-   // Set configuration root
-   project.SetConfigRoot("path/to/resource")
-   
-   // Create and start project
-   p, err := project.NewProject("project.yaml")
-   if err != nil {
-       log.Fatal(err)
-   }
-   
-   err = p.Start()
-   if err != nil {
-       log.Fatal(err)
-   }
-   ```
+# Run with auto-reload (using air)
+go install github.com/cosmtrek/air@latest
+air
 
-3. **Monitor and Manage**
-   - Use `GetMetrics()` to monitor system performance
-   - Check `GetLastError()` for error handling
-   - Monitor `GetUptime()` for system health
+# Run tests
+go test ./...
 
-## Rule Types
+# Build for production
+go build -ldflags="-s -w" -o agentsmith-hub
+```
 
-The rules engine supports various check types:
+### Frontend Development
+```bash
+cd web
 
-- **String Operations**
-  - `EQU`: Equal to
-  - `NEQ`: Not equal to
-  - `INCL`: Contains
-  - `NI`: Not contains
-  - `START`: Starts with
-  - `END`: Ends with
-  - `NSTART`: Not starts with
-  - `NEND`: Not ends with
+# Development server with hot reload
+npm run dev
 
-- **Case-insensitive Operations**
-  - `NCS_EQU`: Case-insensitive equal
-  - `NCS_NEQ`: Case-insensitive not equal
-  - `NCS_INCL`: Case-insensitive contains
-  - `NCS_NI`: Case-insensitive not contains
-  - `NCS_START`: Case-insensitive starts with
-  - `NCS_END`: Case-insensitive ends with
+# Build for production
+npm run build
 
-- **Numeric Operations**
-  - `MT`: More than
-  - `LT`: Less than
+# Preview production build
+npm run preview
+```
 
-- **Null Checks**
-  - `ISNULL`: Is null/empty
-  - `NOTNULL`: Is not null/empty
+### Plugin Development
+```go
+package plugin
 
-- **Pattern Matching**
-  - `REGEX`: Regular expression match
+// Custom plugin function
+func Eval(input string, threshold float64) (bool, error) {
+    // Your custom logic here
+    value, err := strconv.ParseFloat(input, 64)
+    if err != nil {
+        return false, err
+    }
+    
+    return value > threshold, nil
+}
+```
 
-- **Custom Logic**
-  - `PLUGIN`: Custom plugin execution
+## 📊 Monitoring & Operations
 
-## Performance Considerations
+### Health Checks
+```bash
+# Node health
+curl http://localhost:8080/ping
 
-- Use appropriate batch sizes for outputs
-- Configure local caching for frequently accessed data
-- Use Redis for distributed caching when needed
-- Monitor QPS metrics for performance tuning
-- Adjust channel buffer sizes based on load
+# Cluster status
+curl http://localhost:8080/cluster-status
 
-## Error Handling
+# System metrics
+curl http://localhost:8080/system-metrics
+```
 
-The system provides comprehensive error handling:
+### Performance Metrics
+- **QPS Statistics** - Messages processed per second
+- **Resource Usage** - CPU, Memory, Goroutines
+- **Error Rates** - Failed processing statistics
+- **Latency Metrics** - End-to-end processing times
 
-- Input/Output connection errors
-- Rule evaluation errors
-- Plugin execution errors
-- Configuration validation errors
+### Scaling Considerations
+- **Horizontal Scaling** - Add follower nodes for increased capacity
+- **Vertical Scaling** - Increase memory/CPU for complex rule processing
+- **Cache Optimization** - Use Redis for distributed rule state
+- **Batch Tuning** - Adjust batch sizes for optimal throughput
 
-All errors are logged and can be retrieved using `GetLastError()`.
+## 🔒 Security
 
-## Contributing
+### Authentication
+- **Token-based API Authentication** - Secure cluster communication
+- **Web Interface Security** - Session management and CSRF protection
 
+### Network Security
+- **TLS Support** - Encrypted communication between nodes
+- **Firewall Configuration** - Recommended port restrictions
+- **Secret Management** - Environment variable support for credentials
+
+## 🗺️ Roadmap
+
+- [ ] **GraphQL API** - Advanced query capabilities
+- [ ] **Kubernetes Integration** - Cloud-native deployment
+- [ ] **Multi-tenant Support** - Isolated workspaces
+- [ ] **Advanced Analytics** - Machine learning integration
+- [ ] **Stream Processing SQL** - SQL-like query interface
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Setup
 1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes and add tests
+4. Commit your changes: `git commit -m 'Add amazing feature'`
+5. Push to the branch: `git push origin feature/amazing-feature`
+6. Open a Pull Request
 
-## License
+## 📄 License
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-    http://www.apache.org/licenses/LICENSE-2.0
+## 🙏 Acknowledgments
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+- **Monaco Editor** - Code editing experience
+- **Vue.js Ecosystem** - Frontend framework and tools
+- **Go Community** - Backend libraries and patterns
+- **Apache Kafka** - Stream processing inspiration
+
+---
+
+<div align="center">
+
+**[🌐 Website](https://your-domain.com)** • **[📚 Documentation](https://docs.your-domain.com)** • **[💬 Community](https://discord.gg/your-discord)**
+
+Made with ❤️ by the AgentSmith Team
+
+</div>

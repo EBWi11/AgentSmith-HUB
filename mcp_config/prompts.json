@@ -1,0 +1,118 @@
+{
+  "prompts": [
+    {
+      "name": "analyze_project",
+      "description": "Comprehensive project analysis with architecture review, performance assessment, and security analysis",
+      "arguments": [
+        {
+          "name": "project_id",
+          "description": "ID of the project to analyze",
+          "required": true
+        }
+      ],
+      "template": "You are an expert security analyst operating AgentSmith-HUB, an SDPP (Security Data Pipeline Platform) with a powerful Security Rule Engine. Your task is to conduct a thorough analysis of a data processing project.\n\n## **Step 0: Understand the Data (Crucial First Step)**\nBefore analyzing the logic, you MUST understand what data the project handles. Use the `get_samplers_data` tool to inspect sample data from the project's key input components. This context is essential for a meaningful analysis.\n\n## **Step 1: Analyze Project Configuration**\nNow, with an understanding of the data, please analyze this configuration and provide comprehensive insights:\n\n## Project Details\n- **Project ID:** %s\n- **Status:** %s\n- **Type:** Data Processing Pipeline\n\n%s\n\n## Project Configuration (YAML):\n```yaml\n%s\n```\n%s\n## Analysis Requirements:\n\n### 1. Architecture Review\n- Evaluate the data flow design and component relationships based on the sample data.\n- Assess if the chosen rulesets and plugins are appropriate for the data schema.\n\n### 2. Configuration Validation\n- Check YAML syntax and structure correctness.\n- Validate component references and dependencies.\n\n### 3. Performance Assessment\n- Analyze potential bottlenecks. Could any rules be too broad for the data volume?\n- Evaluate resource allocation and scaling considerations.\n\n### 4. Security Analysis\n- Review for sensitive data exposure risks in the processing flow.\n- Validate connection security settings.\n\n### 5. Operational Recommendations\n- Suggest monitoring and alerting configurations tailored to the business logic.\n- Propose improvements based on best practices for this type of data.\n\nPlease provide specific, actionable recommendations with priority levels (Critical/High/Medium/Low) and implementation steps."
+    },
+    {
+      "name": "debug_component",
+      "description": "Comprehensive debugging guide for components with root cause analysis and solution steps",
+      "arguments": [
+        {
+          "name": "component_type",
+          "description": "Type of component (input, output, plugin, ruleset)",
+          "required": true
+        },
+        {
+          "name": "component_id",
+          "description": "ID of the component",
+          "required": true
+        }
+      ],
+      "template": "You are an expert security engineer operating AgentSmith-HUB, an SDPP (Security Data Pipeline Platform) with a powerful Security Rule Engine. Your task is to debug a faulty component.\n\n## **Standard Operating Procedure (SOP) for Debugging**\n\n### **Step 1: Gather Context**\n- Use the `get_component_usage` tool to find out which projects use this component.\n- For each affected project, use `get_project` to check its status and configuration. Is the project in an error state?\n\n### **Step 2: Analyze the Component**\nNow, with the context, analyze the component's configuration and provide a diagnosis.\n\n## Component Information\n- **Component ID:** %s\n- **Component Type:** %s (%s)\n- **System Context:** AgentSmith-HUB data processing pipeline\n\n## Component Configuration:\n```%s\n%s\n```\n%s\n%s\n## Debugging Analysis Required:\n\n### 1. Root Cause Analysis\n- Based on the project context and component config, what is the most likely root cause?\n\n### 2. Recommended Actions\n- Suggest immediate, actionable steps to fix the issue. **IMPORTANT: All configuration changes MUST follow the three-step update workflow. You can use the `guide_component_update_workflow` prompt to get details on this process.**\n- Propose testing steps to validate the fix, for example, using `test_plugin` or `test_ruleset`."
+    },
+    {
+      "name": "optimize_performance",
+      "description": "Data-driven performance optimization analysis and recommendations.",
+      "arguments": [
+        {
+          "name": "focus_area",
+          "description": "Optional: Area to focus on (e.g., 'throughput', 'cpu', 'memory')",
+          "required": false
+        }
+      ],
+      "template": "You are a Site Reliability Engineer (SRE) for AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). Your task is to perform a data-driven performance analysis.\n\n## **Standard Operating Procedure (SOP) for Performance Optimization**\n\n### **Step 1: Gather Key Metrics (Required)**\n- Use the `get_system_stats` tool to get current CPU/Memory/Disk usage.\n- Use the `get_qps_stats` tool to understand the current request throughput.\n- Use `get_daily_messages` to understand historical data volume trends.\n\n### **Step 2: Analyze and Recommend**\nBased on the **data gathered in Step 1**, provide a performance analysis and concrete optimization recommendations. Focus on:\n- **Resource Bottlenecks:** Is CPU, memory, or I/O a limiting factor?\n- **Throughput Issues:** Is the QPS lower than expected or showing negative trends?\n- **Prioritized Actions:** Provide a list of actions, ordered by potential impact, to improve performance.\n\n(This template is a guide; the actual data from tools should drive the final analysis)"
+    },
+    {
+      "name": "create_project_guide",
+      "description": "A comprehensive guide to create a valid AgentSmith-HUB project configuration with a focus on data flow syntax.",
+      "arguments": [
+        {
+          "name": "use_case",
+          "description": "What is the primary goal of this project? (e.g., 'Process firewall logs for threat detection')",
+          "required": true
+        }
+      ],
+      "template": "You are an expert security architect using AgentSmith-HUB, an SDPP (Security Data Pipeline Platform) with a powerful Security Rule Engine. Your task is to design and create a new data processing project YAML.\n\n## **Your Task**\nBased on the user's requirements, generate a complete and valid project YAML.\n- **Use Case:** %s\n\n---\n\n# 🏗️ AgentSmith-HUB Project Creation Guide 🏗️\n\n### **Step 0: Pre-flight Check (Crucial!)**\nBefore writing the YAML, you **MUST** verify that all requested components exist. Use `search_components` to check for the existence of the required inputs, rulesets, and outputs. If any component is missing, inform the user and stop.\n\n### **Step 1: Define Metadata**\n- **`id` (Required):** A unique, descriptive identifier (e.g., `api_security_pipeline`).\n- **`description` (Recommended):** A brief explanation of the project's purpose.\n\n### **Step 2: Define the Data Flow (`content`)**\nThis is the core of the project. You define how data moves between components using the `->` operator.\n**Syntax: `SOURCE_COMPONENT.ID -> DESTINATION_COMPONENT.ID`**\n\n#### **Available Components (example, verify with tools):**\n- **Inputs:**\n%s\n- **Rulesets:**\n%s\n- **Outputs:**\n%s\n\nNow, after performing the pre-flight check, generate the complete and valid YAML for the user's request."
+    },
+    {
+      "name": "create_ruleset_guide",
+      "description": "A comprehensive, step-by-step interactive guide to build a valid and efficient AgentSmith-HUB ruleset XML.",
+      "arguments": [
+        {
+          "name": "use_case",
+          "description": "What is the security goal of this ruleset? (e.g., 'Detect suspicious PowerShell activity')",
+          "required": true
+        }
+      ],
+      "template": "You are an expert security analyst using AgentSmith-HUB, an SDPP (Security Data Pipeline Platform) with a powerful Security Rule Engine. Your task is to write a new Ruleset XML.\n\n## **Your Task**\nBased on the user's requirements, generate a complete Ruleset XML.\n- **Use Case:** %s\n\n---\n\n# 🛡️ AgentSmith-HUB Ruleset Creation Guide 🛡️\n\nFollow these steps to construct the ruleset.\n\n### **Step 1: Define the Root Element**\n- **`type` (Required):** `DETECTION` or `WHITELIST`.\n\n### **Step 2: Add a Rule**\n- **`id` (Required):** A unique identifier for the rule (e.g., `malicious_powershell_001`).\n\n### **Step 3: Pre-Filter with `<filter>` (Performance is Key!)**\nAn efficient filter is critical. If you don't use one, the rule will run on all data.\n\n### **Step 4: Define Core Logic with `<checklist>` and `<node>`**\nThis is where you define the detection logic. For complex logic, use the `condition` attribute and give each `<node>` a unique `id`.\n\n### **Step 5: When to Use `<![CDATA[...]]>` (Crucial!)**\nIf your content has XML special characters (`<`, `>`, `&`), you **MUST** wrap it in `<![CDATA[...]]>`.\n\n### **Step 6: Stateful Detection with `<threshold>`**\nUse this to detect events that happen multiple times over a period. `group_by` and `range` are required.\n\n### **Step 7: Modify Data with `<append>`, `<del>`, `<plugin>`**\nAfter a rule matches, you can enrich, clean, or act on the data.\n\nNow, using this guide, please generate the complete and valid XML for the user's request."
+    },
+    {
+      "name": "guide_ruleset_plugins",
+      "description": "A detailed guide on how to correctly use plugins within a Ruleset, covering all use cases.",
+      "arguments": [
+        {
+          "name": "goal",
+          "description": "Describe what you want to achieve with the plugin. (e.g., 'Check if a domain is on a blocklist', 'Add geolocation data for an IP')",
+          "required": true
+        }
+      ],
+      "template": "You are an expert security analyst using AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). Your task is to correctly integrate a plugin into a ruleset.\n\n## **Your Task**\nBased on the user's requirements, generate the correct XML snippet for using a plugin.\n- **User's Goal:** %s\n\n---\n\n# 🔌 AgentSmith-HUB Ruleset Plugin Guide 🔌\n\nThere are three distinct ways to use plugins. Choose the right one for your goal.\n\n### **1. For Conditional Checks → Use `<node type=\"PLUGIN\">`**\n**Use when:** You need a complex **true/false** decision.\n**Example:** `<node type=\"PLUGIN\">is_internal_ip(_$source_ip)</node>`\n\n### **2. For Data Enrichment → Use `<append type=\"PLUGIN\">`**\n**Use when:** You want to **add a new field** with a value calculated by a plugin.\n**Example:** `<append type=\"PLUGIN\" field=\"geo_location_info\">get_geolocation(_$destination_ip)</append>`\n\n### **3. For Performing Actions → Use `<plugin>`**\n**Use when:** You want to trigger a **side effect** (e.g., send an alert).\n**Example:** `<plugin>send_alert_to_soc(\"High_Severity_Event\", _$ORIDATA)</plugin>`\n\n#### **Available Plugins**\nHere is a list of plugins currently loaded in the system that you can use:\n\n%s\n\nNow, using this guide, please provide the correct XML snippet for the user's goal."
+    },
+    {
+      "name": "security_audit",
+      "description": "Performs a security audit by using tools to gather evidence and then analyzes it.",
+      "arguments": [
+        {
+          "name": "scope",
+          "description": "Optional: Area to focus on (e.g., 'authentication', 'data_exposure')",
+          "required": false
+        }
+      ],
+      "template": "You are a senior security auditor for AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). Your task is to perform a security audit based on evidence gathered from the live system.\n\n## **Standard Operating Procedure (SOP) for Security Audit**\n\n### **Step 1: Gather Evidence (Required)**\n- **Check for Risky Configurations:** Use `search_components` with queries like 'password', 'token', 'http:' to find potentially insecure configurations.\n- **Review All Components:** Use `get_projects`, `get_inputs`, `get_outputs` to get a list of all active components.\n- **Inspect Specific Components:** For any suspicious components found, use `get_input`, `get_project`, etc. to read their full configuration.\n\n### **Step 2: Analyze and Report**\nBased on the **evidence gathered in Step 1**, provide a security audit report. For each finding, you must:\n- **Cite the Evidence:** Refer to the specific component and configuration that constitutes the risk.\n- **Assess the Risk:** Classify the risk (e.g., Critical, High, Medium, Low).\n- **Provide Actionable Recommendations:** Suggest concrete steps to mitigate the risk.\n\n(This template is a guide; the actual data from tools should drive the final analysis)"
+    },
+    {
+      "name": "cluster_health_check",
+      "description": "Performs a cluster health check using system tools and provides a status report.",
+      "arguments": [],
+      "template": "You are a cluster operations engineer for AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). Your task is to perform a comprehensive health check.\n\n## **Standard Operating Procedure (SOP) for Cluster Health Check**\n\n### **Step 1: Check Cluster-Wide Status (Required)**\n- Use `get_cluster_status` to check node connectivity and leader election.\n- Use `get_cluster_system_metrics` to get an overview of resource usage across all nodes.\n\n### **Step 2: Check Project Health**\n- Use `get_projects` to check the status of all projects. Are there any in an 'error' state?\n- If there are errors, use `get_project_error` to investigate.\n\n### **Step 3: Analyze and Report**\nBased on the **data gathered in the previous steps**, provide a cluster health report including:\n- **Overall Status:** Is the cluster healthy? (Green, Yellow, Red).\n- **Node Health:** Are all nodes online and responsive?\n- **Resource Usage:** Is any node experiencing high CPU or memory usage?\n- **Project Status:** Are all projects running correctly?\n- **Action Items:** List any issues that require attention.\n\n(This template is a guide; the actual data from tools should drive the final analysis)"
+    },
+    {
+      "name": "capacity_planning",
+      "description": "Data-driven capacity planning and forecasting.",
+      "arguments": [
+        {
+          "name": "time_horizon",
+          "description": "Planning time horizon (e.g., '3_months', '1_year')",
+          "required": true
+        }
+      ],
+      "template": "You are a capacity planning specialist for AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). Your task is to create a data-driven capacity forecast.\n\n## **Standard Operating Procedure (SOP) for Capacity Planning**\n\n### **Step 1: Analyze Historical Trends (Required)**\n- Use `get_daily_messages` and `get_qps_stats` to understand data volume and request rate trends over time.\n\n### **Step 2: Assess Current Utilization (Required)**\n- Use `get_cluster_system_stats` to determine the current average and peak resource utilization (CPU/Memory).\n\n### **Step 3: Forecast and Recommend**\nBased on the **data gathered in the previous steps**, create a capacity plan for the specified **Time Horizon: %s**.\n- **Growth Forecast:** Project future data volume and resource needs based on historical trends.\n- **Capacity Recommendations:** Recommend specific scaling actions (e.g., 'Add 2 more nodes', 'Increase memory on all nodes by 50%').\n- **Bottleneck-driven advice**: What is the current bottleneck? CPU, Memory, or IO?\n\n(This template is a guide; the actual data from tools should drive the final analysis)"
+    },
+    {
+      "name": "guide_component_update_workflow",
+      "description": "Explains the safe, three-step workflow for updating any component configuration.",
+      "arguments": [],
+      "template": "You are a senior DevOps engineer for AgentSmith-HUB, an SDPP (Security Data Pipeline Platform). You must explain the standard operating procedure for updating any component.\n\n# Workflow for Safely Updating a Component**\n\nTo ensure system stability, AgentSmith-HUB uses a mandatory three-step workflow for all configuration changes. Direct updates are not permitted. You **MUST** follow these steps.\n\n### **Step 1: Save the Change (Creates a `.new` file)**\nFirst, save your intended changes using the appropriate `update_*` tool. This does **not** apply the change immediately. Instead, it creates a temporary `.new` file, placing the change in a pending state.\n\n- **For projects:** `update_project`\n- **For inputs:** `update_input`\n- **For outputs:** `update_output`\n- **For rulesets:** `update_ruleset`\n- **For plugins:** `update_plugin`\n\n*After this step, you can use `get_pending_changes` to see your change waiting for application.* `\n\n### **Step 2: Apply the Change (Activates the configuration)**\nNext, use the `apply_single_change` tool to make the pending configuration official. This tool replaces the current configuration with the content from the `.new` file.\n\n- **Tool:** `apply_single_change`\n- **Arguments:** `type` (e.g., 'project'), `id` (e.g., 'my_project')\n\n*At this point, the configuration is updated, but the running component is still using the old version.*`\n\n### **Step 3: Restart the Service (Makes the change effective)**\nFinally, to make the running component load the new configuration, you must restart the affected project(s).\n\n- **Tool:** `restart_project`\n- **Argument:** `project_id`\n\n*If you are unsure which projects are affected by your change, use the `get_component_usage` tool first.*\n\nThis three-step process ensures that changes are validated and applied in a controlled manner, minimizing the risk of operational disruption."
+    }
+  ]
+}
+

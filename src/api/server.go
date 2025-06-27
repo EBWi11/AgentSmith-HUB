@@ -195,6 +195,15 @@ func ServerStart(listener string) error {
 	auth.GET("/error-logs", getErrorLogs)
 	auth.GET("/cluster-error-logs", getClusterErrorLogs)
 
+	// MCP (Model Context Protocol) endpoints - REQUIRE AUTH
+	auth.POST("/mcp", handleMCP)              // Main MCP JSON-RPC endpoint
+	auth.POST("/mcp/batch", handleMCPBatch)   // Batch MCP requests
+	auth.GET("/mcp/info", getMCPInfo)         // MCP server information
+	auth.GET("/mcp/manifest", getMCPManifest) // MCP server manifest
+	auth.GET("/mcp/stats", getMCPStats)       // MCP statistics
+	auth.GET("/mcp/health", mcpHealthCheck)   // MCP health check
+	auth.GET("/mcp/ws", handleMCPWebSocket)   // WebSocket endpoint (future)
+
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
