@@ -32,15 +32,7 @@ const store = useStore();
 
 
 
-// Get data from store
-const availablePlugins = computed(() => store.getters.getAvailablePlugins);
-const nodeTypes = computed(() => store.getters.getNodeTypes);
-const logicTypes = computed(() => store.getters.getLogicTypes);
-const countTypes = computed(() => store.getters.getCountTypes);
-const rootTypes = computed(() => store.getters.getRootTypes);
-const commonFields = computed(() => store.getters.getCommonFields);
-const inputTypes = computed(() => store.getters.getInputTypes || []);
-const outputTypes = computed(() => store.getters.getOutputTypes || []);
+// Note: Component uses local static arrays for autocompletion data instead of store
 
 // Get component lists
 const inputComponents = computed(() => store.getters.getComponents('inputs'));
@@ -92,9 +84,8 @@ watch([() => props.componentId, () => props.componentType], ([newId, newType], [
   }
 }, { immediate: true });
 
-// Get plugin lists and component lists when component is mounted
+// Get component lists when component is mounted
 onMounted(async () => {
-  store.dispatch('fetchAvailablePlugins');
   store.dispatch('fetchComponents', 'inputs');
   store.dispatch('fetchComponents', 'outputs');
   store.dispatch('fetchComponents', 'rulesets');
