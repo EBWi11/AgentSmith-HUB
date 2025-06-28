@@ -172,6 +172,8 @@
                     :class="{
                       'bg-green-500': project.status === 'running',
                       'bg-gray-400': project.status === 'stopped',
+                      'bg-blue-500': project.status === 'starting',
+                      'bg-orange-500': project.status === 'stopping',
                       'bg-red-500': project.status === 'error'
                     }"></span>
               <div>
@@ -420,9 +422,9 @@ const sortedProjects = computed(() => {
     if (a.status === 'running' && b.status !== 'running') return -1
     if (a.status !== 'running' && b.status === 'running') return 1
     
-    // Then by status: running, stopped, error
-    const statusOrder = { 'running': 0, 'stopped': 1, 'error': 2 }
-    const statusDiff = (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3)
+    // Then by status: running, starting, stopping, stopped, error
+    const statusOrder = { 'running': 0, 'starting': 1, 'stopping': 2, 'stopped': 3, 'error': 4 }
+    const statusDiff = (statusOrder[a.status] || 5) - (statusOrder[b.status] || 5)
     if (statusDiff !== 0) return statusDiff
     
     // Finally by project id alphabetically
@@ -688,9 +690,13 @@ async function refreshStats() {
 
     // Update last updated time
     lastUpdated.value = new Date().toLocaleTimeString()
+    
+    // 成功时重置错误计数
+    resetErrorCount()
 
   } catch (error) {
     console.error('Failed to refresh stats:', error)
+    handleRefreshError(error)
   } finally {
     loading.stats = false
   }
@@ -783,11 +789,66 @@ async function fetchDashboardData() {
   }
 }
 
+// 动态刷新间隔管理
+const dynamicStatsInterval = ref(null)
+const lastOperationTime = ref(0) // 记录最近操作时间
+const currentRefreshInterval = ref(60000) // 记录当前间隔，避免依赖浏览器扩展属性
+
+// 全局项目操作事件监听
+function handleGlobalProjectOperation(event) {
+  if (event.detail && event.detail.timestamp) {
+    lastOperationTime.value = event.detail.timestamp
+    console.log('Dashboard received project operation event:', event.detail)
+  }
+}
+
+// 获取动态刷新间隔
+function getDynamicRefreshInterval() {
+  // 检查是否有项目处于过渡状态
+  const hasTransitionProjects = projectList.value.some(project => 
+    project.status === 'starting' || project.status === 'stopping'
+  )
+  
+  // 检查是否在最近操作后的30秒内
+  const recentOperation = Date.now() - lastOperationTime.value < 30000
+  
+  if (hasTransitionProjects || recentOperation) {
+    return 2000 // 2秒 - 快速刷新过渡状态或最近操作后
+  }
+  return 60000 // 60秒 - 正常刷新稳定状态
+}
+
+// 记录项目操作时间
+function recordProjectOperation() {
+  lastOperationTime.value = Date.now()
+}
+
+async function refreshStatsWithDynamicInterval() {
+  await refreshStats()
+  
+  // 数据刷新后，检查是否需要调整刷新间隔
+  if (dynamicStatsInterval.value) {
+    const newInterval = getDynamicRefreshInterval()
+    
+    // 只有当间隔发生显著变化时才重新设置定时器（避免频繁重置）
+    if (Math.abs(newInterval - currentRefreshInterval.value) > 500) {
+      clearInterval(dynamicStatsInterval.value)
+      currentRefreshInterval.value = newInterval
+      dynamicStatsInterval.value = setInterval(refreshStatsWithDynamicInterval, newInterval)
+      console.log(`Dashboard refresh interval adjusted to ${newInterval}ms`)
+    }
+  }
+}
+
 function startAutoRefresh() {
-  // Fast refresh for stats every 10 seconds
-  statsRefreshInterval.value = setInterval(() => {
-    refreshStats()
-  }, 10000)
+  // 确保先清理旧的定时器
+  stopAutoRefresh()
+  
+  // Dynamic fast refresh for stats based on project states
+  const initialInterval = getDynamicRefreshInterval()
+  currentRefreshInterval.value = initialInterval
+  dynamicStatsInterval.value = setInterval(refreshStatsWithDynamicInterval, initialInterval)
+  console.log(`Dashboard refresh started with ${initialInterval}ms interval`)
   
   // Comprehensive refresh every 2 minutes for structural changes
   refreshInterval.value = setInterval(() => {
@@ -801,9 +862,9 @@ function stopAutoRefresh() {
     refreshInterval.value = null
   }
   
-  if (statsRefreshInterval.value) {
-    clearInterval(statsRefreshInterval.value)
-    statsRefreshInterval.value = null
+  if (dynamicStatsInterval.value) {
+    clearInterval(dynamicStatsInterval.value)
+    dynamicStatsInterval.value = null
   }
 }
 
@@ -825,6 +886,58 @@ function handleKeyDown(event) {
   }
 }
 
+// 页面可见性变化处理
+function handleVisibilityChange() {
+  if (document.hidden) {
+    // 页面隐藏时暂停自动刷新
+    stopAutoRefresh()
+  } else {
+    // 页面重新可见时恢复自动刷新并立即刷新一次
+    fetchDashboardData()
+    startAutoRefresh()
+  }
+}
+
+// 错误恢复机制
+let errorCount = 0
+const maxErrors = 3
+
+function handleRefreshError(error) {
+  errorCount++
+  console.error(`Dashboard refresh error (${errorCount}/${maxErrors}):`, error)
+  
+  if (errorCount >= maxErrors) {
+    // 达到最大错误次数，进入错误恢复模式
+    console.warn('Too many refresh errors, entering recovery mode')
+    stopAutoRefresh()
+    
+    // 使用保守的恢复刷新模式，但保持一定的智能性
+    const recoveryRefresh = async () => {
+      try {
+        await fetchDashboardData()
+        // 如果成功，重置错误计数并恢复正常刷新
+        resetErrorCount()
+        stopAutoRefresh() // 清理恢复模式定时器
+        startAutoRefresh() // 恢复正常智能刷新
+      } catch (recoveryError) {
+        console.error('Recovery refresh also failed:', recoveryError)
+        // 继续使用恢复模式
+      }
+    }
+    
+    // 5分钟间隔的恢复刷新
+    refreshInterval.value = setInterval(recoveryRefresh, 300000)
+  }
+}
+
+// 成功时重置错误计数
+function resetErrorCount() {
+  if (errorCount > 0) {
+    errorCount = 0
+    console.log('Dashboard refresh recovered, error count reset')
+  }
+}
+
 // Lifecycle
 onMounted(() => {
   fetchDashboardData()
@@ -832,6 +945,12 @@ onMounted(() => {
   
   // Add keyboard event listener
   window.addEventListener('keydown', handleKeyDown)
+  
+  // Add page visibility change listener
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  
+  // Add global project operation listener
+  window.addEventListener('projectOperation', handleGlobalProjectOperation)
 })
 
 onUnmounted(() => {
@@ -839,6 +958,12 @@ onUnmounted(() => {
   
   // Remove keyboard event listener
   window.removeEventListener('keydown', handleKeyDown)
+  
+  // Remove page visibility change listener
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  
+  // Remove global project operation listener
+  window.removeEventListener('projectOperation', handleGlobalProjectOperation)
 })
 </script>
 

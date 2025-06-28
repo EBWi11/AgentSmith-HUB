@@ -253,6 +253,18 @@
                           Stop
                         </a>
                         
+                        <!-- Starting status display -->
+                        <div v-if="item.status === 'starting'" class="flex items-center px-4 py-2 text-sm text-blue-600">
+                          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                          Starting...
+                        </div>
+                        
+                        <!-- Stopping status display -->
+                        <div v-if="item.status === 'stopping'" class="flex items-center px-4 py-2 text-sm text-orange-600">
+                          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                          Stopping...
+                        </div>
+                        
                         <!-- Restart action -->
                         <a v-if="(item.status === 'running' || item.status === 'error') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                            @click.prevent.stop="restartProject(item)">
@@ -794,6 +806,8 @@
                         :class="{
                           'bg-green-500': project.status === 'running',
                           'bg-gray-500': project.status === 'stopped',
+                          'bg-blue-500': project.status === 'starting',
+                          'bg-orange-500': project.status === 'stopping',
                           'bg-red-500': project.status === 'error'
                         }"></span>
                   <span>{{ project.id }}</span>
@@ -803,6 +817,8 @@
                         :class="{
                           'bg-green-100 text-green-800': project.status === 'running',
                           'bg-gray-100 text-gray-800': project.status === 'stopped',
+                          'bg-blue-100 text-blue-800': project.status === 'starting',
+                          'bg-orange-100 text-orange-800': project.status === 'stopping',
                           'bg-red-100 text-red-800': project.status === 'error'
                         }">
                     {{ project.status }}
@@ -1190,12 +1206,12 @@ watch(search, (newVal) => {
 
 // Methods
 function startProjectPolling() {
-  // Refresh project status every 5 seconds
+  // Refresh project status every 60 seconds (will be dynamically adjusted based on project states)
   projectRefreshInterval.value = setInterval(async () => {
     if (!collapsed.projects) {
       await refreshProjectStatus()
     }
-  }, 5000)
+  }, 60000)
 }
 
 function openAddModal(type) {
@@ -1875,12 +1891,89 @@ function getArgumentTypeHint() {
   return 'String, number, or boolean value'
 }
 
+// 项目状态自动刷新
+const projectStatusRefreshInterval = ref(null)
+const lastSidebarOperation = ref(0) // 记录最近操作时间
+const currentSidebarInterval = ref(60000) // 记录当前刷新间隔
+
+// 设置动态项目状态刷新
+function setupProjectStatusRefresh() {
+  if (projectStatusRefreshInterval.value) {
+    clearInterval(projectStatusRefreshInterval.value)
+  }
+  
+  // 动态调整刷新频率：过渡状态1秒，稳定状态60秒
+  const getRefreshInterval = () => {
+    // 检查是否有项目处于过渡状态
+    const hasTransitionProjects = items.projects && items.projects.some(project => 
+      project.status === 'starting' || project.status === 'stopping'
+    )
+    
+    // 检查是否在最近操作后的30秒内
+    const recentOperation = Date.now() - lastSidebarOperation.value < 30000
+    
+    if (hasTransitionProjects || recentOperation) {
+      return 1000 // 1秒 - 快速刷新过渡状态或最近操作后
+    }
+    return 60000 // 60秒 - 正常刷新稳定状态
+  }
+  
+  const refreshProjects = async () => {
+    try {
+      await refreshProjectStatus()
+      
+      // 状态刷新后，检查是否需要调整刷新间隔
+      const newInterval = getRefreshInterval()
+      
+      // 只有当间隔发生显著变化时才重新设置定时器
+      if (projectStatusRefreshInterval.value && Math.abs(newInterval - currentSidebarInterval.value) > 500) {
+        clearInterval(projectStatusRefreshInterval.value)
+        currentSidebarInterval.value = newInterval
+        projectStatusRefreshInterval.value = setInterval(refreshProjects, newInterval)
+        console.log(`Sidebar refresh interval adjusted to ${newInterval}ms`)
+      }
+    } catch (error) {
+      console.error('Failed to refresh project status:', error)
+    }
+  }
+  
+  // 初始设置
+  const initialInterval = getRefreshInterval()
+  currentSidebarInterval.value = initialInterval
+  projectStatusRefreshInterval.value = setInterval(refreshProjects, initialInterval)
+  console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
+}
+
+// 清除项目状态刷新
+function clearProjectStatusRefresh() {
+  if (projectStatusRefreshInterval.value) {
+    clearInterval(projectStatusRefreshInterval.value)
+    projectStatusRefreshInterval.value = null
+  }
+}
+
+// 监听项目列表变化，自动设置刷新
+watch(() => items.projects, (newProjects) => {
+  if (newProjects && newProjects.length > 0) {
+    setupProjectStatusRefresh()
+  } else {
+    clearProjectStatusRefresh()
+  }
+}, { deep: true, immediate: true })
+
+// 组件卸载时清理
+onBeforeUnmount(() => {
+  clearProjectStatusRefresh()
+})
+
 // Expose methods to parent component
 defineExpose({
   fetchItems,
   fetchAllItems,
   refreshProjectStatus,
-  fetchProjectsComplete
+  fetchProjectsComplete,
+  setupProjectStatusRefresh,
+  clearProjectStatusRefresh
 })
 
 function handleItemClick(type, item) {
@@ -1888,8 +1981,26 @@ function handleItemClick(type, item) {
   emit('select-item', { type, id });
 }
 
+// 发送全局项目操作事件
+function emitSidebarProjectOperation(operationType, projectId) {
+  const timestamp = Date.now()
+  lastSidebarOperation.value = timestamp
+  
+  // 发送全局事件通知其他组件
+  window.dispatchEvent(new CustomEvent('projectOperation', {
+    detail: {
+      projectId,
+      operationType,
+      timestamp
+    }
+  }))
+}
+
 // Project operations
 async function startProject(item) {
+  // 记录操作时间并通知其他组件
+  emitSidebarProjectOperation('start', item.id)
+  
   closeAllMenus()
   projectOperationLoading.value = true
   
@@ -1907,8 +2018,7 @@ async function startProject(item) {
     } else if (result.success) {
       // Project started successfully
       $message?.success?.('Project started successfully')
-      // Update project status
-      item.status = 'running'
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
       // Refresh project status only, no need to rebuild list
       await refreshProjectStatus()
     } else if (result.error) {
@@ -1923,6 +2033,9 @@ async function startProject(item) {
 }
 
 async function stopProject(item) {
+  // 记录操作时间并通知其他组件
+  emitSidebarProjectOperation('stop', item.id)
+  
   closeAllMenus()
   projectOperationLoading.value = true
   
@@ -1940,8 +2053,7 @@ async function stopProject(item) {
     } else if (result.success) {
       // Project stopped successfully
       $message?.success?.('Project stopped successfully')
-      // Update project status
-      item.status = 'stopped'
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
       // Refresh project status only, no need to rebuild list
       await refreshProjectStatus()
     } else if (result.error) {
@@ -1956,6 +2068,9 @@ async function stopProject(item) {
 }
 
 async function restartProject(item) {
+  // 记录操作时间并通知其他组件
+  emitSidebarProjectOperation('restart', item.id)
+  
   closeAllMenus()
   projectOperationLoading.value = true
   
@@ -1973,8 +2088,7 @@ async function restartProject(item) {
     } else if (result.success) {
       // Project restarted successfully
       $message?.success?.('Project restarted successfully')
-      // Update project status
-      item.status = 'running'
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
       // Refresh project status only, no need to rebuild list
       await refreshProjectStatus()
     } else if (result.error) {
@@ -2036,12 +2150,7 @@ async function continueProjectOperation() {
     if (result && result.success) {
       // Operation executed successfully
       $message?.success?.(`Project ${operationType}ed successfully`)
-      // Update project status
-      if (operationType === 'start' || operationType === 'restart') {
-        item.status = 'running'
-      } else if (operationType === 'stop') {
-        item.status = 'stopped'
-      }
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
       
       // Refresh project status only, no need to rebuild list
       await refreshProjectStatus()

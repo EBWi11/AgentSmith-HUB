@@ -404,6 +404,18 @@
             </svg>
             <span>Restart</span>
           </button>
+          
+          <!-- Starting status display -->
+          <div v-if="detail.status === 'starting'" class="flex items-center text-blue-600 bg-blue-50 px-3 py-1 rounded-md">
+            <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+            <span class="text-sm font-medium">Starting...</span>
+          </div>
+          
+          <!-- Stopping status display -->
+          <div v-if="detail.status === 'stopping'" class="flex items-center text-orange-600 bg-orange-50 px-3 py-1 rounded-md">
+            <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+            <span class="text-sm font-medium">Stopping...</span>
+          </div>
         </div>
         
         <!-- Temporary project warning -->
@@ -591,6 +603,8 @@ const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
 // Project status refresh
 const statusRefreshInterval = ref(null)
+const lastProjectOperation = ref(0) // 记录最近项目操作时间
+const currentStatusInterval = ref(60000) // 记录当前刷新间隔
 
 // Watch for item changes
 watch(
@@ -1013,9 +1027,27 @@ function getTemplateForComponent(type, id) {
   return getDefaultTemplate(type, id, store);
 }
 
+// 发送全局项目操作事件
+function emitProjectOperation(operationType) {
+  const timestamp = Date.now()
+  lastProjectOperation.value = timestamp
+  
+  // 发送全局事件通知其他组件
+  window.dispatchEvent(new CustomEvent('projectOperation', {
+    detail: {
+      projectId: props.item?.id,
+      operationType,
+      timestamp
+    }
+  }))
+}
+
 // Project operations
 async function startProject() {
   if (!props.item || !props.item.id) return
+  
+  // 记录操作时间并通知其他组件
+  emitProjectOperation('start')
   
   projectOperationLoading.value = true
   
@@ -1030,10 +1062,8 @@ async function startProject() {
     } else if (result.success) {
       // 成功启动项目
       $message?.success?.('Project started successfully')
-      // 更新项目状态
-      if (detail.value) {
-        detail.value.status = 'running'
-      }
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
+      // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {
       // 启动失败
       $message?.error?.('Failed to start project: ' + result.error)
@@ -1048,6 +1078,9 @@ async function startProject() {
 async function stopProject() {
   if (!props.item || !props.item.id) return
   
+  // 记录操作时间并通知其他组件
+  emitProjectOperation('stop')
+  
   projectOperationLoading.value = true
   
   try {
@@ -1061,10 +1094,8 @@ async function stopProject() {
     } else if (result.success) {
       // 成功停止项目
       $message?.success?.('Project stopped successfully')
-      // 更新项目状态
-      if (detail.value) {
-        detail.value.status = 'stopped'
-      }
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
+      // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {
       // 停止失败
       $message?.error?.('Failed to stop project: ' + result.error)
@@ -1079,6 +1110,9 @@ async function stopProject() {
 async function restartProject() {
   if (!props.item || !props.item.id) return
   
+  // 记录操作时间并通知其他组件
+  emitProjectOperation('restart')
+  
   projectOperationLoading.value = true
   
   try {
@@ -1092,10 +1126,8 @@ async function restartProject() {
     } else if (result.success) {
       // 成功重启项目
       $message?.success?.('Project restarted successfully')
-      // 更新项目状态
-      if (detail.value) {
-        detail.value.status = 'running'
-      }
+      // 不要立即修改状态，让刷新机制去更新状态确保同步
+      // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {
       // 重启失败
       $message?.error?.('Failed to restart project: ' + result.error)
@@ -1128,9 +1160,7 @@ function continueProjectOperation() {
         .then(result => {
           if (result.success) {
             $message?.success?.('Project started successfully')
-            if (detail.value) {
-              detail.value.status = 'running'
-            }
+            // 不要立即修改状态，让刷新机制去更新状态确保同步
           } else if (result.error) {
             $message?.error?.('Failed to start project: ' + result.error)
           }
@@ -1147,9 +1177,7 @@ function continueProjectOperation() {
         .then(result => {
           if (result.success) {
             $message?.success?.('Project stopped successfully')
-            if (detail.value) {
-              detail.value.status = 'stopped'
-            }
+            // 不要立即修改状态，让刷新机制去更新状态确保同步
           } else if (result.error) {
             $message?.error?.('Failed to stop project: ' + result.error)
           }
@@ -1166,9 +1194,7 @@ function continueProjectOperation() {
         .then(result => {
           if (result.success) {
             $message?.success?.('Project restarted successfully')
-            if (detail.value) {
-              detail.value.status = 'running'
-            }
+            // 不要立即修改状态，让刷新机制去更新状态确保同步
           } else if (result.error) {
             $message?.error?.('Failed to restart project: ' + result.error)
           }
@@ -1189,22 +1215,54 @@ function continueProjectOperation() {
 // 设置定时刷新项目状态
 function setupStatusRefresh() {
   if (isProject.value && props.item && props.item.id && !statusRefreshInterval.value) {
-    // 每5秒刷新一次项目状态
-    statusRefreshInterval.value = setInterval(async () => {
+    // 动态调整刷新频率：过渡状态1秒，稳定状态60秒
+    const getRefreshInterval = () => {
+      const currentStatus = detail.value?.status;
+      // 过渡状态（starting/stopping）使用更快的刷新频率
+      if (currentStatus === 'starting' || currentStatus === 'stopping') {
+        return 1000; // 1秒
+      }
+      // 检查是否在最近操作后的30秒内
+      const recentOperation = Date.now() - lastProjectOperation.value < 30000;
+      if (recentOperation) {
+        return 1000; // 1秒 - 最近操作后快速刷新
+      }
+      // 稳定状态使用正常频率
+      return 60000; // 60秒
+    };
+    
+    const refreshStatus = async () => {
       if (detail.value && !detail.value.isTemporary) {
         try {
           const clusterStatus = await hubApi.fetchClusterStatus();
           if (clusterStatus && clusterStatus.projects) {
             const projectStatus = clusterStatus.projects.find(p => p.id === props.item.id);
             if (projectStatus && detail.value) {
+              const oldStatus = detail.value.status;
               detail.value.status = projectStatus.status || 'stopped';
+              
+              // 只有在间隔需要显著改变时才重新设置定时器
+              const newInterval = getRefreshInterval();
+              
+              if (Math.abs(newInterval - currentStatusInterval.value) > 500) {
+                clearInterval(statusRefreshInterval.value);
+                currentStatusInterval.value = newInterval;
+                statusRefreshInterval.value = setInterval(refreshStatus, newInterval);
+                console.log(`ComponentDetail refresh interval adjusted to ${newInterval}ms for project ${props.item.id}`);
+              }
             }
           }
         } catch (error) {
           console.error('Failed to refresh project status:', error);
         }
       }
-    }, 5000);
+    };
+    
+    // 初始设置
+    const initialInterval = getRefreshInterval();
+    currentStatusInterval.value = initialInterval;
+    statusRefreshInterval.value = setInterval(refreshStatus, initialInterval);
+    console.log(`ComponentDetail refresh started with ${initialInterval}ms for project ${props.item?.id}`);
   }
 }
 
@@ -1240,9 +1298,24 @@ watch(() => props.item?.id, (newVal, oldVal) => {
   }
 });
 
+// 页面可见性变化处理
+function handleComponentVisibilityChange() {
+  if (document.hidden) {
+    // 页面隐藏时暂停刷新
+    clearStatusRefresh();
+  } else if (isProject.value && props.item?.id) {
+    // 页面重新可见时恢复刷新
+    setupStatusRefresh();
+  }
+}
+
 // 组件卸载时清除定时刷新
 onBeforeUnmount(() => {
   clearStatusRefresh();
+  
+  // Remove page visibility change listener
+  document.removeEventListener('visibilitychange', handleComponentVisibilityChange);
+  
   // Clear validation timeouts
   if (rulesetValidationTimeout.value) {
     clearTimeout(rulesetValidationTimeout.value);
@@ -1280,6 +1353,11 @@ onMounted(async () => {
     if (isProject.value) {
       setupStatusRefresh();
     }
+  }
+  
+  // Add page visibility change listener for projects
+  if (isProject.value) {
+    document.addEventListener('visibilitychange', handleComponentVisibilityChange);
   }
 });
 </script> 
