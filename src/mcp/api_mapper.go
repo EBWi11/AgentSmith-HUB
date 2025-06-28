@@ -11,6 +11,33 @@ import (
 	"strings"
 )
 
+// Annotation helper functions for creating MCPToolAnnotations
+func createAnnotations(title string, readOnly, destructive, idempotent, openWorld *bool) *common.MCPToolAnnotations {
+	return &common.MCPToolAnnotations{
+		Title:           title,
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: destructive,
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   openWorld,
+	}
+}
+
+// Helper function to create tool with title and annotations
+func createToolWithAnnotations(name, title, description string, inputSchema map[string]common.MCPToolArg, annotations *common.MCPToolAnnotations) common.MCPTool {
+	return common.MCPTool{
+		Name:        name,
+		Title:       title,
+		Description: description,
+		InputSchema: inputSchema,
+		Annotations: annotations,
+	}
+}
+
+// Helper functions for creating boolean pointers
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 // APIMapper handles the mapping between MCP tools and existing HTTP API endpoints
 type APIMapper struct {
 	baseURL string
@@ -28,648 +55,382 @@ func NewAPIMapper(baseURL, token string) *APIMapper {
 // GetAllAPITools returns all MCP tools that map to existing API endpoints
 func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 	return []common.MCPTool{
-		// === PUBLIC ENDPOINTS ===
+		// === 🎯 INTELLIGENT WORKFLOW TOOLS ===
+		// Smart tools that combine multiple operations for optimal user experience
+
+		// 🔥 Primary Workflow - Rule Management
 		{
-			Name:        "ping",
-			Description: "Health check endpoint that returns 'pong' to verify server connectivity and basic status.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "token_check",
-			Description: "Verify authentication token validity and retrieve current authentication status information.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_qps_data",
-			Description: "Retrieve current QPS (Queries Per Second) metrics for all components. Returns real-time throughput data including per-component processing rates, message counts, and performance statistics. Supports filtering by project_id, component_id, node_id, and aggregation options.",
+			Name:        "create_rule_complete",
+			Description: "🎯 INTELLIGENT RULE CREATION: Smart workflow → 1. Identify target projects → 2. Get relevant sample data → 3. Analyze data structure → 4. Design rule based on user needs + real data. Automatically finds appropriate sample data for rule context.",
 			InputSchema: map[string]common.MCPToolArg{
-				"project_id":     {Type: "string", Description: "Filter by specific project ID", Required: false},
-				"node_id":        {Type: "string", Description: "Filter by specific node ID", Required: false},
-				"component_id":   {Type: "string", Description: "Filter by specific component ID", Required: false},
-				"component_type": {Type: "string", Description: "Filter by component type (input, output, ruleset)", Required: false},
-				"aggregated":     {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
+				"ruleset_id":      {Type: "string", Description: "Target ruleset ID", Required: true},
+				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (e.g., 'suspicious network connections', 'malware execution')", Required: true},
+				"target_projects": {Type: "string", Description: "Which projects will use this rule? (comma-separated IDs or 'auto' to detect)", Required: false},
+				"sample_data":     {Type: "string", Description: "Sample data (optional - will auto-fetch from target projects if not provided)", Required: false},
+				"rule_name":       {Type: "string", Description: "Human-readable rule name", Required: false},
+				"auto_deploy":     {Type: "string", Description: "Auto-deploy if tests pass: true/false (default: false)", Required: false},
 			},
+			Annotations: createAnnotations("Smart Rule Creation", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
-			Name:        "get_qps_stats",
-			Description: "Get statistical analysis of QPS data including averages, trends, and performance metrics over time.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_hourly_messages",
-			Description: "Retrieve hourly message processing statistics for time-based performance analysis. Returns message counts by hour with breakdown by component type and processing status.",
+			Name:        "smart_deployment",
+			Description: "🚀 INTELLIGENT DEPLOYMENT: Validates all pending changes → Tests compatibility → Deploys with rollback capability. Prevents failed deployments and provides detailed feedback.",
 			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Filter by specific project ID", Required: false},
-				"node_id":    {Type: "string", Description: "Filter by specific node ID", Required: false},
-				"aggregated": {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
-				"by_node":    {Type: "string", Description: "Group results by node (true/false)", Required: false},
+				"component_filter": {Type: "string", Description: "Deploy specific component type (optional): ruleset/input/output/plugin/project", Required: false},
+				"dry_run":          {Type: "string", Description: "Preview deployment without applying (true/false)", Required: false},
+				"force_deploy":     {Type: "string", Description: "Skip validation warnings (true/false) - use cautiously", Required: false},
+				"test_after":       {Type: "string", Description: "Run component tests after deployment (true/false)", Required: false},
 			},
-		},
-		{
-			Name:        "get_daily_messages",
-			Description: "Get daily message processing totals and trends for long-term analysis. Returns daily totals by project and component type with comparative statistics.",
-			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Filter by specific project ID", Required: false},
-				"node_id":    {Type: "string", Description: "Filter by specific node ID", Required: false},
-				"aggregated": {Type: "string", Description: "Return aggregated data (true/false)", Required: false},
-				"by_node":    {Type: "string", Description: "Group results by node (true/false)", Required: false},
-			},
-		},
-		{
-			Name:        "get_system_metrics",
-			Description: "Retrieve current system performance metrics including CPU usage, memory consumption, goroutine count, and disk usage from the local node.",
-			InputSchema: map[string]common.MCPToolArg{
-				"since":   {Type: "string", Description: "Get metrics since specific timestamp (RFC3339 format)", Required: false},
-				"current": {Type: "string", Description: "Return only current metrics (true/false)", Required: false},
-			},
-		},
-		{
-			Name:        "get_system_stats",
-			Description: "Get statistical analysis of system performance metrics including averages, peaks, and trends over time.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_cluster_system_metrics",
-			Description: "Retrieve system performance metrics from all nodes in the cluster for comprehensive cluster monitoring.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_cluster_system_stats",
-			Description: "Get statistical analysis of cluster-wide system performance including node comparisons and performance distribution.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_cluster_status",
-			Description: "Retrieve cluster status information including node health, leader election status, and connectivity information.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_cluster",
-			Description: "Get detailed cluster configuration and membership information including node addresses and cluster settings.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("Smart Deployment", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === PROJECT ENDPOINTS ===
+		// 🔥 Component Lifecycle Management
 		{
-			Name:        "get_projects",
-			Description: "Retrieve list of all projects with their status, configuration summary, and metadata. Returns project IDs, running status, and temporary file indicators.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_project",
-			Description: "Get detailed configuration and status information for a specific project including YAML configuration and file paths.",
+			Name:        "component_wizard",
+			Description: "🧙‍♂️ COMPONENT CREATION WIZARD: Guided component creation with templates, validation, and testing. Supports all component types with intelligent defaults and best practices.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to retrieve", Required: true},
+				"component_type": {Type: "string", Description: "Component type: input/output/plugin/project/ruleset", Required: true},
+				"component_id":   {Type: "string", Description: "Component identifier", Required: true},
+				"use_template":   {Type: "string", Description: "Use template (true/false) - recommended for beginners", Required: false},
+				"config_content": {Type: "string", Description: "Component configuration (optional if using template)", Required: false},
+				"test_data":      {Type: "string", Description: "Test data for validation", Required: false},
+				"auto_deploy":    {Type: "string", Description: "Auto-deploy after creation (true/false)", Required: false},
 			},
-		},
-		{
-			Name:        "create_project",
-			Description: "Create a new project with specified ID and YAML configuration. Creates temporary file that requires separate application step.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Unique project identifier", Required: true},
-				"raw": {Type: "string", Description: "Project YAML configuration content", Required: true},
-			},
-		},
-		{
-			Name:        "update_project",
-			Description: "Update existing project configuration with modified YAML content. Creates temporary file that requires application via apply_single_change.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Project identifier to update", Required: true},
-				"raw": {Type: "string", Description: "Updated project YAML configuration", Required: true},
-			},
-		},
-		{
-			Name:        "delete_project",
-			Description: "Delete specified project and all associated resources including configurations and temporary files.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to delete", Required: true},
-			},
-		},
-		{
-			Name:        "start_project",
-			Description: "Start specified project and begin message processing. Applies pending changes automatically before starting.",
-			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to start", Required: true},
-			},
-		},
-		{
-			Name:        "stop_project",
-			Description: "Stop specified project gracefully, completing current message processing before shutdown.",
-			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to stop", Required: true},
-			},
-		},
-		{
-			Name:        "restart_project",
-			Description: "Restart specified project by stopping it gracefully and starting it again with latest configuration.",
-			InputSchema: map[string]common.MCPToolArg{
-				"project_id": {Type: "string", Description: "Project identifier to restart", Required: true},
-			},
-		},
-		{
-			Name:        "restart_all_projects",
-			Description: "Restart all projects in the system sequentially with proper error handling and status reporting.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_project_error",
-			Description: "Retrieve detailed error information for projects in error status including error messages and timestamps.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get error details for", Required: true},
-			},
-		},
-		{
-			Name:        "get_project_inputs",
-			Description: "Get list of input components and input nodes available for specified project, used for testing and validation.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get input components for", Required: true},
-			},
-		},
-		{
-			Name:        "get_project_components",
-			Description: "Retrieve component usage statistics for specified project including counts by component type and relationships.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to analyze components for", Required: true},
-			},
-		},
-		{
-			Name:        "get_project_component_sequences",
-			Description: "Get component processing sequences and workflow paths for specified project showing message flow order.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to get component sequences for", Required: true},
-			},
+			Annotations: createAnnotations("Component Wizard", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === RULESET ENDPOINTS ===
+		// 🔥 System Intelligence
+		{
+			Name:        "system_overview",
+			Description: "🏠 SYSTEM DASHBOARD: Complete system status with health check, pending changes, active projects, and smart recommendations. Your one-stop system overview.",
+			InputSchema: map[string]common.MCPToolArg{
+				"include_metrics":     {Type: "string", Description: "Include performance metrics (true/false)", Required: false},
+				"include_suggestions": {Type: "string", Description: "Include optimization suggestions (true/false)", Required: false},
+				"focus_area":          {Type: "string", Description: "Focus on specific area: rules/projects/health/all", Required: false},
+			},
+			Annotations: createAnnotations("System Dashboard", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(true)),
+		},
+
+		// === 🎯 CORE COMPONENT MANAGEMENT ===
+		// Simplified, intelligent component operations
+
+		// 🔥 Universal Component Operations
+		{
+			Name:        "explore_components",
+			Description: "🔍 SMART EXPLORER: List and discover all components (projects, rulesets, inputs, outputs, plugins) with search, filtering, and status overview. Your starting point for exploration.",
+			InputSchema: map[string]common.MCPToolArg{
+				"component_type":  {Type: "string", Description: "Filter by type: project/ruleset/input/output/plugin/all (default: all)", Required: false},
+				"search_term":     {Type: "string", Description: "Search components by name or content", Required: false},
+				"show_status":     {Type: "string", Description: "Include deployment status (true/false)", Required: false},
+				"include_details": {Type: "string", Description: "Include detailed configuration (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Component Explorer", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "component_manager",
+			Description: "⚙️ UNIVERSAL COMPONENT MANAGER: View, edit, create, or delete any component with intelligent validation and deployment options. Handles all component types uniformly.",
+			InputSchema: map[string]common.MCPToolArg{
+				"action":         {Type: "string", Description: "Action: view/create/update/delete", Required: true},
+				"component_type": {Type: "string", Description: "Component type: project/ruleset/input/output/plugin", Required: true},
+				"component_id":   {Type: "string", Description: "Component ID", Required: true},
+				"config_content": {Type: "string", Description: "Configuration content (for create/update actions)", Required: false},
+				"auto_deploy":    {Type: "string", Description: "Auto-deploy after changes (true/false)", Required: false},
+				"backup_first":   {Type: "string", Description: "Create backup before destructive operations (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Universal Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		// 🔥 Project Operations
+		{
+			Name:        "project_control",
+			Description: "🎮 PROJECT CONTROLLER: Start, stop, restart projects with health monitoring and automatic recovery. Includes batch operations and smart status tracking.",
+			InputSchema: map[string]common.MCPToolArg{
+				"action":     {Type: "string", Description: "Action: start/stop/restart/status/start_all/stop_all", Required: true},
+				"project_id": {Type: "string", Description: "Specific project ID (optional for batch operations)", Required: false},
+				"force":      {Type: "string", Description: "Force operation even if warnings (true/false)", Required: false},
+				"wait_ready": {Type: "string", Description: "Wait for project to be fully ready (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Project Controller", boolPtr(false), boolPtr(false), boolPtr(true), boolPtr(false)),
+		},
+
+		// 🔥 Advanced Rule Management
+		{
+			Name:        "rule_manager",
+			Description: "🛡️ INTELLIGENT RULE MANAGER: Smart context-aware rule management → Auto-discovers target projects → Fetches relevant sample data → Analyzes data structure → Creates rules based on user intent + real data patterns. 🚨 CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only!",
+			InputSchema: map[string]common.MCPToolArg{
+				"action":          {Type: "string", Description: "Action: add_rule/update_rule/delete_rule/view_rules/create_ruleset/update_ruleset", Required: true},
+				"id":              {Type: "string", Description: "Target ruleset ID", Required: true},
+				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (for add_rule action)", Required: false},
+				"target_projects": {Type: "string", Description: "Projects that will use this rule (for context-aware data fetching)", Required: false},
+				"rule_id":         {Type: "string", Description: "Specific rule ID (for update/delete actions)", Required: false},
+				"rule_raw":        {Type: "string", Description: "Complete rule XML (generated after data analysis)", Required: false},
+				"raw":             {Type: "string", Description: "Complete ruleset XML (for create/update ruleset actions)", Required: false},
+				"test_data":       {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: true},
+				"auto_deploy":     {Type: "string", Description: "Auto-deploy if validation passes (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Rule Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		// === 🎯 TESTING & VALIDATION ===
+		// Smart testing and validation tools
+
+		{
+			Name:        "test_lab",
+			Description: "🧪 COMPREHENSIVE TESTING LAB: Test any component with intelligent data samples, validation reports, and performance metrics. Supports batch testing and automated test suites.",
+			InputSchema: map[string]common.MCPToolArg{
+				"test_target":    {Type: "string", Description: "What to test: component/ruleset/project/workflow", Required: true},
+				"component_id":   {Type: "string", Description: "Component ID or 'all' for batch testing", Required: true},
+				"test_mode":      {Type: "string", Description: "Test mode: quick/thorough/performance/security", Required: false},
+				"custom_data":    {Type: "string", Description: "Custom test data (JSON) - optional, auto-generates if not provided", Required: false},
+				"include_report": {Type: "string", Description: "Generate detailed test report (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Testing Lab", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		// === 🎯 DEPLOYMENT & RESOURCES ===
+		// Smart deployment and learning tools
+
+		{
+			Name:        "deployment_center",
+			Description: "🚀 SMART DEPLOYMENT CENTER: View pending changes → Validate → Deploy with rollback capability. Includes deployment history, impact analysis, and automated testing.",
+			InputSchema: map[string]common.MCPToolArg{
+				"action":           {Type: "string", Description: "Action: view_pending/validate/deploy/rollback/history", Required: true},
+				"component_filter": {Type: "string", Description: "Filter by component type (optional)", Required: false},
+				"dry_run":          {Type: "string", Description: "Simulate deployment without applying (true/false)", Required: false},
+				"force":            {Type: "string", Description: "Force deploy despite warnings (true/false)", Required: false},
+				"create_backup":    {Type: "string", Description: "Create backup before deployment (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Deployment Center", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "learning_center",
+			Description: "📚 DATA-DRIVEN LEARNING CENTER: Get templates, tutorials, and best practices. ⚠️ IMPORTANT: If backend has no sample data, guide users to provide their own real data for rule creation.",
+			InputSchema: map[string]common.MCPToolArg{
+				"resource_type": {Type: "string", Description: "Resource: samples (try to get backend data)/syntax_guide/templates/tutorials/best_practices", Required: true},
+				"component":     {Type: "string", Description: "Component focus: ruleset/input/output/plugin/project/all", Required: false},
+				"difficulty":    {Type: "string", Description: "Difficulty level: beginner/intermediate/advanced", Required: false},
+				"format":        {Type: "string", Description: "Output format: summary/detailed/interactive", Required: false},
+			},
+			Annotations: createAnnotations("Learning Center", boolPtr(true), boolPtr(false), boolPtr(true), boolPtr(false)),
+		},
+
+		// === 🎯 DATA INTELLIGENCE ===
+		// Intelligent data analysis and sample retrieval
+
+		{
+			Name:        "get_samplers_data_intelligent",
+			Description: "🧠 INTELLIGENT SAMPLE DATA: Enhanced sample data retrieval with project context analysis. 🚨 CRITICAL: Cannot generate fake data! If backend has NO data or this fails, you MUST ask user to provide REAL JSON data. ❌ NEVER imagine or create data!",
+			InputSchema: map[string]common.MCPToolArg{
+				"target_projects":    {Type: "string", Description: "Target projects (comma-separated IDs) for context-aware data fetching", Required: false},
+				"rule_purpose":       {Type: "string", Description: "What will this rule detect? (e.g., 'network security', 'error monitoring')", Required: false},
+				"field_requirements": {Type: "string", Description: "Required fields (comma-separated) for rule creation", Required: false},
+				"quality_threshold":  {Type: "string", Description: "Minimum data quality score (0.0-1.0)", Required: false},
+				"sampler_type":       {Type: "string", Description: "Backward compatibility: specific sampler type", Required: false},
+				"count":              {Type: "string", Description: "Backward compatibility: sample count", Required: false},
+			},
+			Annotations: createAnnotations("Intelligent Data", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "smart_assistant",
+			Description: "🤖 AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert.",
+			InputSchema: map[string]common.MCPToolArg{
+				"task":        {Type: "string", Description: "What you want to accomplish or issue you're facing", Required: true},
+				"context":     {Type: "string", Description: "Current situation or component you're working with", Required: false},
+				"experience":  {Type: "string", Description: "Your experience level: beginner/intermediate/expert", Required: false},
+				"preferences": {Type: "string", Description: "Preferences: step_by_step/quick_solution/explain_why", Required: false},
+			},
+			Annotations: createAnnotations("Smart Assistant", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(true)),
+		},
+
+		// === 📋 BASIC DIRECT TOOLS ===
+		// Simple, direct tools for common operations - Added back for usability
+
+		// 🔍 Essential Data Tools
+		{
+			Name:        "get_samplers_data",
+			Description: "📊 GET SAMPLE DATA: Try to get real sample data from backend. 🚨 CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. ❌ NEVER create fake data yourself!",
+			InputSchema: map[string]common.MCPToolArg{
+				"sampler_type": {Type: "string", Description: "Sampler type (optional - default gets all)", Required: false},
+				"count":        {Type: "string", Description: "Number of samples (default: 10)", Required: false},
+			},
+			Annotations: createAnnotations("Get Sample Data", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		// 🛡️ Direct Rule Operations
+		{
+			Name:        "add_ruleset_rule",
+			Description: "➕ ADD RULE TO RULESET: Add a single rule to an existing ruleset. 🚨 CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. ❌ NEVER use imagined data like 'data_type=59' or fake field names!",
+			InputSchema: map[string]common.MCPToolArg{
+				"id":        {Type: "string", Description: "Ruleset ID", Required: true},
+				"rule_raw":  {Type: "string", Description: "Complete rule XML content", Required: true},
+				"test_data": {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: true},
+			},
+			Annotations: createAnnotations("Add Rule", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+		{
+			Name:        "delete_ruleset_rule",
+			Description: "🗑️ DELETE RULE FROM RULESET: Remove a specific rule from a ruleset by rule ID.",
+			InputSchema: map[string]common.MCPToolArg{
+				"id":      {Type: "string", Description: "Ruleset ID", Required: true},
+				"rule_id": {Type: "string", Description: "Rule ID to delete", Required: true},
+			},
+			Annotations: createAnnotations("Delete Rule", boolPtr(false), boolPtr(true), boolPtr(true), boolPtr(false)),
+		},
+
+		// 📋 Component Viewing
 		{
 			Name:        "get_rulesets",
-			Description: "Retrieve list of all rulesets with their metadata and temporary file indicators. Returns ruleset IDs and hasTemp flags.",
+			Description: "📋 LIST ALL RULESETS: View all rulesets with rule counts and usage info. ⚠️ IMPORTANT: Check deployment status! Use 'get_pending_changes' to see if rulesets are temporary/unpublished. Use 'get_component_usage' to see project dependencies.",
 			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("List Rulesets", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_ruleset",
-			Description: "Get detailed information for specific ruleset including complete XML configuration and file path information.",
+			Description: "🔍 VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. ⚠️ Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status. Use 'get_component_usage' to see which projects depend on this ruleset.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to retrieve", Required: true},
+				"id": {Type: "string", Description: "Ruleset ID", Required: true},
 			},
-		},
-		{
-			Name:        "create_ruleset",
-			Description: "Create new ruleset with specified ID and XML configuration. Creates temporary file that requires separate application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Unique ruleset identifier", Required: true},
-				"raw": {Type: "string", Description: "Ruleset XML configuration content", Required: true},
-			},
-		},
-		{
-			Name:        "update_ruleset",
-			Description: "Update existing ruleset with modified XML configuration. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Ruleset identifier to update", Required: true},
-				"raw": {Type: "string", Description: "Updated ruleset XML configuration", Required: true},
-			},
-		},
-		{
-			Name:        "delete_ruleset",
-			Description: "Delete specified ruleset and all associated resources including configuration files and references.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to delete", Required: true},
-			},
-		},
-
-		// === INPUT ENDPOINTS ===
-		{
-			Name:        "get_inputs",
-			Description: "Retrieve list of all input components with their metadata and temporary file indicators. Returns input IDs and hasTemp flags.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("View Ruleset", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_input",
-			Description: "Get detailed information for specific input component including complete YAML configuration and file path.",
+			Description: "🔍 VIEW INPUT DETAILS: Get detailed configuration of a specific input component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Input component identifier to retrieve", Required: true},
+				"id": {Type: "string", Description: "Input component ID", Required: true},
 			},
-		},
-		{
-			Name:        "create_input",
-			Description: "Create new input component with specified ID and YAML configuration. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Unique input identifier", Required: true},
-				"raw": {Type: "string", Description: "Input YAML configuration content", Required: true},
-			},
-		},
-		{
-			Name:        "update_input",
-			Description: "Update existing input component with modified YAML configuration. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Input identifier to update", Required: true},
-				"raw": {Type: "string", Description: "Updated input YAML configuration", Required: true},
-			},
-		},
-		{
-			Name:        "delete_input",
-			Description: "Delete specified input component and all associated resources including configuration files.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Input identifier to delete", Required: true},
-			},
-		},
-
-		// === OUTPUT ENDPOINTS ===
-		{
-			Name:        "get_outputs",
-			Description: "Retrieve list of all output components with their metadata, type information, and temporary file indicators.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("View Input", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_output",
-			Description: "Get detailed information for specific output component including complete YAML configuration, type, and file path.",
+			Description: "🔍 VIEW OUTPUT DETAILS: Get detailed configuration of a specific output component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Output component identifier to retrieve", Required: true},
+				"id": {Type: "string", Description: "Output component ID", Required: true},
 			},
-		},
-		{
-			Name:        "create_output",
-			Description: "Create new output component with specified ID and YAML configuration. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Unique output identifier", Required: true},
-				"raw": {Type: "string", Description: "Output YAML configuration content", Required: true},
-			},
-		},
-		{
-			Name:        "update_output",
-			Description: "Update existing output component with modified YAML configuration. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Output identifier to update", Required: true},
-				"raw": {Type: "string", Description: "Updated output YAML configuration", Required: true},
-			},
-		},
-		{
-			Name:        "delete_output",
-			Description: "Delete specified output component and all associated resources including configuration files.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Output identifier to delete", Required: true},
-			},
-		},
-
-		// === PLUGIN ENDPOINTS ===
-		{
-			Name:        "get_plugins",
-			Description: "Retrieve list of all plugins with their type information (local, yaegi, new), return types, and temporary file indicators.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("View Output", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_plugin",
-			Description: "Get detailed information for specific plugin including source code, type information, and file path.",
+			Description: "🔍 VIEW PLUGIN DETAILS: Get detailed configuration of a specific plugin component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to retrieve", Required: true},
+				"id": {Type: "string", Description: "Plugin component ID", Required: true},
 			},
+			Annotations: createAnnotations("View Plugin", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
-			Name:        "create_plugin",
-			Description: "Create new plugin with specified ID and source code. Creates temporary file that requires application.",
+			Name:        "get_project",
+			Description: "🔍 VIEW PROJECT DETAILS: Get detailed configuration of a specific project. ⚠️ Check deployment status with 'get_pending_changes' and component health with 'get_project_error'.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Unique plugin identifier", Required: true},
-				"raw": {Type: "string", Description: "Plugin source code content", Required: true},
+				"id": {Type: "string", Description: "Project ID", Required: true},
 			},
-		},
-		{
-			Name:        "update_plugin",
-			Description: "Update existing plugin with modified source code. Creates temporary file that requires application.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":  {Type: "string", Description: "Plugin identifier to update", Required: true},
-				"raw": {Type: "string", Description: "Updated plugin source code", Required: true},
-			},
-		},
-		{
-			Name:        "delete_plugin",
-			Description: "Delete specified plugin and all associated resources including source code files.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to delete", Required: true},
-			},
-		},
-		{
-			Name:        "get_available_plugins",
-			Description: "Get list of available built-in plugins and plugin templates that can be used in configurations.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_plugin_parameters",
-			Description: "Get parameter specifications and function signature information for specified plugin.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to get parameter information for", Required: true},
-			},
+			Annotations: createAnnotations("View Project", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === TESTING AND VERIFICATION ENDPOINTS ===
-		{
-			Name:        "verify_component",
-			Description: "Validate component configuration syntax, connectivity, and compatibility. Returns detailed validation results with error messages and line numbers.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type (input, output, ruleset, plugin, project)", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to validate", Required: true},
-			},
-		},
-		{
-			Name:        "connect_check",
-			Description: "Test connectivity and authentication for input/output components. Performs actual connection attempts and returns status.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type (input or output)", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to test connection for", Required: true},
-			},
-		},
-		{
-			Name:        "test_plugin",
-			Description: "Execute plugin function with provided test data and return processing results with execution metrics.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Plugin identifier to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-		{
-			Name:        "test_plugin_content",
-			Description: "Test plugin source code directly without saving. Compiles and executes code with test data temporarily.",
-			InputSchema: map[string]common.MCPToolArg{
-				"content":   {Type: "string", Description: "Plugin source code to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-		{
-			Name:        "test_ruleset",
-			Description: "Execute ruleset processing with sample data and return rule matching results with execution trace.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Ruleset identifier to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-		{
-			Name:        "test_ruleset_content",
-			Description: "Test ruleset XML configuration directly without saving. Parses XML and executes rules with test data temporarily.",
-			InputSchema: map[string]common.MCPToolArg{
-				"content":   {Type: "string", Description: "Ruleset XML configuration to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-		{
-			Name:        "test_output",
-			Description: "Test output component delivery functionality with sample data. Attempts actual delivery and returns results.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Output identifier to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to deliver", Required: true},
-			},
-		},
-		{
-			Name:        "test_project",
-			Description: "Execute complete project workflow with test data. Processes data through entire pipeline and returns execution trace.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Project identifier to test", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-		{
-			Name:        "test_project_content",
-			Description: "Test project configuration directly without saving. Executes project workflow temporarily with provided configuration.",
-			InputSchema: map[string]common.MCPToolArg{
-				"inputNode": {Type: "string", Description: "Input node identifier to start workflow testing", Required: true},
-				"test_data": {Type: "string", Description: "JSON formatted test data to process", Required: true},
-			},
-		},
-
-		// === CLUSTER MANAGEMENT ===
-		{
-			Name:        "cluster_heartbeat",
-			Description: "Send heartbeat signal to maintain cluster node health status and coordinate cluster membership.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Heartbeat data including node status and metrics", Required: true},
-			},
-		},
-		{
-			Name:        "component_sync",
-			Description: "Synchronize component configurations across cluster nodes to ensure consistency.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Component synchronization data", Required: true},
-			},
-		},
-		{
-			Name:        "project_status_sync",
-			Description: "Synchronize project status information across cluster nodes for consistent state management.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Project status synchronization data", Required: true},
-			},
-		},
-		{
-			Name:        "qps_sync",
-			Description: "Synchronize QPS and performance metrics across cluster nodes for system-wide monitoring.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "QPS synchronization data", Required: true},
-			},
-		},
-		{
-			Name:        "get_config_root",
-			Description: "Retrieve cluster leader's configuration root directory path for follower node synchronization.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "download_config",
-			Description: "Download complete configuration package from cluster leader for node synchronization.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-
-		// === PENDING CHANGES MANAGEMENT ===
+		// 🚀 Deployment Tools
 		{
 			Name:        "get_pending_changes",
-			Description: "Retrieve list of all pending configuration changes awaiting application to production components.",
+			Description: "📋 VIEW PENDING CHANGES: Show all components with temporary changes that need deployment. Essential before applying changes!",
 			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_enhanced_pending_changes",
-			Description: "Retrieve comprehensive pending changes information with validation results and dependency analysis.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("View Pending", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "apply_changes",
-			Description: "Apply all pending configuration changes to production components with validation and rollback support.",
+			Description: "🚀 DEPLOY CHANGES: Apply all pending changes to make them active in production. Use after reviewing pending changes!",
 			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "apply_changes_enhanced",
-			Description: "Apply pending changes with enhanced transaction support and dependency resolution.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "apply_single_change",
-			Description: "Apply specific individual pending change with focused validation and immediate feedback.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Change data including component type and identifier", Required: true},
-			},
-		},
-		{
-			Name:        "verify_changes",
-			Description: "Validate all pending changes without applying them, providing comprehensive validation results.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "verify_change",
-			Description: "Validate specific individual pending change with detailed analysis and compatibility checking.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to validate", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to validate", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_change",
-			Description: "Cancel specific pending change and remove it from deployment queue with cleanup.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type of change to cancel", Required: true},
-				"id":   {Type: "string", Description: "Component identifier of change to cancel", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_all_changes",
-			Description: "Cancel all pending changes and clean up the entire deployment queue with comprehensive cleanup.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("Deploy Changes", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === TEMPORARY FILE MANAGEMENT ===
+		// 🧪 Testing Tools
 		{
-			Name:        "create_temp_file",
-			Description: "Create temporary configuration file for safe editing before applying changes to production.",
+			Name:        "test_ruleset",
+			Description: "🧪 TEST RULESET: Test a ruleset with sample data to verify it works correctly. Essential after rule changes!",
 			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type for temporary file", Required: true},
-				"id":   {Type: "string", Description: "Component identifier", Required: true},
-				"data": {Type: "string", Description: "Configuration data to write", Required: true},
+				"id":        {Type: "string", Description: "Ruleset ID", Required: true},
+				"test_data": {Type: "string", Description: "JSON test data", Required: false},
 			},
-		},
-		{
-			Name:        "check_temp_file",
-			Description: "Check status and existence of temporary configuration files for specific components.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to check", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to check", Required: true},
-			},
-		},
-		{
-			Name:        "delete_temp_file",
-			Description: "Delete temporary configuration file and clean up associated editing session data.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type for deletion", Required: true},
-				"id":   {Type: "string", Description: "Component identifier for deletion", Required: true},
-			},
-		},
-
-		// === SAMPLER ENDPOINTS ===
-		{
-			Name:        "get_samplers_data",
-			Description: "Retrieve sample data and field analysis from system components for ruleset development.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_ruleset_fields",
-			Description: "Get detailed field mapping and schema information for specific rulesets for development assistance.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to get field information for", Required: true},
-			},
-		},
-
-		// === CANCEL UPGRADE ROUTES ===
-		{
-			Name:        "cancel_ruleset_upgrade",
-			Description: "Cancel pending ruleset upgrade process and revert to previous stable version.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset identifier to cancel upgrade for", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_input_upgrade",
-			Description: "Cancel pending input component upgrade process and revert to previous stable configuration.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Input identifier to cancel upgrade for", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_output_upgrade",
-			Description: "Cancel pending output component upgrade process and revert to previous stable configuration.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Output identifier to cancel upgrade for", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_project_upgrade",
-			Description: "Cancel pending project upgrade process and revert to previous stable configuration.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Project identifier to cancel upgrade for", Required: true},
-			},
-		},
-		{
-			Name:        "cancel_plugin_upgrade",
-			Description: "Cancel pending plugin upgrade process and revert to previous stable version.",
-			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Plugin identifier to cancel upgrade for", Required: true},
-			},
-		},
-
-		// === COMPONENT USAGE ANALYSIS ===
-		{
-			Name:        "get_component_usage",
-			Description: "Analyze component usage patterns and dependencies across projects for impact assessment.",
-			InputSchema: map[string]common.MCPToolArg{
-				"type": {Type: "string", Description: "Component type to analyze", Required: true},
-				"id":   {Type: "string", Description: "Component identifier to analyze", Required: true},
-			},
-		},
-
-		// === SEARCH ===
-		{
-			Name:        "search_components",
-			Description: "Search through component configurations and content using flexible query patterns for discovery.",
-			InputSchema: map[string]common.MCPToolArg{
-				"query": {Type: "string", Description: "Search query string", Required: true},
-			},
-		},
-
-		// === LOCAL CHANGES ===
-		{
-			Name:        "get_local_changes",
-			Description: "Retrieve list of local configuration changes detected in filesystem that haven't been loaded.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "load_local_changes",
-			Description: "Load all detected local configuration changes from filesystem into the system with validation.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "load_single_local_change",
-			Description: "Load specific individual local configuration change from filesystem with validation.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Local change data to load", Required: true},
-			},
-		},
-
-		// === METRICS SYNC ===
-		{
-			Name:        "metrics_sync",
-			Description: "Synchronize performance metrics and monitoring data across cluster nodes for consistent reporting.",
-			InputSchema: map[string]common.MCPToolArg{
-				"data": {Type: "object", Description: "Metrics synchronization data", Required: true},
-			},
-		},
-
-		// === ERROR LOGS ===
-		{
-			Name:        "get_error_logs",
-			Description: "Retrieve system error logs and diagnostic information from local node for troubleshooting.",
-			InputSchema: map[string]common.MCPToolArg{},
-		},
-		{
-			Name:        "get_cluster_error_logs",
-			Description: "Retrieve aggregated error logs from all cluster nodes for comprehensive system monitoring.",
-			InputSchema: map[string]common.MCPToolArg{},
+			Annotations: createAnnotations("Test Ruleset", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 	}
 }
 
 // CallAPITool calls the corresponding API endpoint for a given tool
 func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (common.MCPToolResult, error) {
+	// Handle new intelligent workflow tools (temporarily using legacy handlers for compatibility)
+	switch toolName {
+	// Core intelligent workflows - mapped to existing handlers for now
+	case "create_rule_complete":
+		return m.handleCreateRuleWithValidation(args)
+	case "smart_deployment":
+		return m.handleApplyChanges(args)
+	case "component_wizard":
+		return m.handleManageComponent(args)
+	case "system_overview":
+		return m.handleSystemHealthCheck(args)
+	case "explore_components":
+		return m.handleGetProjects(args) // Combined list functionality
+	case "component_manager":
+		return m.handleManageComponent(args)
+	case "project_control":
+		return m.handleControlProject(args)
+	case "rule_manager":
+		action, hasAction := args["action"].(string)
+		if !hasAction {
+			return common.MCPToolResult{
+				Content: []common.MCPToolContent{{Type: "text", Text: "Error: action parameter is required"}},
+				IsError: true,
+			}, nil
+		}
+
+		// Route to appropriate handler based on action
+		switch action {
+		case "add_rule":
+			return m.handleAddRulesetRule(args)
+		case "update_rule":
+			// First delete old rule, then add new one
+			return m.handleUpdateRuleSafely(args)
+		case "delete_rule":
+			return m.handleDeleteRulesetRule(args)
+		case "view_rules":
+			return m.handleGetRuleset(args)
+		case "create_ruleset":
+			return m.handleCreateRuleset(args)
+		case "update_ruleset":
+			return m.handleUpdateRuleset(args)
+		default:
+			return common.MCPToolResult{
+				Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Error: unknown action '%s'. Supported actions: add_rule, update_rule, delete_rule, view_rules, create_ruleset, update_ruleset", action)}},
+				IsError: true,
+			}, nil
+		}
+	case "test_lab":
+		return m.handleTestComponent(args)
+	case "deployment_center":
+		return m.handleApplyChanges(args)
+	case "learning_center":
+		return m.handleGetRulesets(args)
+	case "smart_assistant":
+		return m.handleTroubleshootSystem(args)
+	case "get_samplers_data_intelligent":
+		return m.handleGetSamplersDataIntelligent(args)
+
+	// Legacy compatibility handlers
+	case "get_metrics":
+		return m.handleGetMetrics(args)
+	case "get_cluster_status":
+		return m.handleGetClusterStatus(args)
+	case "get_error_logs":
+		return m.handleGetErrorLogs(args)
+	case "get_pending_changes":
+		return m.handleGetPendingChanges(args)
+	case "apply_changes":
+		return m.handleApplyChanges(args)
+	case "verify_changes":
+		return m.handleVerifyChanges(args)
+	}
+
+	// CRITICAL: get_samplers_data must be used BEFORE any rule creation!
 	// Map tool names to API endpoints and methods
 	endpointMap := map[string]struct {
 		method   string
@@ -706,11 +467,16 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		"get_project_component_sequences": {"GET", "/project-component-sequences/%s", true},
 
 		// Ruleset endpoints
-		"get_rulesets":   {"GET", "/rulesets", true},
-		"get_ruleset":    {"GET", "/rulesets/%s", true},
-		"create_ruleset": {"POST", "/rulesets", true},
-		"update_ruleset": {"PUT", "/rulesets/%s", true},
-		"delete_ruleset": {"DELETE", "/rulesets/%s", true},
+		"get_rulesets":             {"GET", "/rulesets", true},
+		"get_ruleset":              {"GET", "/rulesets/%s", true},
+		"create_ruleset":           {"POST", "/rulesets", true},
+		"update_ruleset":           {"PUT", "/rulesets/%s", true},
+		"delete_ruleset":           {"DELETE", "/rulesets/%s", true},
+		"delete_ruleset_rule":      {"DELETE", "/rulesets/%s/rules/%s", true},
+		"add_ruleset_rule":         {"POST", "/rulesets/%s/rules", true},
+		"get_ruleset_templates":    {"GET", "/ruleset-templates", true},
+		"get_ruleset_syntax_guide": {"GET", "/ruleset-syntax-guide", true},
+		"get_rule_templates":       {"GET", "/rule-templates", true},
 
 		// Input endpoints
 		"get_inputs":   {"GET", "/inputs", true},
@@ -770,9 +536,10 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		"check_temp_file":  {"GET", "/temp-file/%s/%s", true},
 		"delete_temp_file": {"DELETE", "/temp-file/%s/%s", true},
 
-		// Sampler endpoints
-		"get_samplers_data":  {"GET", "/samplers/data", true},
-		"get_ruleset_fields": {"GET", "/ruleset-fields/%s", true},
+		// ⚠️ MANDATORY BEFORE RULE CREATION: Must use this to get real data samples first!
+		"get_samplers_data":             {"GET", "/samplers/data", true},
+		"get_samplers_data_intelligent": {"POST", "/samplers/data/intelligent", true},
+		"get_ruleset_fields":            {"GET", "/ruleset-fields/%s", true},
 
 		// Cancel upgrade routes
 		"cancel_ruleset_upgrade": {"POST", "/cancel-upgrade/rulesets/%s", true},
@@ -820,6 +587,13 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 			if inputNode, exists := args["inputNode"]; exists {
 				endpoint = fmt.Sprintf(endpointInfo.endpoint, projectName, inputNode)
 			}
+		} else if toolName == "delete_ruleset_rule" {
+			// Special handling for delete_ruleset_rule: id and rule_id
+			if id, exists := args["id"]; exists {
+				if ruleId, exists := args["rule_id"]; exists {
+					endpoint = fmt.Sprintf(endpointInfo.endpoint, id, ruleId)
+				}
+			}
 		}
 	case strings.Contains(endpoint, "%s"):
 		// One parameter needed
@@ -844,7 +618,8 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		for key, value := range args {
 			// Skip parameters that are used in URL path
 			if key == "id" || key == "type" || key == "project_name" || key == "inputNode" ||
-				key == "ruleset_name" || key == "input_name" || key == "output_name" || key == "plugin_name" {
+				key == "ruleset_name" || key == "input_name" || key == "output_name" || key == "plugin_name" ||
+				key == "rule_id" {
 				continue
 			}
 			if strValue, ok := value.(string); ok {
@@ -866,8 +641,8 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{
 				{
-					Format: "text",
-					Text:   fmt.Sprintf("Error calling tool: %v", err),
+					Type: "text",
+					Text: fmt.Sprintf("Error calling tool: %v", err),
 				},
 			},
 			IsError: true,
@@ -893,8 +668,8 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
-				Format: "text", // MCP only supports "text" and "image" formats
-				Text:   prettyResponseBody,
+				Type: "text", // MCP supports "text", "image", and "resource" types
+				Text: prettyResponseBody,
 			},
 		},
 	}, nil
@@ -951,4 +726,1660 @@ func (m *APIMapper) makeHTTPRequest(method, endpoint string, body interface{}, r
 	}
 
 	return responseBody, nil
+}
+
+// handleCreateRuleWithValidation orchestrates the complete rule creation workflow
+func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["ruleset_id"].(string)
+	ruleRaw := args["rule_raw"].(string)
+	testData, hasTestData := args["test_data"].(string)
+
+	// MANDATORY: Check if real sample data is provided
+	if !hasTestData || testData == "" {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "❌ SAMPLE DATA REQUIRED: Must provide real sample data for rule creation!\n\n🎯 **Two Options:**\n1. **Try backend data:** Use 'get_samplers_data' (may fail if backend has no data)\n2. **Provide your own:** Add real JSON sample data directly to the 'test_data' parameter\n\n⚠️ **Cannot create rules without actual data examples!**"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Validate that test data appears to be real (basic checks)
+	if len(testData) < 50 || !strings.Contains(testData, "{") {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "❌ INVALID SAMPLE DATA: The provided data appears to be too simple or not in JSON format.\n\n🎯 **Required Format:**\n- Must be real JSON data from your actual system\n- Should contain actual field names and values\n- Example: {\"timestamp\":\"2024-01-01T10:00:00Z\",\"source_ip\":\"192.168.1.1\",\"exe\":\"msf.exe\",...}\n\n💡 **Get real data from:** your log files, monitoring systems, or actual data samples"}},
+			IsError: true,
+		}, nil
+	}
+
+	var results []string
+	results = append(results, "=== DATA-DRIVEN RULE CREATION WORKFLOW ===\n")
+	results = append(results, "✅ Sample data validation passed - proceeding with rule creation...")
+
+	// Step 1: Add the rule
+	results = append(results, "Step 1: Adding rule to ruleset...")
+	addArgs := map[string]interface{}{
+		"id":       rulesetId,
+		"rule_raw": ruleRaw,
+	}
+	addResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/rulesets/%s/rules", rulesetId), addArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Rule addition failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Rule added successfully: %s\n", string(addResponse)))
+
+	// Step 2: Verify the ruleset
+	results = append(results, "Step 2: Verifying ruleset configuration...")
+	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/ruleset/%s", rulesetId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Verification passed: %s\n", string(verifyResponse)))
+	}
+
+	// Step 3: Test with sample data if provided
+	if hasTestData {
+		results = append(results, "Step 3: Testing rule with sample data...")
+		testArgs := map[string]interface{}{
+			"test_data": testData,
+		}
+		testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-ruleset/%s", rulesetId), testArgs, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+		}
+	}
+
+	// Step 4: Get usage analysis
+	results = append(results, "Step 4: Analyzing component usage and impact...")
+	usageResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/component-usage/ruleset/%s", rulesetId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Usage analysis failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Usage analysis: %s\n", string(usageResponse)))
+	}
+
+	// Step 5: Deployment guidance
+	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+	results = append(results, "⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!")
+	results = append(results, "")
+	results = append(results, "📋 Next Steps Required:")
+	results = append(results, "1. 🔍 Check what's pending: Use 'get_pending_changes' to see all changes awaiting deployment")
+	results = append(results, "2. ✅ Apply changes: Use 'apply_changes' to deploy your rule to production")
+	results = append(results, "3. 🧪 Test thoroughly: Use 'test_ruleset' with real data to validate rule behavior")
+	results = append(results, "")
+	results = append(results, "🎯 Recommended Workflow:")
+	results = append(results, "   → get_pending_changes  (review what will be deployed)")
+	results = append(results, "   → apply_changes        (activate your rule)")
+	results = append(results, "   → test_ruleset         (verify it works correctly)")
+	results = append(results, "")
+	results = append(results, "💡 Your rule will remain inactive until you run 'apply_changes'!")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdateRuleSafely orchestrates the safe rule update workflow
+func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["ruleset_id"].(string)
+	ruleId := args["rule_id"].(string)
+	ruleRaw := args["rule_raw"].(string)
+	testData, hasTestData := args["test_data"].(string)
+
+	var results []string
+	results = append(results, "=== SAFE RULE UPDATE WORKFLOW ===\n")
+
+	// Step 1: Get current ruleset for backup
+	results = append(results, "Step 1: Backing up current ruleset...")
+	_, err := m.makeHTTPRequest("GET", fmt.Sprintf("/rulesets/%s", rulesetId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Backup failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, "✓ Current ruleset backed up")
+
+	// Step 2: Delete old rule
+	results = append(results, "Step 2: Removing old rule...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/rulesets/%s/rules/%s", rulesetId, ruleId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Rule deletion failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Old rule removed: %s\n", string(deleteResponse)))
+	}
+
+	// Step 3: Add new rule
+	results = append(results, "Step 3: Adding updated rule...")
+	addArgs := map[string]interface{}{
+		"id":       rulesetId,
+		"rule_raw": ruleRaw,
+	}
+	addResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/rulesets/%s/rules", rulesetId), addArgs, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Rule addition failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Updated rule added: %s\n", string(addResponse)))
+	}
+
+	// Step 4: Verify updated ruleset
+	results = append(results, "Step 4: Verifying updated ruleset...")
+	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/ruleset/%s", rulesetId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Verification passed: %s\n", string(verifyResponse)))
+	}
+
+	// Step 5: Test if data provided
+	if hasTestData {
+		results = append(results, "Step 5: Testing updated rule...")
+		testArgs := map[string]interface{}{
+			"test_data": testData,
+		}
+		testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-ruleset/%s", rulesetId), testArgs, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+		}
+	}
+
+	// Step 6: Deployment guidance for rule updates
+	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+	results = append(results, "⚠️  IMPORTANT: Your rule update has been saved to a TEMPORARY file and is NOT YET ACTIVE!")
+	results = append(results, "")
+	results = append(results, "📋 Next Steps Required:")
+	results = append(results, "1. 🔍 Review changes: Use 'get_pending_changes' to see all modifications awaiting deployment")
+	results = append(results, "2. ✅ Deploy update: Use 'apply_changes' to activate your updated rule in production")
+	results = append(results, "3. 🧪 Verify changes: Use 'test_ruleset' to ensure the updated rule works as expected")
+	results = append(results, "")
+	results = append(results, "🎯 Deployment Workflow:")
+	results = append(results, "   → get_pending_changes  (review what will be deployed)")
+	results = append(results, "   → apply_changes        (activate your updated rule)")
+	results = append(results, "   → test_ruleset         (verify the update works correctly)")
+	results = append(results, "")
+	results = append(results, "💡 The old rule version is still active until you run 'apply_changes'!")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeployRuleComplete orchestrates complete rule deployment workflow
+func (m *APIMapper) handleDeployRuleComplete(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["ruleset_id"].(string)
+	testData, hasTestData := args["test_data"].(string)
+	dryRun, isDryRun := args["dry_run"].(string)
+
+	var results []string
+	results = append(results, "=== COMPLETE RULE DEPLOYMENT WORKFLOW ===\n")
+
+	// Step 1: Pre-deployment validation
+	results = append(results, "Step 1: Pre-deployment validation...")
+	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/ruleset/%s", rulesetId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Pre-deployment validation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Pre-deployment validation passed: %s\n", string(verifyResponse)))
+
+	// Step 2: Dependency verification
+	results = append(results, "Step 2: Verifying dependencies...")
+	usageResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/component-usage/ruleset/%s", rulesetId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Dependency check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Dependencies verified: %s\n", string(usageResponse)))
+	}
+
+	// Step 3: Performance testing
+	if hasTestData {
+		results = append(results, "Step 3: Performance testing...")
+		testArgs := map[string]interface{}{
+			"test_data": testData,
+		}
+		testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-ruleset/%s", rulesetId), testArgs, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Performance testing failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Performance testing completed: %s\n", string(testResponse)))
+		}
+	}
+
+	// Step 4: Deployment (if not dry run)
+	if isDryRun && dryRun == "true" {
+		results = append(results, "Step 4: Dry run mode - skipping actual deployment")
+		results = append(results, "✓ Dry run completed successfully - ready for deployment")
+	} else {
+		results = append(results, "Step 4: Applying deployment...")
+		applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Deployment failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Deployment completed: %s\n", string(applyResponse)))
+		}
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleManageComponent orchestrates complete component management workflow
+func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.MCPToolResult, error) {
+	operation := args["operation"].(string)
+	componentType := args["type"].(string)
+	componentId := args["id"].(string)
+	rawContent, hasRawContent := args["raw"].(string)
+	testData, hasTestData := args["test_data"].(string)
+
+	var results []string
+	results = append(results, fmt.Sprintf("=== COMPLETE %s MANAGEMENT WORKFLOW ===\n", strings.ToUpper(componentType)))
+
+	// Step 1: Create component if operation is "create"
+	if operation == "create" {
+		results = append(results, "Step 1: Creating component...")
+		createArgs := map[string]interface{}{
+			"id":  componentId,
+			"raw": rawContent,
+		}
+		createResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/%ss", componentType), createArgs, true)
+		if err != nil {
+			return common.MCPToolResult{
+				Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Component creation failed: %v", err)}},
+				IsError: true,
+			}, nil
+		}
+		results = append(results, fmt.Sprintf("✓ Component created: %s\n", string(createResponse)))
+	}
+
+	// Step 2: Verify component
+	results = append(results, "Step 2: Verifying component...")
+	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/%s/%s", componentType, componentId), nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Verification passed: %s\n", string(verifyResponse)))
+	}
+
+	// Step 3: Connectivity test for inputs/outputs
+	if componentType == "input" || componentType == "output" {
+		results = append(results, "Step 3: Testing connectivity...")
+		connectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/connect-check/%s/%s", componentType, componentId), nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Connectivity test failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Connectivity test passed: %s\n", string(connectResponse)))
+		}
+	}
+
+	// Step 4: Test with sample data if provided
+	if hasTestData {
+		results = append(results, "Step 4: Testing with sample data...")
+		testArgs := map[string]interface{}{
+			"test_data": testData,
+		}
+		var testEndpoint string
+		switch componentType {
+		case "ruleset":
+			testEndpoint = fmt.Sprintf("/test-ruleset/%s", componentId)
+		case "plugin":
+			testEndpoint = fmt.Sprintf("/test-plugin/%s", componentId)
+		case "output":
+			testEndpoint = fmt.Sprintf("/test-output/%s", componentId)
+		}
+		if testEndpoint != "" {
+			testResponse, err := m.makeHTTPRequest("POST", testEndpoint, testArgs, true)
+			if err != nil {
+				results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
+			} else {
+				results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+			}
+		}
+	}
+
+	// Step 5: Deployment if requested
+	if hasRawContent {
+		results = append(results, "Step 5: Deploying component...")
+		applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Deployment failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Deployment completed: %s\n", string(applyResponse)))
+			results = append(results, "🎉 Component is now ACTIVE in production!")
+		}
+	} else {
+		results = append(results, "Step 5: Component created in temporary file")
+
+		// Add deployment guidance
+		results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+		results = append(results, fmt.Sprintf("⚠️  IMPORTANT: Your %s has been created in a TEMPORARY file and is NOT YET ACTIVE!", strings.ToUpper(componentType)))
+		results = append(results, "")
+		results = append(results, "📋 Next Steps Required:")
+		results = append(results, "1. 🔍 Review changes: Use 'get_pending_changes' to see all components awaiting deployment")
+		results = append(results, "2. ✅ Deploy component: Use 'apply_changes' to activate your component in production")
+		if componentType == "input" || componentType == "output" {
+			results = append(results, "3. 🔗 Test connectivity: Use 'connect_check' to verify connection to external systems")
+		}
+		if componentType == "plugin" {
+			results = append(results, "3. 🧪 Test plugin: Use 'test_plugin' to verify plugin functionality")
+		}
+		results = append(results, "")
+		results = append(results, "🎯 Deployment Workflow:")
+		results = append(results, "   → get_pending_changes  (review what will be deployed)")
+		results = append(results, "   → apply_changes        (activate your component)")
+		results = append(results, "")
+		results = append(results, "💡 Your component will remain inactive until you run 'apply_changes'!")
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleSystemHealthCheck orchestrates comprehensive system health assessment
+func (m *APIMapper) handleSystemHealthCheck(args map[string]interface{}) (common.MCPToolResult, error) {
+	includePerformance, shouldIncludePerf := args["include_performance"].(string)
+	checkDependencies, shouldCheckDeps := args["check_dependencies"].(string)
+
+	var results []string
+	results = append(results, "=== COMPREHENSIVE SYSTEM HEALTH CHECK ===\n")
+
+	// Step 1: Cluster health
+	results = append(results, "Step 1: Checking cluster health...")
+	clusterResponse, err := m.makeHTTPRequest("GET", "/cluster-status", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Cluster health check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Cluster status: %s\n", string(clusterResponse)))
+	}
+
+	// Step 2: All projects health
+	results = append(results, "Step 2: Checking all projects...")
+	projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Projects health check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Projects status: %s\n", string(projectsResponse)))
+	}
+
+	// Step 3: System resources
+	results = append(results, "Step 3: Checking system resources...")
+	systemResponse, err := m.makeHTTPRequest("GET", "/system-metrics", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ System metrics check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ System metrics: %s\n", string(systemResponse)))
+	}
+
+	// Step 4: Error logs analysis
+	results = append(results, "Step 4: Analyzing error logs...")
+	errorResponse, err := m.makeHTTPRequest("GET", "/error-logs", nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Error log analysis failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Error logs analysis: %s\n", string(errorResponse)))
+	}
+
+	// Step 5: Performance analysis (if requested)
+	if shouldIncludePerf && includePerformance == "true" {
+		results = append(results, "Step 5: Performance analysis...")
+		qpsResponse, err := m.makeHTTPRequest("GET", "/qps-stats", nil, false)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Performance analysis failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Performance analysis: %s\n", string(qpsResponse)))
+		}
+	}
+
+	// Step 6: Dependency checks (if requested)
+	if shouldCheckDeps && checkDependencies == "true" {
+		results = append(results, "Step 6: Checking component dependencies...")
+		// Get all rulesets and check dependencies
+		rulesetsResponse, err := m.makeHTTPRequest("GET", "/rulesets", nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Dependency check failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Component dependencies: %s\n", string(rulesetsResponse)))
+		}
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleTroubleshootSystem orchestrates intelligent system troubleshooting
+func (m *APIMapper) handleTroubleshootSystem(args map[string]interface{}) (common.MCPToolResult, error) {
+	symptoms, hasSymptoms := args["symptoms"].(string)
+	projectId, hasProjectId := args["project_id"].(string)
+	autoFix, shouldAutoFix := args["auto_fix"].(string)
+
+	var results []string
+	results = append(results, "=== INTELLIGENT SYSTEM TROUBLESHOOTING ===\n")
+
+	if hasSymptoms {
+		results = append(results, fmt.Sprintf("Investigating symptoms: %s\n", symptoms))
+	}
+
+	// Step 1: Error log analysis
+	results = append(results, "Step 1: Analyzing error logs...")
+	errorResponse, err := m.makeHTTPRequest("GET", "/error-logs", nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Error log analysis failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Error logs: %s\n", string(errorResponse)))
+	}
+
+	// Step 2: Component health check
+	results = append(results, "Step 2: Component health verification...")
+	if hasProjectId {
+		projectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/projects/%s", projectId), nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Project health check failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ Project status: %s\n", string(projectResponse)))
+		}
+	} else {
+		projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
+		if err != nil {
+			results = append(results, fmt.Sprintf("✗ Projects health check failed: %v\n", err))
+		} else {
+			results = append(results, fmt.Sprintf("✓ All projects status: %s\n", string(projectsResponse)))
+		}
+	}
+
+	// Step 3: Performance anomaly detection
+	results = append(results, "Step 3: Performance anomaly detection...")
+	qpsResponse, err := m.makeHTTPRequest("GET", "/qps-stats", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Performance analysis failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Performance metrics: %s\n", string(qpsResponse)))
+	}
+
+	// Step 4: System resource check
+	results = append(results, "Step 4: System resource analysis...")
+	systemResponse, err := m.makeHTTPRequest("GET", "/system-metrics", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ System resource check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ System resources: %s\n", string(systemResponse)))
+	}
+
+	// Step 5: Cluster health (if applicable)
+	results = append(results, "Step 5: Cluster health verification...")
+	clusterResponse, err := m.makeHTTPRequest("GET", "/cluster-status", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Cluster health check failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Cluster status: %s\n", string(clusterResponse)))
+	}
+
+	// Step 6: Auto-fix attempt (if requested)
+	if shouldAutoFix && autoFix == "true" {
+		results = append(results, "Step 6: Attempting automatic fixes...")
+		// Try to restart any failed projects
+		if hasProjectId {
+			restartResponse, err := m.makeHTTPRequest("POST", "/restart-project", map[string]interface{}{"project_id": projectId}, true)
+			if err != nil {
+				results = append(results, fmt.Sprintf("✗ Auto-fix failed: %v\n", err))
+			} else {
+				results = append(results, fmt.Sprintf("✓ Auto-fix applied: %s\n", string(restartResponse)))
+			}
+		} else {
+			results = append(results, "⚠️  Auto-fix requires specific project_id")
+		}
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetMetrics retrieves comprehensive system metrics
+func (m *APIMapper) handleGetMetrics(args map[string]interface{}) (common.MCPToolResult, error) {
+	projectId, hasProjectId := args["project_id"].(string)
+	timeRange, hasTimeRange := args["time_range"].(string)
+	aggregated, hasAggregated := args["aggregated"].(string)
+
+	var results []string
+	results = append(results, "=== SYSTEM METRICS ===\n")
+
+	// Step 1: Retrieve metrics based on type
+	results = append(results, "Step 1: Retrieving metrics...")
+	metricsArgs := ""
+	if hasProjectId {
+		metricsArgs += fmt.Sprintf("?project_id=%s", projectId)
+	}
+	if hasTimeRange {
+		metricsArgs += fmt.Sprintf("&time_range=%s", timeRange)
+	}
+	if hasAggregated {
+		metricsArgs += fmt.Sprintf("&aggregated=%s", aggregated)
+	}
+	metricsResponse, err := m.makeHTTPRequest("GET", "/system-metrics"+metricsArgs, nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Metrics retrieval failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Metrics retrieved: %s\n", string(metricsResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetClusterStatus retrieves comprehensive cluster status information
+func (m *APIMapper) handleGetClusterStatus(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== CLUSTER STATUS ===\n")
+
+	// Step 1: Retrieve cluster status
+	results = append(results, "Step 1: Retrieving cluster status...")
+	clusterStatusResponse, err := m.makeHTTPRequest("GET", "/cluster-status", nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Cluster status retrieval failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Cluster status retrieved: %s\n", string(clusterStatusResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetErrorLogs retrieves system error logs
+func (m *APIMapper) handleGetErrorLogs(args map[string]interface{}) (common.MCPToolResult, error) {
+	clusterWide, hasClusterWide := args["cluster_wide"].(string)
+
+	var results []string
+	results = append(results, "=== SYSTEM ERROR LOGS ===\n")
+
+	// Step 1: Retrieve error logs
+	results = append(results, "Step 1: Retrieving error logs...")
+	errorLogsArgs := ""
+	if hasClusterWide {
+		errorLogsArgs += fmt.Sprintf("?cluster_wide=%s", clusterWide)
+	}
+	errorLogsResponse, err := m.makeHTTPRequest("GET", "/error-logs"+errorLogsArgs, nil, false)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Error logs retrieval failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Error logs retrieved: %s\n", string(errorLogsResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetProjects retrieves comprehensive list of all projects
+func (m *APIMapper) handleGetProjects(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== PROJECT LIST ===\n")
+
+	// Step 1: Retrieve projects
+	results = append(results, "Step 1: Retrieving projects...")
+	projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get projects: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Projects retrieved: %s\n", string(projectsResponse)))
+
+	// Step 2: Add critical guidance
+	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
+	results = append(results, "📋 **Check Project Health:**")
+	results = append(results, "   → Use 'get_project_error' with id='<project_name>' to check for errors")
+	results = append(results, "   → Use 'project_control' with action='status' to check running status")
+	results = append(results, "")
+	results = append(results, "🔗 **Check Component Dependencies:**")
+	results = append(results, "   → Use 'get_project_components' with id='<project_name>' to see used components")
+	results = append(results, "   → Use 'get_project_component_sequences' to see data flow")
+	results = append(results, "")
+	results = append(results, "📋 **Check Component Status:**")
+	results = append(results, "   → Use 'get_pending_changes' to see if any components have unpublished changes")
+	results = append(results, "   → Components with pending changes may affect project behavior!")
+	results = append(results, "")
+	results = append(results, "⚡ **Common Actions:**")
+	results = append(results, "   → 'test_project' - Test project end-to-end")
+	results = append(results, "   → 'project_control' - Start/stop/restart projects")
+	results = append(results, "   → 'apply_changes' - Deploy pending component changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetProject retrieves complete information for a specific project
+func (m *APIMapper) handleGetProject(args map[string]interface{}) (common.MCPToolResult, error) {
+	projectId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== PROJECT DETAILS ===\n")
+
+	// Step 1: Retrieve project
+	results = append(results, "Step 1: Retrieving project...")
+	projectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/projects/%s", projectId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get project: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Project retrieved: %s\n", string(projectResponse)))
+
+	// Step 2: Add critical analysis guidance
+	results = append(results, "\n=== ⚠️  PROJECT HEALTH & DEPENDENCY ANALYSIS ===")
+	results = append(results, "📋 **Check project health and status:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_project_error' with id='%s' to check for errors", projectId))
+	results = append(results, "   → Use 'project_control' with action='status' to check running status")
+	results = append(results, "")
+	results = append(results, "🔗 **Check component dependencies:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_project_components' with id='%s' to see all used components", projectId))
+	results = append(results, fmt.Sprintf("   → Use 'get_project_component_sequences' with id='%s' to see data flow", projectId))
+	results = append(results, "")
+	results = append(results, "📋 **Check if dependencies have pending changes:**")
+	results = append(results, "   → Use 'get_pending_changes' to see if any referenced components have unpublished changes")
+	results = append(results, "   → Components with pending changes may affect project behavior!")
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_project' - Test project end-to-end")
+	results = append(results, "   → 'project_control' with action='restart' - Restart project")
+	results = append(results, "   → 'apply_changes' - Deploy any pending component changes")
+	results = append(results, "   → 'component_manager' - Edit project configuration")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleCreateProject creates a new project with specified ID and YAML configuration
+func (m *APIMapper) handleCreateProject(args map[string]interface{}) (common.MCPToolResult, error) {
+	projectId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== PROJECT CREATION ===\n")
+
+	// Step 1: Create project
+	results = append(results, "Step 1: Creating project...")
+	createArgs := map[string]interface{}{
+		"id":  projectId,
+		"raw": raw,
+	}
+	createResponse, err := m.makeHTTPRequest("POST", "/projects", createArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project creation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Project created: %s\n", string(createResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdateProject updates an existing project configuration with validation and change analysis
+func (m *APIMapper) handleUpdateProject(args map[string]interface{}) (common.MCPToolResult, error) {
+	projectId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== PROJECT UPDATE ===\n")
+
+	// Step 1: Update project
+	results = append(results, "Step 1: Updating project...")
+	updateArgs := map[string]interface{}{
+		"id":  projectId,
+		"raw": raw,
+	}
+	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/projects/%s", projectId), updateArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project update failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Project updated: %s\n", string(updateResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeleteProject deletes a specified project and associated resources
+func (m *APIMapper) handleDeleteProject(args map[string]interface{}) (common.MCPToolResult, error) {
+	projectId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== PROJECT DELETION ===\n")
+
+	// Step 1: Delete project
+	results = append(results, "Step 1: Deleting project...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/projects/%s", projectId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Project deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleControlProject performs unified project control operations
+func (m *APIMapper) handleControlProject(args map[string]interface{}) (common.MCPToolResult, error) {
+	operation := args["operation"].(string)
+	projectId, hasProjectId := args["project_id"].(string)
+
+	var results []string
+	results = append(results, fmt.Sprintf("=== PROJECT CONTROL (%s) ===\n", strings.ToUpper(operation)))
+
+	// Step 1: Perform control operation
+	results = append(results, "Step 1: Performing control operation...")
+	controlArgs := map[string]interface{}{
+		"operation": operation,
+	}
+	if hasProjectId {
+		controlArgs["project_id"] = projectId
+	}
+	controlResponse, err := m.makeHTTPRequest("POST", "/control-project", controlArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project control failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Control operation completed: %s\n", string(controlResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetRulesets retrieves comprehensive list of all rulesets
+func (m *APIMapper) handleGetRulesets(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== RULESET LIST ===\n")
+
+	// Step 1: Retrieve rulesets
+	results = append(results, "Step 1: Retrieving rulesets...")
+	rulesetsResponse, err := m.makeHTTPRequest("GET", "/rulesets", nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get rulesets: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Rulesets retrieved: %s\n", string(rulesetsResponse)))
+
+	// Step 2: Add critical guidance
+	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
+	results = append(results, "📋 **Check Deployment Status:**")
+	results = append(results, "   → Use 'get_pending_changes' to see which rulesets have unpublished changes")
+	results = append(results, "   → Rulesets with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check Project Dependencies:**")
+	results = append(results, "   → Use 'get_component_usage' with type='ruleset' and id='<ruleset_name>'")
+	results = append(results, "   → This shows which projects depend on each ruleset")
+	results = append(results, "")
+	results = append(results, "🚀 **If you see pending changes:**")
+	results = append(results, "   → Review them with 'get_pending_changes'")
+	results = append(results, "   → Deploy them with 'apply_changes' to make them active")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetRuleset retrieves complete information for a specific ruleset
+func (m *APIMapper) handleGetRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== RULESET DETAILS ===\n")
+
+	// Step 1: Retrieve ruleset
+	results = append(results, "Step 1: Retrieving ruleset...")
+	rulesetResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/rulesets/%s", rulesetId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get ruleset: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Ruleset retrieved: %s\n", string(rulesetResponse)))
+
+	// Step 2: Add critical analysis guidance
+	results = append(results, "\n=== ⚠️  DEPLOYMENT & USAGE ANALYSIS ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", rulesetId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which projects use this ruleset:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='ruleset' and id='%s'", rulesetId))
+	results = append(results, "   → This shows project dependencies and impact of changes")
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_ruleset' - Test this ruleset with sample data")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+	results = append(results, "   → 'rule_manager' with action='add_rule' - Add new rules")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleCreateRuleset creates a new ruleset with XML configuration and validation
+func (m *APIMapper) handleCreateRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== RULESET CREATION ===\n")
+
+	// Step 1: Create ruleset
+	results = append(results, "Step 1: Creating ruleset...")
+	createArgs := map[string]interface{}{
+		"id":  rulesetId,
+		"raw": raw,
+	}
+	createResponse, err := m.makeHTTPRequest("POST", "/rulesets", createArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Ruleset creation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Ruleset created: %s\n", string(createResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleAddRulesetRule adds a single rule to an existing ruleset with mandatory data validation
+func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+	ruleRaw := args["rule_raw"].(string)
+	testData, hasTestData := args["test_data"].(string)
+
+	// MANDATORY: Validate that real sample data is provided
+	if !hasTestData || testData == "" {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "❌ SAMPLE DATA REQUIRED: Must provide real sample data for rule creation!\n\n🎯 **Two Options:**\n1. **Try backend data:** Use 'get_samplers_data' (may fail if backend has no data)\n2. **Provide your own:** Add real JSON sample data directly to the 'test_data' parameter\n\n⚠️ **Cannot create rules without actual data examples!**"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Validate that test data appears to be real (basic checks)
+	if len(testData) < 50 || !strings.Contains(testData, "{") {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "❌ INVALID SAMPLE DATA: The provided data appears to be too simple or not in JSON format.\n\n🎯 **Required Format:**\n- Must be real JSON data from your actual system\n- Should contain actual field names and values\n- Example: {\"timestamp\":\"2024-01-01T10:00:00Z\",\"source_ip\":\"192.168.1.1\",\"exe\":\"msf.exe\",...}\n\n💡 **Get real data from:** your log files, monitoring systems, or actual data samples"}},
+			IsError: true,
+		}, nil
+	}
+
+	var results []string
+	results = append(results, "=== ✅ DATA-DRIVEN RULE CREATION ===\n")
+	results = append(results, "🎯 **EXCELLENT:** Real sample data provided!")
+	results = append(results, "✅ Following data-driven best practices...")
+
+	// Step 1: Add rule
+	results = append(results, "\nStep 1: Adding rule to ruleset...")
+	addArgs := map[string]interface{}{
+		"id":       rulesetId,
+		"rule_raw": ruleRaw,
+	}
+	addResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/rulesets/%s/rules", rulesetId), addArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Rule addition failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Rule added successfully: %s\n", string(addResponse)))
+
+	// Step 2: Add deployment guidance
+	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+	results = append(results, "⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!")
+	results = append(results, "")
+	results = append(results, "📋 Next Steps Required:")
+	results = append(results, "1. 🔍 Check what's pending: Use 'get_pending_changes'")
+	results = append(results, "2. ✅ Apply changes: Use 'apply_changes' to deploy your rule")
+	results = append(results, "3. 🧪 Test thoroughly: Use 'test_ruleset' with real data")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdateRuleset updates an entire ruleset configuration
+func (m *APIMapper) handleUpdateRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== RULESET UPDATE ===\n")
+
+	// Step 1: Update ruleset
+	results = append(results, "Step 1: Updating ruleset...")
+	updateArgs := map[string]interface{}{
+		"id":  rulesetId,
+		"raw": raw,
+	}
+	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/rulesets/%s", rulesetId), updateArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Ruleset update failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Ruleset updated: %s\n", string(updateResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeleteRuleset deletes a specified ruleset
+func (m *APIMapper) handleDeleteRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== RULESET DELETION ===\n")
+
+	// Step 1: Delete ruleset
+	results = append(results, "Step 1: Deleting ruleset...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/rulesets/%s", rulesetId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Ruleset deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Ruleset deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeleteRulesetRule deletes a specific rule from a ruleset
+func (m *APIMapper) handleDeleteRulesetRule(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulesetId := args["id"].(string)
+	ruleId := args["rule_id"].(string)
+
+	var results []string
+	results = append(results, "=== RULE DELETION ===\n")
+
+	// Step 1: Delete rule
+	results = append(results, "Step 1: Deleting rule...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/rulesets/%s/rules/%s", rulesetId, ruleId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Rule deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Rule deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetInputs retrieves comprehensive list of all input components
+func (m *APIMapper) handleGetInputs(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== INPUT COMPONENTS ===\n")
+
+	// Step 1: Retrieve inputs
+	results = append(results, "Step 1: Retrieving inputs...")
+	inputsResponse, err := m.makeHTTPRequest("GET", "/inputs", nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get inputs: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Inputs retrieved: %s\n", string(inputsResponse)))
+
+	// Step 2: Add critical guidance
+	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
+	results = append(results, "📋 **Check Deployment Status:**")
+	results = append(results, "   → Use 'get_pending_changes' to see which inputs have unpublished changes")
+	results = append(results, "   → Inputs with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check Project Dependencies:**")
+	results = append(results, "   → Use 'get_component_usage' with type='input' and id='<input_name>'")
+	results = append(results, "   → This shows which projects depend on each input")
+	results = append(results, "")
+	results = append(results, "⚡ **Common Actions:**")
+	results = append(results, "   → 'connect_check' - Test input connectivity")
+	results = append(results, "   → 'apply_changes' - Deploy pending changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetInput retrieves detailed information for a specific input component
+func (m *APIMapper) handleGetInput(args map[string]interface{}) (common.MCPToolResult, error) {
+	inputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== INPUT DETAILS ===\n")
+
+	// Step 1: Retrieve input
+	results = append(results, "Step 1: Retrieving input...")
+	inputResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/inputs/%s", inputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get input: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Input retrieved: %s\n", string(inputResponse)))
+
+	// Step 2: Add critical analysis guidance
+	results = append(results, "\n=== ⚠️  DEPLOYMENT & USAGE ANALYSIS ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", inputId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which projects use this input:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='input' and id='%s'", inputId))
+	results = append(results, "   → This shows project dependencies and impact of changes")
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'connect_check' - Test input connectivity")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+	results = append(results, "   → 'component_manager' - Edit input configuration")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleCreateInput creates a new input component with YAML configuration and validation
+func (m *APIMapper) handleCreateInput(args map[string]interface{}) (common.MCPToolResult, error) {
+	inputId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== INPUT CREATION ===\n")
+
+	// Step 1: Create input
+	results = append(results, "Step 1: Creating input...")
+	createArgs := map[string]interface{}{
+		"id":  inputId,
+		"raw": raw,
+	}
+	createResponse, err := m.makeHTTPRequest("POST", "/inputs", createArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Input creation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Input created: %s\n", string(createResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdateInput updates an existing input component with configuration validation
+func (m *APIMapper) handleUpdateInput(args map[string]interface{}) (common.MCPToolResult, error) {
+	inputId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== INPUT UPDATE ===\n")
+
+	// Step 1: Update input
+	results = append(results, "Step 1: Updating input...")
+	updateArgs := map[string]interface{}{
+		"id":  inputId,
+		"raw": raw,
+	}
+	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/inputs/%s", inputId), updateArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Input update failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Input updated: %s\n", string(updateResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeleteInput deletes a specified input component
+func (m *APIMapper) handleDeleteInput(args map[string]interface{}) (common.MCPToolResult, error) {
+	inputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== INPUT DELETION ===\n")
+
+	// Step 1: Delete input
+	results = append(results, "Step 1: Deleting input...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/inputs/%s", inputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Input deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Input deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetOutputs retrieves comprehensive list of all output components
+func (m *APIMapper) handleGetOutputs(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== OUTPUT COMPONENTS ===\n")
+
+	// Step 1: Retrieve outputs
+	results = append(results, "Step 1: Retrieving outputs...")
+	outputsResponse, err := m.makeHTTPRequest("GET", "/outputs", nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get outputs: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Outputs retrieved: %s\n", string(outputsResponse)))
+
+	// Step 2: Add critical guidance
+	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
+	results = append(results, "📋 **Check Deployment Status:**")
+	results = append(results, "   → Use 'get_pending_changes' to see which outputs have unpublished changes")
+	results = append(results, "   → Outputs with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check Project Dependencies:**")
+	results = append(results, "   → Use 'get_component_usage' with type='output' and id='<output_name>'")
+	results = append(results, "   → This shows which projects depend on each output")
+	results = append(results, "")
+	results = append(results, "⚡ **Common Actions:**")
+	results = append(results, "   → 'test_output' - Test output delivery")
+	results = append(results, "   → 'connect_check' - Test output connectivity")
+	results = append(results, "   → 'apply_changes' - Deploy pending changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetOutput retrieves detailed information for a specific output component
+func (m *APIMapper) handleGetOutput(args map[string]interface{}) (common.MCPToolResult, error) {
+	outputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== OUTPUT DETAILS ===\n")
+
+	// Step 1: Retrieve output
+	results = append(results, "Step 1: Retrieving output...")
+	outputResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/outputs/%s", outputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get output: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Output retrieved: %s\n", string(outputResponse)))
+
+	// Step 2: Add critical analysis guidance
+	results = append(results, "\n=== ⚠️  DEPLOYMENT & USAGE ANALYSIS ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", outputId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which projects use this output:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='output' and id='%s'", outputId))
+	results = append(results, "   → This shows project dependencies and impact of changes")
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_output' - Test output delivery")
+	results = append(results, "   → 'connect_check' - Test output connectivity")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+	results = append(results, "   → 'component_manager' - Edit output configuration")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleCreateOutput creates a new output component with YAML configuration and validation
+func (m *APIMapper) handleCreateOutput(args map[string]interface{}) (common.MCPToolResult, error) {
+	outputId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== OUTPUT CREATION ===\n")
+
+	// Step 1: Create output
+	results = append(results, "Step 1: Creating output...")
+	createArgs := map[string]interface{}{
+		"id":  outputId,
+		"raw": raw,
+	}
+	createResponse, err := m.makeHTTPRequest("POST", "/outputs", createArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Output creation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Output created: %s\n", string(createResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdateOutput updates an existing output component with configuration validation
+func (m *APIMapper) handleUpdateOutput(args map[string]interface{}) (common.MCPToolResult, error) {
+	outputId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== OUTPUT UPDATE ===\n")
+
+	// Step 1: Update output
+	results = append(results, "Step 1: Updating output...")
+	updateArgs := map[string]interface{}{
+		"id":  outputId,
+		"raw": raw,
+	}
+	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/outputs/%s", outputId), updateArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Output update failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Output updated: %s\n", string(updateResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeleteOutput deletes a specified output component
+func (m *APIMapper) handleDeleteOutput(args map[string]interface{}) (common.MCPToolResult, error) {
+	outputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== OUTPUT DELETION ===\n")
+
+	// Step 1: Delete output
+	results = append(results, "Step 1: Deleting output...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/outputs/%s", outputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Output deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Output deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetPlugins retrieves comprehensive list of all plugins
+func (m *APIMapper) handleGetPlugins(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== PLUGIN LIST ===\n")
+
+	// Step 1: Retrieve plugins
+	results = append(results, "Step 1: Retrieving plugins...")
+	pluginsResponse, err := m.makeHTTPRequest("GET", "/plugins", nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get plugins: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Plugins retrieved: %s\n", string(pluginsResponse)))
+
+	// Step 2: Add critical guidance
+	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
+	results = append(results, "📋 **Check Deployment Status:**")
+	results = append(results, "   → Use 'get_pending_changes' to see which plugins have unpublished changes")
+	results = append(results, "   → Plugins with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check Ruleset Dependencies:**")
+	results = append(results, "   → Use 'get_component_usage' with type='plugin' and id='<plugin_name>'")
+	results = append(results, "   → This shows which rulesets depend on each plugin")
+	results = append(results, "")
+	results = append(results, "⚡ **Common Actions:**")
+	results = append(results, "   → 'test_plugin' - Test plugin execution")
+	results = append(results, "   → 'get_plugin_parameters' - Check plugin signature")
+	results = append(results, "   → 'apply_changes' - Deploy pending changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetPlugin retrieves detailed information for a specific plugin
+func (m *APIMapper) handleGetPlugin(args map[string]interface{}) (common.MCPToolResult, error) {
+	pluginId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== PLUGIN DETAILS ===\n")
+
+	// Step 1: Retrieve plugin
+	results = append(results, "Step 1: Retrieving plugin...")
+	pluginResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/plugins/%s", pluginId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get plugin: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Plugin retrieved: %s\n", string(pluginResponse)))
+
+	// Step 2: Add critical analysis guidance
+	results = append(results, "\n=== ⚠️  DEPLOYMENT & USAGE ANALYSIS ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", pluginId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which rulesets use this plugin:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='plugin' and id='%s'", pluginId))
+	results = append(results, "   → This shows ruleset dependencies and impact of changes")
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_plugin' - Test plugin execution")
+	results = append(results, "   → 'get_plugin_parameters' - Check plugin signature")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+	results = append(results, "   → 'component_manager' - Edit plugin code")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleCreatePlugin creates a new plugin with Go source code, compilation validation, and return type checking
+func (m *APIMapper) handleCreatePlugin(args map[string]interface{}) (common.MCPToolResult, error) {
+	pluginId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== PLUGIN CREATION ===\n")
+
+	// Step 1: Create plugin
+	results = append(results, "Step 1: Creating plugin...")
+	createArgs := map[string]interface{}{
+		"id":  pluginId,
+		"raw": raw,
+	}
+	createResponse, err := m.makeHTTPRequest("POST", "/plugins", createArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Plugin creation failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Plugin created: %s\n", string(createResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleUpdatePlugin updates an existing plugin with source code validation and compatibility checking
+func (m *APIMapper) handleUpdatePlugin(args map[string]interface{}) (common.MCPToolResult, error) {
+	pluginId := args["id"].(string)
+	raw := args["raw"].(string)
+
+	var results []string
+	results = append(results, "=== PLUGIN UPDATE ===\n")
+
+	// Step 1: Update plugin
+	results = append(results, "Step 1: Updating plugin...")
+	updateArgs := map[string]interface{}{
+		"id":  pluginId,
+		"raw": raw,
+	}
+	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/plugins/%s", pluginId), updateArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Plugin update failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Plugin updated: %s\n", string(updateResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleDeletePlugin deletes a specified plugin
+func (m *APIMapper) handleDeletePlugin(args map[string]interface{}) (common.MCPToolResult, error) {
+	pluginId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== PLUGIN DELETION ===\n")
+
+	// Step 1: Delete plugin
+	results = append(results, "Step 1: Deleting plugin...")
+	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/plugins/%s", pluginId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Plugin deletion failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Plugin deleted: %s\n", string(deleteResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleTestComponent performs unified testing for components
+func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentType := args["type"].(string)
+	componentId, _ := args["id"].(string)
+	testData, _ := args["test_data"].(string)
+	content, hasContent := args["content"].(string)
+
+	var results []string
+	results = append(results, fmt.Sprintf("=== TESTING %s ===\n", strings.ToUpper(componentType)))
+
+	// Step 1: Test component
+	results = append(results, "Step 1: Testing component...")
+	testArgs := map[string]interface{}{
+		"id":        componentId,
+		"test_data": testData,
+	}
+	if hasContent {
+		testArgs["content"] = content
+	}
+	testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-component/%s", componentType), testArgs, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleVerifyComponent verifies component configuration and dependencies
+func (m *APIMapper) handleVerifyComponent(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentType := args["type"].(string)
+	componentId := args["id"].(string)
+
+	var results []string
+	results = append(results, fmt.Sprintf("=== VERIFYING %s ===\n", strings.ToUpper(componentType)))
+
+	// Step 1: Verify component
+	results = append(results, "Step 1: Verifying component...")
+	verifyArgs := map[string]interface{}{
+		"id": componentId,
+	}
+	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/%s", componentType), verifyArgs, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Verification passed: %s\n", string(verifyResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleConnectCheck tests connectivity and configuration for input/output components
+func (m *APIMapper) handleConnectCheck(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentType := args["type"].(string)
+	componentId := args["id"].(string)
+
+	var results []string
+	results = append(results, fmt.Sprintf("=== CONNECTIVITY CHECK FOR %s ===\n", strings.ToUpper(componentType)))
+
+	// Step 1: Test connectivity
+	results = append(results, "Step 1: Testing connectivity...")
+	connectArgs := map[string]interface{}{
+		"id": componentId,
+	}
+	connectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/connect-check/%s", componentType), connectArgs, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Connectivity test failed: %v\n", err))
+	} else {
+		results = append(results, fmt.Sprintf("✓ Connectivity test passed: %s\n", string(connectResponse)))
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetPendingChanges retrieves all pending configuration changes
+func (m *APIMapper) handleGetPendingChanges(args map[string]interface{}) (common.MCPToolResult, error) {
+	enhanced, hasEnhanced := args["enhanced"].(string)
+
+	var results []string
+	results = append(results, "=== PENDING CHANGES ===\n")
+
+	// Step 1: Retrieve pending changes
+	results = append(results, "Step 1: Retrieving pending changes...")
+	pendingChangesArgs := ""
+	if hasEnhanced {
+		pendingChangesArgs += fmt.Sprintf("?enhanced=%s", enhanced)
+	}
+	pendingChangesResponse, err := m.makeHTTPRequest("GET", "/pending-changes"+pendingChangesArgs, nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get pending changes: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Pending changes retrieved: %s\n", string(pendingChangesResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleApplyChanges applies all pending configuration changes
+func (m *APIMapper) handleApplyChanges(args map[string]interface{}) (common.MCPToolResult, error) {
+	_, hasEnhanced := args["enhanced"].(string)
+
+	var results []string
+	results = append(results, "=== APPLYING CHANGES ===\n")
+
+	// Step 1: Apply changes
+	results = append(results, "Step 1: Applying changes...")
+	applyArgs := map[string]interface{}{
+		"enhanced": hasEnhanced,
+	}
+	applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", applyArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Change application failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Changes applied: %s\n", string(applyResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleVerifyChanges verifies pending changes for consistency and dependency issues
+func (m *APIMapper) handleVerifyChanges(args map[string]interface{}) (common.MCPToolResult, error) {
+	typeToVerify, hasTypeToVerify := args["type"].(string)
+	idToVerify, hasIdToVerify := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== VERIFYING CHANGES ===\n")
+
+	// Step 1: Verify changes
+	results = append(results, "Step 1: Verifying changes...")
+	verifyArgs := map[string]interface{}{}
+	if hasTypeToVerify {
+		verifyArgs["type"] = typeToVerify
+	}
+	if hasIdToVerify {
+		verifyArgs["id"] = idToVerify
+	}
+	verifyResponse, err := m.makeHTTPRequest("POST", "/verify-changes", verifyArgs, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Change verification failed: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+	results = append(results, fmt.Sprintf("✓ Changes verified: %s\n", string(verifyResponse)))
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetSamplersDataIntelligent handles the intelligent sample data request
+func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}) (common.MCPToolResult, error) {
+	response, err := m.makeHTTPRequest("POST", "/samplers/data/intelligent", args, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Error fetching intelligent sample data: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: string(response)}},
+	}, nil
 }

@@ -355,6 +355,14 @@ func StartAllProject() {
 					// User explicitly stopped this project -> DON'T START
 					shouldStart = false
 					logger.Info("Project explicitly stopped by user, skipping start", "project_id", p.Id, "saved_status", savedStatus)
+				} else if savedStatus == project.ProjectStatusStopping {
+					// Project was stopping when hub shut down -> DON'T START (treat as stopped)
+					shouldStart = false
+					logger.Info("Project was stopping when hub shut down, treating as stopped", "project_id", p.Id, "saved_status", savedStatus)
+				} else if savedStatus == project.ProjectStatusStarting {
+					// Project was starting when hub shut down -> START (user intended to run it)
+					shouldStart = true
+					logger.Info("Project was starting when hub shut down, continuing with start", "project_id", p.Id, "saved_status", savedStatus)
 				} else {
 					// Project in file but not stopped (running/error/etc.) -> START
 					shouldStart = true

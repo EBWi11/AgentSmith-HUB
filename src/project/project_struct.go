@@ -11,9 +11,11 @@ import (
 type ProjectStatus string
 
 const (
-	ProjectStatusStopped ProjectStatus = "stopped"
-	ProjectStatusRunning ProjectStatus = "running"
-	ProjectStatusError   ProjectStatus = "error"
+	ProjectStatusStopped  ProjectStatus = "stopped"
+	ProjectStatusStarting ProjectStatus = "starting"
+	ProjectStatusRunning  ProjectStatus = "running"
+	ProjectStatusStopping ProjectStatus = "stopping"
+	ProjectStatusError    ProjectStatus = "error"
 )
 
 type GlobalProjectInfo struct {

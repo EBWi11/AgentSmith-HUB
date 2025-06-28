@@ -702,6 +702,92 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}) ([]byte, error) 
 		}
 	}
 
+	// Add system monitoring resources
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://metrics/qps",
+		"name":        "Real-time QPS Metrics",
+		"description": "Current system QPS (Queries Per Second) data with component-level breakdown and performance statistics",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":     "metrics",
+			"category": "performance",
+			"realtime": true,
+		},
+	})
+
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://metrics/system",
+		"name":        "System Performance Metrics",
+		"description": "Current system performance metrics including CPU usage, memory consumption, goroutine count, and disk usage",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":     "metrics",
+			"category": "system",
+			"realtime": true,
+		},
+	})
+
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://cluster/status",
+		"name":        "Cluster Health Status",
+		"description": "Comprehensive cluster status including node health, leader election state, connectivity matrix, and operational readiness",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":     "cluster",
+			"category": "infrastructure",
+			"realtime": true,
+		},
+	})
+
+	// Add knowledge base resources
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://docs/ruleset-syntax",
+		"name":        "Ruleset Syntax Guide",
+		"description": "ESSENTIAL reference containing comprehensive syntax documentation AND performance optimization guidelines for writing MCP rules",
+		"mimeType":    "text/markdown",
+		"annotations": map[string]interface{}{
+			"type":     "documentation",
+			"category": "reference",
+			"priority": 1.0,
+		},
+	})
+
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://templates/rulesets",
+		"name":        "Ruleset Templates Library",
+		"description": "Collection of well-tested ruleset templates including LLM-optimized patterns, performance-tuned configurations, and best practices",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":     "templates",
+			"category": "rulesets",
+			"priority": 0.8,
+		},
+	})
+
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://logs/errors",
+		"name":        "System Error Logs",
+		"description": "Recent system error logs and debugging information for troubleshooting and system analysis",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":     "logs",
+			"category": "debugging",
+			"realtime": true,
+		},
+	})
+
+	resources = append(resources, map[string]interface{}{
+		"uri":         "hub://status/health",
+		"name":        "System Health Report",
+		"description": "Comprehensive system health assessment including component status, performance metrics, and optimization recommendations",
+		"mimeType":    "application/json",
+		"annotations": map[string]interface{}{
+			"type":      "report",
+			"category":  "health",
+			"generated": true,
+		},
+	})
+
 	result := map[string]interface{}{
 		"resources": resources,
 	}
@@ -772,6 +858,91 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				content = result.Content[0].Text
 				mimeType = "text/x-go"
 			}
+		}
+	case "metrics":
+		// Handle metrics resources
+		switch resourceID {
+		case "qps":
+			if result, err := s.apiMapper.CallAPITool("get_qps_data", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		case "system":
+			if result, err := s.apiMapper.CallAPITool("get_system_metrics", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown metrics resource", fmt.Sprintf("Metrics resource '%s' not supported", resourceID))
+		}
+	case "cluster":
+		// Handle cluster resources
+		switch resourceID {
+		case "status":
+			if result, err := s.apiMapper.CallAPITool("get_cluster_status", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown cluster resource", fmt.Sprintf("Cluster resource '%s' not supported", resourceID))
+		}
+	case "docs":
+		// Handle documentation resources
+		switch resourceID {
+		case "ruleset-syntax":
+			if result, err := s.apiMapper.CallAPITool("get_ruleset_syntax_guide", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "text/markdown"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown documentation resource", fmt.Sprintf("Documentation resource '%s' not supported", resourceID))
+		}
+	case "templates":
+		// Handle template resources
+		switch resourceID {
+		case "rulesets":
+			if result, err := s.apiMapper.CallAPITool("get_ruleset_templates", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown template resource", fmt.Sprintf("Template resource '%s' not supported", resourceID))
+		}
+	case "logs":
+		// Handle logs resources
+		switch resourceID {
+		case "errors":
+			if result, err := s.apiMapper.CallAPITool("get_error_logs", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown logs resource", fmt.Sprintf("Logs resource '%s' not supported", resourceID))
+		}
+	case "status":
+		// Handle status resources
+		switch resourceID {
+		case "health":
+			if result, err := s.apiMapper.CallAPITool("system_health_check", map[string]interface{}{}); err == nil && !result.IsError {
+				if len(result.Content) > 0 {
+					content = result.Content[0].Text
+					mimeType = "application/json"
+				}
+			}
+		default:
+			return s.createJSONRPCError(id, -32602, "Unknown status resource", fmt.Sprintf("Status resource '%s' not supported", resourceID))
 		}
 	default:
 		return s.createJSONRPCError(id, -32602, "Unknown resource type", fmt.Sprintf("Resource type '%s' not supported", resourceType))

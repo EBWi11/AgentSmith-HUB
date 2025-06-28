@@ -1,0 +1,157 @@
+{
+  "DATA_DRIVEN_DESIGN_MANDATORY": {
+    "CRITICAL_FIRST_STEP": "MUST use 'get_samplers_data' to get real sample data before creating ANY rules!",
+    "REAL_DATA_ANALYSIS": "Analyze actual field names, data types, possible values from sample data",
+    "ARCHITECTURE_PRINCIPLE": "Filter for coarse filtering (real event_type), nodes for specific detection (real field values)",
+    "NO_IMAGINATION": "NEVER create rules based on guessing or fake data - only real sample data analysis!",
+    "FIELD_VALIDATION": "Every field name in rules must exist in actual sample data",
+    "VALUE_VALIDATION": "Every field value must be based on observed real data patterns"
+  },
+  "llm_recommended": {
+    "name": "LLM Recommended Template",
+    "description": "Performance-optimized template for LLM generation following best practices: specific filter, fast nodes before slow ones, descriptive naming",
+    "template": "<root type=\"detection\" author=\"ai_generated\">\n    <rule id=\"suspicious_process_execution\" name=\"Detect suspicious process execution patterns\">\n        <filter field=\"event_type\">process_creation</filter>\n        <checklist condition=\"a and b\">\n            <node id=\"a\" type=\"EQU\" field=\"log_source\">endpoint_security</node>\n            <node id=\"b\" type=\"INCL\" field=\"process_name\">hack</node>\n        </checklist>\n        <threshold group_by=\"host,user\" range=\"60s\" local_cache=\"true\">3</threshold>\n        <append field=\"severity\">medium</append>\n        <append field=\"detection_type\">process_monitoring</append>\n        <append field=\"confidence\">high</append>\n    </rule>\n</root>",
+    "performance_notes": [
+      "✅ OPTIMAL: Uses specific filter 'event_type=process_creation' for coarse filtering - eliminates non-process events immediately",
+      "✅ OPTIMAL: Specific detection (log_source, process_name) in nodes, not filter - perfect architecture",
+      "Uses descriptive rule ID and name for maintainability",
+      "Moderate threshold to avoid false positives",
+      "Local cache enabled for performance"
+    ]
+  },
+  "minimal_rule": {
+    "name": "Minimal Rule",
+    "description": "Simplest possible rule structure",
+    "template": "<root type=\"detection\" author=\"user\">\n    <rule id=\"minimal_rule\" name=\"Minimal detection rule\">\n        <checklist>\n            <node type=\"INCL\" field=\"status\">error</node>\n        </checklist>\n    </rule>\n</root>"
+  },
+  "basic_detection": {
+    "name": "Basic Detection Rule", 
+    "description": "Simple detection rule with filter and checklist",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"basic_detection_rule\" name=\"Basic detection example\">\n        <filter field=\"event_type\">security_event</filter>\n        <checklist>\n            <node type=\"INCL\" field=\"process_name\">suspicious_process.exe</node>\n        </checklist>\n        <append field=\"alert_level\">HIGH</append>\n    </rule>\n</root>"
+  },
+  "whitelist_rule": {
+    "name": "Whitelist Rule",
+    "description": "Whitelist rule to filter out known good events", 
+    "template": "<root type=\"whitelist\" author=\"security_team\">\n    <rule id=\"known_good_processes\" name=\"Filter known good processes\">\n        <filter field=\"event_type\">process_creation</filter>\n        <checklist>\n            <node type=\"INCL\" field=\"process_path\" logic=\"OR\" delimiter=\"|\">C:\\Windows\\System32\\|C:\\Program Files\\|C:\\Program Files (x86)\\</node>\n        </checklist>\n    </rule>\n</root>"
+  },
+  "string_exact_match": {
+    "name": "String Exact Match (EQU/NEQ)",
+    "description": "Templates demonstrating exact string matching with case-sensitive and case-insensitive options",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"string_exact_match\" name=\"Exact string matching examples\">\n        <filter field=\"event_type\">authentication</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"auth_method\">password</node>\n            <node type=\"NEQ\" field=\"result_status\">success</node>\n            <node type=\"NCS_EQU\" field=\"user_agent\">Mozilla/5.0</node>\n            <node type=\"NCS_NEQ\" field=\"source_ip\">127.0.0.1</node>\n        </checklist>\n        <append field=\"detection_type\">authentication_analysis</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "EQU: Fast exact case-sensitive match",
+      "NEQ: Fast exact case-sensitive non-match", 
+      "NCS_EQU: Case-insensitive exact match",
+      "NCS_NEQ: Case-insensitive exact non-match",
+      "No condition: Default AND logic for DETECTION type",
+      "No node IDs needed when condition is not used"
+    ]
+  },
+  "string_contains_match": {
+    "name": "String Contains Match (INCL/NI)",
+    "description": "Templates for substring matching operations",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"string_contains_match\" name=\"Substring matching examples\">\n        <filter field=\"log_type\">network</filter>\n        <checklist>\n            <node type=\"INCL\" field=\"url_path\">/admin/</node>\n            <node type=\"NI\" field=\"user_agent\">bot</node>\n            <node type=\"NCS_INCL\" field=\"hostname\">SUSPICIOUS</node>\n            <node type=\"NCS_NI\" field=\"referrer\">GOOGLE</node>\n        </checklist>\n        <append field=\"analysis_type\">url_analysis</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "INCL: Case-sensitive substring contains",
+      "NI: Case-sensitive substring does not contain",
+      "NCS_INCL: Case-insensitive substring contains", 
+      "NCS_NI: Case-insensitive substring does not contain",
+      "Default AND logic: All nodes must match for DETECTION"
+    ]
+  },
+  "complex_conditions": {
+    "name": "Complex Condition Expressions",
+    "description": "Templates showing advanced logical expressions with parentheses and multiple operators",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"complex_conditions\" name=\"Advanced logical conditions\">\n        <filter field=\"data_source\">endpoint</filter>\n        <checklist condition=\"(a and b) or (c and d) or (e and not f)\">\n            <node id=\"a\" type=\"EQU\" field=\"event_type\">process_creation</node>\n            <node id=\"b\" type=\"INCL\" field=\"process_name\">powershell</node>\n            <node id=\"c\" type=\"EQU\" field=\"event_type\">file_creation</node>\n            <node id=\"d\" type=\"END\" field=\"file_name\">.exe</node>\n            <node id=\"e\" type=\"EQU\" field=\"event_type\">network_connection</node>\n            <node id=\"f\" type=\"INCL\" field=\"destination_ip\">192.168</node>\n        </checklist>\n        <append field=\"complexity_level\">advanced</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "Supports AND, OR, NOT operators with parentheses",
+      "Parsed via ConditionRegex.Find and converted to AST",
+      "All referenced node IDs must exist and be unique",
+      "Expression validated via GetAST during RulesetBuild",
+      "Use 'not nodeid' syntax for negation"
+    ]
+  },
+  "plugin_integration": {
+    "name": "Plugin Integration",
+    "description": "Templates demonstrating plugin usage in checknode, append, and standalone contexts",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"plugin_integration\" name=\"Comprehensive plugin usage\">\n        <filter field=\"analysis_required\">true</filter>\n        <checklist condition=\"a and b\">\n            <node id=\"a\" type=\"PLUGIN\">is_suspicious_ip(_$ORIDATA)</node>\n            <node id=\"b\" type=\"PLUGIN\">malware_scanner(\"${file_hash}\", \"${file_path}\")</node>\n        </checklist>\n        <threshold group_by=\"source_ip\" range=\"60s\">1</threshold>\n        <append type=\"PLUGIN\" field=\"geolocation\">get_ip_geolocation(\"${source_ip}\")</append>\n        <append type=\"PLUGIN\" field=\"threat_score\">calculate_threat_score(_$ORIDATA, 0.8)</append>\n        <plugin>alert_security_team(_$ORIDATA, \"high_priority\")</plugin>\n        <plugin>quarantine_file(\"${file_path}\", \"auto\")</plugin>\n    </rule>\n</root>",
+    "validation_notes": [
+      "Checknode plugins must return bool type (validateCheckNodePluginCall)",
+      "Append/plugin elements can return any type",
+      "_$ORIDATA passes complete original data",
+      "${field_name} syntax for field references",
+      "Plugin existence validated against plugin.Plugins map",
+      "Temporary plugins (plugin.PluginsNew) cause validation failure",
+      "Parameter count and types validated against plugin.Parameters"
+    ]
+  },
+  "threshold_configurations": {
+    "name": "Threshold Configurations",
+    "description": "Templates showing all threshold counting modes and configurations",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"threshold_default_count\" name=\"Default counting threshold\">\n        <filter field=\"event_type\">failed_login</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"status\">failure</node>\n        </checklist>\n        <threshold group_by=\"source_ip,username\" range=\"300s\" local_cache=\"true\">5</threshold>\n        <append field=\"threshold_type\">default_count</append>\n    </rule>\n    \n    <rule id=\"threshold_sum_count\" name=\"Sum-based threshold\">\n        <filter field=\"event_type\">transaction</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"transaction_type\">withdrawal</node>\n        </checklist>\n        <threshold group_by=\"account_id\" range=\"86400s\" count_type=\"SUM\" count_field=\"amount\">10000</threshold>\n        <append field=\"threshold_type\">sum_aggregation</append>\n    </rule>\n    \n    <rule id=\"threshold_classify_count\" name=\"Classify-based threshold\">\n        <filter field=\"event_type\">access_request</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"access_granted\">true</node>\n        </checklist>\n        <threshold group_by=\"user_id\" range=\"3600s\" count_type=\"CLASSIFY\" count_field=\"resource_id\">20</threshold>\n        <append field=\"threshold_type\">classify_unique</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "group_by: Cannot be empty, parsed to GroupByList map",
+      "range: Must be valid duration (ParseDurationToSecondsInt)",
+      "value: Must be positive integer > 0",
+      "count_type: Empty (default), 'SUM', or 'CLASSIFY'",
+      "count_field: Required for SUM/CLASSIFY modes",
+      "local_cache: Creates ristretto.Cache with 64MB limit",
+      "Memory impact: CLASSIFY mode uses additional CacheForClassify"
+    ]
+  },
+  "fromraw_symbol_advanced": {
+    "name": "FromRawSymbol Advanced Usage",
+    "description": "Templates demonstrating advanced FromRawSymbol (_$) usage in filters, nodes, and thresholds",
+    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"dynamic_values_rule\" name=\"Dynamic value resolution example\">\n        <filter field=\"event_category\">_$expected_category</filter>\n        <checklist condition=\"a and b and c\">\n            <node id=\"a\" type=\"EQU\" field=\"actual_status\">_$expected_status</node>\n            <node id=\"b\" type=\"MT\" field=\"risk_score\">_$risk_threshold</node>\n            <node id=\"c\" type=\"INCL\" field=\"event.metadata.source.system\">_$critical_systems</node>\n        </checklist>\n        <threshold group_by=\"_$grouping_field\" range=\"300s\" count_type=\"SUM\" count_field=\"_$metric_field\">100</threshold>\n        <append field=\"processed_timestamp\">_$event.metadata.timestamp</append>\n        <append field=\"context_info\">_$user.profile.department</append>\n        <append field=\"nested_reference\">_$event.source.application.name</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "FromRawSymbol (_$) supported in filters, node values, append values",
+      "Supports nested field access: _$event.metadata.timestamp",
+      "Values resolved via GetRuleValueFromRawFromCache with caching",
+      "Field paths parsed via common.StringToList for efficiency",
+      "Works with all node types including numeric (MT/LT)",
+      "Can be used in threshold group_by and count_field attributes"
+    ]
+  },
+  "data_replacement_advanced": {
+    "name": "Data Replacement Advanced",
+    "description": "ADVANCED: Complete data transformation using _$ORIDATA field replacement",
+    "template": "<root type=\"detection\" author=\"data_team\">\n    <rule id=\"data_transformation\" name=\"Complete data structure transformation\">\n        <filter field=\"transform_required\">true</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"data_version\">legacy</node>\n            <node type=\"NOTNULL\" field=\"conversion_context\"/>\n        </checklist>\n        <append field=\"transformation_timestamp\">_$current_time</append>\n        <append field=\"original_schema_version\">_$schema.version</append>\n        <append type=\"PLUGIN\" field=\"_$ORIDATA\">transform_legacy_data(_$ORIDATA)</append>\n        <plugin>log_transformation(_$ORIDATA, \"data_migration\")</plugin>\n    </rule>\n    \n    <rule id=\"security_enrichment\" name=\"Security context enrichment\">\n        <filter field=\"event_type\">security_event</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"enrichment_required\">true</node>\n        </checklist>\n        <append type=\"PLUGIN\" field=\"threat_intel\">get_threat_intelligence(source_ip)</append>\n        <append type=\"PLUGIN\" field=\"_$ORIDATA\">enrich_security_context(_$ORIDATA)</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "field=\"_$ORIDATA\" triggers complete data replacement",
+      "Plugin must return map[string]interface{} type for replacement",
+      "Engine validates result type before replacing original data",
+      "Use NOTNULL checks to ensure required data exists before transformation",
+      "Processed after all other append operations complete",
+      "Original data accessible via _$ORIDATA parameter in plugin"
+    ]
+  },
+  "performance_optimized": {
+    "name": "Performance Optimized Template",
+    "description": "Template following all performance best practices with detailed optimization notes",
+    "template": "<root type=\"detection\" author=\"performance_team\">\n    <rule id=\"optimized_detection\" name=\"Performance-optimized detection rule\">\n        <filter field=\"event_type\">security_alert</filter>\n        <checklist condition=\"a and b and c and d\">\n            <node id=\"a\" type=\"NOTNULL\" field=\"required_field\"/>\n            <node id=\"b\" type=\"EQU\" field=\"alert_level\">high</node>\n            <node id=\"c\" type=\"INCL\" field=\"source_category\">endpoint</node>\n            <node id=\"d\" type=\"REGEX\" field=\"signature_pattern\">^[A-Z]{3}-[0-9]{4}$</node>\n        </checklist>\n        <threshold group_by=\"source_host\" range=\"60s\" local_cache=\"true\">2</threshold>\n        <append field=\"processing_speed\">optimized</append>\n    </rule>\n</root>",
+    "performance_notes": [
+      "Specific filter reduces input volume significantly",
+      "Node auto-sorting: NOTNULL (tier1) → EQU (tier2) → INCL (tier2) → REGEX (tier3)",
+      "Short regex with anchors for efficiency",
+      "Local cache enabled for threshold performance",
+      "Moderate threshold to balance detection and false positives",
+      "GroupBy on low-cardinality field (source_host)",
+      "Engine automatically sorts nodes by performance tiers"
+    ]
+  },
+  "comprehensive_advanced": {
+    "name": "Comprehensive Advanced Ruleset",
+    "description": "Complete advanced ruleset demonstrating all features: complex conditions, all threshold types, plugins, data transformation",
+    "template": "<root type=\"detection\" author=\"advanced_security_team\">\n    <rule id=\"advanced_threat_detection\" name=\"Advanced multi-vector threat detection\">\n        <filter field=\"event_category\">security_analysis</filter>\n        <checklist condition=\"(a and b and c) and (d or e) and not f\">\n            <node id=\"a\" type=\"ISNULL\" field=\"whitelisted\"/>\n            <node id=\"b\" type=\"EQU\" field=\"event_type\">process_creation</node>\n            <node id=\"c\" type=\"REGEX\" field=\"process_name\">.*\\.(exe|bat|ps1)$</node>\n            <node id=\"d\" type=\"INCL\" field=\"command_line\" logic=\"OR\" delimiter=\"|\">powershell|cmd|wscript</node>\n            <node id=\"e\" type=\"PLUGIN\">is_suspicious_behavior(_$ORIDATA)</node>\n            <node id=\"f\" type=\"INCL\" field=\"process_path\" logic=\"OR\" delimiter=\"|\">C:\\\\Windows\\\\System32\\\\|C:\\\\Program Files\\\\</node>\n        </checklist>\n        <threshold group_by=\"host_id,user_id\" range=\"300s\" count_type=\"SUM\" count_field=\"risk_score\" local_cache=\"true\">200</threshold>\n        <append field=\"rule_category\">advanced_detection</append>\n        <append field=\"processed_timestamp\">_$event.metadata.timestamp</append>\n        <append type=\"PLUGIN\" field=\"threat_intelligence\">get_threat_intel(source_ip)</append>\n        <append type=\"PLUGIN\" field=\"_$ORIDATA\">enrich_security_context(_$ORIDATA)</append>\n        <plugin>escalate_alert(_$ORIDATA, \"security_team\")</plugin>\n        <plugin>update_threat_model(_$ORIDATA)</plugin>\n        <del>temporary_fields,debug_info,internal_metadata</del>\n    </rule>\n    \n    <rule id=\"transaction_anomaly\" name=\"Financial transaction anomaly detection\">\n        <filter field=\"transaction_type\">high_value</filter>\n        <checklist condition=\"a and (b or c)\">\n            <node id=\"a\" type=\"MT\" field=\"amount\">_$transaction_threshold</node>\n            <node id=\"b\" type=\"EQU\" field=\"after_hours\">true</node>\n            <node id=\"c\" type=\"PLUGIN\">is_anomalous_pattern(user_id, _$transaction.details)</node>\n        </checklist>\n        <threshold group_by=\"account_id\" range=\"86400s\" count_type=\"CLASSIFY\" count_field=\"destination_account\">10</threshold>\n        <append field=\"anomaly_type\">financial</append>\n        <append field=\"analysis_timestamp\">_$current_time</append>\n        <plugin>alert_fraud_team(_$ORIDATA, \"urgent\")</plugin>\n    </rule>\n    \n    <rule id=\"access_pattern_analysis\" name=\"Unusual access pattern detection\">\n        <filter field=\"event_type\">resource_access</filter>\n        <checklist>\n            <node type=\"EQU\" field=\"access_granted\">true</node>\n            <node type=\"NCS_NI\" field=\"access_method\">SSO</node>\n        </checklist>\n        <threshold group_by=\"user_id\" range=\"3600s\" count_type=\"CLASSIFY\" count_field=\"resource_id\">25</threshold>\n        <append field=\"pattern_type\">access_analysis</append>\n        <append type=\"PLUGIN\" field=\"user_context\">get_user_profile(user_id)</append>\n    </rule>\n</root>",
+    "validation_notes": [
+      "Demonstrates all threshold types: default count, SUM, CLASSIFY",
+      "Complex condition expressions with proper precedence",
+      "Mixed node types with automatic performance sorting",
+      "Plugin usage in checknode (bool return), append (any return), standalone",
+      "FromRawSymbol usage in dynamic thresholds and values",
+      "Data replacement via _$ORIDATA field for complete transformation",
+      "Field deletion for cleanup and security",
+      "Local cache optimization for high-frequency rules"
+    ]
+  }
+} 

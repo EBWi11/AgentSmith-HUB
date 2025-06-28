@@ -761,6 +761,12 @@ func (p *Project) Start() error {
 		if p.Status == ProjectStatusRunning {
 			return fmt.Errorf("project is already running %s", p.Id)
 		}
+		if p.Status == ProjectStatusStarting {
+			return fmt.Errorf("project is currently starting, please wait %s", p.Id)
+		}
+		if p.Status == ProjectStatusStopping {
+			return fmt.Errorf("project is currently stopping, please wait %s", p.Id)
+		}
 		if p.Status == ProjectStatusError {
 			return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
 		}
@@ -768,6 +774,17 @@ func (p *Project) Start() error {
 		// Force set status to stopped to allow starting in test mode
 		p.Status = ProjectStatusStopped
 		logger.Info("Starting project in test mode (bypassing status checks)", "id", p.Id)
+	}
+
+	// Set status to starting immediately to prevent duplicate operations
+	if !isTestMode {
+		p.Status = ProjectStatusStarting
+		logger.Info("Project status set to starting", "id", p.Id)
+
+		// Save the starting status to file immediately
+		if err := p.SaveProjectStatus(); err != nil {
+			logger.Warn("Failed to save starting project status", "id", p.Id, "error", err)
+		}
 	}
 
 	// Initialize project control channels
@@ -1033,17 +1050,18 @@ func (p *Project) stopComponents() error {
 	// Use centralized component usage counter for better performance and code maintainability
 
 	// Step 1: Stop inputs first to prevent new data (only if not used by other projects)
-	logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
+	// This is critical for fast shutdown - we want to stop data sources immediately
+	logger.Info("Step 1: Rapidly stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
 	for _, in := range p.Inputs {
 		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 		if otherProjectsUsing == 0 {
-			logger.Info("Stopping input component", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
+			logger.Info("Rapidly stopping input component", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
 			startTime := time.Now()
 			if err := in.Stop(); err != nil {
 				logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
 				// Continue with other inputs instead of failing immediately
 			} else {
-				logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
+				logger.Info("Rapidly stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
 			}
 		} else {
 			logger.Info("Input component still used by other projects, skipping stop", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
@@ -1152,8 +1170,20 @@ func (p *Project) stopComponents() error {
 
 // Stop stops the project and all its components in proper order
 func (p *Project) Stop() error {
-	if p.Status != ProjectStatusRunning {
+	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStarting {
+		if p.Status == ProjectStatusStopping {
+			return fmt.Errorf("project is already stopping %s", p.Id)
+		}
 		return fmt.Errorf("project is not running %s", p.Id)
+	}
+
+	// Set status to stopping immediately to prevent duplicate operations
+	p.Status = ProjectStatusStopping
+	logger.Info("Project status set to stopping", "id", p.Id)
+
+	// Save the stopping status to file immediately
+	if err := p.SaveProjectStatus(); err != nil {
+		logger.Warn("Failed to save stopping project status", "id", p.Id, "error", err)
 	}
 
 	// Check if project is in error state
@@ -2117,6 +2147,10 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 				restartedCount++
 				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
 			}
+		} else if proj.Status == ProjectStatusStarting {
+			logger.Info("Skipping project restart (currently starting)", "id", projectID, "status", proj.Status)
+		} else if proj.Status == ProjectStatusStopping {
+			logger.Info("Skipping project restart (currently stopping)", "id", projectID, "status", proj.Status)
 		} else {
 			logger.Info("Skipping project restart (not running)", "id", projectID, "status", proj.Status)
 		}
@@ -2137,6 +2171,12 @@ func RestartSingleProjectSafely(projectID string) error {
 	}
 
 	if proj.Status != ProjectStatusRunning {
+		if proj.Status == ProjectStatusStarting {
+			return fmt.Errorf("project is currently starting: %s (status: %s)", projectID, proj.Status)
+		}
+		if proj.Status == ProjectStatusStopping {
+			return fmt.Errorf("project is currently stopping: %s (status: %s)", projectID, proj.Status)
+		}
 		return fmt.Errorf("project is not running: %s (status: %s)", projectID, proj.Status)
 	}
 

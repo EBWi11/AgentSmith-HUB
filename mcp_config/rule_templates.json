@@ -1,0 +1,170 @@
+{
+  "RULE_TEMPLATES": {
+    "description": "Comprehensive rule templates for AgentSmith-HUB with intelligent data-driven design",
+    "version": "2.0.0",
+    
+    "BASIC_TEMPLATES": {
+      "minimal_rule": {
+        "name": "Minimal Rule Template",
+        "description": "Simple rule with single condition - perfect for beginners",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist>\n    <node type=\"EQU\" field=\"{field_name}\">{field_value}</node>\n  </checklist>\n</rule>",
+        "required_fields": ["rule_id", "rule_name", "field_name", "field_value"],
+        "use_case": "Simple detection with exact match",
+        "performance": "Fastest - single condition check"
+      },
+      
+      "filtered_detection": {
+        "name": "Performance-Optimized Rule",
+        "description": "Rule with filter for high-volume data processing",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"{filter_field}\">{filter_value}</filter>\n  <checklist>\n    <node type=\"{node_type}\" field=\"{check_field}\">{check_value}</node>\n  </checklist>\n</rule>",
+        "required_fields": ["rule_id", "rule_name", "filter_field", "filter_value", "node_type", "check_field", "check_value"],
+        "use_case": "High-volume data with coarse filtering",
+        "performance": "Optimized - filter reduces volume by 80%+"
+      },
+      
+      "multi_condition": {
+        "name": "Multi-Condition Rule",
+        "description": "Rule with boolean logic and multiple conditions",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"{boolean_condition}\">\n    <node id=\"a\" type=\"{type_a}\" field=\"{field_a}\">{value_a}</node>\n    <node id=\"b\" type=\"{type_b}\" field=\"{field_b}\">{value_b}</node>\n    <node id=\"c\" type=\"{type_c}\" field=\"{field_c}\">{value_c}</node>\n  </checklist>\n</rule>",
+        "required_fields": ["rule_id", "rule_name", "boolean_condition", "type_a", "field_a", "value_a", "type_b", "field_b", "value_b", "type_c", "field_c", "value_c"],
+        "use_case": "Complex detection with multiple conditions",
+        "performance": "Variable - depends on condition complexity"
+      }
+    },
+
+    "PERFORMANCE_TEMPLATES": {
+      "high_volume_optimized": {
+        "name": "High Volume Data Rule",
+        "description": "Optimized for processing millions of events",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"event_type\">{event_type}</filter>\n  <checklist>\n    <node type=\"NOTNULL\" field=\"timestamp\"/>\n    <node type=\"EQU\" field=\"level\">ERROR</node>\n    <node type=\"{detection_type}\" field=\"{detection_field}\">{detection_value}</node>\n  </checklist>\n</rule>",
+        "architecture_notes": "Filter reduces volume by 90%, NOTNULL is tier-1 performance, specific detection last",
+        "use_case": "High-frequency log processing",
+        "performance": "Excellent - optimized data flow"
+      },
+      
+      "threshold_counting": {
+        "name": "Threshold-Based Detection",
+        "description": "Event counting and aggregation with performance optimization",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"{filter_field}\">{filter_value}</filter>\n  <checklist>\n    <node type=\"EQU\" field=\"{event_field}\">{event_value}</node>\n  </checklist>\n  <threshold group_by=\"{group_field}\" range=\"{time_range}\">{threshold_count}</threshold>\n</rule>",
+        "required_fields": ["rule_id", "rule_name", "filter_field", "filter_value", "event_field", "event_value", "group_field", "time_range", "threshold_count"],
+        "use_case": "Rate limiting, anomaly detection",
+        "performance": "Good - efficient counting with grouping"
+      }
+    },
+
+    "SECURITY_TEMPLATES": {
+      "network_anomaly": {
+        "name": "Network Anomaly Detection",
+        "description": "Detect suspicious network connections",
+        "xml": "<rule id=\"network_anomaly_{timestamp}\" name=\"Network Anomaly Detection\">\n  <filter field=\"event_type\">network</filter>\n  <checklist condition=\"a and (b or c)\">\n    <node id=\"a\" type=\"EQU\" field=\"connection_type\">outbound</node>\n    <node id=\"b\" type=\"REGEX\" field=\"dst_ip\">^(?!192\\.168\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*</node>\n    <node id=\"c\" type=\"MT\" field=\"dst_port\">1024</node>\n  </checklist>\n  <append field=\"detection_category\">network_security</append>\n</rule>",
+        "data_requirements": "Fields: event_type, connection_type, dst_ip, dst_port",
+        "use_case": "External connection monitoring"
+      },
+      
+      "authentication_failure": {
+        "name": "Authentication Failure Pattern",
+        "description": "Detect authentication attack patterns",
+        "xml": "<rule id=\"auth_failure_{timestamp}\" name=\"Authentication Failure Pattern\">\n  <filter field=\"event_category\">authentication</filter>\n  <checklist>\n    <node type=\"EQU\" field=\"result\">failure</node>\n    <node type=\"INCL\" field=\"reason\">invalid</node>\n  </checklist>\n  <threshold group_by=\"source_ip\" range=\"300s\">5</threshold>\n  <append field=\"alert_level\">medium</append>\n</rule>",
+        "data_requirements": "Fields: event_category, result, reason, source_ip",
+        "use_case": "Brute force attack detection"
+      }
+    },
+
+    "INTELLIGENT_TEMPLATES": {
+      "context_aware_rule": {
+        "name": "Context-Aware Smart Rule",
+        "description": "AI-generated rule based on project context and real data analysis",
+        "generation_process": {
+          "step_1": "Analyze user intent: What should this rule detect?",
+          "step_2": "Identify target projects: Which projects need this rule?",
+          "step_3": "Fetch relevant sample data from target projects",
+          "step_4": "Generate optimized rule with actual field names",
+          "step_5": "Apply performance architecture principles"
+        },
+        "xml_template": "<rule id=\"{intelligent_id}\" name=\"{context_name}\">\n  <filter field=\"{optimal_filter_field}\">{filter_value}</filter>\n  <checklist condition=\"{ai_generated_condition}\">\n    {ai_generated_nodes}\n  </checklist>\n  {optional_threshold}\n  <append field=\"ai_context\">{generation_context}</append>\n</rule>",
+        "ai_features": [
+          "Auto-field discovery from sample data",
+          "Performance optimization suggestions",
+          "Context-aware naming and descriptions",
+          "Real data validation"
+        ]
+      }
+    },
+
+    "SYNTAX_REFERENCE": {
+      "node_types": {
+        "string_operations": {
+          "EQU": "Exact match (case-sensitive)",
+          "NEQ": "Not equal (case-sensitive)", 
+          "INCL": "Contains substring",
+          "NI": "Not contains substring",
+          "START": "Starts with",
+          "END": "Ends with",
+          "NSTART": "Not starts with",
+          "NEND": "Not ends with"
+        },
+        "case_insensitive": {
+          "NCS_EQU": "Exact match (case-insensitive)",
+          "NCS_NEQ": "Not equal (case-insensitive)",
+          "NCS_INCL": "Contains (case-insensitive)",
+          "NCS_NI": "Not contains (case-insensitive)",
+          "NCS_START": "Starts with (case-insensitive)",
+          "NCS_END": "Ends with (case-insensitive)",
+          "NCS_NSTART": "Not starts with (case-insensitive)",
+          "NCS_NEND": "Not ends with (case-insensitive)"
+        },
+        "numeric_operations": {
+          "MT": "More than (numeric comparison)",
+          "LT": "Less than (numeric comparison)"
+        },
+        "existence_checks": {
+          "ISNULL": "Field is null or missing",
+          "NOTNULL": "Field exists and not null"
+        },
+        "advanced": {
+          "REGEX": "Regular expression match",
+          "PLUGIN": "Custom plugin function"
+        }
+      },
+      
+      "performance_optimization": {
+        "architecture_principle": "Filter first (coarse) → CheckNode second (specific)",
+        "filter_purpose": "Reduce data volume by 80%+ using event_type, data_type, category",
+        "checknode_purpose": "Precise detection logic with specific field values",
+        "performance_tiers": {
+          "tier_1_fastest": ["ISNULL", "NOTNULL"],
+          "tier_2_fast": ["EQU", "NEQ", "MT", "LT"],
+          "tier_3_slower": ["INCL", "NI", "START", "END", "REGEX", "PLUGIN"]
+        }
+      }
+    },
+
+    "DATA_DRIVEN_REQUIREMENTS": {
+      "mandatory_sample_data": "All rules MUST be created using real sample data from target projects",
+      "field_validation": "Field names must exist in actual data - no imaginary fields allowed",
+      "intelligent_workflow": {
+        "user_intent": "Ask: What should this rule detect?",
+        "project_context": "Ask: Which projects will use this rule?",
+        "auto_data_fetch": "Automatically fetch sample data from target projects",
+        "ai_analysis": "Analyze data quality and suggest optimal fields",
+        "performance_check": "Validate architecture for performance optimization"
+      },
+      "quality_assurance": [
+        "Rules tested with real sample data",
+        "Field names verified against actual data structure",
+        "Performance impact assessed",
+        "Architecture follows filter→checknode pattern"
+      ]
+    },
+
+    "EXAMPLES_WITH_CONTEXT": {
+      "web_security_rule": {
+        "context": "Target projects: web-frontend, api-gateway",
+        "sample_data_analysis": "Found fields: request_method, url_path, status_code, response_time",
+        "user_intent": "Detect SQL injection attempts",
+        "generated_rule": "<rule id=\"sql_injection_detection\" name=\"SQL Injection Detection\">\n  <filter field=\"event_type\">web_request</filter>\n  <checklist condition=\"a and b\">\n    <node id=\"a\" type=\"INCL\" field=\"url_path\">SELECT</node>\n    <node id=\"b\" type=\"REGEX\" field=\"url_path\">.*('|\\\"|;|--|/\\*|\\*/|xp_|sp_).*</node>\n  </checklist>\n  <append field=\"threat_type\">sql_injection</append>\n</rule>",
+        "optimization_notes": "Filter reduces volume by 95%, INCL check is faster than REGEX for initial filtering"
+      }
+    }
+  }
+} 

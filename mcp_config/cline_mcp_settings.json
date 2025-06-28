@@ -6,7 +6,7 @@
       "type": "streamableHttp",
       "url": "http://localhost:8080/mcp",
       "headers": {
-        "token": "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+        "token": ""
       }
     }
   }
