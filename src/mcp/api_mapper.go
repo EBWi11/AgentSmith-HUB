@@ -166,7 +166,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 				"rule_id":         {Type: "string", Description: "Specific rule ID (for update/delete actions)", Required: false},
 				"rule_raw":        {Type: "string", Description: "Complete rule XML (generated after data analysis)", Required: false},
 				"raw":             {Type: "string", Description: "Complete ruleset XML (for create/update ruleset actions)", Required: false},
-				"test_data":       {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: true},
+				"data":            {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: false},
 				"auto_deploy":     {Type: "string", Description: "Auto-deploy if validation passes (true/false)", Required: false},
 			},
 			Annotations: createAnnotations("Rule Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
@@ -235,9 +235,9 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "smart_assistant",
-			Description: "🤖 AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert.",
+			Description: "🤖 AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert. Use 'system_intro' task for complete architecture overview.",
 			InputSchema: map[string]common.MCPToolArg{
-				"task":        {Type: "string", Description: "What you want to accomplish or issue you're facing", Required: true},
+				"task":        {Type: "string", Description: "What you want to accomplish or issue you're facing. Use 'system_intro' for complete AgentSmith-HUB overview.", Required: true},
 				"context":     {Type: "string", Description: "Current situation or component you're working with", Required: false},
 				"experience":  {Type: "string", Description: "Your experience level: beginner/intermediate/expert", Required: false},
 				"preferences": {Type: "string", Description: "Preferences: step_by_step/quick_solution/explain_why", Required: false},
@@ -253,8 +253,8 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "get_samplers_data",
 			Description: "📊 GET SAMPLE DATA: Try to get real sample data from backend. 🚨 CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. ❌ NEVER create fake data yourself!",
 			InputSchema: map[string]common.MCPToolArg{
-				"sampler_type": {Type: "string", Description: "Sampler type (optional - default gets all)", Required: false},
-				"count":        {Type: "string", Description: "Number of samples (default: 10)", Required: false},
+				"name":                {Type: "string", Description: "Component type: 'input', 'output', or 'ruleset'", Required: true},
+				"projectNodeSequence": {Type: "string", Description: "Component ID (e.g. 'test') or full sequence (e.g. 'ruleset.test'). Simple ID is usually sufficient.", Required: true},
 			},
 			Annotations: createAnnotations("Get Sample Data", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -264,9 +264,8 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "add_ruleset_rule",
 			Description: "➕ ADD RULE TO RULESET: Add a single rule to an existing ruleset. 🚨 CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. ❌ NEVER use imagined data like 'data_type=59' or fake field names!",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Ruleset ID", Required: true},
-				"rule_raw":  {Type: "string", Description: "Complete rule XML content", Required: true},
-				"test_data": {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: true},
+				"id":       {Type: "string", Description: "Ruleset ID", Required: true},
+				"rule_raw": {Type: "string", Description: "Complete rule XML content", Required: true},
 			},
 			Annotations: createAnnotations("Add Rule", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -347,8 +346,8 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "test_ruleset",
 			Description: "🧪 TEST RULESET: Test a ruleset with sample data to verify it works correctly. Essential after rule changes!",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":        {Type: "string", Description: "Ruleset ID", Required: true},
-				"test_data": {Type: "string", Description: "JSON test data", Required: false},
+				"id":   {Type: "string", Description: "Ruleset ID", Required: true},
+				"data": {Type: "string", Description: "JSON test data (required)", Required: true},
 			},
 			Annotations: createAnnotations("Test Ruleset", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -1157,15 +1156,21 @@ func (m *APIMapper) handleSystemHealthCheck(args map[string]interface{}) (common
 
 // handleTroubleshootSystem orchestrates intelligent system troubleshooting
 func (m *APIMapper) handleTroubleshootSystem(args map[string]interface{}) (common.MCPToolResult, error) {
-	symptoms, hasSymptoms := args["symptoms"].(string)
-	projectId, hasProjectId := args["project_id"].(string)
-	autoFix, shouldAutoFix := args["auto_fix"].(string)
+	task := args["task"].(string)
+	context, hasContext := args["context"].(string)
 
 	var results []string
-	results = append(results, "=== INTELLIGENT SYSTEM TROUBLESHOOTING ===\n")
 
-	if hasSymptoms {
-		results = append(results, fmt.Sprintf("Investigating symptoms: %s\n", symptoms))
+	// Handle system introduction request
+	if task == "system_intro" {
+		return m.generateSystemIntroduction()
+	}
+
+	results = append(results, "=== INTELLIGENT SYSTEM TROUBLESHOOTING ===\n")
+	results = append(results, fmt.Sprintf("Task: %s\n", task))
+
+	if hasContext {
+		results = append(results, fmt.Sprintf("Context: %s\n", context))
 	}
 
 	// Step 1: Error log analysis
@@ -1179,20 +1184,11 @@ func (m *APIMapper) handleTroubleshootSystem(args map[string]interface{}) (commo
 
 	// Step 2: Component health check
 	results = append(results, "Step 2: Component health verification...")
-	if hasProjectId {
-		projectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/projects/%s", projectId), nil, true)
-		if err != nil {
-			results = append(results, fmt.Sprintf("✗ Project health check failed: %v\n", err))
-		} else {
-			results = append(results, fmt.Sprintf("✓ Project status: %s\n", string(projectResponse)))
-		}
+	projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
+	if err != nil {
+		results = append(results, fmt.Sprintf("✗ Projects health check failed: %v\n", err))
 	} else {
-		projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
-		if err != nil {
-			results = append(results, fmt.Sprintf("✗ Projects health check failed: %v\n", err))
-		} else {
-			results = append(results, fmt.Sprintf("✓ All projects status: %s\n", string(projectsResponse)))
-		}
+		results = append(results, fmt.Sprintf("✓ All projects status: %s\n", string(projectsResponse)))
 	}
 
 	// Step 3: Performance anomaly detection
@@ -1220,22 +1216,6 @@ func (m *APIMapper) handleTroubleshootSystem(args map[string]interface{}) (commo
 		results = append(results, fmt.Sprintf("✗ Cluster health check failed: %v\n", err))
 	} else {
 		results = append(results, fmt.Sprintf("✓ Cluster status: %s\n", string(clusterResponse)))
-	}
-
-	// Step 6: Auto-fix attempt (if requested)
-	if shouldAutoFix && autoFix == "true" {
-		results = append(results, "Step 6: Attempting automatic fixes...")
-		// Try to restart any failed projects
-		if hasProjectId {
-			restartResponse, err := m.makeHTTPRequest("POST", "/restart-project", map[string]interface{}{"project_id": projectId}, true)
-			if err != nil {
-				results = append(results, fmt.Sprintf("✗ Auto-fix failed: %v\n", err))
-			} else {
-				results = append(results, fmt.Sprintf("✓ Auto-fix applied: %s\n", string(restartResponse)))
-			}
-		} else {
-			results = append(results, "⚠️  Auto-fix requires specific project_id")
-		}
 	}
 
 	return common.MCPToolResult{
@@ -1484,21 +1464,71 @@ func (m *APIMapper) handleDeleteProject(args map[string]interface{}) (common.MCP
 
 // handleControlProject performs unified project control operations
 func (m *APIMapper) handleControlProject(args map[string]interface{}) (common.MCPToolResult, error) {
-	operation := args["operation"].(string)
+	action := args["action"].(string)
 	projectId, hasProjectId := args["project_id"].(string)
 
 	var results []string
-	results = append(results, fmt.Sprintf("=== PROJECT CONTROL (%s) ===\n", strings.ToUpper(operation)))
+	results = append(results, fmt.Sprintf("=== PROJECT CONTROL (%s) ===\n", strings.ToUpper(action)))
+
+	// Map actions to correct endpoints
+	var endpoint string
+	var controlArgs map[string]interface{}
+
+	switch action {
+	case "start":
+		endpoint = "/start-project"
+		controlArgs = map[string]interface{}{"project_id": projectId}
+	case "stop":
+		endpoint = "/stop-project"
+		controlArgs = map[string]interface{}{"project_id": projectId}
+	case "restart":
+		endpoint = "/restart-project"
+		controlArgs = map[string]interface{}{"project_id": projectId}
+	case "start_all":
+		endpoint = "/restart-all-projects"
+		controlArgs = map[string]interface{}{}
+	case "stop_all":
+		// There's no stop-all endpoint, so we handle this differently
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Stop all projects is not supported by the API. Please stop projects individually."}},
+			IsError: true,
+		}, nil
+	case "status":
+		if !hasProjectId {
+			return common.MCPToolResult{
+				Content: []common.MCPToolContent{{Type: "text", Text: "Project ID is required for status check"}},
+				IsError: true,
+			}, nil
+		}
+		// Use get project endpoint for status
+		projectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/projects/%s", projectId), nil, true)
+		if err != nil {
+			return common.MCPToolResult{
+				Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get project status: %v", err)}},
+				IsError: true,
+			}, nil
+		}
+		results = append(results, fmt.Sprintf("✓ Project status: %s\n", string(projectResponse)))
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+		}, nil
+	default:
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Unknown action: %s. Supported actions: start, stop, restart, start_all, status", action)}},
+			IsError: true,
+		}, nil
+	}
+
+	if !hasProjectId && action != "start_all" {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Project ID is required for this action"}},
+			IsError: true,
+		}, nil
+	}
 
 	// Step 1: Perform control operation
 	results = append(results, "Step 1: Performing control operation...")
-	controlArgs := map[string]interface{}{
-		"operation": operation,
-	}
-	if hasProjectId {
-		controlArgs["project_id"] = projectId
-	}
-	controlResponse, err := m.makeHTTPRequest("POST", "/control-project", controlArgs, true)
+	controlResponse, err := m.makeHTTPRequest("POST", endpoint, controlArgs, true)
 	if err != nil {
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project control failed: %v", err)}},
@@ -1613,37 +1643,17 @@ func (m *APIMapper) handleCreateRuleset(args map[string]interface{}) (common.MCP
 	}, nil
 }
 
-// handleAddRulesetRule adds a single rule to an existing ruleset with mandatory data validation
+// handleAddRulesetRule adds a single rule to an existing ruleset
 func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MCPToolResult, error) {
 	rulesetId := args["id"].(string)
 	ruleRaw := args["rule_raw"].(string)
-	testData, hasTestData := args["test_data"].(string)
-
-	// MANDATORY: Validate that real sample data is provided
-	if !hasTestData || testData == "" {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "❌ SAMPLE DATA REQUIRED: Must provide real sample data for rule creation!\n\n🎯 **Two Options:**\n1. **Try backend data:** Use 'get_samplers_data' (may fail if backend has no data)\n2. **Provide your own:** Add real JSON sample data directly to the 'test_data' parameter\n\n⚠️ **Cannot create rules without actual data examples!**"}},
-			IsError: true,
-		}, nil
-	}
-
-	// Validate that test data appears to be real (basic checks)
-	if len(testData) < 50 || !strings.Contains(testData, "{") {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "❌ INVALID SAMPLE DATA: The provided data appears to be too simple or not in JSON format.\n\n🎯 **Required Format:**\n- Must be real JSON data from your actual system\n- Should contain actual field names and values\n- Example: {\"timestamp\":\"2024-01-01T10:00:00Z\",\"source_ip\":\"192.168.1.1\",\"exe\":\"msf.exe\",...}\n\n💡 **Get real data from:** your log files, monitoring systems, or actual data samples"}},
-			IsError: true,
-		}, nil
-	}
 
 	var results []string
-	results = append(results, "=== ✅ DATA-DRIVEN RULE CREATION ===\n")
-	results = append(results, "🎯 **EXCELLENT:** Real sample data provided!")
-	results = append(results, "✅ Following data-driven best practices...")
+	results = append(results, "=== RULE ADDITION ===\n")
 
 	// Step 1: Add rule
-	results = append(results, "\nStep 1: Adding rule to ruleset...")
+	results = append(results, "Step 1: Adding rule to ruleset...")
 	addArgs := map[string]interface{}{
-		"id":       rulesetId,
 		"rule_raw": ruleRaw,
 	}
 	addResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/rulesets/%s/rules", rulesetId), addArgs, true)
@@ -2381,5 +2391,78 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: string(response)}},
+	}, nil
+}
+
+// generateSystemIntroduction provides comprehensive AgentSmith-HUB system overview
+func (m *APIMapper) generateSystemIntroduction() (common.MCPToolResult, error) {
+	var results []string
+
+	results = append(results, "🏛️ ===============================")
+	results = append(results, "🏛️  AGENTSMITH-HUB SYSTEM OVERVIEW")
+	results = append(results, "🏛️ ===============================\n")
+
+	results = append(results, "🎯 **SYSTEM ARCHITECTURE**")
+	results = append(results, "AgentSmith-HUB is a distributed security detection platform and security data pipeline platform with:")
+	results = append(results, "• Data-driven security detection with component-based architecture")
+	results = append(results, "• Input → Multi-Ruleset → Output pipeline with real-time processing")
+	results = append(results, "• The rule engine supports complex data filtering and detection")
+	results = append(results, "• Leader-follower cluster architecture with automatic failover\n")
+
+	results = append(results, "🧩 **COMPONENT TYPES**")
+	results = append(results, "┌─ INPUT: Data ingestion (kafka, aliyun sls) [YAML config]")
+	results = append(results, "├─ RULESET: Security detection logic [XML with custom DSL]")
+	results = append(results, "│  └─ Filter → CheckNode architecture for performance")
+	results = append(results, "├─ OUTPUT: Alert delivery (print to log file, aliyun sls, elasticsearch, kafka) [YAML config]")
+	results = append(results, "├─ PLUGIN: Custom functions (yaegi) [Go code]")
+	results = append(results, "└─ PROJECT: Component orchestration [YAML workflow]\n")
+
+	results = append(results, "🔑 **KEY CONCEPTS**")
+	results = append(results, "⚡ Temporary Files: Changes go to .new files → deploy via apply_changes")
+	results = append(results, "⚠️  CRITICAL: Temporary changes are NOT ACTIVE until deployed!")
+	results = append(results, "📈 Sample Data: Auto-collected at each component for rule creation Or ask the user to provide Or use the intelligent sample data tool")
+	results = append(results, "🎯 ProjectNodeSequence: Used to describe the specific location of a component within a project, like: INPUT.name.RULESET.name.OUTPUT.name")
+	results = append(results, "📊 Data-Driven: NEVER create rules without sample data\n")
+
+	results = append(results, "🚀 **DEPLOYMENT WORKFLOW**")
+	results = append(results, "1. 📝 Create/Edit → Saves to temporary (.new) files")
+	results = append(results, "2. 🔍 Review → Use 'get_pending_changes' to see what's staged")
+	results = append(results, "3. 🧪 Test → Validate with real data using test tools\n")
+	results = append(results, "4. 🚀 Deploy → Use 'apply_changes' to activate in production")
+
+	results = append(results, "🛡️ **RULE ENGINE ARCHITECTURE**")
+	results = append(results, "Performance Design: Filter → CheckNode")
+	results = append(results, "• Filter: Coarse filtering (reduce volume 80%+)")
+	results = append(results, "• CheckNode: Precise detection with field matching")
+	results = append(results, "• Node Types: FASTEST[ISNULL,NOTNULL] → FAST[EQU,NEQ,MT,LT] → SLOWER[INCL,REGEX,PLUGIN]")
+	results = append(results, "• Validation: Uppercase types required (DETECTION/WHITELIST)")
+	results = append(results, "• Append: Only Type,FieldName,Value fields (NO desc!)\n")
+
+	results = append(results, "📊 **DATA REQUIREMENTS** 🚨")
+	results = append(results, "✅ MANDATORY: All rules based on actual sample data")
+	results = append(results, "❌ FORBIDDEN: Imagined data like 'data_type=59', 'exe=msfconsole'")
+	results = append(results, "📥 Sources: get_samplers_data API OR user-provided real JSON")
+	results = append(results, "🔍 Validation: Field names must exist in actual data\n")
+
+	results = append(results, "🎯 **COMMON WORKFLOWS**")
+	results = append(results, "📝 Rule Creation:")
+	results = append(results, "   1. get_samplers_data → 2. Analyze fields → 3. Create rule → 4. Test → 5. Deploy")
+	results = append(results, "⚙️  Component Updates:")
+	results = append(results, "   1. Edit (creates .new) → 2. get_pending_changes → 3. Test → 4. apply_changes")
+	results = append(results, "🔧 Troubleshooting:")
+	results = append(results, "   1. Check status → 2. Review logs → 3. Validate data flow → 4. Test components\n")
+
+	results = append(results, "⚠️  **CRITICAL WARNINGS**")
+	results = append(results, "🚨 Deployment: Temporary changes NOT ACTIVE until apply_changes")
+	results = append(results, "🚨 Data-Driven: NEVER create rules without real sample data")
+	results = append(results, "🚨 Syntax: Rule engine syntax must be exact - errors break ruleset")
+	results = append(results, "🚨 Testing: Always test with real data before production")
+	results = append(results, "🚨 Cluster: Only leader nodes collect sample data\n")
+
+	results = append(results, "\n🎉 **YOU'RE READY TO USE AGENTSMITH-HUB!**")
+	results = append(results, "Remember: Always work with real data, review before deploying, test thoroughly!")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
 	}, nil
 }

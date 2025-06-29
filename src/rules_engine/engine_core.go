@@ -332,6 +332,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				if !filterCheckRes {
 					continue
 				}
+			} else {
+				continue
 			}
 		}
 

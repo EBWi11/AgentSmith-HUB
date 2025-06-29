@@ -43,4 +43,24 @@
             <node type="REGEX" field="exe">will</node>
         </checklist>
     </rule>
+
+    <rule id="hack_detection" name="检测hack程序">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="INCL" field="exe">hack</node>
+        </checklist>
+    </rule>
+
+    <rule id="reverse_shell_bash" name="检测bash反弹shell">
+        <filter field="data_type">59</filter>
+        <checklist>
+            <node type="INCL" field="argv">bash -i</node>
+        </checklist>
+    </rule>
+    <rule id="detect_msf" name="Detect malicious MSF processes when exe field indicates potential security intrusion">
+        <filter field="type">process</filter>
+        <checklist>
+            <node type="EQU" field="exe">msf</node>
+        </checklist>
+    </rule>
 </root>
