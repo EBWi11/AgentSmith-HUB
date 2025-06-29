@@ -36,6 +36,17 @@
           @click="$emit('action', 'restart-project')"
         />
         
+        <!-- Starting status display in menu -->
+        <div v-if="item.status === 'starting'" class="flex items-center px-4 py-2 text-sm text-blue-600">
+          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+          Starting...
+        </div>
+        
+        <!-- Stopping status display in menu -->
+        <div v-if="item.status === 'stopping'" class="flex items-center px-4 py-2 text-sm text-orange-600">
+          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+          Stopping...
+        </div>
 
       </template>
       

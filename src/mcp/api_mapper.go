@@ -289,7 +289,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_ruleset",
-			Description: "🔍 VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. ⚠️ Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status. Use 'get_component_usage' to see which projects depend on this ruleset.",
+			Description: "🔍 VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. 🎯 NEW: Automatically includes relevant sample data from upstream input components! ⚠️ Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Ruleset ID", Required: true},
 			},
@@ -297,7 +297,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_input",
-			Description: "🔍 VIEW INPUT DETAILS: Get detailed configuration of a specific input component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
+			Description: "🔍 VIEW INPUT DETAILS: Get detailed configuration of a specific input component. 🎯 NEW: Automatically includes real sample data from the input source! Perfect for understanding data structure when creating rules. ⚠️ Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Input component ID", Required: true},
 			},
@@ -305,7 +305,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_output",
-			Description: "🔍 VIEW OUTPUT DETAILS: Get detailed configuration of a specific output component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
+			Description: "🔍 VIEW OUTPUT DETAILS: Get detailed configuration of a specific output component. 🎯 NEW: Automatically includes sample data from upstream components showing what data flows through this output! ⚠️ Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Output component ID", Required: true},
 			},
@@ -321,7 +321,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_project",
-			Description: "🔍 VIEW PROJECT DETAILS: Get detailed configuration of a specific project. ⚠️ Check deployment status with 'get_pending_changes' and component health with 'get_project_error'.",
+			Description: "🔍 VIEW PROJECT DETAILS: Get detailed configuration of a specific project. 🎯 NEW: Automatically includes sample data from all input components in the project's data flow! Perfect for understanding the complete data pipeline. ⚠️ Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Project ID", Required: true},
 			},

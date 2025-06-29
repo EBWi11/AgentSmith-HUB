@@ -3,6 +3,7 @@ package api
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/mcp"
 	"errors"
 	"net/http"
 
@@ -107,6 +108,15 @@ func ServerStart(listener string) error {
 	auth.PUT("/rulesets/:id", updateRuleset)
 	auth.DELETE("/rulesets/:id", deleteRuleset)
 
+	// Ruleset rule management endpoints - REQUIRE AUTH
+	auth.DELETE("/rulesets/:id/rules/:ruleId", deleteRulesetRule)
+	auth.POST("/rulesets/:id/rules", addRulesetRule)
+
+	// Ruleset templates and documentation - REQUIRE AUTH (Updated to use MCP module)
+	auth.GET("/ruleset-templates", mcp.GetRulesetTemplates)
+	auth.GET("/ruleset-syntax-guide", mcp.GetRulesetSyntaxGuide)
+	auth.GET("/rule-templates", mcp.GetRuleTemplates)
+
 	// Input endpoints (use plural form for consistency) - REQUIRE AUTH
 	auth.GET("/inputs", getInputs)
 	auth.GET("/inputs/:id", getInput)
@@ -168,6 +178,7 @@ func ServerStart(listener string) error {
 
 	// Sampler endpoints - REQUIRE AUTH
 	auth.GET("/samplers/data", GetSamplerData)
+	auth.POST("/samplers/data/intelligent", GetSamplersDataIntelligent)
 	auth.GET("/ruleset-fields/:id", GetRulesetFields)
 
 	// Cancel upgrade routes - REQUIRE AUTH

@@ -315,12 +315,19 @@ func getProject(c echo.Context) error {
 	p_raw, ok := project.GlobalProject.ProjectsNew[id]
 	if ok {
 		tempPath, _ := GetComponentPath("project", id, true)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this project (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForProject(id)
+		response := map[string]interface{}{
 			"id":     id,
 			"status": project.ProjectStatusStopped,
 			"raw":    p_raw,
 			"path":   tempPath,
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 
 	p := project.GlobalProject.Projects[id]
@@ -329,12 +336,19 @@ func getProject(c echo.Context) error {
 	}
 
 	formalPath, _ := GetComponentPath("project", id, false)
-	return c.JSON(http.StatusOK, map[string]interface{}{
+	// Get sample data for this project (for MCP interface optimization)
+	sampleData, dataSource, err := getSampleDataForProject(id)
+	response := map[string]interface{}{
 		"id":     p.Id,
 		"status": p.Status,
 		"raw":    p.Config.RawConfig,
 		"path":   formalPath,
-	})
+	}
+	if err == nil && len(sampleData) > 0 {
+		response["sample_data"] = sampleData
+		response["data_source"] = dataSource
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 func getRulesets(c echo.Context) error {
@@ -452,22 +466,36 @@ func getRuleset(c echo.Context) error {
 	r_raw, ok := project.GlobalProject.RulesetsNew[id]
 	if ok {
 		tempPath, _ := GetComponentPath("ruleset", id, true)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this ruleset (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForRuleset(id)
+		response := map[string]interface{}{
 			"id":   id,
 			"raw":  r_raw,
 			"path": tempPath,
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 
 	r := project.GlobalProject.Rulesets[id]
 
 	if r != nil {
 		formalPath, _ := GetComponentPath("ruleset", id, false)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this ruleset (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForRuleset(id)
+		response := map[string]interface{}{
 			"id":   r.RulesetID,
 			"raw":  r.RawConfig,
 			"path": formalPath,
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
 }
@@ -580,23 +608,36 @@ func getInput(c echo.Context) error {
 	in_raw, ok := project.GlobalProject.InputsNew[id]
 	if ok {
 		tempPath, _ := GetComponentPath("input", id, true)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this input (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForInput(id)
+		response := map[string]interface{}{
 			"id":   id,
 			"raw":  in_raw,
 			"path": tempPath,
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 
 	in := project.GlobalProject.Inputs[id]
 
 	if in != nil {
 		formalPath, _ := GetComponentPath("input", id, false)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this input (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForInput(id)
+		response := map[string]interface{}{
 			"id":   in.Id,
 			"raw":  in.Config.RawConfig,
 			"path": formalPath,
-		})
-
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
@@ -901,24 +942,38 @@ func getOutput(c echo.Context) error {
 		tempPath, _ := GetComponentPath("output", id, true)
 		// Parse type from temporary file content
 		outputType := parseOutputType(out_raw)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this output (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForOutput(id)
+		response := map[string]interface{}{
 			"id":   id,
 			"raw":  out_raw,
 			"path": tempPath,
 			"type": outputType,
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 
 	out := project.GlobalProject.Outputs[id]
 
 	if out != nil {
 		formalPath, _ := GetComponentPath("output", id, false)
-		return c.JSON(http.StatusOK, map[string]interface{}{
+		// Get sample data for this output (for MCP interface optimization)
+		sampleData, dataSource, err := getSampleDataForOutput(id)
+		response := map[string]interface{}{
 			"id":   out.Id,
 			"raw":  out.Config.RawConfig,
 			"path": formalPath,
 			"type": string(out.Type), // Include output type
-		})
+		}
+		if err == nil && len(sampleData) > 0 {
+			response["sample_data"] = sampleData
+			response["data_source"] = dataSource
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
 }

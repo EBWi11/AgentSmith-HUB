@@ -93,10 +93,22 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// Check if project is already running
+	// Check if project is already running, starting, or stopping
 	if p.Status == project.ProjectStatusRunning {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is already running",
+		})
+	}
+
+	if p.Status == project.ProjectStatusStarting {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is currently starting, please wait",
+		})
+	}
+
+	if p.Status == project.ProjectStatusStopping {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is currently stopping, please wait",
 		})
 	}
 
@@ -138,6 +150,16 @@ func StopProject(c echo.Context) error {
 
 	// Check if project is running
 	if p.Status != project.ProjectStatusRunning {
+		if p.Status == project.ProjectStatusStarting {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "Project is currently starting, cannot stop",
+			})
+		}
+		if p.Status == project.ProjectStatusStopping {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "Project is already stopping",
+			})
+		}
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is not running",
 		})
@@ -183,6 +205,19 @@ func RestartProject(c echo.Context) error {
 	if p.Status == project.ProjectStatusError {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Error projects cannot be restarted. Please use start instead.",
+		})
+	}
+
+	// Check if project is starting or stopping
+	if p.Status == project.ProjectStatusStarting {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is currently starting, please wait",
+		})
+	}
+
+	if p.Status == project.ProjectStatusStopping {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is currently stopping, please wait",
 		})
 	}
 

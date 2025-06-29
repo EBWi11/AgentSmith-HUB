@@ -583,12 +583,16 @@ func handleProjectStatusSync(c echo.Context) error {
 	// Execute the action
 	switch request.Action {
 	case "start":
-		if proj.Status != project.ProjectStatusRunning {
+		if proj.Status != project.ProjectStatusRunning && proj.Status != project.ProjectStatusStarting && proj.Status != project.ProjectStatusStopping {
 			logger.Info("Starting project on follower based on leader command", "project_id", request.ProjectID)
 			if err := proj.Start(); err != nil {
 				logger.Error("Failed to start project on follower", "project_id", request.ProjectID, "error", err)
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to start project"})
 			}
+		} else if proj.Status == project.ProjectStatusStarting {
+			logger.Info("Project already starting on follower", "project_id", request.ProjectID)
+		} else if proj.Status == project.ProjectStatusStopping {
+			logger.Info("Project is stopping on follower, cannot start", "project_id", request.ProjectID)
 		}
 	case "stop":
 		if proj.Status == project.ProjectStatusRunning {
@@ -597,8 +601,19 @@ func handleProjectStatusSync(c echo.Context) error {
 				logger.Error("Failed to stop project on follower", "project_id", request.ProjectID, "error", err)
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to stop project"})
 			}
+		} else if proj.Status == project.ProjectStatusStopping {
+			logger.Info("Project already stopping on follower", "project_id", request.ProjectID)
 		}
 	case "restart":
+		if proj.Status == project.ProjectStatusStarting {
+			logger.Info("Project is starting on follower, cannot restart", "project_id", request.ProjectID)
+			return c.JSON(http.StatusConflict, map[string]string{"error": "project is currently starting"})
+		}
+		if proj.Status == project.ProjectStatusStopping {
+			logger.Info("Project is stopping on follower, cannot restart", "project_id", request.ProjectID)
+			return c.JSON(http.StatusConflict, map[string]string{"error": "project is currently stopping"})
+		}
+
 		logger.Info("Restarting project on follower based on leader command", "project_id", request.ProjectID)
 		if proj.Status == project.ProjectStatusRunning {
 			if err := proj.Stop(); err != nil {

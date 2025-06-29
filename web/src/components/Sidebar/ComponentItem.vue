@@ -107,6 +107,8 @@ function getStatusLabel(status) {
   const labels = {
     running: 'R',
     stopped: 'S',
+    starting: '◐',  // 使用半圆符号表示启动中
+    stopping: '●',  // 使用圆点符号表示正在停止中
     error: 'E'
   }
   return labels[status] || '?'
@@ -116,6 +118,8 @@ function getStatusTitle(item) {
   const titles = {
     running: `Project is running (${item.id})`,
     stopped: `Project is stopped (${item.id})`,
+    starting: `Project is starting (${item.id})`,
+    stopping: `Project is stopping (${item.id})`,
     error: item.error ? `Project has errors: ${item.error}` : `Project has errors (${item.id})`
   }
   return titles[item.status] || `Unknown status (${item.id})`

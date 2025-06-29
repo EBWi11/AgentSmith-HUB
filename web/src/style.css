@@ -329,6 +329,34 @@
   box-shadow: 0 10px 15px -3px rgba(245, 158, 11, 0.3);
 }
 
+.btn-stopping {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  border: none;
+  color: white;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btn-stopping:hover {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-starting {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  color: white;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btn-starting:hover {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  transform: none;
+  box-shadow: none;
+}
+
 /* Focus states for all buttons */
 .btn:focus {
   @apply ring-2 ring-offset-2;

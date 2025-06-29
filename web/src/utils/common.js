@@ -134,6 +134,8 @@ export function getStatusLabel(status) {
   const mapping = {
     running: 'R',
     stopped: 'S',
+    starting: '◐',  // 使用半圆符号表示启动中
+    stopping: '●',  // 使用圆点符号表示正在停止中
     error: 'E'
   }
   return mapping[status] || '?'
@@ -147,7 +149,9 @@ export function getStatusTitle(item) {
   
   const statusMap = {
     running: 'Running',
-    stopped: 'Stopped', 
+    stopped: 'Stopped',
+    starting: 'Starting',
+    stopping: 'Stopping',
     error: item.error ? `Error: ${item.error}` : 'Error'
   }
   
