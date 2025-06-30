@@ -54,9 +54,6 @@ func NewStandardMCPServer() *StandardMCPServer {
 		promptHandlers: make(map[string]func(map[string]interface{}) (common.MCPGetPromptResult, error)),
 	}
 
-	// Start with basic tools
-	std.registerBasicTools()
-
 	// Initialize prompt handlers
 	std.initializePromptHandlers()
 
@@ -64,72 +61,14 @@ func NewStandardMCPServer() *StandardMCPServer {
 	return std
 }
 
-// registerBasicTools registers a few basic tools
-func (s *StandardMCPServer) registerBasicTools() {
-	// Add ping tool
-	pingTool := mcp.NewTool("ping",
-		mcp.WithDescription("Health check endpoint for server connectivity and basic status verification"),
-	)
-
-	s.server.AddTool(pingTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := s.apiMapper.CallAPITool("ping", map[string]interface{}{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Ping failed: %v", err)), nil
-		}
-
-		if result.IsError {
-			errorMsg := "Ping failed"
-			if len(result.Content) > 0 {
-				errorMsg = result.Content[0].Text
-			}
-			return mcp.NewToolResultError(errorMsg), nil
-		}
-
-		if len(result.Content) > 0 {
-			return mcp.NewToolResultText(result.Content[0].Text), nil
-		}
-		return mcp.NewToolResultText("Ping successful"), nil
-	})
-
-	// Add get_projects tool
-	projectsTool := mcp.NewTool("get_projects",
-		mcp.WithDescription("Retrieve complete list of all projects in the AgentSmith-HUB system"),
-	)
-
-	s.server.AddTool(projectsTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		result, err := s.apiMapper.CallAPITool("get_projects", map[string]interface{}{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get projects: %v", err)), nil
-		}
-
-		if result.IsError {
-			errorMsg := "Failed to get projects"
-			if len(result.Content) > 0 {
-				errorMsg = result.Content[0].Text
-			}
-			return mcp.NewToolResultError(errorMsg), nil
-		}
-
-		if len(result.Content) > 0 {
-			return mcp.NewToolResultText(result.Content[0].Text), nil
-		}
-		return mcp.NewToolResultText("No projects found"), nil
-	})
-
-	logger.Info("Registered basic tools for standard MCP server")
-}
-
 // initializePromptHandlers initializes basic prompt handlers
 func (s *StandardMCPServer) initializePromptHandlers() {
 	s.promptHandlers["analyze_project"] = s.basicPromptHandler
 	s.promptHandlers["debug_component"] = s.basicPromptHandler
 
-	// Load prompts from config file if available (try current path first, then parent path)
-	if err := s.loadPrompts("mcp_config/prompts.json"); err != nil {
-		logger.Warn("Could not load prompts from current path, trying parent path", "error", err)
-		if err := s.loadPrompts("../mcp_config/prompts.json"); err != nil {
-			logger.Warn("Could not load prompts from config file", "error", err)
-		}
+	// Load prompts from config file using unified config loading
+	if err := s.loadPromptsFromConfig(); err != nil {
+		logger.Warn("Could not load prompts from config file", "error", err)
 	}
 
 	logger.Info("Prompt handlers initialized for standard MCP server")
@@ -150,11 +89,12 @@ func (s *StandardMCPServer) basicPromptHandler(args map[string]interface{}) (com
 	}, nil
 }
 
-// loadPrompts loads prompt definitions from file
-func (s *StandardMCPServer) loadPrompts(path string) error {
-	data, err := os.ReadFile(path)
+// loadPromptsFromConfig loads prompt definitions using unified config loading
+func (s *StandardMCPServer) loadPromptsFromConfig() error {
+	// Use the same logic as loadMCPConfigFile for consistency
+	data, err := s.loadMCPConfigFile("prompts.json")
 	if err != nil {
-		return fmt.Errorf("could not read prompt file: %w", err)
+		return fmt.Errorf("could not load prompts config: %w", err)
 	}
 
 	var promptFile struct {
@@ -173,8 +113,26 @@ func (s *StandardMCPServer) loadPrompts(path string) error {
 		}
 	}
 
-	logger.Info("Successfully loaded MCP prompts from file", "count", len(s.promptDefs))
+	logger.Info("Successfully loaded MCP prompts from config", "count", len(s.promptDefs))
 	return nil
+}
+
+// loadMCPConfigFile loads a JSON configuration file from mcp_config directory
+// It tries ./mcp_config first, then ../mcp_config as fallback
+func (s *StandardMCPServer) loadMCPConfigFile(filename string) ([]byte, error) {
+	// Try current directory first
+	currentPath := fmt.Sprintf("mcp_config/%s", filename)
+	if data, err := os.ReadFile(currentPath); err == nil {
+		return data, nil
+	}
+
+	// Fallback to parent directory
+	parentPath := fmt.Sprintf("../mcp_config/%s", filename)
+	if data, err := os.ReadFile(parentPath); err == nil {
+		return data, nil
+	}
+
+	return nil, fmt.Errorf("config file %s not found in ./mcp_config or ../mcp_config", filename)
 }
 
 // AddToolFromAPIMapper adds a tool from our existing API mapper
@@ -281,11 +239,6 @@ func (s *StandardMCPServer) MigrateAllTools() error {
 	failed := 0
 
 	for _, tool := range tools {
-		// Skip tools we've already added manually
-		if tool.Name == "ping" || tool.Name == "get_projects" {
-			continue
-		}
-
 		err := s.AddToolFromAPIMapper(tool.Name, tool.Description, tool.InputSchema)
 		if err != nil {
 			logger.Error("Failed to migrate tool", "tool", tool.Name, "error", err)
@@ -379,7 +332,21 @@ func (s *StandardMCPServer) HandleJSONRPCRequest(requestData []byte) ([]byte, er
 
 // handleInitialize handles the initialize method
 func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
-	// Always return our supported protocol version
+	// Get system introduction from API mapper
+	systemIntro, err := s.apiMapper.generateSystemIntroduction()
+	var instructions string
+	if err != nil {
+		logger.Error("Failed to generate system introduction", "error", err)
+		instructions = "AgentSmith-HUB MCP Server initialized. Use 'smart_assistant' with task='system_intro' for complete system overview."
+	} else {
+		if len(systemIntro.Content) > 0 {
+			instructions = systemIntro.Content[0].Text
+		} else {
+			instructions = "AgentSmith-HUB MCP Server initialized. System overview generation completed."
+		}
+	}
+
+	// Return protocol information with system introduction
 	result := map[string]interface{}{
 		"protocolVersion": common.MCPVersion,
 		"capabilities": map[string]interface{}{
@@ -395,8 +362,9 @@ func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
 			},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":    "AgentSmith-HUB",
-			"version": "0.1.2",
+			"name":         "AgentSmith-HUB",
+			"version":      "0.1.2",
+			"instructions": instructions,
 		},
 	}
 	return s.createJSONRPCResponse(id, result)
