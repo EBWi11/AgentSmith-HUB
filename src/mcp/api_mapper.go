@@ -87,7 +87,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// 🔥 Component Lifecycle Management
 		{
 			Name:        "component_wizard",
-			Description: "🧙‍♂️ COMPONENT CREATION WIZARD: Guided component creation with templates, validation, and testing. Supports all component types with intelligent defaults and best practices.",
+			Description: GetToolDescription("component_wizard"),
 			InputSchema: map[string]common.MCPToolArg{
 				"component_type": {Type: "string", Description: "Component type: input/output/plugin/project/ruleset", Required: true},
 				"component_id":   {Type: "string", Description: "Component identifier", Required: true},
@@ -102,7 +102,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// 🔥 System Intelligence
 		{
 			Name:        "system_overview",
-			Description: "🏠 SYSTEM DASHBOARD: Complete system status with health check, pending changes, active projects, and smart recommendations. Your one-stop system overview.",
+			Description: GetToolDescription("system_overview"),
 			InputSchema: map[string]common.MCPToolArg{
 				"include_metrics":     {Type: "string", Description: "Include performance metrics (true/false)", Required: false},
 				"include_suggestions": {Type: "string", Description: "Include optimization suggestions (true/false)", Required: false},
@@ -157,7 +157,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// 🔥 Advanced Rule Management
 		{
 			Name:        "rule_manager",
-			Description: "🛡️ INTELLIGENT RULE MANAGER: Smart context-aware rule management → Auto-discovers target projects → Fetches relevant sample data → Analyzes data structure → Creates rules based on user intent + real data patterns. 🚨 CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only!",
+			Description: GetToolDescription("rule_manager"),
 			InputSchema: map[string]common.MCPToolArg{
 				"action":          {Type: "string", Description: "Action: add_rule/update_rule/delete_rule/view_rules/create_ruleset/update_ruleset", Required: true},
 				"id":              {Type: "string", Description: "Target ruleset ID", Required: true},
@@ -177,7 +177,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "test_lab",
-			Description: "🧪 COMPREHENSIVE TESTING LAB: Test any component with intelligent data samples, validation reports, and performance metrics. Supports batch testing and automated test suites.",
+			Description: GetToolDescription("test_lab"),
 			InputSchema: map[string]common.MCPToolArg{
 				"test_target":    {Type: "string", Description: "What to test: component/ruleset/project/workflow", Required: true},
 				"component_id":   {Type: "string", Description: "Component ID or 'all' for batch testing", Required: true},
@@ -193,7 +193,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "deployment_center",
-			Description: "🚀 SMART DEPLOYMENT CENTER: View pending changes → Validate → Deploy with rollback capability. Includes deployment history, impact analysis, and automated testing.",
+			Description: GetToolDescription("deployment_center"),
 			InputSchema: map[string]common.MCPToolArg{
 				"action":           {Type: "string", Description: "Action: view_pending/validate/deploy/rollback/history", Required: true},
 				"component_filter": {Type: "string", Description: "Filter by component type (optional)", Required: false},
@@ -206,7 +206,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "learning_center",
-			Description: "📚 DATA-DRIVEN LEARNING CENTER: Get templates, tutorials, and best practices. ⚠️ IMPORTANT: If backend has no sample data, guide users to provide their own real data for rule creation.",
+			Description: GetToolDescription("learning_center"),
 			InputSchema: map[string]common.MCPToolArg{
 				"resource_type": {Type: "string", Description: "Resource: samples (try to get backend data)/syntax_guide/templates/tutorials/best_practices", Required: true},
 				"component":     {Type: "string", Description: "Component focus: ruleset/input/output/plugin/project/all", Required: false},
@@ -235,7 +235,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "smart_assistant",
-			Description: "🤖 AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert. Use 'system_intro' task for complete architecture overview.",
+			Description: GetToolDescription("smart_assistant"),
 			InputSchema: map[string]common.MCPToolArg{
 				"task":        {Type: "string", Description: "What you want to accomplish or issue you're facing. Use 'system_intro' for complete AgentSmith-HUB overview.", Required: true},
 				"context":     {Type: "string", Description: "Current situation or component you're working with", Required: false},
@@ -750,7 +750,9 @@ func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) 
 	}
 
 	var results []string
-	results = append(results, "=== DATA-DRIVEN RULE CREATION WORKFLOW ===\n")
+	results = append(results, GetWorkflowHeader("rule_creation", map[string]string{
+		"component_type": "rule",
+	}))
 	results = append(results, "✅ Sample data validation passed - proceeding with rule creation...")
 
 	// Step 1: Add the rule
@@ -800,21 +802,11 @@ func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) 
 		results = append(results, fmt.Sprintf("✓ Usage analysis: %s\n", string(usageResponse)))
 	}
 
-	// Step 5: Deployment guidance
-	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
-	results = append(results, "⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!")
-	results = append(results, "")
-	results = append(results, "📋 Next Steps Required:")
-	results = append(results, "1. 🔍 Check what's pending: Use 'get_pending_changes' to see all changes awaiting deployment")
-	results = append(results, "2. ✅ Apply changes: Use 'apply_changes' to deploy your rule to production")
-	results = append(results, "3. 🧪 Test thoroughly: Use 'test_ruleset' with real data to validate rule behavior")
-	results = append(results, "")
-	results = append(results, "🎯 Recommended Workflow:")
-	results = append(results, "   → get_pending_changes  (review what will be deployed)")
-	results = append(results, "   → apply_changes        (activate your rule)")
-	results = append(results, "   → test_ruleset         (verify it works correctly)")
-	results = append(results, "")
-	results = append(results, "💡 Your rule will remain inactive until you run 'apply_changes'!")
+	// Step 5: Deployment guidance using template
+	guidance := GetDeploymentGuidance("rule", "created", "ruleset")
+	for _, line := range guidance {
+		results = append(results, line)
+	}
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -829,10 +821,15 @@ func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.
 	testData, hasTestData := args["test_data"].(string)
 
 	var results []string
-	results = append(results, "=== SAFE RULE UPDATE WORKFLOW ===\n")
+	results = append(results, GetWorkflowHeader("rule_update", map[string]string{
+		"component_type": "rule",
+	}))
 
 	// Step 1: Get current ruleset for backup
-	results = append(results, "Step 1: Backing up current ruleset...")
+	results = append(results, GetStepTemplate("retrieving_data", map[string]string{
+		"step":      "1",
+		"component": "current ruleset for backup",
+	}))
 	_, err := m.makeHTTPRequest("GET", fmt.Sprintf("/rulesets/%s", rulesetId), nil, true)
 	if err != nil {
 		return common.MCPToolResult{
@@ -843,7 +840,10 @@ func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.
 	results = append(results, "✓ Current ruleset backed up")
 
 	// Step 2: Delete old rule
-	results = append(results, "Step 2: Removing old rule...")
+	results = append(results, GetStepTemplate("creating_component", map[string]string{
+		"step":      "2",
+		"component": "old rule removal",
+	}))
 	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/rulesets/%s/rules/%s", rulesetId, ruleId), nil, true)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ Rule deletion failed: %v\n", err))
@@ -852,7 +852,10 @@ func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.
 	}
 
 	// Step 3: Add new rule
-	results = append(results, "Step 3: Adding updated rule...")
+	results = append(results, GetStepTemplate("creating_component", map[string]string{
+		"step":      "3",
+		"component": "updated rule",
+	}))
 	addArgs := map[string]interface{}{
 		"id":       rulesetId,
 		"rule_raw": ruleRaw,
@@ -887,21 +890,11 @@ func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.
 		}
 	}
 
-	// Step 6: Deployment guidance for rule updates
-	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
-	results = append(results, "⚠️  IMPORTANT: Your rule update has been saved to a TEMPORARY file and is NOT YET ACTIVE!")
-	results = append(results, "")
-	results = append(results, "📋 Next Steps Required:")
-	results = append(results, "1. 🔍 Review changes: Use 'get_pending_changes' to see all modifications awaiting deployment")
-	results = append(results, "2. ✅ Deploy update: Use 'apply_changes' to activate your updated rule in production")
-	results = append(results, "3. 🧪 Verify changes: Use 'test_ruleset' to ensure the updated rule works as expected")
-	results = append(results, "")
-	results = append(results, "🎯 Deployment Workflow:")
-	results = append(results, "   → get_pending_changes  (review what will be deployed)")
-	results = append(results, "   → apply_changes        (activate your updated rule)")
-	results = append(results, "   → test_ruleset         (verify the update works correctly)")
-	results = append(results, "")
-	results = append(results, "💡 The old rule version is still active until you run 'apply_changes'!")
+	// Step 6: Deployment guidance for rule updates using template
+	guidance := GetDeploymentGuidance("rule update", "saved", "ruleset")
+	for _, line := range guidance {
+		results = append(results, line)
+	}
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -979,11 +972,16 @@ func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.M
 	testData, hasTestData := args["test_data"].(string)
 
 	var results []string
-	results = append(results, fmt.Sprintf("=== COMPLETE %s MANAGEMENT WORKFLOW ===\n", strings.ToUpper(componentType)))
+	results = append(results, GetWorkflowHeader("component_management", map[string]string{
+		"component_type": strings.ToUpper(componentType),
+	}))
 
 	// Step 1: Create component if operation is "create"
 	if operation == "create" {
-		results = append(results, "Step 1: Creating component...")
+		results = append(results, GetStepTemplate("creating_component", map[string]string{
+			"step":      "1",
+			"component": componentType,
+		}))
 		createArgs := map[string]interface{}{
 			"id":  componentId,
 			"raw": rawContent,
@@ -999,7 +997,10 @@ func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.M
 	}
 
 	// Step 2: Verify component
-	results = append(results, "Step 2: Verifying component...")
+	results = append(results, GetStepTemplate("verifying_component", map[string]string{
+		"step":      "2",
+		"component": componentType,
+	}))
 	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/%s/%s", componentType, componentId), nil, true)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
@@ -1056,25 +1057,11 @@ func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.M
 	} else {
 		results = append(results, "Step 5: Component created in temporary file")
 
-		// Add deployment guidance
-		results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
-		results = append(results, fmt.Sprintf("⚠️  IMPORTANT: Your %s has been created in a TEMPORARY file and is NOT YET ACTIVE!", strings.ToUpper(componentType)))
-		results = append(results, "")
-		results = append(results, "📋 Next Steps Required:")
-		results = append(results, "1. 🔍 Review changes: Use 'get_pending_changes' to see all components awaiting deployment")
-		results = append(results, "2. ✅ Deploy component: Use 'apply_changes' to activate your component in production")
-		if componentType == "input" || componentType == "output" {
-			results = append(results, "3. 🔗 Test connectivity: Use 'connect_check' to verify connection to external systems")
+		// Add deployment guidance using template
+		guidance := GetDeploymentGuidance(componentType, "created", componentType)
+		for _, line := range guidance {
+			results = append(results, line)
 		}
-		if componentType == "plugin" {
-			results = append(results, "3. 🧪 Test plugin: Use 'test_plugin' to verify plugin functionality")
-		}
-		results = append(results, "")
-		results = append(results, "🎯 Deployment Workflow:")
-		results = append(results, "   → get_pending_changes  (review what will be deployed)")
-		results = append(results, "   → apply_changes        (activate your component)")
-		results = append(results, "")
-		results = append(results, "💡 Your component will remain inactive until you run 'apply_changes'!")
 	}
 
 	return common.MCPToolResult{
@@ -1088,10 +1075,15 @@ func (m *APIMapper) handleSystemHealthCheck(args map[string]interface{}) (common
 	checkDependencies, shouldCheckDeps := args["check_dependencies"].(string)
 
 	var results []string
-	results = append(results, "=== COMPREHENSIVE SYSTEM HEALTH CHECK ===\n")
+	results = append(results, GetWorkflowHeader("system_health", map[string]string{
+		"component_type": "system",
+	}))
 
 	// Step 1: Cluster health
-	results = append(results, "Step 1: Checking cluster health...")
+	results = append(results, GetStepTemplate("verifying_component", map[string]string{
+		"step":      "1",
+		"component": "cluster health",
+	}))
 	clusterResponse, err := m.makeHTTPRequest("GET", "/cluster-status", nil, false)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ Cluster health check failed: %v\n", err))
@@ -1100,7 +1092,10 @@ func (m *APIMapper) handleSystemHealthCheck(args map[string]interface{}) (common
 	}
 
 	// Step 2: All projects health
-	results = append(results, "Step 2: Checking all projects...")
+	results = append(results, GetStepTemplate("verifying_component", map[string]string{
+		"step":      "2",
+		"component": "all projects",
+	}))
 	projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ Projects health check failed: %v\n", err))
@@ -1109,7 +1104,10 @@ func (m *APIMapper) handleSystemHealthCheck(args map[string]interface{}) (common
 	}
 
 	// Step 3: System resources
-	results = append(results, "Step 3: Checking system resources...")
+	results = append(results, GetStepTemplate("verifying_component", map[string]string{
+		"step":      "3",
+		"component": "system resources",
+	}))
 	systemResponse, err := m.makeHTTPRequest("GET", "/system-metrics", nil, false)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ System metrics check failed: %v\n", err))
@@ -1652,7 +1650,10 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 	results = append(results, "=== RULE ADDITION ===\n")
 
 	// Step 1: Add rule
-	results = append(results, "Step 1: Adding rule to ruleset...")
+	results = append(results, GetStepTemplate("creating_component", map[string]string{
+		"step":      "1",
+		"component": "rule to ruleset",
+	}))
 	addArgs := map[string]interface{}{
 		"rule_raw": ruleRaw,
 	}

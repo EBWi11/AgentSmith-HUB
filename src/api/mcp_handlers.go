@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 )
 
 var mcpServer *mcp.StandardMCPServer
+var mcpInitialized bool
 
 // Session management
 type MCPSession struct {
@@ -36,16 +38,72 @@ var (
 
 const (
 	MCPSessionHeader = "Mcp-Session-Id"
-	SessionTimeout   = 30 * time.Minute
+	SessionTimeout   = 48 * time.Hour
 )
 
 func init() {
-	// Initialize with new mcp-go standard implementation
+	// Create MCP server but don't initialize yet (wait for proper config)
 	mcpServer = mcp.NewStandardMCPServer()
+	mcpInitialized = false
 
 	// Start session cleanup goroutine
 	go sessionCleanup()
+
+	logger.Info("MCP server created, waiting for initialization")
 }
+
+// InitializeMCPServer initializes the MCP server with proper configuration
+func InitializeMCPServer(baseURL, token string) {
+	if mcpServer != nil && !mcpInitialized {
+		mcpServer.UpdateConfig(baseURL, token)
+
+		// Start migration of all tools
+		if err := mcpServer.StartMigration(); err != nil {
+			logger.Error("Failed to migrate MCP tools", "error", err)
+		} else {
+			mcpInitialized = true
+			logger.Info("MCP server fully initialized and migrated")
+		}
+	}
+}
+
+// checkLeaderMode checks if current node is leader, returns error response if not
+func checkLeaderMode(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]interface{}{
+			"error":           "MCP service is only available on leader nodes",
+			"message":         "This node is not the cluster leader. MCP operations are restricted to the leader node.",
+			"leader_required": true,
+		})
+	}
+	return nil
+}
+
+// GetMCPImplementationStatus returns current implementation status
+func GetMCPImplementationStatus() map[string]interface{} {
+	if mcpServer == nil {
+		return map[string]interface{}{
+			"initialized":      false,
+			"using_standard":   false,
+			"migration_status": "not_started",
+		}
+	}
+
+	tools := mcpServer.GetAPIMapper().GetAllAPITools()
+	return map[string]interface{}{
+		"initialized":    mcpInitialized,
+		"using_standard": true,
+		"library":        "mcp-go",
+		"tool_count":     len(tools),
+		"server_info":    "AgentSmith-HUB v0.1.2",
+		"migration_status": map[string]interface{}{
+			"completed": mcpInitialized,
+			"tools":     len(tools),
+		},
+	}
+}
+
+// --- Session Management ---
 
 // generateSessionID creates a cryptographically secure session ID
 func generateSessionID() string {
@@ -144,51 +202,7 @@ func isInitializeMethod(body interface{}) bool {
 	return false
 }
 
-// InitializeMCPServer initializes the MCP server with proper configuration
-func InitializeMCPServer(baseURL, token string) {
-	if mcpServer != nil {
-		mcpServer.UpdateConfig(baseURL, token)
-	}
-}
-
-// StartMCPMigration starts the migration of all tools to the new server
-func StartMCPMigration() error {
-	if mcpServer != nil {
-		return mcpServer.StartMigration()
-	}
-	return fmt.Errorf("MCP server not initialized")
-}
-
-// GetMCPImplementationStatus returns current implementation status
-func GetMCPImplementationStatus() map[string]interface{} {
-	if mcpServer == nil {
-		return map[string]interface{}{
-			"initialized":    false,
-			"using_standard": false,
-		}
-	}
-
-	tools := mcpServer.GetAPIMapper().GetAllAPITools()
-	return map[string]interface{}{
-		"initialized":    true,
-		"using_standard": true,
-		"library":        "mcp-go",
-		"tool_count":     len(tools),
-		"server_info":    "AgentSmith-HUB v0.1.2",
-	}
-}
-
-// checkLeaderMode checks if current node is leader, returns error response if not
-func checkLeaderMode(c echo.Context) error {
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusForbidden, map[string]interface{}{
-			"error":           "MCP service is only available on leader nodes",
-			"message":         "This node is not the cluster leader. MCP operations are restricted to the leader node.",
-			"leader_required": true,
-		})
-	}
-	return nil
-}
+// --- Main MCP Handler ---
 
 // MCP HTTP endpoint - handles all MCP JSON-RPC requests
 func handleMCP(c echo.Context) error {
@@ -197,18 +211,43 @@ func handleMCP(c echo.Context) error {
 		return err
 	}
 
-	// Handle DELETE requests for session termination
-	if c.Request().Method == "DELETE" {
+	// Ensure MCP server is initialized
+	if !mcpInitialized {
+		// Try to initialize with current request context
+		scheme := "http"
+		if c.Request().TLS != nil {
+			scheme = "https"
+		}
+		baseURL := fmt.Sprintf("%s://%s", scheme, c.Request().Host)
+
+		// Use default token from config if available
+		token := c.Request().Header.Get("token")
+		if token != "" {
+			InitializeMCPServer(baseURL, token)
+		}
+
+		// If still not initialized, return error
+		if !mcpInitialized {
+			return c.JSON(http.StatusServiceUnavailable, map[string]interface{}{
+				"error": "MCP server not properly initialized",
+				"hint":  "Server is starting up, please try again in a moment",
+			})
+		}
+	}
+
+	// Handle different HTTP methods
+	switch c.Request().Method {
+	case "DELETE":
 		return handleMCPSessionDelete(c)
-	}
-
-	// Handle GET requests for SSE connections (like Cline)
-	if c.Request().Method == "GET" {
+	case "GET":
 		return handleMCPSSE(c)
+	case "POST":
+		return handleMCPPost(c)
+	default:
+		return c.JSON(http.StatusMethodNotAllowed, map[string]interface{}{
+			"error": "Method not allowed",
+		})
 	}
-
-	// Handle POST requests
-	return handleMCPPost(c)
 }
 
 // handleMCPSessionDelete handles session termination via DELETE request
@@ -291,46 +330,6 @@ func handleMCPPost(c echo.Context) error {
 		})
 	}
 
-	// Process request based on type
-	switch v := body.(type) {
-	case map[string]interface{}:
-		// Single JSON-RPC message
-		return handleSingleMessage(c, v, session)
-	case []interface{}:
-		// Batch JSON-RPC messages
-		return handleBatchMessages(c, v, session)
-	default:
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid request format",
-		})
-	}
-}
-
-// handleMCPJSONRPC handles a JSON-RPC request using the StandardMCPServer
-func handleMCPJSONRPC(requestData []byte) ([]byte, error) {
-	// Use the StandardMCPServer to handle the request
-	return mcpServer.HandleJSONRPCRequest(requestData)
-}
-
-// handleSingleMessage processes a single JSON-RPC message
-func handleSingleMessage(c echo.Context, messageData map[string]interface{}, session *MCPSession) error {
-	// Convert to MCPMessage
-	messageBytes, _ := json.Marshal(messageData)
-	var message common.MCPMessage
-	if err := json.Unmarshal(messageBytes, &message); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid JSON-RPC message format",
-		})
-	}
-
-	// Validate JSON-RPC format
-	if message.JSONRpc != "2.0" {
-		logger.Error("Invalid JSON-RPC version", "version", message.JSONRpc)
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid JSON-RPC version, expected 2.0",
-		})
-	}
-
 	// Update MCP server configuration
 	scheme := "http"
 	if c.Request().TLS != nil {
@@ -339,14 +338,45 @@ func handleSingleMessage(c echo.Context, messageData map[string]interface{}, ses
 	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request().Host)
 	mcpServer.UpdateConfig(baseURL, session.Token)
 
-	// Handle the MCP message using StandardMCPServer
-	responseBytes, err := handleMCPJSONRPC(messageBytes)
+	// Process request based on type
+	switch v := body.(type) {
+	case map[string]interface{}:
+		// Single JSON-RPC message
+		return handleSingleMCPMessage(c, v)
+	case []interface{}:
+		// Batch JSON-RPC messages
+		return handleBatchMCPMessages(c, v)
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid request format",
+		})
+	}
+}
+
+// handleSingleMCPMessage processes a single JSON-RPC message using StandardMCPServer
+func handleSingleMCPMessage(c echo.Context, messageData map[string]interface{}) error {
+	// Convert to bytes for StandardMCPServer
+	messageBytes, err := json.Marshal(messageData)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Failed to marshal message",
+		})
+	}
+
+	// Use StandardMCPServer to handle the request
+	responseBytes, err := mcpServer.HandleJSONRPCRequest(messageBytes)
 	if err != nil {
 		logger.Error("MCP server error", "error", err)
-		// Return error response in JSON-RPC format
+
+		// Create error response
+		var messageID interface{}
+		if id, ok := messageData["id"]; ok {
+			messageID = id
+		}
+
 		errorResponse := &common.MCPMessage{
 			JSONRpc: "2.0",
-			ID:      message.ID,
+			ID:      messageID,
 			Error: &common.MCPError{
 				Code:    -32603,
 				Message: "Internal error",
@@ -356,7 +386,7 @@ func handleSingleMessage(c echo.Context, messageData map[string]interface{}, ses
 		return c.JSON(http.StatusOK, errorResponse)
 	}
 
-	// Parse response and return
+	// Parse and return response
 	var response interface{}
 	if err := json.Unmarshal(responseBytes, &response); err != nil {
 		logger.Error("Failed to parse MCP response", "error", err)
@@ -365,21 +395,12 @@ func handleSingleMessage(c echo.Context, messageData map[string]interface{}, ses
 		})
 	}
 
-	// For now, return JSON response (could be enhanced to support streaming)
 	return c.JSON(http.StatusOK, response)
 }
 
-// handleBatchMessages processes batch JSON-RPC messages
-func handleBatchMessages(c echo.Context, messagesData []interface{}, session *MCPSession) error {
-	responses := make([]*common.MCPMessage, 0, len(messagesData))
-
-	// Update MCP server configuration
-	scheme := "http"
-	if c.Request().TLS != nil {
-		scheme = "https"
-	}
-	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request().Host)
-	mcpServer.UpdateConfig(baseURL, session.Token)
+// handleBatchMCPMessages processes batch JSON-RPC messages
+func handleBatchMCPMessages(c echo.Context, messagesData []interface{}) error {
+	responses := make([]interface{}, 0, len(messagesData))
 
 	for _, messageData := range messagesData {
 		messageMap, ok := messageData.(map[string]interface{})
@@ -396,62 +417,29 @@ func handleBatchMessages(c echo.Context, messagesData []interface{}, session *MC
 			continue
 		}
 
-		// Convert to MCPMessage
-		messageBytes, _ := json.Marshal(messageMap)
-		var message common.MCPMessage
-		if err := json.Unmarshal(messageBytes, &message); err != nil {
+		// Convert to bytes for StandardMCPServer
+		messageBytes, err := json.Marshal(messageMap)
+		if err != nil {
 			errorResponse := &common.MCPMessage{
 				JSONRpc: "2.0",
 				ID:      messageMap["id"],
 				Error: &common.MCPError{
 					Code:    -32600,
 					Message: "Invalid Request",
-					Data:    "Invalid JSON-RPC message format",
+					Data:    "Failed to marshal message",
 				},
 			}
 			responses = append(responses, errorResponse)
 			continue
 		}
 
-		// Validate JSON-RPC format
-		if message.JSONRpc != "2.0" {
-			logger.Error("Invalid JSON-RPC version in batch", "version", message.JSONRpc)
-			errorResponse := &common.MCPMessage{
-				JSONRpc: "2.0",
-				ID:      message.ID,
-				Error: &common.MCPError{
-					Code:    -32600,
-					Message: "Invalid Request",
-					Data:    "Invalid JSON-RPC version, expected 2.0",
-				},
-			}
-			responses = append(responses, errorResponse)
-			continue
-		}
-
-		// Handle each message using StandardMCPServer
-		messageBytes, err := json.Marshal(message)
-		if err != nil {
-			logger.Error("Failed to marshal message in batch", "error", err)
-			errorResponse := &common.MCPMessage{
-				JSONRpc: "2.0",
-				ID:      message.ID,
-				Error: &common.MCPError{
-					Code:    -32603,
-					Message: "Internal error",
-					Data:    err.Error(),
-				},
-			}
-			responses = append(responses, errorResponse)
-			continue
-		}
-
-		responseBytes, err := handleMCPJSONRPC(messageBytes)
+		// Handle message using StandardMCPServer
+		responseBytes, err := mcpServer.HandleJSONRPCRequest(messageBytes)
 		if err != nil {
 			logger.Error("MCP server error in batch", "error", err)
 			errorResponse := &common.MCPMessage{
 				JSONRpc: "2.0",
-				ID:      message.ID,
+				ID:      messageMap["id"],
 				Error: &common.MCPError{
 					Code:    -32603,
 					Message: "Internal error",
@@ -460,12 +448,12 @@ func handleBatchMessages(c echo.Context, messagesData []interface{}, session *MC
 			}
 			responses = append(responses, errorResponse)
 		} else {
-			var response common.MCPMessage
+			var response interface{}
 			if err := json.Unmarshal(responseBytes, &response); err != nil {
 				logger.Error("Failed to parse MCP response in batch", "error", err)
 				errorResponse := &common.MCPMessage{
 					JSONRpc: "2.0",
-					ID:      message.ID,
+					ID:      messageMap["id"],
 					Error: &common.MCPError{
 						Code:    -32603,
 						Message: "Parse error",
@@ -474,85 +462,40 @@ func handleBatchMessages(c echo.Context, messagesData []interface{}, session *MC
 				}
 				responses = append(responses, errorResponse)
 			} else {
-				responses = append(responses, &response)
+				responses = append(responses, response)
 			}
 		}
 	}
 
-	// Return batch responses
 	return c.JSON(http.StatusOK, responses)
 }
 
+// --- Server-Sent Events Support ---
+
 // handleMCPSSE handles Server-Sent Events for MCP connections (like Cline)
 func handleMCPSSE(c echo.Context) error {
-	// Check if this node is the leader
-	if err := checkLeaderMode(c); err != nil {
-		return err
-	}
-
-	// Get authentication token from 'token' header
+	// Validate authentication
 	token := c.Request().Header.Get("token")
-
-	// Validate token
-	if token == "" {
-		logger.Error("MCP SSE connection attempted without token")
+	if token == "" || token != common.Config.Token {
 		return c.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "Authentication required",
 		})
 	}
 
-	if token != common.Config.Token {
-		logger.Error("MCP SSE connection with invalid token")
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "Authentication failed",
-		})
-	}
+	// Create session for SSE connection
+	session := createSession(token)
 
-	// Session management for SSE
-	sessionID := c.Request().Header.Get(MCPSessionHeader)
-	var session *MCPSession
-
-	if sessionID != "" {
-		// Validate existing session
-		session = getSession(sessionID)
-		if session == nil {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": "Session not found or expired",
-			})
-		}
-
-		// Verify token matches session
-		if session.Token != token {
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"error": "Token mismatch for session",
-			})
-		}
-	} else {
-		// Allow SSE without session for backwards compatibility
-		// But log a warning
-		logger.Warn("MCP SSE connection without session ID, creating temporary session")
-		session = createSession(token)
-		// Set session ID in response header
-		c.Response().Header().Set(MCPSessionHeader, session.ID)
-	}
-
-	// Validate Origin header for security (prevent DNS rebinding attacks)
-	origin := c.Request().Header.Get("Origin")
-	if origin != "" {
-		// For now, we'll log but not block. In production, you should validate against allowed origins
-		logger.Info("MCP SSE connection from origin", "origin", origin, "sessionId", session.ID)
-	}
-
-	// Set proper SSE headers according to MCP specification
+	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("Access-Control-Allow-Origin", "*")
 	c.Response().Header().Set("Access-Control-Allow-Headers", "token, Content-Type, Mcp-Session-Id")
+	c.Response().Header().Set(MCPSessionHeader, session.ID)
 
 	w := c.Response()
 
-	// Send initial connection notification (standard JSON-RPC notification)
+	// Send initial connection notification
 	connectionNotification := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "notification/initialized",
@@ -585,9 +528,10 @@ func handleMCPSSE(c echo.Context) error {
 		select {
 		case <-done:
 			logger.Info("MCP SSE connection closed by client", "sessionId", session.ID)
+			deleteSession(session.ID)
 			return nil
 		case <-ticker.C:
-			// Send heartbeat as standard JSON-RPC notification
+			// Send heartbeat
 			heartbeat := map[string]interface{}{
 				"jsonrpc": "2.0",
 				"method":  "notification/ping",
@@ -603,9 +547,10 @@ func handleMCPSSE(c echo.Context) error {
 	}
 }
 
+// --- MCP Information Endpoints ---
+
 // MCP Server information endpoint (for discovery)
 func getMCPInfo(c echo.Context) error {
-	// Check if this node is the leader
 	if err := checkLeaderMode(c); err != nil {
 		return err
 	}
@@ -615,7 +560,7 @@ func getMCPInfo(c echo.Context) error {
 		"version":  common.MCPVersion,
 		"server": map[string]interface{}{
 			"name":    "AgentSmith-HUB",
-			"version": "1.0.0",
+			"version": "0.1.2",
 		},
 		"capabilities": map[string]interface{}{
 			"resources": map[string]interface{}{
@@ -628,7 +573,6 @@ func getMCPInfo(c echo.Context) error {
 			"prompts": map[string]interface{}{
 				"listChanged": true,
 			},
-			"logging": map[string]interface{}{},
 		},
 		"transport": "http",
 		"endpoint":  "/mcp",
@@ -636,6 +580,7 @@ func getMCPInfo(c echo.Context) error {
 			"is_leader": cluster.IsLeader,
 			"node_id":   cluster.NodeID,
 		},
+		"implementation": GetMCPImplementationStatus(),
 	}
 
 	return c.JSON(http.StatusOK, info)
@@ -643,46 +588,45 @@ func getMCPInfo(c echo.Context) error {
 
 // MCP Server manifest (for client discovery)
 func getMCPManifest(c echo.Context) error {
-	// Check if this node is the leader
 	if err := checkLeaderMode(c); err != nil {
 		return err
 	}
+
+	// Get current host for proper URLs
+	scheme := "http"
+	if c.Request().TLS != nil {
+		scheme = "https"
+	}
+	host := c.Request().Host
+	protocol := scheme
 
 	manifest := map[string]interface{}{
 		"mcpVersion":  common.MCPVersion,
 		"name":        "AgentSmith-HUB MCP Server",
 		"version":     "0.1.2",
-		"description": "Model Context Protocol server for AgentSmith-HUB Security Data Pipe Platform (SDPP) providing access to security project configurations, components, and security management tools (Leader node only)",
+		"description": "Model Context Protocol server for AgentSmith-HUB Security Data Pipe Platform providing comprehensive access to security management tools",
 		"author":      "AgentSmith-HUB Team",
 		"license":     "MIT",
 		"homepage":    "https://github.com/your-org/AgentSmith-HUB",
 		"transport": map[string]interface{}{
 			"type": "http",
-			"host": c.Request().Host,
+			"host": host,
 			"path": "/mcp",
 		},
 		"capabilities": map[string]interface{}{
-			"resources": []string{
-				"Projects and their configurations",
-				"Input component configurations",
-				"Output component configurations",
-				"Plugin source code and metadata",
-				"Ruleset XML configurations",
+			"resources": map[string]interface{}{
+				"description": "Access to project configurations, inputs, outputs, rulesets, and plugins",
+				"supported":   true,
 			},
-			"tools": []string{
-				"Full API coverage with 60+ tools for managing all HUB components",
-				"create_project - Create new projects",
-				"start_project - Start existing projects",
-				"stop_project - Stop running projects",
-				"get_project_status - Get project status information",
-				"search_components - Search through component configurations",
-				"validate_component - Validate component configurations",
-				"And many more management tools...",
+			"tools": map[string]interface{}{
+				"description": "Complete API access to all AgentSmith-HUB functionality",
+				"count":       len(mcpServer.GetAPIMapper().GetAllAPITools()),
+				"supported":   true,
 			},
-			"prompts": []string{
-				"analyze_project - Analyze project configurations",
-				"debug_component - Debug component issues",
-				"optimize_performance - Get performance optimization suggestions",
+			"prompts": map[string]interface{}{
+				"description": "Intelligent prompts for project analysis, debugging, optimization, and plugin development",
+				"count":       6,
+				"supported":   true,
 			},
 		},
 		"security": map[string]interface{}{
@@ -693,88 +637,27 @@ func getMCPManifest(c echo.Context) error {
 			"leader_only": true,
 			"description": "MCP service is only available on cluster leader nodes",
 		},
+		"installation": map[string]interface{}{
+			"endpoint":    fmt.Sprintf("%s://%s/mcp", protocol, host),
+			"auth_header": "token",
+			"auth_value":  "your-auth-token-here",
+		},
 	}
 
 	return c.JSON(http.StatusOK, manifest)
 }
 
-// Health check for MCP server
-func mcpHealthCheck(c echo.Context) error {
-	status := "healthy"
-	httpStatus := http.StatusOK
-
-	// Include leader status in health check but don't block it
-	if !cluster.IsLeader {
-		status = "unavailable"
-		httpStatus = http.StatusServiceUnavailable
-	}
-
-	return c.JSON(httpStatus, map[string]interface{}{
-		"status":    status,
-		"service":   "AgentSmith-HUB MCP Server",
-		"version":   "0.1.2",
-		"uptime":    "running",
-		"is_leader": cluster.IsLeader,
-		"node_id":   cluster.NodeID,
-		"message": func() string {
-			if cluster.IsLeader {
-				return "MCP service available"
-			}
-			return "MCP service only available on leader nodes"
-		}(),
-	})
-}
-
-// WebSocket handler for MCP (optional - for real-time communication)
-func handleMCPWebSocket(c echo.Context) error {
-	// Check if this node is the leader
-	if err := checkLeaderMode(c); err != nil {
-		return err
-	}
-
-	// WebSocket implementation would go here if needed for real-time MCP communication
-	// For now, we'll return a not implemented response
-	return c.JSON(http.StatusNotImplemented, map[string]string{
-		"error": "WebSocket transport not yet implemented",
-		"note":  "Use HTTP transport at /mcp endpoint",
-	})
-}
-
-// Batch MCP request handler (for multiple requests in one call)
-func handleMCPBatch(c echo.Context) error {
-	// Check if this node is the leader
-	if err := checkLeaderMode(c); err != nil {
-		return err
-	}
-
-	// Return success response for batch requests - migrated to mcp-go
-	return c.JSON(http.StatusOK, []map[string]interface{}{
-		{
-			"jsonrpc": "2.0",
-			"id":      1,
-			"result": map[string]interface{}{
-				"status":  "success",
-				"message": "Batch processing migrated to mcp-go",
-				"server":  "standard",
-			},
-		},
-	})
-}
-
-// Original batch handler removed - migrated to mcp-go
-
 // MCP Statistics endpoint
 func getMCPStats(c echo.Context) error {
-	// Check if this node is the leader
 	if err := checkLeaderMode(c); err != nil {
 		return err
 	}
 
-	// Collect statistics about MCP usage
 	stats := map[string]interface{}{
 		"server": map[string]interface{}{
-			"initialized": mcpServer != nil,
+			"initialized": mcpInitialized,
 			"version":     common.MCPVersion,
+			"library":     "mcp-go + custom handlers",
 		},
 		"cluster": map[string]interface{}{
 			"is_leader": cluster.IsLeader,
@@ -792,170 +675,43 @@ func getMCPStats(c echo.Context) error {
 			"tools_available":     true,
 			"prompts_available":   true,
 		},
-		"api_tools": map[string]interface{}{
+		"tools": map[string]interface{}{
 			"total_tools": len(mcpServer.GetAPIMapper().GetAllAPITools()),
 		},
+		"sessions": map[string]interface{}{
+			"active_count": len(mcpSessions),
+		},
+		"implementation": GetMCPImplementationStatus(),
 	}
 
 	return c.JSON(http.StatusOK, stats)
 }
 
-// getMCPInstallConfig provides MCP client installation configuration
-func getMCPInstallConfig(c echo.Context) error {
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusForbidden, map[string]string{
-			"error": "MCP services are only available on the leader node",
-		})
+// Health check endpoint
+func mcpHealthCheck(c echo.Context) error {
+	if err := checkLeaderMode(c); err != nil {
+		return err
 	}
 
-	// Get server host information
-	host := c.Request().Host
-	if host == "" {
-		host = "localhost:8080"
-	}
-
-	// Determine protocol (http/https)
-	protocol := "http"
-	if c.Request().TLS != nil {
-		protocol = "https"
-	}
-	if forwardedProto := c.Request().Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
-		protocol = forwardedProto
-	}
-
-	baseURL := fmt.Sprintf("%s://%s", protocol, host)
-
-	// MCP server configuration for VSCode extension
-	mcpConfig := map[string]interface{}{
-		"name":        "AgentSmith-HUB",
-		"description": "AgentSmith-HUB MCP Server - Security Data Pipe Platform (SDPP) & Security Rules Engine",
-		"version":     "0.1.2",
-		"server": map[string]interface{}{
-			"type":    "http",
-			"baseUrl": baseURL,
-			"endpoints": map[string]interface{}{
-				"mcp":      "/mcp",
-				"batch":    "/mcp/batch",
-				"info":     "/mcp/info",
-				"manifest": "/mcp/manifest",
-				"stats":    "/mcp/stats",
-				"health":   "/mcp/health",
-				"install":  "/mcp/install", // This endpoint
-			},
-			"authentication": map[string]interface{}{
-				"type":   "header",
-				"header": "token",
-				"note":   "Obtain token from AgentSmith-HUB administrator",
-			},
-		},
-		"capabilities": map[string]interface{}{
-			"resources": map[string]interface{}{
-				"description": "Access to project configurations, inputs, outputs, rulesets, and plugins",
-				"supported":   true,
-			},
-			"tools": map[string]interface{}{
-				"description": "Complete API access to all AgentSmith-HUB functionality",
-				"count":       60, // Approximate number of tools available
-				"supported":   true,
-			},
-			"prompts": map[string]interface{}{
-				"description": "Intelligent prompts for project analysis, debugging, and optimization",
-				"count":       12, // Number of available prompts
-				"supported":   true,
-			},
-		},
-		"installation": map[string]interface{}{
-			"vscode": map[string]interface{}{
-				"extensionId": "your-extension-id", // Replace with actual VSCode extension ID
-				"settings": map[string]interface{}{
-					"mcp.servers": map[string]interface{}{
-						"agentsmith-hub": map[string]interface{}{
-							"name":        "AgentSmith-HUB",
-							"description": "Security Data Pipe Platform & Rules Engine",
-							"transport": map[string]interface{}{
-								"type": "http",
-								"host": host,
-								"port": getPortFromHost(host),
-								"path": "/mcp",
-								"ssl":  protocol == "https",
-							},
-							"authentication": map[string]interface{}{
-								"type":   "bearer",
-								"header": "token",
-							},
-							"timeout": 30000, // 30 seconds
-						},
-					},
-				},
-				"configuration": map[string]interface{}{
-					"steps": []string{
-						"1. Install the MCP extension for VSCode",
-						"2. Add the server configuration to your VSCode settings",
-						"3. Obtain authentication token from your AgentSmith-HUB administrator",
-						"4. Configure the token in VSCode MCP settings",
-						"5. Restart VSCode to apply the changes",
-					},
-				},
-			},
-			"claude_desktop": map[string]interface{}{
-				"settings": map[string]interface{}{
-					"mcpServers": map[string]interface{}{
-						"agentsmith-hub": map[string]interface{}{
-							"command": "node",
-							"args": []string{
-								"/path/to/mcp-http-client.js", // HTTP MCP client bridge
-								"--server", baseURL + "/mcp",
-								"--token", "${AGENTSMITH_TOKEN}", // Environment variable
-							},
-							"env": map[string]interface{}{
-								"AGENTSMITH_TOKEN": "your-token-here",
-							},
-						},
-					},
-				},
-				"configuration": map[string]interface{}{
-					"steps": []string{
-						"1. Set environment variable AGENTSMITH_TOKEN with your authentication token",
-						"2. Add the server configuration to Claude Desktop settings",
-						"3. Restart Claude Desktop to apply the changes",
-					},
-				},
-			},
-		},
-		"documentation": map[string]interface{}{
-			"apiDocs":    baseURL + "/api/docs",
-			"quickStart": baseURL + "/docs/quickstart",
-			"examples":   baseURL + "/docs/examples",
-			"github":     "https://github.com/your-org/agentsmith-hub",
-		},
-		"support": map[string]interface{}{
-			"email":   "support@your-domain.com",
-			"website": "https://your-domain.com",
-			"docs":    baseURL + "/docs",
+	health := map[string]interface{}{
+		"status":      "healthy",
+		"timestamp":   time.Now().Unix(),
+		"initialized": mcpInitialized,
+		"cluster": map[string]interface{}{
+			"is_leader": cluster.IsLeader,
+			"node_id":   cluster.NodeID,
 		},
 	}
 
-	return c.JSON(http.StatusOK, mcpConfig)
+	return c.JSON(http.StatusOK, health)
 }
 
-// getPortFromHost extracts port from host string
+// Helper function to extract port from host
 func getPortFromHost(host string) int {
-	// Default ports
-	defaultPort := 8080
-
-	// Try to parse port from host
-	if len(host) > 0 {
-		for i := len(host) - 1; i >= 0; i-- {
-			if host[i] == ':' {
-				if portStr := host[i+1:]; len(portStr) > 0 {
-					if port, err := strconv.Atoi(portStr); err == nil {
-						return port
-					}
-				}
-				break
-			}
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		if port, err := strconv.Atoi(host[idx+1:]); err == nil {
+			return port
 		}
 	}
-
-	return defaultPort
+	return 8080 // Default port
 }
