@@ -4,9 +4,16 @@
          :style="props.collapsed ? 'min-width: 64px' : 'min-width: 288px'">
     <!-- Header with toggle button -->
     <div class="flex items-center justify-between px-3 pt-5 pb-3">
-      <div v-if="!props.collapsed" class="flex items-center flex-1">
-        <h1 class="text-lg font-bold text-gray-900 truncate">AgentSmith-HUB</h1>
+      <div v-if="!props.collapsed" class="flex items-center flex-1 pl-6">
+        <router-link 
+          to="/app" 
+          class="text-lg font-bold text-gray-900 truncate hover:text-blue-600 transition-colors duration-200 cursor-pointer select-none"
+          title="Back to Dashboard"
+        >
+          AgentSmith-HUB
+        </router-link>
       </div>
+
       <div class="relative" :class="props.collapsed ? 'mx-auto' : 'mr-3'">
         <button 
           @click="emit('toggle-collapse')"
@@ -46,38 +53,8 @@
       <!-- Navigation -->
       <div class="flex-1 overflow-y-auto custom-scrollbar">
         <div v-for="(section, type) in sections" :key="type" class="mb-4">
-          <!-- Dashboard special button -->
-          <div v-if="type === 'dashboard'">
-            <div class="flex items-center justify-between mb-1.5">
-              <button
-                @click="$emit('select-item', { type: 'home' })"
-                class="text-[13px] font-bold text-gray-900 tracking-wide uppercase focus:outline-none group"
-                :class="[
-                  { 'text-blue-600': selected && selected.type === 'home' },
-                  props.collapsed ? 'w-full flex justify-center' : 'flex items-center'
-                ]"
-                :title="props.collapsed ? section.title : ''"
-                style="min-width:0;"
-              >
-                <!-- Collapsed view: just icon centered -->
-                <template v-if="props.collapsed">
-                  <div class="w-8 h-8 flex items-center justify-center mx-auto text-gray-600" v-html="section.icon"></div>
-                </template>
-                <!-- Expanded view: normal layout -->
-                <template v-else>
-                  <div class="flex items-center w-full">
-                    <!-- Empty space for arrow alignment -->
-                    <div class="w-4 h-4 mr-1.5 flex-shrink-0"></div>
-                    <!-- Add section icon -->
-                    <div class="w-4 h-4 mr-1.5 text-gray-600 flex-shrink-0" v-html="section.icon"></div>
-                    <span class="truncate">{{ section.title }}</span>
-                  </div>
-                </template>
-              </button>
-            </div>
-          </div>
         <!-- Regular sections -->
-        <div v-else>
+        <div>
           <div class="flex items-center justify-between mb-1.5">
             <button
               @click="toggleCollapse(type)"
@@ -957,7 +934,6 @@ const items = reactive({
 })
 
 const collapsed = reactive({
-  dashboard: false,
   inputs: true,
   outputs: true,
   rulesets: true,
@@ -967,10 +943,6 @@ const collapsed = reactive({
 })
 
 const sections = reactive({
-  dashboard: {
-    title: 'DASHBOARD',
-    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>'
-  },
   inputs: { 
     title: 'Input', 
     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 

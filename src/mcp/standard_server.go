@@ -54,12 +54,6 @@ func NewStandardMCPServer() *StandardMCPServer {
 		promptHandlers: make(map[string]func(map[string]interface{}) (common.MCPGetPromptResult, error)),
 	}
 
-	// Start with basic tools
-	std.registerBasicTools()
-
-	// Initialize template system
-	std.initializeTemplateSystem()
-
 	// Initialize prompt handlers
 	std.initializePromptHandlers()
 
@@ -67,227 +61,40 @@ func NewStandardMCPServer() *StandardMCPServer {
 	return std
 }
 
-// registerBasicTools registers essential tools - removed duplicate registration
-func (s *StandardMCPServer) registerBasicTools() {
-	// Note: Basic tools will be registered through MigrateAllTools()
-	// This prevents duplicate registration and ensures consistency
-	logger.Info("Basic tools will be registered through API mapper migration")
-}
-
-// initializeTemplateSystem initializes the response template system
-func (s *StandardMCPServer) initializeTemplateSystem() {
-	// Load response templates from config
-	if err := LoadResponseTemplates("mcp_config/response_templates.json"); err != nil {
-		logger.Warn("Could not load response templates, trying parent path", "error", err)
-		if err := LoadResponseTemplates("../mcp_config/response_templates.json"); err != nil {
-			logger.Warn("Could not load response templates from any path", "error", err)
-		} else {
-			logger.Info("Response templates loaded from parent directory")
-		}
-	} else {
-		logger.Info("Response templates loaded successfully")
-	}
-}
-
 // initializePromptHandlers initializes basic prompt handlers
 func (s *StandardMCPServer) initializePromptHandlers() {
-	// Register actual prompt handlers instead of placeholders
-	s.promptHandlers["analyze_project"] = s.handleAnalyzeProjectPrompt
-	s.promptHandlers["debug_component"] = s.handleDebugComponentPrompt
-	s.promptHandlers["plugin_development_guide"] = s.handlePluginDevelopmentGuide
-	s.promptHandlers["plugin_usage_guide"] = s.handlePluginUsageGuide
-	s.promptHandlers["plugin_troubleshooting"] = s.handlePluginTroubleshooting
-	s.promptHandlers["plugin_best_practices"] = s.handlePluginBestPractices
+	s.promptHandlers["analyze_project"] = s.basicPromptHandler
+	s.promptHandlers["debug_component"] = s.basicPromptHandler
 
-	// Load prompts from config file if available (try current path first, then parent path)
-	if err := s.loadPrompts("mcp_config/prompts.json"); err != nil {
-		logger.Warn("Could not load prompts from current path, trying parent path", "error", err)
-		if err := s.loadPrompts("../mcp_config/prompts.json"); err != nil {
-			logger.Warn("Could not load prompts from config file", "error", err)
-		}
+	// Load prompts from config file using unified config loading
+	if err := s.loadPromptsFromConfig(); err != nil {
+		logger.Warn("Could not load prompts from config file", "error", err)
 	}
 
-	logger.Info("Prompt handlers initialized for standard MCP server", "handlers", len(s.promptHandlers))
+	logger.Info("Prompt handlers initialized for standard MCP server")
 }
 
-// handleAnalyzeProjectPrompt provides project analysis guidance
-func (s *StandardMCPServer) handleAnalyzeProjectPrompt(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	projectID, hasProject := args["project_id"].(string)
-
-	var promptText string
-	if hasProject {
-		promptText = fmt.Sprintf("Analyze the AgentSmith-HUB project '%s' and provide:\n\n1. **Project Overview**: Components, data flow, and architecture\n2. **Security Assessment**: Current rules and detection capabilities\n3. **Performance Analysis**: Throughput, bottlenecks, and optimization opportunities\n4. **Recommendations**: Improvements and best practices\n\nUse the following MCP tools to gather information:\n- get_project to retrieve project details\n- get_component_usage to check dependencies\n- get_metrics for performance data\n- get_samplers_data for data analysis", projectID)
-	} else {
-		promptText = "To analyze an AgentSmith-HUB project, please provide:\n\n**project_id**: The ID of the project to analyze\n\nI'll then provide comprehensive analysis including components, security posture, performance metrics, and optimization recommendations."
-	}
-
+// basicPromptHandler provides a placeholder for prompt handling
+func (s *StandardMCPServer) basicPromptHandler(args map[string]interface{}) (common.MCPGetPromptResult, error) {
 	return common.MCPGetPromptResult{
 		Messages: []common.MCPPromptMessage{
 			{
 				Role: "user",
 				Content: common.MCPPromptContent{
 					Type: "text",
-					Text: promptText,
+					Text: "This prompt handler will be implemented during migration",
 				},
 			},
 		},
 	}, nil
 }
 
-// handleDebugComponentPrompt provides component debugging guidance
-func (s *StandardMCPServer) handleDebugComponentPrompt(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	componentType, hasType := args["component_type"].(string)
-	componentID, hasID := args["component_id"].(string)
-
-	var promptText string
-	if hasType && hasID {
-		promptText = fmt.Sprintf("Debug the %s component '%s' using this systematic approach:\n\n1. **Validate Configuration**: Check syntax and structure\n2. **Test Connectivity**: Verify external connections (if applicable)\n3. **Check Dependencies**: Ensure all referenced components exist\n4. **Review Logs**: Check for errors and warnings\n5. **Performance Check**: Monitor resource usage\n\nRecommended MCP tools:\n- get_%s to retrieve component details\n- validate_component for syntax checking\n- test_component for functionality testing\n- get_error_logs for troubleshooting", componentType, componentID, componentType)
-	} else {
-		promptText = "To debug an AgentSmith-HUB component, please provide:\n\n**component_type**: Type of component (input/output/plugin/ruleset/project)\n**component_id**: ID of the specific component\n\nI'll then provide targeted debugging guidance and recommended tools."
-	}
-
-	return common.MCPGetPromptResult{
-		Messages: []common.MCPPromptMessage{
-			{
-				Role: "user",
-				Content: common.MCPPromptContent{
-					Type: "text",
-					Text: promptText,
-				},
-			},
-		},
-	}, nil
-}
-
-// handlePluginDevelopmentGuide provides comprehensive plugin development guidance
-func (s *StandardMCPServer) handlePluginDevelopmentGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	// Get the template from loaded prompts
-	if promptConfig, exists := s.promptDefs["plugin_development_guide"]; exists {
-		return common.MCPGetPromptResult{
-			Messages: []common.MCPPromptMessage{
-				{
-					Role: "user",
-					Content: common.MCPPromptContent{
-						Type: "text",
-						Text: promptConfig.Template,
-					},
-				},
-			},
-		}, nil
-	}
-
-	// Fallback if template not loaded
-	return common.MCPGetPromptResult{
-		Messages: []common.MCPPromptMessage{
-			{
-				Role: "user",
-				Content: common.MCPPromptContent{
-					Type: "text",
-					Text: "🔧 AGENTSMITH-HUB PLUGIN DEVELOPMENT GUIDE 🔧\n\nMANDATORY REQUIREMENTS:\n• Package: must be 'plugin'\n• Function: must contain 'Eval' function\n• Returns: (bool, error) for checknode or (interface{}, bool, error) for data processing\n• Imports: Only Go standard library allowed\n\nUse create_plugin MCP tool to create your plugin with proper validation.",
-				},
-			},
-		},
-	}, nil
-}
-
-// handlePluginUsageGuide provides plugin usage guidance
-func (s *StandardMCPServer) handlePluginUsageGuide(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	// Get the template from loaded prompts
-	if promptConfig, exists := s.promptDefs["plugin_usage_guide"]; exists {
-		return common.MCPGetPromptResult{
-			Messages: []common.MCPPromptMessage{
-				{
-					Role: "user",
-					Content: common.MCPPromptContent{
-						Type: "text",
-						Text: promptConfig.Template,
-					},
-				},
-			},
-		}, nil
-	}
-
-	// Fallback if template not loaded
-	return common.MCPGetPromptResult{
-		Messages: []common.MCPPromptMessage{
-			{
-				Role: "user",
-				Content: common.MCPPromptContent{
-					Type: "text",
-					Text: "🎯 PLUGIN USAGE IN RULESETS GUIDE 🎯\n\nCONTEXTS:\n• CheckNode: <node type=\"PLUGIN\">plugin_name(_$ORIDATA)</node>\n• Append: <append type=\"PLUGIN\">plugin_name(\"param\")</append>\n• Standalone: <plugin>plugin_name(_$ORIDATA)</plugin>\n\nUse add_ruleset_rule MCP tool to integrate plugins into rules.",
-				},
-			},
-		},
-	}, nil
-}
-
-// handlePluginTroubleshooting provides plugin troubleshooting guidance
-func (s *StandardMCPServer) handlePluginTroubleshooting(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	// Get the template from loaded prompts
-	if promptConfig, exists := s.promptDefs["plugin_troubleshooting"]; exists {
-		return common.MCPGetPromptResult{
-			Messages: []common.MCPPromptMessage{
-				{
-					Role: "user",
-					Content: common.MCPPromptContent{
-						Type: "text",
-						Text: promptConfig.Template,
-					},
-				},
-			},
-		}, nil
-	}
-
-	// Fallback if template not loaded
-	return common.MCPGetPromptResult{
-		Messages: []common.MCPPromptMessage{
-			{
-				Role: "user",
-				Content: common.MCPPromptContent{
-					Type: "text",
-					Text: "🔧 PLUGIN TROUBLESHOOTING GUIDE 🔧\n\nCOMMON ISSUES:\n• Package name error: Change to 'package plugin'\n• Function not found: Must be named 'Eval'\n• Wrong return type: Use (bool, error) or (interface{}, bool, error)\n\nUse test_plugin and get_plugin_parameters MCP tools for debugging.",
-				},
-			},
-		},
-	}, nil
-}
-
-// handlePluginBestPractices provides plugin best practices guidance
-func (s *StandardMCPServer) handlePluginBestPractices(args map[string]interface{}) (common.MCPGetPromptResult, error) {
-	// Get the template from loaded prompts
-	if promptConfig, exists := s.promptDefs["plugin_best_practices"]; exists {
-		return common.MCPGetPromptResult{
-			Messages: []common.MCPPromptMessage{
-				{
-					Role: "user",
-					Content: common.MCPPromptContent{
-						Type: "text",
-						Text: promptConfig.Template,
-					},
-				},
-			},
-		}, nil
-	}
-
-	// Fallback if template not loaded
-	return common.MCPGetPromptResult{
-		Messages: []common.MCPPromptMessage{
-			{
-				Role: "user",
-				Content: common.MCPPromptContent{
-					Type: "text",
-					Text: "⭐ PLUGIN DEVELOPMENT BEST PRACTICES ⭐\n\nDESIGN PRINCIPLES:\n• Single Responsibility: One clear purpose per plugin\n• Defensive Programming: Validate all inputs\n• Performance: Use early returns and avoid expensive operations\n• Error Handling: Provide meaningful error messages\n\nTest thoroughly with test_plugin before deploying.",
-				},
-			},
-		},
-	}, nil
-}
-
-// loadPrompts loads prompt definitions from file
-func (s *StandardMCPServer) loadPrompts(path string) error {
-	data, err := os.ReadFile(path)
+// loadPromptsFromConfig loads prompt definitions using unified config loading
+func (s *StandardMCPServer) loadPromptsFromConfig() error {
+	// Use the same logic as loadMCPConfigFile for consistency
+	data, err := s.loadMCPConfigFile("prompts.json")
 	if err != nil {
-		return fmt.Errorf("could not read prompt file: %w", err)
+		return fmt.Errorf("could not load prompts config: %w", err)
 	}
 
 	var promptFile struct {
@@ -306,8 +113,26 @@ func (s *StandardMCPServer) loadPrompts(path string) error {
 		}
 	}
 
-	logger.Info("Successfully loaded MCP prompts from file", "count", len(s.promptDefs))
+	logger.Info("Successfully loaded MCP prompts from config", "count", len(s.promptDefs))
 	return nil
+}
+
+// loadMCPConfigFile loads a JSON configuration file from mcp_config directory
+// It tries ./mcp_config first, then ../mcp_config as fallback
+func (s *StandardMCPServer) loadMCPConfigFile(filename string) ([]byte, error) {
+	// Try current directory first
+	currentPath := fmt.Sprintf("mcp_config/%s", filename)
+	if data, err := os.ReadFile(currentPath); err == nil {
+		return data, nil
+	}
+
+	// Fallback to parent directory
+	parentPath := fmt.Sprintf("../mcp_config/%s", filename)
+	if data, err := os.ReadFile(parentPath); err == nil {
+		return data, nil
+	}
+
+	return nil, fmt.Errorf("config file %s not found in ./mcp_config or ../mcp_config", filename)
 }
 
 // AddToolFromAPIMapper adds a tool from our existing API mapper
@@ -507,7 +332,21 @@ func (s *StandardMCPServer) HandleJSONRPCRequest(requestData []byte) ([]byte, er
 
 // handleInitialize handles the initialize method
 func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
-	// Always return our supported protocol version
+	// Get system introduction from API mapper
+	systemIntro, err := s.apiMapper.generateSystemIntroduction()
+	var instructions string
+	if err != nil {
+		logger.Error("Failed to generate system introduction", "error", err)
+		instructions = "AgentSmith-HUB MCP Server initialized. Use 'smart_assistant' with task='system_intro' for complete system overview."
+	} else {
+		if len(systemIntro.Content) > 0 {
+			instructions = systemIntro.Content[0].Text
+		} else {
+			instructions = "AgentSmith-HUB MCP Server initialized. System overview generation completed."
+		}
+	}
+
+	// Return protocol information with system introduction
 	result := map[string]interface{}{
 		"protocolVersion": common.MCPVersion,
 		"capabilities": map[string]interface{}{
@@ -523,8 +362,9 @@ func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
 			},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":    "AgentSmith-HUB",
-			"version": "0.1.2",
+			"name":         "AgentSmith-HUB",
+			"version":      "0.1.2",
+			"instructions": instructions,
 		},
 	}
 	return s.createJSONRPCResponse(id, result)
