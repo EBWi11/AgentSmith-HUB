@@ -43,5 +43,23 @@
       "Field name guessing",
       "Value fabrication"
     ]
+  },
+  "plugin_development": {
+    "package_requirement": "package plugin  // MANDATORY",
+    "function_requirement": "func Eval(...) (...)  // MANDATORY",
+    "import_restrictions": "Only Go standard library allowed",
+    "return_types": {
+      "checknode": "(bool, error)",
+      "data_processing": "(interface{}, bool, error) or (map[string]interface{}, error)"
+    },
+    "common_imports": [
+      "strings",
+      "regexp", 
+      "fmt",
+      "strconv",
+      "time",
+      "net",
+      "encoding/json"
+    ]
   }
 } 
