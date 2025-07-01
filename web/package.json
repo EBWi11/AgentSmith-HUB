@@ -1,6 +1,6 @@
 {
   "name": "agentsmith-hub-frontend",
-  "version": "0.1.2",
+  "version": "v0.1.2",
   "private": true,
   "scripts": {
     "dev": "vite",
