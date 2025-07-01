@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"path/filepath"
 
+	"AgentSmith-HUB/common"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -26,6 +28,39 @@ func loadMCPConfigFile(filename string) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("config file %s not found in ./mcp_config or ../mcp_config", filename)
+}
+
+// LoadMCPPrompts loads all MCP prompts from configuration
+func LoadMCPPrompts() ([]common.MCPPrompt, error) {
+	data, err := loadMCPConfigFile("prompts.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load prompts config: %w", err)
+	}
+
+	var promptFile struct {
+		Prompts []common.MCPPrompt `json:"prompts"`
+	}
+	if err := json.Unmarshal(data, &promptFile); err != nil {
+		return nil, fmt.Errorf("failed to parse prompts file: %w", err)
+	}
+
+	return promptFile.Prompts, nil
+}
+
+// GetMCPPrompt gets a specific prompt by name
+func GetMCPPrompt(name string) (*common.MCPPrompt, error) {
+	prompts, err := LoadMCPPrompts()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, prompt := range prompts {
+		if prompt.Name == name {
+			return &prompt, nil
+		}
+	}
+
+	return nil, fmt.Errorf("prompt '%s' not found", name)
 }
 
 // GetRulesetTemplates provides comprehensive ruleset templates covering all syntax combinations
@@ -115,7 +150,7 @@ func GetRuleTemplates(c echo.Context) error {
 	return c.JSON(http.StatusOK, templates)
 }
 
-// GetMCPPrompts loads the main MCP prompts configuration
+// GetMCPPrompts loads the main MCP prompts configuration (HTTP handler)
 func GetMCPPrompts(c echo.Context) error {
 	// Load prompts from JSON file
 	data, err := loadMCPConfigFile("prompts.json")

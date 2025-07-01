@@ -135,22 +135,32 @@ export function generatePluginTemplate(id) {
   return `package plugin
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 )
 
-// ${id} is an example plugin
-// It takes a data map and returns a boolean result
-func ${id}(data interface{}) (bool, string) {
-	// Your plugin logic here
-	fmt.Println("Plugin ${id} called with data:", data)
+// ${id} is a plugin for AgentSmith-HUB
+// It takes arguments and returns a boolean result for checknode usage
+func Eval(args ...interface{}) (bool, error) {
+	// Input validation - always check arguments first
+	if len(args) == 0 {
+		return false, errors.New("plugin requires at least one argument")
+	}
 	
-	// Example implementation
-	return true, "Plugin executed successfully"
-}
-
-// Register the plugin when the package is imported
-func init() {
-	Plugins["${id}"] = ${id}
+	// Get the first argument (typically data or _$ORIDATA)
+	data := args[0]
+	
+	// Example: Convert to string for processing
+	dataStr := fmt.Sprintf("%v", data)
+	
+	// Your plugin logic here
+	// Example implementation: check if data contains specific string
+	if strings.Contains(dataStr, "example") {
+		return true, nil
+	}
+	
+	return false, nil
 }`;
 }
 

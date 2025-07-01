@@ -43,19 +43,31 @@ const NewPluginData = `package plugin
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
-func Eval(data string) (bool, error) {
-	if data == "" {
-		return false, errors.New("")
+// Eval is the main function for plugin execution
+// For checknode usage: returns (bool, error)
+// For other usage: returns (interface{}, bool, error)
+func Eval(args ...interface{}) (bool, error) {
+	// Input validation - always check arguments first
+	if len(args) == 0 {
+		return false, errors.New("plugin requires at least one argument")
 	}
-
-	if strings.HasSuffix(data, "something") {
+	
+	// Get the first argument (typically data or _$ORIDATA)
+	data := args[0]
+	
+	// Convert to string for processing
+	dataStr := fmt.Sprintf("%v", data)
+	
+	// Example implementation: check if data contains specific pattern
+	if strings.Contains(dataStr, "something") {
 		return true, nil
-	} else {
-		return false, nil
 	}
+	
+	return false, nil
 }`
 
 const NewInputData = `type: kafka

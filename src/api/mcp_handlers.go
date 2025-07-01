@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,7 @@ const (
 )
 
 func init() {
-	// Initialize with new mcp-go standard implementation
+	// Initialize with simplified StandardMCPServer
 	mcpServer = mcp.NewStandardMCPServer()
 
 	// Start session cleanup goroutine
@@ -151,12 +152,10 @@ func InitializeMCPServer(baseURL, token string) {
 	}
 }
 
-// StartMCPMigration starts the migration of all tools to the new server
+// StartMCPMigration is simplified - no longer needed for complex migration
 func StartMCPMigration() error {
-	if mcpServer != nil {
-		return mcpServer.StartMigration()
-	}
-	return fmt.Errorf("MCP server not initialized")
+	logger.Info("MCP using simplified StandardMCPServer with mcp-go")
+	return nil
 }
 
 // GetMCPImplementationStatus returns current implementation status
@@ -495,55 +494,37 @@ func handleMCPSSE(c echo.Context) error {
 
 	// Validate token
 	if token == "" {
-		logger.Error("MCP SSE connection attempted without token")
+		logger.Error("MCP SSE request attempted without token")
 		return c.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "Authentication required",
 		})
 	}
 
 	if token != common.Config.Token {
-		logger.Error("MCP SSE connection with invalid token")
+		logger.Error("MCP SSE request with invalid token")
 		return c.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "Authentication failed",
 		})
 	}
 
-	// Session management for SSE
+	// Get or create session
 	sessionID := c.Request().Header.Get(MCPSessionHeader)
 	var session *MCPSession
 
-	if sessionID != "" {
-		// Validate existing session
+	if sessionID == "" {
+		// Create new session for SSE
+		session = createSession(token)
+		sessionID = session.ID
+	} else {
 		session = getSession(sessionID)
 		if session == nil {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": "Session not found or expired",
-			})
+			// Create new session if not found
+			session = createSession(token)
+			sessionID = session.ID
 		}
-
-		// Verify token matches session
-		if session.Token != token {
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"error": "Token mismatch for session",
-			})
-		}
-	} else {
-		// Allow SSE without session for backwards compatibility
-		// But log a warning
-		logger.Warn("MCP SSE connection without session ID, creating temporary session")
-		session = createSession(token)
-		// Set session ID in response header
-		c.Response().Header().Set(MCPSessionHeader, session.ID)
 	}
 
-	// Validate Origin header for security (prevent DNS rebinding attacks)
-	origin := c.Request().Header.Get("Origin")
-	if origin != "" {
-		// For now, we'll log but not block. In production, you should validate against allowed origins
-		logger.Info("MCP SSE connection from origin", "origin", origin, "sessionId", session.ID)
-	}
-
-	// Set proper SSE headers according to MCP specification
+	// Set SSE headers
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
@@ -747,21 +728,19 @@ func handleMCPBatch(c echo.Context) error {
 		return err
 	}
 
-	// Return success response for batch requests - migrated to mcp-go
+	// Return success response for batch requests - handled by StandardMCPServer
 	return c.JSON(http.StatusOK, []map[string]interface{}{
 		{
 			"jsonrpc": "2.0",
 			"id":      1,
 			"result": map[string]interface{}{
 				"status":  "success",
-				"message": "Batch processing migrated to mcp-go",
+				"message": "Batch processing handled by mcp-go",
 				"server":  "standard",
 			},
 		},
 	})
 }
-
-// Original batch handler removed - migrated to mcp-go
 
 // MCP Statistics endpoint
 func getMCPStats(c echo.Context) error {
@@ -897,65 +876,41 @@ func getMCPInstallConfig(c echo.Context) error {
 					},
 				},
 			},
-			"claude_desktop": map[string]interface{}{
+			"cline": map[string]interface{}{
 				"settings": map[string]interface{}{
 					"mcpServers": map[string]interface{}{
 						"agentsmith-hub": map[string]interface{}{
 							"command": "node",
-							"args": []string{
-								"/path/to/mcp-http-client.js", // HTTP MCP client bridge
-								"--server", baseURL + "/mcp",
-								"--token", "${AGENTSMITH_TOKEN}", // Environment variable
-							},
+							"args":    []string{"-e", "console.log('Use HTTP transport instead')"},
 							"env": map[string]interface{}{
-								"AGENTSMITH_TOKEN": "your-token-here",
+								"MCP_SERVER_URL": baseURL + "/mcp",
+								"MCP_AUTH_TOKEN": "YOUR_TOKEN_HERE",
 							},
 						},
 					},
 				},
-				"configuration": map[string]interface{}{
-					"steps": []string{
-						"1. Set environment variable AGENTSMITH_TOKEN with your authentication token",
-						"2. Add the server configuration to Claude Desktop settings",
-						"3. Restart Claude Desktop to apply the changes",
-					},
-				},
+				"note": "Cline supports HTTP transport via custom configuration",
 			},
 		},
 		"documentation": map[string]interface{}{
-			"apiDocs":    baseURL + "/api/docs",
-			"quickStart": baseURL + "/docs/quickstart",
-			"examples":   baseURL + "/docs/examples",
-			"github":     "https://github.com/your-org/agentsmith-hub",
-		},
-		"support": map[string]interface{}{
-			"email":   "support@your-domain.com",
-			"website": "https://your-domain.com",
-			"docs":    baseURL + "/docs",
+			"quickStart": baseURL + "/mcp/info",
+			"examples":   "Use tools like 'system_overview' to get started",
+			"support":    "Contact your AgentSmith-HUB administrator for setup assistance",
 		},
 	}
 
 	return c.JSON(http.StatusOK, mcpConfig)
 }
 
-// getPortFromHost extracts port from host string
-func getPortFromHost(host string) int {
-	// Default ports
-	defaultPort := 8080
-
-	// Try to parse port from host
-	if len(host) > 0 {
-		for i := len(host) - 1; i >= 0; i-- {
-			if host[i] == ':' {
-				if portStr := host[i+1:]; len(portStr) > 0 {
-					if port, err := strconv.Atoi(portStr); err == nil {
-						return port
-					}
-				}
-				break
-			}
+// Helper function to extract port from host string
+func getPortFromHost(host string) interface{} {
+	if colonIndex := strings.LastIndex(host, ":"); colonIndex != -1 {
+		portStr := host[colonIndex+1:]
+		if port, err := strconv.Atoi(portStr); err == nil {
+			return port
 		}
 	}
-
+	// Default ports
+	defaultPort := 8080
 	return defaultPort
 }
