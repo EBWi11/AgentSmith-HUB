@@ -861,6 +861,10 @@ func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
 	syncComponentToFollowers("plugin", change.ID)
 
 	logger.Info("Plugin change applied successfully", "id", change.ID, "affected_projects", len(affectedProjects))
+
+	// 新增：记录操作历史
+	RecordChangePush("plugin", change.ID, change.OldContent, change.NewContent, "", "success", "")
+
 	return affectedProjects, nil
 }
 
@@ -954,6 +958,10 @@ func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
 	syncComponentToFollowers(change.Type, change.ID)
 
 	logger.Info("Component change applied successfully", "type", change.Type, "id", change.ID, "affected_projects", len(affectedProjects))
+
+	// 新增：记录操作历史
+	RecordChangePush(change.Type, change.ID, change.OldContent, change.NewContent, "", "success", "")
+
 	return affectedProjects, nil
 }
 
@@ -1017,6 +1025,10 @@ func applyProjectChange(change *EnhancedPendingChange) error {
 	syncComponentToFollowers("project", change.ID)
 
 	logger.Info("Project change applied successfully", "id", change.ID)
+
+	// 新增：记录操作历史
+	RecordChangePush("project", change.ID, change.OldContent, change.NewContent, "", "success", "")
+
 	return nil
 }
 
