@@ -188,21 +188,23 @@ async function runTest() {
   testError.value = null;
   testResults.value = {};
   testExecuted.value = true;
-  jsonError.value = null;
-  jsonErrorLine.value = null;
+  // Don't reset jsonError and jsonErrorLine here - let them be reset when needed
   
   try {
     // Parse input data
     let data;
     try {
       data = JSON.parse(inputData.value);
+      // Clear JSON errors on successful parse
+      jsonError.value = null;
+      jsonErrorLine.value = null;
     } catch (e) {
       testError.value = `Invalid JSON: ${e.message}`;
       
-      // Try to extract line number from JSON parse error
-      const match = e.message.match(/line (\d+)/i) || e.message.match(/position (\d+)/i);
-      if (match) {
-        jsonErrorLine.value = parseInt(match[1]);
+      // Extract line number from JSON parse error
+      const errorLine = extractErrorLine(e.message, inputData.value);
+      if (errorLine) {
+        jsonErrorLine.value = errorLine;
         jsonError.value = e.message;
       }
       
@@ -258,6 +260,33 @@ async function runTest() {
   } finally {
     testLoading.value = false;
   }
+}
+
+// Extract line number from error message (JSON or YAML)
+function extractErrorLine(errorMessage, sourceContent = '') {
+  if (!errorMessage) return null;
+  
+  // Handle YAML errors from backend: "yaml-line X:", "yaml: line X:"
+  const yamlLineMatch = errorMessage.match(/yaml[:-]?line\s+(\d+)/i);
+  if (yamlLineMatch) {
+    return parseInt(yamlLineMatch[1]);
+  }
+  
+  // Handle general line format: "line X", "at line X"
+  const lineMatch = errorMessage.match(/(?:at\s+)?line\s+(\d+)/i);
+  if (lineMatch) {
+    return parseInt(lineMatch[1]);
+  }
+  
+  // Handle position-based errors: "position X"
+  const posMatch = errorMessage.match(/position\s+(\d+)/i);
+  if (posMatch && sourceContent) {
+    const position = parseInt(posMatch[1]);
+    const lines = sourceContent.substring(0, position).split('\n');
+    return lines.length;
+  }
+  
+  return null;
 }
 </script>
 

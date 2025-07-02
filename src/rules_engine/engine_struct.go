@@ -41,6 +41,7 @@ type Ruleset struct {
 
 	IsDetection bool
 	Rules       []Rule `xml:"rule"`
+	RulesCount  int
 
 	RulesByFilter map[string]*RulesByFilter
 
@@ -1374,6 +1375,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 		return errors.New("resource type only support whitelist or detection")
 	}
 
+	ruleset.RulesCount = len(ruleset.Rules)
 	for i := range ruleset.Rules {
 		rule := &ruleset.Rules[i]
 

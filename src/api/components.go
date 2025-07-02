@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1411,11 +1412,35 @@ func verifyComponent(c echo.Context) error {
 				Warnings: []rules_engine.ValidationWarning{},
 			}
 		}
+
+		// Extract line number from error message
+		errorMsg := err.Error()
+		lineNumber := 0
+
+		// Parse different error formats:
+		// 1. "YAML parse error: yaml-line X: ..." format
+		if match := regexp.MustCompile(`yaml-line\s+(\d+)`).FindStringSubmatch(errorMsg); len(match) > 1 {
+			if num, parseErr := strconv.Atoi(match[1]); parseErr == nil {
+				lineNumber = num
+			}
+		} else if match := regexp.MustCompile(`(\d+):(\d+):`).FindStringSubmatch(errorMsg); len(match) > 1 {
+			// 2. Plugin format: "failed to parse plugin code: 7:1: expected declaration, found asdsad"
+			if num, parseErr := strconv.Atoi(match[1]); parseErr == nil {
+				lineNumber = num
+			}
+		} else if match := regexp.MustCompile(`at line (\d+)`).FindStringSubmatch(errorMsg); len(match) > 1 {
+			// 3. Project format: "... not found at line 2"
+			if num, parseErr := strconv.Atoi(match[1]); parseErr == nil {
+				lineNumber = num
+			}
+		}
+
 		return &rules_engine.ValidationResult{
 			IsValid: false,
 			Errors: []rules_engine.ValidationError{
 				{
-					Message: err.Error(),
+					Line:    lineNumber,
+					Message: errorMsg,
 				},
 			},
 			Warnings: []rules_engine.ValidationWarning{},

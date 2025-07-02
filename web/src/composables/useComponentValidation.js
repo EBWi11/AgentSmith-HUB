@@ -60,7 +60,7 @@ export function useComponentValidation() {
       // Single error message  
       const lineNumber = extractLineNumber(data.error, componentType)
       errors = [{
-        line: lineNumber || 'Unknown',
+        line: lineNumber !== null ? lineNumber : 'Unknown',
         message: data.error,
         detail: data.detail || null
       }]
@@ -79,7 +79,13 @@ export function useComponentValidation() {
       warnings
     }
     
-    errorLines.value = errors.map(err => typeof err.line === 'number' ? err.line : extractLineNumber(err.message, componentType)).filter(Boolean)
+    errorLines.value = errors.map(err => {
+      if (typeof err.line === 'number') {
+        return err.line
+      }
+      const lineNumber = extractLineNumber(err.message, componentType)
+      return lineNumber !== null ? lineNumber : null
+    }).filter(line => line !== null && line !== undefined)
     showValidationPanel.value = true
     
     if (showMessages) {

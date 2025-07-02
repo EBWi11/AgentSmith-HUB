@@ -8,6 +8,7 @@ import (
 	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -59,10 +60,13 @@ func Verify(path string, raw string) error {
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		// Extract line number from error message
+		// Enhanced error parsing to extract accurate line numbers
+		errString := err.Error()
+
+		// Handle different types of YAML errors
 		if yamlErr, ok := err.(*yaml.TypeError); ok && len(yamlErr.Errors) > 0 {
+			// Type errors with multiple error messages
 			errMsg := yamlErr.Errors[0]
-			// Try to extract line number
 			lineInfo := ""
 			for _, line := range yamlErr.Errors {
 				if strings.Contains(line, "line") {
@@ -71,8 +75,17 @@ func Verify(path string, raw string) error {
 				}
 			}
 			return fmt.Errorf("failed to parse project configuration: %s (location: %s)", errMsg, lineInfo)
+		} else {
+			// General YAML parsing errors - extract line number from error string
+			// Common patterns: "yaml: line 10:", "at line 10", "line 10:"
+			linePattern := `(?i)(?:yaml: |at )?line (\d+)`
+			if match := regexp.MustCompile(linePattern).FindStringSubmatch(errString); len(match) > 1 {
+				lineNum := match[1]
+				return fmt.Errorf("YAML parse error: yaml-line %s: %s", lineNum, errString)
+			}
+			// If no line number found, return the error as-is but with consistent format
+			return fmt.Errorf("YAML parse error: %s", errString)
 		}
-		return fmt.Errorf("failed to parse project configuration: %w", err)
 	}
 
 	if strings.TrimSpace(cfg.Content) == "" {

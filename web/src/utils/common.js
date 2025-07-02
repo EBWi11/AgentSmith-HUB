@@ -167,7 +167,8 @@ export function extractLineNumber(errorMessage, componentType = null, editorCont
     return null
   }
   
-  const lineMatches = errorMessage.match(/at\s+line\s+(\d+)/i) ||
+  const lineMatches = errorMessage.match(/yaml[:-]?line\s+(\d+)/i) ||
+                      errorMessage.match(/at\s+line\s+(\d+)/i) ||
                       errorMessage.match(/line\s+(\d+)/i) || 
                       errorMessage.match(/line:\s*(\d+)/i) ||
                       errorMessage.match(/location:.*line\s*(\d+)/i) ||

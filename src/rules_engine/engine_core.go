@@ -317,6 +317,7 @@ func (r *Ruleset) HotUpdate(raw string, id string) (*Ruleset, error) {
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
 	ruleCache := make(map[string]common.CheckCoreCache, 8)
+	whiteListCount := 0
 
 	for _, rf := range r.RulesByFilter {
 		// Filter check process
@@ -399,11 +400,15 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 			if rule.Checklist.ConditionFlag {
 				ruleCheckRes = rule.Checklist.ConditionAST.ExprASTResult(rule.Checklist.ConditionAST.ExprAST, rule.Checklist.ConditionMap)
-			} else {
-				if r.IsDetection && checkListRes {
-					ruleCheckRes = true
-				} else if !r.IsDetection && !checkListRes {
-					ruleCheckRes = true
+			}
+
+			if r.IsDetection && checkListRes {
+				ruleCheckRes = true
+			} else if !r.IsDetection && !checkListRes {
+				whiteListCount = whiteListCount + 1
+				if whiteListCount == r.RulesCount {
+					dataCopy := common.MapDeepCopy(data)
+					finalRes = append(finalRes, dataCopy)
 				}
 			}
 
@@ -411,129 +416,131 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				continue
 			}
 
-			// Threshold process
-			if rule.ThresholdCheck {
-				var err error
-				ruleCheckRes = false
+			if r.IsDetection {
+				// Threshold process
+				if rule.ThresholdCheck {
+					var err error
+					ruleCheckRes = false
 
-				// Isolate by ruleset ID and rule ID
-				var groupByKey = rule.Threshold.GroupByID
-				for k, v := range rule.Threshold.GroupByList {
-					tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
-					groupByKey = groupByKey + tmpData
-				}
-				groupByKey = common.XXHash64(groupByKey)
-
-				switch rule.Threshold.CountType {
-				case "":
-					groupByKey = "F_" + groupByKey
-
-					if rule.Threshold.LocalCache {
-						ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
-					} else {
-						ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+					// Isolate by ruleset ID and rule ID
+					var groupByKey = rule.Threshold.GroupByID
+					for k, v := range rule.Threshold.GroupByList {
+						tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+						groupByKey = groupByKey + tmpData
 					}
+					groupByKey = common.XXHash64(groupByKey)
 
-				case "SUM":
-					groupByKey = "FS_" + groupByKey
+					switch rule.Threshold.CountType {
+					case "":
+						groupByKey = "F_" + groupByKey
 
-					sumDataStr, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-					if !ok {
-						break
-					}
-
-					sumData, err := strconv.Atoi(sumDataStr)
-					if err != nil {
-						break
-					}
-
-					if rule.Threshold.LocalCache {
-						ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
-					} else {
-						ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
-					}
-
-				case "CLASSIFY":
-					groupByKey = "FC_" + groupByKey
-					classifyData, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-					if !ok {
-						break
-					}
-
-					tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
-
-					if rule.Threshold.LocalCache {
-						ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
-					} else {
-						ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
-					}
-				}
-
-				if err != nil {
-					logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
-				}
-			}
-
-			if !ruleCheckRes {
-				continue
-			}
-
-			dataCopy := common.MapDeepCopy(data)
-
-			// Add rule info
-			addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
-
-			// Append process
-			for i := range rule.Appends {
-				tmpAppend := rule.Appends[i]
-				if tmpAppend.Type == "" {
-					appendData := tmpAppend.Value
-					if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
-						appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
-					}
-
-					dataCopy[tmpAppend.FieldName] = appendData
-				} else {
-					// Plugin
-					args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
-					res, ok, err := tmpAppend.Plugin.FuncEvalOther(args...)
-					if err == nil && ok {
-						if tmpAppend.FieldName == PluginArgFromRawSymbol {
-							if r, ok := res.(map[string]interface{}); ok {
-								res = common.MapDeepCopy(r)
-							} else {
-								logger.Error("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
-								res = nil
-							}
+						if rule.Threshold.LocalCache {
+							ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
+						} else {
+							ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
 						}
 
-						dataCopy[tmpAppend.FieldName] = res
+					case "SUM":
+						groupByKey = "FS_" + groupByKey
+
+						sumDataStr, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
+						if !ok {
+							break
+						}
+
+						sumData, err := strconv.Atoi(sumDataStr)
+						if err != nil {
+							break
+						}
+
+						if rule.Threshold.LocalCache {
+							ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+						} else {
+							ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
+						}
+
+					case "CLASSIFY":
+						groupByKey = "FC_" + groupByKey
+						classifyData, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
+						if !ok {
+							break
+						}
+
+						tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
+
+						if rule.Threshold.LocalCache {
+							ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+						} else {
+							ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
+						}
+					}
+
+					if err != nil {
+						logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
 					}
 				}
-			}
 
-			// Plugin process
-			for i := range rule.Plugins {
-				p := rule.Plugins[i]
-				args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
-
-				ok, err := p.Plugin.FuncEvalCheckNode(args...)
-				if err != nil {
-					logger.Error("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
+				if !ruleCheckRes {
+					continue
 				}
 
-				if !ok {
-					logger.Info("Plugin check failed", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+				dataCopy := common.MapDeepCopy(data)
+
+				// Add rule info
+				addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
+
+				// Append process
+				for i := range rule.Appends {
+					tmpAppend := rule.Appends[i]
+					if tmpAppend.Type == "" {
+						appendData := tmpAppend.Value
+						if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
+							appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
+						}
+
+						dataCopy[tmpAppend.FieldName] = appendData
+					} else {
+						// Plugin
+						args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
+						res, ok, err := tmpAppend.Plugin.FuncEvalOther(args...)
+						if err == nil && ok {
+							if tmpAppend.FieldName == PluginArgFromRawSymbol {
+								if r, ok := res.(map[string]interface{}); ok {
+									res = common.MapDeepCopy(r)
+								} else {
+									logger.Error("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
+									res = nil
+								}
+							}
+
+							dataCopy[tmpAppend.FieldName] = res
+						}
+					}
 				}
-			}
 
-			// Delete process
-			for i := range rule.DelList {
-				common.MapDel(dataCopy, rule.DelList[i])
-			}
+				// Plugin process
+				for i := range rule.Plugins {
+					p := rule.Plugins[i]
+					args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
 
-			// Add to final result
-			finalRes = append(finalRes, dataCopy)
+					ok, err := p.Plugin.FuncEvalCheckNode(args...)
+					if err != nil {
+						logger.Error("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
+					}
+
+					if !ok {
+						logger.Info("Plugin check failed", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+					}
+				}
+
+				// Delete process
+				for i := range rule.DelList {
+					common.MapDel(dataCopy, rule.DelList[i])
+				}
+
+				// Add to final result
+				finalRes = append(finalRes, dataCopy)
+			}
 		}
 	}
 
