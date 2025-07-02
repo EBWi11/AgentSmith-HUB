@@ -45,7 +45,7 @@ func readToken(create bool) (string, error) {
 	tokenPath := common.GetConfigPath(".token")
 	data, err := os.ReadFile(tokenPath)
 	if err == nil {
-		return string(data), nil
+		return strings.TrimSpace(string(data)), nil
 	}
 
 	// Leader creates a new token

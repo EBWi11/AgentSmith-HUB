@@ -218,15 +218,19 @@ func (cm *ClusterManager) SendHeartbeat() error {
 	}
 
 	// Send heartbeat to leader
-	heartbeatURL := fmt.Sprintf("http://%s/cluster/heartbeat", leaderAddr)
-	resp, err := http.Post(heartbeatURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to send heartbeat: %w", err)
-	}
-	defer resp.Body.Close()
+	heartbeatURL := fmt.Sprintf("%s/cluster/heartbeat", leaderAddr)
 
-	if resp.StatusCode != http.StatusOK {
+	req, _ := http.NewRequest("POST", heartbeatURL, bytes.NewBuffer(jsonData))
+	req.Header.Set("token", common.Config.Token)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil && resp.StatusCode < 300 {
 		return fmt.Errorf("heartbeat request failed with status: %d", resp.StatusCode)
+	}
+
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
 
 	return nil

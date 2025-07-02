@@ -32,7 +32,7 @@
     </div>
     
     <!-- Content wrapper -->
-    <div class="flex-1 flex flex-col" :class="props.collapsed ? 'px-2' : 'px-3'">
+    <div class="flex-1 flex flex-col min-h-0" :class="props.collapsed ? 'px-2' : 'px-3'">
       <!-- Search bar - only show when not collapsed -->
       <div v-if="!props.collapsed" class="mb-4">
         <div class="relative">
@@ -51,7 +51,7 @@
         </div>
       </div>
       <!-- Navigation -->
-      <div class="flex-1 overflow-y-auto custom-scrollbar">
+      <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <div v-for="(section, type) in sections" :key="type" class="mb-4">
         <!-- Regular sections -->
         <div>
@@ -2339,12 +2339,29 @@ function shouldShowConnectCheck(type, item) {
 </script>
 
 <style>
+/* Custom scrollbar for webkit browsers */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   background: transparent;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #e5e7eb;
+  background: #d1d5db;
   border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Firefox scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
 }
 </style> 
