@@ -122,6 +122,7 @@ function getStatusTitle(item) {
     stopping: `Project is stopping (${item.id})`,
     error: item.error ? `Project has errors: ${item.error}` : `Project has errors (${item.id})`
   }
+  
   return titles[item.status] || `Unknown status (${item.id})`
 }
-</script> 
+</script>

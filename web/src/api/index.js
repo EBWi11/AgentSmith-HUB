@@ -367,6 +367,11 @@ export const hubApi = {
     return response.data;
   },
 
+  async getClusterProjectStates() {
+    const response = await api.get('/cluster-project-states');
+    return response.data;
+  },
+
   async updatePlugin(id, raw) {
     try {
       // Ensure raw is a string

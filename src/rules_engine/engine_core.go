@@ -39,7 +39,7 @@ func (r *Ruleset) Start() error {
 
 	// Auto-scaling goroutine
 	go func() {
-		ticker := time.NewTicker(2 * time.Second)
+		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -52,14 +52,14 @@ func (r *Ruleset) Start() error {
 				}
 				targetSize := MinPoolSize
 				switch {
-				case totalBacklog > 1024:
+				case totalBacklog > 1000:
 					targetSize = MaxPoolSize
-				case totalBacklog > 256:
+				case totalBacklog > 512:
 					targetSize = 128
-				case totalBacklog > 64:
-					targetSize = 96
-				case totalBacklog > 16:
+				case totalBacklog > 256:
 					targetSize = 64
+				case totalBacklog > 32:
+					targetSize = 32
 				default:
 					targetSize = MinPoolSize
 				}
@@ -413,6 +413,9 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			}
 
 			if !ruleCheckRes {
+				if !r.IsDetection {
+					return finalRes
+				}
 				continue
 			}
 

@@ -100,6 +100,7 @@ func ServerStart(listener string) error {
 	auth.GET("/project-inputs/:id", getProjectInputs)
 	auth.GET("/project-components/:id", getProjectComponents)
 	auth.GET("/project-component-sequences/:id", getProjectComponentSequences)
+	auth.GET("/cluster-project-states", getClusterProjectStates)
 
 	// Ruleset endpoints (use plural form for consistency) - REQUIRE AUTH
 	auth.GET("/rulesets", getRulesets)

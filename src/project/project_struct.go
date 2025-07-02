@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
+	"time"
 )
 
 // ProjectStatus represents the current status of a project
@@ -46,9 +47,10 @@ type ProjectConfig struct {
 
 // Project represents a project
 type Project struct {
-	Id     string        `json:"id"`
-	Status ProjectStatus `json:"status"`
-	Err    error         `json:"-"`
+	Id              string        `json:"id"`
+	Status          ProjectStatus `json:"status"`
+	StatusChangedAt *time.Time    `json:"status_changed_at,omitempty"`
+	Err             error         `json:"-"`
 
 	Config *ProjectConfig `json:"config"`
 

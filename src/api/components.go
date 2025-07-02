@@ -233,7 +233,7 @@ type CtrlProjectRequest struct {
 
 func getProjects(c echo.Context) error {
 	p := project.GlobalProject
-	result := make([]map[string]interface{}, 0, 0)
+	result := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
@@ -265,10 +265,11 @@ func getProjects(c echo.Context) error {
 		}
 
 		projectData := map[string]interface{}{
-			"id":      proj.Id,
-			"status":  proj.Status,
-			"hasTemp": hasTemp,
-			"raw":     rawConfig,
+			"id":                proj.Id,
+			"status":            proj.Status,
+			"hasTemp":           hasTemp,
+			"raw":               rawConfig,
+			"status_changed_at": proj.StatusChangedAt,
 			"components": map[string]interface{}{
 				"inputs":   inputList,
 				"outputs":  outputList,
@@ -352,10 +353,11 @@ func getProject(c echo.Context) error {
 	// Get sample data for this project (for MCP interface optimization)
 	sampleData, dataSource, err := getSampleDataForProject(id)
 	response := map[string]interface{}{
-		"id":     p.Id,
-		"status": p.Status,
-		"raw":    p.Config.RawConfig,
-		"path":   formalPath,
+		"id":                p.Id,
+		"status":            p.Status,
+		"raw":               p.Config.RawConfig,
+		"path":              formalPath,
+		"status_changed_at": p.StatusChangedAt,
 	}
 	if err == nil && len(sampleData) > 0 {
 		response["sample_data"] = sampleData

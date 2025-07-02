@@ -130,15 +130,17 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 
 	_ = yaml.Unmarshal(data, &cfg)
 
+	now := time.Now()
 	p := &Project{
-		Id:          cfg.Id,
-		Status:      ProjectStatusStopped, // Default to stopped status, will be started by StartAllProject
-		Config:      &cfg,
-		Inputs:      make(map[string]*input.Input),
-		Outputs:     make(map[string]*output.Output),
-		Rulesets:    make(map[string]*rules_engine.Ruleset),
-		MsgChannels: make([]string, 0),
-		stopChan:    make(chan struct{}),
+		Id:              cfg.Id,
+		Status:          ProjectStatusStopped, // Default to stopped status, will be started by StartAllProject
+		StatusChangedAt: &now,
+		Config:          &cfg,
+		Inputs:          make(map[string]*input.Input),
+		Outputs:         make(map[string]*output.Output),
+		Rulesets:        make(map[string]*rules_engine.Ruleset),
+		MsgChannels:     make([]string, 0),
+		stopChan:        make(chan struct{}),
 		metrics: &ProjectMetrics{
 			InputQPS:  make(map[string]uint64),
 			OutputQPS: make(map[string]uint64),
@@ -147,7 +149,9 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 
 	// Initialize components
 	if err := p.initComponents(); err != nil {
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 		p.Err = err
 
 		// Save the error status to file
@@ -191,15 +195,17 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 
 	_ = yaml.Unmarshal(data, &cfg)
 
+	now := time.Now()
 	p := &Project{
-		Id:          cfg.Id,
-		Status:      ProjectStatusStopped, // Start as stopped for testing
-		Config:      &cfg,
-		Inputs:      make(map[string]*input.Input),
-		Outputs:     make(map[string]*output.Output),
-		Rulesets:    make(map[string]*rules_engine.Ruleset),
-		MsgChannels: make([]string, 0),
-		stopChan:    make(chan struct{}),
+		Id:              cfg.Id,
+		Status:          ProjectStatusStopped, // Start as stopped for testing
+		StatusChangedAt: &now,
+		Config:          &cfg,
+		Inputs:          make(map[string]*input.Input),
+		Outputs:         make(map[string]*output.Output),
+		Rulesets:        make(map[string]*rules_engine.Ruleset),
+		MsgChannels:     make([]string, 0),
+		stopChan:        make(chan struct{}),
 		metrics: &ProjectMetrics{
 			InputQPS:  make(map[string]uint64),
 			OutputQPS: make(map[string]uint64),
@@ -208,7 +214,9 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 
 	// Initialize components with independent instances for testing
 	if err := p.initComponentsForTesting(); err != nil {
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 		p.Err = err
 		return p, fmt.Errorf("failed to initialize test project components: %w", err)
 	}
@@ -791,7 +799,9 @@ func (p *Project) Start() error {
 
 	// Set status to starting immediately to prevent duplicate operations
 	if !isTestMode {
+		now := time.Now()
 		p.Status = ProjectStatusStarting
+		p.StatusChangedAt = &now
 		logger.Info("Project status set to starting", "id", p.Id)
 
 		// Save the starting status to file immediately
@@ -806,7 +816,9 @@ func (p *Project) Start() error {
 	// Parse project content to get component flow
 	flowGraph, err := p.parseContent()
 	if err != nil {
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 		p.Err = err
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
@@ -814,7 +826,9 @@ func (p *Project) Start() error {
 	// Load components from global registry
 	err = p.loadComponentsFromGlobal(flowGraph)
 	if err != nil {
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 		p.Err = err
 		return fmt.Errorf("failed to load components: %v", err)
 	}
@@ -822,7 +836,9 @@ func (p *Project) Start() error {
 	// Create fresh channel connections
 	err = p.createChannelConnections(flowGraph)
 	if err != nil {
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 		p.Err = err
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
@@ -841,7 +857,9 @@ func (p *Project) Start() error {
 				// Clean up already started components
 				p.cleanupComponentsOnStartupFailure()
 
+				now := time.Now()
 				p.Status = ProjectStatusError
+				p.StatusChangedAt = &now
 				p.Err = errorMsg
 				return errorMsg
 			}
@@ -858,7 +876,9 @@ func (p *Project) Start() error {
 					// Clean up already started components
 					p.cleanupComponentsOnStartupFailure()
 
+					now := time.Now()
 					p.Status = ProjectStatusError
+					p.StatusChangedAt = &now
 					p.Err = errorMsg
 					_ = p.SaveProjectStatus()
 					return errorMsg
@@ -881,7 +901,9 @@ func (p *Project) Start() error {
 				// Clean up already started components
 				p.cleanupComponentsOnStartupFailure()
 
+				now := time.Now()
 				p.Status = ProjectStatusError
+				p.StatusChangedAt = &now
 				p.Err = errorMsg
 				return errorMsg
 			}
@@ -898,7 +920,9 @@ func (p *Project) Start() error {
 					// Clean up already started components
 					p.cleanupComponentsOnStartupFailure()
 
+					now := time.Now()
 					p.Status = ProjectStatusError
+					p.StatusChangedAt = &now
 					p.Err = errorMsg
 					_ = p.SaveProjectStatus()
 					return errorMsg
@@ -921,7 +945,9 @@ func (p *Project) Start() error {
 				// Clean up already started components
 				p.cleanupComponentsOnStartupFailure()
 
+				now := time.Now()
 				p.Status = ProjectStatusError
+				p.StatusChangedAt = &now
 				p.Err = errorMsg
 				return errorMsg
 			}
@@ -938,7 +964,9 @@ func (p *Project) Start() error {
 					// Clean up already started components
 					p.cleanupComponentsOnStartupFailure()
 
+					now := time.Now()
 					p.Status = ProjectStatusError
+					p.StatusChangedAt = &now
 					p.Err = errorMsg
 					_ = p.SaveProjectStatus()
 					return errorMsg
@@ -957,7 +985,9 @@ func (p *Project) Start() error {
 		p.collectMetrics()
 	}()
 
+	now := time.Now()
 	p.Status = ProjectStatusRunning
+	p.StatusChangedAt = &now
 
 	// Save the running status to file (skip in test mode)
 	if !isTestMode {
@@ -1171,7 +1201,9 @@ func (p *Project) stopComponents() error {
 	}
 
 	// Set status to stopped and save
+	now := time.Now()
 	p.Status = ProjectStatusStopped
+	p.StatusChangedAt = &now
 	err := p.SaveProjectStatus()
 	if err != nil {
 		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
@@ -1191,7 +1223,9 @@ func (p *Project) Stop() error {
 	}
 
 	// Set status to stopping immediately to prevent duplicate operations
+	now := time.Now()
 	p.Status = ProjectStatusStopping
+	p.StatusChangedAt = &now
 	logger.Info("Project status set to stopping", "id", p.Id)
 
 	// Save the stopping status to file immediately
@@ -1231,7 +1265,9 @@ func (p *Project) Stop() error {
 		return nil
 	case <-overallTimeout:
 		logger.Error("Project stop timeout exceeded", "project", p.Id)
+		now := time.Now()
 		p.Status = ProjectStatusError
+		p.StatusChangedAt = &now
 
 		// Save the error status to file
 		if err := p.SaveProjectStatus(); err != nil {
