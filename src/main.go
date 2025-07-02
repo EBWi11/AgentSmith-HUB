@@ -511,6 +511,9 @@ func main() {
 		cl.SetLeader(common.Config.LocalIP, common.Config.LocalIP)
 		cl.StartHeartbeatLoop()
 
+		// Start project states sync loop for leader
+		cl.StartProjectStatesSyncLoop()
+
 		//leader read local config
 		err := loadHubConfig(*configRoot)
 		if err != nil {

@@ -23,11 +23,7 @@ import (
 )
 
 func handleHeartbeat(c echo.Context) error {
-	var payload struct {
-		NodeID    string `json:"node_id"`
-		NodeAddr  string `json:"node_addr"`
-		Timestamp string `json:"timestamp"`
-	}
+	var payload cluster.HeartbeatMessage
 
 	if err := c.Bind(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -69,6 +65,34 @@ func getClusterStatus(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, cm.GetClusterStatus())
+}
+
+func getClusterProjectStates(c echo.Context) error {
+	cm := cluster.ClusterInstance
+	if cm == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "cluster manager not initialized",
+		})
+	}
+
+	// Allow all nodes to provide cluster project states for read-only access
+	// Non-leader nodes will return what they know about the cluster state
+
+	cm.Mu.RLock()
+	nodeProjectStates := make(map[string][]cluster.ProjectStatus)
+	for nodeID, projectStates := range cm.NodeProjectStates {
+		nodeProjectStates[nodeID] = projectStates
+	}
+	clusterStatus := cm.GetClusterStatus()
+	cm.Mu.RUnlock()
+
+	// Combine cluster status and project states
+	response := map[string]interface{}{
+		"cluster_status": clusterStatus,
+		"project_states": nodeProjectStates,
+	}
+
+	return c.JSON(http.StatusOK, response)
 }
 
 func tokenCheck(c echo.Context) error {

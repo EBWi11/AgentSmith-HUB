@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,13 @@ type NodeInfo struct {
 	LastSeen  time.Time  `json:"last_seen"`
 	IsHealthy bool       `json:"is_healthy"`
 	MissCount int        `json:"miss_count"` // Count of consecutive missed heartbeats
+}
+
+// ProjectStatus represents a project's current status
+type ProjectStatus struct {
+	ID              string     `json:"id"`
+	Status          string     `json:"status"`
+	StatusChangedAt *time.Time `json:"status_changed_at,omitempty"`
 }
 
 // HeartbeatMessage represents a heartbeat message sent to the leader
@@ -74,6 +82,9 @@ type ClusterManager struct {
 	stopHeartbeatMonitor  chan struct{}
 	stopFollowerHeartbeat chan struct{}
 	startTime             time.Time
+
+	// Node project states storage (only used by leader)
+	NodeProjectStates map[string][]ProjectStatus
 }
 
 var (
@@ -97,6 +108,7 @@ func ClusterInit(selfID, selfAddress string) *ClusterManager {
 		CleanupInterval:   10 * time.Second,
 		MaxMissCount:      3, // Remove node after 3 consecutive missed heartbeats
 		stopChan:          make(chan struct{}),
+		NodeProjectStates: make(map[string][]ProjectStatus),
 	}
 
 	return ClusterInstance
@@ -393,6 +405,9 @@ func StartAsLeader(config *ClusterConfig) error {
 	// Start heartbeat monitoring (for monitoring followers)
 	go cm.monitorHeartbeats()
 
+	// Start project states sync loop
+	cm.StartProjectStatesSyncLoop()
+
 	logger.Info("Cluster leader started", "node_id", config.NodeID, "listen_addr", config.ListenAddr)
 	return nil
 }
@@ -422,4 +437,161 @@ func (cm *ClusterManager) monitorHeartbeats() {
 			return
 		}
 	}
+}
+
+// StartProjectStatesSyncLoop starts leader's project states synchronization loop
+func (cm *ClusterManager) StartProjectStatesSyncLoop() {
+	if !cm.IsLeader() {
+		return // Only leader does project states sync
+	}
+
+	logger.Info("Starting project states sync loop as leader")
+	// Execute sync immediately on startup
+	go cm.syncAllNodesProjectStates()
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second) // Sync every 10 seconds
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				cm.syncAllNodesProjectStates()
+			case <-cm.stopChan:
+				return
+			}
+		}
+	}()
+}
+
+// syncAllNodesProjectStates syncs project states from all nodes (including self)
+func (cm *ClusterManager) syncAllNodesProjectStates() {
+	cm.Mu.RLock()
+	nodesToSync := make(map[string]string) // nodeID -> address
+
+	// Add self - use localhost with extracted port for API access
+	selfPort := extractPortFromAddress(cm.SelfAddress)
+	if selfPort == "" {
+		selfPort = "8080" // fallback to default port
+	}
+	nodesToSync[cm.SelfID] = fmt.Sprintf("127.0.0.1:%s", selfPort)
+
+	// Add all follower nodes
+	for nodeID, node := range cm.Nodes {
+		if node.IsHealthy {
+			nodesToSync[nodeID] = node.Address
+		}
+	}
+	cm.Mu.RUnlock()
+
+	logger.Debug("Syncing project states from nodes", "node_count", len(nodesToSync))
+
+	// Sync from each node
+	for nodeID, address := range nodesToSync {
+		var projectStates []ProjectStatus
+
+		// Leader node: get project states directly from local
+		if nodeID == cm.SelfID {
+			projectStates = cm.getLocalProjectStates()
+		} else {
+			// Other nodes: fetch via HTTP API
+			projectStates = cm.fetchProjectStatesFromNode(nodeID, address)
+		}
+
+		if len(projectStates) >= 0 { // Even empty states are valid
+			cm.Mu.Lock()
+			cm.NodeProjectStates[nodeID] = projectStates
+			cm.Mu.Unlock()
+			logger.Debug("Updated project states for node", "node_id", nodeID, "project_count", len(projectStates))
+		}
+	}
+}
+
+// fetchProjectStatesFromNode fetches project states from a specific node
+func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []ProjectStatus {
+	// Extract port from address
+	port := extractPortFromAddress(address)
+	if port == "" {
+		logger.Debug("Failed to extract port from address", "node_id", nodeID, "address", address)
+		return nil
+	}
+
+	// Create request - correct API path is /projects, not /api/projects
+	url := fmt.Sprintf("http://localhost:%s/projects", port)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		logger.Debug("Failed to create request for project states", "node_id", nodeID, "error", err)
+		return nil
+	}
+
+	// Add authorization header if token is available
+	if common.Config.Token != "" {
+		req.Header.Set("token", common.Config.Token)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Debug("Failed to get project states from node", "node_id", nodeID, "error", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Debug("Failed to get project states from node", "node_id", nodeID, "status", resp.StatusCode)
+		return nil
+	}
+
+	var projects []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
+		logger.Debug("Failed to decode project states from node", "node_id", nodeID, "error", err)
+		return nil
+	}
+
+	// Convert to ProjectStatus format
+	projectStates := make([]ProjectStatus, 0, len(projects))
+	for _, proj := range projects {
+		if id, ok := proj["id"].(string); ok {
+			if status, ok := proj["status"].(string); ok {
+				projectState := ProjectStatus{
+					ID:     id,
+					Status: status,
+				}
+
+				// Try to parse status_changed_at if available
+				if statusChangedAt, ok := proj["status_changed_at"]; ok && statusChangedAt != nil {
+					if statusTimeStr, ok := statusChangedAt.(string); ok {
+						if statusTime, err := time.Parse(time.RFC3339, statusTimeStr); err == nil {
+							projectState.StatusChangedAt = &statusTime
+						}
+					}
+				}
+
+				projectStates = append(projectStates, projectState)
+			}
+		}
+	}
+
+	return projectStates
+}
+
+// getLocalProjectStates gets project states from local API
+func (cm *ClusterManager) getLocalProjectStates() []ProjectStatus {
+	// Use localhost with extracted port for local API access
+	selfPort := extractPortFromAddress(cm.SelfAddress)
+	if selfPort == "" {
+		selfPort = "8080" // fallback to default port
+	}
+	localAddress := fmt.Sprintf("127.0.0.1:%s", selfPort)
+	return cm.fetchProjectStatesFromNode(cm.SelfID, localAddress)
+}
+
+// extractPortFromAddress extracts port from address format like "127.0.0.1:8080"
+func extractPortFromAddress(address string) string {
+	// Extract port from "127.0.0.1:8080" format
+	parts := strings.Split(address, ":")
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return "8080" // default port
 }

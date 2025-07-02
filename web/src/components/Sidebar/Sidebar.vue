@@ -332,6 +332,15 @@
                         Test Project
                       </a>
                       
+                      <!-- Cluster Status action for projects -->
+                      <a v-if="type === 'projects'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openClusterStatusModal(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                        </svg>
+                        Cluster Status
+                      </a>
+                      
                       <!-- Copy name action -->
                       <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="copyName(item)">
@@ -866,6 +875,99 @@
         </div>
       </div>
     </div>
+    
+    <!-- Cluster Status Modal -->
+    <div v-if="showClusterStatusModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-2/3 max-w-4xl">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg font-medium">Cluster Project Status - {{ selectedProjectForCluster?.name || selectedProjectForCluster?.id }}</h3>
+          <button @click="closeClusterStatusModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 max-h-[70vh] overflow-auto">
+          <div v-if="clusterProjectStatesLoading" class="flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+          <div v-else-if="clusterProjectStatesError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-red-700">{{ clusterProjectStatesError }}</p>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="!clusterProjectStates?.project_states || Object.keys(clusterProjectStates.project_states).length === 0" class="text-center text-gray-500 py-8">
+            No cluster data available
+          </div>
+          <div v-else>
+            <!-- Simple table showing project status across nodes -->
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Node</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Updated</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <tr v-for="(projects, nodeId) in clusterProjectStates.project_states" :key="nodeId">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {{ nodeId }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                      <span v-if="nodeId === clusterProjectStates.cluster_status?.leader_id" 
+                            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        Leader
+                      </span>
+                      <span v-else class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        Follower
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                      <template v-if="getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
+                        <span :class="'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ' + getStatusColorClass(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status)">
+                          {{ getStatusDisplayText(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status) }}
+                        </span>
+                      </template>
+                      <template v-else>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                          Not Found
+                        </span>
+                      </template>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <template v-if="getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
+                        {{ getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at ? 
+                            new Date(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at).toLocaleString() : 
+                            'Unknown' }}
+                      </template>
+                      <template v-else>
+                        -
+                      </template>
+                    </td>
+                  </tr>
+                  <!-- Show empty row if no nodes have project states -->
+                  <tr v-if="Object.keys(clusterProjectStates.project_states).length === 0">
+                    <td colspan="4" class="px-6 py-4 text-center text-gray-500">
+                      No nodes found
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -1018,6 +1120,13 @@ const sampleDataLoading = ref(false)
 const sampleDataError = ref(null)
 const sampleData = ref({})
 
+// Cluster Status Modal states
+const showClusterStatusModal = ref(false)
+const selectedProjectForCluster = ref(null)
+const clusterProjectStatesLoading = ref(false)
+const clusterProjectStatesError = ref(null)
+const clusterProjectStates = ref({})
+
 // Flag variable to track if ESC key listener is added
 const escKeyListenerAdded = ref(false)
 
@@ -1140,6 +1249,9 @@ function closeActiveModal() {
       break
     case 'sampleData':
       closeSampleDataModal()
+      break
+    case 'clusterStatus':
+      closeClusterStatusModal()
       break
   }
   
@@ -1807,6 +1919,17 @@ function openTestProject(item) {
   closeAllMenus();
 }
 
+// Open cluster status modal
+function openClusterStatusModal(item) {
+  selectedProjectForCluster.value = item;
+  showClusterStatusModal.value = true;
+  activeModal.value = 'clusterStatus';
+  loadClusterProjectStates(item.id || item.name);
+  addEscKeyListener();
+  // Ensure menus are closed
+  closeAllMenus();
+}
+
 // Add plugin parameter
 function addPluginArg() {
   testPluginArgs.value.push({ value: '' })
@@ -2335,6 +2458,64 @@ function shouldShowConnectCheck(type, item) {
   
   // Other types do NOT show Connect Check
   return false;
+}
+
+// Load cluster project states
+async function loadClusterProjectStates(projectId) {
+  clusterProjectStatesLoading.value = true;
+  clusterProjectStatesError.value = null;
+  clusterProjectStates.value = {};
+  
+  try {
+    const response = await hubApi.getClusterProjectStates();
+    clusterProjectStates.value = response || {};
+  } catch (error) {
+    clusterProjectStatesError.value = error.message || 'Failed to fetch cluster project states';
+  } finally {
+    clusterProjectStatesLoading.value = false;
+  }
+}
+
+// Close cluster status modal
+function closeClusterStatusModal() {
+  showClusterStatusModal.value = false;
+  selectedProjectForCluster.value = null;
+  clusterProjectStatesLoading.value = false;
+  clusterProjectStatesError.value = null;
+  clusterProjectStates.value = {};
+  activeModal.value = null;
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener();
+  }
+}
+
+// Get status display text
+function getStatusDisplayText(status) {
+  const statusMap = {
+    'running': 'Running',
+    'stopped': 'Stopped', 
+    'starting': 'Starting',
+    'stopping': 'Stopping',
+    'error': 'Error'
+  };
+  return statusMap[status] || status;
+}
+
+// Get status color class
+function getStatusColorClass(status) {
+  const colorMap = {
+    'running': 'text-green-600 bg-green-100',
+    'stopped': 'text-gray-600 bg-gray-100',
+    'starting': 'text-blue-600 bg-blue-100', 
+    'stopping': 'text-orange-600 bg-orange-100',
+    'error': 'text-red-600 bg-red-100'
+  };
+  return colorMap[status] || 'text-gray-600 bg-gray-100';
+}
+
+function getProjectStatusForNode(projects, projectId) {
+  return projects.find(project => project.id === projectId);
 }
 </script>
 

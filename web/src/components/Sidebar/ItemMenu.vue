@@ -96,11 +96,20 @@
         @click="$emit('action', 'test-output', { type: 'outputs', id: item.id || item.name })"
       />
       
+      <!-- Test Project -->
       <MenuItem 
         v-if="type === 'projects'"
         icon="test"
         text="Test Project"
         @click="$emit('action', 'test-project', { type: 'projects', id: item.id || item.name })"
+      />
+      
+      <!-- Cluster Status for projects -->
+      <MenuItem 
+        v-if="type === 'projects'"
+        icon="cluster"
+        text="Cluster Status"
+        @click="$emit('action', 'cluster-status')"
       />
       
       <!-- Copy name action -->
@@ -139,6 +148,11 @@ const props = defineProps({
 })
 
 defineEmits(['action', 'close'])
+
+// Icon definitions for menu items
+const iconPaths = {
+  cluster: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z'
+}
 
 // Computed properties for menu visibility
 const showEdit = computed(() => {
