@@ -328,12 +328,18 @@ onMounted(() => {
 })
 
 // Methods
+function toLocalISOString(date) {
+  // 生成本地时区的 yyyy-MM-ddTHH:mm 字符串
+  const pad = n => n < 10 ? '0' + n : n
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+}
+
 function setDefaultTimeRange() {
   const now = new Date()
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
   
-  filters.value.startDate = twentyFourHoursAgo.toISOString().slice(0, 16)
-  filters.value.endDate = now.toISOString().slice(0, 16)
+  filters.value.startDate = toLocalISOString(twentyFourHoursAgo)
+  filters.value.endDate = toLocalISOString(now)
 }
 
 function handleTimeRangeChange() {
@@ -358,8 +364,8 @@ function handleTimeRangeChange() {
         startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
     }
     
-    filters.value.startDate = startTime.toISOString().slice(0, 16)
-    filters.value.endDate = now.toISOString().slice(0, 16)
+    filters.value.startDate = toLocalISOString(startTime)
+    filters.value.endDate = toLocalISOString(now)
   }
   
   applyFilters()
@@ -384,11 +390,14 @@ async function fetchOperationsHistory() {
     if (filters.value.keyword) {
       params.append('keyword', filters.value.keyword)
     }
+    // 用本地时间字符串拼接ISO格式，带本地时区
     if (filters.value.startDate) {
-      params.append('start_time', new Date(filters.value.startDate).toISOString())
+      const start = new Date(filters.value.startDate)
+      params.append('start_time', start.toISOString())
     }
     if (filters.value.endDate) {
-      params.append('end_time', new Date(filters.value.endDate).toISOString())
+      const end = new Date(filters.value.endDate)
+      params.append('end_time', end.toISOString())
     }
     
     params.append('limit', pageSize.value.toString())
