@@ -114,10 +114,15 @@ func StartProject(c echo.Context) error {
 
 	// Start the project
 	if err := p.Start(); err != nil {
+		// Record failed operation
+		RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "failed", err.Error(), nil)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to start project: %v", err),
 		})
 	}
+
+	// Record successful operation
+	RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "success", "", nil)
 
 	// Sync status to followers
 	go syncProjectStatusToFollowers(req.ProjectID, "start")
@@ -167,10 +172,15 @@ func StopProject(c echo.Context) error {
 
 	// Stop the project
 	if err := p.Stop(); err != nil {
+		// Record failed operation
+		RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "failed", err.Error(), nil)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to stop project: %v", err),
 		})
 	}
+
+	// Record successful operation
+	RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "success", "", nil)
 
 	// Sync status to followers
 	go syncProjectStatusToFollowers(req.ProjectID, "stop")
@@ -232,10 +242,15 @@ func RestartProject(c echo.Context) error {
 
 	// Start the project
 	if err := p.Start(); err != nil {
+		// Record failed operation
+		RecordProjectOperation(OpTypeProjectRestart, req.ProjectID, "failed", err.Error(), nil)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to start project: %v", err),
 		})
 	}
+
+	// Record successful operation
+	RecordProjectOperation(OpTypeProjectRestart, req.ProjectID, "success", "", nil)
 
 	// Sync status to followers
 	go syncProjectStatusToFollowers(req.ProjectID, "restart")

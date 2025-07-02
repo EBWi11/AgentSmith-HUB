@@ -106,6 +106,12 @@ const routes = [
         meta: { requiresAuth: true, componentType: 'load-local-components' }
       },
       {
+        path: 'operations-history',
+        name: 'OperationsHistory',
+        component: () => import('../components/OperationsHistory.vue'),
+        meta: { requiresAuth: true, componentType: 'operations-history' }
+      },
+      {
         path: 'error-logs',
         name: 'ErrorLogs',
         component: ErrorLogs,

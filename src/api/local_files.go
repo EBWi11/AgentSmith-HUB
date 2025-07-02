@@ -578,6 +578,11 @@ func loadLocalChanges(c echo.Context) error {
 		if err != nil {
 			success = false
 			message = "failed to load component: " + err.Error()
+			// Record failed operation
+			RecordLocalPush(componentType, id, content, "failed", err.Error())
+		} else {
+			// Record successful operation
+			RecordLocalPush(componentType, id, content, "success", "")
 		}
 
 		results = append(results, map[string]interface{}{
@@ -644,8 +649,13 @@ func loadSingleLocalChange(c echo.Context) error {
 	// Load directly into official component storage
 	err = loadComponentDirectly(req.Type, req.ID, content)
 	if err != nil {
+		// Record failed operation
+		RecordLocalPush(req.Type, req.ID, content, "failed", err.Error())
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load component: " + err.Error()})
 	}
+
+	// Record successful operation
+	RecordLocalPush(req.Type, req.ID, content, "success", "")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success":   true,

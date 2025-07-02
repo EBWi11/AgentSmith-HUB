@@ -1103,6 +1103,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				// Sync to follower nodes
 				syncComponentToFollowers("plugin", name)
 
+				// Record operation history
+				var oldContent string
+				if existingPlugin, exists := plugin.Plugins[name]; exists {
+					oldContent = string(existingPlugin.Payload)
+				}
+				RecordChangePush("plugin", name, oldContent, content, "", "success", "")
+
 				// Get affected projects and add them to restart list
 				affectedProjects := project.GetAffectedProjects("plugin", name)
 				for _, projectID := range affectedProjects {
@@ -1173,6 +1180,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				// Sync to follower nodes
 				syncComponentToFollowers("input", id)
 
+				// Record operation history
+				var oldContent string
+				if exists {
+					oldContent = oldInput.Config.RawConfig
+				}
+				RecordChangePush("input", id, oldContent, content, "", "success", "")
+
 				// Get affected projects
 				affectedProjects := project.GetAffectedProjects("input", id)
 				for _, projectID := range affectedProjects {
@@ -1242,6 +1256,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				// Sync to follower nodes
 				syncComponentToFollowers("output", id)
 
+				// Record operation history
+				var oldContent string
+				if exists {
+					oldContent = oldOutput.Config.RawConfig
+				}
+				RecordChangePush("output", id, oldContent, content, "", "success", "")
+
 				// Get affected projects
 				affectedProjects := project.GetAffectedProjects("output", id)
 				for _, projectID := range affectedProjects {
@@ -1310,6 +1331,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				successCount++
 				// Sync to follower nodes
 				syncComponentToFollowers("ruleset", id)
+
+				// Record operation history
+				var oldContent string
+				if exists {
+					oldContent = oldRuleset.RawConfig
+				}
+				RecordChangePush("ruleset", id, oldContent, content, "", "success", "")
 
 				// Get affected projects
 				affectedProjects := project.GetAffectedProjects("ruleset", id)
@@ -1381,6 +1409,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				successCount++
 				// Sync to follower nodes
 				syncComponentToFollowers("project", id)
+
+				// Record operation history
+				var oldContent string
+				if exists {
+					oldContent = oldProject.Config.RawConfig
+				}
+				RecordChangePush("project", id, oldContent, content, "", "success", "")
 
 				// Get affected projects (the project itself and projects that depend on it)
 				affectedProjects := project.GetAffectedProjects("project", id)

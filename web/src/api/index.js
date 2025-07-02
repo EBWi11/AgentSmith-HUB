@@ -1471,6 +1471,28 @@ export const hubApi = {
       console.error('Error searching components:', error);
       throw error;
     }
+  },
+
+  // Operations History API functions
+  async getOperationsHistory(params = '') {
+    try {
+      const url = '/operations-history' + (params ? '?' + params : '');
+      const response = await api.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching operations history:', error);
+      throw error;
+    }
+  },
+
+  async getOperationsStats() {
+    try {
+      const response = await api.get('/operations-stats');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching operations stats:', error);
+      throw error;
+    }
   }
 };
 

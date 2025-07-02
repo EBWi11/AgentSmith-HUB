@@ -18,7 +18,7 @@
       <main class="flex-1 bg-gray-50 transition-all duration-300">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'error-logs'" 
+          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -33,6 +33,7 @@
           v-else-if="selected && selected.type === 'load-local-components'" 
           @refresh-list="handleRefreshList"
         />
+        <OperationsHistory v-else-if="selected && selected.type === 'operations-history'" />
         <ErrorLogs v-else-if="selected && selected.type === 'error-logs'" />
       </main>
     </div>
@@ -69,6 +70,7 @@ import ComponentDetail from '../components/ComponentDetail.vue'
 import ClusterStatus from '../components/ClusterStatus.vue'
 import PendingChanges from '../components/PendingChanges.vue'
 import LoadLocalComponents from '../components/LoadLocalComponents.vue'
+import OperationsHistory from '../components/OperationsHistory.vue'
 import ErrorLogs from '../views/ErrorLogs.vue'
 import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
@@ -100,8 +102,8 @@ onMounted(() => {
         type: 'home',
         _timestamp: Date.now()
       }
-    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'error-logs') {
-      // For cluster, pending-changes, load-local-components, and error-logs, no ID needed
+    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'error-logs') {
+      // For cluster, pending-changes, load-local-components, operations-history, and error-logs, no ID needed
       selected.value = {
         type: meta.componentType,
         _timestamp: Date.now()
@@ -134,8 +136,8 @@ watch(
             _timestamp: Date.now()
           }
         }
-      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'error-logs') {
-        // For cluster, pending-changes, load-local-components, and error-logs, no ID needed
+      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'error-logs') {
+        // For cluster, pending-changes, load-local-components, operations-history, and error-logs, no ID needed
         if (!selected.value || selected.value.type !== componentType) {
           selected.value = {
             type: componentType,
@@ -166,8 +168,8 @@ watch(
       if (newVal.type === 'home') {
         // For home page, use base app path
         expectedPath = '/app'
-      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components' || newVal.type === 'error-logs') {
-        // For cluster, pending-changes, load-local-components, and error-logs, no ID in URL
+      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components' || newVal.type === 'operations-history' || newVal.type === 'error-logs') {
+        // For cluster, pending-changes, load-local-components, operations-history, and error-logs, no ID in URL
         expectedPath = `/app/${newVal.type}`
       } else if (newVal.id) {
         // For regular components, include ID in URL

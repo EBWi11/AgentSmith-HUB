@@ -207,6 +207,10 @@ func ServerStart(listener string) error {
 	auth.GET("/error-logs", getErrorLogs)
 	auth.GET("/cluster-error-logs", getClusterErrorLogs)
 
+	// Operations history endpoints - REQUIRE AUTH
+	auth.GET("/operations-history", GetOperationsHistory)
+	auth.GET("/operations-stats", GetOperationsStats)
+
 	// MCP (Model Context Protocol) endpoints - REQUIRE AUTH
 	auth.POST("/mcp", handleMCP)              // Main MCP JSON-RPC endpoint
 	auth.GET("/mcp", handleMCP)               // MCP SSE endpoint (for Cline and similar clients)
