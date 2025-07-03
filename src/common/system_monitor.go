@@ -144,13 +144,14 @@ func (sm *SystemMonitor) collectMetrics() {
 	sm.dataPoints = append(sm.dataPoints, dataPoint)
 	sm.mutex.Unlock()
 
-	logger.Debug("System metrics collected",
-		"node_id", sm.nodeID,
-		"cpu_percent", cpuPercent,
-		"memory_used_mb", memoryUsedMB,
-		"memory_percent", memoryPercent,
-		"system_memory_gb", systemMemoryGB,
-		"goroutines", goroutineCount)
+	// Remove debug log to reduce log volume
+	// logger.Debug("System metrics collected",
+	// 	"node_id", sm.nodeID,
+	// 	"cpu_percent", cpuPercent,
+	// 	"memory_used_mb", memoryUsedMB,
+	// 	"memory_percent", memoryPercent,
+	// 	"system_memory_gb", systemMemoryGB,
+	// 	"goroutines", goroutineCount)
 }
 
 // calculateCPUPercent calculates CPU usage percentage for the current process using real CPU time
@@ -448,10 +449,11 @@ func (csm *ClusterSystemManager) AddSystemMetrics(metrics *SystemMetrics) {
 	metrics.Timestamp = time.Now()
 	csm.data[metrics.NodeID] = metrics
 
-	logger.Debug("System metrics added for node",
-		"node_id", metrics.NodeID,
-		"cpu_percent", metrics.CPUPercent,
-		"memory_mb", metrics.MemoryUsedMB)
+	// Reduce log verbosity: only log when needed for debugging
+	// logger.Debug("System metrics added for node",
+	// 	"node_id", metrics.NodeID,
+	// 	"cpu_percent", metrics.CPUPercent,
+	// 	"memory_mb", metrics.MemoryUsedMB)
 }
 
 // GetNodeMetrics returns system metrics for a specific node

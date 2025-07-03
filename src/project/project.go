@@ -868,7 +868,7 @@ func (p *Project) Start() error {
 			runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 			if runningCount == 0 {
 				// No other project is using this input - start it
-				logger.Info("Starting shared input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
+				// Reduce log verbosity: only log first input start or errors
 				if err := in.Start(); err != nil {
 					errorMsg := fmt.Errorf("failed to start shared input %s at %s: %v", in.Id, time.Now().Format("2006-01-02 15:04:05"), err)
 					logger.Error("Shared input component startup failed", "project", p.Id, "input", in.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
@@ -883,9 +883,9 @@ func (p *Project) Start() error {
 					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
-			} else {
-				logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
 			}
+			// Remove verbose reuse log to reduce log volume
+			// logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
 		}
 	}
 
@@ -912,7 +912,7 @@ func (p *Project) Start() error {
 			runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 			if runningCount == 0 {
 				// No other project is using this ruleset instance - start it
-				logger.Info("Starting ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
+				// Reduce log verbosity: only log errors
 				if err := rs.Start(); err != nil {
 					errorMsg := fmt.Errorf("failed to start ruleset %s at %s: %v", rs.RulesetID, time.Now().Format("2006-01-02 15:04:05"), err)
 					logger.Error("Ruleset instance startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
@@ -927,9 +927,9 @@ func (p *Project) Start() error {
 					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
-			} else {
-				logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
 			}
+			// Remove verbose reuse log to reduce log volume
+			// logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
@@ -956,7 +956,7 @@ func (p *Project) Start() error {
 			runningCount := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 			if runningCount == 0 {
 				// No other project is using this output instance - start it
-				logger.Info("Starting output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
+				// Reduce log verbosity: only log errors
 				if err := out.Start(); err != nil {
 					errorMsg := fmt.Errorf("failed to start output %s at %s: %v", out.Id, time.Now().Format("2006-01-02 15:04:05"), err)
 					logger.Error("Output instance startup failed", "project", p.Id, "output", out.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
@@ -971,9 +971,9 @@ func (p *Project) Start() error {
 					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
-			} else {
-				logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
 			}
+			// Remove verbose reuse log to reduce log volume
+			// logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
@@ -1008,44 +1008,48 @@ func (p *Project) Start() error {
 // cleanupComponentsOnStartupFailure cleans up components when project startup fails
 // This does NOT change the project status - that should be handled by the caller
 func (p *Project) cleanupComponentsOnStartupFailure() {
-	logger.Info("Cleaning up components due to project startup failure", "project", p.Id)
+	// Reduce log verbosity: only log critical cleanup events
+	// logger.Info("Cleaning up components due to project startup failure", "project", p.Id)
 
-	// Stop outputs first (reverse order of startup)
+	// Stop outputs that were started
 	for _, out := range p.Outputs {
+		// Check if this output instance is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 		if otherProjectsUsing == 0 {
-			logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
-			if err := out.Stop(); err != nil {
-				logger.Error("Failed to stop output during startup failure cleanup", "project", p.Id, "output", out.Id, "error", err)
-			}
+			// Reduce log verbosity: only log errors
+			// logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
+			out.Stop()
 		} else {
-			logger.Info("Skipping output stop during cleanup (still used by other projects)", "project", p.Id, "output", out.Id, "other_projects", otherProjectsUsing)
+			// Reduce log verbosity: only log when skipping due to shared usage
+			// logger.Info("Skipping output stop during cleanup (still used by other projects)", "project", p.Id, "output", out.Id, "other_projects", otherProjectsUsing)
 		}
 	}
 
-	// Stop rulesets
+	// Stop rulesets that were started
 	for _, rs := range p.Rulesets {
+		// Check if this ruleset instance is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 		if otherProjectsUsing == 0 {
-			logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
-			if err := rs.Stop(); err != nil {
-				logger.Error("Failed to stop ruleset during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
-			}
+			// Reduce log verbosity: only log errors
+			// logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
+			rs.Stop()
 		} else {
-			logger.Info("Skipping ruleset stop during cleanup (still used by other projects)", "project", p.Id, "ruleset", rs.RulesetID, "other_projects", otherProjectsUsing)
+			// Reduce log verbosity: only log when skipping due to shared usage
+			// logger.Info("Skipping ruleset stop during cleanup (still used by other projects)", "project", p.Id, "ruleset", rs.RulesetID, "other_projects", otherProjectsUsing)
 		}
 	}
 
-	// Stop inputs last
+	// Stop inputs that were started
 	for _, in := range p.Inputs {
+		// Check if this input is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 		if otherProjectsUsing == 0 {
-			logger.Info("Stopping input component during startup failure cleanup", "project", p.Id, "input", in.Id)
-			if err := in.Stop(); err != nil {
-				logger.Error("Failed to stop input during startup failure cleanup", "project", p.Id, "input", in.Id, "error", err)
-			}
+			// Reduce log verbosity: only log errors
+			// logger.Info("Stopping input component during startup failure cleanup", "project", p.Id, "input", in.Id)
+			in.Stop()
 		} else {
-			logger.Info("Skipping input stop during cleanup (still used by other projects)", "project", p.Id, "input", in.Id, "other_projects", otherProjectsUsing)
+			// Reduce log verbosity: only log when skipping due to shared usage
+			// logger.Info("Skipping input stop during cleanup (still used by other projects)", "project", p.Id, "input", in.Id, "other_projects", otherProjectsUsing)
 		}
 	}
 
@@ -1058,31 +1062,21 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 					close(ch)
 					delete(GlobalProject.msgChans, channelId)
 					delete(GlobalProject.msgChansCounter, channelId)
-					logger.Info("Closed and cleaned up channel during startup failure", "project", p.Id, "channel", channelId)
+					// Reduce log verbosity: only log critical channel cleanup
+					// logger.Info("Closed and cleaned up channel during startup failure", "project", p.Id, "channel", channelId)
 				}
 			}
 		}
 	}
-	p.MsgChannels = []string{}
 
 	// Clear component references
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.MsgChannels = []string{}
 
-	// Close project channels
-	if p.stopChan != nil {
-		close(p.stopChan)
-		p.stopChan = nil
-	}
-
-	// Stop metrics collection if it was started
-	if p.metricsStop != nil {
-		close(p.metricsStop)
-		p.metricsStop = nil
-	}
-
-	logger.Info("Finished cleaning up components due to startup failure", "project", p.Id)
+	// Reduce log verbosity: only log critical cleanup completion
+	// logger.Info("Finished cleaning up components due to startup failure", "project", p.Id)
 }
 
 // stopComponents is an internal function that performs the actual component stopping

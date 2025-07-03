@@ -102,12 +102,12 @@ func (qc *QPSCollector) collectAndReport() {
 	// Send data to leader
 	if err := qc.sendDataToLeader(payload); err != nil {
 		logger.Error("Failed to send data to leader", "error", err, "node_id", qc.nodeID)
-	} else {
-		logger.Debug("Successfully sent data to leader",
-			"node_id", qc.nodeID,
-			"qps_metrics_count", len(qpsData),
-			"has_system_metrics", systemMetrics != nil)
 	}
+	// Remove debug log to reduce log volume
+	// logger.Debug("Successfully sent data to leader",
+	// 	"node_id", qc.nodeID,
+	// 	"qps_metrics_count", len(qpsData),
+	// 	"has_system_metrics", systemMetrics != nil)
 }
 
 // sendDataToLeader sends combined QPS and system data to the leader node

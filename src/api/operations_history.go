@@ -169,18 +169,37 @@ func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]O
 			continue
 		}
 
-		var record OperationRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			logger.Debug("Failed to parse operation log line", "line", line, "error", err)
+		// Parse the operation log line
+		var operation OperationRecord
+		if err := json.Unmarshal([]byte(line), &operation); err != nil {
+			// Reduce log verbosity: only log critical parsing errors
+			// logger.Debug("Failed to parse operation log line", "line", line, "error", err)
+			continue
+		}
+
+		// Apply time filters
+		if !filter.StartTime.IsZero() && operation.Timestamp.Before(filter.StartTime) {
+			// Reduce log verbosity: only log if needed for debugging
+			// logger.Debug("Record filtered out by start_time",
+			// 	"operation_time", operation.Timestamp,
+			// 	"start_time", filter.StartTime)
+			continue
+		}
+
+		if !filter.EndTime.IsZero() && operation.Timestamp.After(filter.EndTime) {
+			// Reduce log verbosity: only log if needed for debugging
+			// logger.Debug("Record filtered out by end_time",
+			// 	"operation_time", operation.Timestamp,
+			// 	"end_time", filter.EndTime)
 			continue
 		}
 
 		// Apply filters
-		if !matchesOperationFilter(record, filter) {
+		if !matchesOperationFilter(operation, filter) {
 			continue
 		}
 
-		operations = append(operations, record)
+		operations = append(operations, operation)
 	}
 
 	return operations, nil

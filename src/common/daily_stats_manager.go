@@ -204,9 +204,8 @@ func (dsm *DailyStatsManager) saveToRedis() {
 		savedCount++
 	}
 
-	if savedCount > 0 {
-		logger.Debug("Saved daily statistics to Redis", "count", savedCount)
-	}
+	// Remove debug log to reduce log volume
+	// logger.Debug("Saved daily statistics to Redis", "count", savedCount)
 }
 
 // persistenceLoop periodically saves data to Redis

@@ -487,7 +487,8 @@ func (cm *ClusterManager) syncAllNodesProjectStates() {
 	}
 	cm.Mu.RUnlock()
 
-	logger.Debug("Syncing project states from nodes", "node_count", len(nodesToSync))
+	// Reduce log verbosity: only log when there are sync errors
+	// logger.Debug("Syncing project states from nodes", "node_count", len(nodesToSync))
 
 	// Sync from each node
 	for nodeID, address := range nodesToSync {
@@ -505,7 +506,8 @@ func (cm *ClusterManager) syncAllNodesProjectStates() {
 			cm.Mu.Lock()
 			cm.NodeProjectStates[nodeID] = projectStates
 			cm.Mu.Unlock()
-			logger.Debug("Updated project states for node", "node_id", nodeID, "project_count", len(projectStates))
+			// Reduce log verbosity: only log errors
+			// logger.Debug("Updated project states for node", "node_id", nodeID, "project_count", len(projectStates))
 		}
 	}
 }
@@ -515,7 +517,8 @@ func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []P
 	// Extract port from address
 	port := extractPortFromAddress(address)
 	if port == "" {
-		logger.Debug("Failed to extract port from address", "node_id", nodeID, "address", address)
+		// Reduce log verbosity: only log errors
+		// logger.Debug("Failed to extract port from address", "node_id", nodeID, "address", address)
 		return nil
 	}
 
@@ -535,7 +538,8 @@ func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []P
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		logger.Debug("Failed to create request for project states", "node_id", nodeID, "error", err)
+		// Reduce log verbosity: only log errors
+		// logger.Debug("Failed to create request for project states", "node_id", nodeID, "error", err)
 		return nil
 	}
 
@@ -547,19 +551,22 @@ func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []P
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Debug("Failed to get project states from node", "node_id", nodeID, "error", err)
+		// Reduce log verbosity: only log errors
+		// logger.Debug("Failed to get project states from node", "node_id", nodeID, "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Debug("Failed to get project states from node", "node_id", nodeID, "status", resp.StatusCode)
+		// Reduce log verbosity: only log errors
+		// logger.Debug("Failed to get project states from node", "node_id", nodeID, "status", resp.StatusCode)
 		return nil
 	}
 
 	var projects []map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-		logger.Debug("Failed to decode project states from node", "node_id", nodeID, "error", err)
+		// Reduce log verbosity: only log errors
+		// logger.Debug("Failed to decode project states from node", "node_id", nodeID, "error", err)
 		return nil
 	}
 

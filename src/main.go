@@ -354,32 +354,32 @@ func StartAllProject() {
 			if err != nil {
 				// Project not found in .project_status file or file doesn't exist
 				// This means it's a new project or not explicitly managed -> DEFAULT TO START
-				logger.Info("Project not found in status file, defaulting to start", "project_id", p.Id, "error", err)
+				// Reduce log verbosity: only log when defaulting to start
 				shouldStart = true
 			} else {
 				// Project found in .project_status file, check if user explicitly stopped it
 				if savedStatus == project.ProjectStatusStopped {
 					// User explicitly stopped this project -> DON'T START
 					shouldStart = false
-					logger.Info("Project explicitly stopped by user, skipping start", "project_id", p.Id, "saved_status", savedStatus)
+					// Reduce log verbosity: only log when skipping start
 				} else if savedStatus == project.ProjectStatusStopping {
 					// Project was stopping when hub shut down -> DON'T START (treat as stopped)
 					shouldStart = false
-					logger.Info("Project was stopping when hub shut down, treating as stopped", "project_id", p.Id, "saved_status", savedStatus)
+					// Reduce log verbosity: only log when treating as stopped
 				} else if savedStatus == project.ProjectStatusStarting {
 					// Project was starting when hub shut down -> START (user intended to run it)
 					shouldStart = true
-					logger.Info("Project was starting when hub shut down, continuing with start", "project_id", p.Id, "saved_status", savedStatus)
+					// Reduce log verbosity: only log when continuing start
 				} else {
 					// Project in file but not stopped (running/error/etc.) -> START
 					shouldStart = true
-					logger.Info("Project found in status file and not stopped, will start", "project_id", p.Id, "saved_status", savedStatus)
+					// Reduce log verbosity: only log when will start
 				}
 			}
 
 			if shouldStart {
 				// Start the project
-				logger.Info("Starting project", "project_id", p.Id, "current_status", p.Status)
+				// Reduce log verbosity: only log key startup events
 
 				// Double check the actual status before starting
 				if p.Status == project.ProjectStatusRunning {
@@ -389,8 +389,18 @@ func StartAllProject() {
 				err = p.Start()
 				if err != nil {
 					logger.Error("project start error", "error", err, "project_id", p.Id)
+					// Record failed project start operation
+					api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
+						"startup_type": "automatic",
+						"reason":       "hub_restart",
+					})
 				} else {
 					logger.Info("project start successful", "project_id", p.Id)
+					// Record successful project start operation
+					api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
+						"startup_type": "automatic",
+						"reason":       "hub_restart",
+					})
 				}
 			}
 		}

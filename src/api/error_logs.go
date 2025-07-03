@@ -146,7 +146,7 @@ func readErrorLogsFromFile(filePath string, source string, filter ErrorLogFilter
 		entry, err := parseLogLine(line, source, lineNum)
 		if err != nil {
 			// Skip unparseable lines but log the error
-			logger.Debug("Failed to parse log line", "line", lineNum, "content", line, "error", err)
+			// logger.Debug("Failed to parse log line", "line", lineNum, "content", line, "error", err)
 			continue
 		}
 
