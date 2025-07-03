@@ -72,13 +72,15 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 	dsm.mutex.Lock()
 	defer dsm.mutex.Unlock()
 
+	var statsData *DailyStatsData
 	if existing, exists := dsm.data[key]; exists {
 		// Update existing data
 		existing.TotalMessages = totalMessages
 		existing.LastUpdate = now
+		statsData = existing
 	} else {
 		// Create new data
-		dsm.data[key] = &DailyStatsData{
+		statsData = &DailyStatsData{
 			NodeID:              nodeID,
 			ProjectID:           projectID,
 			ComponentID:         componentID,
@@ -88,6 +90,12 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 			TotalMessages:       totalMessages,
 			LastUpdate:          now,
 		}
+		dsm.data[key] = statsData
+	}
+
+	// Immediately save this specific record to Redis for real-time data availability
+	if dsm.redisEnabled {
+		go dsm.saveToRedisSingle(key, statsData)
 	}
 }
 
@@ -173,6 +181,23 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 	}
 
 	logger.Info("Loaded daily statistics from Redis", "count", loadedCount)
+}
+
+// saveToRedisSingle saves a single statistics record to Redis immediately
+func (dsm *DailyStatsManager) saveToRedisSingle(key string, statsData *DailyStatsData) {
+	redisKey := dsm.redisKeyPrefix + key
+	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
+
+	jsonData, err := json.Marshal(statsData)
+	if err != nil {
+		logger.Error("Failed to marshal daily stats for immediate Redis save", "key", key, "error", err)
+		return
+	}
+
+	if _, err := RedisSet(redisKey, string(jsonData), expiration); err != nil {
+		logger.Error("Failed to immediately save daily stats to Redis", "key", redisKey, "error", err)
+		return
+	}
 }
 
 // saveToRedis saves current daily statistics to Redis

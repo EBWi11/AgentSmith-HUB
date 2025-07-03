@@ -828,11 +828,11 @@ func getHourlyMessages(c echo.Context) error {
 }
 
 // getDailyMessages returns real message counts for today (from 00:00)
-// Each node can provide its own data - no leader restriction needed
+// Modified to read directly from Redis via Daily Stats Manager
 func getDailyMessages(c echo.Context) error {
-	if common.GlobalQPSManager == nil {
+	if common.GlobalDailyStatsManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "QPS manager not initialized",
+			"error": "Daily statistics manager not initialized",
 		})
 	}
 
@@ -841,29 +841,89 @@ func getDailyMessages(c echo.Context) error {
 	aggregated := c.QueryParam("aggregated") == "true"
 	byNode := c.QueryParam("by_node") == "true"
 
+	// Get date parameter, default to today
+	date := c.QueryParam("date")
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
 	var result interface{}
 
 	if byNode {
 		if nodeID != "" {
-			// Return message counts for a specific node
-			result = common.GlobalQPSManager.GetNodeDailyMessages(nodeID)
+			// Return message counts for a specific node from Redis
+			nodeStats := common.GlobalDailyStatsManager.GetDailyStats(date, "", nodeID)
+			nodeResult := map[string]uint64{
+				"input_messages":   0,
+				"output_messages":  0,
+				"ruleset_messages": 0,
+			}
+
+			for _, statsData := range nodeStats {
+				nodeResult[statsData.ComponentType+"_messages"] += statsData.TotalMessages
+			}
+
+			nodeResult["total_messages"] = nodeResult["input_messages"] + nodeResult["output_messages"] + nodeResult["ruleset_messages"]
+			result = nodeResult
 		} else {
-			// Return message counts for all nodes
-			result = common.GlobalQPSManager.GetAllNodeDailyMessages()
+			// Return message counts for all nodes from Redis
+			allNodeStats := common.GlobalDailyStatsManager.GetDailyStats(date, "", "")
+			nodeResults := make(map[string]map[string]uint64)
+
+			for _, statsData := range allNodeStats {
+				if _, exists := nodeResults[statsData.NodeID]; !exists {
+					nodeResults[statsData.NodeID] = map[string]uint64{
+						"input_messages":   0,
+						"output_messages":  0,
+						"ruleset_messages": 0,
+					}
+				}
+				nodeResults[statsData.NodeID][statsData.ComponentType+"_messages"] += statsData.TotalMessages
+			}
+
+			// Calculate totals for each node
+			for nodeID, stats := range nodeResults {
+				stats["total_messages"] = stats["input_messages"] + stats["output_messages"] + stats["ruleset_messages"]
+				nodeResults[nodeID] = stats
+			}
+
+			result = nodeResults
 		}
 	} else if aggregated {
-		// Return aggregated message counts across all projects and nodes
-		result = common.GlobalQPSManager.GetAggregatedDailyMessages()
+		// Return aggregated message counts directly from Redis
+		result = common.GlobalDailyStatsManager.GetAggregatedDailyStats(date)
 	} else {
-		// Return message counts for a specific project (or all if projectID is empty)
-		result = common.GlobalQPSManager.GetDailyMessageCounts(projectID)
+		// Return message counts for a specific project or all projects from Redis
+		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(date, projectID, "")
+
+		// Group by ProjectNodeSequence
+		sequenceGroups := make(map[string]map[string]interface{})
+
+		for _, statsData := range dailyStats {
+			sequenceKey := statsData.ProjectNodeSequence
+
+			if _, exists := sequenceGroups[sequenceKey]; !exists {
+				sequenceGroups[sequenceKey] = map[string]interface{}{
+					"component_type":        statsData.ComponentType,
+					"project_node_sequence": statsData.ProjectNodeSequence,
+					"total_messages":        uint64(0),
+					"daily_messages":        uint64(0),
+				}
+			}
+
+			sequenceGroups[sequenceKey]["total_messages"] = statsData.TotalMessages
+			sequenceGroups[sequenceKey]["daily_messages"] = statsData.TotalMessages // For daily stats, these are the same
+		}
+
+		result = sequenceGroups
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"data":        result,
 		"timestamp":   time.Now(),
 		"period":      "today",
-		"period_note": "Message counts are calculated from 00:00 today to current time",
+		"period_note": "Message counts are from Redis daily statistics",
+		"data_source": "redis",
 	})
 }
 
