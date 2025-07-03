@@ -73,12 +73,7 @@ func ServerStart(listener string) error {
 
 	// Statistics and metrics endpoints (public access for monitoring)
 	e.GET("/qps-data", getQPSData)
-	e.GET("/qps-stats", getQPSStats)
-	e.GET("/hourly-messages", getHourlyMessages)
 	e.GET("/daily-messages", getDailyMessages)
-	e.GET("/daily-stats", getDailyStatsFromRedis)
-	e.GET("/daily-stats/aggregated", getAggregatedDailyStatsFromRedis)
-	e.GET("/daily-stats/info", getDailyStatsInfo)
 	e.GET("/system-metrics", getSystemMetrics)
 	e.GET("/system-stats", getSystemStats)
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)

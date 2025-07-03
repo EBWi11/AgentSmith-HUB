@@ -1244,15 +1244,7 @@ export const hubApi = {
     }
   },
 
-  async getQPSStats() {
-    try {
-      const response = await publicApi.get('/qps-stats');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching component stats:', error);
-      throw error;
-    }
-  },
+
 
   async getProjectQPS(projectId, aggregated = false) {
     try {

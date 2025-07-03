@@ -426,11 +426,10 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		auth     bool
 	}{
 		// Public endpoints
-		"ping":                       {"GET", "/ping", false},
-		"token_check":                {"GET", "/token-check", false},
-		"get_qps_data":               {"GET", "/qps-data", false},
-		"get_qps_stats":              {"GET", "/qps-stats", false},
-		"get_hourly_messages":        {"GET", "/hourly-messages", false},
+		"ping":         {"GET", "/ping", false},
+		"token_check":  {"GET", "/token-check", false},
+		"get_qps_data": {"GET", "/qps-data", false},
+
 		"get_daily_messages":         {"GET", "/daily-messages", false},
 		"get_system_metrics":         {"GET", "/system-metrics", false},
 		"get_system_stats":           {"GET", "/system-stats", false},

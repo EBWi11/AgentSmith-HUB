@@ -309,7 +309,6 @@ const loading = reactive({
 
 const projectList = ref([])
 const clusterInfo = ref({}) // Store the full cluster info response
-const componentData = ref({})
 const messageData = ref({})
 const systemData = ref({})
 const pendingChanges = ref([])
@@ -625,16 +624,14 @@ async function refreshStats() {
   try {
     loading.stats = true
     
-    // Fetch frequently changing data and component data for accurate counting
-    const [messageResponse, systemResponse, componentResponse] = await Promise.all([
-              hubApi.getAggregatedDailyMessages(),
-      hubApi.getAggregatedSystemMetrics(),
-      hubApi.getQPSData() // Also refresh component data to ensure accurate counting
+    // Fetch frequently changing data
+    const [messageResponse, systemResponse] = await Promise.all([
+      hubApi.getAggregatedDailyMessages(),
+      hubApi.getAggregatedSystemMetrics()
     ])
 
     messageData.value = messageResponse.data || {}
     systemData.value = systemResponse || {}
-    componentData.value = componentResponse.data || {}
 
     // Fetch cluster system metrics for node display (if current node is leader)
     if (clusterInfo.value.status === 'leader') {
@@ -722,11 +719,6 @@ async function fetchDashboardData() {
     }))
 
     clusterInfo.value = clusterResponse // Store full cluster info
-
-    // Fetch component data for component count calculation
-    loading.messages = true
-    const componentResponse = await hubApi.getQPSData()
-    componentData.value = componentResponse.data || {}
 
     // Fetch cluster system metrics for initial load (if current node is leader)
     if (clusterResponse.status === 'leader') {
