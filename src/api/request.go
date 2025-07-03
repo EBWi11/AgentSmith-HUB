@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 var hubRequest *HubRequest
@@ -24,8 +25,16 @@ func InitRequest(leader string, Token string) error {
 	var err error
 	var req *http.Request
 
+	// Ensure proper URL format for leader address
+	var normalizedLeader string
+	if strings.HasPrefix(leader, "http://") || strings.HasPrefix(leader, "https://") {
+		normalizedLeader = leader
+	} else {
+		normalizedLeader = fmt.Sprintf("http://%s", leader)
+	}
+
 	hubRequest = &HubRequest{
-		Leader: leader,
+		Leader: normalizedLeader,
 		Token:  Token,
 	}
 

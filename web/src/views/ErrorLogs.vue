@@ -1,51 +1,43 @@
 <template>
-  <div class="h-full flex flex-col bg-gray-50">
+  <div class="h-full flex flex-col bg-white">
     <!-- Header -->
-    <div class="bg-white shadow-sm border-b border-gray-200 p-4">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="text-2xl font-semibold text-gray-900">Error Logs</h1>
-          <p class="mt-1 text-sm text-gray-600">Monitor and analyze error logs from hub and plugin components across cluster nodes</p>
-        </div>
-        <div class="flex items-center space-x-4">
-          <!-- Refresh Button -->
-          <button
-            @click="refreshLogs"
-            :disabled="loading"
-            class="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            <svg class="w-4 h-4 mr-2" :class="{ 'animate-spin': loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Refresh
-          </button>
-
-          <!-- Export Button -->
-          <button
-            @click="exportLogs"
-            :disabled="logs.length === 0"
-            class="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-            </svg>
-            Export
-          </button>
-        </div>
+    <div class="flex items-center justify-between p-4 border-b border-gray-200">
+      <h1 class="text-xl font-semibold text-gray-900">Error Logs</h1>
+      <div class="flex items-center space-x-2">
+        <button
+          @click="refreshLogs"
+          :disabled="loading"
+          class="btn btn-secondary btn-sm"
+        >
+          <svg v-if="loading" class="w-4 h-4 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          Refresh
+        </button>
+        <button
+          @click="exportLogs"
+          :disabled="logs.length === 0"
+          class="btn btn-secondary btn-sm"
+        >
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+          Export
+        </button>
       </div>
     </div>
 
     <!-- Filters -->
-    <div class="bg-white border-b border-gray-200 p-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="p-4 border-b border-gray-200 bg-gray-50">
+      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <!-- Source Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Source</label>
-          <select
-            v-model="filters.source"
-            @change="applyFilters"
-            class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
+          <select v-model="filters.source" @change="applyFilters" class="filter-select">
             <option value="all">All Sources</option>
             <option value="hub">Hub</option>
             <option value="plugin">Plugin</option>
@@ -55,11 +47,7 @@
         <!-- Node Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Node</label>
-          <select
-            v-model="filters.nodeId"
-            @change="applyFilters"
-            class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
+          <select v-model="filters.nodeId" @change="applyFilters" class="filter-select">
             <option value="all">All Nodes</option>
             <option v-for="node in availableNodes" :key="node.id" :value="node.id">
               {{ node.name || node.id }}
@@ -70,198 +58,206 @@
         <!-- Time Range Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
-          <select
-            v-model="filters.timeRange"
-            @change="applyTimeRange"
-            class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
+          <select v-model="filters.timeRange" @change="handleTimeRangeChange" class="filter-select">
             <option value="1h">Last Hour</option>
             <option value="6h">Last 6 Hours</option>
             <option value="24h">Last 24 Hours</option>
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
-            <option value="custom">Custom</option>
+            <option value="custom">Custom Range</option>
           </select>
         </div>
 
-        <!-- Keyword Search -->
+        <!-- Level Filter -->
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Keyword Search</label>
-          <div class="relative">
-            <input
-              v-model="filters.keyword"
-              @keyup.enter="applyFilters"
-              type="text"
-              placeholder="Search in messages..."
-              class="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-            <button
-              @click="applyFilters"
-              class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600"
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-              </svg>
-            </button>
-          </div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Level</label>
+          <select v-model="filters.level" @change="applyFilters" class="filter-select">
+            <option value="">All Levels</option>
+            <option value="ERROR">Error</option>
+            <option value="FATAL">Fatal</option>
+          </select>
+        </div>
+
+        <!-- Search -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+          <input 
+            v-model="filters.keyword" 
+            @input="debouncedSearch"
+            type="text" 
+            placeholder="Search messages..."
+            class="filter-input"
+          >
         </div>
       </div>
 
-      <!-- Custom Time Range -->
-      <div v-if="filters.timeRange === 'custom'" class="mt-4 grid grid-cols-2 gap-4">
+      <!-- Custom Date Range (shown when custom is selected) -->
+      <div v-if="filters.timeRange === 'custom'" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
-          <input
-            v-model="filters.startTime"
+          <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+          <input 
+            v-model="filters.startDate" 
             @change="applyFilters"
-            type="datetime-local"
-            class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            type="datetime-local" 
+            class="filter-input"
           >
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
-          <input
-            v-model="filters.endTime"
+          <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+          <input 
+            v-model="filters.endDate" 
             @change="applyFilters"
-            type="datetime-local"
-            class="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            type="datetime-local" 
+            class="filter-input"
           >
         </div>
       </div>
 
       <!-- Statistics -->
-      <div v-if="nodeStats && Object.keys(nodeStats).length > 0" class="mt-4 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div v-for="(stat, nodeId) in nodeStats" :key="nodeId" class="bg-gray-50 px-3 py-2 rounded-md">
-          <div class="text-xs font-medium text-gray-500 truncate">{{ stat.node_id }}</div>
-          <div class="flex items-center space-x-2 mt-1">
-            <span class="text-sm font-semibold text-red-600">{{ stat.total_errors }}</span>
-            <span class="text-xs text-gray-500">errors</span>
-          </div>
-          <div class="flex space-x-2 text-xs text-gray-400 mt-1">
-            <span>H: {{ stat.hub_errors }}</span>
-            <span>P: {{ stat.plugin_errors }}</span>
+      <div v-if="nodeStats && Object.keys(nodeStats).length > 0" class="mt-4">
+        <div class="text-sm font-medium text-gray-700 mb-2">Error Statistics</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div v-for="(stat, nodeId) in nodeStats" :key="nodeId" class="bg-white px-3 py-2 rounded-md border border-gray-200">
+            <div class="text-xs font-medium text-gray-500 truncate">{{ stat.node_id }}</div>
+            <div class="flex items-center space-x-2 mt-1">
+              <span class="text-sm font-semibold text-red-600">{{ stat.total_errors }}</span>
+              <span class="text-xs text-gray-500">errors</span>
+            </div>
+            <div class="flex space-x-2 text-xs text-gray-400 mt-1">
+              <span>H: {{ stat.hub_errors }}</span>
+              <span>P: {{ stat.plugin_errors }}</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-hidden">
-      <!-- Loading State -->
-      <div v-if="loading && logs.length === 0" class="flex items-center justify-center h-full">
-        <div class="text-center">
-          <svg class="animate-spin h-8 w-8 text-blue-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p class="text-gray-600">Loading error logs...</p>
-        </div>
+    <div class="flex-1 overflow-y-auto">
+      <div v-if="loading && !logs.length" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading error logs...</div>
       </div>
-
-      <!-- Error State -->
-      <div v-else-if="error" class="flex items-center justify-center h-full">
-        <div class="text-center">
-          <svg class="h-12 w-12 text-red-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
-            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-          </svg>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">Failed to load error logs</h3>
-          <p class="text-gray-600 mb-4">{{ error }}</p>
-          <button
-            @click="refreshLogs"
-            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            Try Again
-          </button>
-        </div>
+      
+      <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+        {{ error }}
       </div>
-
-      <!-- No Data State -->
-      <div v-else-if="logs.length === 0 && !loading" class="flex items-center justify-center h-full">
-        <div class="text-center">
-          <svg class="h-12 w-12 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
-            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-          </svg>
-          <h3 class="text-lg font-medium text-gray-900 mb-2">No error logs found</h3>
-          <p class="text-gray-600">No error logs match your current filters.</p>
-        </div>
+      
+      <div v-else-if="!logs.length" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">No error logs found</div>
       </div>
-
-      <!-- Log List -->
-      <div v-else class="h-full overflow-auto">
-        <div class="divide-y divide-gray-200">
-          <div
-            v-for="(log, index) in logs"
-            :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
-            class="p-4 hover:bg-gray-50 transition-colors"
-          >
-            <div class="flex items-start space-x-4">
-              <!-- Source Icon -->
-              <div class="flex-shrink-0 mt-1">
-                <div
-                  class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium"
-                  :class="{
-                    'bg-blue-100 text-blue-800': log.source === 'hub',
-                    'bg-purple-100 text-purple-800': log.source === 'plugin'
-                  }"
-                >
-                  {{ log.source === 'hub' ? 'H' : 'P' }}
-                </div>
-              </div>
-
-              <!-- Content -->
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center space-x-2">
-                    <span class="text-sm font-medium text-gray-900">{{ log.message }}</span>
-                    <span
-                      class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                      :class="{
-                        'bg-red-100 text-red-800': log.level === 'ERROR',
-                        'bg-orange-100 text-orange-800': log.level === 'FATAL',
-                        'bg-gray-100 text-gray-800': !['ERROR', 'FATAL'].includes(log.level)
-                      }"
-                    >
-                      {{ log.level }}
-                    </span>
-                  </div>
-                  <div class="flex items-center space-x-4 text-xs text-gray-500">
-                    <span>{{ formatTimestamp(log.timestamp) }}</span>
-                    <span v-if="log.node_id">Node: {{ log.node_id }}</span>
-                    <span>Line: {{ log.line }}</span>
-                  </div>
+      
+      <div v-else class="space-y-2 p-4">
+        <div
+          v-for="(log, index) in logs"
+          :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
+          class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
+        >
+          <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
+               @click="toggleLogDetail(index)">
+            <div class="flex items-center space-x-3">
+              <div class="flex items-center space-x-2">
+                <!-- Source Icon -->
+                <div class="flex items-center justify-center w-8 h-8 rounded-full" :class="getSourceClass(log.source)">
+                  <span class="text-white text-xs font-medium">{{ log.source === 'hub' ? 'H' : 'P' }}</span>
                 </div>
                 
-                <!-- Context -->
-                <div v-if="log.context && log.context !== log.message" class="mt-2">
-                  <details class="group">
-                    <summary class="cursor-pointer text-xs text-gray-500 hover:text-gray-700">
-                      <span class="group-open:hidden">Show context</span>
-                      <span class="hidden group-open:inline">Hide context</span>
-                    </summary>
-                    <div class="mt-2 p-3 bg-gray-100 rounded-md">
-                      <pre class="text-xs text-gray-700 whitespace-pre-wrap break-all">{{ log.context }}</pre>
-                    </div>
-                  </details>
+                <!-- Log Info -->
+                <div>
+                  <h3 class="font-medium text-gray-900">{{ log.message }}</h3>
+                  <div class="text-sm text-gray-500">
+                    {{ formatTimestamp(log.timestamp) }}
+                    <span v-if="log.node_id" class="ml-2">{{ log.node_id }}</span>
+                    <span class="ml-2">Line: {{ log.line }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+              <!-- Level Badge -->
+              <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getLevelClass(log.level)">
+                {{ log.level }}
+              </span>
+              
+              <!-- Expand/Collapse Icon -->
+              <svg class="w-4 h-4 text-gray-400 transform transition-transform" 
+                   :class="{ 'rotate-90': expandedLogs.has(index) }"
+                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </div>
+          </div>
+          
+          <!-- Log Details (expanded) -->
+          <div v-if="expandedLogs.has(index)" class="p-4 bg-white">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <!-- Basic Info -->
+              <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Log Details</h4>
+                <dl class="space-y-1 text-sm">
+                  <div class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Source:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ log.source }}</dd>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Level:</dt>
+                    <dd class="col-span-2">
+                      <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getLevelClass(log.level)">
+                        {{ log.level }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div v-if="log.node_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Node:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ log.node_id }}</dd>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Line:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ log.line }}</dd>
+                  </div>
+                  <div class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Timestamp:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(log.timestamp) }}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <!-- Context (if any) -->
+              <div v-if="log.context && log.context !== log.message">
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Context</h4>
+                <div class="bg-gray-50 border border-gray-200 rounded-md p-3">
+                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.context }}</pre>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
-        <!-- Load More -->
-        <div v-if="hasMore" class="p-4 text-center border-t border-gray-200">
-          <button
-            @click="loadMore"
-            :disabled="loading"
-            class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            <svg v-if="loading" class="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            {{ loading ? 'Loading...' : 'Load More' }}
-          </button>
-        </div>
+    <!-- Pagination -->
+    <div v-if="totalCount > 0" class="flex items-center justify-between p-4 border-t border-gray-200 bg-gray-50">
+      <div class="text-sm text-gray-700">
+        Showing {{ ((currentPage - 1) * pageSize) + 1 }} to {{ Math.min(currentPage * pageSize, totalCount) }} of {{ totalCount }} logs
+      </div>
+      <div class="flex items-center space-x-2">
+        <button 
+          @click="previousPage" 
+          :disabled="currentPage <= 1 || loading"
+          class="btn btn-secondary btn-sm"
+        >
+          Previous
+        </button>
+        <span class="text-sm text-gray-700">
+          Page {{ currentPage }} of {{ totalPages }}
+        </span>
+        <button 
+          @click="nextPage" 
+          :disabled="currentPage >= totalPages || loading"
+          class="btn btn-secondary btn-sm"
+        >
+          Next
+        </button>
       </div>
     </div>
   </div>
@@ -270,6 +266,7 @@
 <script setup>
 import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
+import { debounce } from '../utils/common'
 
 // Inject global message service
 const $message = inject('$message')
@@ -279,20 +276,21 @@ const loading = ref(false)
 const error = ref(null)
 const logs = ref([])
 const nodeStats = ref({})
-const hasMore = ref(false)
 const totalCount = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
 const availableNodes = ref([])
+const expandedLogs = ref(new Set())
 
 // Filters
 const filters = reactive({
   source: 'all',
   nodeId: 'all',
   timeRange: '24h',
+  level: '',
   keyword: '',
-  startTime: '',
-  endTime: '',
-  limit: 50,
-  offset: 0
+  startDate: '',
+  endDate: ''
 })
 
 // Computed properties
@@ -300,52 +298,105 @@ const isClusterMode = computed(() => {
   return availableNodes.value.length > 1
 })
 
+const totalPages = computed(() => Math.ceil(totalCount.value / pageSize.value))
+
 // Helper functions
 const formatTimestamp = (timestamp) => {
-  return new Date(timestamp).toLocaleString()
+  return new Date(timestamp).toLocaleString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+}
+
+const formatFullTimestamp = (timestamp) => {
+  return new Date(timestamp).toLocaleString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'short'
+  })
+}
+
+function toLocalISOString(date) {
+  // 生成本地时区的 yyyy-MM-ddTHH:mm 字符串
+  const pad = n => n < 10 ? '0' + n : n
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+}
+
+function setDefaultTimeRange() {
+  const now = new Date()
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  
+  filters.startDate = toLocalISOString(twentyFourHoursAgo)
+  filters.endDate = toLocalISOString(now)
+}
+
+function handleTimeRangeChange() {
+  if (filters.timeRange !== 'custom') {
+    const now = new Date()
+    let startTime
+    
+    switch (filters.timeRange) {
+      case '1h':
+        startTime = new Date(now.getTime() - 60 * 60 * 1000)
+        break
+      case '6h':
+        startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+        break
+      case '24h':
+        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+        break
+      case '7d':
+        startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        break
+      case '30d':
+        startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        break
+      default:
+        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    }
+    
+    filters.startDate = toLocalISOString(startTime)
+    filters.endDate = toLocalISOString(now)
+  }
+  
+  applyFilters()
 }
 
 const getTimeRangeParams = () => {
-  const now = new Date()
-  let startTime, endTime
-
-  switch (filters.timeRange) {
-    case '1h':
-      startTime = new Date(now.getTime() - 60 * 60 * 1000)
-      break
-    case '6h':
-      startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
-      break
-    case '24h':
-      startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-      break
-    case '7d':
-      startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      break
-    case '30d':
-      startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-      break
-    case 'custom':
-      if (filters.startTime) startTime = new Date(filters.startTime)
-      if (filters.endTime) endTime = new Date(filters.endTime)
-      break
-  }
-
   const params = {}
-  if (startTime) params.start_time = startTime.toISOString()
-  if (endTime) params.end_time = endTime.toISOString()
+  
+  // 用本地时间字符串拼接ISO格式，带本地时区
+  if (filters.startDate) {
+    const start = new Date(filters.startDate)
+    params.start_time = start.toISOString()
+  }
+  if (filters.endDate) {
+    const end = new Date(filters.endDate)
+    params.end_time = end.toISOString()
+  }
   
   return params
 }
 
 const buildApiParams = () => {
   const params = {
-    limit: filters.limit,
-    offset: filters.offset
+    limit: pageSize.value,
+    offset: (currentPage.value - 1) * pageSize.value
   }
 
   if (filters.source !== 'all') params.source = filters.source
   if (filters.nodeId !== 'all') params.node_id = filters.nodeId
+  if (filters.level) params.level = filters.level
   if (filters.keyword) params.keyword = filters.keyword
 
   Object.assign(params, getTimeRangeParams())
@@ -354,12 +405,7 @@ const buildApiParams = () => {
 }
 
 // API functions
-const fetchErrorLogs = async (reset = true) => {
-  if (reset) {
-    filters.offset = 0
-    logs.value = []
-  }
-
+const fetchErrorLogs = async () => {
   loading.value = true
   error.value = null
 
@@ -378,27 +424,29 @@ const fetchErrorLogs = async (reset = true) => {
       nodeStats.value = {}
     }
 
-    if (reset) {
-      logs.value = response.logs || []
+    logs.value = response.logs || []
+    totalCount.value = response.total_count || 0
+
+    // Update available nodes from cluster info or logs
+    if (response.available_nodes) {
+      availableNodes.value = response.available_nodes.map(nodeId => ({
+        id: nodeId,
+        name: nodeId
+      }))
     } else {
-      logs.value.push(...(response.logs || []))
+      // Fallback: extract from logs
+      const nodes = new Set()
+      logs.value.forEach(log => {
+        if (log.node_id) {
+          nodes.add(log.node_id)
+        }
+      })
+      
+      availableNodes.value = Array.from(nodes).map(nodeId => ({
+        id: nodeId,
+        name: nodeId
+      }))
     }
-
-    hasMore.value = response.has_more || false
-    totalCount.value = response.total_count || logs.value.length
-
-    // Update available nodes from logs
-    const nodes = new Set()
-    logs.value.forEach(log => {
-      if (log.node_id) {
-        nodes.add(log.node_id)
-      }
-    })
-    
-    availableNodes.value = Array.from(nodes).map(nodeId => ({
-      id: nodeId,
-      name: nodeId
-    }))
 
   } catch (err) {
     error.value = err.message
@@ -408,28 +456,56 @@ const fetchErrorLogs = async (reset = true) => {
   }
 }
 
-const loadMore = async () => {
-  if (loading.value || !hasMore.value) return
-  
-  filters.offset += filters.limit
-  await fetchErrorLogs(false)
-}
-
 const applyFilters = async () => {
-  await fetchErrorLogs(true)
+  currentPage.value = 1
+  expandedLogs.value.clear()
+  await fetchErrorLogs()
 }
 
-const applyTimeRange = async () => {
-  // Clear custom time inputs when switching away from custom
-  if (filters.timeRange !== 'custom') {
-    filters.startTime = ''
-    filters.endTime = ''
-  }
-  await fetchErrorLogs(true)
-}
+const debouncedSearch = debounce(() => {
+  applyFilters()
+}, 500)
 
 const refreshLogs = async () => {
-  await fetchErrorLogs(true)
+  await fetchErrorLogs()
+}
+
+function toggleLogDetail(index) {
+  if (expandedLogs.value.has(index)) {
+    expandedLogs.value.delete(index)
+  } else {
+    expandedLogs.value.add(index)
+  }
+}
+
+function previousPage() {
+  if (currentPage.value > 1) {
+    currentPage.value--
+    fetchErrorLogs()
+  }
+}
+
+function nextPage() {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+    fetchErrorLogs()
+  }
+}
+
+function getSourceClass(source) {
+  const classes = {
+    'hub': 'bg-blue-500',
+    'plugin': 'bg-purple-500'
+  }
+  return classes[source] || 'bg-gray-500'
+}
+
+function getLevelClass(level) {
+  const classes = {
+    'ERROR': 'bg-red-100 text-red-800',
+    'FATAL': 'bg-red-100 text-red-800'
+  }
+  return classes[level] || 'bg-gray-100 text-gray-800'
 }
 
 const exportLogs = () => {
@@ -460,6 +536,29 @@ const exportLogs = () => {
 
 // Lifecycle
 onMounted(async () => {
-  await fetchErrorLogs(true)
+  setDefaultTimeRange()
+  await fetchErrorLogs()
 })
-</script> 
+</script>
+
+<style scoped>
+.filter-select {
+  @apply block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+.filter-input {
+  @apply block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+.btn {
+  @apply inline-flex items-center border font-medium rounded focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors;
+}
+
+.btn-secondary {
+  @apply border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-blue-500;
+}
+
+.btn-sm {
+  @apply px-3 py-2 text-sm;
+}
+</style> 

@@ -591,8 +591,13 @@ func getFollowerErrorLogs(followerAddress string, filter ErrorLogFilter) ([]Erro
 	params["limit"] = strconv.Itoa(filter.Limit)
 	params["offset"] = strconv.Itoa(filter.Offset)
 
-	// Build URL
-	url := fmt.Sprintf("http://%s/error-logs", followerAddress)
+	// Build URL with proper protocol handling
+	var url string
+	if strings.HasPrefix(followerAddress, "http://") || strings.HasPrefix(followerAddress, "https://") {
+		url = fmt.Sprintf("%s/error-logs", followerAddress)
+	} else {
+		url = fmt.Sprintf("http://%s/error-logs", followerAddress)
+	}
 	if len(params) > 0 {
 		url += "?"
 		var paramPairs []string

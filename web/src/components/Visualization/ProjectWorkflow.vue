@@ -73,7 +73,15 @@
                 <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="bg-gray-50 rounded p-3">
                   <div class="text-xs text-gray-500 mb-2 flex justify-between">
                     <span>Sample {{ index + 1 }}</span>
-                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString() }}</span>
+                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString('en-US', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: false
+                    }) }}</span>
                   </div>
                   <JsonViewer :value="sample.data || sample" height="auto" />
                 </div>

@@ -1571,6 +1571,15 @@ func ApplySingleChange(c echo.Context) error {
 			err = plugin.NewPlugin(pluginPath, "", req.ID, plugin.YAEGI_PLUGIN)
 			if err != nil {
 				logger.PluginError("Failed to reload plugin after merge", "id", req.ID, "error", err)
+				// Record failed operation
+				RecordChangePush("plugin", req.ID, "", content, "", "failed", err.Error())
+			} else {
+				// Record successful operation
+				var oldContent string
+				if existingPlugin, exists := plugin.Plugins[req.ID]; exists {
+					oldContent = string(existingPlugin.Payload)
+				}
+				RecordChangePush("plugin", req.ID, oldContent, content, "", "success", "")
 			}
 		}
 	case "input", "output", "ruleset", "project":
@@ -1579,10 +1588,6 @@ func ApplySingleChange(c echo.Context) error {
 			// Clear the memory map entry after successful merge and reload components
 			switch req.Type {
 			case "input":
-				common.GlobalMu.Lock()
-				delete(project.GlobalProject.InputsNew, req.ID)
-				common.GlobalMu.Unlock()
-
 				// Reload the input component
 				configRoot := common.Config.ConfigRoot
 				inputPath := path.Join(configRoot, "input", req.ID+".yaml")
@@ -1591,6 +1596,11 @@ func ApplySingleChange(c echo.Context) error {
 				common.GlobalMu.RLock()
 				oldInput, exists := project.GlobalProject.Inputs[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var oldContent string
+				if exists {
+					oldContent = oldInput.Config.RawConfig
+				}
 
 				var projectsUsingInput int
 				if exists {
@@ -1611,16 +1621,22 @@ func ApplySingleChange(c echo.Context) error {
 				newInput, reloadErr := input.NewInput(inputPath, "", req.ID)
 				if reloadErr != nil {
 					logger.Error("Failed to reload input after merge", "id", req.ID, "error", reloadErr)
+					// Record failed operation
+					RecordChangePush("input", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Inputs[req.ID] = newInput
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded input component", "id", req.ID)
+					// Record successful operation
+					RecordChangePush("input", req.ID, oldContent, content, "", "success", "")
 				}
-			case "output":
+
+				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.OutputsNew, req.ID)
+				delete(project.GlobalProject.InputsNew, req.ID)
 				common.GlobalMu.Unlock()
+			case "output":
 				// Reload the output component
 				configRoot := common.Config.ConfigRoot
 				outputPath := path.Join(configRoot, "output", req.ID+".yaml")
@@ -1629,6 +1645,11 @@ func ApplySingleChange(c echo.Context) error {
 				common.GlobalMu.RLock()
 				oldOutput, exists := project.GlobalProject.Outputs[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var oldContent string
+				if exists {
+					oldContent = oldOutput.Config.RawConfig
+				}
 
 				var projectsUsingOutput int
 				if exists {
@@ -1649,16 +1670,22 @@ func ApplySingleChange(c echo.Context) error {
 				newOutput, reloadErr := output.NewOutput(outputPath, "", req.ID)
 				if reloadErr != nil {
 					logger.Error("Failed to reload output after merge", "id", req.ID, "error", reloadErr)
+					// Record failed operation
+					RecordChangePush("output", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Outputs[req.ID] = newOutput
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded output component", "id", req.ID)
+					// Record successful operation
+					RecordChangePush("output", req.ID, oldContent, content, "", "success", "")
 				}
-			case "ruleset":
+
+				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.RulesetsNew, req.ID)
+				delete(project.GlobalProject.OutputsNew, req.ID)
 				common.GlobalMu.Unlock()
+			case "ruleset":
 				// Reload the ruleset component
 				configRoot := common.Config.ConfigRoot
 				rulesetPath := path.Join(configRoot, "ruleset", req.ID+".xml")
@@ -1667,6 +1694,11 @@ func ApplySingleChange(c echo.Context) error {
 				common.GlobalMu.RLock()
 				oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
 				common.GlobalMu.RUnlock()
+
+				var oldContent string
+				if exists {
+					oldContent = oldRuleset.RawConfig
+				}
 
 				var projectsUsingRuleset int
 				if exists {
@@ -1687,27 +1719,35 @@ func ApplySingleChange(c echo.Context) error {
 				newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", req.ID)
 				if reloadErr != nil {
 					logger.Error("Failed to reload ruleset after merge", "id", req.ID, "error", reloadErr)
+					// Record failed operation
+					RecordChangePush("ruleset", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Rulesets[req.ID] = newRuleset
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded ruleset component", "id", req.ID)
+					// Record successful operation
+					RecordChangePush("ruleset", req.ID, oldContent, content, "", "success", "")
 				}
-			case "project":
+
+				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.ProjectsNew, req.ID)
+				delete(project.GlobalProject.RulesetsNew, req.ID)
 				common.GlobalMu.Unlock()
+			case "project":
 				// Reload the project component
 				configRoot := common.Config.ConfigRoot
 				projectPath := path.Join(configRoot, "project", req.ID+".yaml")
 
 				// Handle project lifecycle carefully
 				var wasRunning bool
+				var oldContent string
 				common.GlobalMu.RLock()
 				oldProject, exists := project.GlobalProject.Projects[req.ID]
 				common.GlobalMu.RUnlock()
 				if exists {
 					wasRunning = (oldProject.Status == project.ProjectStatusRunning)
+					oldContent = oldProject.Config.RawConfig
 					if wasRunning {
 						err := oldProject.Stop()
 						if err != nil {
@@ -1719,6 +1759,8 @@ func ApplySingleChange(c echo.Context) error {
 				newProject, reloadErr := project.NewProject(projectPath, "", req.ID)
 				if reloadErr != nil {
 					logger.Error("Failed to reload project after merge", "id", req.ID, "error", reloadErr)
+					// Record failed operation
+					RecordChangePush("project", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
 					project.GlobalProject.Projects[req.ID] = newProject
@@ -1731,7 +1773,14 @@ func ApplySingleChange(c echo.Context) error {
 							logger.Error("Failed to restart project after reload", "id", req.ID, "error", startErr)
 						}
 					}
+					// Record successful operation
+					RecordChangePush("project", req.ID, oldContent, content, "", "success", "")
 				}
+
+				// Only clear the memory map entry after successful recording
+				common.GlobalMu.Lock()
+				delete(project.GlobalProject.ProjectsNew, req.ID)
+				common.GlobalMu.Unlock()
 			}
 		}
 	}
@@ -2007,8 +2056,13 @@ func syncComponentToFollowersWithData(syncData ComponentSyncRequest) {
 		go func(node *cluster.NodeInfo) {
 			defer wg.Done()
 
-			// Build request URL
-			url := fmt.Sprintf("http://%s/component-sync", node.Address)
+			// Build request URL with proper protocol handling
+			var url string
+			if strings.HasPrefix(node.Address, "http://") || strings.HasPrefix(node.Address, "https://") {
+				url = fmt.Sprintf("%s/component-sync", node.Address)
+			} else {
+				url = fmt.Sprintf("http://%s/component-sync", node.Address)
+			}
 
 			// Create request
 			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))

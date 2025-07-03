@@ -7,6 +7,7 @@ import (
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
@@ -232,19 +233,23 @@ func handleComponentSync(c echo.Context) error {
 			// Lock only for memory operations
 			common.GlobalMu.Lock()
 			delete(common.AllRulesetsRawConfig, request.ID)
-			if ruleset, exists := p.Rulesets[request.ID]; exists {
-				delete(p.Rulesets, request.ID)
-				common.GlobalMu.Unlock()
+			if p.Rulesets != nil {
+				if ruleset, exists := p.Rulesets[request.ID]; exists {
+					delete(p.Rulesets, request.ID)
+					common.GlobalMu.Unlock()
 
-				// Check if any projects are using this ruleset before stopping
-				projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(request.ID)
-				if projectsUsingRuleset == 0 {
-					logger.Info("Stopping deleted ruleset component on follower", "id", request.ID)
-					if err := ruleset.Stop(); err != nil {
-						logger.Error("Failed to stop deleted ruleset on follower", "id", request.ID, "error", err)
+					// Check if any projects are using this ruleset before stopping
+					projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(request.ID)
+					if projectsUsingRuleset == 0 {
+						logger.Info("Stopping deleted ruleset component on follower", "id", request.ID)
+						if err := ruleset.Stop(); err != nil {
+							logger.Error("Failed to stop deleted ruleset on follower", "id", request.ID, "error", err)
+						}
+					} else {
+						logger.Warn("Cannot stop deleted ruleset - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingRuleset)
 					}
 				} else {
-					logger.Warn("Cannot stop deleted ruleset - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingRuleset)
+					common.GlobalMu.Unlock()
 				}
 			} else {
 				common.GlobalMu.Unlock()
@@ -252,19 +257,23 @@ func handleComponentSync(c echo.Context) error {
 		case "input":
 			common.GlobalMu.Lock()
 			delete(common.AllInputsRawConfig, request.ID)
-			if input, exists := p.Inputs[request.ID]; exists {
-				delete(p.Inputs, request.ID)
-				common.GlobalMu.Unlock()
+			if p.Inputs != nil {
+				if input, exists := p.Inputs[request.ID]; exists {
+					delete(p.Inputs, request.ID)
+					common.GlobalMu.Unlock()
 
-				// Check if any projects are using this input before stopping
-				projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(request.ID)
-				if projectsUsingInput == 0 {
-					logger.Info("Stopping deleted input component on follower", "id", request.ID)
-					if err := input.Stop(); err != nil {
-						logger.Error("Failed to stop deleted input on follower", "id", request.ID, "error", err)
+					// Check if any projects are using this input before stopping
+					projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(request.ID)
+					if projectsUsingInput == 0 {
+						logger.Info("Stopping deleted input component on follower", "id", request.ID)
+						if err := input.Stop(); err != nil {
+							logger.Error("Failed to stop deleted input on follower", "id", request.ID, "error", err)
+						}
+					} else {
+						logger.Warn("Cannot stop deleted input - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingInput)
 					}
 				} else {
-					logger.Warn("Cannot stop deleted input - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingInput)
+					common.GlobalMu.Unlock()
 				}
 			} else {
 				common.GlobalMu.Unlock()
@@ -272,19 +281,23 @@ func handleComponentSync(c echo.Context) error {
 		case "output":
 			common.GlobalMu.Lock()
 			delete(common.AllOutputsRawConfig, request.ID)
-			if output, exists := p.Outputs[request.ID]; exists {
-				delete(p.Outputs, request.ID)
-				common.GlobalMu.Unlock()
+			if p.Outputs != nil {
+				if output, exists := p.Outputs[request.ID]; exists {
+					delete(p.Outputs, request.ID)
+					common.GlobalMu.Unlock()
 
-				// Check if any projects are using this output before stopping
-				projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(request.ID)
-				if projectsUsingOutput == 0 {
-					logger.Info("Stopping deleted output component on follower", "id", request.ID)
-					if err := output.Stop(); err != nil {
-						logger.Error("Failed to stop deleted output on follower", "id", request.ID, "error", err)
+					// Check if any projects are using this output before stopping
+					projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(request.ID)
+					if projectsUsingOutput == 0 {
+						logger.Info("Stopping deleted output component on follower", "id", request.ID)
+						if err := output.Stop(); err != nil {
+							logger.Error("Failed to stop deleted output on follower", "id", request.ID, "error", err)
+						}
+					} else {
+						logger.Warn("Cannot stop deleted output - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingOutput)
 					}
 				} else {
-					logger.Warn("Cannot stop deleted output - still in use by projects on follower", "id", request.ID, "projects_using", projectsUsingOutput)
+					common.GlobalMu.Unlock()
 				}
 			} else {
 				common.GlobalMu.Unlock()
@@ -292,14 +305,18 @@ func handleComponentSync(c echo.Context) error {
 		case "project":
 			common.GlobalMu.Lock()
 			delete(common.AllProjectRawConfig, request.ID)
-			if proj, exists := p.Projects[request.ID]; exists {
-				delete(p.Projects, request.ID)
-				common.GlobalMu.Unlock()
+			if p.Projects != nil {
+				if proj, exists := p.Projects[request.ID]; exists {
+					delete(p.Projects, request.ID)
+					common.GlobalMu.Unlock()
 
-				// Always stop projects when deleted
-				logger.Info("Stopping deleted project on follower", "id", request.ID)
-				if err := proj.Stop(); err != nil {
-					logger.Error("Failed to stop deleted project on follower", "id", request.ID, "error", err)
+					// Always stop projects when deleted
+					logger.Info("Stopping deleted project on follower", "id", request.ID)
+					if err := proj.Stop(); err != nil {
+						logger.Error("Failed to stop deleted project on follower", "id", request.ID, "error", err)
+					}
+				} else {
+					common.GlobalMu.Unlock()
 				}
 			} else {
 				common.GlobalMu.Unlock()
@@ -336,6 +353,10 @@ func handleComponentSync(c echo.Context) error {
 			} else {
 				// Lock only for updating the map
 				common.GlobalMu.Lock()
+				// Ensure the map exists before updating
+				if p.Rulesets == nil {
+					p.Rulesets = make(map[string]*rules_engine.Ruleset)
+				}
 				p.Rulesets[request.ID] = updatedRuleset
 				common.GlobalMu.Unlock()
 
@@ -371,6 +392,10 @@ func handleComponentSync(c echo.Context) error {
 			} else {
 				// Lock only for updating the map
 				common.GlobalMu.Lock()
+				// Ensure the map exists before updating
+				if p.Inputs == nil {
+					p.Inputs = make(map[string]*input.Input)
+				}
 				p.Inputs[request.ID] = newInput
 				common.GlobalMu.Unlock()
 
@@ -415,6 +440,10 @@ func handleComponentSync(c echo.Context) error {
 			} else {
 				// Lock only for updating the map
 				common.GlobalMu.Lock()
+				// Ensure the map exists before updating
+				if p.Outputs == nil {
+					p.Outputs = make(map[string]*output.Output)
+				}
 				p.Outputs[request.ID] = newOutput
 				common.GlobalMu.Unlock()
 
@@ -454,6 +483,10 @@ func handleComponentSync(c echo.Context) error {
 			} else {
 				// Lock only for updating the map
 				common.GlobalMu.Lock()
+				// Ensure the map exists before updating
+				if p.Projects == nil {
+					p.Projects = make(map[string]*project.Project)
+				}
 				p.Projects[request.ID] = newProject
 				common.GlobalMu.Unlock()
 
@@ -473,6 +506,10 @@ func handleComponentSync(c echo.Context) error {
 				logger.Error("failed to create new project on follower", "id", request.ID, "error", err)
 			} else {
 				common.GlobalMu.Lock()
+				// Ensure the map exists before updating
+				if p.Projects == nil {
+					p.Projects = make(map[string]*project.Project)
+				}
 				p.Projects[request.ID] = newProject
 				common.GlobalMu.Unlock()
 
@@ -523,7 +560,13 @@ func syncToFollowers(method, path string, body []byte) {
 		go func(node *cluster.NodeInfo) {
 			defer wg.Done()
 
-			url := "http://" + node.Address + path
+			// Build URL with proper protocol handling
+			var url string
+			if strings.HasPrefix(node.Address, "http://") || strings.HasPrefix(node.Address, "https://") {
+				url = node.Address + path
+			} else {
+				url = "http://" + node.Address + path
+			}
 			success := false
 
 			for i := 0; i < 3; i++ {
@@ -728,8 +771,7 @@ func getQPSData(c echo.Context) error {
 	})
 }
 
-// getQPSStats returns QPS manager statistics
-// Each node can provide its own data - no leader restriction needed
+// getQPSStats returns QPS manager statistics including Redis persistence status
 func getQPSStats(c echo.Context) error {
 	if common.GlobalQPSManager == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
@@ -737,8 +779,11 @@ func getQPSStats(c echo.Context) error {
 		})
 	}
 
-	stats := common.GlobalQPSManager.GetStats()
-	return c.JSON(http.StatusOK, stats)
+	stats := common.GlobalQPSManager.GetQPSStats()
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"stats":     stats,
+		"timestamp": time.Now(),
+	})
 }
 
 // getHourlyMessages returns real message counts for the past hour
@@ -993,4 +1038,69 @@ func getClusterSystemStats(c echo.Context) error {
 
 	stats := common.GlobalClusterSystemManager.GetStats()
 	return c.JSON(http.StatusOK, stats)
+}
+
+// getDailyStatsFromRedis returns daily statistics stored in Redis
+func getDailyStatsFromRedis(c echo.Context) error {
+	if common.GlobalDailyStatsManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Daily statistics manager not initialized",
+		})
+	}
+
+	date := c.QueryParam("date") // Format: 2006-01-02
+	projectID := c.QueryParam("project_id")
+	nodeID := c.QueryParam("node_id")
+
+	// If no date specified, use today
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	result := common.GlobalDailyStatsManager.GetDailyStats(date, projectID, nodeID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":      result,
+		"date":      date,
+		"timestamp": time.Now(),
+	})
+}
+
+// getAggregatedDailyStatsFromRedis returns aggregated daily statistics from Redis
+func getAggregatedDailyStatsFromRedis(c echo.Context) error {
+	if common.GlobalDailyStatsManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Daily statistics manager not initialized",
+		})
+	}
+
+	date := c.QueryParam("date") // Format: 2006-01-02
+
+	// If no date specified, use today
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	result := common.GlobalDailyStatsManager.GetAggregatedDailyStats(date)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":      result,
+		"timestamp": time.Now(),
+	})
+}
+
+// getDailyStatsInfo returns information about daily statistics storage
+func getDailyStatsInfo(c echo.Context) error {
+	if common.GlobalDailyStatsManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Daily statistics manager not initialized",
+		})
+	}
+
+	stats := common.GlobalDailyStatsManager.GetStats()
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"stats":     stats,
+		"timestamp": time.Now(),
+	})
 }

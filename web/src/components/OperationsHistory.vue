@@ -18,6 +18,16 @@
           </svg>
           Refresh
         </button>
+        <button
+          @click="exportOperations"
+          :disabled="operations.length === 0"
+          class="btn btn-secondary btn-sm"
+        >
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+          Export
+        </button>
       </div>
     </div>
 
@@ -125,11 +135,11 @@
       <div v-else class="space-y-2 p-4">
         <div 
           v-for="operation in operations" 
-          :key="operation.id" 
+          :key="getOperationKey(operation)" 
           class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
         >
           <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
-               @click="toggleOperationDetail(operation.id)">
+               @click="toggleOperationDetail(operation)">
             <div class="flex items-center space-x-3">
               <div class="flex items-center space-x-2">
                 <!-- Operation Type Icon -->
@@ -150,7 +160,6 @@
                   </h3>
                   <div class="text-sm text-gray-500">
                     {{ formatTimestamp(operation.timestamp) }}
-                    <span class="ml-2">{{ operation.node_id }}</span>
                   </div>
                 </div>
               </div>
@@ -164,7 +173,7 @@
               
               <!-- Expand/Collapse Icon -->
               <svg class="w-4 h-4 text-gray-400 transform transition-transform" 
-                   :class="{ 'rotate-90': expandedOperations.has(operation.id) }"
+                   :class="{ 'rotate-90': expandedOperations.has(getOperationKey(operation)) }"
                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
               </svg>
@@ -172,16 +181,13 @@
           </div>
           
           <!-- Operation Details (expanded) -->
-          <div v-if="expandedOperations.has(operation.id)" class="p-4 bg-white">
+          <div v-if="expandedOperations.has(getOperationKey(operation))" class="p-4 bg-white">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <!-- Basic Info -->
               <div>
                 <h4 class="text-sm font-medium text-gray-900 mb-2">Operation Details</h4>
                 <dl class="space-y-1 text-sm">
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">ID:</dt>
-                    <dd class="col-span-2 text-gray-900 font-mono text-xs">{{ operation.id }}</dd>
-                  </div>
+
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Type:</dt>
                     <dd class="col-span-2 text-gray-900">{{ getOperationTypeLabel(operation.type) }}</dd>
@@ -210,10 +216,7 @@
                     <dt class="text-gray-500">Timestamp:</dt>
                     <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(operation.timestamp) }}</dd>
                   </div>
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Node:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ operation.node_id }}</dd>
-                  </div>
+
                 </dl>
               </div>
 
@@ -231,7 +234,7 @@
               <h4 class="text-sm font-medium text-gray-900 mb-2">Changes</h4>
               <div class="bg-gray-100 rounded-md" style="height: 300px;">
                 <MonacoEditor 
-                  :key="`diff-${operation.id}`"
+                  :key="`diff-${getOperationKey(operation)}`"
                   :value="operation.new_content || ''" 
                   :original-value="operation.old_content || ''"
                   :language="getLanguageForComponent(operation.component_type)" 
@@ -247,7 +250,7 @@
               <h4 class="text-sm font-medium text-gray-900 mb-2">Content</h4>
               <div class="bg-gray-100 rounded-md" style="height: 300px;">
                 <MonacoEditor 
-                  :key="`content-${operation.id}`"
+                  :key="`content-${getOperationKey(operation)}`"
                   :value="operation.new_content" 
                   :language="getLanguageForComponent(operation.component_type)" 
                   :read-only="true" 
@@ -454,15 +457,63 @@ function refreshHistory() {
   fetchOperationsHistory()
 }
 
-function toggleOperationDetail(operationId) {
-  if (expandedOperations.value.has(operationId)) {
-    expandedOperations.value.delete(operationId)
+function exportOperations() {
+  try {
+    // Create CSV headers
+    const headers = ['Type', 'Component Type', 'Component ID', 'Project ID', 'Status', 'Timestamp', 'Error']
+    
+    // Convert operations to CSV format
+    const csvData = operations.value.map(op => [
+      getOperationTypeLabel(op.type),
+      op.component_type || '',
+      op.component_id || '',
+      op.project_id || '',
+      op.status,
+      formatFullTimestamp(op.timestamp),
+      op.error || ''
+    ])
+    
+    // Add headers to data
+    csvData.unshift(headers)
+    
+    // Convert to CSV string
+    const csvString = csvData.map(row => 
+      row.map(cell => 
+        typeof cell === 'string' && cell.includes(',') ? `"${cell}"` : cell
+      ).join(',')
+    ).join('\n')
+    
+    // Create and download file
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob)
+      link.setAttribute('href', url)
+      link.setAttribute('download', `operations_history_${new Date().toISOString().split('T')[0]}.csv`)
+      link.style.visibility = 'hidden'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    }
+    
+    $message?.success?.('Operations history exported successfully')
+  } catch (e) {
+    $message?.error?.('Failed to export operations history')
+  }
+}
+
+function toggleOperationDetail(operation) {
+  const key = getOperationKey(operation)
+  if (expandedOperations.value.has(key)) {
+    expandedOperations.value.delete(key)
   } else {
-    expandedOperations.value.add(operationId)
+    expandedOperations.value.add(key)
   }
   
   // Refresh editor layout after expansion
-  if (expandedOperations.value.has(operationId)) {
+  if (expandedOperations.value.has(key)) {
     nextTick(() => {
       refreshEditorsLayout()
     })
@@ -548,13 +599,34 @@ function formatTimestamp(timestamp) {
   } else if (diff < 86400000) { // Less than 1 day
     return `${Math.floor(diff / 3600000)} hours ago`
   } else {
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
   }
 }
 
 function formatFullTimestamp(timestamp) {
   const date = new Date(timestamp)
-  return date.toLocaleString()
+  return date.toLocaleString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+}
+
+function getOperationKey(operation) {
+  // Create a unique key for each operation using timestamp and operation details
+  return `${operation.timestamp}-${operation.type}-${operation.component_type || ''}-${operation.component_id || ''}-${operation.project_id || ''}`
 }
 </script>
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -59,7 +60,13 @@ func syncProjectStatusToFollowers(projectID string, action string) {
 	// Sync to each follower
 	for _, node := range followers {
 		go func(node *cluster.NodeInfo) {
-			url := fmt.Sprintf("http://%s/project-status-sync", node.Address)
+			// Ensure proper URL format for node address
+			var url string
+			if strings.HasPrefix(node.Address, "http://") || strings.HasPrefix(node.Address, "https://") {
+				url = fmt.Sprintf("%s/project-status-sync", node.Address)
+			} else {
+				url = fmt.Sprintf("http://%s/project-status-sync", node.Address)
+			}
 			req, err := http.NewRequest("POST", url, bytes.NewReader(jsonData))
 			if err != nil {
 				return

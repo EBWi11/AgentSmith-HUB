@@ -862,7 +862,15 @@
                 <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="bg-gray-50 rounded p-3">
                   <div class="text-xs text-gray-500 mb-2 flex justify-between">
                     <span>Sample {{ index + 1 }}</span>
-                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString() }}</span>
+                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString('en-US', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: false
+                    }) }}</span>
                   </div>
                   <JsonViewer :value="sample.data || sample" height="auto" />
                 </div>
@@ -947,7 +955,15 @@
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <template v-if="getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
                         {{ getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at ? 
-                            new Date(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at).toLocaleString() : 
+                            new Date(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at).toLocaleString('en-US', {
+                              year: 'numeric',
+                              month: '2-digit', 
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                              hour12: false
+                            }) : 
                             'Unknown' }}
                       </template>
                       <template v-else>
@@ -1071,8 +1087,8 @@ const sections = reactive({
     children: [
       { type: 'pending-changes', title: 'Push Changes' },
       { type: 'load-local-components', title: 'Load Local Components' },
-      { type: 'operations-history', title: 'Operations History', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' },
       { type: 'cluster', title: 'Cluster', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12a7 7 0 1114 0 7 7 0 01-14 0zM12 8v4l3 3"></path></svg>' },
+      { type: 'operations-history', title: 'Operations History', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' },
       { type: 'error-logs', title: 'Error Logs', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>' }
     ]
   }

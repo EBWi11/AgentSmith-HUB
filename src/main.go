@@ -330,7 +330,14 @@ func LoadProject() {
 			if err != nil {
 				logger.Error("project init error", "err", err, "project_id", id)
 			}
-			project.GlobalProject.Projects[id] = p
+			if p != nil {
+				// IMPORTANT: Ensure follower projects have their own timestamp
+				// This prevents inheriting leader's timestamp and ensures proper cluster differentiation
+				now := time.Now()
+				p.StatusChangedAt = &now
+				logger.Info("Project created on follower with follower-specific timestamp", "project_id", id, "timestamp", now.Format(time.RFC3339))
+				project.GlobalProject.Projects[id] = p
+			}
 		}
 	}
 }
@@ -528,7 +535,15 @@ func main() {
 			return
 		}
 	} else if *leaderAddr != "" {
-		common.Config.Leader = *leaderAddr
+		// Normalize leader address by removing protocol prefix if present
+		normalizedLeaderAddr := *leaderAddr
+		if strings.HasPrefix(normalizedLeaderAddr, "http://") {
+			normalizedLeaderAddr = strings.TrimPrefix(normalizedLeaderAddr, "http://")
+		} else if strings.HasPrefix(normalizedLeaderAddr, "https://") {
+			normalizedLeaderAddr = strings.TrimPrefix(normalizedLeaderAddr, "https://")
+		}
+
+		common.Config.Leader = normalizedLeaderAddr
 		//set leader
 		cl.SetLeader(common.Config.Leader, common.Config.Leader)
 		cl.StartHeartbeatLoop()

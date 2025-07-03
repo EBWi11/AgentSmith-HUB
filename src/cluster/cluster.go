@@ -229,23 +229,38 @@ func (cm *ClusterManager) SendHeartbeat() error {
 		return fmt.Errorf("failed to marshal heartbeat data: %w", err)
 	}
 
-	// Send heartbeat to leader
-	heartbeatURL := fmt.Sprintf("%s/cluster/heartbeat", leaderAddr)
+	// Send heartbeat to leader - ensure proper URL format
+	var heartbeatURL string
+	if strings.HasPrefix(leaderAddr, "http://") || strings.HasPrefix(leaderAddr, "https://") {
+		heartbeatURL = fmt.Sprintf("%s/cluster/heartbeat", leaderAddr)
+	} else {
+		heartbeatURL = fmt.Sprintf("http://%s/cluster/heartbeat", leaderAddr)
+	}
 
-	req, _ := http.NewRequest("POST", heartbeatURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", heartbeatURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create heartbeat request: %w", err)
+	}
 	req.Header.Set("token", common.Config.Token)
+	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
-	if err == nil && resp.StatusCode < 300 {
-		return fmt.Errorf("heartbeat request failed with status: %d", resp.StatusCode)
+	if err != nil {
+		return fmt.Errorf("heartbeat request failed: %w", err)
+	}
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	// Check if response is successful
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil // Success
 	}
 
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-
-	return nil
+	return fmt.Errorf("heartbeat request failed with status: %d", resp.StatusCode)
 }
 
 // StartHeartbeatLoop starts the heartbeat sending loop
@@ -419,20 +434,8 @@ func (cm *ClusterManager) monitorHeartbeats() {
 	for {
 		select {
 		case <-ticker.C:
-			if err := cm.SendHeartbeat(); err != nil {
-				// Log error but continue
-				fmt.Printf("Failed to send heartbeat: %v\n", err)
-
-				// If we're a follower and can't reach the leader, we might need to start an election
-				cm.Mu.Lock()
-				isFollower := cm.Status == NodeStatusFollower
-				cm.Mu.Unlock()
-
-				if isFollower {
-					// TODO: Implement leader election logic
-					fmt.Printf("Lost connection to leader, might need to start election\n")
-				}
-			}
+			// Leader监控follower的心跳状态，而不是发送心跳
+			cm.cleanupUnhealthyNodes()
 		case <-cm.stopHeartbeatMonitor:
 			return
 		}
@@ -516,8 +519,20 @@ func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []P
 		return nil
 	}
 
-	// Create request - correct API path is /projects, not /api/projects
-	url := fmt.Sprintf("http://localhost:%s/projects", port)
+	// Create request - use proper HTTP URL format with protocol handling
+	var url string
+	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
+		url = fmt.Sprintf("%s/projects", address)
+	} else {
+		// For localhost addresses, use the address as-is
+		if strings.Contains(address, "127.0.0.1") || strings.Contains(address, "localhost") {
+			url = fmt.Sprintf("http://%s/projects", address)
+		} else {
+			// For remote addresses, construct with port
+			url = fmt.Sprintf("http://%s:%s/projects", strings.Split(address, ":")[0], port)
+		}
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		logger.Debug("Failed to create request for project states", "node_id", nodeID, "error", err)

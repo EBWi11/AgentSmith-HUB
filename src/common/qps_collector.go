@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,9 +122,27 @@ func (qc *QPSCollector) sendDataToLeader(payload map[string]interface{}) error {
 		return fmt.Errorf("failed to marshal data: %w", err)
 	}
 
-	// Send POST request to leader (use combined endpoint)
-	url := fmt.Sprintf("http://%s/metrics-sync", qc.leaderAddr)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	// Send POST request to leader (use combined endpoint) - ensure proper URL format
+	var url string
+	if strings.HasPrefix(qc.leaderAddr, "http://") || strings.HasPrefix(qc.leaderAddr, "https://") {
+		url = fmt.Sprintf("%s/metrics-sync", qc.leaderAddr)
+	} else {
+		url = fmt.Sprintf("http://%s/metrics-sync", qc.leaderAddr)
+	}
+
+	// Create request with authentication token
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set headers including authentication token
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("token", Config.Token)
+
+	// Send request with timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send HTTP request: %w", err)
 	}
