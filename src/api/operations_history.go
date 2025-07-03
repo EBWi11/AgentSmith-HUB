@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
 	"fmt"
@@ -30,7 +29,6 @@ const (
 
 // OperationRecord represents a single operation record
 type OperationRecord struct {
-	ID            string                 `json:"id"`
 	Type          OperationType          `json:"type"`
 	Timestamp     time.Time              `json:"timestamp"`
 	ComponentType string                 `json:"component_type,omitempty"`
@@ -42,7 +40,6 @@ type OperationRecord struct {
 	Status        string                 `json:"status"`
 	Error         string                 `json:"error,omitempty"`
 	UserIP        string                 `json:"user_ip,omitempty"`
-	NodeID        string                 `json:"node_id"`
 	Details       map[string]interface{} `json:"details,omitempty"`
 }
 
@@ -120,14 +117,6 @@ func getOperationsLogPath(month string) string {
 
 // recordOperation records an operation to the monthly log file
 func recordOperation(record OperationRecord) error {
-	// Set node ID
-	record.NodeID = common.Config.LocalIP
-
-	// Generate ID if not provided
-	if record.ID == "" {
-		record.ID = common.NewUUID()
-	}
-
 	// Get monthly log file path
 	monthKey := record.Timestamp.Format("2006-01")
 	logPath := getOperationsLogPath(monthKey)
@@ -203,15 +192,13 @@ func matchesOperationFilter(record OperationRecord, filter OperationHistoryFilte
 	if !filter.StartTime.IsZero() && record.Timestamp.Before(filter.StartTime) {
 		logger.Debug("Record filtered out by start_time",
 			"record_time", record.Timestamp.Format(time.RFC3339),
-			"filter_start", filter.StartTime.Format(time.RFC3339),
-			"record_id", record.ID)
+			"filter_start", filter.StartTime.Format(time.RFC3339))
 		return false
 	}
 	if !filter.EndTime.IsZero() && record.Timestamp.After(filter.EndTime) {
 		logger.Debug("Record filtered out by end_time",
 			"record_time", record.Timestamp.Format(time.RFC3339),
-			"filter_end", filter.EndTime.Format(time.RFC3339),
-			"record_id", record.ID)
+			"filter_end", filter.EndTime.Format(time.RFC3339))
 		return false
 	}
 
