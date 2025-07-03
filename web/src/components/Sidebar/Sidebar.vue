@@ -1938,13 +1938,24 @@ function openTestProject(item) {
 
 // Open cluster status modal
 function openClusterStatusModal(item) {
+  console.log('Opening cluster status modal for project:', item.id || item.name);
+  
+  // Ensure all menus are closed first
+  closeAllMenus();
+  
+  // Set the selected project and modal state
   selectedProjectForCluster.value = item;
   showClusterStatusModal.value = true;
   activeModal.value = 'clusterStatus';
+  
+  // Load cluster project states
   loadClusterProjectStates(item.id || item.name);
+  
+  // Add ESC key listener
   addEscKeyListener();
-  // Ensure menus are closed
-  closeAllMenus();
+  
+  // Prevent any potential navigation by stopping event propagation
+  // This is handled in the template with @click.prevent.stop but adding extra safety
 }
 
 // Add plugin parameter
