@@ -566,6 +566,14 @@ func main() {
 	LoadComponents()
 	LoadProject()
 
+	// Initialize daily statistics manager for all nodes (requires Redis to be initialized)
+	common.InitDailyStatsManager()
+	logger.Info("Daily statistics manager initialized")
+
+	// Initialize Redis Sample Manager
+	common.InitRedisSampleManager()
+	logger.Info("Redis Sample Manager initialized successfully")
+
 	// Initialize QPS system based on node role
 	if cluster.IsLeader {
 		// Initialize QPS manager for leader nodes

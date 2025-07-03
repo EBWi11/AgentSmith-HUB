@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// QPSMetrics represents QPS data for a specific component
+// QPSMetrics represents QPS metrics for a single component
 type QPSMetrics struct {
 	NodeID              string    `json:"node_id"`
 	ProjectID           string    `json:"project_id"`
@@ -118,6 +118,18 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 	componentData.DataPoints = append(componentData.DataPoints, dataPoint)
 	componentData.LastUpdate = metrics.Timestamp
 	componentData.CurrentTotal = metrics.TotalMessages // Update current total
+
+	// Update daily statistics in Redis
+	if GlobalDailyStatsManager != nil {
+		GlobalDailyStatsManager.UpdateDailyStats(
+			metrics.NodeID,
+			metrics.ProjectID,
+			metrics.ComponentID,
+			metrics.ComponentType,
+			metrics.ProjectNodeSequence,
+			metrics.TotalMessages,
+		)
+	}
 
 	// Keep only data from the last hour (3600 seconds) and ensure sorted order
 	cutoffTime := time.Now().Add(-time.Hour)
@@ -303,7 +315,7 @@ func (qm *QPSManager) GetAggregatedQPS(projectID string) map[string]interface{} 
 	return result
 }
 
-// cleanupLoop periodically removes old data (older than 1 hour)
+// cleanupLoop periodically removes old data (older than 1 hour in memory)
 func (qm *QPSManager) cleanupLoop() {
 	defer qm.cleanupWg.Done()
 
@@ -315,7 +327,7 @@ func (qm *QPSManager) cleanupLoop() {
 		case <-qm.stopChan:
 			return
 		case <-ticker.C:
-			qm.cleanup()
+			qm.cleanup() // Clean memory data
 		}
 	}
 }
@@ -381,11 +393,12 @@ func (qm *QPSManager) updateMessageCache() {
 	qm.cacheMutex.Unlock()
 }
 
-// Stop stops the QPS manager and cleanup goroutine
+// Stop stops the QPS manager and all goroutines
 func (qm *QPSManager) Stop() {
 	close(qm.stopChan)
 	qm.cleanupWg.Wait()
 	qm.cacheWg.Wait()
+
 }
 
 // calculateHourlyMessageCounts calculates the real message counts for the past hour (internal method)
@@ -694,29 +707,9 @@ func (qm *QPSManager) GetAllNodeHourlyMessages() map[string]interface{} {
 	return qm.cachedNodeMessages
 }
 
-// GetStats returns statistics about the QPS manager
+// GetStats returns statistics about the QPS manager (legacy method)
 func (qm *QPSManager) GetStats() map[string]interface{} {
-	qm.mutex.RLock()
-	defer qm.mutex.RUnlock()
-
-	totalComponents := len(qm.data)
-	totalDataPoints := 0
-	nodeCount := make(map[string]bool)
-	projectCount := make(map[string]bool)
-
-	for _, data := range qm.data {
-		totalDataPoints += len(data.DataPoints)
-		nodeCount[data.NodeID] = true
-		projectCount[data.ProjectID] = true
-	}
-
-	return map[string]interface{}{
-		"total_components":  totalComponents,
-		"total_data_points": totalDataPoints,
-		"unique_nodes":      len(nodeCount),
-		"unique_projects":   len(projectCount),
-		"data_retention":    "1 hour",
-	}
+	return qm.GetQPSStats()
 }
 
 // Global QPS manager instance (only on leader)
@@ -1016,4 +1009,52 @@ func (qm *QPSManager) GetNodeDailyMessages(nodeID string) map[string]interface{}
 // GetAllNodeDailyMessages returns message counts for all nodes for today
 func (qm *QPSManager) GetAllNodeDailyMessages() map[string]interface{} {
 	return qm.calculateNodeDailyMessages()
+}
+
+// GetQPSStats returns statistics about QPS data storage
+func (qm *QPSManager) GetQPSStats() map[string]interface{} {
+	qm.mutex.RLock()
+	defer qm.mutex.RUnlock()
+
+	totalComponents := len(qm.data)
+	totalDataPoints := 0
+	nodeCount := make(map[string]bool)
+	projectCount := make(map[string]bool)
+	oldestTimestamp := time.Now()
+	newestTimestamp := time.Time{}
+
+	for _, data := range qm.data {
+		totalDataPoints += len(data.DataPoints)
+		nodeCount[data.NodeID] = true
+		projectCount[data.ProjectID] = true
+
+		// Find oldest and newest timestamps
+		for _, point := range data.DataPoints {
+			if point.Timestamp.Before(oldestTimestamp) {
+				oldestTimestamp = point.Timestamp
+			}
+			if point.Timestamp.After(newestTimestamp) {
+				newestTimestamp = point.Timestamp
+			}
+		}
+	}
+
+	stats := map[string]interface{}{
+		"total_components":      totalComponents,
+		"total_data_points":     totalDataPoints,
+		"unique_nodes":          len(nodeCount),
+		"unique_projects":       len(projectCount),
+		"memory_data_retention": "1 hour",
+		"redis_persistence":     false,
+		"redis_data_retention":  "0 hours",
+		"redis_save_interval":   "0s",
+	}
+
+	if totalDataPoints > 0 {
+		stats["oldest_data"] = oldestTimestamp
+		stats["newest_data"] = newestTimestamp
+		stats["data_span"] = newestTimestamp.Sub(oldestTimestamp).String()
+	}
+
+	return stats
 }

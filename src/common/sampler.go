@@ -20,13 +20,7 @@ type SampleData struct {
 	ProjectNodeSequence string      `json:"project_node_sequence"`
 }
 
-// ProjectSamples uses lock-free ring buffer
-type ProjectSamples struct {
-	samples     [100]SampleData // Fixed-size ring buffer
-	writeIdx    uint32          // Write position
-	sampleCount uint32          // Current sample count
-	mu          sync.RWMutex    // Read-write lock to protect data consistency
-}
+// Note: ProjectSamples struct has been removed as we now use Redis-only storage
 
 // SamplerStats represents statistics about sampling
 type SamplerStats struct {
@@ -39,10 +33,9 @@ type SamplerStats struct {
 	ProjectStats   map[string]int64 `json:"projectStats"`
 }
 
-// Sampler represents a sampling instance
+// Sampler represents a sampling instance (Redis-only storage)
 type Sampler struct {
 	name         string
-	samples      sync.Map // key: projectNodeSequence, value: *ProjectSamples
 	totalCount   uint64
 	sampledCount uint64
 	maxSamples   int
@@ -64,10 +57,18 @@ func NewSampler(name string) *Sampler {
 	}
 }
 
-// getOrCreateProjectSamples gets or creates project sampler
-func (s *Sampler) getOrCreateProjectSamples(projectNodeSequence string) *ProjectSamples {
-	value, _ := s.samples.LoadOrStore(projectNodeSequence, &ProjectSamples{})
-	return value.(*ProjectSamples)
+// isFirstSampleForProject checks if this is the first sample for a project sequence
+func (s *Sampler) isFirstSampleForProject(projectNodeSequence string) bool {
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager == nil {
+		return true // Default to true if Redis not available
+	}
+
+	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectNodeSequence)
+	if err != nil || len(samples) == 0 {
+		return true
+	}
+	return false
 }
 
 // Sample attempts to sample the data based on sampling rate
@@ -85,19 +86,8 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Increment counter using atomic operations
 	total := atomic.AddUint64(&s.totalCount, 1)
 
-	// Check if it's the first data or the first data for this ProjectNodeSequence
-	shouldSampleFirst := false
-
 	// Check if it's the first data for this ProjectNodeSequence
-	ps := s.getOrCreateProjectSamples(projectNodeSequence)
-	ps.mu.RLock()
-	isEmpty := ps.sampleCount == 0
-	ps.mu.RUnlock()
-
-	if isEmpty {
-		// If this ProjectNodeSequence has no samples yet, force collection of the first one
-		shouldSampleFirst = true
-	}
+	shouldSampleFirst := s.isFirstSampleForProject(projectNodeSequence)
 
 	// Sampling decision: force collection of first data, or collect according to sampling rate
 	shouldSample := shouldSampleFirst || (total&SamplingMask == 0)
@@ -137,126 +127,64 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	return true
 }
 
-// storeSample stores sample data to ring buffer
+// storeSample stores sample data to Redis only
 func (s *Sampler) storeSample(sample SampleData, projectNodeSequence string) {
-	// Get project sampler
-	ps := s.getOrCreateProjectSamples(projectNodeSequence)
-
-	// Use write lock to protect write operations
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-
-	// Write sample data to ring buffer
-	writeIdx := ps.writeIdx % 100
-	ps.samples[writeIdx] = sample
-	ps.writeIdx++
-
-	// Update sample count
-	if ps.sampleCount < 100 {
-		ps.sampleCount++
+	// Store to Redis if Redis sample manager is available
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager != nil {
+		err := redisSampleManager.StoreSample(s.name, sample)
+		if err != nil {
+			// Log error but don't fail the sampling
+			// We could add proper logging here if needed
+		}
 	}
 }
 
-// GetSamples returns all collected samples
+// GetSamples returns all collected samples from Redis
 func (s *Sampler) GetSamples() map[string][]SampleData {
-	result := make(map[string][]SampleData)
-
-	s.samples.Range(func(key, value interface{}) bool {
-		projectNodeSequence := key.(string)
-		ps := value.(*ProjectSamples)
-
-		// Use read lock to protect read operations
-		ps.mu.RLock()
-		count := ps.sampleCount
-		writeIdx := ps.writeIdx
-
-		if count == 0 {
-			ps.mu.RUnlock()
-			return true
-		}
-
-		// Copy sample data
-		samples := make([]SampleData, count)
-
-		// Start copying from oldest data (if buffer is full)
-		if count == 100 {
-			// Buffer is full, start from oldest data
-			startIdx := writeIdx % 100
-			for i := uint32(0); i < count; i++ {
-				idx := (startIdx + i) % 100
-				samples[i] = ps.samples[idx]
-			}
-		} else {
-			// Buffer is not full, start from index 0
-			for i := uint32(0); i < count; i++ {
-				samples[i] = ps.samples[i]
-			}
-		}
-
-		ps.mu.RUnlock()
-		result[projectNodeSequence] = samples
-		return true
-	})
-
-	return result
-}
-
-// GetSamplesByProject returns samples for a specific project
-func (s *Sampler) GetSamplesByProject(projectNodeSequence string) []SampleData {
-	if value, ok := s.samples.Load(projectNodeSequence); ok {
-		ps := value.(*ProjectSamples)
-
-		// Use read lock to protect read operations
-		ps.mu.RLock()
-		defer ps.mu.RUnlock()
-
-		count := ps.sampleCount
-		writeIdx := ps.writeIdx
-
-		if count == 0 {
-			return nil
-		}
-
-		// Copy sample data
-		samples := make([]SampleData, count)
-
-		// Start copying from oldest data (if buffer is full)
-		if count == 100 {
-			// Buffer is full, start from oldest data
-			startIdx := writeIdx % 100
-			for i := uint32(0); i < count; i++ {
-				idx := (startIdx + i) % 100
-				samples[i] = ps.samples[idx]
-			}
-		} else {
-			// Buffer is not full, start from index 0
-			for i := uint32(0); i < count; i++ {
-				samples[i] = ps.samples[i]
-			}
-		}
-
-		return samples
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager == nil {
+		return make(map[string][]SampleData)
 	}
-	return nil
+
+	samples, err := redisSampleManager.GetSamples(s.name)
+	if err != nil {
+		return make(map[string][]SampleData)
+	}
+
+	return samples
 }
 
-// GetStats returns sampling statistics
+// GetSamplesByProject returns samples for a specific project from Redis
+func (s *Sampler) GetSamplesByProject(projectNodeSequence string) []SampleData {
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager == nil {
+		return nil
+	}
+
+	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectNodeSequence)
+	if err != nil {
+		return nil
+	}
+
+	return samples
+}
+
+// GetStats returns sampling statistics from Redis
 func (s *Sampler) GetStats() SamplerStats {
 	projectStats := make(map[string]int64)
 	totalSamples := 0
 
-	s.samples.Range(func(key, value interface{}) bool {
-		projectNodeSequence := key.(string)
-		ps := value.(*ProjectSamples)
-
-		ps.mu.RLock()
-		count := ps.sampleCount
-		ps.mu.RUnlock()
-
-		projectStats[projectNodeSequence] = int64(count)
-		totalSamples += int(count)
-		return true
-	})
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager != nil {
+		stats, err := redisSampleManager.GetStats(s.name)
+		if err == nil {
+			projectStats = stats
+			for _, count := range stats {
+				totalSamples += int(count)
+			}
+		}
+	}
 
 	return SamplerStats{
 		Name:           s.name,
@@ -273,12 +201,21 @@ func (s *Sampler) GetStats() SamplerStats {
 func (s *Sampler) Reset() {
 	atomic.StoreUint64(&s.totalCount, 0)
 	atomic.StoreUint64(&s.sampledCount, 0)
-	s.samples = sync.Map{}
+
+	// Clear Redis samples
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager != nil {
+		redisSampleManager.Reset(s.name)
+	}
 }
 
 // ResetProject resets samples for a specific project
 func (s *Sampler) ResetProject(projectNodeSequence string) {
-	s.samples.Delete(projectNodeSequence)
+	// Clear Redis samples for specific project
+	redisSampleManager := GetRedisSampleManager()
+	if redisSampleManager != nil {
+		redisSampleManager.ResetProject(s.name, projectNodeSequence)
+	}
 }
 
 // Close releases resources
