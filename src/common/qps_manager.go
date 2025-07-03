@@ -1,6 +1,7 @@
 package common
 
 import (
+	"AgentSmith-HUB/logger"
 	"fmt"
 	"sort"
 	"strings"
@@ -67,6 +68,9 @@ func NewQPSManager() *QPSManager {
 		cacheUpdateTime:    time.Now(),
 	}
 
+	// Load existing data from Redis via Daily Stats Manager
+	qm.loadFromRedis()
+
 	// Start cleanup goroutine to remove old data
 	qm.cleanupWg.Add(1)
 	go qm.cleanupLoop()
@@ -76,6 +80,54 @@ func NewQPSManager() *QPSManager {
 	go qm.cacheUpdateLoop()
 
 	return qm
+}
+
+// loadFromRedis loads historical data from Redis via Daily Stats Manager
+func (qm *QPSManager) loadFromRedis() {
+	if GlobalDailyStatsManager == nil {
+		return
+	}
+
+	// Get today's data from Daily Stats Manager
+	today := time.Now().Format("2006-01-02")
+	dailyStats := GlobalDailyStatsManager.GetDailyStats(today, "", "")
+
+	loadedComponents := 0
+	for _, statsData := range dailyStats {
+		// Create component data based on daily stats
+		key := qm.generateKey(statsData.NodeID, statsData.ProjectNodeSequence)
+
+		// Only load if we don't already have this component
+		if _, exists := qm.data[key]; !exists {
+			componentData := &ComponentQPSData{
+				NodeID:              statsData.NodeID,
+				ProjectID:           statsData.ProjectID,
+				ComponentID:         statsData.ComponentID,
+				ComponentType:       statsData.ComponentType,
+				ProjectNodeSequence: statsData.ProjectNodeSequence,
+				DataPoints:          make([]QPSDataPoint, 0),
+				LastUpdate:          statsData.LastUpdate,
+				CurrentTotal:        statsData.TotalMessages,
+			}
+
+			// Add a single data point representing the current state
+			if statsData.TotalMessages > 0 {
+				dataPoint := QPSDataPoint{
+					QPS:           0, // We don't have QPS data from daily stats
+					TotalMessages: statsData.TotalMessages,
+					Timestamp:     statsData.LastUpdate,
+				}
+				componentData.DataPoints = append(componentData.DataPoints, dataPoint)
+			}
+
+			qm.data[key] = componentData
+			loadedComponents++
+		}
+	}
+
+	if loadedComponents > 0 {
+		logger.Info("QPS Manager loaded data from Redis", "components", loadedComponents)
+	}
 }
 
 // generateKey creates a unique key for component QPS data based on ProjectNodeSequence
@@ -1039,15 +1091,30 @@ func (qm *QPSManager) GetQPSStats() map[string]interface{} {
 		}
 	}
 
+	// Check if Daily Stats Manager is available for Redis persistence
+	redisEnabled := GlobalDailyStatsManager != nil
+	var redisRetentionDays int
+	var redisSaveInterval string
+
+	if redisEnabled {
+		dailyStatsInfo := GlobalDailyStatsManager.GetStats()
+		if retentionDays, ok := dailyStatsInfo["retention_days"].(int); ok {
+			redisRetentionDays = retentionDays
+		}
+		if saveInterval, ok := dailyStatsInfo["save_interval"].(string); ok {
+			redisSaveInterval = saveInterval
+		}
+	}
+
 	stats := map[string]interface{}{
 		"total_components":      totalComponents,
 		"total_data_points":     totalDataPoints,
 		"unique_nodes":          len(nodeCount),
 		"unique_projects":       len(projectCount),
 		"memory_data_retention": "1 hour",
-		"redis_persistence":     false,
-		"redis_data_retention":  "0 hours",
-		"redis_save_interval":   "0s",
+		"redis_persistence":     redisEnabled,
+		"redis_data_retention":  fmt.Sprintf("%d days", redisRetentionDays),
+		"redis_save_interval":   redisSaveInterval,
 	}
 
 	if totalDataPoints > 0 {
