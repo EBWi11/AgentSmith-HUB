@@ -1,6 +1,6 @@
 import { ref, inject } from 'vue'
 import { hubApi } from '../api'
-import { extractLineNumber } from '../utils/common'
+import { extractLineNumber, getComponentTypeLabel } from '../utils/common'
 
 /**
  * Component validation composable
@@ -231,18 +231,4 @@ export function useComponentValidation() {
     validateBeforeSave,
     verifyAfterSave
   }
-}
-
-/**
- * Get component type label for messages
- */
-function getComponentTypeLabel(componentType) {
-  const labels = {
-    inputs: 'Input',
-    outputs: 'Output', 
-    rulesets: 'Ruleset',
-    plugins: 'Plugin',
-    projects: 'Project'
-  }
-  return labels[componentType] || componentType
 } 

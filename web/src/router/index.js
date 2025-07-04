@@ -116,6 +116,12 @@ const routes = [
         name: 'ErrorLogs',
         component: ErrorLogs,
         meta: { requiresAuth: true, componentType: 'error-logs' }
+      },
+      {
+        path: 'tutorial',
+        name: 'Tutorial',
+        component: () => import('../views/Tutorial.vue'),
+        meta: { requiresAuth: true, componentType: 'tutorial' }
       }
     ]
   }

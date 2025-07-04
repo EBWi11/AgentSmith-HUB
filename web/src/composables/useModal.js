@@ -3,8 +3,9 @@ import { ref, onBeforeUnmount } from 'vue'
 /**
  * 通用模态框管理composable
  * 用于减少重复的模态框处理代码
+ * 仅供内部使用，不直接导出
  */
-export function useModal() {
+function useModal() {
   const isOpen = ref(false)
   const data = ref(null)
   
@@ -38,8 +39,9 @@ export function useModal() {
 /**
  * ESC键处理composable
  * 统一处理ESC键关闭模态框的逻辑
+ * 仅供内部使用，不直接导出
  */
-export function useEscapeKey(callback) {
+function useEscapeKey(callback) {
   const handleEscape = (event) => {
     if (event.key === 'Escape') {
       callback()
@@ -62,61 +64,6 @@ export function useEscapeKey(callback) {
   return {
     enableEscapeKey,
     disableEscapeKey
-  }
-}
-
-/**
- * 多模态框管理composable
- * 用于管理多个命名模态框
- */
-export function useMultiModal() {
-  const modals = ref({})
-  
-  const isOpen = (name) => {
-    return modals.value[name]?.isOpen || false
-  }
-  
-  const getData = (name) => {
-    return modals.value[name]?.data || null
-  }
-  
-  const open = (name, data = null) => {
-    if (!modals.value[name]) {
-      modals.value[name] = { isOpen: false, data: null }
-    }
-    modals.value[name].isOpen = true
-    modals.value[name].data = data
-  }
-  
-  const close = (name) => {
-    if (modals.value[name]) {
-      modals.value[name].isOpen = false
-      modals.value[name].data = null
-    }
-  }
-  
-  const closeAll = () => {
-    Object.keys(modals.value).forEach(name => {
-      close(name)
-    })
-  }
-  
-  const toggle = (name, data = null) => {
-    if (isOpen(name)) {
-      close(name)
-    } else {
-      open(name, data)
-    }
-  }
-  
-  return {
-    modals,
-    isOpen,
-    getData,
-    open,
-    close,
-    closeAll,
-    toggle
   }
 }
 
@@ -170,60 +117,5 @@ export function useDeleteConfirmModal() {
     closeDeleteModal,
     canDelete,
     confirmDelete
-  }
-}
-
-/**
- * 测试模态框composable
- * 用于各种测试模态框（ruleset、plugin、project、output）
- */
-export function useTestModal() {
-  const testRuleset = useModal()
-  const testPlugin = useModal()
-  const testProject = useModal()
-  const testOutput = useModal()
-  
-  const { enableEscapeKey, disableEscapeKey } = useEscapeKey(() => {
-    closeAllTestModals()
-  })
-  
-  const openTestRuleset = (data) => {
-    testRuleset.open(data)
-    enableEscapeKey()
-  }
-  
-  const openTestPlugin = (data) => {
-    testPlugin.open(data)
-    enableEscapeKey()
-  }
-  
-  const openTestProject = (data) => {
-    testProject.open(data)
-    enableEscapeKey()
-  }
-  
-  const openTestOutput = (data) => {
-    testOutput.open(data)
-    enableEscapeKey()
-  }
-  
-  const closeAllTestModals = () => {
-    testRuleset.close()
-    testPlugin.close()
-    testProject.close()
-    testOutput.close()
-    disableEscapeKey()
-  }
-  
-  return {
-    testRuleset,
-    testPlugin,
-    testProject,
-    testOutput,
-    openTestRuleset,
-    openTestPlugin,
-    openTestProject,
-    openTestOutput,
-    closeAllTestModals
   }
 } 

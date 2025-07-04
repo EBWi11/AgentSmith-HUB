@@ -127,6 +127,7 @@
 import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
+import { getComponentTypeLabel, getEditorLanguage, getApiComponentType } from '../utils/common'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -200,7 +201,6 @@ async function refreshChanges() {
 function refreshEditorsLayout() {
   // Give editors some time to render
   setTimeout(() => {
-    // Find all Monaco editor instances on the page and refresh layout
     const editorElements = document.querySelectorAll('.monaco-editor-container')
     editorElements.forEach(el => {
       const editor = el.__vue__?.exposed
@@ -220,34 +220,7 @@ function refreshEditorsLayout() {
   }, 300)
 }
 
-function getEditorLanguage(type) {
-  switch (type) {
-    case 'rulesets':
-      return 'xml'
-    case 'plugins':
-      return 'go'
-    default:
-      return 'yaml'
-  }
-}
 
-// Convert singular component type to plural form (for API calls)
-function getApiComponentType(type) {
-  switch (type) {
-    case 'input':
-      return 'inputs'
-    case 'output':
-      return 'outputs'
-    case 'ruleset':
-      return 'rulesets'
-    case 'project':
-      return 'projects'
-    case 'plugin':
-      return 'plugins'
-    default:
-      return type + 's' // Default: add 's'
-  }
-}
 
 async function verifyChanges() {
   if (!changes.value.length) return
@@ -461,17 +434,7 @@ async function loadSingleChange(change) {
   }
 }
 
-function getComponentTypeLabel(type) {
-  const labels = {
-    'input': 'Input',
-    'output': 'Output',
-    'ruleset': 'Ruleset',
-    'project': 'Project',
-    'plugin': 'Plugin'
-  }
-  
-  return labels[type] || type
-}
+
 
 function getChangeStatusClass(change) {
   if (!change.has_local && change.has_memory) {
