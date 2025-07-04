@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -31,7 +32,10 @@ func init() {
 	GlobalProject.RulesetsNew = make(map[string]string)
 
 	GlobalProject.msgChans = make(map[string]chan map[string]interface{})
-	GlobalProject.msgChansCounter = make(map[string]int)
+	GlobalProject.msgChansCounter = make(map[string]*atomic.Int64)
+
+	// Mapping between logical edge ("FROM->TO") and its channelId
+	GlobalProject.edgeChanIds = make(map[string]string)
 
 	// Register a delayed function to analyze dependencies after all projects are loaded
 	go func() {
@@ -1055,16 +1059,21 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 
 	// Clean up channels
 	for _, channelId := range p.MsgChannels {
-		if GlobalProject.msgChansCounter[channelId] > 0 {
-			GlobalProject.msgChansCounter[channelId]--
-			if GlobalProject.msgChansCounter[channelId] == 0 {
-				if ch, exists := GlobalProject.msgChans[channelId]; exists {
-					close(ch)
-					delete(GlobalProject.msgChans, channelId)
-					delete(GlobalProject.msgChansCounter, channelId)
-					// Reduce log verbosity: only log critical channel cleanup
-					// logger.Info("Closed and cleaned up channel during startup failure", "project", p.Id, "channel", channelId)
-				}
+		newCnt := decrementChannelRef(channelId)
+		if newCnt == 0 {
+			GlobalProject.EdgeMapMu.RLock()
+			ch, exists := GlobalProject.msgChans[channelId]
+			GlobalProject.EdgeMapMu.RUnlock()
+			if exists {
+				closedCh := ch
+				// Remove from maps under write lock
+				GlobalProject.EdgeMapMu.Lock()
+				delete(GlobalProject.msgChans, channelId)
+				delete(GlobalProject.msgChansCounter, channelId)
+				GlobalProject.EdgeMapMu.Unlock()
+
+				removeEdgeChanId(channelId, closedCh)
+				close(closedCh)
 			}
 		}
 	}
@@ -1168,15 +1177,21 @@ func (p *Project) stopComponents() error {
 	// Step 7: Clean up channels
 	logger.Info("Step 7: Cleaning up channels", "project", p.Id, "channel_count", len(p.MsgChannels))
 	for _, channelId := range p.MsgChannels {
-		if GlobalProject.msgChansCounter[channelId] > 0 {
-			GlobalProject.msgChansCounter[channelId]--
-			if GlobalProject.msgChansCounter[channelId] == 0 {
-				if ch, exists := GlobalProject.msgChans[channelId]; exists {
-					close(ch)
-					delete(GlobalProject.msgChans, channelId)
-					delete(GlobalProject.msgChansCounter, channelId)
-					logger.Info("Closed and cleaned up channel", "project", p.Id, "channel", channelId)
-				}
+		newCnt := decrementChannelRef(channelId)
+		if newCnt == 0 {
+			GlobalProject.EdgeMapMu.RLock()
+			ch, exists := GlobalProject.msgChans[channelId]
+			GlobalProject.EdgeMapMu.RUnlock()
+			if exists {
+				closedCh := ch
+				// Remove from maps under write lock
+				GlobalProject.EdgeMapMu.Lock()
+				delete(GlobalProject.msgChans, channelId)
+				delete(GlobalProject.msgChansCounter, channelId)
+				GlobalProject.EdgeMapMu.Unlock()
+
+				removeEdgeChanId(channelId, closedCh)
+				close(closedCh)
 			}
 		}
 	}
@@ -2072,21 +2087,30 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 func (p *Project) createChannelConnections(flowGraph map[string][]string) error {
 	logger.Info("Creating channel connections", "project", p.Id)
 
-	// Reset connection state for all components (but keep ProjectNodeSequence as set in loadComponentsFromGlobal)
-	for _, in := range p.Inputs {
-		in.DownStream = []*chan map[string]interface{}{}
+	// Lock global edge/channel maps for the whole construction to avoid races with other project operations
+	GlobalProject.EdgeMapMu.Lock()
+	defer GlobalProject.EdgeMapMu.Unlock()
+
+	// Helper to check if a slice already contains a given channel pointer
+	containsChanPtr := func(list []*chan map[string]interface{}, ptr *chan map[string]interface{}) bool {
+		for _, p := range list {
+			if p == ptr {
+				return true
+			}
+		}
+		return false
 	}
 
-	for _, rs := range p.Rulesets {
-		rs.UpStream = make(map[string]*chan map[string]interface{})
-		rs.DownStream = make(map[string]*chan map[string]interface{})
+	// Helper to check if slice of strings contains target
+	containsStr := func(list []string, target string) bool {
+		for _, s := range list {
+			if s == target {
+				return true
+			}
+		}
+		return false
 	}
 
-	for _, out := range p.Outputs {
-		out.UpStream = []*chan map[string]interface{}{}
-	}
-
-	// Create new channel connections
 	for from, tos := range flowGraph {
 		fromParts := strings.Split(from, ".")
 		fromType := fromParts[0]
@@ -2097,20 +2121,58 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 			toType := toParts[0]
 			toId := toParts[1]
 
-			// Create a unique channel ID for this connection
-			channelId := fmt.Sprintf("%s_%s_%s_%s", p.Id, from, to, time.Now().Format("20060102150405"))
+			edgeKey := fmt.Sprintf("%s->%s", from, to)
+			var msgChan chan map[string]interface{}
+			var channelId string
 
-			// Create a new channel
-			msgChan := make(chan map[string]interface{}, 1024)
-			GlobalProject.msgChans[channelId] = msgChan
-			GlobalProject.msgChansCounter[channelId] = 1
-			p.MsgChannels = append(p.MsgChannels, channelId)
+			// Step 1: Try read-lock reuse
+			GlobalProject.EdgeMapMu.RLock()
+			cid, exists := GlobalProject.edgeChanIds[edgeKey]
+			if exists {
+				channelId = cid
+				msgChan = GlobalProject.msgChans[channelId]
+				if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
+					cntPtr.Add(1)
+				}
+				GlobalProject.EdgeMapMu.RUnlock()
+				logger.Debug("Reusing existing channel connection", "project", p.Id, "edge", edgeKey, "channel", channelId)
+			} else {
+				GlobalProject.EdgeMapMu.RUnlock()
+				// Need to create – acquire write lock
+				GlobalProject.EdgeMapMu.Lock()
+				// Double-check after upgrade
+				if cid2, ok2 := GlobalProject.edgeChanIds[edgeKey]; ok2 {
+					channelId = cid2
+					msgChan = GlobalProject.msgChans[channelId]
+					if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
+						cntPtr.Add(1)
+					}
+					logger.Debug("[race] Reused edge channel after upgrade", "project", p.Id, "edge", edgeKey, "channel", channelId)
+				} else {
+					channelId = fmt.Sprintf("%s_%s_%s_%s", p.Id, from, to, time.Now().Format("20060102150405"))
+					msgChan = make(chan map[string]interface{}, 1024)
+					GlobalProject.msgChans[channelId] = msgChan
+					ptr := &atomic.Int64{}
+					ptr.Store(1)
+					GlobalProject.msgChansCounter[channelId] = ptr
+					GlobalProject.edgeChanIds[edgeKey] = channelId
+					logger.Info("Created new channel connection", "project", p.Id, "from", from, "to", to, "channel", channelId)
+				}
+				GlobalProject.EdgeMapMu.Unlock()
+			}
 
-			// Connect components based on types
+			// Record that this project uses this channelId (avoid duplicates)
+			if !containsStr(p.MsgChannels, channelId) {
+				p.MsgChannels = append(p.MsgChannels, channelId)
+			}
+
+			// Connect components based on types while avoiding duplicate pointer insertion
 			switch fromType {
 			case "INPUT":
 				if in, ok := p.Inputs[fromId]; ok {
-					in.DownStream = append(in.DownStream, &msgChan)
+					if !containsChanPtr(in.DownStream, &msgChan) {
+						in.DownStream = append(in.DownStream, &msgChan)
+					}
 				}
 			case "RULESET":
 				if rs, ok := p.Rulesets[fromId]; ok {
@@ -2125,11 +2187,11 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 				}
 			case "OUTPUT":
 				if out, ok := p.Outputs[toId]; ok {
-					out.UpStream = append(out.UpStream, &msgChan)
+					if !containsChanPtr(out.UpStream, &msgChan) {
+						out.UpStream = append(out.UpStream, &msgChan)
+					}
 				}
 			}
-
-			logger.Info("Created channel connection", "project", p.Id, "from", from, "to", to, "channel", channelId)
 		}
 	}
 
@@ -2306,4 +2368,90 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 	}
 
 	return qpsMetrics
+}
+
+// clearChannelReferences iterates all projects and removes pointers to the given channel from
+// every component's UpStream / DownStream slices or maps. It must be called with
+// GlobalProject.ProjectMu write-locked.
+func clearChannelReferences(closedCh chan map[string]interface{}) {
+	for _, proj := range GlobalProject.Projects {
+		// Inputs downstream slice
+		for _, in := range proj.Inputs {
+			filtered := make([]*chan map[string]interface{}, 0, len(in.DownStream))
+			for _, ptr := range in.DownStream {
+				if ptr != nil && *ptr == closedCh {
+					continue
+				}
+				filtered = append(filtered, ptr)
+			}
+			in.DownStream = filtered
+		}
+
+		// Rulesets upstream / downstream maps
+		for _, rs := range proj.Rulesets {
+			for k, ptr := range rs.UpStream {
+				if ptr != nil && *ptr == closedCh {
+					delete(rs.UpStream, k)
+				}
+			}
+			for k, ptr := range rs.DownStream {
+				if ptr != nil && *ptr == closedCh {
+					delete(rs.DownStream, k)
+				}
+			}
+		}
+
+		// Outputs upstream slice
+		for _, out := range proj.Outputs {
+			filtered := make([]*chan map[string]interface{}, 0, len(out.UpStream))
+			for _, ptr := range out.UpStream {
+				if ptr != nil && *ptr == closedCh {
+					continue
+				}
+				filtered = append(filtered, ptr)
+			}
+			out.UpStream = filtered
+		}
+	}
+}
+
+// removeEdgeChanId deletes mappings that reference the given channelId and removes
+// all component references to the underlying channel. closedCh must be the channel
+// instance corresponding to channelId.
+func removeEdgeChanId(channelId string, closedCh chan map[string]interface{}) {
+	// Remove edge->channelId mapping in a thread-safe manner
+	GlobalProject.EdgeMapMu.Lock()
+	for edge, cid := range GlobalProject.edgeChanIds {
+		if cid == channelId {
+			delete(GlobalProject.edgeChanIds, edge)
+		}
+	}
+	GlobalProject.EdgeMapMu.Unlock()
+
+	// Remove component pointers
+	GlobalProject.ProjectMu.Lock()
+	defer GlobalProject.ProjectMu.Unlock()
+	clearChannelReferences(closedCh)
+}
+
+// incrementChannelRef safely increments the reference counter for the given channel ID.
+func incrementChannelRef(channelId string) {
+	GlobalProject.EdgeMapMu.RLock()
+	if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
+		cntPtr.Add(1)
+	}
+	GlobalProject.EdgeMapMu.RUnlock()
+}
+
+// decrementChannelRef decrements the reference counter and returns the new value (int64).
+// If the channelId does not exist, it returns 0.
+func decrementChannelRef(channelId string) int64 {
+	GlobalProject.EdgeMapMu.RLock()
+	cntPtr, ok := GlobalProject.msgChansCounter[channelId]
+	GlobalProject.EdgeMapMu.RUnlock()
+	if !ok {
+		return 0
+	}
+	newVal := cntPtr.Add(-1)
+	return newVal
 }

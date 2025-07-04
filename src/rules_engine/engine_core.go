@@ -59,13 +59,13 @@ func (r *Ruleset) Start() error {
 				targetSize := MinPoolSize
 				switch {
 				case totalBacklog > 1000:
-					targetSize = MaxPoolSize
-				case totalBacklog > 512:
-					targetSize = 128
-				case totalBacklog > 256:
 					targetSize = 64
-				case totalBacklog > 32:
+				case totalBacklog > 512:
 					targetSize = 32
+				case totalBacklog > 256:
+					targetSize = 16
+				case totalBacklog > 32:
+					targetSize = 8
 				default:
 					targetSize = MinPoolSize
 				}
@@ -100,22 +100,12 @@ func (r *Ruleset) Start() error {
 							// IMPORTANT: Sample the input data BEFORE rule checking starts
 							// This ensures we capture the raw data entering the ruleset for analysis
 							if r.sampler != nil {
-								success := r.sampler.Sample(data, r.ProjectNodeSequence)
-								logger.Info("Ruleset input sampler call",
-									"rulesetID", r.RulesetID,
-									"projectNodeSequence", r.ProjectNodeSequence,
-									"success", success)
+								_ = r.sampler.Sample(data, r.ProjectNodeSequence)
 							}
 						}
 
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
-						logger.Info("Ruleset processing",
-							"rulesetID", r.RulesetID,
-							"projectNodeSequence", r.ProjectNodeSequence,
-							"resultsCount", len(results),
-							"samplerExists", r.sampler != nil)
-
 						// Send results to downstream channels
 						for _, res := range results {
 							for _, downCh := range r.DownStream {

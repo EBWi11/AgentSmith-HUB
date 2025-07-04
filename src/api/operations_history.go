@@ -413,7 +413,7 @@ func GetOperationsHistory(c echo.Context) error {
 	}
 
 	// Log filter parameters for debugging
-	logger.Info("Operations history filter",
+	logger.Debug("Operations history filter",
 		"start_time", filter.StartTime.Format(time.RFC3339),
 		"end_time", filter.EndTime.Format(time.RFC3339),
 		"operation_type", filter.OperationType,
@@ -431,7 +431,7 @@ func GetOperationsHistory(c echo.Context) error {
 		})
 	}
 
-	logger.Info("Retrieved operations", "count", len(operations))
+	logger.Debug("Retrieved operations", "count", len(operations))
 
 	totalCount := len(operations)
 

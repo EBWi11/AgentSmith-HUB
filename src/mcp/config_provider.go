@@ -6,24 +6,43 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"AgentSmith-HUB/common"
 
 	"github.com/labstack/echo/v4"
 )
 
+// simple in-memory cache entry
+type cachedCfg struct {
+	data     []byte
+	loadedAt time.Time
+}
+
+var cfgCache sync.Map // key: filename -> *cachedCfg
+
 // loadMCPConfigFile loads a JSON configuration file from mcp_config directory
 // It tries ./mcp_config first, then ../mcp_config as fallback
 func loadMCPConfigFile(filename string) ([]byte, error) {
+	// fast path: cached
+	if v, ok := cfgCache.Load(filename); ok {
+		if entry, ok := v.(*cachedCfg); ok {
+			return entry.data, nil
+		}
+	}
+
 	// Try current directory first
 	currentPath := filepath.Join("mcp_config", filename)
 	if data, err := ioutil.ReadFile(currentPath); err == nil {
+		cfgCache.Store(filename, &cachedCfg{data: data, loadedAt: time.Now()})
 		return data, nil
 	}
 
 	// Fallback to parent directory
 	parentPath := filepath.Join("../mcp_config", filename)
 	if data, err := ioutil.ReadFile(parentPath); err == nil {
+		cfgCache.Store(filename, &cachedCfg{data: data, loadedAt: time.Now()})
 		return data, nil
 	}
 

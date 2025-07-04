@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,7 +32,14 @@ type GlobalProjectInfo struct {
 	RulesetsNew map[string]string
 
 	msgChans        map[string]chan map[string]interface{}
-	msgChansCounter map[string]int
+	msgChansCounter map[string]*atomic.Int64
+
+	// edgeChanIds keeps a unique mapping between a logical edge ("FROM->TO")
+	// and the channelId stored in msgChans. It is used to ensure that when multiple
+	// projects share the same data-flow edge we reuse the same channel instead of
+	// creating duplicated ones which would lead to data loss or duplication.
+	edgeChanIds map[string]string
+	EdgeMapMu   sync.RWMutex
 
 	// Dedicated lock for project lifecycle management to reduce lock contention
 	ProjectMu sync.RWMutex
