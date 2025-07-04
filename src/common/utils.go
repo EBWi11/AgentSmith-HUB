@@ -489,3 +489,15 @@ func EnsureConfigDirExists() error {
 
 	return nil
 }
+
+// MapShallowCopy returns a shallow copy of a map[string]interface{}. Only top-level keys are copied.
+func MapShallowCopy(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}

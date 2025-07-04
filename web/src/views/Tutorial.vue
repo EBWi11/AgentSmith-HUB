@@ -71,8 +71,8 @@
              :style="{ marginLeft: showOutline ? `${outlineSidebarWidth}px` : '0' }">
           <div class="document-container" ref="documentContainer">
             <div class="markdown-body" v-html="renderedHtml"></div>
-          </div>
-          
+        </div>
+
           <!-- Status Bar -->
           <div class="status-bar">
             <div class="status-left">
@@ -178,7 +178,7 @@ async function loadTutorialContent() {
   try {
     loading.value = true
     error.value = null
-    
+
     const response = await fetch('/RULESET_GUIDE_ZH.md')
     
     if (!response.ok) {
@@ -217,8 +217,8 @@ async function renderMarkdown(markdown) {
     // 渲染为HTML
     const html = md.render(processedMarkdown)
     renderedHtml.value = html
-    
-    // 生成目录
+
+// 生成目录
     generateTableOfContents(processedMarkdown)
     
   } catch (err) {
@@ -487,6 +487,7 @@ onBeforeUnmount(() => {
   height: 100%;
   background: white;
   border-right: 1px solid #e5e7eb;
+  border-left: 1px solid #e5e7eb;
   transform: translateX(-100%);
   transition: transform 0.3s ease;
   z-index: 100;

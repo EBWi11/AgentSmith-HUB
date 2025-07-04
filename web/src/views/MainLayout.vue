@@ -18,7 +18,7 @@
       <main class="flex-1 bg-gray-50 transition-all duration-300">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs'" 
+          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'tutorial'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -35,6 +35,9 @@
         />
         <OperationsHistory v-else-if="selected && selected.type === 'operations-history'" />
         <ErrorLogs v-else-if="selected && selected.type === 'error-logs'" />
+        <router-view v-else-if="selected && selected.type === 'tutorial'" />
+        <!-- Fallback: render any unmatched child route (e.g., tutorial before selected is set) -->
+        <router-view v-else />
       </main>
     </div>
     
@@ -109,7 +112,7 @@ onMounted(() => {
         type: 'home',
         _timestamp: Date.now()
       }
-    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'error-logs') {
+    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'error-logs' || meta.componentType === 'tutorial') {
       // For cluster, pending-changes, load-local-components, operations-history, and error-logs, no ID needed
       selected.value = {
         type: meta.componentType,
@@ -143,7 +146,7 @@ watch(
             _timestamp: Date.now()
           }
         }
-      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'error-logs') {
+      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'error-logs' || componentType === 'tutorial') {
         // For cluster, pending-changes, load-local-components, operations-history, and error-logs, no ID needed
         if (!selected.value || selected.value.type !== componentType) {
           selected.value = {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 )
 
 const HitRuleIdFieldName = "_hub_hit_rule_id"
+
+// ruleCachePool reuses map objects to reduce allocations
+var ruleCachePool = sync.Pool{
+	New: func() interface{} { return make(map[string]common.CheckCoreCache, 8) },
+}
 
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
@@ -64,7 +70,9 @@ func (r *Ruleset) Start() error {
 					targetSize = MinPoolSize
 				}
 				if r.antsPool != nil {
-					r.antsPool.Tune(targetSize)
+					if r.antsPool.Cap() != targetSize {
+						r.antsPool.Tune(targetSize)
+					}
 				}
 			}
 		}
@@ -316,7 +324,11 @@ func (r *Ruleset) HotUpdate(raw string, id string) (*Ruleset, error) {
 // EngineCheck executes all rules in the ruleset on the provided data.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
-	ruleCache := make(map[string]common.CheckCoreCache, 8)
+	ruleCache := ruleCachePool.Get().(map[string]common.CheckCoreCache)
+	// clean previous entries
+	for k := range ruleCache {
+		delete(ruleCache, k)
+	}
 	whiteListCount := 0
 
 	for _, rf := range r.RulesByFilter {
@@ -487,7 +499,13 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 					continue
 				}
 
-				dataCopy := common.MapDeepCopy(data)
+				// Determine if the rule mutates data (append/del/plugin). If not, shallow copy suffices
+				var dataCopy map[string]interface{}
+				if len(rule.Appends) > 0 || len(rule.DelList) > 0 || len(rule.Plugins) > 0 {
+					dataCopy = common.MapDeepCopy(data)
+				} else {
+					dataCopy = common.MapShallowCopy(data)
+				}
 
 				// Add rule info
 				addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
@@ -547,6 +565,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 		}
 	}
 
+	// put back to pool
+	ruleCachePool.Put(ruleCache)
 	ruleCache = nil
 	return finalRes
 }
