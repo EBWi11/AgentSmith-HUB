@@ -645,11 +645,13 @@ onMounted(() => {
 /* Document Area */
 .document-wrapper {
   flex: 1;
-  transition: margin-left 0.3s ease;
+  transition: all 0.3s ease;
+  width: 100%;
 }
 
 .outline-sidebar.visible ~ .document-wrapper {
   margin-left: 280px;
+  width: calc(100% - 280px);
 }
 
 .document-container {
@@ -824,6 +826,7 @@ onMounted(() => {
   
   .outline-sidebar.visible ~ .document-wrapper {
     margin-left: 260px;
+    width: calc(100% - 260px);
   }
   
   .status-bar {
