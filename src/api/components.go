@@ -1714,7 +1714,9 @@ func GetSamplerData(c echo.Context) error {
 				// Support both "RULESET.test" (legacy) and "INPUT.api_sec.RULESET.test" (new format)
 				matched := false
 
-				// Method 1: Direct suffix matching (for backward compatibility)
+				// Method 1: Use suffix matching to get the component's own sample data
+				// This ensures we get the data AT this component, not data that has passed through it
+				// For example: "input.skyguard" should match "INPUT.skyguard" but NOT "INPUT.skyguard.RULESET.test"
 				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
 					matched = true
 				}
