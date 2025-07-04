@@ -539,6 +539,11 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 					}
 				}
 
+				// Delete process
+				for i := range rule.DelList {
+					common.MapDel(dataCopy, rule.DelList[i])
+				}
+
 				// Plugin process
 				for i := range rule.Plugins {
 					p := rule.Plugins[i]
@@ -552,11 +557,6 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 					if !ok {
 						logger.Info("Plugin check failed", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
 					}
-				}
-
-				// Delete process
-				for i := range rule.DelList {
-					common.MapDel(dataCopy, rule.DelList[i])
 				}
 
 				// Add to final result
