@@ -662,11 +662,12 @@ onMounted(() => {
 :deep(.markdown-body) {
   max-width: none;
   margin: 0;
-  padding: 32px 40px;
+  padding: 32px 24px 32px 40px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   color: #24292f;
   background-color: #ffffff;
+  box-sizing: border-box;
 }
 
 /* 自定义标题样式 */
@@ -800,7 +801,7 @@ onMounted(() => {
 /* 响应式设计 */
 @media (max-width: 1024px) {
   :deep(.markdown-body) {
-    padding: 32px 40px;
+    padding: 32px 20px 32px 32px;
   }
 }
 
@@ -830,7 +831,7 @@ onMounted(() => {
   }
   
   :deep(.markdown-body) {
-    padding: 24px 20px;
+    padding: 24px 16px 24px 20px;
   }
 }
 </style> 

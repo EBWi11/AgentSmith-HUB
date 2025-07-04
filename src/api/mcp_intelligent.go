@@ -108,25 +108,16 @@ func GetSamplersDataIntelligent(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request format"})
 	}
 
-	logger.Info("Intelligent sample data request",
-		"targetProjects", req.TargetProjects,
-		"rulePurpose", req.RulePurpose,
-		"fieldRequirements", req.FieldRequirements)
-
 	// Backward compatibility fallback
 	if len(req.TargetProjects) == 0 && req.RulePurpose == "" && len(req.FieldRequirements) == 0 {
-		logger.Info("Falling back to basic sample data API")
 		return GetSamplerData(c)
 	}
 
 	// Extract target ruleset from field requirements or rule purpose
 	targetRuleset := extractTargetRulesetFromRequest(req)
 	if targetRuleset == "" {
-		logger.Info("No target ruleset identified, falling back to basic API")
 		return GetSamplerData(c)
 	}
-
-	logger.Info("Target ruleset identified", "ruleset", targetRuleset)
 
 	// Get sample data for the target ruleset
 	sampleData, dataSource, err := getSampleDataForRuleset(targetRuleset)
@@ -149,11 +140,6 @@ func GetSamplersDataIntelligent(c echo.Context) error {
 			DataSources: []string{dataSource},
 		},
 	}
-
-	logger.Info("Intelligent sample data response ready",
-		"targetRuleset", targetRuleset,
-		"dataSource", dataSource,
-		"dataQualityScore", dataQuality.OverallScore)
 
 	return c.JSON(http.StatusOK, response)
 }
@@ -179,7 +165,6 @@ func analyzeProjectContext(targetProjects []string, rulePurpose string) (Project
 	// Auto-suggest projects if none specified
 	if len(targetProjects) == 0 {
 		targetProjects = suggestProjectsBasedOnPurpose(rulePurpose, allProjects)
-		logger.Info("Auto-suggested projects", "suggested", targetProjects)
 	}
 
 	// Analyze target projects
@@ -249,30 +234,25 @@ func fetchIntelligentSampleData(req IntelligentSampleDataRequest, context Projec
 		// Try to find target component from field requirements or context
 		targetComponent := extractTargetComponent(req, context)
 		if targetComponent != "" {
-			logger.Info("Target component identified", "component", targetComponent)
 
 			// Step 1: Try to get sample data from the target component itself
 			componentData := getSampleDataFromComponent(targetComponent)
 			if len(componentData) > 0 {
-				logger.Info("Found sample data from target component", "component", targetComponent, "samples", len(componentData))
 				result[targetComponent] = componentData
 				return result, nil
 			}
 
 			// Step 2: If target component has no data, find projects using this component
 			usingProjects := findProjectsUsingComponent(targetComponent)
-			logger.Info("Projects using target component", "component", targetComponent, "projects", usingProjects)
 
 			// Step 3: For each project, find upstream input components
 			for _, projectID := range usingProjects {
 				upstreamInputs := findUpstreamInputs(projectID, targetComponent)
-				logger.Info("Upstream inputs found", "project", projectID, "inputs", upstreamInputs)
 
 				// Step 4: Try to get sample data from upstream inputs
 				for _, inputID := range upstreamInputs {
 					inputData := getSampleDataFromComponent("input." + inputID)
 					if len(inputData) > 0 {
-						logger.Info("Found sample data from upstream input", "input", inputID, "samples", len(inputData))
 						// Use project.component format for clarity
 						key := fmt.Sprintf("%s.%s->%s", projectID, inputID, targetComponent)
 						result[key] = inputData
@@ -281,8 +261,6 @@ func fetchIntelligentSampleData(req IntelligentSampleDataRequest, context Projec
 				}
 			}
 
-			// Step 5: If still no data, return empty with clear message
-			logger.Info("No sample data found in target component or upstream inputs", "component", targetComponent)
 		}
 	}
 
@@ -292,7 +270,6 @@ func fetchIntelligentSampleData(req IntelligentSampleDataRequest, context Projec
 		result["fallback"] = fallbackData
 	}
 
-	logger.Info("Intelligent sample data fetched", "totalSources", len(result))
 	return result, nil
 }
 
@@ -917,27 +894,21 @@ func extractTargetRulesetFromRequest(req IntelligentSampleDataRequest) string {
 // 2. Get upstream input components from those projects
 // 3. Return sample data from those inputs to understand data structure
 func getSampleDataForRuleset(rulesetID string) (map[string]interface{}, string, error) {
-	logger.Info("Getting sample data for ruleset", "rulesetID", rulesetID)
 
 	// Step 1: Find projects that use this ruleset
 	usingProjects := findProjectsUsingRuleset(rulesetID)
 	if len(usingProjects) == 0 {
-		logger.Info("No projects found using ruleset", "rulesetID", rulesetID)
 		return map[string]interface{}{}, "", fmt.Errorf("no projects use ruleset %s", rulesetID)
 	}
-
-	logger.Info("Found projects using ruleset", "rulesetID", rulesetID, "projects", usingProjects)
 
 	// Step 2: For each project, find upstream input components
 	for _, projectID := range usingProjects {
 		upstreamInputs := findUpstreamInputsForRuleset(projectID, rulesetID)
-		logger.Info("Found upstream inputs", "project", projectID, "ruleset", rulesetID, "inputs", upstreamInputs)
 
 		// Step 3: Try to get sample data from upstream inputs
 		for _, inputID := range upstreamInputs {
 			inputSamples := getSampleDataFromComponent("input." + inputID)
 			if len(inputSamples) > 0 {
-				logger.Info("Found sample data from input", "input", inputID, "samples", len(inputSamples))
 
 				// Format the result
 				result := map[string]interface{}{
@@ -950,7 +921,6 @@ func getSampleDataForRuleset(rulesetID string) (map[string]interface{}, string, 
 	}
 
 	// Step 4: If no upstream input data found, return empty but with clear message
-	logger.Info("No sample data found in upstream inputs", "rulesetID", rulesetID)
 	return map[string]interface{}{}, "", fmt.Errorf("no sample data available from upstream inputs for ruleset %s", rulesetID)
 }
 
@@ -972,44 +942,35 @@ func findProjectsUsingRuleset(rulesetID string) []string {
 
 // Get sample data for a specific input component
 func getSampleDataForInput(inputID string) ([]interface{}, string, error) {
-	logger.Info("Getting sample data for input", "inputID", inputID)
 
 	// Direct sample data from the input component
 	inputSamples := getSampleDataFromComponent("input." + inputID)
 	if len(inputSamples) > 0 {
-		logger.Info("Found sample data from input", "input", inputID, "samples", len(inputSamples))
 		dataSource := fmt.Sprintf("input.%s (direct source)", inputID)
 		return inputSamples, dataSource, nil
 	}
 
 	// If no direct data, return empty but with clear message
-	logger.Info("No sample data found for input", "inputID", inputID)
 	return []interface{}{}, "", fmt.Errorf("no sample data available for input %s", inputID)
 }
 
 // Get sample data for a specific output component
 func getSampleDataForOutput(outputID string) ([]interface{}, string, error) {
-	logger.Info("Getting sample data for output", "outputID", outputID)
 
 	// Find projects that use this output and get data from their upstream components
 	usingProjects := findProjectsUsingOutput(outputID)
 	if len(usingProjects) == 0 {
-		logger.Info("No projects found using output", "outputID", outputID)
 		return []interface{}{}, "", fmt.Errorf("no projects use output %s", outputID)
 	}
-
-	logger.Info("Found projects using output", "outputID", outputID, "projects", usingProjects)
 
 	// For each project, find what flows to this output
 	for _, projectID := range usingProjects {
 		upstreamComponents := findUpstreamComponentsForOutput(projectID, outputID)
-		logger.Info("Found upstream components", "project", projectID, "output", outputID, "components", upstreamComponents)
 
 		// Try to get sample data from upstream components
 		for _, component := range upstreamComponents {
 			samples := getSampleDataFromComponent(component)
 			if len(samples) > 0 {
-				logger.Info("Found sample data from component", "component", component, "samples", len(samples))
 				dataSource := fmt.Sprintf("%s (via project.%s)", component, projectID)
 				return samples, dataSource, nil
 			}
@@ -1017,7 +978,6 @@ func getSampleDataForOutput(outputID string) ([]interface{}, string, error) {
 	}
 
 	// If no upstream data found, return empty but with clear message
-	logger.Info("No sample data found in upstream components", "outputID", outputID)
 	return []interface{}{}, "", fmt.Errorf("no sample data available from upstream components for output %s", outputID)
 }
 
@@ -1059,8 +1019,6 @@ func findUpstreamComponentsForOutput(projectID string, outputID string) []string
 		return components
 	}
 
-	logger.Info("Analyzing project content for output", "project", projectID, "content", content)
-
 	// Find flows that lead to the target output
 	// Example: "INPUT.kafka_logs -> RULESET.test -> OUTPUT.es_alerts"
 	flowParts := strings.Split(content, "->")
@@ -1069,11 +1027,9 @@ func findUpstreamComponentsForOutput(projectID string, outputID string) []string
 		outputPattern := fmt.Sprintf("OUTPUT.%s", outputID)
 
 		if strings.Contains(part, outputPattern) {
-			logger.Info("Found output in flow", "part", part, "output", outputID)
 			// Found target output, look at all previous parts for upstream components
 			for j := i - 1; j >= 0; j-- {
 				prevPart := strings.TrimSpace(flowParts[j])
-				logger.Info("Checking previous part for components", "prevPart", prevPart)
 
 				// Extract all components from previous parts
 				if strings.Contains(prevPart, "INPUT.") {
@@ -1097,7 +1053,6 @@ func findUpstreamComponentsForOutput(projectID string, outputID string) []string
 
 // Get sample data for a specific project by analyzing its data flow
 func getSampleDataForProject(projectID string) (map[string]interface{}, string, error) {
-	logger.Info("Getting sample data for project", "projectID", projectID)
 
 	common.GlobalMu.RLock()
 	proj, exists := project.GlobalProject.Projects[projectID]
@@ -1115,8 +1070,6 @@ func getSampleDataForProject(projectID string) (map[string]interface{}, string, 
 	if content == "" {
 		return map[string]interface{}{}, "", fmt.Errorf("project %s has no data flow configuration", projectID)
 	}
-
-	logger.Info("Analyzing project data flow", "project", projectID, "content", content)
 
 	result := make(map[string]interface{})
 	dataSources := make([]string, 0)
@@ -1164,8 +1117,6 @@ func findUpstreamInputsForRuleset(projectID string, rulesetID string) []string {
 		return inputs
 	}
 
-	logger.Info("Analyzing project content", "project", projectID, "content", content)
-
 	// Find flows that lead to the target ruleset
 	// Example: "INPUT.kafka_logs -> RULESET.test -> OUTPUT.es_alerts"
 	flowParts := strings.Split(content, "->")
@@ -1174,17 +1125,13 @@ func findUpstreamInputsForRuleset(projectID string, rulesetID string) []string {
 		rulesetPattern := fmt.Sprintf("RULESET.%s", rulesetID)
 
 		if strings.Contains(part, rulesetPattern) {
-			logger.Info("Found ruleset in flow", "part", part, "ruleset", rulesetID)
 			// Found target ruleset, look at previous part for upstream inputs
 			if i > 0 {
 				prevPart := strings.TrimSpace(flowParts[i-1])
-				logger.Info("Checking previous part for inputs", "prevPart", prevPart)
-
 				// Extract input components from previous part
 				if strings.Contains(prevPart, "INPUT.") {
 					inputMatches := extractComponentIDs(prevPart, "INPUT")
 					inputs = append(inputs, inputMatches...)
-					logger.Info("Extracted input IDs", "inputs", inputMatches)
 				}
 			}
 		}
