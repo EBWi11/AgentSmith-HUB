@@ -20,12 +20,12 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
     <rule id="detect_powershell" name="检测PowerShell执行">
         <!-- 1. 过滤器：只处理进程创建事件 -->
         <filter field="event_type">process_creation</filter>
-        
+
         <!-- 2. 检查列表：检查进程名是否包含powershell -->
         <checklist>
             <node type="INCL" field="process_name">powershell</node>
         </checklist>
-        
+
         <!-- 3. 添加字段：标记为可疑活动 -->
         <append field="alert_type">suspicious_powershell</append>
     </rule>
@@ -33,7 +33,7 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 ```
 
 **这个规则做了什么？**
-1. 监听所有进程创建事件（event_type = 'process_creation'）
+1. 监听所有进程创建事件（event_type = process_creation）
 2. 检查进程名（process_name字段）是否包含（INCL）"powershell"
 3. 如果匹配，添加一个`alert_type`字段标记为可疑活动(suspicious_powershell)
 
@@ -222,7 +222,7 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 <!-- OR逻辑：匹配任意一个值 -->
 <node type="INCL" field="process" logic="OR" delimiter="|">malware.exe|virus.exe|trojan.exe</node>
 
-<!-- AND逻辑：必须包含所有值 -->
+        <!-- AND逻辑：必须包含所有值 -->
 <node type="INCL" field="command" logic="AND" delimiter="|">-exec|-payload</node>
 ```
 
@@ -320,45 +320,45 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 package main
 
 import (
-    "fmt"
-    "strings"
+	"fmt"
+	"strings"
 )
 
 // CheckNode插件：检查IP是否可疑
 func IsSuspiciousIP(ip string) bool {
-    // 检查是否为内网IP
-    if strings.HasPrefix(ip, "192.168.") || 
-       strings.HasPrefix(ip, "10.") ||
-       strings.HasPrefix(ip, "172.") {
-        return false
-    }
-    
-    // 检查是否在黑名单中
-    blacklist := []string{"1.2.3.4", "5.6.7.8"}
-    for _, blocked := range blacklist {
-        if ip == blocked {
-            return true
-        }
-    }
-    
-    return false
+	// 检查是否为内网IP
+	if strings.HasPrefix(ip, "192.168.") ||
+		strings.HasPrefix(ip, "10.") ||
+		strings.HasPrefix(ip, "172.") {
+		return false
+	}
+
+	// 检查是否在黑名单中
+	blacklist := []string{"1.2.3.4", "5.6.7.8"}
+	for _, blocked := range blacklist {
+		if ip == blocked {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Append插件：获取地理位置信息
 func GetGeolocation(ip string) map[string]interface{} {
-    // 模拟地理位置查询
-    return map[string]interface{}{
-        "country": "US",
-        "city": "New York",
-        "latitude": 40.7128,
-        "longitude": -74.0060,
-    }
+	// 模拟地理位置查询
+	return map[string]interface{}{
+		"country": "US",
+		"city": "New York",
+		"latitude": 40.7128,
+		"longitude": -74.0060,
+	}
 }
 
 // Standalone插件：发送告警
 func SendAlert(data map[string]interface{}, level string) {
-    fmt.Printf("ALERT [%s]: %v\n", level, data)
-    // 实际实现中会调用告警系统API
+	fmt.Printf("ALERT [%s]: %v\n", level, data)
+	// 实际实现中会调用告警系统API
 }
 ```
 
@@ -366,9 +366,9 @@ func SendAlert(data map[string]interface{}, level string) {
 ```go
 // 在插件系统中注册函数
 func init() {
-    RegisterPlugin("is_suspicious_ip", IsSuspiciousIP)
-    RegisterPlugin("get_geolocation", GetGeolocation)
-    RegisterPlugin("send_alert", SendAlert)
+RegisterPlugin("is_suspicious_ip", IsSuspiciousIP)
+RegisterPlugin("get_geolocation", GetGeolocation)
+RegisterPlugin("send_alert", SendAlert)
 }
 ```
 
@@ -382,9 +382,9 @@ func init() {
     <node id="plugin_check" type="PLUGIN">deep_analysis(_$ORIDATA)</node>
 </checklist>
 
-<!-- 不好：直接使用插件 -->
+        <!-- 不好：直接使用插件 -->
 <checklist>
-    <node type="PLUGIN">complex_analysis(_$ORIDATA)</node>
+<node type="PLUGIN">complex_analysis(_$ORIDATA)</node>
 </checklist>
 ```
 
@@ -400,19 +400,19 @@ func init() {
 #### 3. 数据验证
 ```go
 func SafeAnalysis(data interface{}) bool {
-    // 验证输入数据
-    if data == nil {
-        return false
-    }
-    
-    // 类型断言
-    str, ok := data.(string)
-    if !ok {
-        return false
-    }
-    
-    // 执行分析
-    return analyzeString(str)
+// 验证输入数据
+if data == nil {
+return false
+}
+
+// 类型断言
+str, ok := data.(string)
+if !ok {
+return false
+}
+
+// 执行分析
+return analyzeString(str)
 }
 ```
 
@@ -427,7 +427,7 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 静态值 -->
 <node type="EQU" field="status">active</node>
 
-<!-- 动态值：从数据中获取 -->
+        <!-- 动态值：从数据中获取 -->
 <node type="EQU" field="status">_$expected_status</node>
 ```
 
@@ -443,16 +443,16 @@ func SafeAnalysis(data interface{}) bool {
 <rule id="dynamic_rule" name="动态规则示例">
     <!-- Filter中使用 -->
     <filter field="event_type">_$monitoring.target_event</filter>
-    
+
     <!-- CheckList中使用 -->
     <checklist>
         <node type="MT" field="risk_score">_$thresholds.min_risk</node>
         <node type="INCL" field="user_group">_$policies.allowed_groups</node>
     </checklist>
-    
+
     <!-- Threshold中使用 -->
     <threshold group_by="_$grouping.primary_field" range="300s">_$limits.max_count</threshold>
-    
+
     <!-- Append中使用 -->
     <append field="processing_time">_$event.timestamp</append>
 </rule>
@@ -494,10 +494,10 @@ func SafeAnalysis(data interface{}) bool {
     <node type="INCL" field="path">temp</node>
 </checklist>
 
-<!-- OR逻辑 -->
+        <!-- OR逻辑 -->
 <checklist condition="a or b">
-    <node id="a" type="INCL" field="process">malware</node>
-    <node id="b" type="INCL" field="path">suspicious</node>
+<node id="a" type="INCL" field="process">malware</node>
+<node id="b" type="INCL" field="path">suspicious</node>
 </checklist>
 ```
 
@@ -517,10 +517,10 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 错误：包含XML特殊字符 -->
 <node type="REGEX" field="html"><script>alert('xss')</script></node>
 
-<!-- 正确：使用CDATA -->
+        <!-- 正确：使用CDATA -->
 <node type="REGEX" field="html"><![CDATA[<script>alert('xss')</script>]]></node>
 
-<!-- 复杂正则表达式 -->
+        <!-- 复杂正则表达式 -->
 <node type="REGEX" field="sql_query"><![CDATA[(?i)(union\s+select|insert\s+into|drop\s+table)]]></node>
 ```
 
@@ -540,7 +540,7 @@ func SafeAnalysis(data interface{}) bool {
     <rule id="malicious_powershell" name="恶意PowerShell检测">
         <!-- 过滤：只处理进程创建事件 -->
         <filter field="event_type">process_creation</filter>
-        
+
         <!-- 检查：PowerShell + 可疑参数 -->
         <checklist condition="powershell_proc and (encoded_cmd or bypass_policy or download_cradle)">
             <node id="powershell_proc" type="INCL" field="process_name">powershell</node>
@@ -548,19 +548,19 @@ func SafeAnalysis(data interface{}) bool {
             <node id="bypass_policy" type="INCL" field="command_line">-ExecutionPolicy Bypass</node>
             <node id="download_cradle" type="PLUGIN">detect_download_cradle(_$command_line)</node>
         </checklist>
-        
+
         <!-- 阈值：10分钟内同一主机超过3次 -->
         <threshold group_by="hostname" range="600s" local_cache="true">3</threshold>
-        
+
         <!-- 数据丰富化 -->
         <append field="alert_type">malicious_powershell</append>
         <append field="severity">high</append>
         <append type="PLUGIN" field="decoded_command">decode_powershell(_$command_line)</append>
-        
+
         <!-- 执行响应动作 -->
         <plugin>send_alert(_$ORIDATA, "HIGH")</plugin>
         <plugin>isolate_host_if_confirmed(_$hostname, _$confidence_score)</plugin>
-        
+
         <!-- 清理敏感信息 -->
         <del>raw_log,internal_metadata</del>
     </rule>
@@ -573,33 +573,33 @@ func SafeAnalysis(data interface{}) bool {
 <root type="DETECTION" name="web_security" author="security_team">
     <rule id="sql_injection" name="SQL注入检测">
         <filter field="event_type">web_request</filter>
-        
+
         <checklist condition="sql_patterns and not false_positive">
             <node id="sql_patterns" type="REGEX" field="request_body"><![CDATA[(?i)(union\s+select|insert\s+into|delete\s+from|drop\s+table|exec\s*\(|xp_cmdshell)]]></node>
             <node id="false_positive" type="PLUGIN">is_legitimate_request(_$request_context)</node>
         </checklist>
-        
+
         <threshold group_by="source_ip" range="300s">5</threshold>
-        
+
         <append field="attack_type">sql_injection</append>
         <append type="PLUGIN" field="payload_analysis">analyze_sql_payload(_$request_body)</append>
-        
+
         <plugin>block_ip(_$source_ip)</plugin>
         <plugin>alert_security_team(_$ORIDATA)</plugin>
     </rule>
-    
+
     <rule id="xss_detection" name="XSS攻击检测">
         <filter field="event_type">web_request</filter>
-        
+
         <checklist>
             <node type="REGEX" field="request_params"><![CDATA[(?i)(<script[^>]*>|javascript:|on\w+\s*=|eval\s*\(|alert\s*\()]]></node>
         </checklist>
-        
+
         <threshold group_by="source_ip,target_url" range="600s">3</threshold>
-        
+
         <append field="attack_type">cross_site_scripting</append>
         <append type="PLUGIN" field="xss_payload">extract_xss_payload(_$request_params)</append>
-        
+
         <plugin>sanitize_and_log(_$ORIDATA)</plugin>
     </rule>
 </root>
@@ -611,21 +611,21 @@ func SafeAnalysis(data interface{}) bool {
 <root type="DETECTION" name="fraud_detection" author="fraud_team">
     <rule id="suspicious_transaction" name="可疑交易检测">
         <filter field="event_type">financial_transaction</filter>
-        
+
         <checklist condition="large_amount and (velocity_anomaly or location_anomaly or time_anomaly)">
             <node id="large_amount" type="MT" field="amount">_$user.daily_limit</node>
             <node id="velocity_anomaly" type="PLUGIN">detect_velocity_anomaly(_$user_id, _$amount)</node>
             <node id="location_anomaly" type="PLUGIN">detect_location_anomaly(_$user_id, _$location)</node>
             <node id="time_anomaly" type="PLUGIN">detect_time_anomaly(_$user_id, _$timestamp)</node>
         </checklist>
-        
+
         <!-- 24小时内交易总额阈值 -->
         <threshold group_by="user_id" range="86400s" count_type="SUM" count_field="amount">_$user.daily_limit</threshold>
-        
+
         <append field="fraud_type">suspicious_transaction</append>
         <append type="PLUGIN" field="risk_score">calculate_risk_score(_$ORIDATA)</append>
         <append type="PLUGIN" field="recommended_action">determine_action(_$risk_score)</append>
-        
+
         <plugin>freeze_account_if_high_risk(_$user_id, _$risk_score)</plugin>
         <plugin>notify_fraud_team(_$ORIDATA)</plugin>
     </rule>
@@ -638,20 +638,20 @@ func SafeAnalysis(data interface{}) bool {
 <root type="DETECTION" name="network_threat" author="security_team">
     <rule id="c2_communication" name="C2通信检测">
         <filter field="event_type">network_connection</filter>
-        
+
         <checklist condition="external_connection and (suspicious_port or known_malware_domain or beacon_pattern)">
             <node id="external_connection" type="PLUGIN">is_external_connection(_$dest_ip)</node>
             <node id="suspicious_port" type="INCL" field="dest_port" logic="OR" delimiter="|">4444|5555|6666|8080</node>
             <node id="known_malware_domain" type="PLUGIN">is_malware_domain(_$dest_domain)</node>
             <node id="beacon_pattern" type="PLUGIN">detect_beacon_pattern(_$connection_history)</node>
         </checklist>
-        
+
         <!-- 统计不同目标IP的连接数 -->
         <threshold group_by="source_ip" range="3600s" count_type="CLASSIFY" count_field="dest_ip">10</threshold>
-        
+
         <append field="threat_type">c2_communication</append>
         <append type="PLUGIN" field="threat_intelligence">get_threat_intel(_$dest_ip, _$dest_domain)</append>
-        
+
         <plugin>block_connection(_$source_ip, _$dest_ip)</plugin>
         <plugin>escalate_to_soc(_$ORIDATA)</plugin>
     </rule>
@@ -669,12 +669,12 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 错误 -->
 <rule id="test">
     <filter field="type">59</filter>
-<!-- 缺少</rule> -->
+    <!-- 缺少</rule> -->
 
-<!-- 正确 -->
-<rule id="test">
-    <filter field="type">59</filter>
-</rule>
+    <!-- 正确 -->
+    <rule id="test">
+        <filter field="type">59</filter>
+    </rule>
 ```
 
 #### 问题：特殊字符未处理
@@ -682,7 +682,7 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 错误 -->
 <node type="REGEX" field="html"><script>alert('xss')</script></node>
 
-<!-- 正确 -->
+        <!-- 正确 -->
 <node type="REGEX" field="html"><![CDATA[<script>alert('xss')</script>]]></node>
 ```
 
@@ -696,10 +696,10 @@ func SafeAnalysis(data interface{}) bool {
     <node type="INCL" field="path">temp</node>
 </checklist>
 
-<!-- 正确 -->
+        <!-- 正确 -->
 <checklist condition="a and b">
-    <node id="a" type="INCL" field="exe">malware</node>
-    <node id="b" type="INCL" field="path">temp</node>
+<node id="a" type="INCL" field="exe">malware</node>
+<node id="b" type="INCL" field="path">temp</node>
 </checklist>
 ```
 
@@ -708,7 +708,7 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 错误 -->
 <node type="INCL" field="process" logic="OR">malware.exe|virus.exe</node>
 
-<!-- 正确 -->
+        <!-- 正确 -->
 <node type="INCL" field="process" logic="OR" delimiter="|">malware.exe|virus.exe</node>
 ```
 
@@ -719,7 +719,7 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 错误 -->
 <threshold group_by="user_id" range="1h" count_type="SUM">1000</threshold>
 
-<!-- 正确 -->
+        <!-- 正确 -->
 <threshold group_by="user_id" range="1h" count_type="SUM" count_field="amount">1000</threshold>
 ```
 
@@ -735,12 +735,12 @@ func SafeAnalysis(data interface{}) bool {
     </checklist>
 </rule>
 
-<!-- 不好：没有filter -->
+        <!-- 不好：没有filter -->
 <rule id="slow_rule">
-    <checklist>
-        <node type="EQU" field="event_type">process_creation</node>
-        <node type="INCL" field="process_name">suspicious</node>
-    </checklist>
+<checklist>
+    <node type="EQU" field="event_type">process_creation</node>
+    <node type="INCL" field="process_name">suspicious</node>
+</checklist>
 </rule>
 ```
 
@@ -759,6 +759,6 @@ func SafeAnalysis(data interface{}) bool {
 <!-- 好：使用local_cache -->
 <threshold group_by="source_ip" range="300s" local_cache="true">10</threshold>
 
-<!-- 注意：CLASSIFY类型内存消耗较大 -->
+        <!-- 注意：CLASSIFY类型内存消耗较大 -->
 <threshold group_by="user_id" range="3600s" count_type="CLASSIFY" count_field="resource_id">100</threshold>
 ```

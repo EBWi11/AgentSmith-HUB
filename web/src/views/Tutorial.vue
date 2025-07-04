@@ -34,33 +34,6 @@
 
     <!-- Main Content -->
     <div v-else class="tutorial-content">
-      <!-- Header -->
-      <div class="tutorial-header">
-        <div class="header-content">
-          <div class="header-title">
-            <h1>AgentSmith-HUB 规则引擎指南</h1>
-            <p class="subtitle">完整的使用文档和最佳实践</p>
-          </div>
-          <div class="header-actions">
-            <button @click="toggleOutline" class="action-button" :class="{ active: showOutline }" title="文档大纲">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="8" y1="6" x2="21" y2="6"/>
-                <line x1="8" y1="12" x2="21" y2="12"/>
-                <line x1="8" y1="18" x2="21" y2="18"/>
-                <line x1="3" y1="6" x2="3.01" y2="6"/>
-                <line x1="3" y1="12" x2="3.01" y2="12"/>
-                <line x1="3" y1="18" x2="3.01" y2="18"/>
-              </svg>
-            </button>
-            <button @click="toggleFullscreen" class="action-button" title="全屏模式">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
       <!-- Content Area -->
       <div class="content-wrapper">
         <!-- Sidebar Outline -->
@@ -93,39 +66,55 @@
         </div>
 
         <!-- Document Area -->
-        <div class="document-wrapper">
+        <div class="document-wrapper" 
+             :class="{ 'outline-open': showOutline }"
+             :style="{ marginLeft: showOutline ? `${outlineSidebarWidth}px` : '0' }">
           <div class="document-container" ref="documentContainer">
             <div class="markdown-body" v-html="renderedHtml"></div>
           </div>
-        </div>
-      </div>
-
-      <!-- Status Bar -->
-      <div class="status-bar">
-        <div class="status-left">
-          <span class="status-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14,2 14,8 20,8"/>
-            </svg>
-            {{ formatFileSize(tutorialContent.length) }}
-          </span>
-          <span class="status-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 3v18h18"/>
-              <rect x="7" y="7" width="3" height="9"/>
-              <rect x="13" y="5" width="3" height="11"/>
-            </svg>
-            {{ tocItems.length }} 章节
-          </span>
-        </div>
-        <div class="status-right">
-          <span class="status-item">
-            {{ currentSection ? getSectionTitle(currentSection) : '文档开始' }}
-          </span>
-          <span class="status-item">
-            Markdown
-          </span>
+          
+          <!-- Status Bar -->
+          <div class="status-bar">
+            <div class="status-left">
+              <span class="status-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14,2 14,8 20,8"/>
+                </svg>
+                {{ formatFileSize(tutorialContent.length) }}
+              </span>
+              <span class="status-item">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 3v18h18"/>
+                  <rect x="7" y="7" width="3" height="9"/>
+                  <rect x="13" y="5" width="3" height="11"/>
+                </svg>
+                {{ tocItems.length }} 章节
+              </span>
+            </div>
+            <div class="status-right">
+              <span class="status-item">
+                Markdown
+              </span>
+              <div class="status-controls">
+                <button @click="toggleOutline" class="status-btn" :class="{ active: showOutline }" title="文档大纲">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="8" y1="6" x2="21" y2="6"/>
+                    <line x1="8" y1="12" x2="21" y2="12"/>
+                    <line x1="8" y1="18" x2="21" y2="18"/>
+                    <line x1="3" y1="6" x2="3.01" y2="6"/>
+                    <line x1="3" y1="12" x2="3.01" y2="12"/>
+                    <line x1="3" y1="18" x2="3.01" y2="18"/>
+                  </svg>
+                </button>
+                <button @click="toggleFullscreen" class="status-btn" title="全屏模式">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -133,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 import xml from 'highlight.js/lib/languages/xml'
@@ -158,6 +147,14 @@ const currentSection = ref('')
 const showOutline = ref(false)
 const documentContainer = ref(null)
 const isFullscreen = ref(false)
+
+// 计算outline sidebar宽度（响应式）
+const outlineSidebarWidth = computed(() => {
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+    return 260 // 移动端宽度
+  }
+  return 280 // 桌面端宽度
+})
 
 // 配置markdown-it
 const md = new MarkdownIt({
@@ -240,7 +237,7 @@ function addHeaderIds(markdown) {
     if (match) {
       const level = match[1].length
       const text = match[2]
-        .replace(/[🛡️🚀🧠📋🎯🔌⚡💼❓📖]/g, '')
+        .replace(/[🛡️🚀🧠📋🎯🔌⚡💼❓💡📖]/g, '')
         .trim()
       
       if (text && level <= 3) {
@@ -349,15 +346,21 @@ onMounted(() => {
     isFullscreen.value = !!document.fullscreenElement
   })
 })
+
+// 组件卸载时清理
+onBeforeUnmount(() => {
+  // 清理工作已在组件挂载时处理
+})
 </script>
 
 <style scoped>
 .tutorial-container {
-  position: relative;
-  height: 100vh;
   width: 100%;
+  height: 100%;
   background: #ffffff;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Loading State */
@@ -461,70 +464,10 @@ onMounted(() => {
 
 /* Main Content */
 .tutorial-content {
-  height: 100vh;
+  flex: 1;
   display: flex;
   flex-direction: column;
-}
-
-/* Header */
-.tutorial-header {
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 16px 24px;
-  flex-shrink: 0;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-}
-
-.header-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.header-title h1 {
-  color: #111827;
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
-
-.subtitle {
-  color: #6b7280;
-  font-size: 14px;
-  margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.action-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: #6b7280;
-}
-
-.action-button:hover {
-  background: #f3f4f6;
-  color: #374151;
-  border-color: #d1d5db;
-}
-
-.action-button.active {
-  background: #3b82f6;
-  color: white;
-  border-color: #3b82f6;
+  overflow: hidden;
 }
 
 /* Content Wrapper */
@@ -646,25 +589,103 @@ onMounted(() => {
 .document-wrapper {
   flex: 1;
   transition: all 0.3s ease;
-  width: 100%;
-}
-
-.outline-sidebar.visible ~ .document-wrapper {
-  margin-left: 280px;
-  width: calc(100% - 280px);
+  display: flex;
+  flex-direction: column;
 }
 
 .document-container {
-  height: 100%;
+  flex: 1;
   overflow-y: auto;
   background: white;
+  min-height: 0;
+  padding-bottom: 48px; /* leave space for fixed status bar */
+}
+
+/* Status Bar */
+.status-bar {
+  position: fixed;
+  left: var(--sidebar-width, 288px);
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  font-size: 12px;
+  color: #6b7280;
+  z-index: 500;
+}
+
+.status-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-item svg {
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.status-controls {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.status-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.status-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #9ca3af;
+}
+
+.status-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
 }
 
 /* GitHub Markdown 样式增强 */
 :deep(.markdown-body) {
   max-width: none;
   margin: 0;
-  padding: 32px 24px 32px 40px;
+  padding: 24px 40px 32px 40px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   color: #24292f;
@@ -750,38 +771,6 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-/* Status Bar */
-.status-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 36px;
-  padding: 0 24px;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
-  font-size: 12px;
-  color: #6b7280;
-  flex-shrink: 0;
-}
-
-.status-left,
-.status-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-}
-
-.status-item svg {
-  opacity: 0.7;
-}
-
 /* 自定义滚动条 */
 .document-container::-webkit-scrollbar {
   width: 8px;
@@ -800,33 +789,28 @@ onMounted(() => {
   background: #94a3b8;
 }
 
-/* 响应式设计 */
 @media (max-width: 1024px) {
   :deep(.markdown-body) {
-    padding: 32px 20px 32px 32px;
+    padding: 24px 32px 32px 32px;
+  }
+  
+  .status-controls {
+    margin-left: 12px;
   }
 }
 
 @media (max-width: 768px) {
-  .header-content {
-    padding: 0 16px;
+  .status-controls {
+    margin-left: 8px;
   }
   
-  .tutorial-header {
-    padding: 12px 16px;
-  }
-  
-  .header-title h1 {
-    font-size: 20px;
+  .status-btn {
+    width: 22px;
+    height: 22px;
   }
   
   .outline-sidebar {
     width: 260px;
-  }
-  
-  .outline-sidebar.visible ~ .document-wrapper {
-    margin-left: 260px;
-    width: calc(100% - 260px);
   }
   
   .status-bar {
@@ -834,7 +818,7 @@ onMounted(() => {
   }
   
   :deep(.markdown-body) {
-    padding: 24px 16px 24px 20px;
+    padding: 20px 16px 24px 20px;
   }
 }
 </style> 

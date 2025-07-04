@@ -91,8 +91,15 @@ const testProjectId = ref('')
 const route = useRoute()
 const router = useRouter()
 
+// Helper: update global CSS variable for sidebar width
+function updateSidebarWidth () {
+  const width = sidebarCollapsed.value ? 64 : 288 // keep in sync with Sidebar.vue
+  document.documentElement.style.setProperty('--sidebar-width', width + 'px')
+}
+
 // Handle route changes
 onMounted(() => {
+  updateSidebarWidth()
   // Check if we have component type in the route
   const { params, meta } = route
   if (meta.componentType) {
@@ -183,6 +190,11 @@ watch(
   },
   { deep: true }
 )
+
+// Watch for sidebar collapsed state
+watch(sidebarCollapsed, () => {
+  updateSidebarWidth()
+})
 
 // Methods
 function onSelectItem(item) {

@@ -33,7 +33,7 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 ```
 
 **这个规则做了什么？**
-1. 监听所有进程创建事件（event_type = 'process_creation'）
+1. 监听所有进程创建事件（event_type = process_creation）
 2. 检查进程名（process_name字段）是否包含（INCL）"powershell"
 3. 如果匹配，添加一个`alert_type`字段标记为可疑活动(suspicious_powershell)
 
