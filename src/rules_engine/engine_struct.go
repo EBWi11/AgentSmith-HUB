@@ -25,7 +25,6 @@ const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
 const MinPoolSize = 4
-const MaxPoolSize = 256
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 

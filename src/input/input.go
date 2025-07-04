@@ -416,6 +416,12 @@ func (in *Input) metricLoop() {
 			}
 
 			atomic.StoreUint64(&in.consumeQPS, qps)
+
+			// Persist total messages per ProjectNodeSequence to Redis once per second.
+			if in.ProjectNodeSequence != "" {
+				key := "msg_total:" + in.ProjectNodeSequence + ":input"
+				_, _ = common.RedisIncrby(key, int64(qps))
+			}
 		}
 	}
 }

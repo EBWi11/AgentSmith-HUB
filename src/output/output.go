@@ -228,21 +228,17 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 
 // Start initializes and starts the output component based on its type
 // Returns an error if the component is already running or if initialization fails
-// If TestCollectionChan is set, it will run in test mode (using print mode to avoid external connections)
+// If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,
+// but the original output type will still be used so that real external side-effects can be observed.
 func (out *Output) Start() error {
-	// Check if this is test mode (TestCollectionChan is set)
-	isTestMode := out.TestCollectionChan != nil
+	// Determine if we need to duplicate data for testing
+	hasTestCollector := out.TestCollectionChan != nil
 
 	// Start metric goroutine
 	out.metricStop = make(chan struct{})
 	go out.metricLoop()
 
-	// In test mode, force use print mode to avoid external connections
 	effectiveType := out.Type
-	if isTestMode {
-		effectiveType = OutputTypePrint
-		logger.Info("Starting output in test mode (using print mode)", "id", out.Id, "original_type", out.Type)
-	}
 
 	switch effectiveType {
 	case OutputTypeKafka:
@@ -284,20 +280,26 @@ func (out *Output) Start() error {
 							continue
 						}
 
-						// Only count and sample in production mode (not test mode)
-						isTestMode := out.TestCollectionChan != nil
-						if !isTestMode {
-							// Count immediately at upstream read to ensure all messages are counted
-							atomic.AddUint64(&out.produceTotal, 1)
+						// Always count/sample; duplication handled below
+						// Count immediately at upstream read to ensure all messages are counted
+						atomic.AddUint64(&out.produceTotal, 1)
 
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
+						// Sample the message
+						if out.sampler != nil {
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
-						// Enhance message with ProjectNodeSequence information before sending to Kafka
+						// Enhance message with ProjectNodeSequence information before sending
 						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						// Duplicate to TestCollectionChan if present (non-blocking)
+						if hasTestCollector {
+							select {
+							case *out.TestCollectionChan <- enhancedMsg:
+							default:
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+							}
+						}
 
 						// Send enhanced message to msgChan for Kafka producer
 						msgChan <- enhancedMsg
@@ -362,20 +364,25 @@ func (out *Output) Start() error {
 							continue
 						}
 
-						// Only count and sample in production mode (not test mode)
-						isTestMode := out.TestCollectionChan != nil
-						if !isTestMode {
-							// Count immediately at upstream read to ensure all messages are counted
-							atomic.AddUint64(&out.produceTotal, 1)
+						// Always count/sample; duplication handled separately
+						// Count immediately at upstream read to ensure all messages are counted
+						atomic.AddUint64(&out.produceTotal, 1)
 
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
+						// Sample the message
+						if out.sampler != nil {
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
-						// Enhance message with ProjectNodeSequence information before sending to Elasticsearch
+						// Enhance message with ProjectNodeSequence information before sending
 						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						if hasTestCollector {
+							select {
+							case *out.TestCollectionChan <- enhancedMsg:
+							default:
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+							}
+						}
 
 						// Send enhanced message to msgChan for Elasticsearch producer
 						msgChan <- enhancedMsg
@@ -410,28 +417,21 @@ func (out *Output) Start() error {
 								// Channel is closed, skip this channel
 								continue
 							}
-							// Only count and sample in production mode (not test mode)
-							isTestMode := out.TestCollectionChan != nil
-							if !isTestMode {
-								// Optimization: only increment total count, QPS is calculated by metricLoop
-								atomic.AddUint64(&out.produceTotal, 1)
+							// Always count/sample.
+							// Count immediately at upstream read to ensure all messages are counted
+							atomic.AddUint64(&out.produceTotal, 1)
 
-								// Sample the message
-								if out.sampler != nil {
-									out.sampler.Sample(msg, out.ProjectNodeSequence)
-								}
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
 							}
 
-							// If test collection channel is set, also send data there
-							if out.TestCollectionChan != nil {
-								// Add output ID to the message for test collection
+							// Duplicate to TestCollectionChan if present
+							if hasTestCollector {
 								msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
-
 								select {
 								case *out.TestCollectionChan <- msgWithId:
-									// Successfully sent to test collection channel
 								default:
-									// Test collection channel is full, log warning
 									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "print")
 								}
 							}
@@ -655,6 +655,12 @@ func (out *Output) metricLoop() {
 			}
 
 			atomic.StoreUint64(&out.produceQPS, qps)
+
+			// Persist total produced messages to Redis using ProjectNodeSequence key.
+			if out.ProjectNodeSequence != "" {
+				key := "msg_total:" + out.ProjectNodeSequence + ":output"
+				_, _ = common.RedisIncrby(key, int64(qps))
+			}
 		}
 	}
 }
