@@ -416,6 +416,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 			if !ruleCheckRes {
 				if !r.IsDetection {
+					// For whitelist, once any rule matches, stop further processing (no forward).
 					return finalRes
 				}
 				continue
@@ -634,6 +635,12 @@ func (r *Ruleset) metricLoop() {
 			}
 
 			atomic.StoreUint64(&r.processQPS, qps)
+
+			// Persist total processed messages to Redis keyed by ProjectNodeSequence
+			if r.ProjectNodeSequence != "" {
+				key := "msg_total:" + r.ProjectNodeSequence + ":ruleset"
+				_, _ = common.RedisIncrby(key, int64(qps))
+			}
 		}
 	}
 }

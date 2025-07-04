@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -2321,7 +2322,14 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		// Collect input QPS data
 		for inputID, input := range proj.Inputs {
 			qps := input.GetConsumeQPS()
-			total := input.GetConsumeTotal() // Get real total messages
+			total := input.GetConsumeTotal()
+			if seq := input.ProjectNodeSequence; seq != "" {
+				if val, err := common.RedisGet("msg_total:" + seq + ":input"); err == nil {
+					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
+						total = v
+					}
+				}
+			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,
@@ -2329,7 +2337,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 				ComponentType:       "input",
 				ProjectNodeSequence: input.ProjectNodeSequence,
 				QPS:                 qps,
-				TotalMessages:       total, // Add real total messages
+				TotalMessages:       total,
 				Timestamp:           now,
 			})
 		}
@@ -2337,7 +2345,14 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		// Collect output QPS data
 		for outputID, output := range proj.Outputs {
 			qps := output.GetProduceQPS()
-			total := output.GetProduceTotal() // Get real total messages
+			total := output.GetProduceTotal()
+			if seq := output.ProjectNodeSequence; seq != "" {
+				if val, err := common.RedisGet("msg_total:" + seq + ":output"); err == nil {
+					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
+						total = v
+					}
+				}
+			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,
@@ -2345,15 +2360,22 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 				ComponentType:       "output",
 				ProjectNodeSequence: output.ProjectNodeSequence,
 				QPS:                 qps,
-				TotalMessages:       total, // Add real total messages
+				TotalMessages:       total,
 				Timestamp:           now,
 			})
 		}
 
 		// Collect ruleset QPS data - now with real processing statistics
 		for rulesetID, ruleset := range proj.Rulesets {
-			qps := ruleset.GetProcessQPS()     // Get real processing QPS
-			total := ruleset.GetProcessTotal() // Get real total processed messages
+			qps := ruleset.GetProcessQPS() // Get real processing QPS
+			total := ruleset.GetProcessTotal()
+			if seq := ruleset.ProjectNodeSequence; seq != "" {
+				if val, err := common.RedisGet("msg_total:" + seq + ":ruleset"); err == nil {
+					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
+						total = v
+					}
+				}
+			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,
