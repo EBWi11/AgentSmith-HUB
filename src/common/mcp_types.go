@@ -186,12 +186,14 @@ type MCPResourceLink struct {
 // --- Prompts ---
 
 type MCPPrompt struct {
-	Name        string                 `json:"name"`
-	Title       string                 `json:"title,omitempty"` // Human-friendly display name (2025-06-18)
-	Description string                 `json:"description,omitempty"`
-	Arguments   []MCPPromptArg         `json:"arguments,omitempty"`
-	Template    string                 `json:"template,omitempty"`
-	Meta        map[string]interface{} `json:"_meta,omitempty"` // Metadata field (2025-06-18)
+	Name         string                 `json:"name"`
+	Title        string                 `json:"title,omitempty"` // Human-friendly display name (2025-06-18)
+	Description  string                 `json:"description,omitempty"`
+	Arguments    []MCPPromptArg         `json:"arguments,omitempty"`
+	Template     string                 `json:"template,omitempty"`
+	Texts        map[string]string      `json:"texts,omitempty"` // optional per-language text variants
+	Placeholders []string               `json:"placeholders,omitempty"`
+	Meta         map[string]interface{} `json:"_meta,omitempty"` // Metadata field (2025-06-18)
 }
 
 // MCPPromptArg defines a strongly-typed argument for a prompt.
