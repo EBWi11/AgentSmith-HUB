@@ -21,9 +21,11 @@ type OutputType string
 
 const (
 	OutputTypeKafka         OutputType = "kafka"
+	OutputTypeKafkaAzure    OutputType = "kafka_azure"
+	OutputTypeKafkaAWS      OutputType = "kafka_aws"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
-	OutputTypePrint         OutputType = "print"
 	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
+	OutputTypePrint         OutputType = "print"
 )
 
 // OutputConfig is the YAML config for an output.
@@ -42,6 +44,7 @@ type KafkaOutputConfig struct {
 	Topic       string                      `yaml:"topic"`
 	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
 	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
+	TLS         *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
 	Key         string                      `yaml:"key"`
 }
 
@@ -145,7 +148,7 @@ func Verify(path string, raw string) error {
 
 	// Validate type-specific fields
 	switch cfg.Type {
-	case OutputTypeKafka:
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if cfg.Kafka == nil {
 			return fmt.Errorf("missing required field 'kafka' for kafka output (line: unknown)")
 		}
@@ -244,7 +247,7 @@ func (out *Output) Start() error {
 	effectiveType := out.Type
 
 	switch effectiveType {
-	case OutputTypeKafka:
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if out.kafkaProducer != nil {
 			return fmt.Errorf("kafka producer already running for output %s", out.Id)
 		}
@@ -260,6 +263,7 @@ func (out *Output) Start() error {
 			out.kafkaCfg.SASL,
 			msgChan,
 			out.kafkaCfg.Key,
+			out.kafkaCfg.TLS,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err)
@@ -514,7 +518,7 @@ func (out *Output) Stop() error {
 
 		// Wait for all internal msgChan to be empty (for each output type)
 		switch out.Type {
-		case OutputTypeKafka:
+		case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 			if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
 				logger.Info("Waiting for kafka internal channel to empty", "output", out.Id)
 				internalTimeout := time.After(5 * time.Second) // 5 second timeout for internal channels
@@ -588,7 +592,7 @@ func (out *Output) Stop() error {
 		logger.Warn("Output stop timeout exceeded, forcing shutdown", "output", out.Id)
 		// Force cleanup even on timeout
 		switch out.Type {
-		case OutputTypeKafka:
+		case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 			if out.kafkaProducer != nil {
 				// Note: msgChan is closed by the UpStream processing goroutine, not here
 				out.kafkaProducer.Close()
@@ -700,7 +704,7 @@ func (out *Output) StopForTesting() error {
 
 	// Force close producers without waiting
 	switch out.Type {
-	case OutputTypeKafka:
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if out.kafkaProducer != nil {
 			// Note: msgChan is closed by the UpStream processing goroutine, not here
 			out.kafkaProducer.Close()
@@ -752,7 +756,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 	}
 
 	switch out.Type {
-	case OutputTypeKafka:
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if out.kafkaCfg == nil {
 			result["status"] = "error"
 			result["message"] = "Kafka configuration missing"
@@ -771,7 +775,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
 		// Test actual connectivity to Kafka brokers
-		err := common.TestKafkaConnection(out.kafkaCfg.Brokers, out.kafkaCfg.SASL)
+		err := common.TestKafkaConnection(out.kafkaCfg.Brokers, out.kafkaCfg.SASL, out.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "error"
 			result["message"] = "Failed to connect to Kafka brokers"
@@ -783,7 +787,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Test if topic exists
-		topicExists, err := common.TestKafkaTopicExists(out.kafkaCfg.Brokers, out.kafkaCfg.Topic, out.kafkaCfg.SASL)
+		topicExists, err := common.TestKafkaTopicExists(out.kafkaCfg.Brokers, out.kafkaCfg.Topic, out.kafkaCfg.SASL, out.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "warning"
 			result["message"] = "Connected to Kafka but failed to verify topic"

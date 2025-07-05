@@ -4,7 +4,11 @@ import (
 	"AgentSmith-HUB/logger"
 	"context"
 	"fmt"
+	"os"
 	"time"
+
+	"crypto/tls"
+	"crypto/x509"
 
 	"github.com/bytedance/sonic"
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -53,6 +57,14 @@ type KafkaSASLConfig struct {
 	Scopes       []string `yaml:"scopes,omitempty"`
 }
 
+// KafkaTLSConfig holds TLS configuration
+type KafkaTLSConfig struct {
+	CertPath   string `yaml:"cert_path"`
+	KeyPath    string `yaml:"key_path"`
+	CAFilePath string `yaml:"ca_file_path"`
+	SkipVerify bool   `yaml:"skip_verify"`
+}
+
 // KafkaProducer wraps a franz-go producer with a channel-based interface.
 type KafkaProducer struct {
 	Client       *kgo.Client
@@ -88,6 +100,7 @@ func NewKafkaProducer(
 	saslCfg *KafkaSASLConfig,
 	msgChan chan map[string]interface{},
 	keyField string,
+	tlsCfg *KafkaTLSConfig,
 ) (*KafkaProducer, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
@@ -111,6 +124,15 @@ func NewKafkaProducer(
 		if mechanism != nil {
 			opts = append(opts, kgo.SASL(mechanism))
 		}
+	}
+
+	// Add TLS if specified
+	if tlsCfg != nil {
+		tlsOpt, err := getTLSDialOpt(tlsCfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, tlsOpt)
 	}
 
 	cl, err := kgo.NewClient(opts...)
@@ -232,7 +254,7 @@ func getSASLMechanism(cfg *KafkaSASLConfig) (sasl.Mechanism, error) {
 }
 
 // NewKafkaConsumer creates a new high-performance Kafka consumer with compression and SASL support.
-func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCompressionType, saslCfg *KafkaSASLConfig, msgChan chan map[string]interface{}) (*KafkaConsumer, error) {
+func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCompressionType, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig, msgChan chan map[string]interface{}) (*KafkaConsumer, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumerGroup(group),
@@ -254,6 +276,15 @@ func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCo
 		if mechanism != nil {
 			opts = append(opts, kgo.SASL(mechanism))
 		}
+	}
+
+	// Add TLS if specified
+	if tlsCfg != nil {
+		tlsOpt, err := getTLSDialOpt(tlsCfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, tlsOpt)
 	}
 
 	cl, err := kgo.NewClient(opts...)
@@ -377,7 +408,7 @@ func (c *KafkaConsumer) Close() {
 
 // TestConnection tests the connection to Kafka brokers
 // This method creates a temporary client to test connectivity without affecting the main producer
-func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig) error {
+func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig) error {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.RequestTimeoutOverhead(3 * time.Second), // Set shorter timeout for connection test
@@ -393,6 +424,15 @@ func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig) error {
 		if mechanism != nil {
 			opts = append(opts, kgo.SASL(mechanism))
 		}
+	}
+
+	// Add TLS if enabled
+	if tlsCfg != nil {
+		tlsOpt, err := getTLSDialOpt(tlsCfg)
+		if err != nil {
+			return fmt.Errorf("failed to configure TLS: %w", err)
+		}
+		opts = append(opts, tlsOpt)
 	}
 
 	// Create a temporary client for testing
@@ -416,7 +456,7 @@ func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig) error {
 }
 
 // TestTopicExists tests if a specific topic exists in Kafka
-func TestKafkaTopicExists(brokers []string, topic string, saslCfg *KafkaSASLConfig) (bool, error) {
+func TestKafkaTopicExists(brokers []string, topic string, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig) (bool, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.RequestTimeoutOverhead(5 * time.Second),
@@ -431,6 +471,15 @@ func TestKafkaTopicExists(brokers []string, topic string, saslCfg *KafkaSASLConf
 		if mechanism != nil {
 			opts = append(opts, kgo.SASL(mechanism))
 		}
+	}
+
+	// Add TLS if enabled
+	if tlsCfg != nil {
+		tlsOpt, err := getTLSDialOpt(tlsCfg)
+		if err != nil {
+			return false, fmt.Errorf("failed to configure TLS: %w", err)
+		}
+		opts = append(opts, tlsOpt)
 	}
 
 	// Create a temporary client for testing
@@ -452,4 +501,34 @@ func TestKafkaTopicExists(brokers []string, topic string, saslCfg *KafkaSASLConf
 
 	_, exists := metadata[topic]
 	return exists, nil
+}
+
+func getTLSDialOpt(cfg *KafkaTLSConfig) (kgo.Opt, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+
+	tlsCfg := &tls.Config{InsecureSkipVerify: cfg.SkipVerify}
+
+	if cfg.CAFilePath != "" {
+		caCert, err := os.ReadFile(cfg.CAFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to append CA cert")
+		}
+		tlsCfg.RootCAs = caPool
+	}
+
+	if cfg.CertPath != "" && cfg.KeyPath != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client cert/key: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	return kgo.DialTLSConfig(tlsCfg), nil
 }

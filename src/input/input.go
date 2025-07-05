@@ -19,8 +19,10 @@ import (
 type InputType string
 
 const (
-	InputTypeKafka     InputType = "kafka"
-	InputTypeAliyunSLS InputType = "aliyun_sls"
+	InputTypeKafka      InputType = "kafka"
+	InputTypeKafkaAzure InputType = "kafka_azure"
+	InputTypeKafkaAWS   InputType = "kafka_aws"
+	InputTypeAliyunSLS  InputType = "aliyun_sls"
 )
 
 // InputConfig is the YAML config for an input.
@@ -39,6 +41,7 @@ type KafkaInputConfig struct {
 	Topic       string                      `yaml:"topic"`
 	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
 	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
+	TLS         *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
 }
 
 // AliyunSLSInputConfig holds Aliyun SLS-specific config.
@@ -132,7 +135,7 @@ func Verify(path string, raw string) error {
 
 	// Validate type-specific fields
 	switch cfg.Type {
-	case InputTypeKafka:
+	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
 		if cfg.Kafka == nil {
 			return fmt.Errorf("missing required field 'kafka' for kafka input (line: unknown)")
 		}
@@ -205,7 +208,7 @@ func (in *Input) Start() error {
 	}()
 
 	switch in.Type {
-	case InputTypeKafka:
+	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
 		if in.kafkaConsumer != nil {
 			return fmt.Errorf("kafka consumer already running for input %s", in.Id)
 		}
@@ -219,6 +222,7 @@ func (in *Input) Start() error {
 			in.kafkaCfg.Topic,
 			in.kafkaCfg.Compression,
 			in.kafkaCfg.SASL,
+			in.kafkaCfg.TLS,
 			msgChan,
 		)
 		if err != nil {
@@ -339,6 +343,9 @@ func (in *Input) Start() error {
 				}
 			}
 		}()
+
+	default:
+		return fmt.Errorf("unsupported input type %s", in.Type)
 	}
 
 	return nil
@@ -463,7 +470,7 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 	}
 
 	switch in.Type {
-	case InputTypeKafka:
+	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
 		if in.kafkaCfg == nil {
 			result["status"] = "error"
 			result["message"] = "Kafka configuration missing"
@@ -483,7 +490,7 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
 		// Test actual connectivity to Kafka brokers
-		err := common.TestKafkaConnection(in.kafkaCfg.Brokers, in.kafkaCfg.SASL)
+		err := common.TestKafkaConnection(in.kafkaCfg.Brokers, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "error"
 			result["message"] = "Failed to connect to Kafka brokers"
@@ -495,7 +502,7 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Test if topic exists
-		topicExists, err := common.TestKafkaTopicExists(in.kafkaCfg.Brokers, in.kafkaCfg.Topic, in.kafkaCfg.SASL)
+		topicExists, err := common.TestKafkaTopicExists(in.kafkaCfg.Brokers, in.kafkaCfg.Topic, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "warning"
 			result["message"] = "Connected to Kafka but failed to verify topic"

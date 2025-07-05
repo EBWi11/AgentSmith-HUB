@@ -1358,6 +1358,8 @@ function getInputValueCompletions(context, range, fullText) {
     // 使用固定的输入类型列表，确保总是有枚举提示
     const availableInputTypes = [
       { value: 'kafka', description: 'Apache Kafka input source' },
+      { value: 'kafka_azure', description: 'Azure Event Hubs (Kafka) input source' },
+      { value: 'kafka_aws', description: 'AWS MSK (Kafka) input source' },
       { value: 'aliyun_sls', description: 'Alibaba Cloud SLS input source' }
     ];
     
@@ -1738,6 +1740,8 @@ function getOutputValueCompletions(context, range, fullText) {
     // 使用固定的输出类型列表，确保总是有枚举提示
     const availableOutputTypes = [
       { value: 'kafka', description: 'Apache Kafka output destination' },
+      { value: 'kafka_azure', description: 'Azure Event Hubs (Kafka) output' },
+      { value: 'kafka_aws', description: 'AWS MSK (Kafka) output' },
       { value: 'elasticsearch', description: 'Elasticsearch output destination' },
       { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
       { value: 'print', description: 'Console print output for debugging' }
@@ -1908,7 +1912,7 @@ function getOutputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Output destination type - choose from: kafka, elasticsearch, aliyun_sls, print',
+        documentation: 'Output destination type - choose from: kafka, kafka_azure, kafka_aws, elasticsearch, aliyun_sls, print',
         insertText: 'type:',
         range: range,
         sortText: '000_type'
@@ -1916,7 +1920,7 @@ function getOutputKeyCompletions(context, range, fullText) {
     }
     
     // 根据type提供相应的配置段
-    const typeMatch = fullText.match(/type:\s*(kafka|elasticsearch|aliyun_sls|print)/);
+    const typeMatch = fullText.match(/type:\s*(kafka|kafka_azure|kafka_aws|elasticsearch|aliyun_sls|print)/);
     if (typeMatch) {
       const outputType = typeMatch[1];
       
@@ -1926,6 +1930,28 @@ function getOutputKeyCompletions(context, range, fullText) {
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Kafka output configuration section',
           insertText: 'kafka:\n  brokers:\n    - "localhost:9092"\n  topic: "topic-name"\n  compression: "none"',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (outputType === 'kafka_azure' && !fullText.includes('kafka_azure:')) {
+        suggestions.push({
+          label: 'kafka_azure',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'Azure Event Hubs (Kafka) output configuration section',
+          insertText: 'kafka_azure:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (outputType === 'kafka_aws' && !fullText.includes('kafka_aws:')) {
+        suggestions.push({
+          label: 'kafka_aws',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'AWS MSK (Kafka) output configuration section',
+          insertText: 'kafka_aws:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
