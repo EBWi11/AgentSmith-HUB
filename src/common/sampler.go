@@ -1,6 +1,7 @@
 package common
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,7 @@ type SampleData struct {
 	Data                interface{} `json:"data"`
 	Timestamp           time.Time   `json:"timestamp"`
 	ProjectNodeSequence string      `json:"project_node_sequence"`
+	ProjectID           string      `json:"project_id"`
 }
 
 // Note: ProjectSamples struct has been removed as we now use Redis-only storage
@@ -59,20 +61,27 @@ func NewSampler(name string) *Sampler {
 
 // isFirstSampleForProject checks if this is the first sample for a project sequence
 func (s *Sampler) isFirstSampleForProject(projectNodeSequence string) bool {
-	redisSampleManager := GetRedisSampleManager()
-	if redisSampleManager == nil {
-		return true // Default to true if Redis not available
-	}
-
-	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectNodeSequence)
-	if err != nil || len(samples) == 0 {
+	rsm := GetRedisSampleManager()
+	if rsm == nil {
 		return true
 	}
-	return false
+	all, err := rsm.GetSamples(s.name)
+	if err != nil {
+		return true
+	}
+	for _, arr := range all {
+		if len(arr) > 0 && arr[0].ProjectNodeSequence == projectNodeSequence {
+			return false
+		}
+	}
+	return true
 }
 
 // Sample attempts to sample the data based on sampling rate
-func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
+func (s *Sampler) Sample(data interface{}, projectNodeSequence string, projectID string) bool {
+	// Normalize ProjectNodeSequence to lower-case to avoid case-sensitivity issues downstream
+	projectNodeSequence = strings.ToLower(projectNodeSequence)
+
 	// Check if already closed
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return false
@@ -104,6 +113,7 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 		Data:                data,
 		Timestamp:           time.Now(),
 		ProjectNodeSequence: projectNodeSequence,
+		ProjectID:           projectID,
 	}
 
 	// If there's a goroutine pool, process asynchronously; otherwise process synchronously
@@ -129,13 +139,10 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 
 // storeSample stores sample data to Redis only
 func (s *Sampler) storeSample(sample SampleData, projectNodeSequence string) {
-	// Store to Redis if Redis sample manager is available
 	redisSampleManager := GetRedisSampleManager()
 	if redisSampleManager != nil {
-		err := redisSampleManager.StoreSample(s.name, sample)
-		if err != nil {
-			// Log error but don't fail the sampling
-			// We could add proper logging here if needed
+		if err := redisSampleManager.StoreSample(s.name, sample.ProjectID, sample); err != nil {
+			// TODO: add logger if needed
 		}
 	}
 }
@@ -156,13 +163,13 @@ func (s *Sampler) GetSamples() map[string][]SampleData {
 }
 
 // GetSamplesByProject returns samples for a specific project from Redis
-func (s *Sampler) GetSamplesByProject(projectNodeSequence string) []SampleData {
+func (s *Sampler) GetSamplesByProject(projectID string, projectNodeSequence string) []SampleData {
 	redisSampleManager := GetRedisSampleManager()
 	if redisSampleManager == nil {
 		return nil
 	}
 
-	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectNodeSequence)
+	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectID, projectNodeSequence)
 	if err != nil {
 		return nil
 	}
@@ -210,11 +217,11 @@ func (s *Sampler) Reset() {
 }
 
 // ResetProject resets samples for a specific project
-func (s *Sampler) ResetProject(projectNodeSequence string) {
+func (s *Sampler) ResetProject(projectID string, projectNodeSequence string) {
 	// Clear Redis samples for specific project
 	redisSampleManager := GetRedisSampleManager()
 	if redisSampleManager != nil {
-		redisSampleManager.ResetProject(s.name, projectNodeSequence)
+		redisSampleManager.ResetProject(s.name, projectID, projectNodeSequence)
 	}
 }
 
@@ -241,6 +248,9 @@ func GetSampler(name string) *Sampler {
 	if name == "" {
 		return nil
 	}
+
+	// Normalize sampler name to lower-case so that all callers map to the same instance
+	name = strings.ToLower(name)
 
 	mu.Lock()
 	defer mu.Unlock()

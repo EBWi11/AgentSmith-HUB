@@ -1210,8 +1210,12 @@ func deleteComponent(componentType string, c echo.Context) error {
 			if err := os.Remove(componentPath); err != nil {
 				logger.Error("failed to delete component file", "path", componentPath, "error", err)
 			}
-			// Only notify followers when deleting formal file
-			go syncToFollowers("DELETE", "/"+componentType+"/"+id, nil)
+			// Notify followers via Redis
+			cluster.PublishComponentSync(&cluster.CompSyncEvt{
+				Op:   "delete",
+				Type: componentType,
+				ID:   id,
+			})
 		}
 	}
 
@@ -1717,7 +1721,7 @@ func GetSamplerData(c echo.Context) error {
 				// Method 1: Use suffix matching to get the component's own sample data
 				// This ensures we get the data AT this component, not data that has passed through it
 				// For example: "input.skyguard" should match "INPUT.skyguard" but NOT "INPUT.skyguard.RULESET.test"
-				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
+				if strings.HasSuffix(strings.ToLower(projectNodeSequence), strings.ToLower(nodeSequence)) {
 					matched = true
 				}
 
@@ -1807,7 +1811,7 @@ func GetRulesetFields(c echo.Context) error {
 	logger.Info("GetRulesetFields request",
 		"componentId", componentId)
 
-	nodeSequence := fmt.Sprintf("ruleset.%s", componentId)
+	nodeSequence := strings.ToLower(fmt.Sprintf("ruleset.%s", componentId))
 	var allSampleData []map[string]interface{}
 
 	// Get potential sampler names based on component types and IDs
@@ -1831,7 +1835,7 @@ func GetRulesetFields(c echo.Context) error {
 			samples := sampler.GetSamples()
 			for projectNodeSequence, sampleDataList := range samples {
 				// Match samples that flow into this ruleset
-				if strings.HasSuffix(projectNodeSequence, nodeSequence) {
+				if strings.HasSuffix(strings.ToLower(projectNodeSequence), strings.ToLower(nodeSequence)) {
 					for _, sample := range sampleDataList {
 						if sampleMap, ok := sample.Data.(map[string]interface{}); ok {
 							allSampleData = append(allSampleData, sampleMap)
@@ -2370,7 +2374,7 @@ func addRulesetRule(c echo.Context) error {
 	}
 
 	// Validate the rule XML syntax first
-	ruleId, err := validateAndExtractRuleId(request.RuleRaw)
+	ruleId, ruleName, err := validateAndExtractRuleId(request.RuleRaw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"error": err.Error(),
@@ -2411,8 +2415,11 @@ func addRulesetRule(c echo.Context) error {
 		})
 	}
 
-	// Create a temporary ruleset with the new rule to do complete validation
-	updatedXML, err := addRuleToXML(currentRawConfig, request.RuleRaw)
+	// Ensure the rule contains an <append field="desc"> element with the rule's descriptive name
+	processedRuleRaw := addDescAppendToRule(request.RuleRaw, ruleName)
+
+	// Create a temporary ruleset with the new (possibly augmented) rule to do complete validation
+	updatedXML, err := addRuleToXML(currentRawConfig, processedRuleRaw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -2535,8 +2542,8 @@ func ruleExistsInXML(xmlContent, ruleId string) bool {
 	return false
 }
 
-// validateAndExtractRuleId validates rule XML and extracts the rule ID
-func validateAndExtractRuleId(ruleRaw string) (string, error) {
+// validateAndExtractRuleId validates rule XML syntax and returns (ruleID, ruleName)
+func validateAndExtractRuleId(ruleRaw string) (string, string, error) {
 	// Create a temporary ruleset XML with just this rule to validate it
 	tempXML := fmt.Sprintf(`<root>
 	%s
@@ -2551,27 +2558,27 @@ func validateAndExtractRuleId(ruleRaw string) (string, error) {
 	}
 
 	if err := xml.Unmarshal([]byte(tempXML), &tempRuleset); err != nil {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: XML syntax error.\n\n🔧 HOW TO FIX: Check your XML structure for common issues:\n- Missing closing tags\n- Unescaped special characters (< > & \" ')\n- Incorrect attribute quotes\n- Malformed tag structure\n\n🐛 XML ERROR: %v\n\n📝 VALID EXAMPLE:\n<rule id=\"example_rule\" name=\"Detailed description here\">\n    <filter field=\"event_type\">security</filter>\n    <checklist>\n        <node type=\"INCL\" field=\"command\">suspicious_command</node>\n    </checklist>\n</rule>\n\n💡 Use an XML validator to check your syntax before submitting!", err)
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: XML syntax error.\n\n🔧 HOW TO FIX: Check your XML structure for common issues:\n- Missing closing tags\n- Unescaped special characters (< > & \" ')\n- Incorrect attribute quotes\n- Malformed tag structure\n\n🐛 XML ERROR: %v\n\n📝 VALID EXAMPLE:\n<rule id=\"example_rule\" name=\"Detailed description here\">\n    <filter field=\"event_type\">security</filter>\n    <checklist>\n        <node type=\"INCL\" field=\"command\">suspicious_command</node>\n    </checklist>\n</rule>\n\n💡 Use an XML validator to check your syntax before submitting!", err)
 	}
 
 	if len(tempRuleset.Rules) != 1 {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Expected exactly one rule, got %d.\n\n🔧 HOW TO FIX: When adding a single rule, provide exactly one <rule> element.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_id\" name=\"Descriptive name\">\n    <!-- rule content -->\n</rule>\n\n❌ AVOID: Multiple <rule> elements or no <rule> elements in a single addition.", len(tempRuleset.Rules))
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Expected exactly one rule, got %d.\n\n🔧 HOW TO FIX: When adding a single rule, provide exactly one <rule> element.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_id\" name=\"Descriptive name\">\n    <!-- rule content -->\n</rule>\n\n❌ AVOID: Multiple <rule> elements or no <rule> elements in a single addition.", len(tempRuleset.Rules))
 	}
 
 	ruleId := strings.TrimSpace(tempRuleset.Rules[0].ID)
+	ruleName := strings.TrimSpace(tempRuleset.Rules[0].Name)
 	if ruleId == "" {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing rule ID.\n\n🔧 HOW TO FIX: Add a unique 'id' attribute to your rule.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_descriptive_id\" name=\"Detailed description\">\n\n💡 GOOD ID EXAMPLES:\n- \"detect_ssh_brute_force\"\n- \"monitor_privilege_escalation\"\n- \"alert_sql_injection_attempts\"\n\n⚠️ The ID must be unique within the ruleset and descriptive of the rule's purpose.")
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing rule ID.\n\n🔧 HOW TO FIX: Add a unique 'id' attribute to your rule.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_descriptive_id\" name=\"Detailed description\">\n\n�� GOOD ID EXAMPLES:\n- \"detect_ssh_brute_force\"\n- \"monitor_privilege_escalation\"\n- \"alert_sql_injection_attempts\"\n\n⚠️ The ID must be unique within the ruleset and descriptive of the rule's purpose.")
 	}
 
 	// Validate rule name (description) for LLM compliance
-	ruleName := strings.TrimSpace(tempRuleset.Rules[0].Name)
 	if ruleName == "" {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing 'name' attribute. \n\n🔧 HOW TO FIX: Add a detailed 'name' attribute to your rule that explains what it detects and why it's important.\n\n📝 EXAMPLE: <rule id=\"%s\" name=\"Detect suspicious bash reverse shell execution patterns from compromised accounts\">\n\n💡 The 'name' should be descriptive enough for team members to understand the rule's purpose without reading the technical details.", ruleId)
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing 'name' attribute. \n\n🔧 HOW TO FIX: Add a detailed 'name' attribute to your rule that explains what it detects and why it's important.\n\n📝 EXAMPLE: <rule id=\"%s\" name=\"Detect suspicious bash reverse shell execution patterns from compromised accounts\">\n\n💡 The 'name' should be descriptive enough for team members to understand the rule's purpose without reading the technical details.", ruleId)
 	}
 
 	// Check for meaningful description (not just simple words)
 	if len(ruleName) < 10 {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name too short.\n\n🔧 HOW TO FIX: The 'name' attribute should contain a comprehensive description (at least 10 characters). Current name: '%s'\n\n📝 GOOD EXAMPLES:\n- \"Detect SQL injection attempts in web application logs\"\n- \"Monitor for suspicious PowerShell execution patterns\"\n- \"Alert on unusual network connections from endpoints\"\n\n💡 Make it descriptive so others understand what the rule does!", ruleName)
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name too short.\n\n🔧 HOW TO FIX: The 'name' attribute should contain a comprehensive description (at least 10 characters). Current name: '%s'\n\n📝 GOOD EXAMPLES:\n- \"Detect SQL injection attempts in web application logs\"\n- \"Monitor for suspicious PowerShell execution patterns\"\n- \"Alert on unusual network connections from endpoints\"\n\n💡 Make it descriptive so others understand what the rule does!", ruleName)
 	}
 
 	// Check for common non-descriptive patterns
@@ -2583,7 +2590,7 @@ func validateAndExtractRuleId(ruleRaw string) (string, error) {
 
 	for _, pattern := range nonDescriptivePatterns {
 		if lowercaseName == pattern || lowercaseName == pattern+" rule" {
-			return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Generic rule name detected.\n\n🔧 HOW TO FIX: Instead of using generic terms like '%s', provide a specific description of what the rule detects.\n\n📝 GOOD EXAMPLES:\n- Instead of 'test rule' → 'Test for unauthorized SSH key installation attempts'\n- Instead of 'detection' → 'Detect cryptocurrency mining processes on endpoints'\n- Instead of 'alert' → 'Alert on failed authentication patterns indicating brute force attacks'\n\n💡 Be specific about the security threat or behavior being monitored!", ruleName)
+			return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Generic rule name detected.\n\n🔧 HOW TO FIX: Instead of using generic terms like '%s', provide a specific description of what the rule detects.\n\n📝 GOOD EXAMPLES:\n- Instead of 'test rule' → 'Test for unauthorized SSH key installation attempts'\n- Instead of 'detection' → 'Detect cryptocurrency mining processes on endpoints'\n- Instead of 'alert' → 'Alert on failed authentication patterns indicating brute force attacks'\n\n💡 Be specific about the security threat or behavior being monitored!", ruleName)
 		}
 	}
 
@@ -2611,10 +2618,10 @@ func validateAndExtractRuleId(ruleRaw string) (string, error) {
 	}
 
 	if !hasmeaningfulContent {
-		return "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name lacks meaningful security context.\n\n🔧 HOW TO FIX: Your rule name '%s' should explain the specific security purpose and detection logic.\n\n📝 IMPROVED EXAMPLES:\n- Add security keywords: 'intrusion', 'malicious', 'unauthorized', 'suspicious'\n- Specify what you're detecting: 'failed logins', 'code injection', 'privilege escalation'\n- Include the context: 'from external IPs', 'on critical systems', 'during off-hours'\n\n💡 GOOD PATTERN: 'Detect [specific threat] when [condition] indicates [security concern]'\n\n🎯 EXAMPLE: 'Detect reverse shell connections when bash processes contain suspicious command line patterns indicating potential compromise'", ruleName)
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name lacks meaningful security context.\n\n🔧 HOW TO FIX: Your rule name '%s' should explain the specific security purpose and detection logic.\n\n📝 IMPROVED EXAMPLES:\n- Add security keywords: 'intrusion', 'malicious', 'unauthorized', 'suspicious'\n- Specify what you're detecting: 'failed logins', 'code injection', 'privilege escalation'\n- Include the context: 'from external IPs', 'on critical systems', 'during off-hours'\n\n💡 GOOD PATTERN: 'Detect [specific threat] when [condition] indicates [security concern]'\n\n🎯 EXAMPLE: 'Detect reverse shell connections when bash processes contain suspicious command line patterns indicating potential compromise'", ruleName)
 	}
 
-	return ruleId, nil
+	return ruleId, ruleName, nil
 }
 
 // addRuleToXML adds a new rule to the XML before the closing </root> tag
@@ -2647,4 +2654,38 @@ func addRuleToXML(xmlContent, ruleRaw string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
+}
+
+// addDescAppendToRule ensures the given rule XML contains an <append field="desc"> element.
+// If missing, it appends one (static value = ruleName) right before the closing </rule> tag.
+// The function returns the possibly-modified rule XML.
+func addDescAppendToRule(ruleRaw, ruleName string) string {
+	// Quick check – already has desc append?
+	lowered := strings.ToLower(ruleRaw)
+	if strings.Contains(lowered, "field=\"desc\"") {
+		return ruleRaw // nothing to do
+	}
+
+	// Escape XML special chars in ruleName
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+		"'", "&apos;",
+	)
+	safeRuleName := replacer.Replace(ruleName)
+
+	// Construct append snippet (4-space indent by default)
+	appendSnippet := fmt.Sprintf("    <append field=\"desc\">%s</append>\n", safeRuleName)
+
+	// Insert before closing </rule>
+	closingTag := "</rule>"
+	idx := strings.LastIndex(ruleRaw, closingTag)
+	if idx == -1 {
+		// malformed? fallback to original
+		return ruleRaw
+	}
+
+	return ruleRaw[:idx] + appendSnippet + ruleRaw[idx:]
 }

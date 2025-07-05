@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
 import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { onBeforeUpdate } from 'vue';
@@ -83,6 +83,24 @@ watch([() => props.componentId, () => props.componentType], ([newId, newType], [
     store.dispatch('fetchRulesetFields', newId);
   }
 }, { immediate: true });
+
+// After dynamicFieldKeys definition, add a watcher to auto-trigger suggestions when keys become available
+watch(
+  () => dynamicFieldKeys.value.length,
+  (newLen, oldLen) => {
+    if (newLen > 0 && newLen !== oldLen) {
+      nextTick(() => {
+        if (isEditorValid(editor)) {
+          try {
+            editor.trigger('dynamic-fields', 'editor.action.triggerSuggest', {});
+          } catch (error) {
+            console.warn('Failed to trigger dynamic field suggestions:', error);
+          }
+        }
+      });
+    }
+  }
+);
 
 // Get component lists when component is mounted
 onMounted(async () => {
@@ -604,7 +622,10 @@ function initializeEditor() {
     acceptSuggestionOnCommitCharacter: !props.readOnly,
     quickSuggestionsDelay: 100,
     // Disable built-in word completion, keep custom completions
-    wordBasedSuggestions: 'off',
+    wordBasedSuggestions: false,
+    suggest: {
+      showWords: false
+    },
     folding: true,
     autoIndent: 'full',
     formatOnPaste: !props.readOnly,
@@ -2373,8 +2394,6 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         range: range
       });
     }
-    
-    // Flow Template removed - user doesn't need it
   }
   
   // Final deduplication
@@ -2668,20 +2687,6 @@ function getXmlAttributeValueCompletions(context, range) {
       });
     }
     
-    // Add common fields as fallback
-    const commonFields = ['data_type', 'exe', 'argv', 'pid', 'sessionid', 'source_ip', 'dest_ip', 'sport', 'dport'];
-    commonFields.forEach(field => {
-      if (!suggestions.some(s => s.label === field)) {
-        suggestions.push({
-          label: field,
-          kind: monaco.languages.CompletionItemKind.Field,
-          documentation: `Common field: ${field}`,
-          insertText: field,
-          range: range,
-          sortText: `1_${field}` // Lower priority than dynamic fields
-        });
-      }
-    });
   }
   
   // group_by attribute - supports comma-separated field lists
@@ -2724,26 +2729,6 @@ function getXmlAttributeValueCompletions(context, range) {
         });
       }
     }
-    
-    // Add common field combinations as fallback
-    const commonCombos = [
-      'data_type,exe',
-      'exe,pid',
-      'source_ip,dest_ip',
-      'source_ip,dest_ip,sport,dport'
-    ];
-    commonCombos.forEach(combo => {
-      if (!suggestions.some(s => s.label === combo)) {
-        suggestions.push({
-          label: combo,
-          kind: monaco.languages.CompletionItemKind.Snippet,
-          documentation: `Common field combination: ${combo}`,
-          insertText: combo,
-          range: range,
-          sortText: `1_${combo}`
-        });
-      }
-    });
   }
   
   return { suggestions };
@@ -3123,7 +3108,35 @@ function getXmlTagContentCompletions(context, range, fullText) {
       }
     }
     
-    // Common fields and combinations removed - only show dynamic fields from sample data
+  }
+  
+  // ---------------------------------------------------------------------
+  //  字段占位符补全 ($field[<cursor>])
+  // ---------------------------------------------------------------------
+  // 适用于 filter / node / append / plugin 等标签的文本内容区域，
+  // 当光标位于 "$field[" 之后且尚未输入右括号时，提供字段名补全。
+  // ---------------------------------------------------------------------
+  const fieldPlaceholderMatch = context.beforeCursor.match(/\$field\[[^\]]*$/);
+  if (fieldPlaceholderMatch) {
+    // 计算替换范围：从左方括号后的首字符开始至光标位置
+    const startColumn = context.beforeCursor.lastIndexOf('[') + 2; // +2 因为 monaco column 从 1 开始
+    const customRange = range; // 使用默认 range 以避免未定义的 position 引用
+
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Sample data field: ${field}`,
+            insertText: field,
+            range: customRange,
+            sortText: `0_${field}`
+          });
+        }
+      });
+    }
+
   }
   
   return { suggestions };
@@ -3184,8 +3197,6 @@ function addFieldSuggestionsForFunctionParams(suggestions, range, context) {
       }
     });
   }
-  
-  // Common fields removed - only show dynamic fields from sample data
   
   // Add special data references (highest priority)
   const specialRefs = [
