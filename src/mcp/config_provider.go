@@ -243,3 +243,8 @@ func GetMCPConfigs(c echo.Context) error {
 		"data":    resp,
 	})
 }
+
+// Deprecated: use GetMCPConfigs instead.
+func GetAllMCPConfigs(c echo.Context) error {
+	return GetMCPConfigs(c)
+}
