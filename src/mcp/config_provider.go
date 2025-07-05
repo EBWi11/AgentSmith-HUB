@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -189,43 +192,54 @@ func GetMCPPrompts(c echo.Context) error {
 	return c.JSON(http.StatusOK, prompts)
 }
 
-// GetAllMCPConfigs returns all MCP configuration files in one response
-func GetAllMCPConfigs(c echo.Context) error {
-	configs := map[string]interface{}{}
-
-	// Load rule templates
-	if data, err := loadMCPConfigFile("rule_templates.json"); err == nil {
-		var ruleTemplates map[string]interface{}
-		if err := json.Unmarshal(data, &ruleTemplates); err == nil {
-			configs["rule_templates"] = ruleTemplates
+// GetMCPConfigs returns requested MCP configuration blocks in one response.
+// Query param include=rule,ruleset,prompt,syntax ; empty means all.
+func GetMCPConfigs(c echo.Context) error {
+	include := c.QueryParam("include")
+	wantAll := include == "" || include == "all"
+	wants := map[string]bool{}
+	if !wantAll {
+		for _, p := range strings.Split(include, ",") {
+			wants[strings.TrimSpace(strings.ToLower(p))] = true
 		}
 	}
 
-	// Load ruleset templates
-	if data, err := loadMCPConfigFile("ruleset_templates.json"); err == nil {
-		var rulesetTemplates map[string]interface{}
-		if err := json.Unmarshal(data, &rulesetTemplates); err == nil {
-			configs["ruleset_templates"] = rulesetTemplates
+	resp := make(map[string]interface{})
+	var etagBuilder strings.Builder
+
+	// helper closure
+	add := func(name, filename string) {
+		if !wantAll && !wants[name] {
+			return
+		}
+		if data, err := loadMCPConfigFile(filename); err == nil {
+			var v interface{}
+			if json.Unmarshal(data, &v) == nil {
+				resp[name] = v
+				etagBuilder.Write(data)
+			}
 		}
 	}
 
-	// Load prompts
-	if data, err := loadMCPConfigFile("prompts.json"); err == nil {
-		var prompts map[string]interface{}
-		if err := json.Unmarshal(data, &prompts); err == nil {
-			configs["prompts"] = prompts
-		}
+	add("rule", "rule_templates.json")
+	add("ruleset", "ruleset_templates.json")
+	add("prompt", "prompts.json")
+	add("syntax", "syntax_guide.json")
+
+	if len(resp) == 0 {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "no config found"})
 	}
 
-	if len(configs) == 0 {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"error": "Failed to load any MCP configuration files",
-		})
+	// Generate ETag
+	sum := sha1.Sum([]byte(etagBuilder.String()))
+	etag := hex.EncodeToString(sum[:])
+	if match := c.Request().Header.Get("If-None-Match"); match != "" && match == etag {
+		return c.NoContent(http.StatusNotModified)
 	}
+	c.Response().Header().Set("ETag", etag)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"configs":     configs,
-		"loaded_at":   fmt.Sprintf("%d", len(configs)),
-		"description": "All available MCP configuration files",
+		"version": time.Now().Format(time.RFC3339),
+		"data":    resp,
 	})
 }
