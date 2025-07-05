@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"AgentSmith-HUB/common"
@@ -279,13 +280,44 @@ func (s *StandardMCPServer) handlePromptsGet(id interface{}, request map[string]
 		return s.createJSONRPCError(id, -32602, "Invalid params", "Missing prompt name")
 	}
 
-	// Load prompt using unified config provider
+	// optional args
+	lang := ""
+	if l, ok := params["lang"].(string); ok {
+		lang = l
+	}
+	placeholders := map[string]interface{}{}
+	if ph, ok := params["placeholders"].(map[string]interface{}); ok {
+		placeholders = ph
+	}
+
 	prompt, err := GetMCPPrompt(promptName)
 	if err != nil {
 		return s.createJSONRPCError(id, -32602, "Prompt not found", fmt.Sprintf("Prompt '%s' not found: %v", promptName, err))
 	}
 
-	// Return prompt content as message
+	// choose text
+	text := prompt.Template
+	if lang != "" && prompt.Texts != nil {
+		if t, ok := prompt.Texts[lang]; ok {
+			text = t
+		}
+	}
+
+	// placeholder replacement
+	re := regexp.MustCompile(`\{\{(.*?)\}\}`)
+	missing := []string{}
+	rendered := re.ReplaceAllStringFunc(text, func(m string) string {
+		key := strings.TrimSpace(re.ReplaceAllString(m, "$1"))
+		if v, ok := placeholders[key]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+		missing = append(missing, key)
+		return m
+	})
+	if len(missing) > 0 {
+		return s.createJSONRPCError(id, -32602, "Missing placeholders", strings.Join(missing, ","))
+	}
+
 	promptResult := map[string]interface{}{
 		"description": prompt.Description,
 		"messages": []map[string]interface{}{
@@ -293,10 +325,11 @@ func (s *StandardMCPServer) handlePromptsGet(id interface{}, request map[string]
 				"role": "user",
 				"content": map[string]interface{}{
 					"type": "text",
-					"text": prompt.Template,
+					"text": rendered,
 				},
 			},
 		},
+		"placeholders": prompt.Placeholders,
 	}
 
 	return s.createJSONRPCResponse(id, promptResult)
