@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,6 +36,41 @@ func ensureLogDir() error {
 	return nil
 }
 
+// detectLocalIP returns first non-loopback IPv4 address or "unknown"
+func detectLocalIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "unknown"
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil {
+				continue // not ipv4
+			}
+			return ip.String()
+		}
+	}
+	return "unknown"
+}
+
 func InitLogger() *slog.Logger {
 	// Ensure log directory exists
 	if err := ensureLogDir(); err != nil {
@@ -62,9 +98,14 @@ func InitLogger() *slog.Logger {
 		}
 
 		handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level:     slog.LevelInfo,
+			AddSource: true,
 		})
-		logger := slog.New(handler)
+
+		base := slog.New(handler)
+
+		logger := base.With("node_ip", detectLocalIP())
+
 		slog.SetDefault(logger)
 		return logger
 	}
@@ -78,10 +119,14 @@ func InitLogger() *slog.Logger {
 	}
 
 	handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level:     slog.LevelInfo,
+		AddSource: true,
 	})
 
-	logger := slog.New(handler)
+	base := slog.New(handler)
+
+	logger := base.With("node_ip", detectLocalIP())
+
 	slog.SetDefault(logger)
 
 	return logger

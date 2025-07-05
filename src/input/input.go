@@ -256,7 +256,11 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						in.sampler.Sample(msg, in.ProjectNodeSequence)
+						pid := ""
+						if len(in.OwnerProjects) > 0 {
+							pid = in.OwnerProjects[0]
+						}
+						in.sampler.Sample(msg, in.ProjectNodeSequence, pid)
 					}
 
 					// Add input ID to message data
@@ -327,7 +331,11 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						in.sampler.Sample(msg, in.ProjectNodeSequence)
+						pid := ""
+						if len(in.OwnerProjects) > 0 {
+							pid = in.OwnerProjects[0]
+						}
+						in.sampler.Sample(msg, in.ProjectNodeSequence, pid)
 					}
 
 					// Add input ID to message data

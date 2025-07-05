@@ -56,13 +56,13 @@ func NewRedisSampleManager() *RedisSampleManager {
 }
 
 // StoreSample stores a sample in Redis with TTL and size limits
-func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData) error {
+func (rsm *RedisSampleManager) StoreSample(samplerName string, projectID string, sample SampleData) error {
 	if rdb == nil {
 		return fmt.Errorf("Redis client not available")
 	}
 
 	ctx := context.Background()
-	key := fmt.Sprintf("%s%s:%s", RedisSampleKeyPrefix, samplerName, sample.ProjectNodeSequence)
+	key := fmt.Sprintf("%s%s:%s:%s", RedisSampleKeyPrefix, samplerName, projectID, sample.ProjectNodeSequence)
 
 	// Create Redis sample data
 	redisSample := RedisSampleData{
@@ -79,9 +79,13 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 		return fmt.Errorf("failed to serialize sample data: %w", err)
 	}
 
-	// Deduplication: compute hash of jsonData
-	hashVal := xxhash.Sum64(jsonData)
-	hashKey := fmt.Sprintf("%s%s:%s", RedisSampleHashKey, samplerName, sample.ProjectNodeSequence)
+	// Deduplication: compute hash only from business content (sequence + data), exclude timestamp
+	hashInputBytes, _ := json.Marshal(struct {
+		Seq  string      `json:"seq"`
+		Data interface{} `json:"data"`
+	}{Seq: sample.ProjectNodeSequence, Data: sample.Data})
+	hashVal := xxhash.Sum64(hashInputBytes)
+	hashKey := fmt.Sprintf("%s%s:%s:%s", RedisSampleHashKey, samplerName, projectID, sample.ProjectNodeSequence)
 
 	// SAdd returns 1 if new, 0 if already exists -> skip duplicate sample
 	added, err := rdb.SAdd(ctx, hashKey, hashVal).Result()
@@ -111,7 +115,7 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 	pipe.ZRemRangeByRank(ctx, key, 0, -int64(rsm.maxSamplesPerKey+1))
 
 	// Update sample count
-	countKey := fmt.Sprintf("%s%s:%s", RedisSampleCountKey, samplerName, sample.ProjectNodeSequence)
+	countKey := fmt.Sprintf("%s%s:%s:%s", RedisSampleCountKey, samplerName, projectID, sample.ProjectNodeSequence)
 	pipe.Incr(ctx, countKey)
 	pipe.Expire(ctx, countKey, rsm.ttl)
 
@@ -160,13 +164,13 @@ func (rsm *RedisSampleManager) GetSamples(samplerName string) (map[string][]Samp
 }
 
 // GetSamplesByProject retrieves samples for a specific project
-func (rsm *RedisSampleManager) GetSamplesByProject(samplerName string, projectNodeSequence string) ([]SampleData, error) {
+func (rsm *RedisSampleManager) GetSamplesByProject(samplerName string, projectID string, projectNodeSequence string) ([]SampleData, error) {
 	if rdb == nil {
 		return nil, fmt.Errorf("Redis client not available")
 	}
 
 	ctx := context.Background()
-	key := fmt.Sprintf("%s%s:%s", RedisSampleKeyPrefix, samplerName, projectNodeSequence)
+	key := fmt.Sprintf("%s%s:%s:%s", RedisSampleKeyPrefix, samplerName, projectID, projectNodeSequence)
 
 	return rsm.getSamplesFromKey(ctx, key)
 }
@@ -272,7 +276,7 @@ func (rsm *RedisSampleManager) Reset(samplerName string) error {
 }
 
 // ResetProject clears samples for a specific project
-func (rsm *RedisSampleManager) ResetProject(samplerName string, projectNodeSequence string) error {
+func (rsm *RedisSampleManager) ResetProject(samplerName string, projectID string, projectNodeSequence string) error {
 	if rdb == nil {
 		return fmt.Errorf("Redis client not available")
 	}
@@ -280,14 +284,14 @@ func (rsm *RedisSampleManager) ResetProject(samplerName string, projectNodeSeque
 	ctx := context.Background()
 
 	// Delete sample data key
-	sampleKey := fmt.Sprintf("%s%s:%s", RedisSampleKeyPrefix, samplerName, projectNodeSequence)
+	sampleKey := fmt.Sprintf("%s%s:%s:%s", RedisSampleKeyPrefix, samplerName, projectID, projectNodeSequence)
 	err := rdb.Del(ctx, sampleKey).Err()
 	if err != nil {
 		return fmt.Errorf("failed to delete sample key: %w", err)
 	}
 
 	// Delete count key
-	countKey := fmt.Sprintf("%s%s:%s", RedisSampleCountKey, samplerName, projectNodeSequence)
+	countKey := fmt.Sprintf("%s%s:%s:%s", RedisSampleCountKey, samplerName, projectID, projectNodeSequence)
 	err = rdb.Del(ctx, countKey).Err()
 	if err != nil {
 		return fmt.Errorf("failed to delete count key: %w", err)

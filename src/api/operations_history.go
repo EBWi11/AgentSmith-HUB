@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
 	"fmt"
@@ -139,6 +140,9 @@ func recordOperation(record OperationRecord) error {
 		return fmt.Errorf("failed to write to operations log file: %w", err)
 	}
 
+	// Publish to Redis list for cluster-wide aggregation (keep last 50000)
+	_ = common.RedisLPush("cluster:ops_history", string(jsonData), 50000)
+
 	logger.Info("Operation recorded", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID, "project", record.ProjectID)
 	return nil
 }
@@ -263,6 +267,19 @@ func matchesOperationFilter(record OperationRecord, filter OperationHistoryFilte
 // getOperationHistory retrieves operations based on filter criteria
 func getOperationHistory(filter OperationHistoryFilter) ([]OperationRecord, error) {
 	var allOperations []OperationRecord
+
+	// Fetch logs cached in Redis list first (cluster-wide)
+	redisLines, _ := common.RedisLRange("cluster:ops_history", 0, 49999)
+	for _, line := range redisLines {
+		var op OperationRecord
+		if err := json.Unmarshal([]byte(line), &op); err == nil {
+			if matchesOperationFilter(op, filter) {
+				allOperations = append(allOperations, op)
+			}
+		}
+	}
+
+	// Then read local monthly files
 
 	// Determine which log files to read based on time range
 	var monthsToRead []string

@@ -9,8 +9,6 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -2009,143 +2007,21 @@ func syncComponentToFollowers(componentType string, id string) {
 
 // syncComponentToFollowersWithData syncs a component to follower nodes
 func syncComponentToFollowersWithData(syncData ComponentSyncRequest) {
-	cm := cluster.ClusterInstance
-	if cm == nil {
-		logger.Warn("Cluster manager not initialized, skipping follower sync")
-		return
+	// Translate old syncData to new CompSyncEvt and publish via Redis
+	evt := &cluster.CompSyncEvt{
+		Op:        "update", // apply_changes implies add or update; follower just upserts
+		Type:      syncData.Type,
+		ID:        syncData.ID,
+		Raw:       syncData.Content,
+		IsRunning: syncData.IsRunning,
 	}
 
-	// Get all follower nodes
-	cm.Mu.RLock()
-	followers := make([]*cluster.NodeInfo, 0)
-	for _, node := range cm.Nodes {
-		if node.Status == cluster.NodeStatusFollower &&
-			node.IsHealthy &&
-			node.Address != cm.SelfAddress {
-			followers = append(followers, node)
-		}
-	}
-	cm.Mu.RUnlock()
+	cluster.PublishComponentSync(evt)
 
-	if len(followers) == 0 {
-		logger.Info("No healthy follower nodes found, skipping sync")
-		return
-	}
-
-	// Prepare sync data
-	jsonData, err := json.Marshal(syncData)
-	if err != nil {
-		logger.Error("Failed to marshal sync data", "error", err)
-		return
-	}
-
-	// Track sync results
-	syncResults := struct {
-		successful []string
-		failed     map[string]string // nodeID -> error message
-		mu         sync.Mutex
-	}{
-		successful: make([]string, 0),
-		failed:     make(map[string]string),
-	}
-
-	// Start a goroutine for each follower to sync
-	var wg sync.WaitGroup
-	for _, node := range followers {
-		wg.Add(1)
-		go func(node *cluster.NodeInfo) {
-			defer wg.Done()
-
-			// Build request URL with proper protocol handling
-			var url string
-			if strings.HasPrefix(node.Address, "http://") || strings.HasPrefix(node.Address, "https://") {
-				url = fmt.Sprintf("%s/component-sync", node.Address)
-			} else {
-				url = fmt.Sprintf("http://%s/component-sync", node.Address)
-			}
-
-			// Create request
-			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-			if err != nil {
-				syncResults.mu.Lock()
-				syncResults.failed[node.ID] = fmt.Sprintf("failed to create request: %v", err)
-				syncResults.mu.Unlock()
-				return
-			}
-
-			// Set request headers
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("token", common.Config.Token)
-
-			// Set timeout
-			client := &http.Client{
-				Timeout: 10 * time.Second,
-			}
-
-			// Send request with up to 3 retries
-			var resp *http.Response
-			var respErr error
-
-			for retry := 0; retry < 3; retry++ {
-				resp, respErr = client.Do(req)
-				if respErr == nil && resp.StatusCode == http.StatusOK {
-					_ = resp.Body.Close()
-					syncResults.mu.Lock()
-					syncResults.successful = append(syncResults.successful, node.ID)
-					syncResults.mu.Unlock()
-					return
-				}
-
-				if resp != nil {
-					_ = resp.Body.Close()
-				}
-
-				// If it's not a timeout error, don't retry
-				if respErr != nil && !strings.Contains(respErr.Error(), "timeout") &&
-					!strings.Contains(respErr.Error(), "connection refused") {
-					break
-				}
-
-				// Wait before retry
-				time.Sleep(time.Duration(retry+1) * time.Second)
-			}
-
-			// All retries failed
-			errorMsg := "unknown error"
-			if respErr != nil {
-				errorMsg = respErr.Error()
-			} else if resp != nil {
-				errorMsg = fmt.Sprintf("status code: %d", resp.StatusCode)
-			}
-
-			syncResults.mu.Lock()
-			syncResults.failed[node.ID] = errorMsg
-			syncResults.mu.Unlock()
-		}(node)
-	}
-
-	// Wait for all sync operations to complete
-	wg.Wait()
-
-	// Log sync results
-	logger.Info("Component sync completed",
-		"type", syncData.Type,
-		"id", syncData.ID,
-		"successful_nodes", len(syncResults.successful),
-		"failed_nodes", len(syncResults.failed),
+	logger.Info("Published component sync event via Redis",
+		"type", evt.Type,
+		"id", evt.ID,
 	)
-
-	// If there are failed nodes, log detailed information
-	if len(syncResults.failed) > 0 {
-		for nodeID, errMsg := range syncResults.failed {
-			logger.Error("Failed to sync component to follower",
-				"node_id", nodeID,
-				"type", syncData.Type,
-				"id", syncData.ID,
-				"error", errMsg,
-			)
-		}
-	}
 }
 
 // CreateTempFile creates a temporary file for editing

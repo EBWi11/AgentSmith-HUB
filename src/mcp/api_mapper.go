@@ -44,13 +44,13 @@ func NewAPIMapper(baseURL, token string) *APIMapper {
 // GetAllAPITools returns all MCP tools that map to existing API endpoints
 func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 	return []common.MCPTool{
-		// === 🎯 INTELLIGENT WORKFLOW TOOLS ===
+		// === INTELLIGENT WORKFLOW TOOLS ===
 		// Smart tools that combine multiple operations for optimal user experience
 
-		// 🔥 Primary Workflow - Rule Management
+		// Primary Workflow - Rule Management
 		{
 			Name:        "create_rule_complete",
-			Description: "🎯 INTELLIGENT RULE CREATION: Smart workflow → 1. Identify target projects → 2. Get relevant sample data → 3. Analyze data structure → 4. Design rule based on user needs + real data. Automatically finds appropriate sample data for rule context.",
+			Description: "INTELLIGENT RULE CREATION: Smart workflow - identify target projects, get relevant sample data, analyze data structure, design rule based on user needs + real data. Automatically finds appropriate sample data for rule context.",
 			InputSchema: map[string]common.MCPToolArg{
 				"ruleset_id":      {Type: "string", Description: "Target ruleset ID", Required: true},
 				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (e.g., 'suspicious network connections', 'malware execution')", Required: true},
@@ -63,7 +63,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "smart_deployment",
-			Description: "🚀 INTELLIGENT DEPLOYMENT: Validates all pending changes → Tests compatibility → Deploys with rollback capability. Prevents failed deployments and provides detailed feedback.",
+			Description: "INTELLIGENT DEPLOYMENT: Validates all pending changes, tests compatibility, deploys with rollback capability. Prevents failed deployments and provides detailed feedback.",
 			InputSchema: map[string]common.MCPToolArg{
 				"component_filter": {Type: "string", Description: "Deploy specific component type (optional): ruleset/input/output/plugin/project", Required: false},
 				"dry_run":          {Type: "string", Description: "Preview deployment without applying (true/false)", Required: false},
@@ -73,10 +73,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Smart Deployment", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🔥 Component Lifecycle Management
+		// Component Lifecycle Management
 		{
 			Name:        "component_wizard",
-			Description: "🧙‍♂️ COMPONENT CREATION WIZARD: Guided component creation with templates, validation, and testing. Supports all component types with intelligent defaults and best practices.",
+			Description: "COMPONENT CREATION WIZARD: Guided component creation with templates, validation, and testing. Supports all component types with intelligent defaults and best practices.",
 			InputSchema: map[string]common.MCPToolArg{
 				"component_type": {Type: "string", Description: "Component type: input/output/plugin/project/ruleset", Required: true},
 				"component_id":   {Type: "string", Description: "Component identifier", Required: true},
@@ -88,10 +88,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Component Wizard", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🔥 System Intelligence
+		// System Intelligence
 		{
 			Name:        "system_overview",
-			Description: "🏠 SYSTEM DASHBOARD: Complete system status with health check, pending changes, active projects, and smart recommendations. Your one-stop system overview.",
+			Description: "SYSTEM DASHBOARD: Complete system status with health check, pending changes, active projects, and smart recommendations. Your one-stop system overview.",
 			InputSchema: map[string]common.MCPToolArg{
 				"include_metrics":     {Type: "string", Description: "Include performance metrics (true/false)", Required: false},
 				"include_suggestions": {Type: "string", Description: "Include optimization suggestions (true/false)", Required: false},
@@ -100,13 +100,13 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("System Dashboard", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(true)),
 		},
 
-		// === 🎯 CORE COMPONENT MANAGEMENT ===
+		// === CORE COMPONENT MANAGEMENT ===
 		// Simplified, intelligent component operations
 
-		// 🔥 Universal Component Operations
+		// Universal Component Operations
 		{
 			Name:        "explore_components",
-			Description: "🔍 SMART EXPLORER: List and discover all components (projects, rulesets, inputs, outputs, plugins) with search, filtering, and status overview. Your starting point for exploration.",
+			Description: "SMART EXPLORER: List and discover all components (projects, rulesets, inputs, outputs, plugins) with search, filtering, and status overview. Your starting point for exploration.",
 			InputSchema: map[string]common.MCPToolArg{
 				"component_type":  {Type: "string", Description: "Filter by type: project/ruleset/input/output/plugin/all (default: all)", Required: false},
 				"search_term":     {Type: "string", Description: "Search components by name or content", Required: false},
@@ -118,7 +118,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "component_manager",
-			Description: "⚙️ UNIVERSAL COMPONENT MANAGER: View, edit, create, or delete any component with intelligent validation and deployment options. Handles all component types uniformly.",
+			Description: "UNIVERSAL COMPONENT MANAGER: View, edit, create, or delete any component with intelligent validation and deployment options. Handles all component types uniformly.",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":         {Type: "string", Description: "Action: view/create/update/delete", Required: true},
 				"component_type": {Type: "string", Description: "Component type: project/ruleset/input/output/plugin", Required: true},
@@ -130,10 +130,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Universal Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🔥 Project Operations
+		// Project Operations
 		{
 			Name:        "project_control",
-			Description: "🎮 PROJECT CONTROLLER: Start, stop, restart projects with health monitoring and automatic recovery. Includes batch operations and smart status tracking.",
+			Description: "PROJECT CONTROLLER: Start, stop, restart projects with health monitoring and automatic recovery. Includes batch operations and smart status tracking.",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":     {Type: "string", Description: "Action: start/stop/restart/status/start_all/stop_all", Required: true},
 				"project_id": {Type: "string", Description: "Specific project ID (optional for batch operations)", Required: false},
@@ -143,10 +143,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Project Controller", boolPtr(false), boolPtr(false), boolPtr(true), boolPtr(false)),
 		},
 
-		// 🔥 Advanced Rule Management
+		// Advanced Rule Management
 		{
 			Name:        "rule_manager",
-			Description: "🛡️ INTELLIGENT RULE MANAGER: Smart context-aware rule management → Auto-discovers target projects → Fetches relevant sample data → Analyzes data structure → Creates rules based on user intent + real data patterns. 🚨 CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only!",
+			Description: "INTELLIGENT RULE MANAGER: Smart context-aware rule management - auto-discovers target projects, fetches relevant sample data, analyzes data structure, creates rules based on user intent + real data patterns. CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only!",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":          {Type: "string", Description: "Action: add_rule/update_rule/delete_rule/view_rules/create_ruleset/update_ruleset", Required: true},
 				"id":              {Type: "string", Description: "Target ruleset ID", Required: true},
@@ -155,18 +155,18 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 				"rule_id":         {Type: "string", Description: "Specific rule ID (for update/delete actions)", Required: false},
 				"rule_raw":        {Type: "string", Description: "Complete rule XML (generated after data analysis)", Required: false},
 				"raw":             {Type: "string", Description: "Complete ruleset XML (for create/update ruleset actions)", Required: false},
-				"data":            {Type: "string", Description: "🚨 MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. ❌ NEVER use imagined data like 'data_type=59'!", Required: false},
+				"data":            {Type: "string", Description: "MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. NEVER use imagined data like 'data_type=59'!", Required: false},
 				"auto_deploy":     {Type: "string", Description: "Auto-deploy if validation passes (true/false)", Required: false},
 			},
 			Annotations: createAnnotations("Rule Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === 🎯 TESTING & VALIDATION ===
+		// === TESTING & VALIDATION ===
 		// Smart testing and validation tools
 
 		{
 			Name:        "test_lab",
-			Description: "🧪 COMPREHENSIVE TESTING LAB: Test any component with intelligent data samples, validation reports, and performance metrics. Supports batch testing and automated test suites.",
+			Description: "COMPREHENSIVE TESTING LAB: Test any component with intelligent data samples, validation reports, and performance metrics. Supports batch testing and automated test suites.",
 			InputSchema: map[string]common.MCPToolArg{
 				"test_target":    {Type: "string", Description: "What to test: component/ruleset/project/workflow", Required: true},
 				"component_id":   {Type: "string", Description: "Component ID or 'all' for batch testing", Required: true},
@@ -177,12 +177,12 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Testing Lab", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// === 🎯 DEPLOYMENT & RESOURCES ===
+		// === DEPLOYMENT & RESOURCES ===
 		// Smart deployment and learning tools
 
 		{
 			Name:        "deployment_center",
-			Description: "🚀 SMART DEPLOYMENT CENTER: View pending changes → Validate → Deploy with rollback capability. Includes deployment history, impact analysis, and automated testing.",
+			Description: "SMART DEPLOYMENT CENTER: View pending changes, validate, deploy with rollback capability. Includes deployment history, impact analysis, and automated testing.",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":           {Type: "string", Description: "Action: view_pending/validate/deploy/rollback/history", Required: true},
 				"component_filter": {Type: "string", Description: "Filter by component type (optional)", Required: false},
@@ -195,7 +195,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "learning_center",
-			Description: "📚 DATA-DRIVEN LEARNING CENTER: Get templates, tutorials, and best practices. ⚠️ IMPORTANT: If backend has no sample data, guide users to provide their own real data for rule creation.",
+			Description: "DATA-DRIVEN LEARNING CENTER: Get templates, tutorials, and best practices. IMPORTANT: If backend has no sample data, guide users to provide their own real data for rule creation.",
 			InputSchema: map[string]common.MCPToolArg{
 				"resource_type": {Type: "string", Description: "Resource: samples (try to get backend data)/syntax_guide/templates/tutorials/best_practices", Required: true},
 				"component":     {Type: "string", Description: "Component focus: ruleset/input/output/plugin/project/all", Required: false},
@@ -205,12 +205,12 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Learning Center", boolPtr(true), boolPtr(false), boolPtr(true), boolPtr(false)),
 		},
 
-		// === 🎯 DATA INTELLIGENCE ===
+		// === DATA INTELLIGENCE ===
 		// Intelligent data analysis and sample retrieval
 
 		{
 			Name:        "get_samplers_data_intelligent",
-			Description: "🧠 INTELLIGENT SAMPLE DATA: Enhanced sample data retrieval with project context analysis. 🚨 CRITICAL: Cannot generate fake data! If backend has NO data or this fails, you MUST ask user to provide REAL JSON data. ❌ NEVER imagine or create data!",
+			Description: "INTELLIGENT SAMPLE DATA: Enhanced sample data retrieval with project context analysis. CRITICAL: Cannot generate fake data! If backend has NO data or this fails, you MUST ask user to provide REAL JSON data. NEVER imagine or create data!",
 			InputSchema: map[string]common.MCPToolArg{
 				"target_projects":    {Type: "string", Description: "Target projects (comma-separated IDs) for context-aware data fetching", Required: false},
 				"rule_purpose":       {Type: "string", Description: "What will this rule detect? (e.g., 'network security', 'error monitoring')", Required: false},
@@ -224,7 +224,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "smart_assistant",
-			Description: "🤖 AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert. Use 'system_intro' task for complete architecture overview.",
+			Description: "AI-POWERED ASSISTANT: Get intelligent recommendations, troubleshoot issues, optimize configurations, and receive guided help for any task. Your personal AgentSmith expert. Use 'system_intro' task for complete architecture overview.",
 			InputSchema: map[string]common.MCPToolArg{
 				"task":        {Type: "string", Description: "What you want to accomplish or issue you're facing. Use 'system_intro' for complete AgentSmith-HUB overview.", Required: true},
 				"context":     {Type: "string", Description: "Current situation or component you're working with", Required: false},
@@ -234,13 +234,13 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Smart Assistant", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(true)),
 		},
 
-		// === 📋 BASIC DIRECT TOOLS ===
+		// === BASIC DIRECT TOOLS ===
 		// Simple, direct tools for common operations - Added back for usability
 
-		// 🔍 Essential Data Tools
+		// Essential Data Tools
 		{
 			Name:        "get_samplers_data",
-			Description: "📊 GET SAMPLE DATA: Try to get real sample data from backend. 🚨 CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. ❌ NEVER create fake data yourself!",
+			Description: "GET SAMPLE DATA: Try to get real sample data from backend. CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. NEVER create fake data yourself!",
 			InputSchema: map[string]common.MCPToolArg{
 				"name":                {Type: "string", Description: "Component type: 'input', 'output', or 'ruleset'", Required: true},
 				"projectNodeSequence": {Type: "string", Description: "Component ID (e.g. 'test') or full sequence (e.g. 'ruleset.test'). Simple ID is usually sufficient.", Required: true},
@@ -248,10 +248,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Get Sample Data", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🛡️ Direct Rule Operations
+		// Direct Rule Operations
 		{
 			Name:        "add_ruleset_rule",
-			Description: "➕ ADD RULE TO RULESET: Add a single rule to an existing ruleset. 🚨 CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. ❌ NEVER use imagined data like 'data_type=59' or fake field names!",
+			Description: "ADD RULE TO RULESET: Add a single rule to an existing ruleset. CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. NEVER use imagined data like 'data_type=59' or fake field names!",
 			InputSchema: map[string]common.MCPToolArg{
 				"id":       {Type: "string", Description: "Ruleset ID", Required: true},
 				"rule_raw": {Type: "string", Description: "Complete rule XML content", Required: true},
@@ -260,7 +260,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "delete_ruleset_rule",
-			Description: "🗑️ DELETE RULE FROM RULESET: Remove a specific rule from a ruleset by rule ID.",
+			Description: "DELETE RULE FROM RULESET: Remove a specific rule from a ruleset by rule ID.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id":      {Type: "string", Description: "Ruleset ID", Required: true},
 				"rule_id": {Type: "string", Description: "Rule ID to delete", Required: true},
@@ -268,16 +268,16 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Delete Rule", boolPtr(false), boolPtr(true), boolPtr(true), boolPtr(false)),
 		},
 
-		// 📋 Component Viewing
+		// Component Viewing
 		{
 			Name:        "get_rulesets",
-			Description: "📋 LIST ALL RULESETS: View all rulesets with rule counts and usage info. ⚠️ IMPORTANT: Check deployment status! Use 'get_pending_changes' to see if rulesets are temporary/unpublished. Use 'get_component_usage' to see project dependencies.",
+			Description: "LIST ALL RULESETS: View all rulesets with rule counts and usage info. IMPORTANT: Check deployment status! Use 'get_pending_changes' to see if rulesets are temporary/unpublished. Use 'get_component_usage' to see project dependencies.",
 			InputSchema: map[string]common.MCPToolArg{},
 			Annotations: createAnnotations("List Rulesets", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_ruleset",
-			Description: "🔍 VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. 🎯 NEW: Automatically includes relevant sample data from upstream input components! ⚠️ Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status.",
+			Description: "VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. NEW: Automatically includes relevant sample data from upstream input components! Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Ruleset ID", Required: true},
 			},
@@ -285,7 +285,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_input",
-			Description: "🔍 VIEW INPUT DETAILS: Get detailed configuration of a specific input component. 🎯 NEW: Automatically includes real sample data from the input source! Perfect for understanding data structure when creating rules. ⚠️ Check deployment status with 'get_pending_changes'.",
+			Description: "VIEW INPUT DETAILS: Get detailed configuration of a specific input component. NEW: Automatically includes real sample data from the input source! Perfect for understanding data structure when creating rules. Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Input component ID", Required: true},
 			},
@@ -293,7 +293,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_output",
-			Description: "🔍 VIEW OUTPUT DETAILS: Get detailed configuration of a specific output component. 🎯 NEW: Automatically includes sample data from upstream components showing what data flows through this output! ⚠️ Check deployment status with 'get_pending_changes'.",
+			Description: "VIEW OUTPUT DETAILS: Get detailed configuration of a specific output component. NEW: Automatically includes sample data from upstream components showing what data flows through this output! Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Output component ID", Required: true},
 			},
@@ -301,7 +301,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_plugin",
-			Description: "🔍 VIEW PLUGIN DETAILS: Get detailed configuration of a specific plugin component. ⚠️ Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
+			Description: "VIEW PLUGIN DETAILS: Get detailed configuration of a specific plugin component. Check deployment status with 'get_pending_changes' and project dependencies with 'get_component_usage'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Plugin component ID", Required: true},
 			},
@@ -309,31 +309,31 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "get_project",
-			Description: "🔍 VIEW PROJECT DETAILS: Get detailed configuration of a specific project. 🎯 NEW: Automatically includes sample data from all input components in the project's data flow! Perfect for understanding the complete data pipeline. ⚠️ Check deployment status with 'get_pending_changes'.",
+			Description: "VIEW PROJECT DETAILS: Get detailed configuration of a specific project. NEW: Automatically includes sample data from all input components in the project's data flow! Perfect for understanding the complete data pipeline. Check deployment status with 'get_pending_changes'.",
 			InputSchema: map[string]common.MCPToolArg{
 				"id": {Type: "string", Description: "Project ID", Required: true},
 			},
 			Annotations: createAnnotations("View Project", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🚀 Deployment Tools
+		// Deployment Tools
 		{
 			Name:        "get_pending_changes",
-			Description: "📋 VIEW PENDING CHANGES: Show all components with temporary changes that need deployment. Essential before applying changes!",
+			Description: "VIEW PENDING CHANGES: Show all components with temporary changes that need deployment. Essential before applying changes!",
 			InputSchema: map[string]common.MCPToolArg{},
 			Annotations: createAnnotations("View Pending", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "apply_changes",
-			Description: "🚀 DEPLOY CHANGES: Apply all pending changes to make them active in production. Use after reviewing pending changes!",
+			Description: "DEPLOY CHANGES: Apply all pending changes to make them active in production. Use after reviewing pending changes!",
 			InputSchema: map[string]common.MCPToolArg{},
 			Annotations: createAnnotations("Deploy Changes", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
-		// 🧪 Testing Tools
+		// Testing Tools
 		{
 			Name:        "test_ruleset",
-			Description: "🧪 TEST RULESET: Test a ruleset with sample data to verify it works correctly. Essential after rule changes!",
+			Description: "TEST RULESET: Test a ruleset with sample data to verify it works correctly. Essential after rule changes!",
 			InputSchema: map[string]common.MCPToolArg{
 				"id":   {Type: "string", Description: "Ruleset ID", Required: true},
 				"data": {Type: "string", Description: "JSON test data (required)", Required: true},
@@ -500,12 +500,7 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		"test_project_content": {"POST", "/test-project-content/%s", true},
 
 		// Cluster management endpoints
-		"cluster_heartbeat":   {"POST", "/cluster/heartbeat", true},
-		"component_sync":      {"POST", "/component-sync", true},
-		"project_status_sync": {"POST", "/project-status-sync", true},
-		"qps_sync":            {"POST", "/qps-sync", true},
-		"get_config_root":     {"GET", "/config_root", true},
-		"download_config":     {"GET", "/config/download", true},
+		// obsolete endpoints removed
 
 		// Pending changes management
 		"get_pending_changes":          {"GET", "/pending-changes", true},
@@ -545,9 +540,6 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		"get_local_changes":        {"GET", "/local-changes", true},
 		"load_local_changes":       {"POST", "/load-local-changes", true},
 		"load_single_local_change": {"POST", "/load-single-local-change", true},
-
-		// Metrics sync
-		"metrics_sync": {"POST", "/metrics-sync", true},
 
 		// Error logs
 		"get_error_logs":         {"GET", "/error-logs", true},

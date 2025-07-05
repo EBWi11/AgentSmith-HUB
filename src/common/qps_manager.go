@@ -2,11 +2,14 @@ package common
 
 import (
 	"AgentSmith-HUB/logger"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
 // QPSMetrics represents QPS metrics for a single component
@@ -55,6 +58,10 @@ type QPSManager struct {
 	cacheUpdateTime    time.Time
 	cacheMutex         sync.RWMutex
 	cacheWg            sync.WaitGroup
+
+	// Redis Pub/Sub
+	pubsub  *redis.PubSub
+	stopSub chan struct{}
 }
 
 // NewQPSManager creates a new QPS manager instance
@@ -66,6 +73,8 @@ func NewQPSManager() *QPSManager {
 		cachedAggregated:   make(map[string]interface{}),
 		cachedNodeMessages: make(map[string]interface{}),
 		cacheUpdateTime:    time.Now(),
+		cacheWg:            sync.WaitGroup{},
+		stopSub:            make(chan struct{}),
 	}
 
 	// Load existing data from Redis via Daily Stats Manager
@@ -78,6 +87,9 @@ func NewQPSManager() *QPSManager {
 	// Start cache update goroutine
 	qm.cacheWg.Add(1)
 	go qm.cacheUpdateLoop()
+
+	// Start Redis subscriber for follower metrics
+	qm.startRedisSubscriber()
 
 	return qm
 }
@@ -95,7 +107,7 @@ func (qm *QPSManager) loadFromRedis() {
 	loadedComponents := 0
 	for _, statsData := range dailyStats {
 		// Create component data based on daily stats
-		key := qm.generateKey(statsData.NodeID, statsData.ProjectNodeSequence)
+		key := qm.generateKey(statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
 
 		// Only load if we don't already have this component
 		if _, exists := qm.data[key]; !exists {
@@ -130,9 +142,10 @@ func (qm *QPSManager) loadFromRedis() {
 	}
 }
 
-// generateKey creates a unique key for component QPS data based on ProjectNodeSequence
-func (qm *QPSManager) generateKey(nodeID, projectNodeSequence string) string {
-	return fmt.Sprintf("%s_%s", nodeID, projectNodeSequence)
+// generateKey creates unique map key; include projectID to avoid collisions when multiple projects
+// share the same ProjectNodeSequence (e.g., shared INPUT).
+func (qm *QPSManager) generateKey(nodeID, projectID, projectNodeSequence string) string {
+	return fmt.Sprintf("%s_%s_%s", nodeID, projectID, projectNodeSequence)
 }
 
 // AddQPSData adds or updates QPS data for a component
@@ -144,7 +157,7 @@ func (qm *QPSManager) AddQPSData(metrics *QPSMetrics) {
 	qm.mutex.Lock()
 	defer qm.mutex.Unlock()
 
-	key := qm.generateKey(metrics.NodeID, metrics.ProjectNodeSequence)
+	key := qm.generateKey(metrics.NodeID, metrics.ProjectID, metrics.ProjectNodeSequence)
 
 	// Get or create component data
 	componentData, exists := qm.data[key]
@@ -205,7 +218,7 @@ func (qm *QPSManager) GetComponentQPS(nodeID, projectNodeSequence string) *Compo
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	key := qm.generateKey(nodeID, projectNodeSequence)
+	key := qm.generateKey(nodeID, "", projectNodeSequence)
 	if data, exists := qm.data[key]; exists {
 		// Create a copy to avoid race conditions
 		result := &ComponentQPSData{
@@ -451,6 +464,9 @@ func (qm *QPSManager) Stop() {
 	qm.cleanupWg.Wait()
 	qm.cacheWg.Wait()
 
+	if qm.stopSub != nil {
+		close(qm.stopSub)
+	}
 }
 
 // calculateHourlyMessageCounts calculates the real message counts for the past hour (internal method)
@@ -843,4 +859,40 @@ func (qm *QPSManager) GetQPSStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+func (qm *QPSManager) startRedisSubscriber() {
+	if rdb == nil {
+		return
+	}
+	qm.pubsub = rdb.Subscribe(ctx, "cluster:qps")
+
+	go func() {
+		ch := qm.pubsub.Channel()
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				var payload struct {
+					QPSData       []QPSMetrics   `json:"qps_data"`
+					SystemMetrics *SystemMetrics `json:"system_metrics"`
+				}
+				if err := json.Unmarshal([]byte(msg.Payload), &payload); err == nil {
+					// Ingest QPS data
+					for _, q := range payload.QPSData {
+						qm.AddQPSData(&q)
+					}
+					// Ingest system metrics
+					if payload.SystemMetrics != nil && GlobalClusterSystemManager != nil {
+						GlobalClusterSystemManager.AddSystemMetrics(payload.SystemMetrics)
+					}
+				}
+			case <-qm.stopSub:
+				_ = qm.pubsub.Close()
+				return
+			}
+		}
+	}()
 }

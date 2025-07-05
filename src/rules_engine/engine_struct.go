@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	regexpgo "regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +25,30 @@ const FromRawSymbol = "_$"
 const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
-const MinPoolSize = 4
+// getMinPoolSize returns the minimum pool size based on CPU count
+// Minimum is 2, scales with CPU count
+func getMinPoolSize() int {
+	cpuCount := runtime.NumCPU()
+	minSize := 2
+	if cpuCount > 2 {
+		minSize = cpuCount / 2
+		if minSize < 2 {
+			minSize = 2
+		}
+	}
+	return minSize
+}
+
+// getMaxPoolSize returns the maximum pool size based on CPU count
+// Scales with CPU count for better resource utilization
+func getMaxPoolSize() int {
+	cpuCount := runtime.NumCPU()
+	maxSize := cpuCount * 8 // 8 threads per CPU core
+	if maxSize < 16 {
+		maxSize = 16
+	}
+	return maxSize
+}
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 

@@ -1,11 +1,8 @@
 package common
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +18,6 @@ type SystemDataProvider func() *SystemMetrics
 // QPSCollector collects QPS data from local components and sends to leader
 type QPSCollector struct {
 	nodeID         string
-	leaderAddr     string
 	reportInterval time.Duration
 	stopChan       chan struct{}
 	wg             sync.WaitGroup
@@ -30,10 +26,9 @@ type QPSCollector struct {
 }
 
 // NewQPSCollector creates a new QPS collector instance
-func NewQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) *QPSCollector {
+func NewQPSCollector(nodeID string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) *QPSCollector {
 	return &QPSCollector{
 		nodeID:         nodeID,
-		leaderAddr:     leaderAddr,
 		reportInterval: 10 * time.Second, // Report every 10 seconds
 		stopChan:       make(chan struct{}),
 		dataProvider:   dataProvider,
@@ -43,7 +38,7 @@ func NewQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider, sy
 
 // Start starts the QPS collection and reporting loop
 func (qc *QPSCollector) Start() {
-	logger.Info("Starting QPS collector", "node_id", qc.nodeID, "leader_addr", qc.leaderAddr)
+	logger.Info("Starting QPS collector", "node_id", qc.nodeID)
 
 	qc.wg.Add(1)
 	go qc.collectAndReportLoop()
@@ -99,75 +94,30 @@ func (qc *QPSCollector) collectAndReport() {
 		payload["system_metrics"] = systemMetrics
 	}
 
-	// Send data to leader
-	if err := qc.sendDataToLeader(payload); err != nil {
-		logger.Error("Failed to send data to leader", "error", err, "node_id", qc.nodeID)
+	if err := qc.sendDataToRedis(payload); err != nil {
+		logger.Error("Failed to publish QPS data", "error", err, "node_id", qc.nodeID)
 	}
-	// Remove debug log to reduce log volume
-	// logger.Debug("Successfully sent data to leader",
-	// 	"node_id", qc.nodeID,
-	// 	"qps_metrics_count", len(qpsData),
-	// 	"has_system_metrics", systemMetrics != nil)
 }
 
-// sendDataToLeader sends combined QPS and system data to the leader node
-func (qc *QPSCollector) sendDataToLeader(payload map[string]interface{}) error {
-	if qc.leaderAddr == "" {
-		return fmt.Errorf("leader address not set")
+// sendDataToRedis sends combined QPS and system data to the leader node
+func (qc *QPSCollector) sendDataToRedis(payload map[string]interface{}) error {
+	if rdb == nil {
+		return fmt.Errorf("redis not initialized")
 	}
-
-	// Marshal data to JSON
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal data: %w", err)
+		return err
 	}
-
-	// Send POST request to leader (use combined endpoint) - ensure proper URL format
-	var url string
-	if strings.HasPrefix(qc.leaderAddr, "http://") || strings.HasPrefix(qc.leaderAddr, "https://") {
-		url = fmt.Sprintf("%s/metrics-sync", qc.leaderAddr)
-	} else {
-		url = fmt.Sprintf("http://%s/metrics-sync", qc.leaderAddr)
-	}
-
-	// Create request with authentication token
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
-
-	// Set headers including authentication token
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("token", Config.Token)
-
-	// Send request with timeout
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("leader returned status code: %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
-// UpdateLeaderAddr updates the leader address
-func (qc *QPSCollector) UpdateLeaderAddr(leaderAddr string) {
-	qc.leaderAddr = leaderAddr
-	logger.Info("Updated QPS collector leader address", "node_id", qc.nodeID, "leader_addr", leaderAddr)
+	return RedisPublish("cluster:qps", string(jsonData))
 }
 
 // Global QPS collector instance (only on followers)
 var GlobalQPSCollector *QPSCollector
 
 // InitQPSCollector initializes the global QPS collector (only call on followers)
-func InitQPSCollector(nodeID, leaderAddr string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) {
+func InitQPSCollector(nodeID string, dataProvider QPSDataProvider, systemProvider SystemDataProvider) {
 	if GlobalQPSCollector == nil {
-		GlobalQPSCollector = NewQPSCollector(nodeID, leaderAddr, dataProvider, systemProvider)
+		GlobalQPSCollector = NewQPSCollector(nodeID, dataProvider, systemProvider)
 		GlobalQPSCollector.Start()
 		logger.Info("QPS collector initialized and started", "node_id", nodeID)
 	}
@@ -178,12 +128,5 @@ func StopQPSCollector() {
 	if GlobalQPSCollector != nil {
 		GlobalQPSCollector.Stop()
 		GlobalQPSCollector = nil
-	}
-}
-
-// UpdateQPSCollectorLeader updates the leader address for QPS collector
-func UpdateQPSCollectorLeader(leaderAddr string) {
-	if GlobalQPSCollector != nil {
-		GlobalQPSCollector.UpdateLeaderAddr(leaderAddr)
 	}
 }

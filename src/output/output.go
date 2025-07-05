@@ -293,7 +293,11 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							out.sampler.Sample(msg, out.ProjectNodeSequence)
+							pid := ""
+							if len(out.OwnerProjects) > 0 {
+								pid = out.OwnerProjects[0]
+							}
+							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -377,7 +381,11 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							out.sampler.Sample(msg, out.ProjectNodeSequence)
+							pid := ""
+							if len(out.OwnerProjects) > 0 {
+								pid = out.OwnerProjects[0]
+							}
+							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -430,7 +438,11 @@ func (out *Output) Start() error {
 
 							// Sample the message
 							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
+								pid := ""
+								if len(out.OwnerProjects) > 0 {
+									pid = out.OwnerProjects[0]
+								}
+								out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
 							}
 
 							// Duplicate to TestCollectionChan if present

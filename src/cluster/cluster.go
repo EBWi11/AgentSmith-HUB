@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -85,6 +85,11 @@ type ClusterManager struct {
 
 	// Node project states storage (only used by leader)
 	NodeProjectStates map[string][]ProjectStatus
+
+	stopSubProj chan struct{}
+
+	stopProjCmdSub chan struct{}
+	stopReconcile  chan struct{}
 }
 
 var (
@@ -204,65 +209,6 @@ func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
 	return status
 }
 
-// SendHeartbeat sends a heartbeat to the leader
-func (cm *ClusterManager) SendHeartbeat() error {
-	cm.Mu.RLock()
-	leaderAddr := cm.LeaderAddress
-	selfID := cm.SelfID
-	selfAddr := cm.SelfAddress
-	cm.Mu.RUnlock()
-
-	if leaderAddr == "" {
-		return fmt.Errorf("no leader address available")
-	}
-
-	// Prepare heartbeat message
-	msg := HeartbeatMessage{
-		NodeID:    selfID,
-		NodeAddr:  selfAddr,
-		Timestamp: time.Now(),
-		Status:    "active",
-	}
-
-	jsonData, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal heartbeat data: %w", err)
-	}
-
-	// Send heartbeat to leader - ensure proper URL format
-	var heartbeatURL string
-	if strings.HasPrefix(leaderAddr, "http://") || strings.HasPrefix(leaderAddr, "https://") {
-		heartbeatURL = fmt.Sprintf("%s/cluster/heartbeat", leaderAddr)
-	} else {
-		heartbeatURL = fmt.Sprintf("http://%s/cluster/heartbeat", leaderAddr)
-	}
-
-	req, err := http.NewRequest("POST", heartbeatURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("failed to create heartbeat request: %w", err)
-	}
-	req.Header.Set("token", common.Config.Token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("heartbeat request failed: %w", err)
-	}
-	defer func() {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-	}()
-
-	// Check if response is successful
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil // Success
-	}
-
-	return fmt.Errorf("heartbeat request failed with status: %d", resp.StatusCode)
-}
-
 // StartHeartbeatLoop starts the heartbeat sending loop
 func (cm *ClusterManager) StartHeartbeatLoop() {
 	if cm.IsLeader() {
@@ -276,7 +222,7 @@ func (cm *ClusterManager) StartHeartbeatLoop() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := cm.SendHeartbeat(); err != nil {
+				if err := cm.SendRedisHeartbeat(); err != nil {
 					// Log error but continue
 					fmt.Printf("Failed to send heartbeat: %v\n", err)
 
@@ -302,20 +248,39 @@ func (cm *ClusterManager) cleanupUnhealthyNodes() {
 	cm.Mu.Lock()
 	defer cm.Mu.Unlock()
 
+	// === Discover new nodes via heartbeats hash ===
+	hmap, err := common.RedisHGetAll("cluster:heartbeats")
+	if err == nil {
+		for nodeID, payload := range hmap {
+			if nodeID == cm.SelfID {
+				continue
+			}
+			if _, exists := cm.Nodes[nodeID]; !exists {
+				var hb HeartbeatMessage
+				if jsonErr := json.Unmarshal([]byte(payload), &hb); jsonErr == nil {
+					cm.Nodes[nodeID] = &NodeInfo{
+						ID:        nodeID,
+						Address:   hb.NodeAddr,
+						Status:    NodeStatusFollower,
+						LastSeen:  time.Now(),
+						IsHealthy: true,
+						MissCount: 0,
+					}
+					logger.Info("Discovered follower via hash", "node_id", nodeID)
+				}
+			}
+		}
+	}
+
+	// Health check based on LastSeen timestamp
 	now := time.Now()
 	for nodeID, node := range cm.Nodes {
-		// Check if node has exceeded heartbeat timeout
 		if now.Sub(node.LastSeen) > cm.HeartbeatTimeout {
-			node.MissCount++ // Increment missed heartbeat counter
+			node.MissCount++
 			node.IsHealthy = false
-
-			// Remove node if it has exceeded the maximum allowed missed heartbeats
 			if node.MissCount >= cm.MaxMissCount {
-				fmt.Printf("Removing unhealthy node: %s (last seen: %v, miss count: %d)\n",
-					nodeID, node.LastSeen, node.MissCount)
+				logger.Warn("Removing unhealthy node", "node_id", nodeID, "miss", node.MissCount)
 				delete(cm.Nodes, nodeID)
-			} else {
-				fmt.Printf("Node %s missed heartbeat (count: %d)\n", nodeID, node.MissCount)
 			}
 		}
 	}
@@ -379,6 +344,9 @@ func (cm *ClusterManager) Start() {
 	// Start heartbeat loop if this is not the leader
 	if !cm.IsLeader() {
 		cm.StartHeartbeatLoop()
+
+		// Start component sync subscriber
+		cm.startComponentSyncSubscriber()
 	}
 
 	// Start cleanup loop
@@ -422,6 +390,14 @@ func StartAsLeader(config *ClusterConfig) error {
 
 	// Start project states sync loop
 	cm.StartProjectStatesSyncLoop()
+
+	// Start Redis Pub/Sub subscriber for heartbeats
+	cm.StartRedisHeartbeatSubscriber()
+
+	cm.startProjectStatusSubscriber()
+
+	// Start reconcile loop for project states
+	cm.startProjectReconciler()
 
 	logger.Info("Cluster leader started", "node_id", config.NodeID, "listen_addr", config.ListenAddr)
 	return nil
@@ -616,4 +592,201 @@ func extractPortFromAddress(address string) string {
 		return parts[1]
 	}
 	return "8080" // default port
+}
+
+// ===================== Redis-based Heartbeat =====================
+
+// SendRedisHeartbeat writes a TTL-based heartbeat key to Redis. Followers call this instead of HTTP API.
+func (cm *ClusterManager) SendRedisHeartbeat() error {
+	// Store basic info for debugging/metrics (address + timestamp)
+	hb := HeartbeatMessage{
+		NodeID:    cm.SelfID,
+		NodeAddr:  cm.SelfAddress,
+		Timestamp: time.Now(),
+		Status:    "active",
+	}
+
+	jsonData, err := json.Marshal(hb)
+	if err != nil {
+		return err
+	}
+
+	// Store to hash for state snapshot
+	if err := common.RedisHSet("cluster:heartbeats", cm.SelfID, string(jsonData)); err != nil {
+		return err
+	}
+
+	// Publish for real-time update
+	if err := common.RedisPublish("cluster:heartbeat", string(jsonData)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// StartRedisHeartbeatSubscriber subscribes to Redis channel for real-time heartbeats (leader only)
+func (cm *ClusterManager) StartRedisHeartbeatSubscriber() {
+	if !cm.IsLeader() {
+		return
+	}
+
+	client := common.GetRedisClient()
+	if client == nil {
+		logger.Error("Redis client not initialized, heartbeat subscriber not started")
+		return
+	}
+
+	pubsub := client.Subscribe(context.Background(), "cluster:heartbeat")
+	cm.stopHeartbeatMonitor = make(chan struct{}) // reuse monitor stop channel if nil
+
+	go func() {
+		ch := pubsub.Channel()
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					logger.Warn("Heartbeat pubsub channel closed")
+					return
+				}
+				var hb HeartbeatMessage
+				if err := json.Unmarshal([]byte(msg.Payload), &hb); err == nil {
+					cm.Mu.Lock()
+					node, exists := cm.Nodes[hb.NodeID]
+					if !exists {
+						cm.Nodes[hb.NodeID] = &NodeInfo{
+							ID:        hb.NodeID,
+							Address:   hb.NodeAddr,
+							Status:    NodeStatusFollower,
+							LastSeen:  time.Now(),
+							IsHealthy: true,
+							MissCount: 0,
+						}
+						logger.Info("Discovered follower via PubSub", "node_id", hb.NodeID, "addr", hb.NodeAddr)
+					} else {
+						node.LastSeen = time.Now()
+						node.IsHealthy = true
+						node.MissCount = 0
+					}
+					cm.Mu.Unlock()
+				}
+			case <-cm.stopHeartbeatMonitor:
+				_ = pubsub.Close()
+				return
+			}
+		}
+	}()
+}
+
+// startProjectStatusSubscriber listens to project status events and updates NodeProjectStates (leader only)
+func (cm *ClusterManager) startProjectStatusSubscriber() {
+	if !cm.IsLeader() {
+		return
+	}
+	client := common.GetRedisClient()
+	if client == nil {
+		return
+	}
+	pub := client.Subscribe(context.Background(), "cluster:proj_status")
+	if cm.stopSubProj == nil {
+		cm.stopSubProj = make(chan struct{})
+	}
+	go func() {
+		ch := pub.Channel()
+		for {
+			select {
+			case m, ok := <-ch:
+				if !ok {
+					return
+				}
+				var evt struct {
+					NodeID    string `json:"node_id"`
+					ProjectID string `json:"project_id"`
+					Status    string `json:"status"`
+				}
+				if err := json.Unmarshal([]byte(m.Payload), &evt); err == nil {
+					cm.Mu.Lock()
+					if cm.NodeProjectStates == nil {
+						cm.NodeProjectStates = make(map[string][]ProjectStatus)
+					}
+					list := cm.NodeProjectStates[evt.NodeID]
+					updated := false
+					for i := range list {
+						if list[i].ID == evt.ProjectID {
+							list[i].Status = evt.Status
+							now := time.Now()
+							list[i].StatusChangedAt = &now
+							updated = true
+							break
+						}
+					}
+					if !updated {
+						now := time.Now()
+						list = append(list, ProjectStatus{ID: evt.ProjectID, Status: evt.Status, StatusChangedAt: &now})
+					}
+					cm.NodeProjectStates[evt.NodeID] = list
+					cm.Mu.Unlock()
+				}
+			case <-cm.stopSubProj:
+				_ = pub.Close()
+				return
+			}
+		}
+	}()
+}
+
+// startProjectReconciler periodically checks follower project states and publishes commands if mismatch
+func (cm *ClusterManager) startProjectReconciler() {
+	if !cm.IsLeader() {
+		return
+	}
+	if cm.stopReconcile == nil {
+		cm.stopReconcile = make(chan struct{})
+	}
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cm.reconcileProjectStates()
+			case <-cm.stopReconcile:
+				return
+			}
+		}
+	}()
+}
+
+// reconcileProjectStates compares desired leader project status vs follower reported and publishes commands
+func (cm *ClusterManager) reconcileProjectStates() {
+	// Snapshot follower-reported states
+	cm.Mu.RLock()
+	snapshot := make(map[string][]ProjectStatus, len(cm.NodeProjectStates))
+	for nodeID, list := range cm.NodeProjectStates {
+		cp := make([]ProjectStatus, len(list))
+		copy(cp, list)
+		snapshot[nodeID] = cp
+	}
+	cm.Mu.RUnlock()
+
+	// Desired statuses from leader hash
+	desired := make(map[string]string)
+	if leaderHash, err := common.RedisHGetAll("cluster:proj_states:" + cm.SelfID); err == nil {
+		for pid, status := range leaderHash {
+			desired[pid] = status
+		}
+	}
+
+	// Compare and publish commands
+	for nodeID, states := range snapshot {
+		for _, st := range states {
+			want, ok := desired[st.ID]
+			if !ok {
+				// Unknown project, instruct stop
+				publishProjCmd(nodeID, st.ID, "stop")
+				continue
+			}
+			if want != st.Status {
+				publishProjCmd(nodeID, st.ID, want)
+			}
+		}
+	}
 }

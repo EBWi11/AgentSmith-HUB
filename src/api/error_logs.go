@@ -338,6 +338,19 @@ func getLocalErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, error) {
 	return allLogs, nil
 }
 
+// storeLocalLogsToRedis caches latest logs for leader aggregation
+func storeLocalLogsToRedis(nodeID string, logs []ErrorLogEntry) {
+	if len(logs) == 0 {
+		return
+	}
+	data, err := json.Marshal(logs)
+	if err != nil {
+		return
+	}
+	// Keep for 120 seconds; refreshed on each query
+	_, _ = common.RedisSet("cluster:error_logs:"+nodeID, string(data), 120)
+}
+
 // API Handlers
 
 // getErrorLogs handles GET /error-logs
@@ -386,6 +399,9 @@ func getErrorLogs(c echo.Context) error {
 			"error": "Failed to read error logs: " + err.Error(),
 		})
 	}
+
+	// Cache to Redis for leader aggregation
+	storeLocalLogsToRedis(common.Config.LocalIP, logs)
 
 	// Apply pagination
 	totalCount := len(logs)
@@ -511,9 +527,23 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 				continue // Skip self and unhealthy nodes
 			}
 
-			followerLogs, err := getFollowerErrorLogs(nodeInfo.Address, filter)
-			if err != nil {
-				logger.Error("Failed to get follower error logs", "node", nodeID, "error", err)
+			// Attempt Redis cache
+			var followerLogs []ErrorLogEntry
+			if cached, err := common.RedisGet("cluster:error_logs:" + nodeID); err == nil && cached != "" {
+				_ = json.Unmarshal([]byte(cached), &followerLogs)
+			}
+
+			// Fallback to HTTP if cache missing
+			if len(followerLogs) == 0 {
+				flogs, err := getFollowerErrorLogs(nodeInfo.Address, filter)
+				if err != nil {
+					logger.Error("Failed to get follower error logs", "node", nodeID, "error", err)
+					continue
+				}
+				followerLogs = flogs
+			}
+
+			if len(followerLogs) == 0 {
 				continue
 			}
 

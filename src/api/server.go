@@ -152,10 +152,6 @@ func ServerStart(listener string) error {
 	auth.POST("/test-project-content/:inputNode", testProjectContent)
 
 	// Cluster management endpoints - REQUIRE AUTH
-	auth.POST("/cluster/heartbeat", handleHeartbeat)
-	auth.POST("/component-sync", handleComponentSync)
-	auth.POST("/project-status-sync", handleProjectStatusSync)
-	auth.POST("/qps-sync", handleQPSSync)
 	auth.GET("/config_root", leaderConfig)
 	auth.GET("/config/download", downloadConfig)
 
@@ -197,9 +193,6 @@ func ServerStart(listener string) error {
 	auth.GET("/local-changes", getLocalChanges)
 	auth.POST("/load-local-changes", loadLocalChanges)
 	auth.POST("/load-single-local-change", loadSingleLocalChange)
-
-	// Combined metrics sync endpoint (only on leader) - REQUIRE AUTH
-	auth.POST("/metrics-sync", handleMetricsSync)
 
 	// Error log endpoints - REQUIRE AUTH
 	auth.GET("/error-logs", getErrorLogs)

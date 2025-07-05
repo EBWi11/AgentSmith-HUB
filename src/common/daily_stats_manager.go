@@ -58,16 +58,17 @@ func NewDailyStatsManager() *DailyStatsManager {
 	return dsm
 }
 
-// generateKey creates a unique key for daily statistics
-func (dsm *DailyStatsManager) generateKey(date, nodeID, projectNodeSequence string) string {
-	return fmt.Sprintf("%s_%s_%s", date, nodeID, projectNodeSequence)
+// generateKey creates a unique key for daily statistics. We must include projectID so that
+// multiple projects共享同一个 ProjectNodeSequence 时不会互相覆盖。
+func (dsm *DailyStatsManager) generateKey(date, nodeID, projectID, projectNodeSequence string) string {
+	return fmt.Sprintf("%s_%s_%s_%s", date, nodeID, projectID, projectNodeSequence)
 }
 
 // UpdateDailyStats updates daily statistics for a component
 func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, componentType, projectNodeSequence string, totalMessages uint64) {
 	now := time.Now()
 	date := now.Format("2006-01-02")
-	key := dsm.generateKey(date, nodeID, projectNodeSequence)
+	key := dsm.generateKey(date, nodeID, projectID, projectNodeSequence)
 
 	dsm.mutex.Lock()
 	defer dsm.mutex.Unlock()
@@ -175,7 +176,7 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 		}
 
 		// Generate internal key
-		internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectNodeSequence)
+		internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
 		dsm.data[internalKey] = &statsData
 		loadedCount++
 	}

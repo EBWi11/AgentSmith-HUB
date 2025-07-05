@@ -38,7 +38,8 @@ func (r *Ruleset) Start() error {
 	}()
 
 	var err error
-	r.antsPool, err = ants.NewPool(MinPoolSize)
+	minPoolSize := getMinPoolSize()
+	r.antsPool, err = ants.NewPool(minPoolSize)
 	if err != nil {
 		return fmt.Errorf("failed to create ants pool: %v", err)
 	}
@@ -47,6 +48,8 @@ func (r *Ruleset) Start() error {
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
+		minPoolSize := getMinPoolSize()
+		maxPoolSize := getMaxPoolSize()
 		for {
 			select {
 			case <-r.stopChan:
@@ -56,19 +59,28 @@ func (r *Ruleset) Start() error {
 				for _, upCh := range r.UpStream {
 					totalBacklog += len(*upCh)
 				}
-				targetSize := MinPoolSize
+				targetSize := minPoolSize
 				switch {
 				case totalBacklog > 1000:
-					targetSize = 64
+					targetSize = maxPoolSize
 				case totalBacklog > 512:
-					targetSize = 32
+					targetSize = maxPoolSize * 3 / 4
 				case totalBacklog > 256:
-					targetSize = 16
+					targetSize = maxPoolSize / 2
 				case totalBacklog > 32:
-					targetSize = 8
+					targetSize = maxPoolSize / 4
 				default:
-					targetSize = MinPoolSize
+					targetSize = minPoolSize
 				}
+
+				// Ensure target size is within bounds
+				if targetSize < minPoolSize {
+					targetSize = minPoolSize
+				}
+				if targetSize > maxPoolSize {
+					targetSize = maxPoolSize
+				}
+
 				if r.antsPool != nil {
 					if r.antsPool.Cap() != targetSize {
 						r.antsPool.Tune(targetSize)
@@ -100,7 +112,11 @@ func (r *Ruleset) Start() error {
 							// IMPORTANT: Sample the input data BEFORE rule checking starts
 							// This ensures we capture the raw data entering the ruleset for analysis
 							if r.sampler != nil {
-								_ = r.sampler.Sample(data, r.ProjectNodeSequence)
+								pid := ""
+								if len(r.OwnerProjects) > 0 {
+									pid = r.OwnerProjects[0]
+								}
+								_ = r.sampler.Sample(data, r.ProjectNodeSequence, pid)
 							}
 						}
 

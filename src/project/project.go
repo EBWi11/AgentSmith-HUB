@@ -1,11 +1,13 @@
 package project
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -1617,6 +1619,9 @@ func (p *Project) SaveProjectStatus() error {
 		}
 	}
 
+	// Write to Redis for cluster-wide visibility
+	updateProjectStatusRedis(cluster.NodeID, p.Id, p.Status)
+
 	return nil
 }
 
@@ -1971,7 +1976,18 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 
 	// Load input components from global registry (inputs can be shared safely)
 	for _, name := range inputNames {
+		componentKey := "INPUT." + name
+		expectedSequence := componentSequences[componentKey]
+		if expectedSequence == "" {
+			expectedSequence = componentKey
+		}
+
 		if globalInput, ok := GlobalProject.Inputs[name]; ok {
+			// Set ProjectNodeSequence if not already set or differs from expected
+			if globalInput.ProjectNodeSequence == "" {
+				globalInput.ProjectNodeSequence = expectedSequence
+			}
+
 			p.Inputs[name] = globalInput
 			// Ensure owner project list includes current project ID
 			if globalInput.OwnerProjects == nil {
@@ -2452,4 +2468,20 @@ func decrementChannelRef(channelId string) int64 {
 	}
 	newVal := cntPtr.Add(-1)
 	return newVal
+}
+
+// updateProjectStatusRedis writes status to Redis hash and publishes event
+func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
+	if common.GetRedisClient() == nil {
+		return
+	}
+	_ = common.RedisHSet("cluster:proj_states:"+nodeID, projectID, string(status))
+	evt := map[string]string{
+		"node_id":    nodeID,
+		"project_id": projectID,
+		"status":     string(status),
+	}
+	if data, err := json.Marshal(evt); err == nil {
+		_ = common.RedisPublish("cluster:proj_status", string(data))
+	}
 }

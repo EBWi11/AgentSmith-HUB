@@ -186,3 +186,52 @@ func RedisIncrby(key string, value int64) (int64, error) {
 func RedisDel(key string) error {
 	return rdb.Del(ctx, key).Err()
 }
+
+// ===================== Hash and Pub/Sub Helpers =====================
+
+// RedisHSet sets a field in a Redis hash (no expiration)
+func RedisHSet(hash string, field string, value interface{}) error {
+	return rdb.HSet(ctx, hash, field, value).Err()
+}
+
+// RedisHGet gets a field from a Redis hash
+func RedisHGet(hash string, field string) (string, error) {
+	res, err := rdb.HGet(ctx, hash, field).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return res, err
+}
+
+// RedisPublish publishes a message to a Redis channel
+func RedisPublish(channel string, message interface{}) error {
+	return rdb.Publish(ctx, channel, message).Err()
+}
+
+// RedisHGetAll returns all field-value pairs of a hash
+func RedisHGetAll(hash string) (map[string]string, error) {
+	return rdb.HGetAll(ctx, hash).Result()
+}
+
+// GetRedisClient returns underlying redis client for advanced operations
+func GetRedisClient() *redis.Client {
+	return rdb
+}
+
+// ===================== List Helpers =====================
+
+// RedisLPush pushes value to list head, keeps maxLen if >0
+func RedisLPush(key string, value interface{}, maxLen int64) error {
+	if err := rdb.LPush(ctx, key, value).Err(); err != nil {
+		return err
+	}
+	if maxLen > 0 {
+		_ = rdb.LTrim(ctx, key, 0, maxLen-1).Err()
+	}
+	return nil
+}
+
+// RedisLRange returns list range
+func RedisLRange(key string, start, stop int64) ([]string, error) {
+	return rdb.LRange(ctx, key, start, stop).Result()
+}
