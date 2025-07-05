@@ -97,6 +97,9 @@ type Output struct {
 
 	// raw config
 	Config *OutputConfig
+
+	// Projects sharing this output instance
+	OwnerProjects []string `json:"-"`
 }
 
 func Verify(path string, raw string) error {
@@ -656,10 +659,17 @@ func (out *Output) metricLoop() {
 
 			atomic.StoreUint64(&out.produceQPS, qps)
 
-			// Persist total produced messages to Redis using ProjectNodeSequence key.
+			// Persist total produced messages per project
 			if out.ProjectNodeSequence != "" {
-				key := "msg_total:" + out.ProjectNodeSequence + ":output"
-				_, _ = common.RedisIncrby(key, int64(qps))
+				if len(out.OwnerProjects) == 0 {
+					key := "msg_total:" + out.ProjectNodeSequence + ":output"
+					_, _ = common.RedisIncrby(key, int64(qps))
+				} else {
+					for _, pid := range out.OwnerProjects {
+						key := fmt.Sprintf("msg_total:%s:%s:output", pid, out.ProjectNodeSequence)
+						_, _ = common.RedisIncrby(key, int64(qps))
+					}
+				}
 			}
 		}
 	}

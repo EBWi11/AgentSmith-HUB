@@ -38,6 +38,7 @@ var (
 const (
 	MCPSessionHeader = "Mcp-Session-Id"
 	SessionTimeout   = 30 * time.Minute
+	redisSessionTTL  = 1800 // seconds, 30m
 )
 
 func init() {
@@ -69,6 +70,11 @@ func createSession(token string) *MCPSession {
 	}
 
 	mcpSessions[sessionID] = session
+
+	// persist to Redis
+	if data, err := json.Marshal(session); err == nil {
+		_, _ = common.RedisSet("mcp_session:"+sessionID, string(data), redisSessionTTL)
+	}
 	logger.Info("Created new MCP session", "sessionId", sessionID)
 	return session
 }
@@ -80,6 +86,21 @@ func getSession(sessionID string) *MCPSession {
 
 	session, exists := mcpSessions[sessionID]
 	if !exists {
+		// If not found in memory, attempt to load from Redis
+		val, err := common.RedisGet("mcp_session:" + sessionID)
+		if err == nil && val != "" {
+			var sess MCPSession
+			if e := json.Unmarshal([]byte(val), &sess); e == nil {
+				mcpSessions[sessionID] = &sess
+				// Update last seen
+				sess.LastSeen = time.Now()
+				// Refresh TTL in Redis
+				if data, err := json.Marshal(sess); err == nil {
+					_, _ = common.RedisSet("mcp_session:"+sessionID, string(data), redisSessionTTL)
+				}
+				return &sess
+			}
+		}
 		return nil
 	}
 
@@ -92,6 +113,10 @@ func getSession(sessionID string) *MCPSession {
 
 	// Update last seen
 	session.LastSeen = time.Now()
+	// Refresh TTL in Redis
+	if data, err := json.Marshal(session); err == nil {
+		_, _ = common.RedisSet("mcp_session:"+sessionID, string(data), redisSessionTTL)
+	}
 	return session
 }
 
@@ -103,6 +128,7 @@ func deleteSession(sessionID string) bool {
 	_, exists := mcpSessions[sessionID]
 	if exists {
 		delete(mcpSessions, sessionID)
+		_ = common.RedisDel("mcp_session:" + sessionID)
 		logger.Info("Deleted MCP session", "sessionId", sessionID)
 		return true
 	}
@@ -272,16 +298,18 @@ func handleMCPPost(c echo.Context) error {
 		// Validate existing session
 		session = getSession(sessionID)
 		if session == nil {
-			return c.JSON(http.StatusNotFound, map[string]string{
-				"error": "Session not found or expired",
-			})
-		}
-
-		// Verify token matches session
-		if session.Token != token {
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"error": "Token mismatch for session",
-			})
+			// Gracefully create a new session if old one expired/invalid
+			session = createSession(token)
+			sessionID = session.ID
+			// Propagate new session ID in response header so client can update
+			c.Response().Header().Set(MCPSessionHeader, sessionID)
+		} else {
+			// Verify token matches session
+			if session.Token != token {
+				return c.JSON(http.StatusUnauthorized, map[string]string{
+					"error": "Token mismatch for session",
+				})
+			}
 		}
 	} else {
 		// Non-initialize request without session

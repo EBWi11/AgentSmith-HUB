@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -14,7 +15,7 @@ const (
 	// Redis keys for sample data
 	RedisSampleKeyPrefix = "sample_data:"
 	RedisSampleCountKey  = "sample_count:"
-	RedisSampleMetaKey   = "sample_meta:"
+	RedisSampleHashKey   = "sample_hash:"
 
 	// Configuration constants
 	DefaultSampleTTL        = 24 * time.Hour // 24 hours TTL
@@ -76,6 +77,22 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 	jsonData, err := json.Marshal(redisSample)
 	if err != nil {
 		return fmt.Errorf("failed to serialize sample data: %w", err)
+	}
+
+	// Deduplication: compute hash of jsonData
+	hashVal := xxhash.Sum64(jsonData)
+	hashKey := fmt.Sprintf("%s%s:%s", RedisSampleHashKey, samplerName, sample.ProjectNodeSequence)
+
+	// SAdd returns 1 if new, 0 if already exists -> skip duplicate sample
+	added, err := rdb.SAdd(ctx, hashKey, hashVal).Result()
+	if err != nil {
+		return fmt.Errorf("failed to add hash set: %w", err)
+	}
+	// set TTL for hash set key
+	rdb.Expire(ctx, hashKey, rsm.ttl)
+	if added == 0 {
+		// duplicate, do not store
+		return nil
 	}
 
 	// Use Redis transaction to ensure atomicity

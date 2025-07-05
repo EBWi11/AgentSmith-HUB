@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/project"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -18,6 +20,7 @@ type StandardMCPServer struct {
 	apiMapper *APIMapper
 	baseURL   string
 	token     string
+	ProjectMu sync.RWMutex
 }
 
 // NewStandardMCPServer creates a new server using mcp-go library
@@ -93,7 +96,13 @@ func (s *StandardMCPServer) HandleJSONRPCRequest(requestData []byte) ([]byte, er
 	case "prompts/get":
 		return s.handlePromptsGet(id, request)
 	case "resources/list":
-		return s.handleResourcesList(id)
+		var p map[string]interface{}
+		if m, ok := request["params"].(map[string]interface{}); ok {
+			p = m
+		} else {
+			p = map[string]interface{}{}
+		}
+		return s.handleResourcesList(id, p)
 	case "resources/read":
 		return s.handleResourcesRead(id, request)
 	default:
@@ -336,8 +345,22 @@ func (s *StandardMCPServer) handlePromptsGet(id interface{}, request map[string]
 }
 
 // handleResourcesList handles the resources/list method
-func (s *StandardMCPServer) handleResourcesList(id interface{}) ([]byte, error) {
+func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[string]interface{}) ([]byte, error) {
 	var resources []map[string]interface{}
+
+	// Parse optional params (type, limit, offset)
+	filterType := ""
+	limit := 100
+	offset := 0
+	if v, ok := params["type"].(string); ok {
+		filterType = v
+	}
+	if v, ok := params["limit"].(float64); ok { // JSON numbers are float64
+		limit = int(v)
+	}
+	if v, ok := params["offset"].(float64); ok {
+		offset = int(v)
+	}
 
 	// Get projects from API
 	if projectResult, err := s.apiMapper.CallAPITool("get_projects", map[string]interface{}{}); err == nil && !projectResult.IsError {
@@ -362,10 +385,56 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}) ([]byte, error) 
 		}
 	}
 
-	// Add other resource types as needed...
+	// Add ruleset resources
+	project.GlobalProject.ProjectMu.RLock()
+	for rsID, rs := range project.GlobalProject.Rulesets {
+		owners := rs.OwnerProjects
+		sampleCnt := 0
+		sampler := common.GetSampler("ruleset." + rsID)
+		if sampler != nil {
+			stats := sampler.GetStats()
+			sampleCnt = int(stats.SampledCount)
+		}
+
+		resources = append(resources, map[string]interface{}{
+			"uri":         fmt.Sprintf("hub://ruleset/%s", rsID),
+			"name":        fmt.Sprintf("Ruleset: %s", rsID),
+			"description": "Ruleset definition",
+			"mimeType":    "application/xml",
+			"annotations": map[string]interface{}{
+				"type":          "ruleset",
+				"ownerProjects": owners,
+				"sampleCount":   sampleCnt,
+			},
+		})
+	}
+	project.GlobalProject.ProjectMu.RUnlock()
+
+	// Apply filtering & pagination
+	filtered := make([]map[string]interface{}, 0)
+	for _, r := range resources {
+		if filterType != "" {
+			if ann, ok := r["annotations"].(map[string]interface{}); ok {
+				if t, ok := ann["type"].(string); ok && t != filterType {
+					continue
+				}
+			}
+		}
+		filtered = append(filtered, r)
+	}
+
+	end := offset + limit
+	if offset > len(filtered) {
+		offset = len(filtered)
+	}
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	paged := filtered[offset:end]
 
 	result := map[string]interface{}{
-		"resources": resources,
+		"resources": paged,
+		"total":     len(filtered),
 	}
 	return s.createJSONRPCResponse(id, result)
 }
@@ -387,9 +456,81 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 		return s.createJSONRPCError(id, -32602, "Invalid URI", "URI must start with hub://")
 	}
 
-	// Simplified resource reading - extend as needed
-	content := "Resource content"
+	var content string
 	mimeType := "text/plain"
+
+	// Split the URI into path and optional fragment (after #)
+	var fragment string
+	pathPart := uri
+	if idx := strings.Index(uri, "#"); idx >= 0 {
+		pathPart = uri[:idx]
+		fragment = uri[idx+1:]
+	}
+
+	uriParts := strings.Split(strings.TrimPrefix(pathPart, "hub://"), "/")
+	if len(uriParts) >= 2 {
+		resType := uriParts[0]
+		resID := uriParts[1]
+
+		switch resType {
+		case "project":
+			s.ProjectMu.RLock()
+			proj, ok := project.GlobalProject.Projects[resID]
+			s.ProjectMu.RUnlock()
+			if ok && proj != nil && proj.Config != nil {
+				content = proj.Config.RawConfig
+				mimeType = "application/yaml"
+			} else {
+				return s.createJSONRPCError(id, -32602, "Project not found", uri)
+			}
+		case "ruleset":
+			project.GlobalProject.ProjectMu.RLock()
+			rs, ok := project.GlobalProject.Rulesets[resID]
+			project.GlobalProject.ProjectMu.RUnlock()
+			if !ok || rs == nil {
+				return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)
+			}
+
+			switch fragment {
+			case "owners":
+				ownersJSON, _ := json.Marshal(rs.OwnerProjects)
+				content = string(ownersJSON)
+				mimeType = "application/json"
+			case "samples":
+				sampler := common.GetSampler("ruleset." + resID)
+				samplesJSON := "[]"
+				if sampler != nil {
+					allSamples := sampler.GetSamples()
+					// Flatten samples (could be grouped by project)
+					flat := make([]json.RawMessage, 0)
+					count := 0
+					for _, list := range allSamples {
+						for _, sm := range list {
+							if count >= 3 { // limit to 3
+								break
+							}
+							if b, err := json.Marshal(sm); err == nil {
+								flat = append(flat, b)
+								count++
+							}
+						}
+					}
+					samplesJSONBytes, _ := json.Marshal(flat)
+					samplesJSON = string(samplesJSONBytes)
+				}
+				content = samplesJSON
+				mimeType = "application/json"
+			default:
+				// default return xml config
+				content = rs.RawConfig
+				mimeType = "application/xml"
+			}
+		}
+	}
+
+	if content == "" {
+		content = "Resource content"
+	}
 
 	contents := []map[string]interface{}{
 		{

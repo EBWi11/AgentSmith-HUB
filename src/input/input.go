@@ -84,6 +84,9 @@ type Input struct {
 	// goroutine management
 	wg       sync.WaitGroup
 	stopChan chan struct{}
+
+	// List of project IDs that share this input instance (for per-project metrics)
+	OwnerProjects []string `json:"-"`
 }
 
 func Verify(path string, raw string) error {
@@ -417,10 +420,18 @@ func (in *Input) metricLoop() {
 
 			atomic.StoreUint64(&in.consumeQPS, qps)
 
-			// Persist total messages per ProjectNodeSequence to Redis once per second.
+			// Persist total messages per project & sequence to Redis
 			if in.ProjectNodeSequence != "" {
-				key := "msg_total:" + in.ProjectNodeSequence + ":input"
-				_, _ = common.RedisIncrby(key, int64(qps))
+				if len(in.OwnerProjects) == 0 {
+					// Fallback for legacy instances
+					key := "msg_total:" + in.ProjectNodeSequence + ":input"
+					_, _ = common.RedisIncrby(key, int64(qps))
+				} else {
+					for _, pid := range in.OwnerProjects {
+						key := fmt.Sprintf("msg_total:%s:%s:input", pid, in.ProjectNodeSequence)
+						_, _ = common.RedisIncrby(key, int64(qps))
+					}
+				}
 			}
 		}
 	}

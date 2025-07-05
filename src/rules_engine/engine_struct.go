@@ -34,7 +34,7 @@ type Ruleset struct {
 	XMLName             xml.Name `xml:"root"`
 	Name                string   `xml:"name,attr"`
 	Author              string   `xml:"author,attr"`
-	RulesetID           string   `json:"Id"`
+	RulesetID           string   `json:"RulesetID"`
 	ProjectNodeSequence string
 	Type                string `xml:"type,attr"`
 
@@ -63,6 +63,8 @@ type Ruleset struct {
 	processQPS   uint64         // QPS calculated by metricLoop
 	metricStop   chan struct{}  // Metric loop stop channel
 	wg           sync.WaitGroup // WaitGroup for goroutine management
+
+	OwnerProjects []string `json:"-"`
 }
 
 type RulesByFilter struct {

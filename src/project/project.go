@@ -37,14 +37,6 @@ func init() {
 
 	// Mapping between logical edge ("FROM->TO") and its channelId
 	GlobalProject.edgeChanIds = make(map[string]string)
-
-	// Register a delayed function to analyze dependencies after all projects are loaded
-	go func() {
-		// Wait for a while to ensure all projects are loaded
-		time.Sleep(5 * time.Second)
-		// Analyze project dependencies
-		AnalyzeProjectDependencies()
-	}()
 }
 
 func Verify(path string, raw string) error {
@@ -1007,6 +999,10 @@ func (p *Project) Start() error {
 	} else {
 		logger.Info("Project started successfully with shared components", "project", p.Id)
 	}
+
+	// After the project is successfully started, recalculate dependencies synchronously
+	AnalyzeProjectDependencies()
+
 	return nil
 }
 
@@ -1323,8 +1319,20 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 
 // Add a new function to analyze project dependencies
 func AnalyzeProjectDependencies() {
+	// Use dedicated project lock to prevent race conditions
+	GlobalProject.ProjectMu.RLock()
+
+	// Create a local copy of projects to avoid holding the lock during analysis
+	projects := make(map[string]*Project)
+	for id, p := range GlobalProject.Projects {
+		projects[id] = p
+	}
+
+	// Release the lock early since we have a local copy
+	GlobalProject.ProjectMu.RUnlock()
+
 	// Clear all project dependencies
-	for _, p := range GlobalProject.Projects {
+	for _, p := range projects {
 		p.DependsOn = []string{}
 		p.DependedBy = []string{}
 		p.SharedInputs = []string{}
@@ -1336,7 +1344,7 @@ func AnalyzeProjectDependencies() {
 	instanceUsage := make(map[string][]string) // ProjectNodeSequence -> list of project IDs using it
 
 	// Analyze component instances used by each project
-	for projectID, p := range GlobalProject.Projects {
+	for projectID, p := range projects {
 		// Record input component instance usage
 		for _, input := range p.Inputs {
 			sequence := input.ProjectNodeSequence
@@ -1363,31 +1371,24 @@ func AnalyzeProjectDependencies() {
 	}
 
 	// Update real shared component information (only components with the same ProjectNodeSequence are shared)
-	for sequence, projects := range instanceUsage {
-		if len(projects) > 1 {
+	for sequence, projectList := range instanceUsage {
+		if len(projectList) > 1 {
 			// This is a truly shared component instance
 			parts := strings.Split(sequence, ".")
 			if len(parts) >= 2 {
 				componentType := strings.ToLower(parts[len(parts)-2])
 				componentID := parts[len(parts)-1]
 
-				for _, projectID := range projects {
-					switch componentType {
-					case "input":
-						GlobalProject.Projects[projectID].SharedInputs = append(
-							GlobalProject.Projects[projectID].SharedInputs,
-							componentID,
-						)
-					case "output":
-						GlobalProject.Projects[projectID].SharedOutputs = append(
-							GlobalProject.Projects[projectID].SharedOutputs,
-							componentID,
-						)
-					case "ruleset":
-						GlobalProject.Projects[projectID].SharedRulesets = append(
-							GlobalProject.Projects[projectID].SharedRulesets,
-							componentID,
-						)
+				for _, projectID := range projectList {
+					if p, exists := projects[projectID]; exists {
+						switch componentType {
+						case "input":
+							p.SharedInputs = append(p.SharedInputs, componentID)
+						case "output":
+							p.SharedOutputs = append(p.SharedOutputs, componentID)
+						case "ruleset":
+							p.SharedRulesets = append(p.SharedRulesets, componentID)
+						}
 					}
 				}
 			}
@@ -1395,8 +1396,8 @@ func AnalyzeProjectDependencies() {
 	}
 
 	// Analyze dependencies between projects
-	for projectID, p := range GlobalProject.Projects {
-		// Parse project configuration to get data flow
+	for projectID, p := range projects {
+		// Parse project configuration to get data flow with error handling
 		flowGraph, err := p.parseContent()
 		if err != nil {
 			logger.Error("Failed to parse project content", "id", projectID, "error", err)
@@ -1417,7 +1418,7 @@ func AnalyzeProjectDependencies() {
 					var fromProjectID, toProjectID string
 
 					// Find project that owns the source output
-					for pid, proj := range GlobalProject.Projects {
+					for pid, proj := range projects {
 						if _, exists := proj.Outputs[fromID]; exists {
 							fromProjectID = pid
 							break
@@ -1425,7 +1426,7 @@ func AnalyzeProjectDependencies() {
 					}
 
 					// Find project that owns the target input
-					for pid, proj := range GlobalProject.Projects {
+					for pid, proj := range projects {
 						if _, exists := proj.Inputs[toID]; exists {
 							toProjectID = pid
 							break
@@ -1435,14 +1436,12 @@ func AnalyzeProjectDependencies() {
 					// If two different projects are found, there is inter-project dependency
 					if fromProjectID != "" && toProjectID != "" && fromProjectID != toProjectID {
 						// Update dependency relationship
-						GlobalProject.Projects[toProjectID].DependsOn = append(
-							GlobalProject.Projects[toProjectID].DependsOn,
-							fromProjectID,
-						)
-						GlobalProject.Projects[fromProjectID].DependedBy = append(
-							GlobalProject.Projects[fromProjectID].DependedBy,
-							toProjectID,
-						)
+						if toProj, exists := projects[toProjectID]; exists {
+							toProj.DependsOn = append(toProj.DependsOn, fromProjectID)
+						}
+						if fromProj, exists := projects[fromProjectID]; exists {
+							fromProj.DependedBy = append(fromProj.DependedBy, toProjectID)
+						}
 					}
 				}
 			}
@@ -1450,7 +1449,7 @@ func AnalyzeProjectDependencies() {
 	}
 
 	// Record dependency relationship information
-	for projectID, p := range GlobalProject.Projects {
+	for projectID, p := range projects {
 		if len(p.DependsOn) > 0 || len(p.DependedBy) > 0 ||
 			len(p.SharedInputs) > 0 || len(p.SharedOutputs) > 0 || len(p.SharedRulesets) > 0 {
 			logger.Info("Project dependencies analyzed",
@@ -1974,27 +1973,19 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 	for _, name := range inputNames {
 		if globalInput, ok := GlobalProject.Inputs[name]; ok {
 			p.Inputs[name] = globalInput
-			// For shared input components, don't overwrite ProjectNodeSequence if it's already set
-			// Multiple projects may use the same input with different sequences in their flow
-			componentKey := "INPUT." + name
-			if expectedSequence, exists := componentSequences[componentKey]; exists {
-				// Only set ProjectNodeSequence if it's empty or if this is the canonical sequence
-				if globalInput.ProjectNodeSequence == "" {
-					globalInput.ProjectNodeSequence = expectedSequence
-					logger.Info("Set input ProjectNodeSequence", "project", p.Id, "input", name, "sequence", expectedSequence)
-				} else if globalInput.ProjectNodeSequence != expectedSequence {
-					// Log warning if different projects expect different sequences for the same input
-					logger.Warn("Input component used with different ProjectNodeSequence",
-						"project", p.Id,
-						"input", name,
-						"existing_sequence", globalInput.ProjectNodeSequence,
-						"expected_sequence", expectedSequence)
-				}
+			// Ensure owner project list includes current project ID
+			if globalInput.OwnerProjects == nil {
+				globalInput.OwnerProjects = []string{p.Id}
 			} else {
-				// Set default sequence if none exists
-				if globalInput.ProjectNodeSequence == "" {
-					globalInput.ProjectNodeSequence = componentKey
-					logger.Info("Set default input ProjectNodeSequence", "project", p.Id, "input", name, "sequence", componentKey)
+				found := false
+				for _, pid := range globalInput.OwnerProjects {
+					if pid == p.Id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					globalInput.OwnerProjects = append(globalInput.OwnerProjects, p.Id)
 				}
 			}
 		} else {
@@ -2025,6 +2016,21 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 			// Found existing instance with same ProjectNodeSequence, can share
 			p.Outputs[name] = foundOutput
 			logger.Info("Reusing existing output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
+			// add owner
+			if foundOutput.OwnerProjects == nil {
+				foundOutput.OwnerProjects = []string{p.Id}
+			} else {
+				found := false
+				for _, pid := range foundOutput.OwnerProjects {
+					if pid == p.Id {
+						found = true
+						break
+					}
+				}
+				if !found {
+					foundOutput.OwnerProjects = append(foundOutput.OwnerProjects, p.Id)
+				}
+			}
 		} else {
 			// Need to create a new instance from global template
 			if globalOutput, ok := GlobalProject.Outputs[name]; ok {
@@ -2033,6 +2039,7 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 				if err != nil {
 					return fmt.Errorf("failed to create output instance for %s: %v", name, err)
 				}
+				newOutput.OwnerProjects = []string{p.Id}
 				p.Outputs[name] = newOutput
 				logger.Info("Created new output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
 			} else {
@@ -2064,6 +2071,20 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 			// Found existing instance with same ProjectNodeSequence, can share
 			p.Rulesets[name] = foundRuleset
 			logger.Info("Reusing existing ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
+			if foundRuleset.OwnerProjects == nil {
+				foundRuleset.OwnerProjects = []string{p.Id}
+			} else {
+				f := false
+				for _, pid := range foundRuleset.OwnerProjects {
+					if pid == p.Id {
+						f = true
+						break
+					}
+				}
+				if !f {
+					foundRuleset.OwnerProjects = append(foundRuleset.OwnerProjects, p.Id)
+				}
+			}
 		} else {
 			// Need to create a new instance from global template
 			if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
@@ -2072,6 +2093,7 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 				if err != nil {
 					return fmt.Errorf("failed to create ruleset instance for %s: %v", name, err)
 				}
+				newRuleset.OwnerProjects = []string{p.Id}
 				p.Rulesets[name] = newRuleset
 				logger.Info("Created new ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
 			} else {
@@ -2088,21 +2110,17 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 func (p *Project) createChannelConnections(flowGraph map[string][]string) error {
 	logger.Info("Creating channel connections", "project", p.Id)
 
-	// Lock global edge/channel maps for the whole construction to avoid races with other project operations
-	GlobalProject.EdgeMapMu.Lock()
-	defer GlobalProject.EdgeMapMu.Unlock()
-
-	// Helper to check if a slice already contains a given channel pointer
-	containsChanPtr := func(list []*chan map[string]interface{}, ptr *chan map[string]interface{}) bool {
+	// Helper to check if a slice already contains a channel (compare by underlying channel value)
+	containsChan := func(list []*chan map[string]interface{}, ch chan map[string]interface{}) bool {
 		for _, p := range list {
-			if p == ptr {
+			if p != nil && *p == ch {
 				return true
 			}
 		}
 		return false
 	}
 
-	// Helper to check if slice of strings contains target
+	// Helper to check if slice of strings contains a value
 	containsStr := func(list []string, target string) bool {
 		for _, s := range list {
 			if s == target {
@@ -2126,41 +2144,34 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 			var msgChan chan map[string]interface{}
 			var channelId string
 
-			// Step 1: Try read-lock reuse
-			GlobalProject.EdgeMapMu.RLock()
-			cid, exists := GlobalProject.edgeChanIds[edgeKey]
-			if exists {
+			// Use single lock to avoid deadlock - check and create in one operation
+			GlobalProject.EdgeMapMu.Lock()
+
+			var ptr *chan map[string]interface{}
+
+			// Check if channel already exists
+			if cid, exists := GlobalProject.edgeChanIds[edgeKey]; exists {
 				channelId = cid
 				msgChan = GlobalProject.msgChans[channelId]
+				ptr = &msgChan
 				if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
 					cntPtr.Add(1)
 				}
-				GlobalProject.EdgeMapMu.RUnlock()
 				logger.Debug("Reusing existing channel connection", "project", p.Id, "edge", edgeKey, "channel", channelId)
 			} else {
-				GlobalProject.EdgeMapMu.RUnlock()
-				// Need to create – acquire write lock
-				GlobalProject.EdgeMapMu.Lock()
-				// Double-check after upgrade
-				if cid2, ok2 := GlobalProject.edgeChanIds[edgeKey]; ok2 {
-					channelId = cid2
-					msgChan = GlobalProject.msgChans[channelId]
-					if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
-						cntPtr.Add(1)
-					}
-					logger.Debug("[race] Reused edge channel after upgrade", "project", p.Id, "edge", edgeKey, "channel", channelId)
-				} else {
-					channelId = fmt.Sprintf("%s_%s_%s_%s", p.Id, from, to, time.Now().Format("20060102150405"))
-					msgChan = make(chan map[string]interface{}, 1024)
-					GlobalProject.msgChans[channelId] = msgChan
-					ptr := &atomic.Int64{}
-					ptr.Store(1)
-					GlobalProject.msgChansCounter[channelId] = ptr
-					GlobalProject.edgeChanIds[edgeKey] = channelId
-					logger.Info("Created new channel connection", "project", p.Id, "from", from, "to", to, "channel", channelId)
-				}
-				GlobalProject.EdgeMapMu.Unlock()
+				// Create new channel
+				channelId = fmt.Sprintf("%s_%s_%s_%s", p.Id, from, to, time.Now().Format("20060102150405"))
+				msgChan = make(chan map[string]interface{}, 1024)
+				GlobalProject.msgChans[channelId] = msgChan
+				ptr = &msgChan
+				cnt := &atomic.Int64{}
+				cnt.Store(1)
+				GlobalProject.msgChansCounter[channelId] = cnt
+				GlobalProject.edgeChanIds[edgeKey] = channelId
+				logger.Info("Created new channel connection", "project", p.Id, "from", from, "to", to, "channel", channelId)
 			}
+
+			GlobalProject.EdgeMapMu.Unlock()
 
 			// Record that this project uses this channelId (avoid duplicates)
 			if !containsStr(p.MsgChannels, channelId) {
@@ -2171,24 +2182,24 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 			switch fromType {
 			case "INPUT":
 				if in, ok := p.Inputs[fromId]; ok {
-					if !containsChanPtr(in.DownStream, &msgChan) {
+					if !containsChan(in.DownStream, msgChan) {
 						in.DownStream = append(in.DownStream, &msgChan)
 					}
 				}
 			case "RULESET":
 				if rs, ok := p.Rulesets[fromId]; ok {
-					rs.DownStream[to] = &msgChan
+					rs.DownStream[to] = ptr
 				}
 			}
 
 			switch toType {
 			case "RULESET":
 				if rs, ok := p.Rulesets[toId]; ok {
-					rs.UpStream[from] = &msgChan
+					rs.UpStream[from] = ptr
 				}
 			case "OUTPUT":
 				if out, ok := p.Outputs[toId]; ok {
-					if !containsChanPtr(out.UpStream, &msgChan) {
+					if !containsChan(out.UpStream, msgChan) {
 						out.UpStream = append(out.UpStream, &msgChan)
 					}
 				}
@@ -2266,44 +2277,6 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 	return restartedCount, nil
 }
 
-// RestartSingleProjectSafely restarts a single project with proper error handling
-func RestartSingleProjectSafely(projectID string) error {
-	common.GlobalMu.RLock()
-	proj, exists := GlobalProject.Projects[projectID]
-	common.GlobalMu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("project not found: %s", projectID)
-	}
-
-	if proj.Status != ProjectStatusRunning {
-		if proj.Status == ProjectStatusStarting {
-			return fmt.Errorf("project is currently starting: %s (status: %s)", projectID, proj.Status)
-		}
-		if proj.Status == ProjectStatusStopping {
-			return fmt.Errorf("project is currently stopping: %s (status: %s)", projectID, proj.Status)
-		}
-		return fmt.Errorf("project is not running: %s (status: %s)", projectID, proj.Status)
-	}
-
-	logger.Info("Restarting single project", "id", projectID)
-	startTime := time.Now()
-
-	// Stop the project (respects shared components)
-	if err := proj.Stop(); err != nil {
-		return fmt.Errorf("failed to stop project %s: %w", projectID, err)
-	}
-	logger.Info("Stopped project for restart", "id", projectID)
-
-	// Start the project (respects shared components)
-	if err := proj.Start(); err != nil {
-		return fmt.Errorf("failed to start project %s: %w", projectID, err)
-	}
-
-	logger.Info("Successfully restarted single project", "id", projectID, "duration", time.Since(startTime))
-	return nil
-}
-
 // GetQPSDataForNode collects QPS data from all running projects and components for this node
 func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 	var qpsMetrics []common.QPSMetrics
@@ -2323,11 +2296,15 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for inputID, input := range proj.Inputs {
 			qps := input.GetConsumeQPS()
 			total := input.GetConsumeTotal()
-			if seq := input.ProjectNodeSequence; seq != "" {
-				if val, err := common.RedisGet("msg_total:" + seq + ":input"); err == nil {
-					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
-						total = v
-					}
+			var redisVal string
+			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:input", projectID, input.ProjectNodeSequence)); err == nil {
+				redisVal = v
+			} else if v, err := common.RedisGet("msg_total:" + input.ProjectNodeSequence + ":input"); err == nil {
+				redisVal = v
+			}
+			if redisVal != "" {
+				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
+					total = parsed
 				}
 			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
@@ -2346,11 +2323,15 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for outputID, output := range proj.Outputs {
 			qps := output.GetProduceQPS()
 			total := output.GetProduceTotal()
-			if seq := output.ProjectNodeSequence; seq != "" {
-				if val, err := common.RedisGet("msg_total:" + seq + ":output"); err == nil {
-					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
-						total = v
-					}
+			var redisVal string
+			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:output", projectID, output.ProjectNodeSequence)); err == nil {
+				redisVal = v
+			} else if v, err := common.RedisGet("msg_total:" + output.ProjectNodeSequence + ":output"); err == nil {
+				redisVal = v
+			}
+			if redisVal != "" {
+				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
+					total = parsed
 				}
 			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
@@ -2369,11 +2350,15 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for rulesetID, ruleset := range proj.Rulesets {
 			qps := ruleset.GetProcessQPS() // Get real processing QPS
 			total := ruleset.GetProcessTotal()
-			if seq := ruleset.ProjectNodeSequence; seq != "" {
-				if val, err := common.RedisGet("msg_total:" + seq + ":ruleset"); err == nil {
-					if v, e := strconv.ParseUint(val, 10, 64); e == nil {
-						total = v
-					}
+			var redisVal string
+			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:ruleset", projectID, ruleset.ProjectNodeSequence)); err == nil {
+				redisVal = v
+			} else if v, err := common.RedisGet("msg_total:" + ruleset.ProjectNodeSequence + ":ruleset"); err == nil {
+				redisVal = v
+			}
+			if redisVal != "" {
+				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
+					total = parsed
 				}
 			}
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
@@ -2454,15 +2439,6 @@ func removeEdgeChanId(channelId string, closedCh chan map[string]interface{}) {
 	GlobalProject.ProjectMu.Lock()
 	defer GlobalProject.ProjectMu.Unlock()
 	clearChannelReferences(closedCh)
-}
-
-// incrementChannelRef safely increments the reference counter for the given channel ID.
-func incrementChannelRef(channelId string) {
-	GlobalProject.EdgeMapMu.RLock()
-	if cntPtr, ok := GlobalProject.msgChansCounter[channelId]; ok {
-		cntPtr.Add(1)
-	}
-	GlobalProject.EdgeMapMu.RUnlock()
 }
 
 // decrementChannelRef decrements the reference counter and returns the new value (int64).

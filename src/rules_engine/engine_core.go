@@ -636,10 +636,17 @@ func (r *Ruleset) metricLoop() {
 
 			atomic.StoreUint64(&r.processQPS, qps)
 
-			// Persist total processed messages to Redis keyed by ProjectNodeSequence
+			// Persist total processed messages per project
 			if r.ProjectNodeSequence != "" {
-				key := "msg_total:" + r.ProjectNodeSequence + ":ruleset"
-				_, _ = common.RedisIncrby(key, int64(qps))
+				if len(r.OwnerProjects) == 0 {
+					key := "msg_total:" + r.ProjectNodeSequence + ":ruleset"
+					_, _ = common.RedisIncrby(key, int64(qps))
+				} else {
+					for _, pid := range r.OwnerProjects {
+						key := fmt.Sprintf("msg_total:%s:%s:ruleset", pid, r.ProjectNodeSequence)
+						_, _ = common.RedisIncrby(key, int64(qps))
+					}
+				}
 			}
 		}
 	}
