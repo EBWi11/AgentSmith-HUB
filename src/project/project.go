@@ -364,9 +364,9 @@ func (p *Project) initComponentsForTesting() error {
 	}
 
 	// Collect all input/output/ruleset names from flowGraph
-	inputNames := []string{}
-	outputNames := []string{}
-	rulesetNames := []string{}
+	var inputNames []string
+	var outputNames []string
+	var rulesetNames []string
 
 	nameExists := func(list []string, name string) bool {
 		for _, n := range list {
@@ -927,8 +927,6 @@ func (p *Project) Start() error {
 					return errorMsg
 				}
 			}
-			// Remove verbose reuse log to reduce log volume
-			// logger.Info("Reusing already running ruleset instance", "project", p.Id, "ruleset", rs.RulesetID, "sequence", rs.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
@@ -1011,20 +1009,13 @@ func (p *Project) Start() error {
 // cleanupComponentsOnStartupFailure cleans up components when project startup fails
 // This does NOT change the project status - that should be handled by the caller
 func (p *Project) cleanupComponentsOnStartupFailure() {
-	// Reduce log verbosity: only log critical cleanup events
-	// logger.Info("Cleaning up components due to project startup failure", "project", p.Id)
-
 	// Stop outputs that were started
 	for _, out := range p.Outputs {
 		// Check if this output instance is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 		if otherProjectsUsing == 0 {
-			// Reduce log verbosity: only log errors
-			// logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
-			out.Stop()
-		} else {
-			// Reduce log verbosity: only log when skipping due to shared usage
-			// logger.Info("Skipping output stop during cleanup (still used by other projects)", "project", p.Id, "output", out.Id, "other_projects", otherProjectsUsing)
+			logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
+			_ = out.Stop()
 		}
 	}
 
@@ -1033,12 +1024,8 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 		// Check if this ruleset instance is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 		if otherProjectsUsing == 0 {
-			// Reduce log verbosity: only log errors
-			// logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
-			rs.Stop()
-		} else {
-			// Reduce log verbosity: only log when skipping due to shared usage
-			// logger.Info("Skipping ruleset stop during cleanup (still used by other projects)", "project", p.Id, "ruleset", rs.RulesetID, "other_projects", otherProjectsUsing)
+			logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
+			_ = rs.Stop()
 		}
 	}
 
@@ -1047,12 +1034,7 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 		// Check if this input is used by other projects
 		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 		if otherProjectsUsing == 0 {
-			// Reduce log verbosity: only log errors
-			// logger.Info("Stopping input component during startup failure cleanup", "project", p.Id, "input", in.Id)
-			in.Stop()
-		} else {
-			// Reduce log verbosity: only log when skipping due to shared usage
-			// logger.Info("Skipping input stop during cleanup (still used by other projects)", "project", p.Id, "input", in.Id, "other_projects", otherProjectsUsing)
+			_ = in.Stop()
 		}
 	}
 
@@ -1126,7 +1108,6 @@ func (p *Project) stopComponents() error {
 			startTime := time.Now()
 			if err := rs.Stop(); err != nil {
 				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
-				// Continue with other rulesets instead of failing immediately
 			} else {
 				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "duration", time.Since(startTime))
 			}
@@ -1319,7 +1300,6 @@ func (p *Project) GetMetrics() *ProjectMetrics {
 	return p.metrics
 }
 
-// Add a new function to analyze project dependencies
 func AnalyzeProjectDependencies() {
 	// Use dedicated project lock to prevent race conditions
 	GlobalProject.ProjectMu.RLock()
@@ -1348,24 +1328,24 @@ func AnalyzeProjectDependencies() {
 	// Analyze component instances used by each project
 	for projectID, p := range projects {
 		// Record input component instance usage
-		for _, input := range p.Inputs {
-			sequence := input.ProjectNodeSequence
+		for _, i := range p.Inputs {
+			sequence := i.ProjectNodeSequence
 			if sequence != "" {
 				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
 			}
 		}
 
 		// Record output component instance usage
-		for _, output := range p.Outputs {
-			sequence := output.ProjectNodeSequence
+		for _, o := range p.Outputs {
+			sequence := o.ProjectNodeSequence
 			if sequence != "" {
 				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
 			}
 		}
 
 		// Record ruleset instance usage
-		for _, ruleset := range p.Rulesets {
-			sequence := ruleset.ProjectNodeSequence
+		for _, r := range p.Rulesets {
+			sequence := r.ProjectNodeSequence
 			if sequence != "" {
 				instanceUsage[sequence] = append(instanceUsage[sequence], projectID)
 			}
@@ -1490,60 +1470,6 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		for projectID, p := range GlobalProject.Projects {
 			if _, exists := p.Rulesets[componentID]; exists {
 				affectedProjects[projectID] = struct{}{}
-			}
-		}
-	case "project":
-		// The project itself is affected
-		affectedProjects[componentID] = struct{}{}
-
-		// Find other projects that depend on this project
-		if p, exists := GlobalProject.Projects[componentID]; exists {
-			for _, depID := range p.DependedBy {
-				affectedProjects[depID] = struct{}{}
-			}
-		}
-	}
-
-	// Convert to string slice
-	result := make([]string, 0, len(affectedProjects))
-	for projectID := range affectedProjects {
-		result = append(result, projectID)
-	}
-
-	return result
-}
-
-// GetAffectedProjectsByInstance returns the list of project IDs affected by specific component instance changes
-// This is used when we need to identify projects using a specific component instance with a particular ProjectNodeSequence
-func GetAffectedProjectsByInstance(componentType string, componentID string, projectNodeSequence string) []string {
-	affectedProjects := make(map[string]struct{})
-
-	switch componentType {
-	case "input":
-		// Find all projects using this input (inputs are typically shared, so we check by ID)
-		for projectID, p := range GlobalProject.Projects {
-			if _, exists := p.Inputs[componentID]; exists {
-				affectedProjects[projectID] = struct{}{}
-			}
-		}
-	case "output":
-		// Find all projects using this specific output instance
-		for projectID, p := range GlobalProject.Projects {
-			if output, exists := p.Outputs[componentID]; exists {
-				// Check if this is the exact same instance by comparing ProjectNodeSequence
-				if output.ProjectNodeSequence == projectNodeSequence {
-					affectedProjects[projectID] = struct{}{}
-				}
-			}
-		}
-	case "ruleset":
-		// Find all projects using this specific ruleset instance
-		for projectID, p := range GlobalProject.Projects {
-			if ruleset, exists := p.Rulesets[componentID]; exists {
-				// Check if this is the exact same instance by comparing ProjectNodeSequence
-				if ruleset.ProjectNodeSequence == projectNodeSequence {
-					affectedProjects[projectID] = struct{}{}
-				}
 			}
 		}
 	case "project":
@@ -2309,13 +2235,13 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		}
 
 		// Collect input QPS data
-		for inputID, input := range proj.Inputs {
-			qps := input.GetConsumeQPS()
-			total := input.GetConsumeTotal()
+		for inputID, i := range proj.Inputs {
+			qps := i.GetConsumeQPS()
+			total := i.GetConsumeTotal()
 			var redisVal string
-			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:input", projectID, input.ProjectNodeSequence)); err == nil {
+			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:input", projectID, i.ProjectNodeSequence)); err == nil {
 				redisVal = v
-			} else if v, err := common.RedisGet("msg_total:" + input.ProjectNodeSequence + ":input"); err == nil {
+			} else if v, err := common.RedisGet("msg_total:" + i.ProjectNodeSequence + ":input"); err == nil {
 				redisVal = v
 			}
 			if redisVal != "" {
@@ -2328,7 +2254,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 				ProjectID:           projectID,
 				ComponentID:         inputID,
 				ComponentType:       "input",
-				ProjectNodeSequence: input.ProjectNodeSequence,
+				ProjectNodeSequence: i.ProjectNodeSequence,
 				QPS:                 qps,
 				TotalMessages:       total,
 				Timestamp:           now,
@@ -2336,13 +2262,13 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		}
 
 		// Collect output QPS data
-		for outputID, output := range proj.Outputs {
-			qps := output.GetProduceQPS()
-			total := output.GetProduceTotal()
+		for outputID, o := range proj.Outputs {
+			qps := o.GetProduceQPS()
+			total := o.GetProduceTotal()
 			var redisVal string
-			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:output", projectID, output.ProjectNodeSequence)); err == nil {
+			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:output", projectID, o.ProjectNodeSequence)); err == nil {
 				redisVal = v
-			} else if v, err := common.RedisGet("msg_total:" + output.ProjectNodeSequence + ":output"); err == nil {
+			} else if v, err := common.RedisGet("msg_total:" + o.ProjectNodeSequence + ":output"); err == nil {
 				redisVal = v
 			}
 			if redisVal != "" {
@@ -2355,7 +2281,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 				ProjectID:           projectID,
 				ComponentID:         outputID,
 				ComponentType:       "output",
-				ProjectNodeSequence: output.ProjectNodeSequence,
+				ProjectNodeSequence: o.ProjectNodeSequence,
 				QPS:                 qps,
 				TotalMessages:       total,
 				Timestamp:           now,
