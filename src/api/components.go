@@ -4,6 +4,7 @@ import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
@@ -801,22 +802,13 @@ func getPlugin(c echo.Context) error {
 
 		if p.Type == plugin.LOCAL_PLUGIN {
 			pluginType = "local"
-			// For local plugins, try to read the actual source code
-			sourceCode, err := readLocalPluginSource(id)
-			if err != nil {
-				// Fallback to explanatory text if source cannot be read
-				rawContent = fmt.Sprintf(`// Built-in Plugin: %s
-// This is a built-in plugin that cannot be viewed or edited.
-// Built-in plugins are compiled into the application and provide core functionality.
-// Error reading source: %s`, id, err.Error())
-			} else {
-				// Add header comment to indicate this is a built-in plugin
-				rawContent = fmt.Sprintf(`// Built-in Plugin: %s (Read-Only)
-// This is a built-in plugin source code for reference only.
-// Built-in plugins cannot be modified through the web interface.
-
-%s`, id, sourceCode)
+			// Get description from LocalPluginDesc
+			desc := local_plugin.LocalPluginDesc[id]
+			if desc == "" {
+				desc = "Built-in plugin (source unavailable)"
 			}
+			// For built-in plugins, only show description, not source code
+			rawContent = fmt.Sprintf("// Built-in Plugin: %s (Read-Only)\n// %s\n", id, desc)
 		} else if p.Type == plugin.YAEGI_PLUGIN {
 			pluginType = "yaegi"
 			rawContent = string(p.Payload)
