@@ -29,6 +29,13 @@ import (
 
 	// user agent
 	pua "AgentSmith-HUB/local_plugin/user_agent/parse_user_agent"
+
+	// string manipulation
+	sreplace "AgentSmith-HUB/local_plugin/string/replace"
+
+	// regex
+	rextract "AgentSmith-HUB/local_plugin/regex/extract"
+	rreplace "AgentSmith-HUB/local_plugin/regex/replace"
 )
 
 // for checknode
@@ -63,6 +70,13 @@ var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{
 
 	// user agent
 	"parseUA": pua.Eval,
+
+	// string manipulation
+	"replace": sreplace.Eval,
+
+	// regex
+	"regexExtract": rextract.Eval,
+	"regexReplace": rreplace.Eval,
 }
 
 var LocalPluginDesc = map[string]string{
@@ -72,7 +86,7 @@ var LocalPluginDesc = map[string]string{
 	"geoMatch":    "Check node: true if IP country ISO matches expected. Args: ip, countryISO.",
 
 	// time append
-	"now":       "Append: current Unix timestamp. Args: none.",
+	"now":       "Append: current time. Args: optional format (unix|ms|rfc3339).",
 	"ago":       "Append: Unix timestamp N seconds ago. Args: seconds.",
 	"dayOfWeek": "Append: day of week 0-6 (Sun=0). Args: optional timestamp.",
 	"hourOfDay": "Append: hour of day 0-23. Args: optional timestamp.",
@@ -95,4 +109,11 @@ var LocalPluginDesc = map[string]string{
 
 	// misc
 	"parseJSON": "Append: parse JSON string into map. Args: json string.",
+
+	// string manipulation
+	"replace": "Append: replace all occurrences of substring. Args: input, old, new.",
+
+	// regex
+	"regexExtract": "Append: extract text using regex. Returns match or capture groups. Args: input, pattern.",
+	"regexReplace": "Append: replace text using regex. Supports $1, $2 references. Args: input, pattern, replacement.",
 }

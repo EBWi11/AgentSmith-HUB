@@ -118,7 +118,239 @@
                 <!-- Short vertical line for empty state -->
                 <div class="absolute left-5 top-0 h-3 w-px bg-gray-300"></div>
               </div>
-              <!-- Normal component list -->
+              <!-- Special handling for plugins with built-in submenu -->
+              <template v-else-if="type === 'plugins'">
+                <div v-if="getOrganizedPlugins().builtinPlugins.length > 0">
+                  <!-- Built-in plugins submenu -->
+                  <div class="relative">
+                    <div class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                         @click="collapsed.builtinPlugins = !collapsed.builtinPlugins">
+                      <!-- Tree lines -->
+                      <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="getOrganizedPlugins().customPlugins.length > 0"></div>
+                      <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                      <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                      
+                      <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                        <svg class="w-3 h-3 mr-2 transition-transform duration-200 flex-shrink-0"
+                             :class="{ 'rotate-90': !collapsed.builtinPlugins }"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        <span class="text-sm text-gray-600 font-medium">Built-in Plugins</span>
+                        <span class="ml-2 text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">
+                          {{ getOrganizedPlugins().builtinPlugins.length }}
+                        </span>
+                      </div>
+                    </div>
+                    
+                                         <!-- Built-in plugins list -->
+                     <div v-if="!collapsed.builtinPlugins" class="relative">
+                       <!-- Continuous vertical line for built-in plugins section -->
+                       <div class="absolute left-5 top-0 w-px bg-gray-300 z-10" 
+                            :style="{ height: getOrganizedPlugins().customPlugins.length > 0 ? '100%' : (getOrganizedPlugins().builtinPlugins.length * 32) + 'px' }"></div>
+                       
+                       <div v-for="(item, index) in getOrganizedPlugins().builtinPlugins" :key="item.id"
+                            class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                            :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
+                            @click="handleItemClick(type, item)">
+                         <!-- Tree lines for built-in plugins -->
+                         <div class="absolute left-8 top-1/2 bottom-0 w-px bg-gray-300 z-10" v-if="index < getOrganizedPlugins().builtinPlugins.length - 1"></div>
+                         <div class="absolute left-8 top-1/2 w-2 h-px bg-gray-300 z-10"></div>
+                         <div class="absolute left-8 top-0 h-1/2 w-px bg-gray-300 z-10"></div>
+                        
+                        <div class="flex items-center min-w-0 flex-1 pl-11 pr-3">
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center">
+                              <span class="text-sm truncate">{{ item.id }}</span>
+                              <!-- Search match indicators -->
+                              <div v-if="item.searchMatch" class="ml-1 flex items-center space-x-1">
+                                <span v-if="item.searchMatch.nameMatch" 
+                                      class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full cursor-help"
+                                      @mouseenter="showTooltip($event, 'Name match')"
+                                      @mouseleave="hideTooltip">
+                                  N
+                                </span>
+                                <span v-if="item.searchMatch.type === 'content' || item.searchMatch.type === 'both'" 
+                                      class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full cursor-help"
+                                      @mouseenter="showTooltip($event, `Content match: Line ${item.searchMatch.lineNumber}`)"
+                                      @mouseleave="hideTooltip">
+                                  C
+                                </span>
+                              </div>
+                            </div>
+                            <!-- Show matching content line for content matches -->
+                            <div v-if="item.searchMatch && (item.searchMatch.type === 'content' || item.searchMatch.type === 'both') && item.searchMatch.lineContent" 
+                                 class="text-xs text-gray-500 truncate mt-0.5">
+                              Line {{ item.searchMatch.lineNumber }}: {{ item.searchMatch.lineContent }}
+                            </div>
+                                                     </div>
+                           <!-- Plugin function type badge -->
+                           <span v-if="isCheckNodeType(item)" 
+                                 class="ml-2 text-xs bg-green-100 text-green-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                                 @mouseenter="showTooltip($event, 'Check Node Plugin')"
+                                 @mouseleave="hideTooltip">
+                             C
+                           </span>
+                           <span v-else-if="isPluginNodeType(item)" 
+                                 class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                                 @mouseenter="showTooltip($event, 'Plugin Node')"
+                                 @mouseleave="hideTooltip">
+                             A
+                           </span>
+                           <!-- Built-in Plugin badge -->
+                           <span class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                                 @mouseenter="showTooltip($event, 'Built-in Plugin')"
+                                 @mouseleave="hideTooltip">
+                             B
+                           </span>
+                         </div>
+                        
+                        <!-- Actions menu for built-in plugins -->
+                        <div class="relative mr-3">
+                          <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                                  @click.stop="toggleMenu(item)">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                            </svg>
+                          </button>
+                          <!-- Dropdown menu for built-in plugins -->
+                          <div v-if="item.menuOpen" 
+                               class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                               @click.stop>
+                            <div class="py-1">
+                              <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                                 @click.prevent.stop="openTestPlugin(item)">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                                Test Plugin
+                              </a>
+                              <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                                 @click.prevent.stop="copyName(item)">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                                </svg>
+                                Copy Name
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Custom plugins -->
+                <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id"
+                     class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                     :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
+                     @click="handleItemClick(type, item)">
+                  <!-- Tree lines for custom plugins -->
+                  <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < getOrganizedPlugins().customPlugins.length - 1"></div>
+                  <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                  <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                  
+                                     <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                     <div class="flex-1 min-w-0">
+                       <div class="flex items-center">
+                         <span class="text-sm truncate">{{ item.id }}</span>
+                         <!-- Search match indicators -->
+                         <div v-if="item.searchMatch" class="ml-1 flex items-center space-x-1">
+                           <span v-if="item.searchMatch.nameMatch" 
+                                 class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full cursor-help"
+                                 @mouseenter="showTooltip($event, 'Name match')"
+                                 @mouseleave="hideTooltip">
+                             N
+                           </span>
+                           <span v-if="item.searchMatch.type === 'content' || item.searchMatch.type === 'both'" 
+                                 class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full cursor-help"
+                                 @mouseenter="showTooltip($event, `Content match: Line ${item.searchMatch.lineNumber}`)"
+                                 @mouseleave="hideTooltip">
+                             C
+                           </span>
+                         </div>
+                       </div>
+                       <!-- Show matching content line for content matches -->
+                       <div v-if="item.searchMatch && (item.searchMatch.type === 'content' || item.searchMatch.type === 'both') && item.searchMatch.lineContent" 
+                            class="text-xs text-gray-500 truncate mt-0.5">
+                         Line {{ item.searchMatch.lineNumber }}: {{ item.searchMatch.lineContent }}
+                       </div>
+                     </div>
+                     <!-- Plugin function type badge -->
+                     <span v-if="isCheckNodeType(item)" 
+                           class="ml-2 text-xs bg-green-100 text-green-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                           @mouseenter="showTooltip($event, 'Check Node Plugin')"
+                           @mouseleave="hideTooltip">
+                       C
+                     </span>
+                     <span v-else-if="isPluginNodeType(item)" 
+                           class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                           @mouseenter="showTooltip($event, 'Plugin Node')"
+                           @mouseleave="hideTooltip">
+                       A
+                     </span>
+                     <!-- Temporary file badge -->
+                     <span v-if="item.hasTemp" 
+                           class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                           @mouseenter="showTooltip($event, 'Temporary Version')"
+                           @mouseleave="hideTooltip">
+                       T
+                     </span>
+                   </div>
+                  
+                  <!-- Actions menu for custom plugins -->
+                  <div class="relative mr-3">
+                    <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                            @click.stop="toggleMenu(item)">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                      </svg>
+                    </button>
+                    <!-- Dropdown menu for custom plugins -->
+                    <div v-if="item.menuOpen" 
+                         class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                         @click.stop>
+                      <div class="py-1">
+                        <!-- Edit action -->
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type, id: item.id, isEdit: true })">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                          </svg>
+                          Edit
+                        </a>
+                        
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openTestPlugin(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                          Test Plugin
+                        </a>
+                        
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="copyName(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                          </svg>
+                          Copy Name
+                        </a>
+                        
+                        <!-- Delete action -->
+                        <div class="border-t border-gray-100 my-1"></div>
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
+                           @click.prevent.stop="openDeleteModal(type, item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <!-- Normal component list for non-plugin types -->
               <div v-else v-for="(item, index) in filteredItems(type)" :key="item.id" 
                    class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                    :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
@@ -157,12 +389,25 @@
                       Line {{ item.searchMatch.lineNumber }}: {{ item.searchMatch.lineContent }}
                     </div>
                   </div>
+                  <!-- Plugin function type badge for plugins -->
+                  <span v-if="type === 'plugins' && isCheckNodeType(item)" 
+                        class="ml-2 text-xs bg-green-100 text-green-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                        @mouseenter="showTooltip($event, 'Check Node Plugin')"
+                        @mouseleave="hideTooltip">
+                    C
+                  </span>
+                  <span v-else-if="type === 'plugins' && isPluginNodeType(item)" 
+                        class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                        @mouseenter="showTooltip($event, 'Plugin Node')"
+                        @mouseleave="hideTooltip">
+                    A
+                  </span>
                   <!-- Plugin type badge -->
                   <span v-if="type === 'plugins' && item.type === 'local'" 
                         class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
                         @mouseenter="showTooltip($event, 'Built-in Plugin')"
                         @mouseleave="hideTooltip">
-                    L
+                    B
                   </span>
                   <!-- Temporary file badge -->
                   <span v-if="item.hasTemp" 
@@ -1057,7 +1302,8 @@ const collapsed = reactive({
   rulesets: true,
   plugins: true,
   projects: true,
-  settings: true
+  settings: true,
+  builtinPlugins: true // New state for built-in plugins submenu
 })
 
 const sections = reactive({
@@ -1441,6 +1687,38 @@ function filteredItems(type) {
   return nameMatchesWithInfo
 }
 
+// Get organized plugin items with built-in plugins in a submenu
+function getOrganizedPlugins() {
+  const allPlugins = filteredItems('plugins')
+  const builtinPlugins = allPlugins.filter(item => item.type === 'local')
+  const customPlugins = allPlugins.filter(item => item.type !== 'local')
+  
+  return {
+    builtinPlugins,
+    customPlugins
+  }
+}
+
+// Determine if a plugin should be displayed as Plugin Node (A badge) based on its usage
+function isPluginNodeType(item) {
+  // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
+  if (item.id && item.id.startsWith('pushMsgTo')) {
+    return true
+  }
+  // Normal case: check returnType
+  return item.returnType === 'interface{}'
+}
+
+// Determine if a plugin should be displayed as Check Node (C badge)
+function isCheckNodeType(item) {
+  // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
+  if (item.id && item.id.startsWith('pushMsgTo')) {
+    return false
+  }
+  // Normal case: check returnType
+  return item.returnType === 'bool'
+}
+
 async function fetchAllItems() {
   const types = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects', 'cluster']
   await Promise.all(types.map(type => fetchItems(type)))
@@ -1469,10 +1747,13 @@ async function fetchItems(type) {
             console.warn(`Skipping invalid plugin item:`, item);
             return null;
           }
+
           return {
             id: item.name,
             type: item.type,
-            hasTemp: item.hasTemp
+            hasTemp: item.hasTemp,
+            returnType: item.returnType, // 添加returnType字段
+            parameters: item.parameters // 添加parameters字段
           }
         } else {
           // 其他组件必须有id字段
