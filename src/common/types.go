@@ -9,7 +9,6 @@ type CheckCoreCache struct {
 type HubConfig struct {
 	Redis         string `yaml:"redis"`
 	RedisPassword string `yaml:"redis_password,omitempty"`
-	Listen        string `yaml:"listen,omitempty"`
 	ConfigRoot    string
 	Leader        string
 	LocalIP       string

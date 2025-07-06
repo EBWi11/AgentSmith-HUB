@@ -27,6 +27,7 @@ func main() {
 	var (
 		cfgRoot   = flag.String("config_root", "", "directory containing config.yaml and component sub dirs (required)")
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
+		port      = flag.Int("port", 8080, "HTTP listen port (leader only)")
 		showVer   = flag.Bool("version", false, "show version")
 		buildVers = "v0.2.0"
 	)
@@ -41,7 +42,7 @@ func main() {
 		return
 	}
 
-	// Load hub config (listen/redis etc.)
+	// Load hub config (redis etc.)
 	if err := loadHubConfig(*cfgRoot); err != nil {
 		logger.Error("load hub config", "error", err)
 		return
@@ -62,20 +63,27 @@ func main() {
 	// Detect local IP & init cluster manager
 	ip, _ := common.GetLocalIP()
 	common.Config.LocalIP = ip
-	cm := cluster.ClusterInit(ip, ip)
+
+	// Self address used by cluster components (include port only for leader)
+	selfAddr := ip
+	if *isLeader {
+		selfAddr = fmt.Sprintf("%s:%d", ip, *port)
+	}
+
+	cm := cluster.ClusterInit(ip, selfAddr)
 	cluster.NodeID = ip
 
 	if *isLeader {
 		common.Config.Leader = ip
-		cm.SetLeader(ip, ip)
+		cm.SetLeader(ip, selfAddr)
 		cm.StartHeartbeatLoop()
 		cm.StartProjectStatesSyncLoop()
 		token, _ := readToken(true)
 		common.Config.Token = token
 	} else {
 		cm.StartHeartbeatLoop() // follower heartbeats only
-		token, _ := readToken(false)
-		common.Config.Token = token // may be empty
+		// Followers don't expose HTTP API, no token needed
+		common.Config.Token = ""
 	}
 
 	// Load components & projects
@@ -92,7 +100,9 @@ func main() {
 		// Leader extra services
 		common.InitQPSManager()
 		common.InitClusterSystemManager()
-		go api.ServerStart(common.Config.Listen) // start Echo API
+
+		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
+		go api.ServerStart(listenAddr) // start Echo API on specified port
 	}
 
 	// Start QPS collector on all nodes (leader and followers)
@@ -226,9 +236,6 @@ func loadHubConfig(root string) error {
 		return err
 	}
 	common.Config.ConfigRoot = root
-	if common.Config.Listen == "" {
-		common.Config.Listen = "0.0.0.0:8080"
-	}
 	return nil
 }
 

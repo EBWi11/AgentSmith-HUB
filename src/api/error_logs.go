@@ -162,7 +162,11 @@ func readErrorLogsFromFile(filePath string, source string, filter ErrorLogFilter
 
 		// Set node information
 		entry.NodeID = common.Config.LocalIP
-		entry.NodeAddress = common.Config.Listen
+		if cluster.ClusterInstance != nil && cluster.ClusterInstance.SelfAddress != "" {
+			entry.NodeAddress = cluster.ClusterInstance.SelfAddress
+		} else {
+			entry.NodeAddress = common.Config.LocalIP
+		}
 
 		logs = append(logs, entry)
 	}
