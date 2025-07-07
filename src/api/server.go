@@ -220,6 +220,9 @@ func ServerStart(listener string) error {
 	// MCP Installation endpoints (public access for easy setup)
 	e.GET("/mcp/install", getMCPInstallConfig) // MCP installation configuration
 
+	// Plugin statistics endpoint - REQUIRE AUTH
+	auth.GET("/plugin-stats", GetPluginStats)
+
 	if err := e.Start(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

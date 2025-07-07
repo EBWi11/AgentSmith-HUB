@@ -1485,6 +1485,15 @@ export const hubApi = {
       console.error('Error fetching operations stats:', error);
       throw error;
     }
+  },
+
+  async getPluginStats(params = {}) {
+    try {
+      const response = await api.get('/plugin-stats', { params });
+      return response.data;
+    } catch (error) {
+      return handleApiError(error, 'Error fetching plugin stats:', true);
+    }
   }
 };
 

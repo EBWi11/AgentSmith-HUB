@@ -364,10 +364,12 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 				}
 			}()
 
+			common.RecordPluginInvoke(p.Name, err == nil)
 			return result, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
+			common.RecordPluginInvoke(p.Name, false)
 			return false, err
 		}
 	case 1: // yaegi plugin
@@ -424,8 +426,10 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 			err = nil
 		}()
 
+		common.RecordPluginInvoke(p.Name, err == nil)
 		return result, err
 	}
+	common.RecordPluginInvoke(p.Name, false)
 	return false, fmt.Errorf("unknown plugin type")
 }
 
@@ -456,10 +460,12 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 				}
 			}()
 
+			common.RecordPluginInvoke(p.Name, err == nil)
 			return result, success, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
+			common.RecordPluginInvoke(p.Name, false)
 			return nil, false, err
 		}
 	case 1: // yaegi plugin
@@ -522,8 +528,10 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 			err = nil
 		}()
 
+		common.RecordPluginInvoke(p.Name, err == nil)
 		return result, success, err
 	}
+	common.RecordPluginInvoke(p.Name, false)
 	return nil, false, fmt.Errorf("unknown plugin type")
 }
 
