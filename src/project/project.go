@@ -819,6 +819,7 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
+		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
@@ -829,6 +830,7 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
+		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to load components: %v", err)
 	}
 
@@ -839,6 +841,7 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
+		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
 

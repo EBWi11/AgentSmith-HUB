@@ -201,6 +201,10 @@ func loadLocalProjects() {
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
 		if p, err := project.NewProject(f, "", id); err == nil {
+			// Load persisted status from .project_status file (if any)
+			if savedStatus, err2 := p.LoadProjectStatus(); err2 == nil {
+				p.Status = savedStatus
+			}
 			project.GlobalProject.Projects[id] = p
 		}
 	}
@@ -239,10 +243,10 @@ func loadHubConfig(root string) error {
 	return nil
 }
 
-// StartAllProject starts all loaded projects (simple version).
+// StartAllProject starts projects that were running before hub restart.
 func StartAllProject() {
 	for _, p := range project.GlobalProject.Projects {
-		if p.Status != project.ProjectStatusRunning {
+		if p.Status == project.ProjectStatusRunning {
 			if err := p.Start(); err != nil {
 				logger.Error("project start", "project", p.Id, "error", err)
 				api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
