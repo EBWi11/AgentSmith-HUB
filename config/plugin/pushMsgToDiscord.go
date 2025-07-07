@@ -1,6 +1,3 @@
-//go:build plugin_discord
-// +build plugin_discord
-
 // This file is compiled only when building the Discord plugin.
 
 package plugin

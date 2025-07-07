@@ -1,6 +1,3 @@
-//go:build plugin_telegram
-// +build plugin_telegram
-
 package plugin
 
 import (

@@ -1,6 +1,3 @@
-//go:build plugin_lark
-// +build plugin_lark
-
 package plugin
 
 import (

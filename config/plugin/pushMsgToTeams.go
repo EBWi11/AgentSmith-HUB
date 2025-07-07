@@ -1,6 +1,3 @@
-//go:build plugin_teams
-// +build plugin_teams
-
 package plugin
 
 import (
