@@ -96,49 +96,6 @@
       </div>
     </div>
 
-    <!-- Plugin Statistics Cards - Only show if there are plugin calls -->
-    <div v-if="pluginStats.totalSuccess > 0 || pluginStats.totalFailure > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <!-- Plugin Success Card -->
-      <div class="bg-white rounded-lg shadow-sm p-6">
-        <div class="flex items-center">
-          <div class="flex-shrink-0">
-            <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">Plugin Success</p>
-            <div class="flex items-baseline">
-              <p class="text-2xl font-semibold text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(pluginStats.totalSuccess) }}</p>
-              <p class="ml-2 text-sm text-green-600">today</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Plugin Failure Card -->
-      <div class="bg-white rounded-lg shadow-sm p-6">
-        <div class="flex items-center">
-          <div class="flex-shrink-0">
-            <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
-              <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-500">Plugin Failures</p>
-            <div class="flex items-baseline">
-              <p class="text-2xl font-semibold text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(pluginStats.totalFailure) }}</p>
-              <p class="ml-2 text-sm text-red-600">today</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Second Row: Hub Total Statistics and Development Status -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Hub Total Statistics -->
