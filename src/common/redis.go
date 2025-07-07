@@ -183,6 +183,35 @@ func RedisIncrby(key string, value int64) (int64, error) {
 	return rdb.IncrBy(ctx, key, value).Result()
 }
 
+// RedisIncrbyWithDailyTTL increments a key and sets TTL to expire at next day 00:00:00 if no TTL exists
+// This is specifically designed for msg_total keys to ensure daily statistics reset properly
+func RedisIncrbyWithDailyTTL(key string, value int64) (int64, error) {
+	// First increment the value
+	result, err := rdb.IncrBy(ctx, key, value).Result()
+	if err != nil {
+		return result, err
+	}
+
+	// Set TTL for msg_total keys to expire at next day 00:00:00
+	// This ensures daily statistics reset properly and don't accumulate across restarts
+	if strings.HasPrefix(key, "msg_total:") {
+		// Only set TTL if key doesn't already have one (to avoid resetting existing TTL)
+		ttl := rdb.TTL(ctx, key).Val()
+		if ttl == -1 { // -1 means no expiration set
+			now := time.Now()
+			// Calculate seconds until next day 00:00:00
+			nextDay := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+
+			ttlSeconds := int(nextDay.Sub(now).Seconds())
+			if ttlSeconds > 0 {
+				rdb.Expire(ctx, key, time.Duration(ttlSeconds)*time.Second)
+			}
+		}
+	}
+
+	return result, err
+}
+
 func RedisDel(key string) error {
 	return rdb.Del(ctx, key).Err()
 }

@@ -440,11 +440,11 @@ func (in *Input) metricLoop() {
 				if len(in.OwnerProjects) == 0 {
 					// Fallback for legacy instances
 					key := "msg_total:" + in.ProjectNodeSequence + ":input"
-					_, _ = common.RedisIncrby(key, int64(qps))
+					_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 				} else {
 					for _, pid := range in.OwnerProjects {
 						key := fmt.Sprintf("msg_total:%s:%s:input", pid, in.ProjectNodeSequence)
-						_, _ = common.RedisIncrby(key, int64(qps))
+						_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 					}
 				}
 			}

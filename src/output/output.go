@@ -679,11 +679,11 @@ func (out *Output) metricLoop() {
 			if out.ProjectNodeSequence != "" {
 				if len(out.OwnerProjects) == 0 {
 					key := "msg_total:" + out.ProjectNodeSequence + ":output"
-					_, _ = common.RedisIncrby(key, int64(qps))
+					_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 				} else {
 					for _, pid := range out.OwnerProjects {
 						key := fmt.Sprintf("msg_total:%s:%s:output", pid, out.ProjectNodeSequence)
-						_, _ = common.RedisIncrby(key, int64(qps))
+						_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 					}
 				}
 			}

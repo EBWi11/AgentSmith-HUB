@@ -656,11 +656,11 @@ func (r *Ruleset) metricLoop() {
 			if r.ProjectNodeSequence != "" {
 				if len(r.OwnerProjects) == 0 {
 					key := "msg_total:" + r.ProjectNodeSequence + ":ruleset"
-					_, _ = common.RedisIncrby(key, int64(qps))
+					_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 				} else {
 					for _, pid := range r.OwnerProjects {
 						key := fmt.Sprintf("msg_total:%s:%s:ruleset", pid, r.ProjectNodeSequence)
-						_, _ = common.RedisIncrby(key, int64(qps))
+						_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
 					}
 				}
 			}
