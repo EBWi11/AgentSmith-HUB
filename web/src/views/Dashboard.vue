@@ -338,37 +338,70 @@
     </div>
 
     <!-- Plugin Call Overview - Only show if there are plugin calls -->
-    <div v-if="Object.keys(pluginStats.plugins).length > 0" class="bg-white rounded-lg shadow-sm p-6">
+    <div v-if="Object.keys(sortedPluginStats).length > 0" class="bg-white rounded-lg shadow-sm p-6">
       <h3 class="text-lg font-medium text-gray-900 mb-4">Plugin Call Overview</h3>
-      <div v-if="loading.stats && Object.keys(pluginStats.plugins).length === 0" class="flex justify-center items-center py-8">
+      <div v-if="loading.stats && Object.keys(sortedPluginStats).length === 0" class="flex justify-center items-center py-8">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
       <div v-else class="space-y-4">
-        <div v-for="(stats, pluginName) in pluginStats.plugins" :key="pluginName" 
-             class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-          <div class="flex items-center">
-            <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
-            <div>
-              <p class="font-medium text-gray-900">{{ pluginName }}</p>
-              <p class="text-sm text-gray-500">Plugin invocations today</p>
-            </div>
+        <!-- Summary Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+          <div class="text-center">
+            <p class="text-sm text-gray-600">Total Plugins Used</p>
+            <p class="text-2xl font-bold text-blue-600">{{ Object.keys(sortedPluginStats).length }}</p>
           </div>
-          <div class="text-right">
-            <div class="flex items-center space-x-4">
+          <div class="text-center">
+            <p class="text-sm text-gray-600">Total Success Calls</p>
+            <p class="text-2xl font-bold text-green-600">{{ formatNumber(pluginStats.totalSuccess) }}</p>
+          </div>
+          <div class="text-center">
+            <p class="text-sm text-gray-600">Total Failed Calls</p>
+            <p class="text-2xl font-bold text-red-600">{{ formatNumber(pluginStats.totalFailure) }}</p>
+          </div>
+        </div>
+
+        <!-- Individual Plugin Stats -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div v-for="(stats, pluginName) in sortedPluginStats" :key="pluginName" 
+               class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center">
+                <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
+                <div>
+                  <p class="font-medium text-gray-900">{{ pluginName }}</p>
+                  <p class="text-xs text-gray-500">{{ formatNumber((stats.success || 0) + (stats.failure || 0)) }} total calls today</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-sm font-medium" :class="{
+                  'text-green-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 95,
+                  'text-yellow-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 80,
+                  'text-red-600': getSuccessRate(stats.success || 0, stats.failure || 0) < 80
+                }">
+                  {{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}% success
+                </div>
+              </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
               <!-- Success Count -->
-              <div class="text-center">
-                <p class="text-xs text-green-600 font-medium">Success</p>
-                <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.success || 0) }}</p>
+              <div class="text-center p-3 bg-green-50 rounded-lg">
+                <p class="text-xs text-green-600 font-medium mb-1">Success</p>
+                <p class="text-lg font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.success || 0) }}</p>
               </div>
+              
               <!-- Failure Count -->
-              <div class="text-center">
-                <p class="text-xs text-red-600 font-medium">Failure</p>
-                <p class="text-sm font-bold text-red-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.failure || 0) }}</p>
+              <div class="text-center p-3 bg-red-50 rounded-lg">
+                <p class="text-xs text-red-600 font-medium mb-1">Failure</p>
+                <p class="text-lg font-bold text-red-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.failure || 0) }}</p>
               </div>
-              <!-- Success Rate -->
-              <div class="text-center">
-                <p class="text-xs text-gray-500">Success Rate</p>
-                <p class="text-sm font-medium text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}%</p>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="mt-3">
+              <div class="w-full bg-gray-200 rounded-full h-2">
+                <div class="bg-green-600 h-2 rounded-full transition-all duration-300" 
+                     :style="{ width: getSuccessRate(stats.success || 0, stats.failure || 0) + '%' }"></div>
               </div>
             </div>
           </div>
@@ -738,6 +771,25 @@ function getSuccessRate(success, failure) {
   return (success / total) * 100
 }
 
+// Sorted plugin statistics by total calls (descending), only show plugins with calls
+const sortedPluginStats = computed(() => {
+  const plugins = Object.entries(pluginStats.value.plugins)
+  return plugins
+    .filter(([, stats]) => {
+      const total = (stats.success || 0) + (stats.failure || 0)
+      return total > 0 // Only include plugins that have been called
+    })
+    .sort(([, a], [, b]) => {
+      const totalA = (a.success || 0) + (a.failure || 0)
+      const totalB = (b.success || 0) + (b.failure || 0)
+      return totalB - totalA // Sort by total calls descending
+    })
+    .reduce((acc, [pluginName, stats]) => {
+      acc[pluginName] = stats
+      return acc
+    }, {})
+})
+
 // Methods - 格式化函数现在从 utils/common.js 导入
 
 function navigateToProject(projectId) {
@@ -761,7 +813,11 @@ async function refreshStats() {
     const [messageResponse, systemResponse, pluginStatsResponse] = await Promise.all([
       hubApi.getAggregatedDailyMessages(),
       hubApi.getAggregatedSystemMetrics(),
-      hubApi.getPluginStats({ date: new Date().toISOString().split('T')[0] })
+      // Updated plugin stats call - explicitly request aggregated data across all nodes
+      hubApi.getPluginStats({ 
+        date: new Date().toISOString().split('T')[0],
+        // No need to specify node_id or by_node - defaults to aggregated across all nodes
+      })
     ])
 
     messageData.value = messageResponse.data || {}
