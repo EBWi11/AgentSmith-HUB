@@ -138,6 +138,7 @@ func ServerStart(listener string) error {
 	auth.DELETE("/plugins/:id", deletePlugin)
 	auth.GET("/available-plugins", getAvailablePlugins)
 	auth.GET("/plugin-parameters/:id", GetPluginParameters)
+	auth.GET("/plugin-parameters", GetBatchPluginParameters)
 
 	// Component verification and testing - REQUIRE AUTH
 	auth.POST("/verify/:type/:id", verifyComponent)
@@ -175,6 +176,7 @@ func ServerStart(listener string) error {
 	auth.GET("/samplers/data", GetSamplerData)
 	auth.POST("/samplers/data/intelligent", GetSamplersDataIntelligent)
 	auth.GET("/ruleset-fields/:id", GetRulesetFields)
+	auth.GET("/ruleset-fields", GetBatchRulesetFields)
 
 	// Cancel upgrade routes - REQUIRE AUTH
 	auth.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)

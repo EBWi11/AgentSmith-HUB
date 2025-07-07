@@ -290,23 +290,48 @@ export const hubApi = {
   },
 
   async deleteInput(id) {
-    return this.deleteComponent('inputs', id);
+    const response = await this.deleteComponent('inputs', id);
+    // Dispatch global event for component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'deleted', type: 'inputs', id, timestamp: Date.now() }
+    }));
+    return response;
   },
 
   async deleteOutput(id) {
-    return this.deleteComponent('outputs', id);
+    const response = await this.deleteComponent('outputs', id);
+    // Dispatch global event for component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'deleted', type: 'outputs', id, timestamp: Date.now() }
+    }));
+    return response;
   },
 
   async deleteRuleset(id) {
-    return this.deleteComponent('rulesets', id);
+    const response = await this.deleteComponent('rulesets', id);
+    // Dispatch global event for component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'deleted', type: 'rulesets', id, timestamp: Date.now() }
+    }));
+    return response;
   },
 
   async deleteProject(id) {
-    return this.deleteComponent('projects', id);
+    const response = await this.deleteComponent('projects', id);
+    // Dispatch global event for component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'deleted', type: 'projects', id, timestamp: Date.now() }
+    }));
+    return response;
   },
 
   async deletePlugin(id) {
-    return this.deleteComponent('plugins', id);
+    const response = await this.deleteComponent('plugins', id);
+    // Dispatch global event for component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'deleted', type: 'plugins', id, timestamp: Date.now() }
+    }));
+    return response;
   },
 
   async startProject(id) {
@@ -669,6 +694,12 @@ export const hubApi = {
       default:
         throw new Error('Unsupported component type');
     }
+    
+    // Dispatch global event for all component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'updated', type, id, timestamp: Date.now() }
+    }));
+    
     return response;
   },
 
@@ -694,6 +725,12 @@ export const hubApi = {
       default:
         throw new Error('Unsupported component type');
     }
+    
+    // Dispatch global event for all component changes
+    window.dispatchEvent(new CustomEvent('componentChanged', { 
+      detail: { action: 'created', type, id, timestamp: Date.now() }
+    }));
+    
     return response;
   },
 
@@ -1042,6 +1079,18 @@ export const hubApi = {
         error: error.message || 'Network error or server not responding',
         inputs: []
       };
+    }
+  },
+
+  // Batch get ruleset fields
+  async getBatchRulesetFields(ids = []) {
+    try {
+      const idsParam = ids.length > 0 ? `?ids=${ids.join(',')}` : '';
+      const response = await api.get(`/ruleset-fields${idsParam}`);
+      return response.data || {};
+    } catch (error) {
+      console.error('Error fetching batch ruleset fields:', error);
+      return {};
     }
   },
 
@@ -1493,6 +1542,17 @@ export const hubApi = {
       return response.data;
     } catch (error) {
       return handleApiError(error, 'Error fetching plugin stats:', true);
+    }
+  },
+
+  async getBatchPluginParameters(ids = []) {
+    try {
+      const params = ids.length ? { ids: ids.join(',') } : {}
+      const response = await api.get('/plugin-parameters', { params })
+      return response.data // expected format: { [id]: parametersArray }
+    } catch (error) {
+      console.error('Error fetching batch plugin parameters:', error)
+      throw error
     }
   }
 };

@@ -2681,3 +2681,124 @@ func addDescAppendToRule(ruleRaw, ruleName string) string {
 
 	return ruleRaw[:idx] + appendSnippet + ruleRaw[idx:]
 }
+
+// GetBatchPluginParameters returns parameter information for multiple plugins
+func GetBatchPluginParameters(c echo.Context) error {
+	idsParam := c.QueryParam("ids")
+	if idsParam == "" {
+		// Return all plugins if no specific IDs requested
+		result := make(map[string]interface{})
+
+		// Get parameters from loaded plugins only (no temporary plugins)
+		for id, p := range plugin.Plugins {
+			result[id] = map[string]interface{}{
+				"parameters": p.Parameters,
+				"returnType": p.ReturnType,
+			}
+		}
+
+		return c.JSON(http.StatusOK, result)
+	}
+
+	// Parse comma-separated IDs
+	ids := strings.Split(idsParam, ",")
+	result := make(map[string]interface{})
+
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+
+		// Check if plugin exists in memory (loaded plugins only)
+		if p, exists := plugin.Plugins[id]; exists {
+			result[id] = map[string]interface{}{
+				"parameters": p.Parameters,
+				"returnType": p.ReturnType,
+			}
+		} else {
+			// Plugin not found in loaded plugins
+			result[id] = map[string]interface{}{
+				"error": "Plugin not found",
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// GetBatchRulesetFields returns field information for multiple rulesets
+func GetBatchRulesetFields(c echo.Context) error {
+	idsParam := c.QueryParam("ids")
+	if idsParam == "" {
+		// Return all rulesets if no specific IDs requested
+		result := make(map[string]interface{})
+
+		// Get field keys from all loaded rulesets
+		for id := range project.GlobalProject.Rulesets {
+			fields := GetRulesetFieldsForID(id)
+			result[id] = fields
+		}
+
+		return c.JSON(http.StatusOK, result)
+	}
+
+	// Parse comma-separated IDs
+	ids := strings.Split(idsParam, ",")
+	result := make(map[string]interface{})
+
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+
+		// Check if ruleset exists
+		if _, exists := project.GlobalProject.Rulesets[id]; exists {
+			fields := GetRulesetFieldsForID(id)
+			result[id] = fields
+		} else {
+			// Ruleset not found
+			result[id] = map[string]interface{}{
+				"error": "Ruleset not found",
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// GetRulesetFieldsForID is a helper function to get field keys for a specific ruleset
+func GetRulesetFieldsForID(id string) map[string]interface{} {
+	// Get sample data for this ruleset
+	fieldSet := make(map[string]bool)
+
+	// Try to get sampler data for this ruleset
+	samplerName := "ruleset." + id
+	sampler := common.GetSampler(samplerName)
+	if sampler != nil {
+		samples := sampler.GetSamples()
+		// Extract field keys from all samples
+		for _, sampleList := range samples {
+			for _, sample := range sampleList {
+				if sample.Data != nil {
+					if dataMap, ok := sample.Data.(map[string]interface{}); ok {
+						extractKeysFromMap(dataMap, "", fieldSet)
+					}
+				}
+			}
+		}
+	}
+
+	// Convert to sorted slice
+	fieldKeys := make([]string, 0, len(fieldSet))
+	for field := range fieldSet {
+		fieldKeys = append(fieldKeys, field)
+	}
+	sort.Strings(fieldKeys)
+
+	return map[string]interface{}{
+		"fieldKeys":   fieldKeys,
+		"sampleCount": len(fieldKeys),
+	}
+}

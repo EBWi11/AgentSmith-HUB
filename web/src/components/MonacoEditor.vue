@@ -10,6 +10,7 @@ import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { onBeforeUpdate } from 'vue';
 import { hubApi } from '@/api';
+import { useMonacoComponentCache } from '@/composables/useComponentCache';
 
 const props = defineProps({
   value: String,
@@ -30,40 +31,31 @@ let editor = null;
 let diffEditor = null;
 const store = useStore();
 
+// Use unified component cache system
+const componentCache = useMonacoComponentCache(props.componentType);
 
+// Get component lists from cache
+const inputComponents = computed(() => componentCache.components.value.inputs || []);
+const outputComponents = computed(() => componentCache.components.value.outputs || []);
+const rulesetComponents = computed(() => componentCache.components.value.rulesets || []);
+const pluginComponents = computed(() => componentCache.components.value.plugins || []);
 
-// Note: Component uses local static arrays for autocompletion data instead of store
+// Plugin parameters cache from unified cache
+const pluginParametersCache = computed(() => componentCache.parameters.value.plugins || {});
 
-// Get component lists
-const inputComponents = computed(() => store.getters.getComponents('inputs'));
-const outputComponents = computed(() => store.getters.getComponents('outputs'));
-const rulesetComponents = computed(() => store.getters.getComponents('rulesets'));
-const pluginComponents = computed(() => store.getters.getComponents('plugins'));
-
-// Plugin parameters cache
-const pluginParametersCache = ref({});
-
-// Function to get plugin parameters
+// Function to get plugin parameters (now using unified cache)
 const getPluginParameters = async (pluginId) => {
-  if (pluginId in pluginParametersCache.value) {
-    return pluginParametersCache.value[pluginId];
+  const cached = pluginParametersCache.value[pluginId];
+  if (cached) {
+    return cached;
   }
   
+  // If not in cache, trigger fetch through cache system
   try {
-    const result = await hubApi.getPluginParameters(pluginId);
-    
-    if (result.success && result.parameters) {
-      pluginParametersCache.value[pluginId] = result.parameters;
-      return result.parameters;
-    } else {
-      // Mark as having no parameters (but fetched successfully)
-      pluginParametersCache.value[pluginId] = [];
-      return [];
-    }
+    await componentCache.fetchParameters('plugins', [pluginId]);
+    return pluginParametersCache.value[pluginId] || [];
   } catch (error) {
     console.warn(`Failed to fetch plugin parameters for ${pluginId}:`, error);
-    // Mark as failed to fetch
-    pluginParametersCache.value[pluginId] = [];
     return [];
   }
 };
@@ -104,22 +96,7 @@ watch(
 
 // Get component lists when component is mounted
 onMounted(async () => {
-  store.dispatch('fetchComponents', 'inputs');
-  store.dispatch('fetchComponents', 'outputs');
-  store.dispatch('fetchComponents', 'rulesets');
-  await store.dispatch('fetchComponents', 'plugins');
-  
-  // Preload plugin parameters for better autocomplete experience
-  try {
-    const plugins = store.getters.getComponents('plugins');
-    const parameterPromises = plugins
-      .filter(plugin => !plugin.hasTemp) // Only fetch for non-temporary plugins
-      .map(plugin => getPluginParameters(plugin.id));
-    
-    await Promise.allSettled(parameterPromises);
-  } catch (error) {
-    console.warn('Some plugin parameters could not be preloaded:', error);
-  }
+  // Note: Component fetching is now handled by useMonacoComponentCache
   
   // Fetch dynamic field keys for rulesets
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {

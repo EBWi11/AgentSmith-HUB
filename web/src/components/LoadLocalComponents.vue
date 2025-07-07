@@ -383,6 +383,14 @@ async function loadAllChanges() {
     ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
       emit('refresh-list', type)
     })
+    
+    // Dispatch global event for any component changes
+    if (changes.value.length > 0) {
+      const affectedTypes = [...new Set(changes.value.map(change => change.type))]
+      window.dispatchEvent(new CustomEvent('localChangesLoaded', { 
+        detail: { types: affectedTypes, timestamp: Date.now() }
+      }))
+    }
   } catch (e) {
     $message?.error?.('Failed to load changes: ' + (e?.message || 'Unknown error'))
     
@@ -418,6 +426,11 @@ async function loadSingleChange(change) {
     
     // Refresh affected component type list
     emit('refresh-list', change.type)
+    
+    // Dispatch global event for the component change
+    window.dispatchEvent(new CustomEvent('localChangesLoaded', { 
+      detail: { type: change.type, id: change.id, timestamp: Date.now() }
+    }))
     
     // Ensure editor layout is correct
     refreshEditorsLayout()

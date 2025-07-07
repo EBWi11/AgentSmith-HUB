@@ -128,6 +128,7 @@ import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
 import { useApiOperations } from '../composables/useApi'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
+import { debounce, throttle } from '../utils/performance'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -178,6 +179,11 @@ const sortedChanges = computed(() => {
 onMounted(() => {
   refreshChanges()
 })
+
+// Create throttled operation functions
+const throttledApplyChanges = throttle(applyChanges, 2000) // 2s throttle
+const throttledVerifyChanges = throttle(verifyChanges, 1000) // 1s throttle
+const throttledCancelChanges = throttle(cancelAllChanges, 1000) // 1s throttle
 
 // Methods
 async function refreshChanges() {
@@ -269,7 +275,7 @@ function refreshEditorsLayout() {
   }, 300)
 }
 
-// 这些函数现在从 utils/common.js 导入
+// These functions are now imported from utils/common.js
 
 async function verifyChanges() {
   if (!changes.value.length) return
@@ -437,7 +443,14 @@ async function applyChanges() {
       emit('refresh-list', getApiComponentType(type))
     })
     
-    // 确保编辑器布局正确
+    // Dispatch global event for all affected component types
+    if (affectedTypes.size > 0) {
+      window.dispatchEvent(new CustomEvent('pendingChangesApplied', { 
+        detail: { types: Array.from(affectedTypes), timestamp: Date.now() }
+      }))
+    }
+    
+    // Ensure editor layout is correct
     refreshEditorsLayout()
   } catch (e) {
     // Handle verification failure cases
@@ -450,7 +463,7 @@ async function applyChanges() {
       $message?.error?.('Failed to apply changes: ' + (e?.message || 'Unknown error'))
     }
     
-    // 即使失败，也要刷新列表以确保显示最新状态
+    // Even if failed, refresh list to ensure latest status is displayed
     await refreshChanges();
   } finally {
     applying.value = false
@@ -487,7 +500,12 @@ async function applySingleChange(change) {
     // Refresh affected component type list
     emit('refresh-list', getApiComponentType(change.type))
     
-    // 确保编辑器布局正确
+    // Dispatch global event for the component change
+    window.dispatchEvent(new CustomEvent('pendingChangesApplied', { 
+      detail: { types: [change.type], id: change.id, timestamp: Date.now() }
+    }))
+    
+    // Ensure editor layout is correct
     refreshEditorsLayout()
   } catch (e) {
 
@@ -498,7 +516,7 @@ async function applySingleChange(change) {
       $message?.error?.('Failed to apply change: ' + (e?.message || 'Unknown error'))
     }
     
-    // 即使失败，也要刷新列表以确保显示最新状态
+    // Even if failed, refresh list to ensure latest status is displayed
     await refreshChanges();
     emit('refresh-list', getApiComponentType(change.type))
   } finally {
@@ -583,7 +601,7 @@ async function cancelUpgrade(change) {
   } catch (e) {
     $message?.error?.('Failed to cancel change: ' + (e?.message || 'Unknown error'))
     
-    // 即使失败，也要刷新列表以确保显示最新状态
+    // Even if failed, refresh list to ensure latest status is displayed
     await refreshChanges();
     emit('refresh-list', getApiComponentType(change.type))
   } finally {
@@ -621,7 +639,7 @@ async function cancelAllChanges() {
   } catch (e) {
     $message?.error?.('Failed to cancel all changes: ' + (e?.message || 'Unknown error'))
     
-    // 即使失败，也要刷新列表以确保显示最新状态
+    // Even if failed, refresh list to ensure latest status is displayed
     await refreshChanges()
   } finally {
     cancelling.value = false
