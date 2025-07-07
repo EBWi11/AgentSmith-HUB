@@ -119,8 +119,6 @@ func (r *Ruleset) Start() error {
 							}
 						}
 
-						fmt.Println(common.GetCheckData(data, []string{"cef_data", "destinationNames"}))
-
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
 						// Send results to downstream channels
@@ -561,7 +559,6 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		} else {
 			regex, err := regexp.Compile(checkNodeValue)
 			if err != nil {
-				fmt.Println("REGEX compile error", err)
 				break
 			}
 			checkListFlag, _ = REGEX(needCheckData, regex)
