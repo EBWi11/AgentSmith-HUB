@@ -187,9 +187,9 @@ main() {
             CONFIG_ARG=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
         fi
         
-        # Start as leader (requires explicit -leader flag)
+        # Start as leader (requires -leader flag)
         cd "$(dirname "$BINARY_PATH")"
-        exec "./$BINARY_NAME" -leader true -config_root "$CONFIG_ARG"
+        exec "./$BINARY_NAME" -config_root "$CONFIG_ARG" -leader
     fi
 }
 
