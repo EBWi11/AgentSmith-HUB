@@ -123,12 +123,14 @@ func main() {
 		<-shutdownCtx.Done()
 		logger.Info("shutdown signal received, stopping Hub components ...")
 
-		// 1. Stop all running projects (allow 2-min timeout inside Stop())
+		// 1. Stop all running projects (but don't save status - preserve user intention)
 		for id, p := range project.GlobalProject.Projects {
 			if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
-				logger.Info("stopping project", "id", id)
+				logger.Info("stopping project for shutdown", "id", id)
+				// Set a flag to indicate this is a shutdown stop (don't save status)
+				p.SetShutdownMode(true)
 				if err := p.Stop(); err != nil {
-					logger.Warn("project stop error", "id", id, "error", err)
+					logger.Warn("project shutdown stop error", "id", id, "error", err)
 				}
 			}
 		}

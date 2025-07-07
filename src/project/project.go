@@ -153,11 +153,6 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 		p.StatusChangedAt = &now
 		p.Err = err
 
-		// Save the error status to file
-		if saveErr := p.SaveProjectStatus(); saveErr != nil {
-			logger.Warn("Failed to save error project status", "id", p.Id, "error", saveErr)
-		}
-
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
@@ -1183,17 +1178,28 @@ func (p *Project) stopComponents() error {
 		p.stopChan = nil
 	}
 
-	// Set status to stopped and save
+	// Set status to stopped and save (only if not shutdown stop)
 	now := time.Now()
 	p.Status = ProjectStatusStopped
 	p.StatusChangedAt = &now
-	err := p.SaveProjectStatus()
-	if err != nil {
-		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+
+	// Only save status if this is not a shutdown stop (preserve user intention)
+	if !p.isShutdownStop {
+		err := p.SaveProjectStatus()
+		if err != nil {
+			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+		}
+	} else {
+		logger.Info("Skipping status save during shutdown to preserve user intention", "project", p.Id)
 	}
 
 	logger.Info("Finished stopping project components", "project", p.Id)
 	return nil
+}
+
+// SetShutdownMode sets the shutdown flag to control whether status should be saved
+func (p *Project) SetShutdownMode(isShutdown bool) {
+	p.isShutdownStop = isShutdown
 }
 
 // Stop stops the project and all its components in proper order
@@ -1482,6 +1488,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 }
 
 // SaveProjectStatus saves the current status of a project to a file
+// This method saves the "user intention" status, not the actual runtime status
 func (p *Project) SaveProjectStatus() error {
 	// Only persist durable states (running, stopped). Skip starting, stopping, error.
 	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStopped {
