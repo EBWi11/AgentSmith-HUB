@@ -3,7 +3,6 @@ package rules_engine
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -119,6 +118,8 @@ func (r *Ruleset) Start() error {
 								_ = r.sampler.Sample(data, r.ProjectNodeSequence, pid)
 							}
 						}
+
+						fmt.Println(common.GetCheckData(data, []string{"cef_data", "destinationNames"}))
 
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
@@ -294,37 +295,6 @@ func (r *Ruleset) StopForTesting() error {
 
 	logger.Info("Test ruleset stopped", "ruleset", r.RulesetID)
 	return nil
-}
-
-func (r *Ruleset) HotUpdate(raw string, id string) (*Ruleset, error) {
-	newR, err := NewRuleset("", raw, id)
-	if err != nil {
-		return nil, errors.New("new ruleset parse error: " + err.Error())
-	}
-
-	err = r.Stop()
-	if err != nil {
-		return nil, errors.New("Hot update stop ruleset error: " + err.Error())
-	}
-
-	// init ruleset
-	r.Rules = make([]Rule, 0)
-	r.RulesByFilter = make(map[string]*RulesByFilter)
-	r.RawConfig = ""
-
-	for i := range r.DownStream {
-		newR.DownStream[i] = r.DownStream[i]
-	}
-
-	for i := range r.UpStream {
-		newR.UpStream[i] = r.UpStream[i]
-	}
-
-	err = newR.Start()
-	if err != nil {
-		return newR, errors.New("Hot update stop ruleset error: " + err.Error())
-	}
-	return newR, nil
 }
 
 // EngineCheck executes all rules in the ruleset on the provided data.

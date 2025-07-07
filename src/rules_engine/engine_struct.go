@@ -1229,17 +1229,24 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 	// Create a new Ruleset instance with the same configuration but different ProjectNodeSequence
 	newRuleset := &Ruleset{
 		Path:                existing.Path,
+		XMLName:             existing.XMLName,
+		Name:                existing.Name,
+		Author:              existing.Author,
 		RulesetID:           existing.RulesetID,
 		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
 		Type:                existing.Type,
 		IsDetection:         existing.IsDetection,
 		Rules:               existing.Rules,         // Share the same rules
+		RulesCount:          existing.RulesCount,    // Copy the rules count
 		RulesByFilter:       existing.RulesByFilter, // Share the same rule mappings
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
 		Cache:               existing.Cache,            // Share the same cache
 		CacheForClassify:    existing.CacheForClassify, // Share the same classify cache
 		RawConfig:           existing.RawConfig,
+		// Note: Runtime fields (stopChan, antsPool, metricStop, wg, etc.) are intentionally not copied
+		// as they will be initialized when the ruleset starts
+		// Metrics fields (processTotal, processQPS) are also not copied as they are instance-specific
 	}
 
 	// Only create sampler on leader node for performance
@@ -1400,7 +1407,6 @@ func RulesetBuild(ruleset *Ruleset) error {
 		return errors.New("resource type only support whitelist or detection")
 	}
 
-	ruleset.RulesCount = len(ruleset.Rules)
 	for i := range ruleset.Rules {
 		rule := &ruleset.Rules[i]
 
@@ -1726,6 +1732,7 @@ func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
 	if err != nil {
 		return nil, err
 	}
+	ruleset.RulesCount = len(ruleset.Rules)
 	return &ruleset, nil
 }
 
@@ -1928,42 +1935,4 @@ func enhanceXMLParsingError(err error, xmlContent string) error {
 	}
 
 	return nil // Return nil to use the original error
-}
-
-// Reload reloads the ruleset from its source file or raw config
-func (r *Ruleset) Reload() error {
-	var rawRuleset []byte
-	var err error
-
-	if r.Path != "" {
-		xmlFile, err := os.Open(r.Path)
-		if err != nil {
-			return fmt.Errorf("failed to open ruleset file at %s: %w", r.Path, err)
-		}
-		defer xmlFile.Close()
-
-		rawRuleset, err = io.ReadAll(xmlFile)
-		if err != nil {
-			return fmt.Errorf("failed to read ruleset file: %w", err)
-		}
-	} else if r.RawConfig != "" {
-		rawRuleset = []byte(r.RawConfig)
-	} else {
-		return fmt.Errorf("no source available to reload ruleset")
-	}
-
-	newRuleset, err := ParseRulesetFromByte(rawRuleset)
-	if err != nil {
-		return fmt.Errorf("failed to parse ruleset: %w", err)
-	}
-
-	// Update the current ruleset with new data
-	r.XMLName = newRuleset.XMLName
-	r.Type = newRuleset.Type
-	r.IsDetection = newRuleset.IsDetection
-	r.Rules = newRuleset.Rules
-	r.RulesByFilter = newRuleset.RulesByFilter
-
-	// Build the ruleset
-	return RulesetBuild(r)
 }

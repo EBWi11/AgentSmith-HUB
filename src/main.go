@@ -90,9 +90,6 @@ func main() {
 	loadLocalComponents()
 	loadLocalProjects()
 
-	// Start/Stop projects depending on status file
-	StartAllProject()
-
 	// Init monitors
 	common.InitSystemMonitor(cluster.NodeID)
 
@@ -205,11 +202,27 @@ func loadLocalProjects() {
 		if p, err := project.NewProject(f, "", id); err == nil {
 			// Load persisted status from .project_status file (if any)
 			if savedStatus, err2 := p.LoadProjectStatus(); err2 == nil {
-				p.Status = savedStatus
+				// If project was running before restart, start it now
+				if savedStatus == project.ProjectStatusRunning {
+					if err := p.Start(); err != nil {
+						logger.Error("Failed to start project from saved status", "project", p.Id, "error", err)
+						api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
+					} else {
+						logger.Info("Successfully started project from saved status", "project", p.Id)
+						api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "success", "", nil)
+					}
+				}
+			} else {
+				logger.Warn("Failed to load project status, using default stopped status", "id", id, "error", err2)
 			}
+
 			project.GlobalProject.Projects[id] = p
+		} else {
+			logger.Error("Failed to create project", "id", id, "error", err)
 		}
 	}
+
+	logger.Info("Finished loading and start local projects", "total_projects", len(project.GlobalProject.Projects))
 }
 
 // readToken reads existing .token or creates one when create==true.
@@ -243,18 +256,4 @@ func loadHubConfig(root string) error {
 	}
 	common.Config.ConfigRoot = root
 	return nil
-}
-
-// StartAllProject starts projects that were running before hub restart.
-func StartAllProject() {
-	for _, p := range project.GlobalProject.Projects {
-		if p.Status == project.ProjectStatusRunning {
-			if err := p.Start(); err != nil {
-				logger.Error("project start", "project", p.Id, "error", err)
-				api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
-			} else {
-				api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "success", "", nil)
-			}
-		}
-	}
 }

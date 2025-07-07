@@ -155,11 +155,9 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
-	// IMPORTANT: After hub restart, all projects start with STOPPED status
-	// The .project_status file only records user intention, not current actual status
-	// Current actual status is always STOPPED after hub restart
-	p.Status = ProjectStatusStopped
-	logger.Info("Project created with stopped status (actual status after hub restart)", "id", p.Id, "status", p.Status)
+	// Note: Project status is now properly loaded from .project_status file in main.go
+	// No need to override it here - preserve the loaded status
+	logger.Info("Project created with loaded status", "id", p.Id, "status", p.Status)
 
 	return p, nil
 }

@@ -1020,6 +1020,9 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 		aliyunSLSCfg:        existing.aliyunSLSCfg,
 		Config:              existing.Config,
 		TestCollectionChan:  nil, // Reset for new instance
+		// Note: Runtime fields (kafkaProducer, elasticsearchProducer, wg, etc.) are intentionally not copied
+		// as they will be initialized when the output starts
+		// Metrics fields (produceTotal, produceQPS, metricStop) are also not copied as they are instance-specific
 	}
 
 	// Only create sampler on leader node for performance
