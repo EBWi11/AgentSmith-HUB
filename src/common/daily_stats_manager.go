@@ -319,7 +319,26 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 				totalOutputMessages += data.TotalMessages
 			}
 		case "ruleset":
-			totalRulesetMessages += data.TotalMessages
+			// Only count ruleset's own processing (not downstream flow)
+			// This represents the actual data volume processed by this specific ruleset
+			for i := 0; i < len(parts)-1; i++ {
+				if strings.ToUpper(parts[i]) == "RULESET" {
+					// Only count if this is the RULESET's own ProjectNodeSequence
+					// Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+
+					// Check if there are more components after this RULESET in the sequence
+					hasDownstream := (i + 2) < len(parts)
+
+					if !hasDownstream {
+						// This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
+						totalRulesetMessages += data.TotalMessages
+					}
+					// If hasDownstream is true, this means it's a downstream component's sequence
+					// that happens to contain this RULESET in its path - we don't count it
+
+					break
+				}
+			}
 		}
 	}
 

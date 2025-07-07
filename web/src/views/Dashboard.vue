@@ -566,6 +566,7 @@ const sortedProjects = computed(() => {
 })
 
 // Hub total statistics (all projects, not just running) - uses aggregated cluster data
+// Focus on Hub's input and output throughput
 const hubTotalStats = computed(() => {
   let input = 0
   let output = 0
@@ -576,6 +577,14 @@ const hubTotalStats = computed(() => {
     Object.values(messageData.value.project_breakdown).forEach(projectData => {
       input += projectData.input || 0
       output += projectData.output || 0
+    })
+  }
+  
+  // Debug info for troubleshooting
+  if (process.env.NODE_ENV === 'development' && messageData.value.project_breakdown) {
+    console.log('[MSG/D Debug] Hub Total Stats:', {
+      breakdown: messageData.value.project_breakdown,
+      totals: { input, output }
     })
   }
   
@@ -604,21 +613,36 @@ function getProjectMessageStats(projectId) {
   let output = 0
   let ruleset = 0
   
+  // Debug info for troubleshooting
+  const debugInfo = {
+    projectId,
+    sequences: [],
+    breakdown: { input: [], output: [], ruleset: [] }
+  }
+  
   // Check if messageData.value contains ProjectNodeSequence keys directly
   if (messageData.value && typeof messageData.value === 'object') {
     for (const [key, componentData] of Object.entries(messageData.value)) {
       if (componentData && typeof componentData === 'object' && componentData.component_type) {
-              // Use daily_messages for MSG/D display instead of cumulative totals
-      const dailyMessages = componentData.daily_messages || 0
+        // Use daily_messages for MSG/D display instead of cumulative totals
+        const dailyMessages = componentData.daily_messages || 0
         
         // Apply updated matching logic for new ProjectNodeSequence format
         const keyParts = key.split('.')
+        
+        debugInfo.sequences.push({
+          sequence: key,
+          type: componentData.component_type,
+          messages: dailyMessages,
+          parts: keyParts
+        })
         
         if (componentData.component_type === 'input') {
           // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
           // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
           if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
             input += dailyMessages
+            debugInfo.breakdown.input.push({ sequence: key, messages: dailyMessages })
           }
         } else if (componentData.component_type === 'output') {
           // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
@@ -626,10 +650,11 @@ function getProjectMessageStats(projectId) {
           if (keyParts.length >= 2 && 
               keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT') {
             output += dailyMessages
+            debugInfo.breakdown.output.push({ sequence: key, messages: dailyMessages })
           }
         } else if (componentData.component_type === 'ruleset') {
-          // Count ruleset processing load - matches patterns like "INPUT.api_sec.RULESET.test"
-          // but ONLY count the RULESET's own processing, not downstream components
+          // Count ruleset processing load - only count actual ruleset processing (not downstream flow)
+          // This represents the actual data volume processed by this specific ruleset
           for (let i = 0; i < keyParts.length - 1; i++) {
             if (keyParts[i].toUpperCase() === 'RULESET') {
               // Only count if this is the RULESET's own ProjectNodeSequence
@@ -641,6 +666,7 @@ function getProjectMessageStats(projectId) {
               if (!hasDownstream) {
                 // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
                 ruleset += dailyMessages;
+                debugInfo.breakdown.ruleset.push({ sequence: key, messages: dailyMessages })
               }
               // If hasDownstream is true, this means it's a downstream component's sequence
               // that happens to contain this RULESET in its path - we don't count it
@@ -651,6 +677,11 @@ function getProjectMessageStats(projectId) {
         }
       }
     }
+  }
+  
+  // Log debug info for troubleshooting (only in development)
+  if (process.env.NODE_ENV === 'development' && debugInfo.sequences.length > 0) {
+    console.log(`[MSG/D Debug] Project ${projectId}:`, debugInfo)
   }
   
   return { input, output, ruleset }
