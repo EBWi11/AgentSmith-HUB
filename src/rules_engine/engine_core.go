@@ -536,7 +536,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 								if r, ok := res.(map[string]interface{}); ok {
 									res = common.MapDeepCopy(r)
 								} else {
-									logger.Error("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
+									logger.PluginError("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
 									res = nil
 								}
 							}
@@ -558,7 +558,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 					ok, err := p.Plugin.FuncEvalCheckNode(args...)
 					if err != nil {
-						logger.Error("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
+						logger.PluginError("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
 					}
 
 					if !ok {
