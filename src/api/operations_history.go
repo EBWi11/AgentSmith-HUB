@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
@@ -140,8 +141,10 @@ func recordOperation(record OperationRecord) error {
 		return fmt.Errorf("failed to write to operations log file: %w", err)
 	}
 
-	// Publish to Redis list for cluster-wide aggregation (keep last 50000)
-	_ = common.RedisLPush("cluster:ops_history", string(jsonData), 50000)
+	// Followers publish to Redis for leader aggregation; leader writes log file only
+	if !cluster.IsLeader {
+		_ = common.RedisLPush("cluster:ops_history", string(jsonData), 50000)
+	}
 
 	logger.Info("Operation recorded", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID, "project", record.ProjectID)
 	return nil
