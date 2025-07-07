@@ -36,13 +36,17 @@ import (
 	// regex
 	rextract "AgentSmith-HUB/local_plugin/regex/extract"
 	rreplace "AgentSmith-HUB/local_plugin/regex/replace"
+
+	// alert suppression
+	suppressonce "AgentSmith-HUB/local_plugin/suppress_once"
 )
 
 // for checknode
 var LocalPluginBoolRes = map[string]func(...interface{}) (bool, error){
-	"isPrivateIP": is_private_ip.Eval,
-	"cidrMatch":   cidr_match.Eval,
-	"geoMatch":    geo_match.Eval,
+	"isPrivateIP":  is_private_ip.Eval,
+	"cidrMatch":    cidr_match.Eval,
+	"geoMatch":     geo_match.Eval,
+	"suppressOnce": suppressonce.Eval,
 }
 
 // for append or other usage
@@ -81,9 +85,10 @@ var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{
 
 var LocalPluginDesc = map[string]string{
 	// check node
-	"isPrivateIP": "Check node: true if IP is private RFC1918/loopback/link-local. Args: ip string.",
-	"cidrMatch":   "Check node: true if IP within CIDR. Args: ip string, cidr string.",
-	"geoMatch":    "Check node: true if IP country ISO matches expected. Args: ip, countryISO.",
+	"isPrivateIP":  "Check node: true if IP is private RFC1918/loopback/link-local. Args: ip string.",
+	"cidrMatch":    "Check node: true if IP within CIDR. Args: ip string, cidr string.",
+	"geoMatch":     "Check node: true if IP country ISO matches expected. Args: ip, countryISO.",
+	"suppressOnce": "Check node: alert suppression. Args: key(any), windowSec. Returns true only first time within window.",
 
 	// time append
 	"now":       "Append: current time. Args: optional format (unix|ms|rfc3339).",
