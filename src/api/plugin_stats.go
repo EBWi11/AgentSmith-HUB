@@ -33,8 +33,8 @@ func GetPluginStats(c echo.Context) error {
 	}
 
 	type stat struct {
-		Success uint64
-		Failure uint64
+		Success uint64 `json:"success"`
+		Failure uint64 `json:"failure"`
 	}
 
 	if byNode {

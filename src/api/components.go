@@ -808,7 +808,7 @@ func getPlugin(c echo.Context) error {
 				desc = "Built-in plugin (source unavailable)"
 			}
 			// For built-in plugins, only show description, not source code
-			rawContent = fmt.Sprintf("// Built-in Plugin: %s (Read-Only)\n// %s\n", id, desc)
+			rawContent = fmt.Sprintf("// Built-in Plugin: %s\n// %s\n", id, desc)
 		} else if p.Type == plugin.YAEGI_PLUGIN {
 			pluginType = "yaegi"
 			rawContent = string(p.Payload)
