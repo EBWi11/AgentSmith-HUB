@@ -38,7 +38,7 @@ func main() {
 		return
 	}
 	if *cfgRoot == "" {
-		fmt.Println("--config_root is required")
+		fmt.Println("config_root is required")
 		return
 	}
 

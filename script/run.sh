@@ -168,7 +168,7 @@ main() {
         
         # Start as follower
         cd "$(dirname "$BINARY_PATH")"
-        exec "./$BINARY_NAME" -leader "$LEADER_ADDR"
+        exec LEADER_ADDR="$LEADER_ADDR" "./$BINARY_NAME"
     else
         print_info "Starting AgentSmith-HUB in LEADER mode..."
         print_info "Web interface will be available at: http://localhost:8080"
