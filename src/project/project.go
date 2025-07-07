@@ -803,10 +803,7 @@ func (p *Project) Start() error {
 		p.StatusChangedAt = &now
 		logger.Info("Project status set to starting", "id", p.Id)
 
-		// Save the starting status to file immediately
-		if err := p.SaveProjectStatus(); err != nil {
-			logger.Warn("Failed to save starting project status", "id", p.Id, "error", err)
-		}
+		// No persistence for transient 'starting' state
 	}
 
 	// Initialize project control channels
@@ -819,7 +816,6 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
-		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
@@ -830,7 +826,6 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
-		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to load components: %v", err)
 	}
 
@@ -841,7 +836,6 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 		p.Err = err
-		_ = p.SaveProjectStatus()
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
 
@@ -882,7 +876,6 @@ func (p *Project) Start() error {
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
 					p.Err = errorMsg
-					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
 			}
@@ -926,7 +919,6 @@ func (p *Project) Start() error {
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
 					p.Err = errorMsg
-					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
 			}
@@ -968,7 +960,6 @@ func (p *Project) Start() error {
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
 					p.Err = errorMsg
-					_ = p.SaveProjectStatus()
 					return errorMsg
 				}
 			}
@@ -1220,10 +1211,7 @@ func (p *Project) Stop() error {
 	p.StatusChangedAt = &now
 	logger.Info("Project status set to stopping", "id", p.Id)
 
-	// Save the stopping status to file immediately
-	if err := p.SaveProjectStatus(); err != nil {
-		logger.Warn("Failed to save stopping project status", "id", p.Id, "error", err)
-	}
+	// No persistence for transient 'stopping' state
 
 	// Check if project is in error state
 	if p.Err != nil {
@@ -1261,10 +1249,7 @@ func (p *Project) Stop() error {
 		p.Status = ProjectStatusError
 		p.StatusChangedAt = &now
 
-		// Save the error status to file
-		if err := p.SaveProjectStatus(); err != nil {
-			logger.Warn("Failed to save error project status after timeout", "id", p.Id, "error", err)
-		}
+		// Skip persisting error status
 
 		return fmt.Errorf("project stop timeout exceeded for %s", p.Id)
 	}
@@ -1498,6 +1483,10 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 
 // SaveProjectStatus saves the current status of a project to a file
 func (p *Project) SaveProjectStatus() error {
+	// Only persist durable states (running, stopped). Skip starting, stopping, error.
+	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStopped {
+		return nil
+	}
 	statusFile := common.GetConfigPath(".project_status")
 
 	// Read existing statuses
