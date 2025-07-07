@@ -329,6 +329,22 @@
                         </a>
                         
                         <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openPluginStatsModal(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                          View Stats
+                        </a>
+                        
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openPluginStatsModal(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                          </svg>
+                          View Stats
+                        </a>
+                        
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                            @click.prevent.stop="copyName(item)">
                           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
@@ -1229,6 +1245,103 @@
         </div>
       </div>
     </div>
+
+    <!-- Plugin Stats Modal -->
+    <div v-if="showPluginStatsModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-2/3 max-w-2xl">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg font-medium">Plugin Statistics - {{ selectedPluginForStats?.id || selectedPluginForStats?.name }}</h3>
+          <button @click="closePluginStatsModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 max-h-[70vh] overflow-auto">
+          <div v-if="pluginStatsLoading" class="flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+          <div v-else-if="pluginStatsError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-red-700">{{ pluginStatsError }}</p>
+              </div>
+            </div>
+          </div>
+          <div v-else>
+            <!-- Today's Stats -->
+            <div class="mb-6">
+              <h4 class="text-sm font-medium text-gray-900 mb-3">Today's Statistics</h4>
+              <div class="grid grid-cols-2 gap-4">
+                <div class="bg-green-50 rounded-lg p-4">
+                  <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                      <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div class="ml-4">
+                      <p class="text-sm font-medium text-green-600">Successful Calls</p>
+                      <p class="text-2xl font-bold text-green-900">{{ formatNumber(pluginStatsData.success || 0) }}</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="bg-red-50 rounded-lg p-4">
+                  <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                      <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div class="ml-4">
+                      <p class="text-sm font-medium text-red-600">Failed Calls</p>
+                      <p class="text-2xl font-bold text-red-900">{{ formatNumber(pluginStatsData.failure || 0) }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Success Rate -->
+            <div class="mb-6">
+              <h4 class="text-sm font-medium text-gray-900 mb-3">Success Rate</h4>
+              <div class="bg-gray-50 rounded-lg p-4">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium text-gray-600">Success Rate</span>
+                  <span class="text-lg font-bold text-gray-900">{{ formatPercent(getPluginSuccessRate()) }}%</span>
+                </div>
+                <div class="mt-2 w-full bg-gray-200 rounded-full h-2">
+                  <div class="bg-green-600 h-2 rounded-full transition-all duration-300" :style="{ width: getPluginSuccessRate() + '%' }"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Total Calls -->
+            <div>
+              <h4 class="text-sm font-medium text-gray-900 mb-3">Total Calls</h4>
+              <div class="bg-blue-50 rounded-lg p-4">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0">
+                    <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <div class="ml-4">
+                    <p class="text-sm font-medium text-blue-600">Total Invocations</p>
+                    <p class="text-2xl font-bold text-blue-900">{{ formatNumber((pluginStatsData.success || 0) + (pluginStatsData.failure || 0)) }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -1239,7 +1352,7 @@ import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
 import { useComponentOperations } from '../../composables/useApi'
 import { useDeleteConfirmModal } from '../../composables/useModal'
-import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, debounce } from '../../utils/common'
+import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, debounce, formatNumber, formatPercent } from '../../utils/common'
 
 // 获取路由器实例
 const router = useRouter()
@@ -1390,6 +1503,13 @@ const clusterProjectStatesLoading = ref(false)
 const clusterProjectStatesError = ref(null)
 const clusterProjectStates = ref({})
 
+// Plugin Stats Modal states
+const showPluginStatsModal = ref(false)
+const selectedPluginForStats = ref(null)
+const pluginStatsData = ref({})
+const pluginStatsLoading = ref(false)
+const pluginStatsError = ref('')
+
 // Flag variable to track if ESC key listener is added
 const escKeyListenerAdded = ref(false)
 
@@ -1515,6 +1635,9 @@ function closeActiveModal() {
       break
     case 'clusterStatus':
       closeClusterStatusModal()
+      break
+    case 'pluginStats':
+      closePluginStatsModal()
       break
   }
   
@@ -2237,6 +2360,75 @@ function openClusterStatusModal(item) {
   
   // Prevent any potential navigation by stopping event propagation
   // This is handled in the template with @click.prevent.stop but adding extra safety
+}
+
+// Open plugin stats modal
+function openPluginStatsModal(item) {
+  console.log('Opening plugin stats modal for plugin:', item.id || item.name);
+  
+  // Ensure all menus are closed first
+  closeAllMenus();
+  
+  // Set the selected plugin and modal state
+  selectedPluginForStats.value = item;
+  showPluginStatsModal.value = true;
+  activeModal.value = 'pluginStats';
+  
+  // Load plugin statistics
+  loadPluginStats(item.id || item.name);
+  
+  // Add ESC key listener
+  addEscKeyListener();
+}
+
+// Close plugin stats modal
+function closePluginStatsModal() {
+  showPluginStatsModal.value = false;
+  selectedPluginForStats.value = null;
+  pluginStatsData.value = {};
+  pluginStatsLoading.value = false;
+  pluginStatsError.value = '';
+  activeModal.value = null;
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener();
+  }
+}
+
+// Load plugin statistics
+async function loadPluginStats(pluginName) {
+  pluginStatsLoading.value = true;
+  pluginStatsError.value = '';
+  
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const response = await hubApi.getPluginStats({ 
+      date: today, 
+      plugin: pluginName 
+    });
+    
+    if (response && response.stats && response.stats[pluginName]) {
+      pluginStatsData.value = response.stats[pluginName];
+    } else {
+      pluginStatsData.value = { success: 0, failure: 0 };
+    }
+  } catch (error) {
+    console.error('Failed to load plugin stats:', error);
+    pluginStatsError.value = 'Failed to load plugin statistics: ' + (error.message || 'Unknown error');
+    pluginStatsData.value = { success: 0, failure: 0 };
+  } finally {
+    pluginStatsLoading.value = false;
+  }
+}
+
+// Get plugin success rate
+function getPluginSuccessRate() {
+  const success = pluginStatsData.value.success || 0;
+  const failure = pluginStatsData.value.failure || 0;
+  const total = success + failure;
+  
+  if (total === 0) return 0;
+  return Math.round((success / total) * 100);
 }
 
 // Add plugin parameter

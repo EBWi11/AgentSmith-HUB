@@ -82,6 +82,14 @@
         @click="$emit('action', 'test-plugin')"
       />
       
+      <!-- Plugin Stats -->
+      <MenuItem 
+        v-if="type === 'plugins'"
+        icon="stats"
+        text="View Stats"
+        @click="$emit('action', 'view-plugin-stats')"
+      />
+      
       <MenuItem 
         v-if="type === 'rulesets'"
         icon="test"

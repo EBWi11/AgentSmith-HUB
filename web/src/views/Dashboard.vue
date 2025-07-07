@@ -96,6 +96,49 @@
       </div>
     </div>
 
+    <!-- Plugin Statistics Cards - Only show if there are plugin calls -->
+    <div v-if="pluginStats.totalSuccess > 0 || pluginStats.totalFailure > 0" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Plugin Success Card -->
+      <div class="bg-white rounded-lg shadow-sm p-6">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+          <div class="ml-4">
+            <p class="text-sm font-medium text-gray-500">Plugin Success</p>
+            <div class="flex items-baseline">
+              <p class="text-2xl font-semibold text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(pluginStats.totalSuccess) }}</p>
+              <p class="ml-2 text-sm text-green-600">today</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plugin Failure Card -->
+      <div class="bg-white rounded-lg shadow-sm p-6">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+              <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+          <div class="ml-4">
+            <p class="text-sm font-medium text-gray-500">Plugin Failures</p>
+            <div class="flex items-baseline">
+              <p class="text-2xl font-semibold text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(pluginStats.totalFailure) }}</p>
+              <p class="ml-2 text-sm text-red-600">today</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Second Row: Hub Total Statistics and Development Status -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Hub Total Statistics -->
@@ -104,7 +147,7 @@
         <div v-if="loading.messages && Object.keys(messageData).length === 0" class="flex justify-center items-center py-4">
           <div class="animate-spin rounded-full h-6 w-6 border-primary"></div>
         </div>
-        <div v-else class="flex flex-col space-y-3">
+        <div v-else class="grid grid-cols-2 gap-3">
           <!-- Total Input -->
           <div class="text-center p-4 bg-blue-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-blue-600 font-medium mb-1">Total Hub Input</div>
@@ -121,6 +164,24 @@
               {{ formatMessagesPerDay(hubTotalStats.output) }}
             </div>
             <div class="text-xs text-green-600">messages/day (all nodes)</div>
+          </div>
+
+          <!-- Plugin Success -->
+          <div class="text-center p-4 bg-emerald-50 rounded-lg flex flex-col justify-center">
+            <div class="text-xs text-emerald-600 font-medium mb-1">Plugin Success</div>
+            <div class="text-2xl font-bold text-emerald-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
+              {{ formatNumber(pluginStats.totalSuccess) }}
+            </div>
+            <div class="text-xs text-emerald-600">calls/day (all nodes)</div>
+          </div>
+          
+          <!-- Plugin Failures -->
+          <div class="text-center p-4 bg-red-50 rounded-lg flex flex-col justify-center">
+            <div class="text-xs text-red-600 font-medium mb-1">Plugin Failures</div>
+            <div class="text-2xl font-bold text-red-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
+              {{ formatNumber(pluginStats.totalFailure) }}
+            </div>
+            <div class="text-xs text-red-600">calls/day (all nodes)</div>
           </div>
         </div>
       </div>
@@ -276,6 +337,45 @@
       </div>
     </div>
 
+    <!-- Plugin Call Overview - Only show if there are plugin calls -->
+    <div v-if="Object.keys(pluginStats.plugins).length > 0" class="bg-white rounded-lg shadow-sm p-6">
+      <h3 class="text-lg font-medium text-gray-900 mb-4">Plugin Call Overview</h3>
+      <div v-if="loading.stats && Object.keys(pluginStats.plugins).length === 0" class="flex justify-center items-center py-8">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+      <div v-else class="space-y-4">
+        <div v-for="(stats, pluginName) in pluginStats.plugins" :key="pluginName" 
+             class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div class="flex items-center">
+            <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
+            <div>
+              <p class="font-medium text-gray-900">{{ pluginName }}</p>
+              <p class="text-sm text-gray-500">Plugin invocations today</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="flex items-center space-x-4">
+              <!-- Success Count -->
+              <div class="text-center">
+                <p class="text-xs text-green-600 font-medium">Success</p>
+                <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.success || 0) }}</p>
+              </div>
+              <!-- Failure Count -->
+              <div class="text-center">
+                <p class="text-xs text-red-600 font-medium">Failure</p>
+                <p class="text-sm font-bold text-red-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.failure || 0) }}</p>
+              </div>
+              <!-- Success Rate -->
+              <div class="text-center">
+                <p class="text-xs text-gray-500">Success Rate</p>
+                <p class="text-sm font-medium text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Last Updated -->
     <div class="text-center text-sm text-gray-500 flex items-center justify-center space-x-2">
       <span>Last updated: {{ lastUpdated }}</span>
@@ -313,6 +413,7 @@ const messageData = ref({})
 const systemData = ref({})
 const pendingChanges = ref([])
 const localChanges = ref([])
+const pluginStatsData = ref({})
 const lastUpdated = ref('')
 const refreshInterval = ref(null)
 const statsRefreshInterval = ref(null) // New interval for frequent stats updates
@@ -605,6 +706,38 @@ const localChangesStats = computed(() => {
   return stats
 })
 
+// Plugin statistics
+const pluginStats = computed(() => {
+  const stats = {
+    totalSuccess: 0,
+    totalFailure: 0,
+    plugins: {}
+  }
+
+  if (pluginStatsData.value && pluginStatsData.value.stats) {
+    Object.entries(pluginStatsData.value.stats).forEach(([pluginName, pluginData]) => {
+      const success = pluginData.success || 0
+      const failure = pluginData.failure || 0
+      
+      stats.totalSuccess += success
+      stats.totalFailure += failure
+      stats.plugins[pluginName] = {
+        success,
+        failure
+      }
+    })
+  }
+
+  return stats
+})
+
+// Helper function to calculate success rate
+function getSuccessRate(success, failure) {
+  const total = success + failure
+  if (total === 0) return 0
+  return (success / total) * 100
+}
+
 // Methods - 格式化函数现在从 utils/common.js 导入
 
 function navigateToProject(projectId) {
@@ -625,13 +758,15 @@ async function refreshStats() {
     loading.stats = true
     
     // Fetch frequently changing data
-    const [messageResponse, systemResponse] = await Promise.all([
+    const [messageResponse, systemResponse, pluginStatsResponse] = await Promise.all([
       hubApi.getAggregatedDailyMessages(),
-      hubApi.getAggregatedSystemMetrics()
+      hubApi.getAggregatedSystemMetrics(),
+      hubApi.getPluginStats({ date: new Date().toISOString().split('T')[0] })
     ])
 
     messageData.value = messageResponse.data || {}
     systemData.value = systemResponse || {}
+    pluginStatsData.value = pluginStatsResponse || {}
 
     // Fetch cluster system metrics for node display (if current node is leader)
     if (clusterInfo.value.status === 'leader') {
