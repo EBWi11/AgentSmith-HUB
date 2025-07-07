@@ -296,7 +296,7 @@
 import { ref, computed, onMounted, nextTick, inject } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
-import { debounce } from '../utils/common'
+import { debounce, createOptimizedApiCall } from '../utils/performance'
 
 // State
 const operations = ref([])
@@ -330,9 +330,15 @@ onMounted(() => {
   fetchOperationsHistory()
 })
 
+// Create optimized API call
+const optimizedFetchHistory = createOptimizedApiCall(
+  (params) => hubApi.getOperationsHistory(params),
+  500 // 500ms debounce
+)
+
 // Methods
 function toLocalISOString(date) {
-  // 生成本地时区的 yyyy-MM-ddTHH:mm 字符串
+  // Generate local timezone yyyy-MM-ddTHH:mm string
   const pad = n => n < 10 ? '0' + n : n
   return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
 }
@@ -393,7 +399,7 @@ async function fetchOperationsHistory() {
     if (filters.value.keyword) {
       params.append('keyword', filters.value.keyword)
     }
-    // 用本地时间字符串拼接ISO格式，带本地时区
+    // Use local time string concatenated with ISO format, with local timezone
     if (filters.value.startDate) {
       const start = new Date(filters.value.startDate)
       params.append('start_time', start.toISOString())
@@ -406,7 +412,7 @@ async function fetchOperationsHistory() {
     params.append('limit', pageSize.value.toString())
     params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
     
-    const response = await hubApi.getOperationsHistory(params.toString())
+    const response = await optimizedFetchHistory(params.toString())
     
     operations.value = response.operations || []
     totalCount.value = response.total_count || 0

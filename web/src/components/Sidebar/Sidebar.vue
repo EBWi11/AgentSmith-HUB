@@ -1352,10 +1352,16 @@ import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
 import { useComponentOperations } from '../../composables/useApi'
 import { useDeleteConfirmModal } from '../../composables/useModal'
-import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, debounce, formatNumber, formatPercent } from '../../utils/common'
+import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
+import { debounce, createOptimizedApiCall } from '../../utils/performance'
+import { useDataCacheStore } from '../../stores/dataCache'
+import { useListSmartRefresh } from '../../composables/useSmartRefresh'
 
-// 获取路由器实例
+// Get router instance
 const router = useRouter()
+
+// Data cache store
+const dataCache = useDataCacheStore()
 
 // Props
 const props = defineProps({
@@ -1518,6 +1524,23 @@ const search = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
 
+// Create smart refresh for sidebar components
+const sidebarSmartRefresh = useListSmartRefresh(async () => {
+  // Refresh all expanded sections
+  const promises = []
+  Object.keys(collapsed).forEach(type => {
+    if (!collapsed[type] && type !== 'settings' && type !== 'builtinPlugins') {
+      promises.push(fetchItems(type))
+    }
+  })
+  await Promise.all(promises)
+}, {
+  baseInterval: 30000,    // 30s base interval
+  fastInterval: 5000,     // 5s fast interval
+  slowInterval: 120000,   // 2min slow interval
+  debug: false
+})
+
 // Debounced search function
 const debouncedSearch = debounce(async (query) => {
   if (!query || query.length < 2) {
@@ -1676,7 +1699,8 @@ watch(search, (newVal) => {
 
 // Methods
 function startProjectPolling() {
-  // Refresh project status every 60 seconds (will be dynamically adjusted based on project states)
+  // Smart refresh will handle project polling automatically
+  // Keep a simple interval for project-specific status updates
   projectRefreshInterval.value = setInterval(async () => {
     if (!collapsed.projects) {
       await refreshProjectStatus()
@@ -1848,7 +1872,7 @@ async function fetchAllItems() {
 }
 
 async function fetchItems(type) {
-  // 对于projects类型，优先使用惰性刷新
+  // For projects type, prioritize lazy refresh
   if (type === 'projects') {
     return await refreshProjectStatus()
   }
@@ -1857,15 +1881,15 @@ async function fetchItems(type) {
   error[type] = null
   try {
     let response
-    // Use new API method to get components with temporary file information
-    response = await hubApi.fetchComponentsWithTempInfo(type);
+    // Use cached data with smart refresh
+    response = await dataCache.fetchComponents(type)
 
     // Transform response data to match expected format
     if (Array.isArray(response)) {
       items[type] = response.map(item => {
-        // 确保只处理属于当前类型的组件
+        // Only process components that belong to the current type
         if (type === 'plugins') {
-          // 插件必须有name字段
+          // Plugins must have a name field
           if (!item.name) {
             console.warn(`Skipping invalid plugin item:`, item);
             return null;
@@ -1875,24 +1899,24 @@ async function fetchItems(type) {
             id: item.name,
             type: item.type,
             hasTemp: item.hasTemp,
-            returnType: item.returnType, // 添加returnType字段
-            parameters: item.parameters // 添加parameters字段
+            returnType: item.returnType, // Add returnType field
+            parameters: item.parameters // Add parameters field
           }
         } else {
-          // 其他组件必须有id字段
+          // Other components must have an id field
           if (!item.id) {
             console.warn(`Skipping invalid ${type} item:`, item);
             return null;
           }
           
-          // 如果是项目且状态为error，获取错误信息
+          // If it's a project with error status, get error information
           if (type === 'projects' && item.status === 'error') {
-            // 异步获取错误信息，但不等待
+            // Asynchronously get error information without waiting
             (async () => {
               try {
                 const projectDetails = await hubApi.getProject(item.id);
                 if (projectDetails && projectDetails.errorMessage) {
-                  // 更新项目的错误信息
+                  // Update project error information
                   const index = items[type].findIndex(p => p.id === item.id);
                   if (index !== -1) {
                     items[type][index].errorMessage = projectDetails.errorMessage;
@@ -1912,9 +1936,9 @@ async function fetchItems(type) {
             errorMessage: item.errorMessage || ''
           }
         }
-      }).filter(Boolean) // 过滤掉null项
+      }).filter(Boolean) // Filter out null items
       
-      // 对列表按照ID排序
+      // Sort list by ID
       items[type].sort((a, b) => {
         const idA = a.id || a.name || ''
         const idB = b.id || b.name || ''
@@ -1930,16 +1954,16 @@ async function fetchItems(type) {
   }
 }
 
-// 惰性刷新project状态，只更新已存在项目的状态，不重建列表
+// Lazy refresh project status, only update status of existing projects, don't rebuild list
 async function refreshProjectStatus() {
-  // 如果项目列表为空或加载中，则进行完整刷新
+  // If project list is empty or loading, perform complete refresh
   if (!items.projects || items.projects.length === 0 || loading.projects) {
     return await fetchProjectsComplete()
   }
   
   try {
-    // 获取最新的项目数据
-    const response = await hubApi.fetchComponentsWithTempInfo('projects')
+    // Get latest project data using cache
+    const response = await dataCache.fetchComponents('projects')
     
     if (Array.isArray(response)) {
       const newProjects = response.map(item => {
@@ -1953,29 +1977,29 @@ async function refreshProjectStatus() {
         }
       }).filter(Boolean)
       
-      // 检查是否有项目增删
+      // Check if there are project additions or deletions
       const currentIds = new Set(items.projects.map(p => p.id))
       const newIds = new Set(newProjects.map(p => p.id))
       
-      // 如果项目数量发生变化或有新/删除的项目，进行完整刷新
+      // If project count changed or there are new/deleted projects, perform complete refresh
       if (currentIds.size !== newIds.size || 
           !Array.from(currentIds).every(id => newIds.has(id)) ||
           !Array.from(newIds).every(id => currentIds.has(id))) {
         return await fetchProjectsComplete()
       }
       
-      // 只更新现有项目的状态，不重建列表
+      // Only update status of existing projects, don't rebuild list
       items.projects.forEach(currentProject => {
         const updatedProject = newProjects.find(p => p.id === currentProject.id)
         if (updatedProject) {
-          // 只更新状态相关字段，保持DOM稳定
+          // Only update status-related fields to keep DOM stable
           currentProject.status = updatedProject.status
           currentProject.hasTemp = updatedProject.hasTemp
           currentProject.errorMessage = updatedProject.errorMessage
         }
       })
       
-      // 异步获取error项目的详细错误信息
+      // Asynchronously get detailed error information for error projects
       items.projects.forEach(async (project) => {
         if (project.status === 'error' && !project.errorMessage) {
           try {
@@ -1991,18 +2015,18 @@ async function refreshProjectStatus() {
     }
   } catch (err) {
     console.error('Failed to refresh project status:', err)
-    // 如果状态刷新失败，不显示错误，静默处理
+    // If status refresh fails, don't show error, handle silently
   }
 }
 
-// 完整刷新项目列表（用于初始加载和项目增删时）
+// Complete refresh of project list (for initial load and project additions/deletions)
 async function fetchProjectsComplete() {
   const type = 'projects'
   loading[type] = true
   error[type] = null
   
   try {
-    const response = await hubApi.fetchComponentsWithTempInfo(type)
+    const response = await dataCache.fetchComponents(type)
     
     if (Array.isArray(response)) {
       items[type] = response.map(item => {
@@ -2011,7 +2035,7 @@ async function fetchProjectsComplete() {
           return null
         }
         
-        // 如果是项目且状态为error，异步获取错误信息
+        // If it's a project with error status, asynchronously get error information
         if (item.status === 'error') {
           (async () => {
             try {
@@ -2037,7 +2061,7 @@ async function fetchProjectsComplete() {
         }
       }).filter(Boolean)
       
-      // 对列表按照ID排序
+      // Sort list by ID
       items[type].sort((a, b) => {
         const idA = a.id || a.name || ''
         const idB = b.id || b.name || ''
@@ -2173,7 +2197,7 @@ function closeDeleteModal() {
   }
 }
 
-// 确认删除
+// Confirm delete
 async function confirmDelete() {
   if (deleteConfirmText.value !== 'delete') {
     deleteError.value = 'Please type "delete" to confirm'

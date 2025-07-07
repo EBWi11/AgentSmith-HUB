@@ -379,13 +379,19 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { hubApi } from '../api'
 import { formatNumber, formatPercent, formatMessagesPerDay, formatTimeAgo } from '../utils/common'
+import { useDataCacheStore } from '../stores/dataCache'
+import { useDashboardSmartRefresh } from '../composables/useSmartRefresh'
+import { debounce } from '../utils/performance'
 
 // Router
 const router = useRouter()
+
+// Data cache store
+const dataCache = useDataCacheStore()
 
 // Reactive state
 const loading = reactive({
@@ -778,7 +784,7 @@ const sortedPluginStats = computed(() => {
     }, {})
 })
 
-// Methods - 格式化函数现在从 utils/common.js 导入
+// Methods - formatting functions now imported from utils/common.js
 
 function navigateToProject(projectId) {
   router.push(`/app/projects/${projectId}`)
@@ -792,23 +798,19 @@ function navigateToLocalChanges() {
   router.push('/app/load-local-components')
 }
 
-// Fast refresh for stats and numbers only
+// Fast refresh for stats and numbers only - now uses caching
 async function refreshStats() {
   try {
     loading.stats = true
     
-    // Fetch frequently changing data
+    // Use cached data with smart refresh
     const [messageResponse, systemResponse, pluginStatsResponse] = await Promise.all([
-      hubApi.getAggregatedDailyMessages(),
-      hubApi.getAggregatedSystemMetrics(),
-      // Updated plugin stats call - explicitly request aggregated data across all nodes
-      hubApi.getPluginStats({ 
-        date: new Date().toISOString().split('T')[0],
-        // No need to specify node_id or by_node - defaults to aggregated across all nodes
-      })
+      dataCache.fetchMessageStats(),
+      dataCache.fetchSystemMetrics(),
+      dataCache.fetchPluginStats(new Date().toISOString().split('T')[0])
     ])
 
-    messageData.value = messageResponse.data || {}
+    messageData.value = messageResponse.data || messageResponse || {}
     systemData.value = systemResponse || {}
     pluginStatsData.value = pluginStatsResponse || {}
 
@@ -867,7 +869,7 @@ async function refreshStats() {
     // Update last updated time
     lastUpdated.value = new Date().toLocaleTimeString()
     
-    // 成功时重置错误计数
+    // Reset error count on success
     resetErrorCount()
 
   } catch (error) {
@@ -878,7 +880,7 @@ async function refreshStats() {
   }
 }
 
-// Comprehensive refresh for all data (used on initial load and less frequently)
+// Comprehensive refresh for all data (used on initial load and less frequently) - now uses caching
 async function fetchDashboardData() {
   try {
     // Fetch projects and cluster data (structural data that changes less frequently)
@@ -887,8 +889,8 @@ async function fetchDashboardData() {
     loading.changes = true
     
     const [projectsResponse, clusterResponse] = await Promise.all([
-      hubApi.fetchComponentsWithTempInfo('projects'),
-      hubApi.fetchClusterStatus()
+      dataCache.fetchComponents('projects'),
+      dataCache.fetchClusterInfo()
     ])
 
     projectList.value = projectsResponse.map(project => ({
@@ -934,11 +936,11 @@ async function fetchDashboardData() {
     // Now refresh stats (this will also update message and system data)
     await refreshStats()
 
-    // Fetch pending changes and local changes
+    // Fetch pending changes and local changes using cache
     try {
       const [pendingResponse, localResponse] = await Promise.all([
-        hubApi.fetchEnhancedPendingChanges(),
-        hubApi.fetchLocalChanges()
+        dataCache.fetchPendingChanges(),
+        dataCache.fetchLocalChanges()
       ])
       
       pendingChanges.value = pendingResponse || []
@@ -960,68 +962,44 @@ async function fetchDashboardData() {
   }
 }
 
-// 动态刷新间隔管理
-const dynamicStatsInterval = ref(null)
-const lastOperationTime = ref(0) // 记录最近操作时间
-const currentRefreshInterval = ref(60000) // 记录当前间隔，避免依赖浏览器扩展属性
-
-// 全局项目操作事件监听
-function handleGlobalProjectOperation(event) {
-  if (event.detail && event.detail.timestamp) {
-    lastOperationTime.value = event.detail.timestamp
-    console.log('Dashboard received project operation event:', event.detail)
-  }
-}
-
-// 获取动态刷新间隔
-function getDynamicRefreshInterval() {
-  // 检查是否有项目处于过渡状态
-  const hasTransitionProjects = projectList.value.some(project => 
+// Use new smart refresh system
+const transitionStates = computed(() => {
+  // Check if any projects are in transition state
+  return projectList.value.filter(project => 
     project.status === 'starting' || project.status === 'stopping'
   )
-  
-  // 检查是否在最近操作后的30秒内
-  const recentOperation = Date.now() - lastOperationTime.value < 30000
-  
-  if (hasTransitionProjects || recentOperation) {
-    return 2000 // 2秒 - 快速刷新过渡状态或最近操作后
-  }
-  return 60000 // 60秒 - 正常刷新稳定状态
-}
+})
 
-// 记录项目操作时间
-function recordProjectOperation() {
-  lastOperationTime.value = Date.now()
-}
+// Create smart refresh instance
+const smartRefresh = useDashboardSmartRefresh(refreshStats, {
+  debug: true,
+  baseInterval: 60000,    // 1 minute base interval
+  fastInterval: 2000,     // 2 second fast interval
+  slowInterval: 300000    // 5 minute slow interval
+})
 
-async function refreshStatsWithDynamicInterval() {
-  await refreshStats()
-  
-  // 数据刷新后，检查是否需要调整刷新间隔
-  if (dynamicStatsInterval.value) {
-    const newInterval = getDynamicRefreshInterval()
-    
-    // 只有当间隔发生显著变化时才重新设置定时器（避免频繁重置）
-    if (Math.abs(newInterval - currentRefreshInterval.value) > 500) {
-      clearInterval(dynamicStatsInterval.value)
-      currentRefreshInterval.value = newInterval
-      dynamicStatsInterval.value = setInterval(refreshStatsWithDynamicInterval, newInterval)
-      console.log(`Dashboard refresh interval adjusted to ${newInterval}ms`)
-    }
+// Global project operation event listener
+function handleGlobalProjectOperation(event) {
+  if (event.detail && event.detail.timestamp) {
+    console.log('Dashboard received project operation event:', event.detail)
+    // Trigger immediate refresh
+    smartRefresh.forceRefresh()
   }
 }
+
+// Watch transition state changes
+watch(transitionStates, (newStates) => {
+  smartRefresh.setTransitionStates(newStates)
+}, { immediate: true })
+
+// Debounced force refresh
+const debouncedForceRefresh = debounce(() => {
+  smartRefresh.forceRefresh()
+}, 500)
 
 function startAutoRefresh() {
-  // 确保先清理旧的定时器
-  stopAutoRefresh()
-  
-  // Dynamic fast refresh for stats based on project states
-  const initialInterval = getDynamicRefreshInterval()
-  currentRefreshInterval.value = initialInterval
-  dynamicStatsInterval.value = setInterval(refreshStatsWithDynamicInterval, initialInterval)
-  console.log(`Dashboard refresh started with ${initialInterval}ms interval`)
-  
-  // Comprehensive refresh every 2 minutes for structural changes
+  // Smart refresh will start automatically
+  // Additional structural data refresh (every 2 minutes)
   refreshInterval.value = setInterval(() => {
     fetchDashboardData()
   }, 120000)
@@ -1032,44 +1010,38 @@ function stopAutoRefresh() {
     clearInterval(refreshInterval.value)
     refreshInterval.value = null
   }
-  
-  if (dynamicStatsInterval.value) {
-    clearInterval(dynamicStatsInterval.value)
-    dynamicStatsInterval.value = null
-  }
+  smartRefresh.stop()
 }
 
-// Keyboard shortcuts
+// Keyboard shortcuts - updated to use smart refresh
 function handleKeyDown(event) {
   // Press 'R' to refresh stats
   if (event.key === 'r' || event.key === 'R') {
     if (!loading.stats) {
-      refreshStats()
+      smartRefresh.forceRefresh()
     }
     event.preventDefault()
   }
   // Press 'Shift+R' to full refresh
   if ((event.key === 'r' || event.key === 'R') && event.shiftKey) {
     if (!loading.projects && !loading.cluster && !loading.messages && !loading.changes) {
+      // Clear cache and force full refresh
+      dataCache.clearAllCache()
       fetchDashboardData()
     }
     event.preventDefault()
   }
 }
 
-// 页面可见性变化处理
+// Page visibility change handling - smart refresh handles automatically, only need to handle structural data
 function handleVisibilityChange() {
-  if (document.hidden) {
-    // 页面隐藏时暂停自动刷新
-    stopAutoRefresh()
-  } else {
-    // 页面重新可见时恢复自动刷新并立即刷新一次
+  if (!document.hidden) {
+    // Refresh structural data immediately when page becomes visible
     fetchDashboardData()
-    startAutoRefresh()
   }
 }
 
-// 错误恢复机制
+// Error recovery mechanism
 let errorCount = 0
 const maxErrors = 3
 
@@ -1078,30 +1050,30 @@ function handleRefreshError(error) {
   console.error(`Dashboard refresh error (${errorCount}/${maxErrors}):`, error)
   
   if (errorCount >= maxErrors) {
-    // 达到最大错误次数，进入错误恢复模式
+    // Reached maximum error count, enter error recovery mode
     console.warn('Too many refresh errors, entering recovery mode')
     stopAutoRefresh()
     
-    // 使用保守的恢复刷新模式，但保持一定的智能性
+    // Use conservative recovery refresh mode, but maintain some intelligence
     const recoveryRefresh = async () => {
       try {
         await fetchDashboardData()
-        // 如果成功，重置错误计数并恢复正常刷新
+        // If successful, reset error count and resume normal refresh
         resetErrorCount()
-        stopAutoRefresh() // 清理恢复模式定时器
-        startAutoRefresh() // 恢复正常智能刷新
+        stopAutoRefresh() // Clean up recovery mode timer
+        startAutoRefresh() // Resume normal smart refresh
       } catch (recoveryError) {
         console.error('Recovery refresh also failed:', recoveryError)
-        // 继续使用恢复模式
+        // Continue using recovery mode
       }
     }
     
-    // 5分钟间隔的恢复刷新
+    // Recovery refresh with 5-minute interval
     refreshInterval.value = setInterval(recoveryRefresh, 300000)
   }
 }
 
-// 成功时重置错误计数
+// Reset error count on success
 function resetErrorCount() {
   if (errorCount > 0) {
     errorCount = 0
