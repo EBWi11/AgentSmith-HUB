@@ -1487,6 +1487,10 @@ func (p *Project) SaveProjectStatus() error {
 	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStopped {
 		return nil
 	}
+	// Skip test projects (IDs starting with "test_")
+	if strings.HasPrefix(p.Id, "test_") {
+		return nil
+	}
 	statusFile := common.GetConfigPath(".project_status")
 
 	// Read existing statuses
