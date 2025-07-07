@@ -2,9 +2,9 @@ import { ref, computed, onMounted, onUnmounted, watch, readonly } from 'vue'
 import { throttle } from '../utils/performance'
 
 export function useSmartRefresh(refreshFunction, options = {}) {
-  const {
-    baseInterval = 30000,      // Base refresh interval (30s)
-    fastInterval = 2000,       // Fast refresh interval (2s)
+  let {
+    baseInterval: baseIntervalMs = 30000,      // Base refresh interval (30s)
+    fastInterval: fastIntervalMs = 2000,       // Fast refresh interval (2s)
     slowInterval = 120000,     // Slow refresh interval (2min)
     maxErrorCount = 3,         // Maximum error count
     errorRecoveryInterval = 300000, // Error recovery interval (5min)
@@ -23,7 +23,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
   const isUserActive = ref(true)
   const isNetworkOnline = ref(navigator.onLine)
   const isPageVisible = ref(!document.hidden)
-  const currentInterval = ref(baseInterval)
+  const currentInterval = ref(baseIntervalMs)
   const refreshTimer = ref(null)
   const hasTransitionStates = ref(false)
 
@@ -107,7 +107,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
 
     // If has transition states, use fast refresh
     if (hasTransitionStates.value) {
-      return fastInterval
+      return fastIntervalMs
     }
 
     // If user inactive, use slow refresh
@@ -121,7 +121,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
     }
 
     // Default to base interval
-    return baseInterval
+    return baseIntervalMs
   })
 
   // Set refresh interval
@@ -323,11 +323,11 @@ export function useSmartRefresh(refreshFunction, options = {}) {
     
     // 配置
     setBaseInterval: (interval) => {
-      baseInterval = interval
+      baseIntervalMs = interval
       log(`Base interval updated to ${interval}ms`)
     },
     setFastInterval: (interval) => {
-      fastInterval = interval
+      fastIntervalMs = interval
       log(`Fast interval updated to ${interval}ms`)
     }
   }
