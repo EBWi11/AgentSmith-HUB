@@ -12,7 +12,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -2241,17 +2240,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for inputID, i := range proj.Inputs {
 			qps := i.GetConsumeQPS()
 			total := i.GetConsumeTotal()
-			var redisVal string
-			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:input", projectID, i.ProjectNodeSequence)); err == nil {
-				redisVal = v
-			} else if v, err := common.RedisGet("msg_total:" + i.ProjectNodeSequence + ":input"); err == nil {
-				redisVal = v
-			}
-			if redisVal != "" {
-				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
-					total = parsed
-				}
-			}
+			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,
@@ -2268,17 +2257,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for outputID, o := range proj.Outputs {
 			qps := o.GetProduceQPS()
 			total := o.GetProduceTotal()
-			var redisVal string
-			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:output", projectID, o.ProjectNodeSequence)); err == nil {
-				redisVal = v
-			} else if v, err := common.RedisGet("msg_total:" + o.ProjectNodeSequence + ":output"); err == nil {
-				redisVal = v
-			}
-			if redisVal != "" {
-				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
-					total = parsed
-				}
-			}
+			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,
@@ -2295,17 +2274,7 @@ func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
 		for rulesetID, ruleset := range proj.Rulesets {
 			qps := ruleset.GetProcessQPS() // Get real processing QPS
 			total := ruleset.GetProcessTotal()
-			var redisVal string
-			if v, err := common.RedisGet(fmt.Sprintf("msg_total:%s:%s:ruleset", projectID, ruleset.ProjectNodeSequence)); err == nil {
-				redisVal = v
-			} else if v, err := common.RedisGet("msg_total:" + ruleset.ProjectNodeSequence + ":ruleset"); err == nil {
-				redisVal = v
-			}
-			if redisVal != "" {
-				if parsed, e := strconv.ParseUint(redisVal, 10, 64); e == nil {
-					total = parsed
-				}
-			}
+			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
 			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
 				NodeID:              nodeID,
 				ProjectID:           projectID,

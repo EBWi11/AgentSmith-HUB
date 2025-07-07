@@ -675,18 +675,8 @@ func (out *Output) metricLoop() {
 
 			atomic.StoreUint64(&out.produceQPS, qps)
 
-			// Persist total produced messages per project
-			if out.ProjectNodeSequence != "" {
-				if len(out.OwnerProjects) == 0 {
-					key := "msg_total:" + out.ProjectNodeSequence + ":output"
-					_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
-				} else {
-					for _, pid := range out.OwnerProjects {
-						key := fmt.Sprintf("msg_total:%s:%s:output", pid, out.ProjectNodeSequence)
-						_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
-					}
-				}
-			}
+			// Note: Redis persistence is now handled by QPS Manager via daily_stats system
+			// This eliminates duplicate data writes and TTL conflicts
 		}
 	}
 }

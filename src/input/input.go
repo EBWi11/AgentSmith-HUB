@@ -435,19 +435,8 @@ func (in *Input) metricLoop() {
 
 			atomic.StoreUint64(&in.consumeQPS, qps)
 
-			// Persist total messages per project & sequence to Redis
-			if in.ProjectNodeSequence != "" {
-				if len(in.OwnerProjects) == 0 {
-					// Fallback for legacy instances
-					key := "msg_total:" + in.ProjectNodeSequence + ":input"
-					_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
-				} else {
-					for _, pid := range in.OwnerProjects {
-						key := fmt.Sprintf("msg_total:%s:%s:input", pid, in.ProjectNodeSequence)
-						_, _ = common.RedisIncrbyWithDailyTTL(key, int64(qps))
-					}
-				}
-			}
+			// Note: Redis persistence is now handled by QPS Manager via daily_stats system
+			// This eliminates duplicate data writes and TTL conflicts
 		}
 	}
 }
