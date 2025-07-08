@@ -1,7 +1,6 @@
 <template>
-  <div class="h-full flex flex-col bg-white">
-    <!-- Header -->
-    <div class="flex items-center justify-between p-4 border-b border-gray-200">
+  <div class="h-full flex flex-col p-4">
+    <div class="flex items-center justify-between mb-4">
       <h1 class="text-xl font-semibold text-gray-900">Load Local Components</h1>
       <div class="flex items-center space-x-2">
         <button 
@@ -18,103 +17,94 @@
         >
           {{ verifying ? 'Verifying...' : 'Verify' }}
         </button>
-
       </div>
     </div>
 
-    <!-- Content -->
-    <div class="flex-1 overflow-y-auto">
-      <div v-if="loading && !changes.length" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading local changes...</div>
-      </div>
-      
-      <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
-        {{ error }}
-      </div>
-      
-      <div v-else-if="!changes.length" class="flex-1 flex items-center justify-center text-gray-500">
-        No local changes detected
-      </div>
-      
-      <div v-else class="space-y-4 p-4">
-        <div v-for="change in sortedChanges" :key="`${change.type}-${change.id}`" class="border border-gray-200 rounded-lg overflow-hidden">
-          <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200">
-            <div class="flex items-center space-x-3">
-              <h3 class="font-medium text-gray-900">
-                {{ getComponentTypeLabel(change.type) }}: {{ change.id }}
-                <span class="ml-2 text-xs px-2 py-1 rounded" :class="getChangeStatusClass(change)">
-                  {{ getChangeStatusLabel(change) }}
-                </span>
-              </h3>
-              <div v-if="change.verifyStatus === 'success'" class="text-xs text-green-600">
-                ✓ Verified
-              </div>
-              <div v-else-if="change.verifyStatus === 'error'" class="text-xs text-red-600">
-                ✗ Verification Failed
-              </div>
-            </div>
-            <div class="flex items-center space-x-2">
-              <button 
-                v-if="change.has_local"
-                @click="verifySingleChange(change)" 
-                :disabled="verifying"
-                class="btn btn-verify btn-xs"
-              >
-                Verify
-              </button>
-              <button 
-                @click="loadSingleChange(change)" 
-                :disabled="change.verifyStatus === 'error' || loading"
-                :class="getLoadButtonClass(change)"
-              >
-                {{ getLoadButtonText(change) }}
-              </button>
-            </div>
+    <div v-if="loading && !changes.length" class="flex-1 flex items-center justify-center">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+    
+    <div v-else-if="error" class="flex-1 flex items-center justify-center text-red-500">
+      {{ error }}
+    </div>
+    
+    <div v-else-if="!changes.length" class="flex-1 flex items-center justify-center text-gray-500">
+      No local changes detected
+    </div>
+    
+    <div v-else class="flex-1 overflow-auto">
+      <div v-for="change in sortedChanges" :key="`${change.type}-${change.id}`" class="mb-4 border rounded-md overflow-hidden">
+        <div class="bg-gray-50 p-3 flex justify-between items-center border-b">
+          <div class="font-medium">
+            <span class="text-gray-700">{{ getComponentTypeLabel(change.type) }}:</span>
+            <span class="ml-1">{{ change.id }}</span>
+            <span class="ml-2 text-xs px-2 py-1 rounded" :class="getChangeStatusClass(change)">
+              {{ getChangeStatusLabel(change) }}
+            </span>
+            <span v-if="change.verifyStatus === 'success'" class="ml-2 px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded">Verified</span>
+            <span v-if="change.verifyStatus === 'error'" class="ml-2 px-1.5 py-0.5 bg-red-100 text-red-800 text-xs rounded">Invalid</span>
+          </div>
+          <div class="flex items-center">
+            <button 
+              v-if="change.has_local"
+              @click="verifySingleChange(change)" 
+              :disabled="verifying"
+              class="btn btn-verify btn-xs mr-2"
+            >
+              Verify
+            </button>
+            <button 
+              @click="loadSingleChange(change)" 
+              :disabled="change.verifyStatus === 'error' || loading"
+              :class="getLoadButtonClass(change)"
+            >
+              {{ getLoadButtonText(change) }}
+            </button>
+          </div>
+        </div>
+        
+        <div class="bg-gray-100" style="padding: 0; margin: 0;">
+          <div v-if="change.verifyError" class="p-2 bg-red-50 border border-red-200 text-red-700 text-xs" style="margin: 0 0 8px 0;">
+            {{ change.verifyError }}
           </div>
           
-          <div class="bg-gray-100" style="padding: 0; margin: 0;">
-            <div v-if="change.verifyError" class="p-2 bg-red-50 border border-red-200 text-red-700 text-xs" style="margin: 0 0 8px 0;">
-              {{ change.verifyError }}
+          <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
+            <!-- New local file: display content directly -->
+            <div v-if="change.has_local && !change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
+              <MonacoEditor 
+                :key="`new-local-${change.type}-${change.id}`"
+                :value="change.local_content || ''" 
+                :language="getEditorLanguage(change.type)" 
+                :read-only="true" 
+                :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                :diff-mode="false"
+                style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+              />
             </div>
-            
-            <div style="margin: 0; padding: 0; border: none; border-radius: 0; overflow: hidden;">
-              <!-- New local file: display content directly -->
-              <div v-if="change.has_local && !change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
-                <MonacoEditor 
-                  :key="`new-local-${change.type}-${change.id}`"
-                  :value="change.local_content || ''" 
-                  :language="getEditorLanguage(change.type)" 
-                  :read-only="true" 
-                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
-                  :diff-mode="false"
-                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
-                />
-              </div>
-              <!-- File deleted locally: show memory content -->
-              <div v-else-if="!change.has_local && change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
-                <MonacoEditor 
-                  :key="`deleted-${change.type}-${change.id}`"
-                  :value="change.memory_content || ''" 
-                  :language="getEditorLanguage(change.type)" 
-                  :read-only="true" 
-                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
-                  :diff-mode="false"
-                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
-                />
-              </div>
-              <!-- File changed: show diff mode -->
-              <div v-else style="height: 400px; margin: 0; padding: 0; border: none;">
-                <MonacoEditor 
-                  :key="`diff-${change.type}-${change.id}`"
-                  :value="change.local_content || ''" 
-                  :original-value="change.memory_content || ''"
-                  :language="getEditorLanguage(change.type)" 
-                  :read-only="true" 
-                  :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
-                  :diff-mode="true"
-                  style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
-                />
-              </div>
+            <!-- File deleted locally: show memory content -->
+            <div v-else-if="!change.has_local && change.has_memory" style="height: 400px; margin: 0; padding: 0; border: none;">
+              <MonacoEditor 
+                :key="`deleted-${change.type}-${change.id}`"
+                :value="change.memory_content || ''" 
+                :language="getEditorLanguage(change.type)" 
+                :read-only="true" 
+                :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                :diff-mode="false"
+                style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+              />
+            </div>
+            <!-- File changed: show diff mode -->
+            <div v-else style="height: 400px; margin: 0; padding: 0; border: none;">
+              <MonacoEditor 
+                :key="`diff-${change.type}-${change.id}`"
+                :value="change.local_content || ''" 
+                :original-value="change.memory_content || ''"
+                :language="getEditorLanguage(change.type)" 
+                :read-only="true" 
+                :error-lines="change.errorLine ? [{ line: change.errorLine }] : []"
+                :diff-mode="true"
+                style="height: 100%; width: 100%; margin: 0; padding: 0; border: none;"
+              />
             </div>
           </div>
         </div>

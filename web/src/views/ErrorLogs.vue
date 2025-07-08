@@ -1,7 +1,6 @@
 <template>
-  <div class="h-full flex flex-col bg-white">
-    <!-- Header -->
-    <div class="flex items-center justify-between p-4 border-b border-gray-200">
+  <div class="h-full flex flex-col p-4">
+    <div class="flex items-center justify-between mb-4">
       <h1 class="text-xl font-semibold text-gray-900">Error Logs</h1>
       <div class="flex items-center space-x-2">
         <button
@@ -32,7 +31,7 @@
     </div>
 
     <!-- Filters -->
-    <div class="p-4 border-b border-gray-200 bg-gray-50">
+    <div class="p-4 mb-4 bg-gray-50 rounded-lg">
       <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <!-- Source Filter -->
         <div>
@@ -130,23 +129,20 @@
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Content -->
-    <div class="flex-1 overflow-y-auto">
-      <div v-if="loading && !logs.length" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading error logs...</div>
-      </div>
-      
-      <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
-        {{ error }}
-      </div>
-      
-      <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
-        No error logs found
-      </div>
-      
-      <div v-else class="space-y-2 p-4">
+    <div v-if="loading && !logs.length" class="flex-1 flex items-center justify-center">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+    </div>
+    
+    <div v-else-if="error" class="flex-1 flex items-center justify-center text-red-500">
+      {{ error }}
+    </div>
+    
+    <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
+      No error logs found
+    </div>
+    
+    <div v-else class="flex-1 overflow-auto space-y-2">
         <div
           v-for="(log, index) in logs"
           :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
@@ -236,7 +232,7 @@
     </div>
 
     <!-- Pagination -->
-    <div v-if="totalCount > 0" class="flex items-center justify-between p-4 border-t border-gray-200 bg-gray-50">
+    <div v-if="totalCount > 0" class="flex items-center justify-between pt-4">
       <div class="text-sm text-gray-700">
         Showing {{ ((currentPage - 1) * pageSize) + 1 }} to {{ Math.min(currentPage * pageSize, totalCount) }} of {{ totalCount }} logs
       </div>

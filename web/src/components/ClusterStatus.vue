@@ -187,7 +187,7 @@
 
     <!-- Empty State -->
     <div v-if="!loading && !error && filteredNodes.length === 0" class="flex-1 flex items-center justify-center text-gray-500">
-      {{ searchQuery ? 'No nodes match your search query.' : 'No cluster nodes available.' }}
+      {{ searchQuery ? 'No nodes match your search query' : 'No cluster nodes available' }}
     </div>
   </div>
 </template>
