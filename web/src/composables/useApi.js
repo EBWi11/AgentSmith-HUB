@@ -109,10 +109,10 @@ export function useApiOperations() {
 export function useComponentOperations(componentType) {
   const { loading, error, fetchData, saveData, deleteData, verifyData, connectCheck } = useApiOperations()
   
-  // API方法映射
+  // API方法映射 - updated to use unified interface
   const apiMethods = {
     inputs: {
-      fetch: hubApi.fetchInputs,
+      fetch: () => hubApi.fetchComponentsWithTempInfo('inputs'),
       get: hubApi.getInput,
       create: hubApi.createInput,
       update: hubApi.updateInput,
@@ -121,7 +121,7 @@ export function useComponentOperations(componentType) {
       connectCheck: (id, config) => hubApi.connectCheck('inputs', id)
     },
     outputs: {
-      fetch: hubApi.fetchOutputs,
+      fetch: () => hubApi.fetchComponentsWithTempInfo('outputs'),
       get: hubApi.getOutput,
       create: hubApi.createOutput,
       update: hubApi.updateOutput,
@@ -130,7 +130,7 @@ export function useComponentOperations(componentType) {
       connectCheck: (id, config) => hubApi.connectCheck('outputs', id)
     },
     rulesets: {
-      fetch: hubApi.fetchRulesets,
+      fetch: () => hubApi.fetchComponentsWithTempInfo('rulesets'),
       get: hubApi.getRuleset,
       create: hubApi.createRuleset,
       update: hubApi.updateRuleset,
@@ -138,7 +138,7 @@ export function useComponentOperations(componentType) {
       verify: (id, content) => hubApi.verifyComponent('rulesets', id, content)
     },
     plugins: {
-      fetch: hubApi.fetchPlugins,
+      fetch: () => hubApi.fetchComponentsWithTempInfo('plugins'),
       get: hubApi.getPlugin,
       create: hubApi.createPlugin,
       update: hubApi.updatePlugin,
@@ -146,7 +146,7 @@ export function useComponentOperations(componentType) {
       verify: (id, content) => hubApi.verifyComponent('plugins', id, content)
     },
     projects: {
-      fetch: hubApi.fetchProjects,
+      fetch: () => hubApi.fetchComponentsWithTempInfo('projects'),
       get: hubApi.getProject,
       create: hubApi.createProject,
       update: hubApi.updateProject,

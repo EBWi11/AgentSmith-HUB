@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { hubApi } from '../api'
+import eventManager from '../utils/eventManager'
 
 // Add at top-level (outside Pinia store) a non-reactive map to track in-flight requests
 const ongoingRequests = new Map()
@@ -54,7 +55,10 @@ export const useDataCacheStore = defineStore('dataCache', {
     },
     
     // Operations history cache - Store as Map with LRU mechanism
-    operationsHistory: new Map()
+    operationsHistory: new Map(),
+    
+    // Event cleanup functions
+    _eventCleanupFunctions: []
   }),
   
   getters: {
@@ -79,8 +83,78 @@ export const useDataCacheStore = defineStore('dataCache', {
   },
   
   actions: {
+    // Initialize event listeners using the unified event manager
+    initializeEventListeners() {
+      if (this._eventCleanupFunctions.length > 0) return // Already initialized
+      
+      // Use unified event manager instead of direct window listeners
+      const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
+        const { action, type, id } = data
+        console.log(`[DataCache] Component ${action}: ${type}/${id}`)
+        
+        switch (action) {
+          case 'created':
+            this.clearComponentCache(type)
+            break
+          case 'updated':
+            this.clearComponentCache(type)
+            break
+          case 'deleted':
+            this.clearComponentCache(type)
+            break
+        }
+      })
+      
+      const pendingChangesCleanup = eventManager.on('pendingChangesApplied', (data) => {
+        const { types } = data
+        console.log(`[DataCache] Pending changes applied for types:`, types)
+        
+        if (Array.isArray(types)) {
+          types.forEach(type => {
+            this.clearComponentCache(type)
+          })
+        }
+        
+        // Also clear pending changes cache
+        this.clearCache('pendingChanges')
+      })
+      
+      const localChangesCleanup = eventManager.on('localChangesLoaded', (data) => {
+        const { types } = data
+        console.log(`[DataCache] Local changes loaded for types:`, types)
+        
+        if (Array.isArray(types)) {
+          types.forEach(type => {
+            this.clearComponentCache(type)
+          })
+        }
+        
+        // Also clear local changes cache
+        this.clearCache('localChanges')
+      })
+      
+      // Store cleanup functions
+      this._eventCleanupFunctions.push(
+        componentChangedCleanup,
+        pendingChangesCleanup,
+        localChangesCleanup
+      )
+      
+      console.log('[DataCache] Event listeners initialized via EventManager')
+    },
+    
+    // Cleanup event listeners
+    cleanupEventListeners() {
+      this._eventCleanupFunctions.forEach(cleanup => cleanup())
+      this._eventCleanupFunctions = []
+      console.log('[DataCache] Event listeners cleaned up')
+    },
+
     // Generic cache fetch method
     async fetchWithCache(key, fetcher, ttl = 30000, forceRefresh = false) {
+      // Initialize event listeners on first use
+      this.initializeEventListeners()
+      
       const cacheKey = key
       // If there is already an in-flight request for this key, return the same Promise
       if (ongoingRequests.has(cacheKey)) {
@@ -88,6 +162,12 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
 
       const cache = this[key]
+      
+      // If cache doesn't exist, return error
+      if (!cache) {
+        console.error(`Cache key '${key}' not found in dataCache store`)
+        throw new Error(`Cache key '${key}' not found`)
+      }
       
       // If data not expired and not forcing refresh, return cached data
       if (!forceRefresh && cache && !this.isExpired(key, ttl)) {
@@ -121,6 +201,9 @@ export const useDataCacheStore = defineStore('dataCache', {
     
     // Get component data
     async fetchComponents(type, forceRefresh = false) {
+      // Initialize event listeners on first use
+      this.initializeEventListeners()
+      
       const cacheKey = `components_${type}`
       
       // If there is already an in-flight request for this key, return the same Promise
@@ -129,6 +212,12 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
 
       const cache = this.components[type]
+      
+      // If cache doesn't exist, return error
+      if (!cache) {
+        console.error(`Component type '${type}' not found in dataCache store`)
+        throw new Error(`Component type '${type}' not found`)
+      }
       
       // If data not expired and not forcing refresh, return cached data
       if (!forceRefresh && !this.isComponentExpired(type, 30000)) {
@@ -314,6 +403,93 @@ export const useDataCacheStore = defineStore('dataCache', {
           throw error
         } finally {
           cacheEntry.loading = false
+          ongoingRequests.delete(cacheKey)
+        }
+      })()
+
+      ongoingRequests.set(cacheKey, requestPromise)
+      return requestPromise
+    },
+    
+    // Get single component detail with caching
+    async fetchComponentDetail(type, id, forceRefresh = false) {
+      const cacheKey = `detail_${type}_${id}`
+      
+      // If there is already an in-flight request for this key, return the same Promise
+      if (ongoingRequests.has(cacheKey)) {
+        return ongoingRequests.get(cacheKey)
+      }
+      
+      // Check component cache first - if we have recent list data, use it
+      const listCache = this.components[type]
+      if (!forceRefresh && listCache && listCache.data && (Date.now() - listCache.timestamp) <= 30000) {
+        // Try to find the component in the list cache first
+        const cachedComponent = listCache.data.find(item => {
+          const itemId = item.id || item.name
+          return itemId === id
+        })
+        
+        if (cachedComponent) {
+          // If it's a basic list item, we still need full details
+          // But we can skip the request if we already have full data
+          if (cachedComponent.raw) {
+            return cachedComponent
+          }
+        }
+      }
+      
+      // Create a Promise for the fetcher and store it in the map to deduplicate
+      const requestPromise = (async () => {
+        try {
+          let data
+          
+          // Call appropriate detail API
+          switch (type) {
+            case 'inputs':
+              data = await hubApi.getInput(id)
+              break
+            case 'outputs':
+              data = await hubApi.getOutput(id)
+              break
+            case 'rulesets':
+              data = await hubApi.getRuleset(id)
+              break
+            case 'projects':
+              data = await hubApi.getProject(id)
+              
+              // Get project status from cluster info
+              try {
+                const clusterStatus = await this.fetchClusterInfo()
+                if (clusterStatus && clusterStatus.projects) {
+                  const projectStatus = clusterStatus.projects.find(p => p.id === id)
+                  if (projectStatus) {
+                    data.status = projectStatus.status || 'stopped'
+                  } else {
+                    data.status = 'stopped'
+                  }
+                }
+              } catch (statusError) {
+                console.error('Failed to fetch project status:', statusError)
+                data.status = 'unknown'
+              }
+              break
+            case 'plugins':
+              data = await hubApi.getPlugin(id)
+              break
+            default:
+              throw new Error(`Unsupported component type: ${type}`)
+          }
+          
+          // Check if this is a temporary file
+          if (data && data.path) {
+            data.isTemporary = data.path.endsWith('.new')
+          }
+          
+          return data
+        } catch (error) {
+          console.error(`Failed to fetch ${type} detail for ${id}:`, error)
+          throw error
+        } finally {
           ongoingRequests.delete(cacheKey)
         }
       })()

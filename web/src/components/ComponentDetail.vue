@@ -667,41 +667,8 @@ async function fetchDetail(item, forEdit = false) {
       // This prevents creating unnecessary .new files when content is identical
     }
     
-    // Get details based on component type
-    switch (item.type) {
-      case 'inputs':
-        data = await hubApi.getInput(item.id);
-        break
-      case 'outputs':
-        data = await hubApi.getOutput(item.id);
-        break
-      case 'rulesets':
-        data = await hubApi.getRuleset(item.id);
-        break
-      case 'projects':
-        data = await hubApi.getProject(item.id);
-        // Get project status using dataCache
-        try {
-          const clusterStatus = await dataCache.fetchClusterInfo();
-          if (clusterStatus && clusterStatus.projects) {
-            const projectStatus = clusterStatus.projects.find(p => p.id === item.id);
-            if (projectStatus) {
-              data.status = projectStatus.status || 'stopped';
-            } else {
-              data.status = 'stopped'; // Default to stopped state
-            }
-          }
-        } catch (statusError) {
-          console.error('Failed to fetch project status:', statusError);
-          data.status = 'unknown';
-        }
-        break
-      case 'plugins':
-        data = await hubApi.getPlugin(item.id);
-        break
-      default:
-        throw new Error(`Unsupported component type: ${item.type}`);
-    }
+    // Get details using unified dataCache
+    data = await dataCache.fetchComponentDetail(item.type, item.id, forEdit)
     
     // Check if this is a temporary file
     if (data && data.path) {

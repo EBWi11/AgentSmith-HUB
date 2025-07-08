@@ -55,24 +55,24 @@ api.interceptors.response.use(
       localStorage.removeItem('auth_token');
       console.error('Authentication failed: Token invalid or expired');
       
-      // 安全地跳转到登录页面
+      // Safe redirect to login page
       if (typeof window !== 'undefined') {
-        // 检查当前路径，如果不是登录页则跳转
+        // Check current path, redirect if not on login page
         const currentPath = window.location.pathname;
         const isLoginPage = currentPath === '/' || currentPath === '/login' || 
                            currentPath.startsWith('/#/') || currentPath.includes('/login');
         
         if (!isLoginPage) {
           if (window.router) {
-            // 如果在Vue Router环境中，使用路由跳转
+            // If in Vue Router environment, use router navigation
             try {
               window.router.push({ name: 'Login' });
             } catch (routerError) {
-              // 路由跳转失败时使用location跳转
+              // Fall back to location redirect if router navigation fails
               window.location.replace('/');
             }
           } else {
-            // 使用replace避免在历史记录中留下记录
+            // Use replace to avoid leaving records in browser history
             window.location.replace('/');
           }
         }
@@ -111,35 +111,28 @@ export const hubApi = {
       const response = await api.get('/token-check');
       return response.data;
     } catch (error) {
-      // 清除token，避免无限刷新
+      // Clear token to avoid infinite refresh
       this.clearToken();
       throw error;
     }
   },
 
   /**
-   * Fetch components with temporary file information
+   * Fetch components with temporary file information (unified interface)
    * @param {string} type - Component type (inputs, outputs, rulesets, plugins, projects)
    * @returns {Array} - Components with hasTemp flag
    */
   async fetchComponentsWithTempInfo(type) {
     try {
+      // Direct API call instead of using deprecated fetch methods
       let response;
       switch (type) {
         case 'inputs':
-          response = await this.fetchInputs();
-          break;
         case 'outputs':
-          response = await this.fetchOutputs();
-          break;
         case 'rulesets':
-          response = await this.fetchRulesets();
-          break;
         case 'plugins':
-          response = await this.fetchPlugins();
-          break;
         case 'projects':
-          response = await this.fetchProjects();
+          response = await fetchComponentsByType(type, `/${type}`);
           break;
         case 'cluster':
           response = await this.fetchClusterInfo();
@@ -148,11 +141,11 @@ export const hubApi = {
           return [];
       }
       
-      // 确保每个组件都有正确的hasTemp属性，并且属于正确的组件类型
+      // Ensure each component has correct hasTemp property and belongs to correct component type
       if (Array.isArray(response)) {
-        // 过滤掉可能由于ID冲突导致错误添加的其他类型组件
+        // Filter out potentially incorrect components due to ID conflicts
         response = response.filter(item => {
-          // 对于插件，检查是否有name字段；对于其他组件，检查是否有id字段
+          // For plugins, check if has name field; for other components, check if has id field
           if (type === 'plugins' && !item.name && item.id) {
             console.warn(`Filtered out invalid plugin item:`, item);
             return false;
@@ -163,7 +156,7 @@ export const hubApi = {
           return true;
         });
         
-        // 确保所有组件都有hasTemp属性
+        // Ensure all components have hasTemp property
         for (const item of response) {
           if (item.hasTemp === undefined) {
             item.hasTemp = false;
@@ -177,25 +170,7 @@ export const hubApi = {
     }
   },
 
-  async fetchInputs() {
-    return fetchComponentsByType('inputs', '/inputs');
-  },
-
-  async fetchOutputs() {
-    return fetchComponentsByType('outputs', '/outputs');
-  },
-
-  async fetchRulesets() {
-    return fetchComponentsByType('rulesets', '/rulesets');
-  },
-
-  async fetchPlugins() {
-    return fetchComponentsByType('plugins', '/plugins');
-  },
-
-  async fetchProjects() {
-    return fetchComponentsByType('projects', '/projects');
-  },
+  // Legacy fetch methods removed - use fetchComponentsWithTempInfo instead
 
   async getInput(id) {
     const response = await api.get(`/inputs/${id}`);
@@ -215,17 +190,17 @@ export const hubApi = {
   async getProject(id) {
     try {
       const response = await api.get(`/projects/${id}`);
-      // 如果项目状态为error，尝试获取错误信息
+      // If project status is error, try to get error information
       if (response.data && response.data.status === 'error') {
         try {
-          // 尝试获取项目的错误信息
+          // Try to get project error information
           const errorResponse = await api.get(`/project-error/${id}`);
           if (errorResponse.data && errorResponse.data.error) {
             response.data.errorMessage = errorResponse.data.error;
           }
         } catch (errorFetchError) {
           console.warn(`Failed to fetch error details for project ${id}:`, errorFetchError);
-          // 设置一个默认的错误信息
+          // Set a default error message
           response.data.errorMessage = "Unknown error occurred";
         }
       }
@@ -461,7 +436,7 @@ export const hubApi = {
       const response = await api.post('/apply-changes');
       return response.data;
     } catch (error) {
-      // 如果是验证失败的错误，特殊处理
+      // Special handling for validation failure errors
       if (error.response && error.response.data && error.response.data.verify_failures) {
         throw {
           message: error.response.data.error,
@@ -1487,17 +1462,6 @@ export const hubApi = {
     } catch (error) {
       console.error('Error fetching cluster error logs:', error);
       throw new Error(error.response?.data?.error || error.message || 'Failed to fetch cluster error logs');
-    }
-  },
-
-  // Get project component sequences - returns each component's projectNodeSequence list in current project
-  async getProjectComponentSequences(projectId) {
-    try {
-      const response = await api.get(`/project-component-sequences/${projectId}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching component sequences for project ${projectId}:`, error);
-      throw error;
     }
   },
 

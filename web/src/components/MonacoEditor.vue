@@ -10,7 +10,8 @@ import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { onBeforeUpdate } from 'vue';
 import { hubApi } from '@/api';
-import { useMonacoComponentCache } from '@/composables/useComponentCache';
+import { useDataCacheStore } from '@/stores/dataCache';
+import eventManager from '@/utils/eventManager';
 
 const props = defineProps({
   value: String,
@@ -23,7 +24,7 @@ const props = defineProps({
   componentType: { type: String, default: '' }, // Component type (input, output, ruleset)
 });
 
-// 正确声明emits
+// Properly declare emits
 const emit = defineEmits(['update:value', 'save', 'line-change']);
 
 const container = ref(null);
@@ -31,34 +32,109 @@ let editor = null;
 let diffEditor = null;
 const store = useStore();
 
-// Use unified component cache system
-const componentCache = useMonacoComponentCache(props.componentType);
+// Use unified data cache store
+const dataCache = useDataCacheStore();
 
-// Get component lists from cache
-const inputComponents = computed(() => componentCache.components.value.inputs || []);
-const outputComponents = computed(() => componentCache.components.value.outputs || []);
-const rulesetComponents = computed(() => componentCache.components.value.rulesets || []);
-const pluginComponents = computed(() => componentCache.components.value.plugins || []);
+// Get component lists from unified cache
+const inputComponents = computed(() => dataCache.getComponentData('inputs') || []);
+const outputComponents = computed(() => dataCache.getComponentData('outputs') || []);
+const rulesetComponents = computed(() => dataCache.getComponentData('rulesets') || []);
+const pluginComponents = computed(() => dataCache.getComponentData('plugins') || []);
 
-// Plugin parameters cache from unified cache
-const pluginParametersCache = computed(() => componentCache.parameters.value.plugins || {});
+// Smart plugin parameters cache - globally shared, supports event-driven cleanup
+const globalPluginParametersCache = ref({});
+let eventCleanupFunctions = []
 
-// Function to get plugin parameters (now using unified cache)
+// Initialize plugin parameters cache event listeners
+const initializeParametersCache = () => {
+  if (eventCleanupFunctions.length > 0) return // Already initialized
+  
+  // Use unified event manager to listen for plugin component changes
+  const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
+    const { action, type, id } = data;
+    if (type === 'plugins') {
+      console.log(`[Monaco] Plugin ${action}: clearing parameters cache for ${id}`);
+      // Clear specific plugin's parameters cache
+      if (id && globalPluginParametersCache.value[id]) {
+        delete globalPluginParametersCache.value[id];
+      }
+      // If it's a delete operation, also clear plugin suggestions cache
+      if (action === 'deleted') {
+        globalPluginSuggestionsCache.clear();
+        lastPluginDataHash = '';
+      }
+    }
+  });
+  
+  // Listen for batch changes
+  const pendingChangesCleanup = eventManager.on('pendingChangesApplied', (data) => {
+    const { types } = data;
+    if (Array.isArray(types) && types.includes('plugins')) {
+      console.log('[Monaco] Clearing all plugin parameters cache due to pending changes');
+      globalPluginParametersCache.value = {};
+      globalPluginSuggestionsCache.clear();
+      lastPluginDataHash = '';
+    }
+  });
+  
+  const localChangesCleanup = eventManager.on('localChangesLoaded', (data) => {
+    const { types } = data;
+    if (Array.isArray(types) && types.includes('plugins')) {
+      console.log('[Monaco] Clearing all plugin parameters cache due to local changes');
+      globalPluginParametersCache.value = {};
+      globalPluginSuggestionsCache.clear();
+      lastPluginDataHash = '';
+    }
+  });
+  
+  // Store cleanup functions
+  eventCleanupFunctions.push(
+    componentChangedCleanup,
+    pendingChangesCleanup,
+    localChangesCleanup
+  );
+  
+  console.log('[Monaco] Plugin parameters cache event listeners initialized via EventManager');
+};
+
+// Cleanup event listeners
+const cleanupParametersCache = () => {
+  eventCleanupFunctions.forEach(cleanup => cleanup());
+  eventCleanupFunctions = [];
+  console.log('[Monaco] Plugin parameters cache event listeners cleaned up');
+};
+
+// Smart plugin parameters fetching (with cache)
 const getPluginParameters = async (pluginId) => {
-  const cached = pluginParametersCache.value[pluginId];
-  if (cached) {
-    return cached;
+  // Initialize cache listeners
+  if (eventCleanupFunctions.length === 0) {
+    initializeParametersCache();
   }
   
-  // If not in cache, trigger fetch through cache system
+  // Check cache
+  if (globalPluginParametersCache.value[pluginId]) {
+    return globalPluginParametersCache.value[pluginId];
+  }
+  
   try {
-    await componentCache.fetchParameters('plugins', [pluginId]);
-    return pluginParametersCache.value[pluginId] || [];
+    console.log(`[Monaco] Fetching parameters for plugin: ${pluginId}`);
+    const parameters = await hubApi.getPluginParameters(pluginId);
+    const result = parameters || [];
+    
+    // Cache result
+    globalPluginParametersCache.value[pluginId] = result;
+    
+    return result;
   } catch (error) {
     console.warn(`Failed to fetch plugin parameters for ${pluginId}:`, error);
+    // Cache empty result to avoid repeated requests
+    globalPluginParametersCache.value[pluginId] = [];
     return [];
   }
 };
+
+// Plugin parameters cache - smart computed property that returns current cache state
+const pluginParametersCache = computed(() => globalPluginParametersCache.value);
 
 // Get dynamic field keys for ruleset completion
 const dynamicFieldKeys = computed(() => {
@@ -76,7 +152,14 @@ watch([() => props.componentId, () => props.componentType], ([newId, newType], [
   }
 }, { immediate: true });
 
-// After dynamicFieldKeys definition, add a watcher to auto-trigger suggestions when keys become available
+// Watch for plugin data changes to invalidate cache
+watch([pluginComponents, pluginParametersCache], () => {
+  // Clear plugin suggestions cache when plugin data changes
+  globalPluginSuggestionsCache.clear();
+  lastPluginDataHash = '';
+}, { deep: true });
+
+// Watch for dynamic field changes to trigger suggestions
 watch(
   () => dynamicFieldKeys.value.length,
   (newLen, oldLen) => {
@@ -96,7 +179,17 @@ watch(
 
 // Get component lists when component is mounted
 onMounted(async () => {
-  // Note: Component fetching is now handled by useMonacoComponentCache
+  // Preload component data for autocomplete
+  try {
+    await Promise.all([
+      dataCache.fetchComponents('inputs'),
+      dataCache.fetchComponents('outputs'),
+      dataCache.fetchComponents('rulesets'),
+      dataCache.fetchComponents('plugins')
+    ]);
+  } catch (error) {
+    console.warn('Failed to preload component data for Monaco:', error);
+  }
   
   // Fetch dynamic field keys for rulesets
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
@@ -942,6 +1035,8 @@ function handleResize() {
 onBeforeUnmount(() => {
   // Remove window size change monitoring
   window.removeEventListener('resize', handleResize);
+  // Clean up event listeners
+  cleanupParametersCache();
   disposeEditors();
 });
 
@@ -955,7 +1050,7 @@ function disposeEditors() {
     console.warn('Failed to dispose editor:', error);
   } finally {
     editor = null;
-    currentDecorations = []; // 重置装饰器数组
+    currentDecorations = []; // Reset decorator array
   }
   
   try {
@@ -1132,7 +1227,7 @@ function formatGoDocument(editor, content) {
   }
 }
 
-// 智能注释切换
+// Smart comment toggle
 function toggleSmartComment(editor, language) {
   const selection = editor.getSelection();
   if (!selection) return;
@@ -1161,7 +1256,7 @@ function toggleSmartComment(editor, language) {
   const edits = [];
   let isCommenting = false;
   
-  // 检查是否需要添加注释或移除注释
+  // Check if comments need to be added or removed
   for (let i = startLine; i <= endLine; i++) {
     const line = model.getLineContent(i);
     const trimmed = line.trim();
@@ -1171,14 +1266,14 @@ function toggleSmartComment(editor, language) {
     }
   }
   
-  // 执行注释或取消注释
+  // Execute comment or uncomment
   for (let i = startLine; i <= endLine; i++) {
     const line = model.getLineContent(i);
     const trimmed = line.trim();
     
     if (trimmed) {
       if (isCommenting) {
-        // 添加注释
+        // Add comment
         const firstNonWhitespace = line.search(/\S/);
         if (firstNonWhitespace >= 0) {
           edits.push({
@@ -1192,7 +1287,7 @@ function toggleSmartComment(editor, language) {
           });
         }
       } else {
-        // 移除注释
+        // Remove comment
         const commentIndex = line.indexOf(commentPrefix);
         if (commentIndex >= 0) {
           edits.push({
@@ -1214,11 +1309,11 @@ function toggleSmartComment(editor, language) {
   }
 }
 
-// Input组件智能补全
+// Input component smart completion
 function getInputCompletions(fullText, lineText, range, position) {
   const suggestions = [];
   
-  // 特殊处理：检查是否是INPUT.后的补全
+  // Special handling: check if it's completion after INPUT.
   const currentWord = getCurrentWord(lineText, position.column);
   if (currentWord.includes('.')) {
     const [prefix, partial] = currentWord.split('.');
@@ -1227,11 +1322,11 @@ function getInputCompletions(fullText, lineText, range, position) {
     if (prefix === 'INPUT') {
       
               if (inputComponents.value.length > 0) {
-          // 提示所有INPUT组件，但过滤掉临时组件
+          // Suggest all INPUT components, but filter out temporary components
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
                 !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // 过滤掉临时组件
+                !input.hasTemp) {  // Filter out temporary components
               suggestions.push({
                 label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -1242,7 +1337,7 @@ function getInputCompletions(fullText, lineText, range, position) {
             }
           });
       } else {
-        // 如果没有input组件，添加一个提示
+        // If no input components, add a hint
         suggestions.push({
           label: 'No input components available',
           kind: monaco.languages.CompletionItemKind.Text,
@@ -2907,106 +3002,19 @@ function getXmlTagContentCompletions(context, range, fullText) {
     return { suggestions };
   }
   
-  // Enhanced plugin function completion with parameter information
+  // Enhanced plugin function completion with parameter information (optimized)
   // Only show plugin functions when NOT in function parameters
   if (context.currentTag === 'plugin' || (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
     
     // Determine if we're in a checknode context (which requires bool return type)
     const isInCheckNode = context.currentTag === 'node' && fullText.includes('type="PLUGIN"');
     
-    // Add existing plugins with smart parameter templates (synchronous approach with cached data)
-    pluginComponents.value.forEach(plugin => {
-      if (!plugin.hasTemp) {  // Filter out temporary components
-        // For checknode, only show plugins with bool return type
-        if (isInCheckNode && plugin.returnType !== 'bool') {
-          return; // Skip this plugin
-        }
-        // Check if we have cached parameters for this plugin
-        const cachedParameters = pluginParametersCache.value[plugin.id];
-        
-        let insertText = plugin.id;
-        let documentation = `Plugin: ${plugin.id}`;
-        
-        // Check if we have explicitly fetched parameters (even if empty)
-        const hasParameterInfo = plugin.id in pluginParametersCache.value;
-        
-        if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
-          // Create parameter template based on actual plugin signature
-          const paramSnippets = cachedParameters.map((param, index) => {
-            // Generate clean parameter placeholder based on parameter type
-            let snippet;
-            
-            switch (param.type) {
-              case 'string':
-                snippet = param.name;
-                break;
-              case 'int':
-              case 'float':
-                snippet = param.name;
-                break;
-              case 'bool':
-                snippet = 'true';
-                break;
-              case '...interface{}':
-                snippet = '_$ORIDATA';
-                break;
-              default:
-                if (param.type.includes('interface')) {
-                  snippet = '_$ORIDATA';
-                } else {
-                  snippet = param.name;
-                }
-            }
-            
-            return snippet;
-          }).join(', ');
-          
-          insertText = `${plugin.id}(${paramSnippets})`;
-          
-          // Create simple parameter list for label display
-          const simpleParams = cachedParameters.map(param => param.name).join(', ');
-          
-          // Enhanced documentation with parameter info
-          const paramDocs = cachedParameters.map(p => `${p.name}: ${p.type}${p.required ? ' (required)' : ' (optional)'}`).join('\n');
-          documentation = `Plugin: ${plugin.id}\n\nParameters:\n${paramDocs}`;
-        } else if (hasParameterInfo) {
-          // We have parameter info but no parameters - plugin takes no arguments
-          insertText = `${plugin.id}()`;
-          documentation = `Plugin: ${plugin.id}\n\nNo parameters required`;
-        } else {
-          // No parameter info yet - show basic plugin name and fetch in background
-          insertText = `${plugin.id}()`;
-          documentation = `Plugin: ${plugin.id}\n\nLoading parameter information...`;
-          
-          // Asynchronously fetch parameters for future use
-          getPluginParameters(plugin.id).catch(error => {
-            console.debug(`Could not fetch parameters for plugin ${plugin.id}:`, error);
-          });
-        }
-        
-        // Create user-friendly label
-        let pluginLabel;
-        if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
-          const simpleParams = cachedParameters.map(param => param.name).join(', ');
-          pluginLabel = `${plugin.id}(${simpleParams})`;
-        } else {
-          pluginLabel = `${plugin.id}()`;
-        }
-        if (!suggestions.some(s => s.label === pluginLabel)) {
-          suggestions.push({
-            label: pluginLabel,
-            kind: monaco.languages.CompletionItemKind.Function,
-            documentation: documentation,
-            insertText: insertText,
-            range: range,
-            sortText: `0_${plugin.id}` // Higher priority for actual plugins
-          });
-        }
-      }
-    });
+    // Use cached plugin suggestions (no async needed)
+    const pluginSuggestions = getPluginSuggestions(range, isInCheckNode);
+    suggestions.push(...pluginSuggestions);
     
     // Only add generic plugin templates if no real plugins exist
-    const hasRealPlugins = pluginComponents.value.some(plugin => !plugin.hasTemp);
+    const hasRealPlugins = (pluginComponents.value || []).some(plugin => !plugin.hasTemp);
     if (!hasRealPlugins) {
       suggestions.push({
         label: 'plugin_name(_$ORIDATA)',
@@ -3252,6 +3260,127 @@ defineExpose({
   getEditor: () => editor,
   getDiffEditor: () => diffEditor
 });
+
+// 全局插件补全建议缓存 - 跨组件实例共享
+const globalPluginSuggestionsCache = new Map();
+let lastPluginDataHash = '';
+
+// 计算插件数据hash用于缓存失效检测
+const calculatePluginDataHash = () => {
+  try {
+    const plugins = pluginComponents.value?.filter(p => !p.hasTemp) || [];
+    const pluginIds = plugins.map(p => p.id).sort().join(',');
+    const parameterKeys = Object.keys(pluginParametersCache.value || {}).sort().join(',');
+    return `${pluginIds}:${parameterKeys}`;
+  } catch (error) {
+    console.warn('Error calculating plugin data hash:', error);
+    return Date.now().toString(); // fallback to timestamp
+  }
+};
+
+// 智能获取插件补全建议（带缓存）
+const getPluginSuggestions = (range, isInCheckNode = false) => {
+  const cacheKey = `${isInCheckNode ? 'check' : 'all'}_plugins`;
+  const currentHash = calculatePluginDataHash();
+  
+  // 检查数据是否有变化
+  if (currentHash !== lastPluginDataHash) {
+    // 插件数据有变化，清理所有缓存
+    globalPluginSuggestionsCache.clear();
+    lastPluginDataHash = currentHash;
+  }
+  
+  // 检查缓存
+  if (globalPluginSuggestionsCache.has(cacheKey)) {
+    const cached = globalPluginSuggestionsCache.get(cacheKey);
+    // 更新range（因为每次调用时的range可能不同）
+    return cached.map(suggestion => ({
+      ...suggestion,
+      range: range
+    }));
+  }
+  
+  // 构建新的补全建议
+  const suggestions = [];
+  const validPlugins = (pluginComponents.value || []).filter(plugin => !plugin.hasTemp);
+  
+  validPlugins.forEach(plugin => {
+    // For checknode, only show plugins with bool return type
+    if (isInCheckNode && plugin.returnType !== 'bool') {
+      return; // Skip this plugin
+    }
+    
+    const cachedParameters = (pluginParametersCache.value || {})[plugin.id];
+    const hasParameterInfo = plugin.id in (pluginParametersCache.value || {});
+    
+    let insertText = plugin.id;
+    let documentation = `Plugin: ${plugin.id}`;
+    
+    if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
+      // Create parameter template based on actual plugin signature
+      const paramSnippets = cachedParameters.map((param) => {
+        switch (param.type) {
+          case 'string':
+            return param.name;
+          case 'int':
+          case 'float':
+            return param.name;
+          case 'bool':
+            return 'true';
+          case '...interface{}':
+            return '_$ORIDATA';
+          default:
+            return param.type.includes('interface') ? '_$ORIDATA' : param.name;
+        }
+      }).join(', ');
+      
+      insertText = `${plugin.id}(${paramSnippets})`;
+      
+      const paramDocs = cachedParameters.map(p => 
+        `${p.name}: ${p.type}${p.required ? ' (required)' : ' (optional)'}`
+      ).join('\n');
+      documentation = `Plugin: ${plugin.id}\n\nParameters:\n${paramDocs}`;
+    } else if (hasParameterInfo) {
+      insertText = `${plugin.id}()`;
+      documentation = `Plugin: ${plugin.id}\n\nNo parameters required`;
+    } else {
+      insertText = `${plugin.id}()`;
+      documentation = `Plugin: ${plugin.id}\n\nLoading parameter information...`;
+      
+      // 异步获取参数，但不阻塞当前补全
+      getPluginParameters(plugin.id).then(() => {
+        // 参数获取完成后，清理缓存以便下次使用最新数据
+        globalPluginSuggestionsCache.delete(cacheKey);
+      }).catch(error => {
+        console.debug(`Could not fetch parameters for plugin ${plugin.id}:`, error);
+      });
+    }
+    
+    // Create user-friendly label
+    let pluginLabel;
+    if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
+      const simpleParams = cachedParameters.map(param => param.name).join(', ');
+      pluginLabel = `${plugin.id}(${simpleParams})`;
+    } else {
+      pluginLabel = `${plugin.id}()`;
+    }
+    
+    suggestions.push({
+      label: pluginLabel,
+      kind: monaco.languages.CompletionItemKind.Function,
+      documentation: documentation,
+      insertText: insertText,
+      range: range, // 这个会在返回时动态更新
+      sortText: `0_${plugin.id}` // Higher priority for actual plugins
+    });
+  });
+  
+  // 缓存结果（不包含range，因为range每次都不同）
+  const cacheableSuggestions = suggestions.map(s => ({ ...s, range: null }));
+  globalPluginSuggestionsCache.set(cacheKey, cacheableSuggestions);
+  
+  return suggestions;
+};
 </script>
 
 <style>

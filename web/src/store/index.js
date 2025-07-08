@@ -1,7 +1,8 @@
 import { createStore } from 'vuex'
 import { hubApi } from '../api'
+import eventManager from '../utils/eventManager'
 
-export default createStore({
+const store = createStore({
   state: {
     components: {
       inputs: [],
@@ -60,7 +61,8 @@ export default createStore({
     pendingChanges: [],
     clusterStatus: {},
     clusterInfo: {},
-    rulesetFields: {} // Cache for ruleset field keys: { rulesetId: { fieldKeys: [...], sampleCount: 0 } }
+    rulesetFields: {}, // Cache for ruleset field keys: { rulesetId: { fieldKeys: [...], sampleCount: 0 } }
+    _eventCleanupFunctions: []
   },
   getters: {
     getComponents: (state) => (type) => {
@@ -115,30 +117,103 @@ export default createStore({
     },
     setRulesetFields(state, { rulesetId, fieldData }) {
       state.rulesetFields[rulesetId] = fieldData
+    },
+    clearRulesetFields(state, rulesetId) {
+      if (rulesetId) {
+        delete state.rulesetFields[rulesetId]
+      } else {
+        // Clear all ruleset fields
+        state.rulesetFields = {}
+      }
+    },
+    setEventCleanupFunctions(state, functions) {
+      state._eventCleanupFunctions = functions
     }
   },
   actions: {
-    async fetchComponents({ commit }, type) {
-      try {
-        let components = []
-        switch (type) {
-          case 'inputs':
-            components = await hubApi.fetchInputs()
-            break
-          case 'outputs':
-            components = await hubApi.fetchOutputs()
-            break
-          case 'rulesets':
-            components = await hubApi.fetchRulesets()
-            break
-          case 'projects':
-            components = await hubApi.fetchProjects()
-            break
-          case 'plugins':
-            components = await hubApi.fetchPlugins()
-            break
+    // Initialize event listeners using the unified event manager (focused on Vuex-specific caches)
+    initializeEventListeners({ commit, state }) {
+      if (state._eventCleanupFunctions.length > 0) return // Already initialized
+      
+      // Use unified event manager for Vuex-specific caches only
+      const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
+        const { action, type, id } = data
+        console.log(`[VuexStore] Component ${action}: ${type}/${id}`)
+        
+        // Only handle Vuex-specific caches (avoid overlap with dataCache)
+        if (type === 'rulesets') {
+          // Clear field cache for the specific ruleset
+          if (id) {
+            commit('clearRulesetFields', id)
+          }
+        } else if (type === 'plugins') {
+          // Clear available plugins cache
+          commit('setAvailablePlugins', [])
         }
-        // 对组件列表按照ID排序
+      })
+      
+      const pendingChangesCleanup = eventManager.on('pendingChangesApplied', (data) => {
+        const { types } = data
+        console.log(`[VuexStore] Pending changes applied for types:`, types)
+        
+        if (Array.isArray(types)) {
+          types.forEach(type => {
+            if (type === 'rulesets') {
+              commit('clearRulesetFields')
+            } else if (type === 'plugins') {
+              commit('setAvailablePlugins', [])
+            }
+          })
+        }
+      })
+      
+      const localChangesCleanup = eventManager.on('localChangesLoaded', (data) => {
+        const { types } = data
+        console.log(`[VuexStore] Local changes loaded for types:`, types)
+        
+        if (Array.isArray(types)) {
+          types.forEach(type => {
+            if (type === 'rulesets') {
+              commit('clearRulesetFields')
+            } else if (type === 'plugins') {
+              commit('setAvailablePlugins', [])
+            }
+          })
+        }
+      })
+      
+      // Store cleanup functions
+      commit('setEventCleanupFunctions', [
+        componentChangedCleanup,
+        pendingChangesCleanup,
+        localChangesCleanup
+      ])
+      
+      console.log('[VuexStore] Event listeners initialized via EventManager')
+    },
+    
+    // Cleanup event listeners
+    cleanupEventListeners({ commit, state }) {
+      state._eventCleanupFunctions.forEach(cleanup => cleanup())
+      commit('setEventCleanupFunctions', [])
+      console.log('[VuexStore] Event listeners cleaned up')
+    },
+
+    // Note: fetchComponents is deprecated in favor of dataCache.fetchComponents
+    // Keep for backward compatibility but add deprecation warning
+    async fetchComponents({ commit, dispatch, state }, type) {
+      console.warn(`[VuexStore] fetchComponents is deprecated. Use dataCache.fetchComponents('${type}') instead.`)
+      
+      // Initialize event listeners if needed
+      if (state._eventCleanupFunctions.length === 0) {
+        dispatch('initializeEventListeners')
+      }
+      
+      try {
+        // Use unified interface instead of deprecated individual fetch methods
+        let components = await hubApi.fetchComponentsWithTempInfo(type)
+        
+        // Sort component list by ID
         if (Array.isArray(components)) {
           components.sort((a, b) => {
             const idA = a.id || a.name || ''
@@ -148,9 +223,15 @@ export default createStore({
         }
         commit('setComponents', { type, components })
       } catch (error) {
+        console.error(`Error fetching ${type}:`, error)
       }
     },
-    async fetchAvailablePlugins({ commit }) {
+    async fetchAvailablePlugins({ commit, dispatch, state }) {
+      // Initialize event listeners if needed
+      if (state._eventCleanupFunctions.length === 0) {
+        dispatch('initializeEventListeners')
+      }
+      
       try {
         const plugins = await hubApi.getAvailablePlugins()
         commit('setAvailablePlugins', plugins)
@@ -159,6 +240,7 @@ export default createStore({
       }
     },
     async fetchAllComponents({ dispatch }) {
+      console.warn('[VuexStore] fetchAllComponents is deprecated. Use dataCache for component fetching.')
       await Promise.all([
         dispatch('fetchComponents', 'inputs'),
         dispatch('fetchComponents', 'outputs'),
@@ -192,7 +274,12 @@ export default createStore({
         commit('setClusterInfo', {})
       }
     },
-    async fetchRulesetFields({ commit }, rulesetId) {
+    async fetchRulesetFields({ commit, dispatch, state }, rulesetId) {
+      // Initialize event listeners if needed
+      if (state._eventCleanupFunctions.length === 0) {
+        dispatch('initializeEventListeners')
+      }
+      
       try {
         const fieldData = await hubApi.getRulesetFields(rulesetId)
         commit('setRulesetFields', { rulesetId, fieldData })
@@ -206,4 +293,6 @@ export default createStore({
     }
   },
   modules: {}
-}) 
+})
+
+export default store 

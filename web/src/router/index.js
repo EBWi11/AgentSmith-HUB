@@ -139,23 +139,23 @@ router.beforeEach(async (to, from, next) => {
     if (!token) {
       next({ name: 'Login' });
     } else {
-      // 验证token是否有效
+      // Verify if token is valid
       try {
         await hubApi.verifyToken();
         next();
       } catch (error) {
-        // Token无效，清除并跳转到登录页
+        // Token invalid, clear and redirect to login page
         hubApi.clearToken();
         next({ name: 'Login' });
       }
     }
   } else if (to.name === 'Login' && token) {
-    // 如果访问登录页面但有token，验证token有效性
+    // If accessing login page but has token, verify token validity
     try {
       await hubApi.verifyToken();
       next({ path: '/app' });
     } catch (error) {
-      // Token无效，清除并显示登录页
+      // Token invalid, clear and show login page
       hubApi.clearToken();
       next();
     }

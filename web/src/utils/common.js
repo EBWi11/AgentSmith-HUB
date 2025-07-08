@@ -1,9 +1,9 @@
 /**
- * 通用工具函数
- * 用于减少重复的格式化和处理逻辑
+ * Common utility functions
+ * Used to reduce repetitive formatting and processing logic
  */
 
-// 组件类型配置
+// Component type configuration
 export const COMPONENT_TYPES = {
   inputs: {
     label: 'Input',
@@ -38,7 +38,7 @@ export const COMPONENT_TYPES = {
 }
 
 /**
- * 获取组件类型标签
+ * Get component type label
  */
 export function getComponentTypeLabel(type) {
   return COMPONENT_TYPES[type]?.label || type
@@ -47,21 +47,21 @@ export function getComponentTypeLabel(type) {
 // Note: getComponentTypeIcon was removed as it was unused
 
 /**
- * 获取编辑器语言
+ * Get editor language
  */
 export function getEditorLanguage(type) {
   return COMPONENT_TYPES[type]?.language || 'yaml'
 }
 
 /**
- * 检查是否支持连接检查
+ * Check if component supports connection check
  */
 export function supportsConnectCheck(type) {
   return COMPONENT_TYPES[type]?.supportsConnectCheck || false
 }
 
 /**
- * 转换API组件类型（单数转复数）
+ * Convert API component type (singular to plural)
  */
 export function getApiComponentType(type) {
   const mapping = {
@@ -75,7 +75,7 @@ export function getApiComponentType(type) {
 }
 
 /**
- * 格式化数字
+ * Format numbers
  */
 export function formatNumber(num) {
   if (num >= 1000000) {
@@ -88,7 +88,7 @@ export function formatNumber(num) {
 }
 
 /**
- * 格式化百分比
+ * Format percentage
  */
 export function formatPercent(num) {
   if (typeof num !== 'number' || isNaN(num)) {
@@ -98,14 +98,14 @@ export function formatPercent(num) {
 }
 
 /**
- * 格式化每日消息数
+ * Format daily message count
  */
 export function formatMessagesPerDay(messages) {
   return formatNumber(messages || 0)
 }
 
 /**
- * 格式化时间差
+ * Format time difference
  */
 export function formatTimeAgo(date) {
   if (!date) return 'Unknown'
@@ -128,21 +128,21 @@ export function formatTimeAgo(date) {
 }
 
 /**
- * 获取项目状态标签
+ * Get project status label
  */
 export function getStatusLabel(status) {
   const mapping = {
     running: 'R',
     stopped: 'S',
-    starting: '◐',  // 使用半圆符号表示启动中
-    stopping: '●',  // 使用圆点符号表示正在停止中
+    starting: '◐',  // Use half-circle symbol for starting
+    stopping: '●',  // Use dot symbol for stopping
     error: 'E'
   }
   return mapping[status] || '?'
 }
 
 /**
- * 获取状态标题
+ * Get status title
  */
 export function getStatusTitle(item) {
   if (!item.status) return 'Unknown Status'
@@ -198,7 +198,7 @@ export function extractLineNumber(errorMessage, componentType = null, editorCont
 }
 
 /**
- * 复制文本到剪贴板
+ * Copy text to clipboard
  */
 export async function copyToClipboard(text) {
   try {
@@ -225,7 +225,7 @@ export async function copyToClipboard(text) {
 }
 
 /**
- * 防抖函数
+ * Debounce function
  */
 export function debounce(func, wait, immediate) {
   let timeout
@@ -246,17 +246,17 @@ export function debounce(func, wait, immediate) {
 // Note: deepClone function was removed as it was unused
 
 /**
- * 检查是否需要重启的组件变更
+ * Check if component change requires restart
  */
 export function needsRestart(change) {
-  // 检查是否是项目组件，或者是被项目使用的组件
+  // Check if it's a project component, or a component used by projects
   return change.type === 'projects' || 
          (change.requires_restart === true) ||
          (change.affected_projects && change.affected_projects.length > 0)
 }
 
 /**
- * 获取CPU颜色类
+ * Get CPU color class
  */
 export function getCPUColor(cpuPercent) {
   if (cpuPercent > 80) return 'text-red-600'
@@ -265,7 +265,7 @@ export function getCPUColor(cpuPercent) {
 }
 
 /**
- * 获取CPU进度条颜色类
+ * Get CPU progress bar color class
  */
 export function getCPUBarColor(cpuPercent) {
   if (cpuPercent > 80) return 'bg-red-500'
@@ -274,7 +274,7 @@ export function getCPUBarColor(cpuPercent) {
 }
 
 /**
- * 获取内存颜色类
+ * Get memory color class
  */
 export function getMemoryColor(memoryPercent) {
   if (memoryPercent > 85) return 'text-red-600'
@@ -283,7 +283,7 @@ export function getMemoryColor(memoryPercent) {
 }
 
 /**
- * 获取内存进度条颜色类
+ * Get memory progress bar color class
  */
 export function getMemoryBarColor(memoryPercent) {
   if (memoryPercent > 85) return 'bg-red-500'

@@ -94,12 +94,12 @@ kafka:
  * @returns {string} - YAML template for the project
  */
 export function generateProjectTemplate(id, store) {
-  // 尝试获取实际的组件名称
+  // Try to get actual component names
   let inputExample = 'example_input';
   let rulesetExample = 'example_ruleset';
   let outputExample = 'example_output';
   
-  // 如果提供了store，尝试获取实际组件
+  // If store is provided, try to get actual components
   if (store) {
     const inputs = store.getters.getComponents('inputs');
     const rulesets = store.getters.getComponents('rulesets');
