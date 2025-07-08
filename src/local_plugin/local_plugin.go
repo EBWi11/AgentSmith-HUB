@@ -88,7 +88,7 @@ var LocalPluginDesc = map[string]string{
 	"isPrivateIP":  "Check node: true if IP is private RFC1918/loopback/link-local. Args: ip string.",
 	"cidrMatch":    "Check node: true if IP within CIDR. Args: ip string, cidr string.",
 	"geoMatch":     "Check node: true if IP country ISO matches expected. Args: ip, countryISO.",
-	"suppressOnce": "Check node: alert suppression. Args: key(any), windowSec. Returns true only first time within window.",
+	"suppressOnce": "Check node: alert suppression. Args: key(any), windowSec, ruleid(optional). Returns true only first time within window. Use ruleid to isolate different rules.",
 
 	// time append
 	"now":       "Append: current time. Args: optional format (unix|ms|rfc3339).",

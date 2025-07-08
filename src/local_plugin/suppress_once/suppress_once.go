@@ -11,11 +11,12 @@ import (
 //
 //	0: key string / any comparable value converted to string
 //	1: window int (seconds) – suppression period
+//	2: ruleid string (optional) – rule identifier to isolate different rules
 //
 // It uses Redis SETNX with TTL to track fired keys.
 func Eval(args ...interface{}) (bool, error) {
 	if len(args) < 2 {
-		return false, fmt.Errorf("suppressOnce requires 2 arguments: key and window(sec)")
+		return false, fmt.Errorf("suppressOnce requires at least 2 arguments: key and window(sec), optionally ruleid")
 	}
 	keyStr := fmt.Sprintf("%v", args[0])
 
@@ -41,7 +42,16 @@ func Eval(args ...interface{}) (bool, error) {
 		return false, fmt.Errorf("window must be positive seconds")
 	}
 
-	redisKey := "suppress_once:" + keyStr
+	// Optional ruleid parameter for rule isolation
+	var redisKey string
+	if len(args) >= 3 {
+		ruleid := fmt.Sprintf("%v", args[2])
+		redisKey = "suppress_once:" + ruleid + ":" + keyStr
+	} else {
+		// Backward compatibility: no ruleid specified
+		redisKey = "suppress_once:" + keyStr
+	}
+
 	ok, err := common.RedisSetNX(redisKey, 1, winSec)
 	if err != nil {
 		return false, err
