@@ -213,9 +213,17 @@ export const useDataCacheStore = defineStore('dataCache', {
 
       const cache = this.components[type]
       
-      // If cache doesn't exist, return error
+      // If cache doesn't exist, check if it's a special UI type
       if (!cache) {
+        // Special UI types that are not actual component types
+        const uiTypes = ['settings', 'cluster', 'pending-changes', 'load-local-components', 'operations-history', 'error-logs', 'tutorial', 'home']
+        if (uiTypes.includes(type)) {
+          console.warn(`Attempted to fetch '${type}' as component type, but it's a UI type. Returning empty array.`)
+          return []
+        }
+        
         console.error(`Component type '${type}' not found in dataCache store`)
+        console.error('Call stack:', new Error().stack)
         throw new Error(`Component type '${type}' not found`)
       }
       

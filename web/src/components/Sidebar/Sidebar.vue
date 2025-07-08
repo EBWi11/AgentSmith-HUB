@@ -1738,11 +1738,15 @@ async function toggleCollapse(type) {
   collapsed[type] = !collapsed[type]
   // If expanding, refresh the list
   if (!collapsed[type]) {
-    if (type === 'projects') {
-      // 对于projects，先使用惰性刷新，如果列表为空则进行完整刷新
-      await refreshProjectStatus()
-    } else {
-      await fetchItems(type)
+    // Only fetch items for real component types, not for sections with children
+    const section = sections[type]
+    if (section && !section.children) {
+      if (type === 'projects') {
+        // 对于projects，先使用惰性刷新，如果列表为空则进行完整刷新
+        await refreshProjectStatus()
+      } else {
+        await fetchItems(type)
+      }
     }
   }
 }
