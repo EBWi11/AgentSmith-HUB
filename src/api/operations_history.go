@@ -19,51 +19,39 @@ import (
 )
 
 // OperationType represents the type of operation
-type OperationType string
+// Type aliases for backward compatibility
+type OperationType = common.OperationType
 
 const (
-	OpTypeChangePush     OperationType = "change_push"
-	OpTypeLocalPush      OperationType = "local_push"
-	OpTypeProjectStart   OperationType = "project_start"
-	OpTypeProjectStop    OperationType = "project_stop"
-	OpTypeProjectRestart OperationType = "project_restart"
+	OpTypeChangePush     = common.OpTypeChangePush
+	OpTypeLocalPush      = common.OpTypeLocalPush
+	OpTypeProjectStart   = common.OpTypeProjectStart
+	OpTypeProjectStop    = common.OpTypeProjectStop
+	OpTypeProjectRestart = common.OpTypeProjectRestart
 )
 
-// OperationRecord represents a single operation record
-type OperationRecord struct {
-	Type          OperationType          `json:"type"`
-	Timestamp     time.Time              `json:"timestamp"`
-	ComponentType string                 `json:"component_type,omitempty"`
-	ComponentID   string                 `json:"component_id,omitempty"`
-	ProjectID     string                 `json:"project_id,omitempty"`
-	Diff          string                 `json:"diff,omitempty"`
-	OldContent    string                 `json:"old_content,omitempty"`
-	NewContent    string                 `json:"new_content,omitempty"`
-	Status        string                 `json:"status"`
-	Error         string                 `json:"error,omitempty"`
-	UserIP        string                 `json:"user_ip,omitempty"`
-	Details       map[string]interface{} `json:"details,omitempty"`
-}
+// OperationRecord is an alias for common.OperationRecord for backward compatibility
+type OperationRecord = common.OperationRecord
 
 // OperationHistoryFilter represents filter parameters
 type OperationHistoryFilter struct {
-	StartTime     time.Time     `json:"start_time"`
-	EndTime       time.Time     `json:"end_time"`
-	OperationType OperationType `json:"operation_type"`
-	ComponentType string        `json:"component_type"`
-	ComponentID   string        `json:"component_id"`
-	ProjectID     string        `json:"project_id"`
-	Status        string        `json:"status"`
-	Keyword       string        `json:"keyword"`
-	Limit         int           `json:"limit"`
-	Offset        int           `json:"offset"`
+	StartTime     time.Time            `json:"start_time"`
+	EndTime       time.Time            `json:"end_time"`
+	OperationType common.OperationType `json:"operation_type"`
+	ComponentType string               `json:"component_type"`
+	ComponentID   string               `json:"component_id"`
+	ProjectID     string               `json:"project_id"`
+	Status        string               `json:"status"`
+	Keyword       string               `json:"keyword"`
+	Limit         int                  `json:"limit"`
+	Offset        int                  `json:"offset"`
 }
 
 // OperationHistoryResponse represents the response
 type OperationHistoryResponse struct {
-	Operations []OperationRecord `json:"operations"`
-	TotalCount int               `json:"total_count"`
-	HasMore    bool              `json:"has_more"`
+	Operations []common.OperationRecord `json:"operations"`
+	TotalCount int                      `json:"total_count"`
+	HasMore    bool                     `json:"has_more"`
 }
 
 // getOperationsLogDir returns the operations history log directory
@@ -118,7 +106,7 @@ func getOperationsLogPath(month string) string {
 }
 
 // recordOperation records an operation to the monthly log file
-func recordOperation(record OperationRecord) error {
+func recordOperation(record common.OperationRecord) error {
 	// Get monthly log file path
 	monthKey := record.Timestamp.Format("2006-01")
 	logPath := getOperationsLogPath(monthKey)
@@ -151,8 +139,8 @@ func recordOperation(record OperationRecord) error {
 }
 
 // readOperationsFromFile reads operations from a specific log file
-func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]OperationRecord, error) {
-	var operations []OperationRecord
+func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]common.OperationRecord, error) {
+	var operations []common.OperationRecord
 
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -177,7 +165,7 @@ func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]O
 		}
 
 		// Parse the operation log line
-		var operation OperationRecord
+		var operation common.OperationRecord
 		if err := json.Unmarshal([]byte(line), &operation); err != nil {
 			// Reduce log verbosity: only log critical parsing errors
 			// logger.Debug("Failed to parse operation log line", "line", line, "error", err)
@@ -213,7 +201,7 @@ func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]O
 }
 
 // matchesOperationFilter checks if a record matches the filter criteria
-func matchesOperationFilter(record OperationRecord, filter OperationHistoryFilter) bool {
+func matchesOperationFilter(record common.OperationRecord, filter OperationHistoryFilter) bool {
 	// Time range filter
 	if !filter.StartTime.IsZero() && record.Timestamp.Before(filter.StartTime) {
 		logger.Debug("Record filtered out by start_time",
@@ -268,13 +256,13 @@ func matchesOperationFilter(record OperationRecord, filter OperationHistoryFilte
 }
 
 // getOperationHistory retrieves operations based on filter criteria
-func getOperationHistory(filter OperationHistoryFilter) ([]OperationRecord, error) {
-	var allOperations []OperationRecord
+func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecord, error) {
+	var allOperations []common.OperationRecord
 
 	// Fetch logs cached in Redis list first (cluster-wide)
 	redisLines, _ := common.RedisLRange("cluster:ops_history", 0, 49999)
 	for _, line := range redisLines {
-		var op OperationRecord
+		var op common.OperationRecord
 		if err := json.Unmarshal([]byte(line), &op); err == nil {
 			if matchesOperationFilter(op, filter) {
 				allOperations = append(allOperations, op)
@@ -335,8 +323,8 @@ func getOperationHistory(filter OperationHistoryFilter) ([]OperationRecord, erro
 
 // RecordChangePush records a change push operation
 func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
-	record := OperationRecord{
-		Type:          OpTypeChangePush,
+	record := common.OperationRecord{
+		Type:          common.OpTypeChangePush,
 		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
@@ -354,8 +342,8 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 
 // RecordLocalPush records a local push operation
 func RecordLocalPush(componentType, componentID, content, status, errorMsg string) {
-	record := OperationRecord{
-		Type:          OpTypeLocalPush,
+	record := common.OperationRecord{
+		Type:          common.OpTypeLocalPush,
 		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
@@ -371,18 +359,8 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 
 // RecordProjectOperation records a project operation
 func RecordProjectOperation(operationType OperationType, projectID, status, errorMsg string, details map[string]interface{}) {
-	record := OperationRecord{
-		Type:      operationType,
-		Timestamp: time.Now(),
-		ProjectID: projectID,
-		Status:    status,
-		Error:     errorMsg,
-		Details:   details,
-	}
-
-	if err := recordOperation(record); err != nil {
-		logger.Error("Failed to record project operation", "operation", operationType, "project", projectID, "error", err)
-	}
+	// Delegate to common package to avoid circular dependency
+	common.RecordProjectOperation(common.OperationType(operationType), projectID, status, errorMsg, details)
 }
 
 // API Handlers
@@ -410,7 +388,7 @@ func GetOperationsHistory(c echo.Context) error {
 		}
 	}
 
-	filter.OperationType = OperationType(c.QueryParam("operation_type"))
+	filter.OperationType = common.OperationType(c.QueryParam("operation_type"))
 	filter.ComponentType = c.QueryParam("component_type")
 	filter.ComponentID = c.QueryParam("component_id")
 	filter.ProjectID = c.QueryParam("project_id")
@@ -502,7 +480,7 @@ func GetOperationsStats(c echo.Context) error {
 		"by_type":           map[string]int{},
 		"by_status":         map[string]int{},
 		"by_component_type": map[string]int{},
-		"recent_operations": []OperationRecord{},
+		"recent_operations": []common.OperationRecord{},
 	}
 
 	typeStats := make(map[string]int)

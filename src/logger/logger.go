@@ -98,10 +98,8 @@ func InitLogger() *slog.Logger {
 		}
 
 		handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-			Level:     slog.LevelInfo,
-			AddSource: true,
+			Level: slog.LevelInfo,
 		})
-
 		base := slog.New(handler)
 
 		logger := base.With("node_ip", detectLocalIP())
@@ -119,10 +117,8 @@ func InitLogger() *slog.Logger {
 	}
 
 	handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-		Level:     slog.LevelInfo,
-		AddSource: true,
+		Level: slog.LevelInfo,
 	})
-
 	base := slog.New(handler)
 
 	logger := base.With("node_ip", detectLocalIP())
@@ -282,35 +278,75 @@ func PluginInfo(msg string, args ...any) {
 }
 
 func Debug(msg string, args ...any) {
-	l.Debug(msg, args...)
+	logWithCaller(l.Debug, msg, args...)
 }
 
 func DebugContext(ctx context.Context, msg string, args ...any) {
-	l.DebugContext(ctx, msg, args...)
+	logWithCallerContext(l.DebugContext, ctx, msg, args...)
 }
 
 func Info(msg string, args ...any) {
-	l.Info(msg, args...)
+	logWithCaller(l.Info, msg, args...)
 }
 
 func InfoContext(ctx context.Context, msg string, args ...any) {
-	l.InfoContext(ctx, msg, args...)
+	logWithCallerContext(l.InfoContext, ctx, msg, args...)
 }
 
 func Warn(msg string, args ...any) {
-	l.Warn(msg, args...)
+	logWithCaller(l.Warn, msg, args...)
 }
 
 func WarnContext(ctx context.Context, msg string, args ...any) {
-	l.WarnContext(ctx, msg, args...)
+	logWithCallerContext(l.WarnContext, ctx, msg, args...)
 }
 
 func Error(msg string, args ...any) {
-	l.Error(msg, args...)
+	logWithCaller(l.Error, msg, args...)
 }
 
 func ErrorContext(ctx context.Context, msg string, args ...any) {
-	l.ErrorContext(ctx, msg, args...)
+	logWithCallerContext(l.ErrorContext, ctx, msg, args...)
+}
+
+// logWithCaller adds caller information to log entries
+func logWithCaller(logFunc func(string, ...any), msg string, args ...any) {
+	// Get caller information (skip 2 frames: logWithCaller + the wrapper function)
+	if pc, file, line, ok := runtime.Caller(2); ok {
+		// Get function name
+		funcName := "unknown"
+		if fn := runtime.FuncForPC(pc); fn != nil {
+			funcName = fn.Name()
+		}
+
+		// Add source information in slog's expected format
+		args = append(args, slog.Group("source",
+			"function", funcName,
+			"file", file,
+			"line", line,
+		))
+	}
+	logFunc(msg, args...)
+}
+
+// logWithCallerContext adds caller information to log entries with context
+func logWithCallerContext(logFunc func(context.Context, string, ...any), ctx context.Context, msg string, args ...any) {
+	// Get caller information (skip 2 frames: logWithCallerContext + the wrapper function)
+	if pc, file, line, ok := runtime.Caller(2); ok {
+		// Get function name
+		funcName := "unknown"
+		if fn := runtime.FuncForPC(pc); fn != nil {
+			funcName = fn.Name()
+		}
+
+		// Add source information in slog's expected format
+		args = append(args, slog.Group("source",
+			"function", funcName,
+			"file", file,
+			"line", line,
+		))
+	}
+	logFunc(ctx, msg, args...)
 }
 
 func init() {

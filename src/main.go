@@ -207,12 +207,12 @@ func loadLocalProjects() {
 					if err := p.Start(); err != nil {
 						logger.Error("Failed to start project from saved status", "project", p.Id, "error", err)
 						if cluster.IsLeader {
-							api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
+							common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
 						}
 					} else {
 						logger.Info("Successfully started project from saved status", "project", p.Id)
 						if cluster.IsLeader {
-							api.RecordProjectOperation(api.OpTypeProjectStart, p.Id, "success", "", nil)
+							common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", nil)
 						}
 					}
 				}

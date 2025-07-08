@@ -1,7 +1,6 @@
 package project
 
 import (
-	"AgentSmith-HUB/api"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
@@ -2198,7 +2197,7 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 				logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
 				// Record failed restart operation to Operations History
 				// Note: recordOperation already handles leader/follower logic
-				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
+				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
 					"trigger": "component_change",
 					"phase":   "stop",
 				})
@@ -2211,7 +2210,7 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 				logger.Error("Failed to start project during restart", "id", projectID, "error", err)
 				// Record failed restart operation to Operations History
 				// Note: recordOperation already handles leader/follower logic
-				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
 					"trigger": "component_change",
 					"phase":   "start",
 				})
@@ -2220,7 +2219,7 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
 				// Record successful restart operation to Operations History
 				// Note: recordOperation already handles leader/follower logic - followers will publish to Redis, leader will write to file
-				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
+				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
 					"duration_ms": time.Since(startTime).Milliseconds(),
 					"trigger":     "component_change",
 				})
