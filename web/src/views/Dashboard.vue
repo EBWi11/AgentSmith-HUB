@@ -1078,7 +1078,7 @@ function startAutoRefresh() {
   // Additional structural data refresh (every 2 minutes)
   refreshInterval.value = setInterval(() => {
     fetchDashboardData()
-  }, 120000)
+  }, 300000)
 }
 
 function stopAutoRefresh() {

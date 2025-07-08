@@ -352,21 +352,23 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						// Panic logging is handled at the rules engine level to avoid duplication
+						logger.PluginError("local plugin execution panicked", "plugin", p.Name, "panic", r)
 						result = false
 						err = fmt.Errorf("local plugin execution panicked: %v", r)
 					}
 				}()
 
 				result, err = f(funcArgs...)
-				// Error logging is handled at the rules engine level to avoid duplication
+				if err != nil {
+					logger.PluginError("local plugin returned error:", "plugin", p.Name, "error", err)
+				}
 			}()
 
 			common.RecordPluginInvoke(p.Name, err == nil)
 			return result, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
-			// Error logging is handled at the rules engine level to avoid duplication
+			logger.PluginError("local plugin not found", "plugin", p.Name)
 			common.RecordPluginInvoke(p.Name, false)
 			return false, err
 		}
@@ -378,7 +380,7 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// Panic logging is handled at the rules engine level to avoid duplication
+					logger.PluginError("plugin execution panicked", "plugin", p.Name, "panic", r)
 					result = false
 					err = fmt.Errorf("plugin execution panicked: %v", r)
 				}
@@ -401,20 +403,20 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 
 			if len(out) != 2 {
 				err = fmt.Errorf("plugin returned unexpected number of results: %d", len(out))
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned unexpected number of results", "name", p.Name, "len of out", len(out))
 				result = false
 				return
 			}
 
 			if res1, ok = out[0].Interface().(bool); !ok {
 				err = fmt.Errorf("plugin returned unexpected type: %v", reflect.TypeOf(out[0].Interface()))
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned unexpected type", "plugin", p.Name, "type", reflect.TypeOf(out[0].Interface()))
 				result = false
 				return
 			}
 
 			if res2, ok = out[1].Interface().(error); ok && res2 != nil {
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned error", "plugin", p.Name, "error", res2)
 				result = res1
 				err = res2
 				return
@@ -445,7 +447,7 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						// Panic logging is handled at the rules engine level to avoid duplication
+						logger.PluginError("local plugin execution panicked", "plugin", p.Name, "panic", r)
 						result = nil
 						success = false
 						err = fmt.Errorf("local plugin execution panicked: %v", r)
@@ -453,14 +455,16 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 				}()
 
 				result, success, err = f(funcArgs...)
-				// Error logging is handled at the rules engine level to avoid duplication
+				if err != nil {
+					logger.PluginError("local plugin %s returned error:", "plugin", p.Name, "error", err)
+				}
 			}()
 
 			common.RecordPluginInvoke(p.Name, err == nil)
 			return result, success, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
-			// Error logging is handled at the rules engine level to avoid duplication
+			logger.PluginError("local plugin not found", "plugin", p.Name)
 			common.RecordPluginInvoke(p.Name, false)
 			return nil, false, err
 		}
@@ -473,7 +477,7 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// Panic logging is handled at the rules engine level to avoid duplication
+					logger.PluginError("plugin execution panicked", "plugin", p.Name, "panic", r)
 					result = nil
 					success = false
 					err = fmt.Errorf("plugin execution panicked: %v", r)
@@ -497,7 +501,7 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 
 			if len(out) != 3 {
 				err = fmt.Errorf("plugin returned unexpected number of results: %d", len(out))
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned unexpected number of results", "plugin", p.Name, "len of out", len(out))
 				result = nil
 				success = false
 				return
@@ -505,14 +509,14 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 
 			if res2, ok = out[1].Interface().(bool); !ok {
 				err = fmt.Errorf("plugin returned unexpected type for second result: %v", reflect.TypeOf(out[1].Interface()))
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned unexpected type for second result", "plugin", p.Name, "type", reflect.TypeOf(out[1].Interface()))
 				result = nil
 				success = false
 				return
 			}
 
 			if res3, ok = out[2].Interface().(error); ok && res3 != nil {
-				// Error logging is handled at the rules engine level to avoid duplication
+				logger.PluginError("plugin returned error", "name", p.Name, "error", res3)
 				result = out[0].Interface()
 				success = res2
 				err = res3

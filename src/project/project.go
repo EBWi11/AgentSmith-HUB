@@ -1,6 +1,7 @@
 package project
 
 import (
+	"AgentSmith-HUB/api"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
@@ -2195,6 +2196,12 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 			// Stop the project (respects shared components)
 			if err := proj.Stop(); err != nil {
 				logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
+				// Record failed restart operation to Operations History
+				// Note: recordOperation already handles leader/follower logic
+				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
+					"trigger": "component_change",
+					"phase":   "stop",
+				})
 				continue // Skip starting if stop failed
 			}
 			logger.Info("Stopped project during restart", "id", projectID)
@@ -2202,9 +2209,21 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 			// Start the project (respects shared components)
 			if err := proj.Start(); err != nil {
 				logger.Error("Failed to start project during restart", "id", projectID, "error", err)
+				// Record failed restart operation to Operations History
+				// Note: recordOperation already handles leader/follower logic
+				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+					"trigger": "component_change",
+					"phase":   "start",
+				})
 			} else {
 				restartedCount++
 				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
+				// Record successful restart operation to Operations History
+				// Note: recordOperation already handles leader/follower logic - followers will publish to Redis, leader will write to file
+				api.RecordProjectOperation(api.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
+					"duration_ms": time.Since(startTime).Milliseconds(),
+					"trigger":     "component_change",
+				})
 			}
 		} else if proj.Status == ProjectStatusStarting {
 			logger.Info("Skipping project restart (currently starting)", "id", projectID, "status", proj.Status)

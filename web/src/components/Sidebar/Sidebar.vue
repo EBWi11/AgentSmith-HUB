@@ -1535,7 +1535,7 @@ const sidebarSmartRefresh = useListSmartRefresh(async () => {
 }, {
   baseInterval: 30000,    // 30s base interval
   fastInterval: 5000,     // 5s fast interval
-  slowInterval: 120000,   // 2min slow interval
+  slowInterval: 300000,   // 5min slow interval
   debug: false
 })
 

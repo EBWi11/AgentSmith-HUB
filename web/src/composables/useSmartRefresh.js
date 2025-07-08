@@ -5,7 +5,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
   let {
     baseInterval: baseIntervalMs = 30000,      // Base refresh interval (30s)
     fastInterval: fastIntervalMs = 2000,       // Fast refresh interval (2s)
-    slowInterval = 120000,     // Slow refresh interval (2min)
+    slowInterval = 300000,     // Slow refresh interval (5min)
     maxErrorCount = 3,         // Maximum error count
     errorRecoveryInterval = 300000, // Error recovery interval (5min)
     enableUserActivity = true, // Enable user activity detection
@@ -349,7 +349,7 @@ export function useListSmartRefresh(refreshFunction, options = {}) {
   return useSmartRefresh(refreshFunction, {
     baseInterval: 30000,    // 30秒
     fastInterval: 5000,     // 5秒
-    slowInterval: 120000,   // 2分钟
+    slowInterval: 300000,   // 5分钟
     enableUserActivity: false, // 列表不需要用户活动检测
     debug: false,
     ...options

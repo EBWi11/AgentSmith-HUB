@@ -369,14 +369,14 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
 						checkNodeValueFromRaw = true
 					}
-					checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, rule.ID, r.RulesetID)
+					checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
 				case "AND":
 					for _, v := range checkNode.DelimiterFieldList {
 						if strings.HasPrefix(v, FromRawSymbol) {
 							checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
 							checkNodeValueFromRaw = true
 						}
-						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache, rule.ID, r.RulesetID); !checkListRes {
+						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); !checkListRes {
 							break
 						}
 					}
@@ -387,7 +387,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 							checkNodeValueFromRaw = true
 						}
 
-						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache, rule.ID, r.RulesetID); checkListRes {
+						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); checkListRes {
 							break
 						}
 					}
@@ -417,15 +417,16 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				if whiteListCount == r.RulesCount {
 					dataCopy := common.MapDeepCopy(data)
 					finalRes = append(finalRes, dataCopy)
+					return finalRes
 				}
 			}
 
-			if !ruleCheckRes {
-				if !r.IsDetection {
-					// For whitelist, once any rule matches, stop further processing (no forward).
-					return finalRes
-				}
+			if !ruleCheckRes && r.IsDetection {
 				continue
+			}
+
+			if ruleCheckRes && !r.IsDetection {
+				return finalRes
 			}
 
 			if r.IsDetection {
@@ -532,8 +533,6 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 							}
 
 							dataCopy[tmpAppend.FieldName] = res
-						} else if err != nil {
-							logger.PluginError("Plugin append evaluation error", "plugin", tmpAppend.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID, "error", err)
 						}
 					}
 				}
@@ -550,7 +549,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 					ok, err := p.Plugin.FuncEvalCheckNode(args...)
 					if err != nil {
-						logger.PluginError("Plugin evaluation error", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID, "error", err)
+						logger.PluginError("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
 					}
 
 					if !ok {
@@ -571,7 +570,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 }
 
 // checkNodeLogic executes the check logic for a single check node.
-func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache, ruleID string, rulesetID string) bool {
+func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
 	var checkListFlag = false
 
 	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
@@ -591,7 +590,6 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
 		result, err := checkNode.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
-			logger.PluginError("Plugin checknode evaluation error", "plugin", checkNode.Plugin.Name, "ruleID", ruleID, "rulesetID", rulesetID, "error", err)
 			return false
 		}
 		return result

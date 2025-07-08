@@ -129,6 +129,7 @@ import MonacoEditor from './MonacoEditor.vue'
 import { useApiOperations } from '../composables/useApi'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
 import { debounce, throttle } from '../utils/performance'
+import { useDataCacheStore } from '../stores/dataCache'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -147,6 +148,9 @@ const editorRefs = ref([]) // Store editor references
 
 // Global message component
 const $message = inject('$message', window?.$toast)
+
+// Data cache store
+const dataCache = useDataCacheStore()
 
 // Computed properties
 const sortedChanges = computed(() => {
@@ -434,6 +438,13 @@ async function applyChanges() {
       }
     }
     
+    // Immediately clear pending changes cache to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    // Also clear affected component type caches for immediate UI update
+    affectedTypes.forEach(type => {
+      dataCache.clearComponentCache(type)
+    })
+    
     // Refresh the list
     await refreshChanges()
     
@@ -463,7 +474,8 @@ async function applyChanges() {
       $message?.error?.('Failed to apply changes: ' + (e?.message || 'Unknown error'))
     }
     
-    // Even if failed, refresh list to ensure latest status is displayed
+    // Even if failed, clear cache and refresh list to ensure latest status is displayed  
+    dataCache.clearCache('pendingChanges')
     await refreshChanges();
   } finally {
     applying.value = false
@@ -492,7 +504,12 @@ async function applySingleChange(change) {
       }
     }
     
-    $message?.success?.(`Change applied successfully!`)
+          $message?.success?.(`Change applied successfully!`)
+      
+          // Immediately clear pending changes cache to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    // Also clear the affected component type cache for immediate UI update
+    dataCache.clearComponentCache(change.type)
     
     // Refresh the list
     await refreshChanges()
@@ -516,7 +533,8 @@ async function applySingleChange(change) {
       $message?.error?.('Failed to apply change: ' + (e?.message || 'Unknown error'))
     }
     
-    // Even if failed, refresh list to ensure latest status is displayed
+    // Even if failed, clear cache and refresh list to ensure latest status is displayed
+    dataCache.clearCache('pendingChanges')
     await refreshChanges();
     emit('refresh-list', getApiComponentType(change.type))
   } finally {
@@ -590,6 +608,11 @@ async function cancelUpgrade(change) {
     
     $message?.success?.(`Change cancelled for ${getComponentTypeLabel(change.type)} "${change.id}"`)
     
+    // Immediately clear pending changes cache to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    // Also clear the affected component type cache for immediate UI update
+    dataCache.clearComponentCache(change.type)
+    
     // Refresh the list to remove the cancelled change
     await refreshChanges()
     
@@ -601,7 +624,8 @@ async function cancelUpgrade(change) {
   } catch (e) {
     $message?.error?.('Failed to cancel change: ' + (e?.message || 'Unknown error'))
     
-    // Even if failed, refresh list to ensure latest status is displayed
+    // Even if failed, clear cache and refresh list to ensure latest status is displayed
+    dataCache.clearCache('pendingChanges')
     await refreshChanges();
     emit('refresh-list', getApiComponentType(change.type))
   } finally {
@@ -626,6 +650,13 @@ async function cancelAllChanges() {
     
     $message?.success?.(`${result.cancelled_count} changes cancelled successfully`)
     
+    // Immediately clear pending changes cache to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    // Also clear all component type caches for immediate UI update
+    ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
+      dataCache.clearComponentCache(type)
+    })
+    
     // Refresh the list to remove all cancelled changes
     await refreshChanges()
     
@@ -639,7 +670,8 @@ async function cancelAllChanges() {
   } catch (e) {
     $message?.error?.('Failed to cancel all changes: ' + (e?.message || 'Unknown error'))
     
-    // Even if failed, refresh list to ensure latest status is displayed
+    // Even if failed, clear cache and refresh list to ensure latest status is displayed
+    dataCache.clearCache('pendingChanges')
     await refreshChanges()
   } finally {
     cancelling.value = false
