@@ -201,11 +201,55 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 
 #### 语法要点总结
 
-| 用法 | 语法 | 说明 | 示例 |
-|------|------|------|------|
-| **field属性** | `field="a.b.c"` | 直接访问输入数据的嵌套字段 | `field="user.profile.level"` |
-| **值引用** | `>_$a.b.c` | 从数据中动态获取值 | `>_$config.min_level` |
-| **组合使用** | `field="a.b">_$c.d` | field访问嵌套字段，值从其他字段获取 | `field="user.level">_$config.expected` |
+| 用法 | 完整XML示例 | 说明 | 适用数据场景 |
+|------|-------------|------|-------------|
+| **field属性嵌套** | `<node type="EQU" field="user.profile.level">admin</node>` | 直接访问输入数据的嵌套字段，与固定值比较 | 输入数据：`{"user":{"profile":{"level":"admin"}}}` |
+| **值的动态引用** | `<node type="EQU" field="status">_$config.expected_status</node>` | field访问简单字段，值从其他字段动态获取 | 输入数据：`{"status":"active", "config":{"expected_status":"active"}}` |
+| **双重嵌套访问** | `<node type="EQU" field="user.profile.level">_$system.security.min_level</node>` | field访问嵌套字段，值也从嵌套字段动态获取 | 输入数据：`{"user":{"profile":{"level":"admin"}}, "system":{"security":{"min_level":"admin"}}}` |
+
+#### 语法综合示例
+
+假设有如下输入数据：
+```json
+{
+  "user": {
+    "id": "user123",
+    "profile": {
+      "level": "admin",
+      "department": "security"
+    }
+  },
+  "system": {
+    "security": {
+      "min_level": "admin",
+      "allowed_departments": ["security", "it"]
+    }
+  },
+  "event": {
+    "type": "login",
+    "timestamp": 1640995200
+  }
+}
+```
+
+**对应的规则写法：**
+```xml
+<rule id="access_control" name="访问控制检测">
+    <checklist condition="level_check and dept_check and event_check">
+        <!-- 1. field属性嵌套：检查用户级别是否为admin -->
+        <node id="level_check" type="EQU" field="user.profile.level">admin</node>
+        
+        <!-- 2. 值的动态引用：用户级别与系统要求的最低级别比较 -->
+        <node id="dynamic_check" type="EQU" field="user.profile.level">_$system.security.min_level</node>
+        
+        <!-- 3. 双重嵌套访问：事件类型与系统配置中的监控类型比较 -->
+        <node id="event_check" type="EQU" field="event.type">login</node>
+        
+        <!-- 4. 部门权限检查：用户部门必须在允许列表中 -->
+        <node id="dept_check" type="INCL" field="_$system.security.allowed_departments">_$user.profile.department</node>
+    </checklist>
+</rule>
+```
 
 ### 原始数据访问（_$ORIDATA）
 
