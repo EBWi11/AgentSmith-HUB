@@ -252,7 +252,7 @@
               </div>
             </div>
           </div>
-          <div v-if="projectList.length === 0" class="text-center text-gray-500 py-4 transition-opacity duration-300">
+          <div v-if="projectList.length === 0" class="flex-1 flex items-center justify-center text-gray-500">
             No projects available
           </div>
         </div>
@@ -337,7 +337,7 @@
         
         <!-- No Nodes Available Message -->
         <div v-if="clusterNodes.length === 0" 
-             class="text-center text-gray-500 py-4 transition-opacity duration-300"
+             class="flex-1 flex items-center justify-center text-gray-500"
              :class="{ 'opacity-50': loading.cluster }">
           No cluster nodes available
         </div>
