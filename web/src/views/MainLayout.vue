@@ -18,7 +18,7 @@
       <main class="flex-1 bg-gray-50 transition-all duration-300">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'tutorial'" 
+          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -210,6 +210,8 @@ function onSelectItem(item) {
     router.push('/app/pending-changes')
   } else if (item.type === 'load-local-components') {
     router.push('/app/load-local-components')
+  } else if (item.type === 'operations-history') {
+    router.push('/app/operations-history')
   } else if (item.type === 'error-logs') {
     router.push('/app/error-logs')
   } else if (item.id) {

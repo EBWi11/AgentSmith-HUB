@@ -1393,8 +1393,7 @@ const loading = reactive({
   outputs: false,
   rulesets: false,
   plugins: false,
-  projects: false,
-  cluster: false
+  projects: false
 })
 
 const error = reactive({
@@ -1402,8 +1401,7 @@ const error = reactive({
   outputs: null,
   rulesets: null,
   plugins: null,
-  projects: null,
-  cluster: null
+  projects: null
 })
 
 const items = reactive({
@@ -1411,8 +1409,7 @@ const items = reactive({
   outputs: [],
   rulesets: [],
   plugins: [],
-  projects: [],
-  cluster: []
+  projects: []
 })
 
 const collapsed = reactive({
@@ -1526,10 +1523,11 @@ const searchLoading = ref(false)
 
 // Create smart refresh for sidebar components
 const sidebarSmartRefresh = useListSmartRefresh(async () => {
-  // Refresh all expanded sections
+  // Refresh all expanded sections (only real component types)
+  const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
   const promises = []
-  Object.keys(collapsed).forEach(type => {
-    if (!collapsed[type] && type !== 'settings' && type !== 'builtinPlugins') {
+  componentTypes.forEach(type => {
+    if (!collapsed[type]) {
       promises.push(fetchItems(type))
     }
   })
@@ -1867,7 +1865,7 @@ function isCheckNodeType(item) {
 }
 
 async function fetchAllItems() {
-  const types = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects', 'cluster']
+  const types = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
   await Promise.all(types.map(type => fetchItems(type)))
 }
 
