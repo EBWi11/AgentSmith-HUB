@@ -29,12 +29,8 @@ export const useDataCacheStore = defineStore('dataCache', {
       loading: false
     },
     
-    // Plugin statistics cache
-    pluginStats: {
-      data: {},
-      timestamp: 0,
-      loading: false
-    },
+    // Plugin statistics cache - Store as Map with LRU mechanism
+    pluginStats: new Map(),
     
     // Cluster status cache
     clusterInfo: {
@@ -57,13 +53,8 @@ export const useDataCacheStore = defineStore('dataCache', {
       loading: false
     },
     
-    // Operations history cache
-    operationsHistory: {
-      data: [],
-      totalCount: 0,
-      timestamp: 0,
-      loading: false
-    }
+    // Operations history cache - Store as Map with LRU mechanism
+    operationsHistory: new Map()
   }),
   
   getters: {
@@ -130,32 +121,43 @@ export const useDataCacheStore = defineStore('dataCache', {
     
     // Get component data
     async fetchComponents(type, forceRefresh = false) {
+      const cacheKey = `components_${type}`
+      
+      // If there is already an in-flight request for this key, return the same Promise
+      if (ongoingRequests.has(cacheKey)) {
+        return ongoingRequests.get(cacheKey)
+      }
+
       const cache = this.components[type]
       
-      if (cache.loading) {
-        return cache.data
-      }
-      
+      // If data not expired and not forcing refresh, return cached data
       if (!forceRefresh && !this.isComponentExpired(type, 30000)) {
         return cache.data
       }
       
-      cache.loading = true
-      
-      try {
-        const data = await hubApi.fetchComponentsWithTempInfo(type)
-        cache.data = data
-        cache.timestamp = Date.now()
-        return data
-      } catch (error) {
-        console.error(`Failed to fetch ${type}:`, error)
-        if (cache.data) {
-          return cache.data
+      // Create a Promise for the fetcher and store it in the map to deduplicate
+      const requestPromise = (async () => {
+        cache.loading = true
+        try {
+          const data = await hubApi.fetchComponentsWithTempInfo(type)
+          cache.data = data
+          cache.timestamp = Date.now()
+          return data
+        } catch (error) {
+          console.error(`Failed to fetch ${type}:`, error)
+          // If has cached data, return cached data
+          if (cache.data && cache.data.length > 0) {
+            return cache.data
+          }
+          throw error
+        } finally {
+          cache.loading = false
+          ongoingRequests.delete(cacheKey)
         }
-        throw error
-      } finally {
-        cache.loading = false
-      }
+      })()
+
+      ongoingRequests.set(cacheKey, requestPromise)
+      return requestPromise
     },
     
     // Get system metrics
@@ -178,40 +180,59 @@ export const useDataCacheStore = defineStore('dataCache', {
       )
     },
     
-    // Get plugin statistics
+    // Get plugin statistics with LRU cache
     async fetchPluginStats(date, forceRefresh = false) {
       const cacheKey = `pluginStats_${date}`
-      if (!this.pluginStats[cacheKey]) {
-        this.pluginStats[cacheKey] = { data: {}, timestamp: 0, loading: false }
+      
+      // If there is already an in-flight request for this key, return the same Promise
+      if (ongoingRequests.has(cacheKey)) {
+        return ongoingRequests.get(cacheKey)
       }
       
-      // Use direct cache access instead of nested key
-      const cache = this.pluginStats[cacheKey]
-      
-      if (cache.loading) {
+      // Check if cache exists and is not expired
+      const cache = this.pluginStats.get(date)
+      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 60000) {
+        // Move to end (LRU)
+        this.pluginStats.delete(date)
+        this.pluginStats.set(date, cache)
         return cache.data
       }
       
-      if (!forceRefresh && (Date.now() - cache.timestamp) <= 60000) {
-        return cache.data
-      }
-      
-      cache.loading = true
-      
-      try {
-        const data = await hubApi.getPluginStats({ date })
-        cache.data = data
-        cache.timestamp = Date.now()
-        return data
-      } catch (error) {
-        console.error(`Failed to fetch plugin stats for ${date}:`, error)
-        if (cache.data) {
-          return cache.data
+      // Create a Promise for the fetcher and store it in the map to deduplicate
+      const requestPromise = (async () => {
+        // Create cache entry if not exists
+        let cacheEntry = this.pluginStats.get(date) || { data: {}, timestamp: 0, loading: false }
+        cacheEntry.loading = true
+        this.pluginStats.set(date, cacheEntry)
+        
+        try {
+          const data = await hubApi.getPluginStats({ date })
+          cacheEntry.data = data
+          cacheEntry.timestamp = Date.now()
+          cacheEntry.loading = false
+          
+          // LRU cleanup: keep only last 10 entries
+          if (this.pluginStats.size > 10) {
+            const firstKey = this.pluginStats.keys().next().value
+            this.pluginStats.delete(firstKey)
+          }
+          
+          return data
+        } catch (error) {
+          console.error(`Failed to fetch plugin stats for ${date}:`, error)
+          // If has cached data, return cached data
+          if (cacheEntry.data && Object.keys(cacheEntry.data).length > 0) {
+            return cacheEntry.data
+          }
+          throw error
+        } finally {
+          cacheEntry.loading = false
+          ongoingRequests.delete(cacheKey)
         }
-        throw error
-      } finally {
-        cache.loading = false
-      }
+      })()
+
+      ongoingRequests.set(cacheKey, requestPromise)
+      return requestPromise
     },
     
     // Get cluster information
@@ -244,41 +265,61 @@ export const useDataCacheStore = defineStore('dataCache', {
       )
     },
     
-    // Get operations history
+    // Get operations history with LRU cache
     async fetchOperationsHistory(params, forceRefresh = false) {
       const cacheKey = `operationsHistory_${JSON.stringify(params)}`
-      if (!this.operationsHistory[cacheKey]) {
-        this.operationsHistory[cacheKey] = { data: [], totalCount: 0, timestamp: 0, loading: false }
+      const paramsKey = JSON.stringify(params)
+      
+      // If there is already an in-flight request for this key, return the same Promise
+      if (ongoingRequests.has(cacheKey)) {
+        return ongoingRequests.get(cacheKey)
       }
       
-      // Use direct cache access instead of nested key
-      const cache = this.operationsHistory[cacheKey]
-      
-      if (cache.loading) {
-        return cache.data
+      // Check if cache exists and is not expired
+      const cache = this.operationsHistory.get(paramsKey)
+      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 30000) {
+        // Move to end (LRU)
+        this.operationsHistory.delete(paramsKey)
+        this.operationsHistory.set(paramsKey, cache)
+        return { operations: cache.data, total_count: cache.totalCount }
       }
       
-      if (!forceRefresh && (Date.now() - cache.timestamp) <= 30000) {
-        return cache.data
-      }
-      
-      cache.loading = true
-      
-      try {
-        const data = await hubApi.getOperationsHistory(params)
-        cache.data = data.operations || []
-        cache.totalCount = data.total_count || 0
-        cache.timestamp = Date.now()
-        return data
-      } catch (error) {
-        console.error(`Failed to fetch operations history:`, error)
-        if (cache.data) {
-          return { operations: cache.data, total_count: cache.totalCount }
+      // Create a Promise for the fetcher and store it in the map to deduplicate
+      const requestPromise = (async () => {
+        // Create cache entry if not exists
+        let cacheEntry = this.operationsHistory.get(paramsKey) || { data: [], totalCount: 0, timestamp: 0, loading: false }
+        cacheEntry.loading = true
+        this.operationsHistory.set(paramsKey, cacheEntry)
+        
+        try {
+          const data = await hubApi.getOperationsHistory(params)
+          cacheEntry.data = data.operations || []
+          cacheEntry.totalCount = data.total_count || 0
+          cacheEntry.timestamp = Date.now()
+          cacheEntry.loading = false
+          
+          // LRU cleanup: keep only last 5 entries
+          if (this.operationsHistory.size > 5) {
+            const firstKey = this.operationsHistory.keys().next().value
+            this.operationsHistory.delete(firstKey)
+          }
+          
+          return data
+        } catch (error) {
+          console.error(`Failed to fetch operations history:`, error)
+          // If has cached data, return cached data
+          if (cacheEntry.data && cacheEntry.data.length > 0) {
+            return { operations: cacheEntry.data, total_count: cacheEntry.totalCount }
+          }
+          throw error
+        } finally {
+          cacheEntry.loading = false
+          ongoingRequests.delete(cacheKey)
         }
-        throw error
-      } finally {
-        cache.loading = false
-      }
+      })()
+
+      ongoingRequests.set(cacheKey, requestPromise)
+      return requestPromise
     },
     
     // Clear specific cache
@@ -309,11 +350,13 @@ export const useDataCacheStore = defineStore('dataCache', {
       // Clear other cache
       this.clearCache('systemMetrics')
       this.clearCache('messageStats')
-      this.clearCache('pluginStats')
       this.clearCache('clusterInfo')
       this.clearCache('pendingChanges')
       this.clearCache('localChanges')
-      this.clearCache('operationsHistory')
+      
+      // Clear Map-based caches
+      this.pluginStats.clear()
+      this.operationsHistory.clear()
     },
     
     // Incremental update component data

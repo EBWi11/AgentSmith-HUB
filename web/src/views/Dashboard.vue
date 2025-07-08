@@ -101,15 +101,22 @@
       <!-- Hub Total Statistics -->
       <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
         <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Hub Total Message Statistics <span class="text-sm text-gray-500 font-normal">(All Nodes)</span></h3>
-        <div v-if="loading.messages && Object.keys(messageData).length === 0" class="flex justify-center items-center py-4">
-          <div class="animate-spin rounded-full h-6 w-6 border-primary"></div>
+        
+        <!-- Loading Overlay -->
+        <div v-if="loading.messages && Object.keys(messageData).length === 0" 
+             class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
+          <div class="animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-500"></div>
         </div>
-        <div v-else class="grid grid-cols-2 gap-3">
+        
+        <!-- Content - Always Rendered -->
+        <div class="grid grid-cols-2 gap-3 relative transition-opacity duration-200" 
+             :class="{ 'opacity-50': loading.messages && Object.keys(messageData).length === 0 }">
           <!-- Total Input -->
           <div class="text-center p-4 bg-blue-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-blue-600 font-medium mb-1">Total Hub Input</div>
-            <div class="text-2xl font-bold text-blue-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatMessagesPerDay(hubTotalStats.input) }}
+            <div class="text-2xl font-bold text-blue-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.messages }">
+              <span class="inline-block min-w-[3ch]">{{ formatMessagesPerDay(hubTotalStats.input) }}</span>
             </div>
             <div class="text-xs text-blue-600">messages/day (all nodes)</div>
           </div>
@@ -117,8 +124,9 @@
           <!-- Total Output -->
           <div class="text-center p-4 bg-green-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-green-600 font-medium mb-1">Total Hub Output</div>
-            <div class="text-2xl font-bold text-green-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatMessagesPerDay(hubTotalStats.output) }}
+            <div class="text-2xl font-bold text-green-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.messages }">
+              <span class="inline-block min-w-[3ch]">{{ formatMessagesPerDay(hubTotalStats.output) }}</span>
             </div>
             <div class="text-xs text-green-600">messages/day (all nodes)</div>
           </div>
@@ -126,8 +134,9 @@
           <!-- Plugin Success -->
           <div class="text-center p-4 bg-emerald-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-emerald-600 font-medium mb-1">Plugin Success</div>
-            <div class="text-2xl font-bold text-emerald-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatNumber(pluginStats.totalSuccess) }}
+            <div class="text-2xl font-bold text-emerald-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.messages }">
+              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalSuccess) }}</span>
             </div>
             <div class="text-xs text-emerald-600">calls/day (all nodes)</div>
           </div>
@@ -135,8 +144,9 @@
           <!-- Plugin Failures -->
           <div class="text-center p-4 bg-red-50 rounded-lg flex flex-col justify-center">
             <div class="text-xs text-red-600 font-medium mb-1">Plugin Failures</div>
-            <div class="text-2xl font-bold text-red-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ formatNumber(pluginStats.totalFailure) }}
+            <div class="text-2xl font-bold text-red-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.messages }">
+              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalFailure) }}</span>
             </div>
             <div class="text-xs text-red-600">calls/day (all nodes)</div>
           </div>
@@ -146,16 +156,23 @@
       <!-- Pending Changes & Local Changes -->
       <div class="bg-white rounded-lg shadow-sm p-4 flex flex-col">
         <h3 class="text-lg font-medium text-gray-900 mb-3 flex-shrink-0">Development Status</h3>
-        <div v-if="loading.changes && pendingChanges.length === 0 && localChanges.length === 0" class="flex justify-center items-center py-4">
-          <div class="animate-spin rounded-full h-6 w-6 border-primary"></div>
+        
+        <!-- Loading Overlay -->
+        <div v-if="loading.changes && pendingChanges.length === 0 && localChanges.length === 0" 
+             class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
+          <div class="animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-500"></div>
         </div>
-        <div v-else class="flex flex-col space-y-3">
+        
+        <!-- Content - Always Rendered -->
+        <div class="flex flex-col space-y-3 relative transition-opacity duration-200" 
+             :class="{ 'opacity-50': loading.changes && pendingChanges.length === 0 && localChanges.length === 0 }">
           <!-- Pending Changes -->
           <div class="text-center p-4 bg-orange-50 rounded-lg hover:bg-orange-100 cursor-pointer transition-colors flex flex-col justify-center"
                @click="navigateToPendingChanges">
             <div class="text-xs text-orange-600 font-medium mb-1">Components to Push</div>
-            <div class="text-2xl font-bold text-orange-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ pendingChangesStats.total }}
+            <div class="text-2xl font-bold text-orange-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.changes }">
+              <span class="inline-block min-w-[2ch]">{{ pendingChangesStats.total }}</span>
             </div>
             <div class="text-xs text-orange-600">changes ready to apply</div>
           </div>
@@ -164,8 +181,9 @@
           <div class="text-center p-4 bg-purple-50 rounded-lg hover:bg-purple-100 cursor-pointer transition-colors flex flex-col justify-center"
                @click="navigateToLocalChanges">
             <div class="text-xs text-purple-600 font-medium mb-1">Components to Load</div>
-            <div class="text-2xl font-bold text-purple-800 mb-1 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">
-              {{ localChangesStats.total }}
+            <div class="text-2xl font-bold text-purple-800 mb-1 transition-all duration-300" 
+                 :class="{ 'opacity-75': loading.stats || loading.changes }">
+              <span class="inline-block min-w-[2ch]">{{ localChangesStats.total }}</span>
             </div>
             <div class="text-xs text-purple-600">local changes available</div>
           </div>
@@ -178,15 +196,21 @@
       <!-- Project Status Chart -->
       <div class="bg-white rounded-lg shadow-sm p-6">
         <h3 class="text-lg font-medium text-gray-900 mb-4">Project Status Overview</h3>
-        <div v-if="loading.projects && projectList.length === 0" class="flex justify-center items-center py-8">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        
+        <!-- Loading Overlay -->
+        <div v-if="loading.projects && projectList.length === 0" 
+             class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
+          <div class="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-500"></div>
         </div>
-        <div v-else class="space-y-4">
+        
+        <!-- Content - Always Rendered -->
+        <div class="space-y-4 relative transition-opacity duration-200" 
+             :class="{ 'opacity-50': loading.projects && projectList.length === 0 }">
           <div v-for="project in sortedProjects" :key="project.id" 
                class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
                @click="navigateToProject(project.id)">
             <div class="flex items-center">
-              <span class="w-3 h-3 rounded-full mr-3" 
+              <span class="w-3 h-3 rounded-full mr-3 transition-colors duration-300" 
                     :class="{
                       'bg-green-500': project.status === 'running',
                       'bg-gray-400': project.status === 'stopped',
@@ -196,30 +220,39 @@
                     }"></span>
               <div>
                 <p class="font-medium text-gray-900">{{ project.id }}</p>
-                <p class="text-sm text-gray-500 capitalize">{{ project.status }}</p>
+                <p class="text-sm text-gray-500 capitalize transition-all duration-300">{{ project.status }}</p>
               </div>
             </div>
             <div class="text-right">
               <div class="flex items-center space-x-4">
                 <!-- Input Messages -->
                 <div class="text-center">
-                                      <p class="text-xs text-blue-600 font-medium">Input/d</p>
-                  <p class="text-sm font-bold text-blue-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerDay(getProjectMessageStats(project.id).input) }}</p>
+                  <p class="text-xs text-blue-600 font-medium">Input/d</p>
+                  <p class="text-sm font-bold text-blue-800 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.projects }">
+                    <span class="inline-block min-w-[2ch]">{{ formatMessagesPerDay(getProjectMessageStats(project.id).input) }}</span>
+                  </p>
                 </div>
                 <!-- Output Messages -->
                 <div class="text-center">
                   <p class="text-xs text-green-600 font-medium">Output/d</p>
-                  <p class="text-sm font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatMessagesPerDay(getProjectMessageStats(project.id).output) }}</p>
+                  <p class="text-sm font-bold text-green-800 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.projects }">
+                    <span class="inline-block min-w-[2ch]">{{ formatMessagesPerDay(getProjectMessageStats(project.id).output) }}</span>
+                  </p>
                 </div>
                 <!-- Components Count -->
                 <div class="text-center">
                   <p class="text-xs text-gray-500">Components</p>
-                  <p class="text-sm font-medium text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ project.components || 0 }}</p>
+                  <p class="text-sm font-medium text-gray-900 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.projects }">
+                    <span class="inline-block min-w-[1ch]">{{ project.components || 0 }}</span>
+                  </p>
                 </div>
               </div>
             </div>
           </div>
-          <div v-if="projectList.length === 0" class="text-center text-gray-500 py-4">
+          <div v-if="projectList.length === 0" class="text-center text-gray-500 py-4 transition-opacity duration-300">
             No projects available
           </div>
         </div>
@@ -248,8 +281,14 @@
                 </div>
               </div>
               <div class="text-right">
-                <p class="text-sm font-medium text-blue-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(leaderNode.cpu_usage || 0) }}% CPU</p>
-                <p class="text-xs text-blue-600 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(leaderNode.memory_usage || 0) }}% Memory</p>
+                <p class="text-sm font-medium text-blue-900 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                  <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.cpu_usage || 0) }}</span>% CPU
+                </p>
+                <p class="text-xs text-blue-600 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                  <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.memory_usage || 0) }}</span>% Memory
+                </p>
               </div>
             </div>
           </div>
@@ -264,7 +303,7 @@
             Follower Nodes ({{ followerNodes.length }})
           </h4>
           <div class="space-y-2">
-            <div v-for="node in followerNodes" :key="node.node_id" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div v-for="node in followerNodes" :key="node.id" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <div class="flex items-center">
                 <span class="w-3 h-3 rounded-full mr-3"
                       :class="{
@@ -277,43 +316,69 @@
                 </div>
               </div>
               <div class="text-right">
-                <p class="text-sm font-medium text-gray-900 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(node.cpu_usage || 0) }}% CPU</p>
-                <p class="text-xs text-gray-500 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatPercent(node.memory_usage || 0) }}% Memory</p>
+                <p class="text-sm font-medium text-gray-900 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                  <span class="inline-block min-w-[3ch]">{{ formatPercent(node.cpu_usage || 0) }}</span>% CPU
+                </p>
+                <p class="text-xs text-gray-500 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                  <span class="inline-block min-w-[3ch]">{{ formatPercent(node.memory_usage || 0) }}</span>% Memory
+                </p>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- No Nodes Available -->
-        <div v-if="loading.cluster && clusterNodes.length === 0" class="flex justify-center items-center py-8">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <!-- Loading Overlay for No Nodes -->
+        <div v-if="loading.cluster && clusterNodes.length === 0" 
+             class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
+          <div class="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-500"></div>
         </div>
-        <div v-else-if="clusterNodes.length === 0" class="text-center text-gray-500 py-4">
+        
+        <!-- No Nodes Available Message -->
+        <div v-if="clusterNodes.length === 0" 
+             class="text-center text-gray-500 py-4 transition-opacity duration-300"
+             :class="{ 'opacity-50': loading.cluster }">
           No cluster nodes available
         </div>
       </div>
     </div>
 
     <!-- Plugin Call Overview - Only show if there are plugin calls -->
-    <div v-if="Object.keys(sortedPluginStats).length > 0" class="bg-white rounded-lg shadow-sm p-6">
+    <div v-if="Object.keys(sortedPluginStats).length > 0" class="bg-white rounded-lg shadow-sm p-6 relative">
       <h3 class="text-lg font-medium text-gray-900 mb-4">Plugin Call Overview</h3>
-      <div v-if="loading.stats && Object.keys(sortedPluginStats).length === 0" class="flex justify-center items-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      
+      <!-- Loading Overlay -->
+      <div v-if="loading.stats && Object.keys(sortedPluginStats).length === 0" 
+           class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
+        <div class="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-500"></div>
       </div>
-      <div v-else class="space-y-4">
+      
+      <!-- Content - Always Rendered -->
+      <div class="space-y-4 relative transition-opacity duration-200" 
+           :class="{ 'opacity-50': loading.stats && Object.keys(sortedPluginStats).length === 0 }">
         <!-- Summary Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
           <div class="text-center">
             <p class="text-sm text-gray-600">Total Plugins Used</p>
-            <p class="text-2xl font-bold text-blue-600">{{ Object.keys(sortedPluginStats).length }}</p>
+            <p class="text-2xl font-bold text-blue-600 transition-all duration-300" 
+               :class="{ 'opacity-75': loading.stats }">
+              <span class="inline-block min-w-[2ch]">{{ Object.keys(sortedPluginStats).length }}</span>
+            </p>
           </div>
           <div class="text-center">
             <p class="text-sm text-gray-600">Total Success Calls</p>
-            <p class="text-2xl font-bold text-green-600">{{ formatNumber(pluginStats.totalSuccess) }}</p>
+            <p class="text-2xl font-bold text-green-600 transition-all duration-300" 
+               :class="{ 'opacity-75': loading.stats }">
+              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalSuccess) }}</span>
+            </p>
           </div>
           <div class="text-center">
             <p class="text-sm text-gray-600">Total Failed Calls</p>
-            <p class="text-2xl font-bold text-red-600">{{ formatNumber(pluginStats.totalFailure) }}</p>
+            <p class="text-2xl font-bold text-red-600 transition-all duration-300" 
+               :class="{ 'opacity-75': loading.stats }">
+              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalFailure) }}</span>
+            </p>
           </div>
         </div>
 
@@ -326,16 +391,21 @@
                 <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
                 <div>
                   <p class="font-medium text-gray-900">{{ pluginName }}</p>
-                  <p class="text-xs text-gray-500">{{ formatNumber((stats.success || 0) + (stats.failure || 0)) }} total calls today</p>
+                  <p class="text-xs text-gray-500 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats }">
+                    <span class="inline-block min-w-[3ch]">{{ formatNumber((stats.success || 0) + (stats.failure || 0)) }}</span> total calls today
+                  </p>
                 </div>
               </div>
               <div class="text-right">
-                <div class="text-sm font-medium" :class="{
-                  'text-green-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 95,
-                  'text-yellow-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 80,
-                  'text-red-600': getSuccessRate(stats.success || 0, stats.failure || 0) < 80
-                }">
-                  {{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}% success
+                <div class="text-sm font-medium transition-all duration-300" 
+                     :class="{
+                       'text-green-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 95,
+                       'text-yellow-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 80,
+                       'text-red-600': getSuccessRate(stats.success || 0, stats.failure || 0) < 80,
+                       'opacity-75': loading.stats
+                     }">
+                  <span class="inline-block min-w-[3ch]">{{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}</span>% success
                 </div>
               </div>
             </div>
@@ -344,13 +414,19 @@
               <!-- Success Count -->
               <div class="text-center p-3 bg-green-50 rounded-lg">
                 <p class="text-xs text-green-600 font-medium mb-1">Success</p>
-                <p class="text-lg font-bold text-green-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.success || 0) }}</p>
+                <p class="text-lg font-bold text-green-800 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats }">
+                  <span class="inline-block min-w-[3ch]">{{ formatNumber(stats.success || 0) }}</span>
+                </p>
               </div>
               
               <!-- Failure Count -->
               <div class="text-center p-3 bg-red-50 rounded-lg">
                 <p class="text-xs text-red-600 font-medium mb-1">Failure</p>
-                <p class="text-lg font-bold text-red-800 transition-all duration-300" :class="{ 'opacity-75': loading.stats }">{{ formatNumber(stats.failure || 0) }}</p>
+                <p class="text-lg font-bold text-red-800 transition-all duration-300" 
+                   :class="{ 'opacity-75': loading.stats }">
+                  <span class="inline-block min-w-[3ch]">{{ formatNumber(stats.failure || 0) }}</span>
+                </p>
               </div>
             </div>
 

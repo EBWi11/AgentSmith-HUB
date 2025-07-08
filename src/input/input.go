@@ -199,6 +199,28 @@ func (in *Input) Start() error {
 	// Initialize stop channel
 	in.stopChan = make(chan struct{})
 
+	// Load today's accumulated message count from Redis to resume counting from correct value
+	// This ensures that component restarts don't reset daily message count to 0
+	if common.GlobalDailyStatsManager != nil {
+		today := time.Now().Format("2006-01-02")
+		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", "")
+
+		for _, statsData := range dailyStats {
+			// Find matching component data
+			if statsData.ComponentID == in.Id &&
+				statsData.ComponentType == "input" &&
+				statsData.ProjectNodeSequence == in.ProjectNodeSequence {
+				// Set the starting count to today's accumulated total
+				atomic.StoreUint64(&in.consumeTotal, statsData.TotalMessages)
+				logger.Info("Loaded historical message count for input",
+					"input", in.Id,
+					"historical_total", statsData.TotalMessages,
+					"date", today)
+				break
+			}
+		}
+	}
+
 	// Start metric goroutine
 	in.metricStop = make(chan struct{})
 	in.wg.Add(1)

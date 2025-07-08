@@ -28,6 +28,28 @@ func (r *Ruleset) Start() error {
 	}
 	r.stopChan = make(chan struct{})
 
+	// Load today's accumulated message count from Redis to resume counting from correct value
+	// This ensures that component restarts don't reset daily message count to 0
+	if common.GlobalDailyStatsManager != nil {
+		today := time.Now().Format("2006-01-02")
+		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", "")
+
+		for _, statsData := range dailyStats {
+			// Find matching component data
+			if statsData.ComponentID == r.RulesetID &&
+				statsData.ComponentType == "ruleset" &&
+				statsData.ProjectNodeSequence == r.ProjectNodeSequence {
+				// Set the starting count to today's accumulated total
+				atomic.StoreUint64(&r.processTotal, statsData.TotalMessages)
+				logger.Info("Loaded historical message count for ruleset",
+					"ruleset", r.RulesetID,
+					"historical_total", statsData.TotalMessages,
+					"date", today)
+				break
+			}
+		}
+	}
+
 	// Start metric collection goroutine
 	r.metricStop = make(chan struct{})
 	r.wg.Add(1)

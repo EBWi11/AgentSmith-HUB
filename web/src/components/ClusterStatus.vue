@@ -199,6 +199,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { hubApi } from '../api'
+import { useDataCacheStore } from '../stores/dataCache'
 import { formatMessagesPerDay, formatTimeAgo, getCPUColor, getCPUBarColor, getMemoryColor, getMemoryBarColor } from '../utils/common'
 
 // Reactive state
@@ -209,6 +210,9 @@ const clusterInfo = ref({})
 const nodeMessageData = ref({})
 const systemMetrics = ref({})
 const refreshInterval = ref(null)
+
+// Data cache store
+const dataCache = useDataCacheStore()
 
 // Computed properties
 const filteredNodes = computed(() => {
@@ -352,8 +356,8 @@ async function fetchAllData() {
     loading.value = true
     error.value = null
     
-    // Fetch cluster info
-    const cluster = await hubApi.fetchClusterStatus()
+    // Fetch cluster info using dataCache
+    const cluster = await dataCache.fetchClusterInfo(true) // Force refresh for real-time updates
     clusterInfo.value = cluster
     
     // Fetch node-level message data from any node (no longer leader-only)
@@ -365,12 +369,12 @@ async function fetchAllData() {
       nodeMessageData.value = {}
     }
     
-    // Fetch system metrics for all nodes
+    // Fetch system metrics for all nodes using dataCache
     if (cluster.status === 'leader') {
       // Leader can fetch cluster-wide system metrics
       try {
-        const systemResponse = await hubApi.getClusterSystemMetrics()
-        const clusterMetrics = systemResponse.metrics || {}
+        const systemResponse = await dataCache.fetchSystemMetrics(true) // Force refresh
+        const clusterMetrics = systemResponse.metrics || systemResponse || {}
         
         // Store cluster metrics directly - API already returns the correct format
         systemMetrics.value = clusterMetrics

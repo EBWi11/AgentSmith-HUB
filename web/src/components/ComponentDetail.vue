@@ -498,6 +498,7 @@
 <script setup>
 import { ref, watch, inject, computed, onMounted, onBeforeUnmount } from 'vue'
 import { hubApi } from '../api'
+import { useDataCacheStore } from '../stores/dataCache'
 import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
@@ -594,6 +595,7 @@ const showProjectTestModal = ref(false)
 const $message = inject('$message', window?.$toast)
 const store = useStore()
 const router = useRouter()
+const dataCache = useDataCacheStore()
 
 // Project operation state
 const projectOperationLoading = ref(false)
@@ -678,9 +680,9 @@ async function fetchDetail(item, forEdit = false) {
         break
       case 'projects':
         data = await hubApi.getProject(item.id);
-        // Get project status
+        // Get project status using dataCache
         try {
-          const clusterStatus = await hubApi.fetchClusterStatus();
+          const clusterStatus = await dataCache.fetchClusterInfo();
           if (clusterStatus && clusterStatus.projects) {
             const projectStatus = clusterStatus.projects.find(p => p.id === item.id);
             if (projectStatus) {
@@ -1234,7 +1236,8 @@ function setupStatusRefresh() {
     const refreshStatus = async () => {
       if (detail.value && !detail.value.isTemporary) {
         try {
-          const clusterStatus = await hubApi.fetchClusterStatus();
+          // Use dataCache with force refresh for real-time status updates
+          const clusterStatus = await dataCache.fetchClusterInfo(true);
           if (clusterStatus && clusterStatus.projects) {
             const projectStatus = clusterStatus.projects.find(p => p.id === props.item.id);
             if (projectStatus && detail.value) {
