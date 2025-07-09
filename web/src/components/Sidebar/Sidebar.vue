@@ -1674,6 +1674,9 @@ onMounted(async () => {
   
   // Add click event listener to close menus when clicking outside
   document.addEventListener('click', handleOutsideClick)
+  
+  // Listen for pending changes applied event to refresh affected components
+  window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
 })
 
 onBeforeUnmount(() => {
@@ -1687,6 +1690,9 @@ onBeforeUnmount(() => {
   
   // Remove click event listener
   document.removeEventListener('click', handleOutsideClick)
+  
+  // Remove pending changes applied event listener
+  window.removeEventListener('pendingChangesApplied', handlePendingChangesApplied)
 })
 
 // Watch for search input changes
@@ -3050,6 +3056,36 @@ function getStatusColorClass(status) {
 
 function getProjectStatusForNode(projects, projectId) {
   return projects.find(project => project.id === projectId);
+}
+
+// Handle pending changes applied event
+async function handlePendingChangesApplied(event) {
+  const { types, timestamp } = event.detail || {}
+  
+  if (!types || !Array.isArray(types)) {
+    return
+  }
+  
+  console.log('Pending changes applied, refreshing affected types:', types)
+  
+  // Clear cache and refresh each affected component type
+  for (const type of types) {
+    // Clear component cache to ensure fresh data
+    dataCache.clearComponentCache(type)
+    
+    // Convert singular type to plural for items object (e.g., 'input' -> 'inputs')
+    const pluralType = type.endsWith('s') ? type : type + 's'
+    
+    // Refresh the component list if it exists
+    if (items[pluralType] !== undefined) {
+      await fetchItems(pluralType)
+    }
+  }
+  
+  // If projects were affected, also trigger a project status refresh
+  if (types.includes('project') || types.includes('projects')) {
+    await refreshProjectStatus()
+  }
 }
 </script>
 
