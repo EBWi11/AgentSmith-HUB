@@ -600,12 +600,12 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 #### 🧩 Complete Built-in Plugin List
 
-##### Check Plugins (for conditional judgment)
-Can be used in `<check type="PLUGIN">`, returns boolean values:
+##### Check-Node Plugins (for conditional checks)
+Can be used in `<check type="PLUGIN">` and return a boolean value. Supports negation with the `!` prefix, e.g., `<check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>` is true if the IP is not a private address.
 
-| Plugin | Function | Parameters | Example |
-|--------|----------|------------|---------|
-| `isPrivateIP` | Check if IP is private address | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
+| Plugin Name | Function | Parameters | Example |
+|---|---|---|---|
+| `isPrivateIP` | Check if IP is a private address | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
 | `cidrMatch` | Check if IP is in CIDR range | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(_$client_ip, "192.168.1.0/24")</check>` |
 | `geoMatch` | Check if IP belongs to specified country | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(_$source_ip, "US")</check>` |
 | `suppressOnce` | Alert suppression: trigger only once within time window | key (any), windowSec (int), ruleid (string, optional) | `<check type="PLUGIN">suppressOnce(_$alert_key, 300, "rule_001")</check>` |
@@ -980,7 +980,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 | Type | Description | Example |
 |------|-------------|---------|
 | REGEX | Regular expression | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
-| PLUGIN | Plugin function | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+| PLUGIN | Plugin function (supports `!` negation) | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
 
 ### 5.4 Data Processing Operations
 

@@ -582,9 +582,11 @@ func validateRuleDuplicateElements(xmlContent, ruleID string, ruleIndex int, res
 // validateChecklist validates checklist elements
 func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
 	if len(checklist.CheckNodes) == 0 {
-		result.Warnings = append(result.Warnings, ValidationWarning{
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
 			Line:    findElementInRule(xmlContent, ruleID, "<checklist", ruleIndex, 0),
-			Message: "Checklist has no check nodes",
+			Message: "Checklist must have at least one check node",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 		})
 		return
 	}
@@ -1521,6 +1523,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 		// Process checklists in ChecklistMap
 		for id, checklist := range rule.ChecklistMap {
+			// Validate that checklist has at least one check node
+			if len(checklist.CheckNodes) == 0 {
+				return errors.New("checklist must have at least one check node: " + rule.ID)
+			}
+
 			if strings.TrimSpace(checklist.Condition) != "" {
 				if _, _, ok := ConditionRegex.Find(strings.TrimSpace(checklist.Condition)); ok {
 					checklist.ConditionAST = GetAST(strings.TrimSpace(checklist.Condition))

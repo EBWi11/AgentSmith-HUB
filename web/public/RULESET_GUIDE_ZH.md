@@ -17,23 +17,23 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 假设我们有这样的数据流入：
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999
 }
 ```
 
 最简单的规则：检测admin登录
 ```xml
 <root author="beginner">
-    <rule id="detect_admin_login" name="检测管理员登录">
-        <!-- 独立的check，不需要checklist包装 -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- 添加标记 -->
-        <append field="alert">admin login detected</append>
-    </rule>
+   <rule id="detect_admin_login" name="检测管理员登录">
+      <!-- 独立的check，不需要checklist包装 -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- 添加标记 -->
+      <append field="alert">admin login detected</append>
+   </rule>
 </root>
 ```
 
@@ -75,11 +75,11 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 输出数据将变成：
 ```json
 {
-  "event_type": "login",
-  "username": "admin", 
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999,
-  "alert": "admin login detected"  // 新添加的字段
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999,
+   "alert": "admin login detected"  // 新添加的字段
 }
 ```
 
@@ -88,36 +88,36 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 输入数据：
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "login_time": 23,  // 23点（晚上11点）
-  "failed_attempts": 5
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "login_time": 23,  // 23点（晚上11点）
+   "failed_attempts": 5
 }
 ```
 
 检测异常时间的admin登录：
 ```xml
 <root author="learner">
-    <rule id="suspicious_admin_login" name="可疑管理员登录">
-        <!-- 灵活顺序：先检查用户名 -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- 再检查时间（深夜） -->
-        <check type="MT" field="login_time">22</check>  <!-- 大于22点 -->
-        
-        <!-- 或者检查失败次数 -->
-        <check type="MT" field="failed_attempts">3</check>
-        
-        <!-- 所有check默认是AND关系，全部满足才继续 -->
-        
-        <!-- 添加告警信息 -->
-        <append field="risk_level">high</append>
-        <append field="alert_reason">admin login at unusual time</append>
-        
-        <!-- 触发告警插件（假设已配置好） -->
-        <plugin>send_security_alert(_$ORIDATA)</plugin>
-    </rule>
+   <rule id="suspicious_admin_login" name="可疑管理员登录">
+      <!-- 灵活顺序：先检查用户名 -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- 再检查时间（深夜） -->
+      <check type="MT" field="login_time">22</check>  <!-- 大于22点 -->
+
+      <!-- 或者检查失败次数 -->
+      <check type="MT" field="failed_attempts">3</check>
+
+      <!-- 所有check默认是AND关系，全部满足才继续 -->
+
+      <!-- 添加告警信息 -->
+      <append field="risk_level">high</append>
+      <append field="alert_reason">admin login at unusual time</append>
+
+      <!-- 触发告警插件（假设已配置好） -->
+      <plugin>send_security_alert(_$ORIDATA)</plugin>
+   </rule>
 </root>
 ```
 
@@ -407,7 +407,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
             <check id="unknown_hash" type="PLUGIN">
                 is_known_malware(_$hash)
             </check>
-        </checklist>
+</checklist>
         
         <!-- 丰富化数据 -->
         <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
@@ -606,7 +606,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 🧩 内置插件完整列表
 
 ##### 检查类插件（用于条件判断）
-可在 `<check type="PLUGIN">` 中使用，返回布尔值：
+可在 `<check type="PLUGIN">` 中使用，返回布尔值。支持使用 `!` 前缀对结果取反，例如 `<check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>` 表示当IP不是私有地址时条件成立。
 
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
@@ -692,11 +692,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 使用内置插件的规则：
 ```xml
 <rule id="suspicious_connection" name="可疑连接检测">
-    <!-- 检查是否为外部连接 -->
+        <!-- 检查是否为外部连接 -->
     <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
     <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
     
-    <!-- 检查地理位置 -->
+        <!-- 检查地理位置 -->
     <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
     
     <!-- 添加时间戳 -->
@@ -930,7 +930,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </check>
         <!-- 可以添加多个检查条件，全部满足才会被白名单过滤 -->
         <check type="PLUGIN">isPrivateIP(_$source_ip)</check>
-    </rule>
+</rule>
     
     <!-- 白名单规则3：内部测试流量 -->
     <rule id="test_traffic">
@@ -995,7 +995,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="internal_scan" type="PLUGIN">
                 isPrivateIP(_$source_ip)
             </check>
-        </checklist>
+</checklist>
         
         <!-- 时间窗口检测 -->
         <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
@@ -1148,7 +1148,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="anomaly_detected" type="PLUGIN">
                 detectAnomaly(_$current_behavior, _$baseline_behavior)
             </check>
-        </checklist>
+    </checklist>
         
         <!-- 微分段策略（假设有自定义插件） -->
         <append type="PLUGIN" field="allowed_resources">
@@ -1158,7 +1158,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <!-- 实时策略执行（假设有自定义插件） -->
         <plugin>enforcePolicy(_$user_id, _$allowed_resources)</plugin>
         <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
-    </rule>
+</rule>
     
     <!-- 规则2：设备信任评估 -->
     <rule id="device_trust" name="设备信任评估">
@@ -1181,7 +1181,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="mdm_enrolled" type="PLUGIN">
                 isMDMEnrolled(_$device_id)
             </check>
-        </checklist>
+    </checklist>
         
         <!-- 证书验证（假设有自定义插件） -->
         <check type="PLUGIN">
@@ -1195,7 +1195,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 访问决策（假设有自定义插件） -->
         <plugin>applyDevicePolicy(_$device_id, _$device_trust_score)</plugin>
-    </rule>
+</rule>
 </root>
 ```
 
@@ -1299,7 +1299,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | 类型 | 说明 | 示例 |
 |------|------|------|
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
-| PLUGIN | 插件函数 | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+| PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
 
 ### 5.4 数据处理操作
 
@@ -1429,7 +1429,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <checklist condition="a and b">
     <check id="a" type="EQU" field="status">active</check>
     <check id="b" type="NOTNULL" field="user"></check>
-</checklist>
+        </checklist>
 ```
 
 #### 性能问题
@@ -1443,7 +1443,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="fast">
     <check type="EQU" field="type">target</check>
     <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
-</rule>
+    </rule>
 ```
 
 ### 5.9 调试技巧

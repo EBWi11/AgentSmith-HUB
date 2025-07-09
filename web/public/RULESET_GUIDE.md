@@ -17,23 +17,23 @@ The rules engine adopts **flexible execution order** - operations are executed i
 Suppose we have the following data flowing in:
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999
 }
 ```
 
 The simplest rule: detecting admin login
 ```xml
 <root author="beginner">
-    <rule id="detect_admin_login" name="Detect Admin Login">
-        <!-- Standalone check, no need for checklist wrapper -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- Add marker -->
-        <append field="alert">admin login detected</append>
-    </rule>
+   <rule id="detect_admin_login" name="Detect Admin Login">
+      <!-- Standalone check, no need for checklist wrapper -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- Add marker -->
+      <append field="alert">admin login detected</append>
+   </rule>
 </root>
 ```
 
@@ -75,11 +75,11 @@ When the rule matches successfully, the `<append>` operation executes, adding th
 The output data will become:
 ```json
 {
-  "event_type": "login",
-  "username": "admin", 
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999,
-  "alert": "admin login detected"  // Newly added field
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999,
+   "alert": "admin login detected"  // Newly added field
 }
 ``` 
 
@@ -88,36 +88,36 @@ The output data will become:
 Input data:
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "login_time": 23,  // 23:00 (11 PM)
-  "failed_attempts": 5
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "login_time": 23,  // 23:00 (11 PM)
+   "failed_attempts": 5
 }
 ```
 
 Detecting admin login at unusual times:
 ```xml
 <root author="learner">
-    <rule id="suspicious_admin_login" name="Suspicious Admin Login">
-        <!-- Flexible order: check username first -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- Then check time (late night) -->
-        <check type="MT" field="login_time">22</check>  <!-- Greater than 22:00 -->
-        
-        <!-- Or check failed attempts -->
-        <check type="MT" field="failed_attempts">3</check>
-        
-        <!-- All checks default to AND relationship, all must be satisfied to continue -->
-        
-        <!-- Add alert information -->
-        <append field="risk_level">high</append>
-        <append field="alert_reason">admin login at unusual time</append>
-        
-        <!-- Trigger alert plugin (assuming configured) -->
-        <plugin>send_security_alert(_$ORIDATA)</plugin>
-    </rule>
+   <rule id="suspicious_admin_login" name="Suspicious Admin Login">
+      <!-- Flexible order: check username first -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- Then check time (late night) -->
+      <check type="MT" field="login_time">22</check>  <!-- Greater than 22:00 -->
+
+      <!-- Or check failed attempts -->
+      <check type="MT" field="failed_attempts">3</check>
+
+      <!-- All checks default to AND relationship, all must be satisfied to continue -->
+
+      <!-- Add alert information -->
+      <append field="risk_level">high</append>
+      <append field="alert_reason">admin login at unusual time</append>
+
+      <!-- Trigger alert plugin (assuming configured) -->
+      <plugin>send_security_alert(_$ORIDATA)</plugin>
+   </rule>
 </root>
 ```
 
@@ -129,7 +129,7 @@ When a rule has multiple `<check>` tags:
 - This design improves performance: fail early, avoid unnecessary checks
 
 In the above example, all three check conditions must be **satisfied**:
-1. username equals "admin" 
+1. username equals "admin"
 2. login_time greater than 22 (after 10 PM)
 3. failed_attempts greater than 3
 
@@ -149,39 +149,39 @@ The `<plugin>` tag is used to execute custom operations, usually for response ac
 
 **Difference from `<append type="PLUGIN">`:**
 - `<plugin>`: Executes operations, doesn't return values
-- `<append type="PLUGIN">`: Executes plugin and adds return value to data 
+- `<append type="PLUGIN">`: Executes plugin and adds return value to data
 
 ### 1.3 Using Dynamic Values
 
 Input data:
 ```json
 {
-  "event_type": "transaction",
-  "amount": 10000,
-  "user": {
-    "id": "user123",
-    "daily_limit": 5000,
-    "vip_level": "gold"
-  }
+   "event_type": "transaction",
+   "amount": 10000,
+   "user": {
+      "id": "user123",
+      "daily_limit": 5000,
+      "vip_level": "gold"
+   }
 }
 ```
 
 Detecting transactions exceeding user limits:
 ```xml
 <root author="dynamic_learner">
-    <rule id="over_limit_transaction" name="Over Limit Transaction Detection">
-        <!-- Dynamic comparison: transaction amount > user daily limit -->
-        <check type="MT" field="amount">_$user.daily_limit</check>
-        
-        <!-- Use plugin to calculate excess ratio (assuming custom plugin exists) -->
-        <append type="PLUGIN" field="over_ratio">
-            calculate_ratio(_$amount, _$user.daily_limit)
-        </append>
-        
-        <!-- Add different handling based on VIP level -->
-        <check type="EQU" field="user.vip_level">gold</check>
-        <append field="action">notify_vip_service</append>
-    </rule>
+   <rule id="over_limit_transaction" name="Over Limit Transaction Detection">
+      <!-- Dynamic comparison: transaction amount > user daily limit -->
+      <check type="MT" field="amount">_$user.daily_limit</check>
+
+      <!-- Use plugin to calculate excess ratio (assuming custom plugin exists) -->
+      <append type="PLUGIN" field="over_ratio">
+         calculate_ratio(_$amount, _$user.daily_limit)
+      </append>
+
+      <!-- Add different handling based on VIP level -->
+      <check type="EQU" field="user.vip_level">gold</check>
+      <append field="action">notify_vip_service</append>
+   </rule>
 </root>
 ```
 
@@ -209,10 +209,10 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 <!-- Dynamic comparison of two fields -->
 <check type="NEQ" field="current_user">_$login_user</check>
 
-<!-- Use dynamic values in append -->
+        <!-- Use dynamic values in append -->
 <append field="message">User _$username logged in from _$source_ip</append>
 
-<!-- Use in plugin parameters -->
+        <!-- Use in plugin parameters -->
 <plugin>blockIP(_$malicious_ip, _$block_duration)</plugin>
 ```
 
@@ -226,7 +226,7 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 <!-- Send entire data object to analysis plugin -->
 <append type="PLUGIN" field="risk_analysis">analyzeFullData(_$ORIDATA)</append>
 
-<!-- Generate complete alert -->
+        <!-- Generate complete alert -->
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ``` 
 
@@ -238,20 +238,20 @@ A key feature of the rules engine is flexible execution order:
 
 ```xml
 <rule id="flexible_way" name="Flexible Processing Example">
-    <!-- Can add timestamp first -->
-    <append type="PLUGIN" field="check_time">now()</append>
-    
-    <!-- Then perform checks -->
-    <check type="EQU" field="event_type">security_event</check>
-    
-    <!-- Threshold statistics can be placed anywhere -->
-    <threshold group_by="source_ip" range="5m" value="10"/>
-    
-    <!-- Continue other checks (assuming custom plugin exists) -->
-    <check type="PLUGIN">is_working_hours(_$check_time)</check>
-    
-    <!-- Final processing -->
-    <append field="processed">true</append>
+   <!-- Can add timestamp first -->
+   <append type="PLUGIN" field="check_time">now()</append>
+
+   <!-- Then perform checks -->
+   <check type="EQU" field="event_type">security_event</check>
+
+   <!-- Threshold statistics can be placed anywhere -->
+   <threshold group_by="source_ip" range="5m" value="10"/>
+
+   <!-- Continue other checks (assuming custom plugin exists) -->
+   <check type="PLUGIN">is_working_hours(_$check_time)</check>
+
+   <!-- Final processing -->
+   <append field="processed">true</append>
 </rule>
 ```
 
@@ -297,57 +297,57 @@ The `<threshold>` tag is used to detect the frequency of events within a specifi
 Input data:
 ```json
 {
-  "request": {
-    "method": "POST",
-    "url": "https://api.example.com/transfer",
-    "headers": {
-      "user-agent": "Mozilla/5.0...",
-      "authorization": "Bearer token123"
-    },
-    "body": {
-      "from_account": "ACC001",
-      "to_account": "ACC999",
-      "amount": 50000,
-      "metadata": {
-        "source": "mobile_app",
-        "geo": {
-          "country": "CN",
-          "city": "Shanghai"
-        }
+   "request": {
+      "method": "POST",
+      "url": "https://api.example.com/transfer",
+      "headers": {
+         "user-agent": "Mozilla/5.0...",
+         "authorization": "Bearer token123"
+      },
+      "body": {
+         "from_account": "ACC001",
+         "to_account": "ACC999",
+         "amount": 50000,
+         "metadata": {
+            "source": "mobile_app",
+            "geo": {
+               "country": "CN",
+               "city": "Shanghai"
+            }
+         }
       }
-    }
-  },
-  "timestamp": 1700000000
+   },
+   "timestamp": 1700000000
 }
 ```
 
 Rule for processing nested data:
 ```xml
 <root type="DETECTION" author="advanced">
-    <rule id="complex_transaction_check" name="Complex Transaction Detection">
-        <!-- Check basic conditions -->
-        <check type="EQU" field="request.method">POST</check>
-        <check type="INCL" field="request.url">transfer</check>
-        
-        <!-- Check amount -->
-        <check type="MT" field="request.body.amount">10000</check>
-        
-        <!-- Add geographic location marker -->
-        <append field="geo_risk">_$request.body.metadata.geo.country</append>
-        
-        <!-- Geographic location-based threshold detection -->
-        <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
-                   range="1h" value="3"/>
-        
-        <!-- Use plugin for deep analysis (assuming custom plugin exists) -->
-        <check type="PLUGIN">analyze_transfer_risk(_$request.body)</check>
-        
-        <!-- Extract and process user-agent -->
-        <append type="PLUGIN" field="client_info">parseUA(_$request.headers.user-agent)</append>
-        
-        <!-- Clean sensitive information -->
-        <del>request.headers.authorization</del>
-    </rule>
+   <rule id="complex_transaction_check" name="Complex Transaction Detection">
+      <!-- Check basic conditions -->
+      <check type="EQU" field="request.method">POST</check>
+      <check type="INCL" field="request.url">transfer</check>
+
+      <!-- Check amount -->
+      <check type="MT" field="request.body.amount">10000</check>
+
+      <!-- Add geographic location marker -->
+      <append field="geo_risk">_$request.body.metadata.geo.country</append>
+
+      <!-- Geographic location-based threshold detection -->
+      <threshold group_by="request.body.from_account,request.body.metadata.geo.country"
+                 range="1h" value="3"/>
+
+      <!-- Use plugin for deep analysis (assuming custom plugin exists) -->
+      <check type="PLUGIN">analyze_transfer_risk(_$request.body)</check>
+
+      <!-- Extract and process user-agent -->
+      <append type="PLUGIN" field="client_info">parseUA(_$request.headers.user-agent)</append>
+
+      <!-- Clean sensitive information -->
+      <del>request.headers.authorization</del>
+   </rule>
 </root>
 ```
 
@@ -376,42 +376,42 @@ The `<del>` tag is used to remove specified fields from data.
 Input data:
 ```json
 {
-  "event_type": "file_upload",
-  "filename": "document.exe",
-  "size": 1048576,
-  "source": "email_attachment",
-  "sender": "unknown@suspicious.com",
-  "hash": "a1b2c3d4..."
+   "event_type": "file_upload",
+   "filename": "document.exe",
+   "size": 1048576,
+   "source": "email_attachment",
+   "sender": "unknown@suspicious.com",
+   "hash": "a1b2c3d4..."
 }
 ```
 
 Rule using conditional combinations:
 ```xml
 <root author="logic_master">
-    <rule id="malware_detection" name="Malware Detection">
-        <!-- Method 1: Using independent checks (default AND relationship) -->
-        <check type="END" field="filename">.exe</check>
-        <check type="MT" field="size">1000000</check>  <!-- Greater than 1MB -->
-        
-        <!-- Method 2: Using checklist for complex logic combinations -->
-        <checklist condition="suspicious_file and (email_threat or unknown_hash)">
-            <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
-                .exe|.dll|.scr|.bat
-            </check>
-            <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
-            <check id="unknown_hash" type="PLUGIN">
-                is_known_malware(_$hash)
-            </check>
-        </checklist>
-        
-        <!-- Enrich data -->
-        <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
-        <append field="threat_level">high</append>
-        
-        <!-- Automated response (assuming custom plugin exists) -->
-        <plugin>quarantine_file(_$filename)</plugin>
-        <plugin>notify_security_team(_$ORIDATA)</plugin>
-    </rule>
+   <rule id="malware_detection" name="Malware Detection">
+      <!-- Method 1: Using independent checks (default AND relationship) -->
+      <check type="END" field="filename">.exe</check>
+      <check type="MT" field="size">1000000</check>  <!-- Greater than 1MB -->
+
+      <!-- Method 2: Using checklist for complex logic combinations -->
+      <checklist condition="suspicious_file and (email_threat or unknown_hash)">
+         <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
+            .exe|.dll|.scr|.bat
+         </check>
+         <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
+         <check id="unknown_hash" type="PLUGIN">
+            is_known_malware(_$hash)
+         </check>
+      </checklist>
+
+      <!-- Enrich data -->
+      <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
+      <append field="threat_level">high</append>
+
+      <!-- Automated response (assuming custom plugin exists) -->
+      <plugin>quarantine_file(_$filename)</plugin>
+      <plugin>notify_security_team(_$ORIDATA)</plugin>
+   </rule>
 </root>
 ```
 
@@ -422,9 +422,9 @@ The `<checklist>` tag allows you to use custom logical expressions to combine mu
 **Basic Syntax:**
 ```xml
 <checklist condition="logical_expression">
-    <check id="identifier1" ...>...</check>
-    <check id="identifier2" ...>...</check>
-</checklist>
+   <check id="identifier1" ...>...</check>
+<check id="identifier2" ...>...</check>
+        </checklist>
 ```
 
 **Attribute Description:**
@@ -454,7 +454,7 @@ When you need to check if a field matches multiple values, you can use multi-val
 **Basic Syntax:**
 ```xml
 <check type="type" field="field" logic="OR|AND" delimiter="separator">
-    value1separatorvalue2separatorvalue3
+   value1separatorvalue2separatorvalue3
 </check>
 ```
 
@@ -472,7 +472,7 @@ When you need to check if a field matches multiple values, you can use multi-val
 **In the above example:**
 ```xml
 <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
-    .exe|.dll|.scr|.bat
+   .exe|.dll|.scr|.bat
 </check>
 ```
 - Checks if filename contains .exe, .dll, .scr, or .bat
@@ -508,13 +508,13 @@ Input data stream:
 Rule:
 ```xml
 <rule id="brute_force_detection" name="Brute Force Detection">
-    <check type="EQU" field="event">login_failed</check>
-    
-    <!-- Same user and IP failed 5 times within 5 minutes -->
-    <threshold group_by="user,ip" range="5m" value="5"/>
-    
-    <append field="alert_type">brute_force_attempt</append>
-    <plugin>block_ip(_$ip, 3600)</plugin>  <!-- Block for 1 hour -->
+   <check type="EQU" field="event">login_failed</check>
+
+   <!-- Same user and IP failed 5 times within 5 minutes -->
+   <threshold group_by="user,ip" range="5m" value="5"/>
+
+   <append field="alert_type">brute_force_attempt</append>
+   <plugin>block_ip(_$ip, 3600)</plugin>  <!-- Block for 1 hour -->
 </rule>
 ```
 
@@ -531,13 +531,13 @@ Input data stream:
 Rule:
 ```xml
 <rule id="daily_limit_check" name="Daily Limit Check">
-    <check type="EQU" field="event">transfer</check>
-    
-    <!-- Cumulative amount exceeds 50000 within 24 hours -->
-    <threshold group_by="user" range="24h" count_type="SUM" 
-               count_field="amount" value="50000"/>
-    
-    <append field="action">freeze_account</append>
+   <check type="EQU" field="event">transfer</check>
+
+   <!-- Cumulative amount exceeds 50000 within 24 hours -->
+   <threshold group_by="user" range="24h" count_type="SUM"
+              count_field="amount" value="50000"/>
+
+   <append field="action">freeze_account</append>
 </rule>
 ```
 
@@ -566,14 +566,14 @@ Input data stream:
 Rule:
 ```xml
 <rule id="data_exfiltration_check" name="Data Exfiltration Detection">
-    <check type="EQU" field="action">download</check>
-    
-    <!-- Accessed more than 25 different files within 1 hour -->
-    <threshold group_by="user" range="1h" count_type="CLASSIFY" 
-               count_field="file_id" value="25"/>
-    
-    <append field="risk_score">high</append>
-    <plugin>alert_dlp_team(_$ORIDATA)</plugin>
+   <check type="EQU" field="action">download</check>
+
+   <!-- Accessed more than 25 different files within 1 hour -->
+   <threshold group_by="user" range="1h" count_type="CLASSIFY"
+              count_field="file_id" value="25"/>
+
+   <append field="risk_score">high</append>
+   <plugin>alert_dlp_team(_$ORIDATA)</plugin>
 </rule>
 ```
 
@@ -600,12 +600,12 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 #### 🧩 Complete Built-in Plugin List
 
-##### Check Plugins (for conditional judgment)
-Can be used in `<check type="PLUGIN">`, returns boolean values:
+##### Check-Node Plugins (for conditional checks)
+Can be used in `<check type="PLUGIN">` and return a boolean value. Supports negation with the `!` prefix, e.g., `<check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>` is true if the IP is not a private address.
 
-| Plugin | Function | Parameters | Example |
-|--------|----------|------------|---------|
-| `isPrivateIP` | Check if IP is private address | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
+| Plugin Name | Function | Parameters | Example |
+|---|---|---|---|
+| `isPrivateIP` | Check if IP is a private address | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
 | `cidrMatch` | Check if IP is in CIDR range | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(_$client_ip, "192.168.1.0/24")</check>` |
 | `geoMatch` | Check if IP belongs to specified country | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(_$source_ip, "US")</check>` |
 | `suppressOnce` | Alert suppression: trigger only once within time window | key (any), windowSec (int), ruleid (string, optional) | `<check type="PLUGIN">suppressOnce(_$alert_key, 300, "rule_001")</check>` |
@@ -980,13 +980,13 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 | Type | Description | Example |
 |------|-------------|---------|
 | REGEX | Regular expression | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
-| PLUGIN | Plugin function | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+| PLUGIN | Plugin function (supports `!` negation) | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
 
 ### 5.4 Data Processing Operations
 
 #### Threshold Detection `<threshold>`
 ```xml
-<threshold group_by="field1,field2" range="time_range" value="threshold" 
+<threshold group_by="field1,field2" range="time_range" value="threshold"
            count_type="SUM|CLASSIFY" count_field="count_field" local_cache="true|false"/>
 ```
 
@@ -1036,13 +1036,13 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <!-- Static value -->
 <check type="EQU" field="status">active</check>
 
-<!-- Dynamic value -->
+        <!-- Dynamic value -->
 <check type="EQU" field="status">_$expected_status</check>
 
-<!-- Nested field -->
+        <!-- Nested field -->
 <check type="EQU" field="user.profile.role">admin</check>
 
-<!-- Dynamic nested -->
+        <!-- Dynamic nested -->
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
@@ -1071,11 +1071,11 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 ```xml
 <!-- Recommended: High-performance operations first -->
 <rule id="optimized">
-    <check type="NOTNULL" field="required"></check>     <!-- Fastest -->
-    <check type="EQU" field="type">target</check>       <!-- Fast -->
-    <check type="INCL" field="message">keyword</check>  <!-- Medium -->
-    <check type="REGEX" field="data">pattern</check>    <!-- Slow -->
-    <check type="PLUGIN">complex_check()</check>        <!-- Slowest -->
+   <check type="NOTNULL" field="required"></check>     <!-- Fastest -->
+   <check type="EQU" field="type">target</check>       <!-- Fast -->
+   <check type="INCL" field="message">keyword</check>  <!-- Medium -->
+   <check type="REGEX" field="data">pattern</check>    <!-- Slow -->
+   <check type="PLUGIN">complex_check()</check>        <!-- Slowest -->
 </rule>
 ```
 
@@ -1084,7 +1084,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <!-- Use local cache for better performance -->
 <threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
 
-<!-- Avoid overly large time windows -->
+        <!-- Avoid overly large time windows -->
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- Don't exceed 24h -->
 ```
 
@@ -1095,7 +1095,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <!-- Wrong: Special characters not escaped -->
 <check type="INCL" field="xml"><tag>value</tag></check>
 
-<!-- Correct: Use CDATA -->
+        <!-- Correct: Use CDATA -->
 <check type="INCL" field="xml"><![CDATA[<tag>value</tag>]]></check>
 ```
 
@@ -1103,13 +1103,13 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 ```xml
 <!-- Wrong: condition references non-existent id -->
 <checklist condition="a and b">
-    <check type="EQU" field="status">active</check>  <!-- Missing id -->
+   <check type="EQU" field="status">active</check>  <!-- Missing id -->
 </checklist>
 
-<!-- Correct -->
+        <!-- Correct -->
 <checklist condition="a and b">
-    <check id="a" type="EQU" field="status">active</check>
-    <check id="b" type="NOTNULL" field="user"></check>
+<check id="a" type="EQU" field="status">active</check>
+<check id="b" type="NOTNULL" field="user"></check>
 </checklist>
 ```
 
@@ -1117,13 +1117,13 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 ```xml
 <!-- Problem: Using plugins directly on large amounts of data -->
 <rule id="slow">
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+   <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 
-<!-- Optimized: Filter first, then process -->
+        <!-- Optimized: Filter first, then process -->
 <rule id="fast">
-    <check type="EQU" field="type">target</check>
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+<check type="EQU" field="type">target</check>
+<check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 ```
 

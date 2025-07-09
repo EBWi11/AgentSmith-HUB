@@ -606,7 +606,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 🧩 内置插件完整列表
 
 ##### 检查类插件（用于条件判断）
-可在 `<check type="PLUGIN">` 中使用，返回布尔值：
+可在 `<check type="PLUGIN">` 中使用，返回布尔值。支持使用 `!` 前缀对结果取反，例如 `<check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>` 表示当IP不是私有地址时条件成立。
 
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
@@ -1299,7 +1299,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | 类型 | 说明 | 示例 |
 |------|------|------|
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
-| PLUGIN | 插件函数 | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+| PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
 
 ### 5.4 数据处理操作
 
