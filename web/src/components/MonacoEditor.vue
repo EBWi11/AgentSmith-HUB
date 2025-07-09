@@ -1548,6 +1548,25 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
+  // skip_verify属性值补全
+  else if (context.currentKey === 'skip_verify') {
+    const skipVerifyValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    skipVerifyValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Skip TLS certificate verification' : 'Enable TLS certificate verification',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}` // 前缀匹配优先
+        });
+      }
+    });
+  }
+  
   // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
     const cursorPositions = ['BEGIN_CURSOR', 'END_CURSOR'];
@@ -1604,7 +1623,7 @@ function getInputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Input source type - choose from: kafka, aliyun_sls',
+        documentation: 'Input source type - choose from: kafka, kafka_azure, kafka_aws, aliyun_sls',
         insertText: 'type:',
         range: range,
         sortText: '000_type'
@@ -1612,7 +1631,7 @@ function getInputKeyCompletions(context, range, fullText) {
     }
     
     // Provide corresponding configuration sections based on type
-    const typeMatch = fullText.match(/type:\s*(kafka|aliyun_sls)/);
+    const typeMatch = fullText.match(/type:\s*(kafka|kafka_azure|kafka_aws|aliyun_sls)/);
     if (typeMatch) {
       const inputType = typeMatch[1];
       
@@ -1627,7 +1646,53 @@ function getInputKeyCompletions(context, range, fullText) {
             '    - "localhost:9092"',
             '  topic: "topic-name"',
             '  group: "group-name"',
-            '  compression:""'
+            '  compression: "none"'
+          ].join('\n'),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (inputType === 'kafka_azure' && !fullText.includes('kafka:')) {
+        suggestions.push({
+          label: 'kafka',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'Azure Event Hubs (Kafka) input configuration section',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "namespace.servicebus.windows.net:9093"',
+            '  topic: "topic-name"',
+            '  group: "group-name"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "plain"',
+            '    username: "$ConnectionString"',
+            '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+          ].join('\n'),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (inputType === 'kafka_aws' && !fullText.includes('kafka:')) {
+        suggestions.push({
+          label: 'kafka',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'AWS MSK (Kafka) input configuration section',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+            '  topic: "topic-name"',
+            '  group: "group-name"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "scram-sha-512"',
+            '    username: "username"',
+            '    password: "password"'
           ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
@@ -1647,17 +1712,40 @@ function getInputKeyCompletions(context, range, fullText) {
     }
   }
   
-  // Kafka配置段内部
+  // Kafka配置段内部 (supports all kafka types)
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
       { key: 'brokers', desc: 'Kafka broker addresses' },
       { key: 'topic', desc: 'Kafka topic name' },
       { key: 'group', desc: 'Consumer group name' },
       { key: 'compression', desc: 'Message compression type' },
-      { key: 'sasl', desc: 'SASL authentication configuration' }
+      { key: 'sasl', desc: 'SASL authentication configuration' },
+      { key: 'tls', desc: 'TLS configuration' }
     ];
     
     kafkaKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // TLS配置段内部
+  else if (context.currentSection === 'tls') {
+    const tlsKeys = [
+      { key: 'cert_path', desc: 'Path to client certificate file' },
+      { key: 'key_path', desc: 'Path to client private key file' },
+      { key: 'ca_file_path', desc: 'Path to CA certificate file' },
+      { key: 'skip_verify', desc: 'Skip TLS verification' }
+    ];
+    
+    tlsKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
@@ -1747,6 +1835,48 @@ function getDefaultInputCompletions(fullText, context, range) {
           '  topic: "topic-name"',
           '  group: "consumer-group"',
           '  compression: "none"'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'Azure Event Hubs Input Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete Azure Event Hubs (Kafka) input configuration',
+        insertText: [
+          'type: kafka_azure',
+          'kafka:',
+          '  brokers:',
+          '    - "namespace.servicebus.windows.net:9093"',
+          '  topic: "topic-name"',
+          '  group: "consumer-group"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "plain"',
+          '    username: "$ConnectionString"',
+          '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'AWS MSK Input Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete AWS MSK (Kafka) input configuration',
+        insertText: [
+          'type: kafka_aws',
+          'kafka:',
+          '  brokers:',
+          '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+          '  topic: "topic-name"',
+          '  group: "consumer-group"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "scram-sha-512"',
+          '    username: "username"',
+          '    password: "password"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1991,6 +2121,25 @@ function getOutputValueCompletions(context, range, fullText) {
     });
   }
   
+  // skip_verify属性值补全
+  else if (context.currentKey === 'skip_verify') {
+    const skipVerifyValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    skipVerifyValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Skip TLS certificate verification' : 'Enable TLS certificate verification',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}` // 前缀匹配优先
+        });
+      }
+    });
+  }
+  
   return { suggestions };
 }
 
@@ -2028,23 +2177,47 @@ function getOutputKeyCompletions(context, range, fullText) {
         });
       }
       
-      if (outputType === 'kafka_azure' && !fullText.includes('kafka_azure:')) {
+      if (outputType === 'kafka_azure' && !fullText.includes('kafka:')) {
         suggestions.push({
-          label: 'kafka_azure',
+          label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Azure Event Hubs (Kafka) output configuration section',
-          insertText: 'kafka_azure:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "namespace.servicebus.windows.net:9093"',
+            '  topic: "topic-name"',
+            '  key: "key-field"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "plain"',
+            '    username: "$ConnectionString"',
+            '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
       }
       
-      if (outputType === 'kafka_aws' && !fullText.includes('kafka_aws:')) {
+      if (outputType === 'kafka_aws' && !fullText.includes('kafka:')) {
         suggestions.push({
-          label: 'kafka_aws',
+          label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'AWS MSK (Kafka) output configuration section',
-          insertText: 'kafka_aws:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+            '  topic: "topic-name"',
+            '  key: "key-field"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "scram-sha-512"',
+            '    username: "username"',
+            '    password: "password"'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -2092,14 +2265,15 @@ function getOutputKeyCompletions(context, range, fullText) {
     }
   }
   
-  // Kafka配置段内部
+  // Kafka配置段内部 (supports all kafka types)
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
       { key: 'brokers', desc: 'Kafka broker addresses' },
       { key: 'topic', desc: 'Kafka topic name' },
       { key: 'key', desc: 'Partition key for Kafka messages' },
       { key: 'compression', desc: 'Message compression type' },
-      { key: 'sasl', desc: 'SASL authentication configuration' }
+      { key: 'sasl', desc: 'SASL authentication configuration' },
+      { key: 'tls', desc: 'TLS configuration' }
     ];
     
     kafkaKeys.forEach(item => {
@@ -2149,6 +2323,28 @@ function getOutputKeyCompletions(context, range, fullText) {
     ];
     
     authKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // TLS配置段内部
+  else if (context.currentSection === 'tls') {
+    const tlsKeys = [
+      { key: 'cert_path', desc: 'Path to client certificate file' },
+      { key: 'key_path', desc: 'Path to client private key file' },
+      { key: 'ca_file_path', desc: 'Path to CA certificate file' },
+      { key: 'skip_verify', desc: 'Skip TLS verification' }
+    ];
+    
+    tlsKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
@@ -2228,6 +2424,48 @@ function getDefaultOutputCompletions(fullText, context, range) {
           '  #   type: basic  # or api_key, bearer',
           '  #   username: "elastic"',
           '  #   password: "password"'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'Azure Event Hubs Output Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete Azure Event Hubs (Kafka) output configuration',
+        insertText: [
+          'type: kafka_azure',
+          'kafka:',
+          '  brokers:',
+          '    - "namespace.servicebus.windows.net:9093"',
+          '  topic: "topic-name"',
+          '  key: "key-field"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "plain"',
+          '    username: "$ConnectionString"',
+          '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'AWS MSK Output Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete AWS MSK (Kafka) output configuration',
+        insertText: [
+          'type: kafka_aws',
+          'kafka:',
+          '  brokers:',
+          '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+          '  topic: "topic-name"',
+          '  key: "key-field"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "scram-sha-512"',
+          '    username: "username"',
+          '    password: "password"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
