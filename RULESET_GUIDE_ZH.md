@@ -407,7 +407,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
             <check id="unknown_hash" type="PLUGIN">
                 is_known_malware(_$hash)
             </check>
-        </checklist>
+</checklist>
         
         <!-- 丰富化数据 -->
         <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
@@ -692,11 +692,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 使用内置插件的规则：
 ```xml
 <rule id="suspicious_connection" name="可疑连接检测">
-    <!-- 检查是否为外部连接 -->
+        <!-- 检查是否为外部连接 -->
     <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
     <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
     
-    <!-- 检查地理位置 -->
+        <!-- 检查地理位置 -->
     <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
     
     <!-- 添加时间戳 -->
@@ -930,7 +930,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </check>
         <!-- 可以添加多个检查条件，全部满足才会被白名单过滤 -->
         <check type="PLUGIN">isPrivateIP(_$source_ip)</check>
-    </rule>
+</rule>
     
     <!-- 白名单规则3：内部测试流量 -->
     <rule id="test_traffic">
@@ -995,7 +995,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="internal_scan" type="PLUGIN">
                 isPrivateIP(_$source_ip)
             </check>
-        </checklist>
+</checklist>
         
         <!-- 时间窗口检测 -->
         <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
@@ -1148,7 +1148,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="anomaly_detected" type="PLUGIN">
                 detectAnomaly(_$current_behavior, _$baseline_behavior)
             </check>
-        </checklist>
+    </checklist>
         
         <!-- 微分段策略（假设有自定义插件） -->
         <append type="PLUGIN" field="allowed_resources">
@@ -1158,7 +1158,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <!-- 实时策略执行（假设有自定义插件） -->
         <plugin>enforcePolicy(_$user_id, _$allowed_resources)</plugin>
         <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
-    </rule>
+</rule>
     
     <!-- 规则2：设备信任评估 -->
     <rule id="device_trust" name="设备信任评估">
@@ -1181,7 +1181,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="mdm_enrolled" type="PLUGIN">
                 isMDMEnrolled(_$device_id)
             </check>
-        </checklist>
+    </checklist>
         
         <!-- 证书验证（假设有自定义插件） -->
         <check type="PLUGIN">
@@ -1195,7 +1195,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 访问决策（假设有自定义插件） -->
         <plugin>applyDevicePolicy(_$device_id, _$device_trust_score)</plugin>
-    </rule>
+</rule>
 </root>
 ```
 
@@ -1429,7 +1429,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <checklist condition="a and b">
     <check id="a" type="EQU" field="status">active</check>
     <check id="b" type="NOTNULL" field="user"></check>
-</checklist>
+        </checklist>
 ```
 
 #### 性能问题
@@ -1443,7 +1443,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="fast">
     <check type="EQU" field="type">target</check>
     <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
-</rule>
+    </rule>
 ```
 
 ### 5.9 调试技巧
@@ -1750,9 +1750,7 @@ func Eval(userID string, actions string, timestamp int64) (interface{}, bool, er
 }
 ```
 
-#### 状态管理插件（不推荐）
-
-虽然技术上可行，但不推荐在插件中管理全局状态，因为这会带来并发问题：
+#### 状态管理插件
 
 ```go
 package plugin
@@ -1762,7 +1760,6 @@ import (
     "time"
 )
 
-// 注意：这是一个示例，实际使用中应该使用Redis等外部存储
 var (
     requestCount = make(map[string]*userRequest)
     mu          sync.RWMutex
@@ -1817,12 +1814,6 @@ func Eval(userID string, threshold int) (bool, error) {
 - 时间：`time`
 - 正则：`regexp`
 - 网络：`net`, `net/url`
-
-#### 安全限制
-1. 不能进行文件系统操作
-2. 不能发起网络请求（威胁情报插件除外）
-3. 不能执行系统命令
-4. 不能创建 goroutine
 
 #### 最佳实践
 1. **保持简单**：插件应该专注于单一功能

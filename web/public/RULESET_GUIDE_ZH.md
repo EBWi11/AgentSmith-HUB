@@ -1,7 +1,5 @@
 # 🛡️ AgentSmith-HUB 规则引擎完整指南
 
-## 🚀 引言：什么是规则引擎？
-
 AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
 - 🔍 **实时检测**：从数据流中识别威胁和异常
 - 🔄 **数据转换**：对数据进行加工和丰富化
@@ -19,10 +17,10 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 假设我们有这样的数据流入：
 ```json
 {
-   "event_type": "login",
-   "username": "admin",
-   "source_ip": "192.168.1.100",
-   "timestamp": 1699999999
+  "event_type": "login",
+  "username": "admin",
+  "source_ip": "192.168.1.100",
+  "timestamp": 1699999999
 }
 ```
 
@@ -1416,7 +1414,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <!-- 错误：特殊字符未转义 -->
 <check type="INCL" field="xml"><tag>value</tag></check>
 
-        <!-- 正确：使用CDATA -->
+<!-- 正确：使用CDATA -->
 <check type="INCL" field="xml"><![CDATA[<tag>value</tag>]]></check>
 ```
 
@@ -1424,13 +1422,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 错误：condition中引用不存在的id -->
 <checklist condition="a and b">
-   <check type="EQU" field="status">active</check>  <!-- 缺少id -->
+    <check type="EQU" field="status">active</check>  <!-- 缺少id -->
 </checklist>
 
-        <!-- 正确 -->
+<!-- 正确 -->
 <checklist condition="a and b">
-<check id="a" type="EQU" field="status">active</check>
-<check id="b" type="NOTNULL" field="user"></check>
+    <check id="a" type="EQU" field="status">active</check>
+    <check id="b" type="NOTNULL" field="user"></check>
 </checklist>
 ```
 
@@ -1438,13 +1436,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 问题：在大量数据上直接使用插件 -->
 <rule id="slow">
-   <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 
-        <!-- 优化：先过滤后处理 -->
+<!-- 优化：先过滤后处理 -->
 <rule id="fast">
-<check type="EQU" field="type">target</check>
-<check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+    <check type="EQU" field="type">target</check>
+    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 ```
 
@@ -1453,14 +1451,14 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 1. 使用append跟踪执行流程
 ```xml
 <rule id="debug_flow">
-   <append field="_debug_step1">check started</append>
-   <check type="EQU" field="type">target</check>
-
-   <append field="_debug_step2">check passed</append>
-   <threshold group_by="user" range="5m" value="10"/>
-
-   <append field="_debug_step3">threshold passed</append>
-   <!-- 最终数据会包含所有debug字段，显示执行流程 -->
+    <append field="_debug_step1">check started</append>
+    <check type="EQU" field="type">target</check>
+    
+    <append field="_debug_step2">check passed</append>
+    <threshold group_by="user" range="5m" value="10"/>
+    
+    <append field="_debug_step3">threshold passed</append>
+    <!-- 最终数据会包含所有debug字段，显示执行流程 -->
 </rule>
 ```
 
@@ -1468,9 +1466,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 创建只包含待测试规则的规则集：
 ```xml
 <root type="DETECTION" name="test_single_rule">
-   <rule id="test_rule">
-      <!-- 你的测试规则 -->
-   </rule>
+    <rule id="test_rule">
+        <!-- 你的测试规则 -->
+    </rule>
 </root>
 ```
 
@@ -1478,9 +1476,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 使用append验证字段是否正确获取：
 ```xml
 <rule id="verify_fields">
-   <append field="debug_nested">_$user.profile.settings.theme</append>
-   <append field="debug_array">_$items.0.name</append>
-   <!-- 检查输出中的debug字段值 -->
+    <append field="debug_nested">_$user.profile.settings.theme</append>
+    <append field="debug_array">_$items.0.name</append>
+    <!-- 检查输出中的debug字段值 -->
 </rule>
 ```
 
@@ -1527,8 +1525,8 @@ func Eval(参数...) (interface{}, bool, error)
 package plugin
 
 import (
-   "strings"
-   "fmt"
+    "strings"
+    "fmt"
 )
 
 // Eval 是插件的入口函数，必须定义此函数
@@ -1543,27 +1541,27 @@ import (
 package plugin
 
 import (
-   "strings"
-   "fmt"
+    "strings"
+    "fmt"
 )
 
 // 检查邮箱是否来自指定域名
 // 返回 (bool, error) - 用于 check 节点
 func Eval(email string, allowedDomain string) (bool, error) {
-   if email == "" {
-      return false, nil
-   }
-
-   // 提取邮箱域名
-   parts := strings.Split(email, "@")
-   if len(parts) != 2 {
-      return false, fmt.Errorf("invalid email format: %s", email)
-   }
-
-   domain := strings.ToLower(parts[1])
-   allowed := strings.ToLower(allowedDomain)
-
-   return domain == allowed, nil
+    if email == "" {
+        return false, nil
+    }
+    
+    // 提取邮箱域名
+    parts := strings.Split(email, "@")
+    if len(parts) != 2 {
+        return false, fmt.Errorf("invalid email format: %s", email)
+    }
+    
+    domain := strings.ToLower(parts[1])
+    allowed := strings.ToLower(allowedDomain)
+    
+    return domain == allowed, nil
 }
 ```
 
@@ -1580,44 +1578,44 @@ func Eval(email string, allowedDomain string) (bool, error) {
 package plugin
 
 import (
-   "strings"
+    "strings"
 )
 
 // 解析并提取User-Agent中的信息
 // 返回 (interface{}, bool, error) - 用于 append 或 plugin 节点
 func Eval(userAgent string) (interface{}, bool, error) {
-   if userAgent == "" {
-      return nil, false, nil
-   }
-
-   result := make(map[string]interface{})
-
-   // 简单的浏览器检测
-   if strings.Contains(userAgent, "Chrome") {
-      result["browser"] = "Chrome"
-   } else if strings.Contains(userAgent, "Firefox") {
-      result["browser"] = "Firefox"
-   } else if strings.Contains(userAgent, "Safari") {
-      result["browser"] = "Safari"
-   } else {
-      result["browser"] = "Unknown"
-   }
-
-   // 操作系统检测
-   if strings.Contains(userAgent, "Windows") {
-      result["os"] = "Windows"
-   } else if strings.Contains(userAgent, "Mac") {
-      result["os"] = "macOS"
-   } else if strings.Contains(userAgent, "Linux") {
-      result["os"] = "Linux"
-   } else {
-      result["os"] = "Unknown"
-   }
-
-   // 是否移动设备
-   result["is_mobile"] = strings.Contains(userAgent, "Mobile")
-
-   return result, true, nil
+    if userAgent == "" {
+        return nil, false, nil
+    }
+    
+    result := make(map[string]interface{})
+    
+    // 简单的浏览器检测
+    if strings.Contains(userAgent, "Chrome") {
+        result["browser"] = "Chrome"
+    } else if strings.Contains(userAgent, "Firefox") {
+        result["browser"] = "Firefox"
+    } else if strings.Contains(userAgent, "Safari") {
+        result["browser"] = "Safari"
+    } else {
+        result["browser"] = "Unknown"
+    }
+    
+    // 操作系统检测
+    if strings.Contains(userAgent, "Windows") {
+        result["os"] = "Windows"
+    } else if strings.Contains(userAgent, "Mac") {
+        result["os"] = "macOS"
+    } else if strings.Contains(userAgent, "Linux") {
+        result["os"] = "Linux"
+    } else {
+        result["os"] = "Unknown"
+    }
+    
+    // 是否移动设备
+    result["is_mobile"] = strings.Contains(userAgent, "Mobile")
+    
+    return result, true, nil
 }
 ```
 
@@ -1626,7 +1624,7 @@ func Eval(userAgent string) (interface{}, bool, error) {
 <!-- 提取信息到新字段 -->
 <append type="PLUGIN" field="ua_info">parseCustomUA(_$user_agent)</append>
 
-        <!-- 后续可以访问解析结果 -->
+<!-- 后续可以访问解析结果 -->
 <check type="EQU" field="ua_info.browser">Chrome</check>
 <check type="EQU" field="ua_info.is_mobile">true</check>
 ```
@@ -1653,18 +1651,18 @@ func Eval(ip string, cidrs ...string) (bool, error)
 #### 错误处理
 ```go
 func Eval(data string) (interface{}, bool, error) {
-// 输入验证
-if data == "" {
-return nil, false, nil  // 空输入返回 false，不报错
-}
-
-// 处理可能的错误
-result, err := processData(data)
-if err != nil {
-return nil, false, fmt.Errorf("process data failed: %w", err)
-}
-
-return result, true, nil
+    // 输入验证
+    if data == "" {
+        return nil, false, nil  // 空输入返回 false，不报错
+    }
+    
+    // 处理可能的错误
+    result, err := processData(data)
+    if err != nil {
+        return nil, false, fmt.Errorf("process data failed: %w", err)
+    }
+    
+    return result, true, nil
 }
 ```
 
@@ -1673,23 +1671,23 @@ return result, true, nil
 package plugin
 
 import (
-   "regexp"
-   "sync"
+    "regexp"
+    "sync"
 )
 
 // 使用全局变量缓存正则表达式
 var (
-   emailRegex *regexp.Regexp
-   regexOnce  sync.Once
+    emailRegex *regexp.Regexp
+    regexOnce  sync.Once
 )
 
 func Eval(email string) (bool, error) {
-   // 确保正则只编译一次
-   regexOnce.Do(func() {
-      emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-   })
-
-   return emailRegex.MatchString(email), nil
+    // 确保正则只编译一次
+    regexOnce.Do(func() {
+        emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+    })
+    
+    return emailRegex.MatchString(email), nil
 }
 ```
 
@@ -1701,111 +1699,108 @@ func Eval(email string) (bool, error) {
 package plugin
 
 import (
-   "crypto/md5"
-   "encoding/hex"
-   "encoding/json"
-   "fmt"
-   "time"
+    "crypto/md5"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "time"
 )
 
 // 生成用户行为指纹
 func Eval(userID string, actions string, timestamp int64) (interface{}, bool, error) {
-   // 解析用户行为
-   var actionList []map[string]interface{}
-   if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
-      return nil, false, fmt.Errorf("invalid actions format: %w", err)
-   }
-
-   // 分析行为模式
-   result := map[string]interface{}{
-      "user_id": userID,
-      "timestamp": timestamp,
-      "action_count": len(actionList),
-      "time_of_day": time.Unix(timestamp, 0).Hour(),
-   }
-
-   // 计算行为频率
-   actionTypes := make(map[string]int)
-   for _, action := range actionList {
-      if actionType, ok := action["type"].(string); ok {
-         actionTypes[actionType]++
-      }
-   }
-   result["action_types"] = actionTypes
-
-   // 生成行为指纹
-   fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
-   hash := md5.Sum([]byte(fingerprint))
-   result["fingerprint"] = hex.EncodeToString(hash[:])
-
-   // 风险评分
-   riskScore := 0
-   if len(actionList) > 100 {
-      riskScore += 20
-   }
-   if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
-      riskScore += 30
-   }
-   result["risk_score"] = riskScore
-
-   return result, true, nil
+    // 解析用户行为
+    var actionList []map[string]interface{}
+    if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
+        return nil, false, fmt.Errorf("invalid actions format: %w", err)
+    }
+    
+    // 分析行为模式
+    result := map[string]interface{}{
+        "user_id": userID,
+        "timestamp": timestamp,
+        "action_count": len(actionList),
+        "time_of_day": time.Unix(timestamp, 0).Hour(),
+    }
+    
+    // 计算行为频率
+    actionTypes := make(map[string]int)
+    for _, action := range actionList {
+        if actionType, ok := action["type"].(string); ok {
+            actionTypes[actionType]++
+        }
+    }
+    result["action_types"] = actionTypes
+    
+    // 生成行为指纹
+    fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
+    hash := md5.Sum([]byte(fingerprint))
+    result["fingerprint"] = hex.EncodeToString(hash[:])
+    
+    // 风险评分
+    riskScore := 0
+    if len(actionList) > 100 {
+        riskScore += 20
+    }
+    if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
+        riskScore += 30
+    }
+    result["risk_score"] = riskScore
+    
+    return result, true, nil
 }
 ```
 
-#### 状态管理插件（不推荐）
-
-虽然技术上可行，但不推荐在插件中管理全局状态，因为这会带来并发问题：
+#### 状态管理插件
 
 ```go
 package plugin
 
 import (
-   "sync"
-   "time"
+    "sync"
+    "time"
 )
 
-// 注意：这是一个示例，实际使用中应该使用Redis等外部存储
 var (
-   requestCount = make(map[string]*userRequest)
-   mu          sync.RWMutex
+    requestCount = make(map[string]*userRequest)
+    mu          sync.RWMutex
 )
 
 type userRequest struct {
-   count      int
-   lastUpdate time.Time
+    count      int
+    lastUpdate time.Time
 }
 
 // 检测用户请求频率是否异常
 func Eval(userID string, threshold int) (bool, error) {
-   mu.Lock()
-   defer mu.Unlock()
-
-   now := time.Now()
-
-   // 获取或创建用户记录
-   req, exists := requestCount[userID]
-   if !exists {
-      req = &userRequest{
-         count:      1,
-         lastUpdate: now,
-      }
-      requestCount[userID] = req
-      return false, nil
-   }
-
-   // 如果距离上次请求超过1分钟，重置计数
-   if now.Sub(req.lastUpdate) > time.Minute {
-      req.count = 1
-      req.lastUpdate = now
-      return false, nil
-   }
-
-   // 增加计数
-   req.count++
-   req.lastUpdate = now
-
-   // 检查是否超过阈值
-   return req.count > threshold, nil
+    mu.Lock()
+    defer mu.Unlock()
+    
+    now := time.Now()
+    
+    // 获取或创建用户记录
+    req, exists := requestCount[userID]
+    if !exists {
+        req = &userRequest{
+            count:      1,
+            lastUpdate: now,
+        }
+        requestCount[userID] = req
+        return false, nil
+    }
+    
+    // 如果距离上次请求超过1分钟，重置计数
+    if now.Sub(req.lastUpdate) > time.Minute {
+        req.count = 1
+        req.lastUpdate = now
+        return false, nil
+    }
+    
+    // 增加计数
+    req.count++
+    req.lastUpdate = now
+    
+    // 检查是否超过阈值
+    return req.count > threshold, nil
 }
 ```
 
@@ -1819,12 +1814,6 @@ func Eval(userID string, threshold int) (bool, error) {
 - 时间：`time`
 - 正则：`regexp`
 - 网络：`net`, `net/url`
-
-#### 安全限制
-1. 不能进行文件系统操作
-2. 不能发起网络请求（威胁情报插件除外）
-3. 不能执行系统命令
-4. 不能创建 goroutine
 
 #### 最佳实践
 1. **保持简单**：插件应该专注于单一功能

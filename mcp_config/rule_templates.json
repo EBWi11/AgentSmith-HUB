@@ -32,7 +32,7 @@
         "performance": "Order operations based on your specific needs"
       }
     },
-    
+
     "ADVANCED_TEMPLATES": {
       "complex_detection_logic": {
         "name": "Complex Detection with Boolean Logic",
@@ -52,7 +52,7 @@
         "optimization_tips": ["Order checks by selectivity", "Use early filtering to reduce processing"]
       }
     },
-    
+
     "FLEXIBLE_ORDER_TEMPLATES": {
       "enrichment_first_pattern": {
         "name": "Enrichment Before Detection",
@@ -74,7 +74,7 @@
         }
       }
     },
-    
+
     "SPECIALIZED_TEMPLATES": {
       "data_aggregation_rule": {
         "name": "Data Aggregation Rule",
@@ -106,7 +106,7 @@
         ]
       }
     },
-    
+
     "SYNTAX_REFERENCE": {
       "check_types": {
         "EQU": "Exact match",
@@ -118,7 +118,7 @@
         "NI": "String does not contain",
         "START": "String starts with",
         "END": "String ends with",
-        "REGEX": "Regular expression match",
+          "REGEX": "Regular expression match",
         "PLUGIN": "Plugin-based check",
         "ISNULL": "Field is null/missing",
         "NOTNULL": "Field exists",
@@ -138,8 +138,8 @@
       "deprecated_tags": {
         "filter": "Use <check> instead",
         "node": "Use <check> instead"
-      },
-      
+    },
+
       "removed_concepts": {
         "fixed_order": "Operations now execute in XML declaration order",
         "detection_vs_postprocessing": "All operations are equal, order as needed"

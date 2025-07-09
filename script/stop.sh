@@ -69,7 +69,7 @@ graceful_stop() {
         echo "$pids" | xargs kill -TERM 2>/dev/null || true
         
         # Wait for graceful shutdown
-        local wait_time=120
+        local wait_time=5
         print_info "Waiting ${wait_time} seconds for graceful shutdown..."
         sleep $wait_time
         

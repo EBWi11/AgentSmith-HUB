@@ -4,7 +4,7 @@
     <div v-if="loading" class="loading-overlay">
       <div class="loading-spinner">
         <div class="spinner-ring"></div>
-        <p class="loading-text">正在加载教程内容...</p>
+        <p class="loading-text">{{ currentLanguage === 'en' ? 'Loading tutorial content...' : '正在加载教程内容...' }}</p>
       </div>
     </div>
 
@@ -18,7 +18,7 @@
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
         </div>
-        <h3 class="error-title">加载失败</h3>
+        <h3 class="error-title">{{ currentLanguage === 'en' ? 'Load Failed' : '加载失败' }}</h3>
         <p class="error-message">{{ error }}</p>
         <button @click="loadTutorialContent" class="retry-button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -27,7 +27,7 @@
             <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
             <path d="M3 21v-5h5"/>
           </svg>
-          重新加载
+          {{ currentLanguage === 'en' ? 'Retry' : '重新加载' }}
         </button>
       </div>
     </div>
@@ -39,7 +39,7 @@
         <!-- Sidebar Outline -->
         <div class="outline-sidebar" :class="{ visible: showOutline }">
           <div class="outline-header">
-            <h3>文档大纲</h3>
+            <h3>{{ currentLanguage === 'en' ? 'Document Outline' : '文档大纲' }}</h3>
             <button @click="toggleOutline" class="outline-close">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"/>
@@ -89,7 +89,7 @@
                   <rect x="7" y="7" width="3" height="9"/>
                   <rect x="13" y="5" width="3" height="11"/>
                 </svg>
-                {{ tocItems.length }} 章节
+                {{ tocItems.length }} {{ currentLanguage === 'en' ? 'sections' : '章节' }}
               </span>
             </div>
             <div class="status-right">
@@ -97,7 +97,7 @@
                 Markdown
               </span>
               <div class="status-controls">
-                <button @click="toggleOutline" class="status-btn" :class="{ active: showOutline }" title="文档大纲">
+                <button @click="toggleOutline" class="status-btn" :class="{ active: showOutline }" :title="currentLanguage === 'en' ? 'Document Outline' : '文档大纲'">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="8" y1="6" x2="21" y2="6"/>
                     <line x1="8" y1="12" x2="21" y2="12"/>
@@ -107,7 +107,10 @@
                     <line x1="3" y1="18" x2="3.01" y2="18"/>
                   </svg>
                 </button>
-                <button @click="toggleFullscreen" class="status-btn" title="全屏模式">
+                <button @click="toggleLanguage" class="status-btn language-btn" :title="currentLanguage === 'en' ? 'Switch to Chinese' : '切换到英文'">
+                  <span class="language-text">{{ currentLanguage === 'en' ? '中' : 'EN' }}</span>
+                </button>
+                <button @click="toggleFullscreen" class="status-btn" :title="currentLanguage === 'en' ? 'Fullscreen Mode' : '全屏模式'">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                   </svg>
@@ -147,6 +150,7 @@ const currentSection = ref('')
 const showOutline = ref(false)
 const documentContainer = ref(null)
 const isFullscreen = ref(false)
+const currentLanguage = ref('en') // Default to English
 
 // 计算outline sidebar宽度（响应式）
 const outlineSidebarWidth = computed(() => {
@@ -179,16 +183,17 @@ async function loadTutorialContent() {
     loading.value = true
     error.value = null
 
-    const response = await fetch('/RULESET_GUIDE_ZH.md')
+    const fileName = currentLanguage.value === 'en' ? '/RULESET_GUIDE.md' : '/RULESET_GUIDE_ZH.md'
+    const response = await fetch(fileName)
     
     if (!response.ok) {
-      throw new Error(`无法加载教程文件 (${response.status})`)
+      throw new Error(`${currentLanguage.value === 'en' ? 'Failed to load tutorial file' : '无法加载教程文件'} (${response.status})`)
     }
     
     const markdownText = await response.text()
     
     if (!markdownText || markdownText.trim() === '') {
-      throw new Error('教程文件内容为空')
+      throw new Error(currentLanguage.value === 'en' ? 'Tutorial file is empty' : '教程文件内容为空')
     }
     
     tutorialContent.value = markdownText
@@ -202,10 +207,22 @@ async function loadTutorialContent() {
     
   } catch (err) {
     console.error('Failed to load tutorial content:', err)
-    error.value = err.message || '加载教程内容失败'
+    error.value = err.message || (currentLanguage.value === 'en' ? 'Failed to load tutorial content' : '加载教程内容失败')
   } finally {
     loading.value = false
   }
+}
+
+// 切换语言
+async function toggleLanguage() {
+  const newLanguage = currentLanguage.value === 'en' ? 'zh' : 'en'
+  currentLanguage.value = newLanguage
+  
+  // 保存语言偏好到localStorage
+  localStorage.setItem('tutorial_language', newLanguage)
+  
+  // 重新加载内容
+  await loadTutorialContent()
 }
 
 // 渲染markdown
@@ -223,7 +240,7 @@ async function renderMarkdown(markdown) {
     
   } catch (err) {
     console.error('Markdown rendering error:', err)
-    error.value = 'Markdown渲染失败'
+    error.value = currentLanguage.value === 'en' ? 'Markdown rendering failed' : 'Markdown渲染失败'
   }
 }
 
@@ -339,6 +356,12 @@ function formatFileSize(bytes) {
 
 // 组件挂载
 onMounted(() => {
+  // 从localStorage恢复语言偏好，默认为英文
+  const savedLanguage = localStorage.getItem('tutorial_language')
+  if (savedLanguage && (savedLanguage === 'en' || savedLanguage === 'zh')) {
+    currentLanguage.value = savedLanguage
+  }
+  
   loadTutorialContent()
   
   // 监听全屏变化
@@ -683,6 +706,17 @@ onBeforeUnmount(() => {
   border-color: #3b82f6;
 }
 
+/* Language Button */
+.language-btn {
+  width: 28px !important;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.language-text {
+  line-height: 1;
+}
+
 /* GitHub Markdown 样式增强 */
 :deep(.markdown-body) {
   max-width: none;
@@ -809,6 +843,10 @@ onBeforeUnmount(() => {
   .status-btn {
     width: 22px;
     height: 22px;
+  }
+  
+  .language-btn {
+    width: 26px !important;
   }
   
   .outline-sidebar {
