@@ -19,10 +19,10 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 假设我们有这样的数据流入：
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999
 }
 ```
 
@@ -147,7 +147,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 这种设计提高了性能：尽早失败，避免不必要的检查
 
 在上面的例子中，三个检查条件必须**全部满足**：
-1. username 等于 "admin" 
+1. username 等于 "admin"
 2. login_time 大于 22（晚上10点后）
 3. failed_attempts 大于 3
 
@@ -698,12 +698,12 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 输入数据：
 ```json
 {
-  "event_type": "network_connection",
-  "source_ip": "10.0.0.100",
-  "dest_ip": "185.220.101.45",
-  "dest_port": 443,
-  "bytes_sent": 1024000,
-  "connection_duration": 3600
+   "event_type": "network_connection",
+   "source_ip": "10.0.0.100",
+   "dest_ip": "185.220.101.45",
+   "dest_port": 443,
+   "bytes_sent": 1024000,
+   "connection_duration": 3600
 }
 ```
 
@@ -1409,11 +1409,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 推荐：高性能操作在前 -->
 <rule id="optimized">
-    <check type="NOTNULL" field="required"></check>     <!-- 最快 -->
-    <check type="EQU" field="type">target</check>       <!-- 快 -->
-    <check type="INCL" field="message">keyword</check>  <!-- 中等 -->
-    <check type="REGEX" field="data">pattern</check>    <!-- 慢 -->
-    <check type="PLUGIN">complex_check()</check>        <!-- 最慢 -->
+   <check type="NOTNULL" field="required"></check>     <!-- 最快 -->
+   <check type="EQU" field="type">target</check>       <!-- 快 -->
+   <check type="INCL" field="message">keyword</check>  <!-- 中等 -->
+   <check type="REGEX" field="data">pattern</check>    <!-- 慢 -->
+   <check type="PLUGIN">complex_check()</check>        <!-- 最慢 -->
 </rule>
 ```
 
@@ -1422,7 +1422,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <!-- 使用本地缓存提升性能 -->
 <threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
 
-<!-- 避免过大的时间窗口 -->
+        <!-- 避免过大的时间窗口 -->
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
 ```
 
@@ -1433,7 +1433,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <!-- 错误：特殊字符未转义 -->
 <check type="INCL" field="xml"><tag>value</tag></check>
 
-<!-- 正确：使用CDATA -->
+        <!-- 正确：使用CDATA -->
 <check type="INCL" field="xml"><![CDATA[<tag>value</tag>]]></check>
 ```
 
