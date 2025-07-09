@@ -183,6 +183,13 @@ kafka:
       calculate_risk_score(amount, location, user_history)
     </append>
   </rule>
+  <rule id="brute_force_detection" name="Login Brute Force Detection">
+    <check type="EQU" field="event_type">login_attempt</check>
+    <check type="EQU" field="result">failed</check>
+    <threshold group_by="user_id" range="1h" count_type="COUNT" local_cache="true">3</threshold>
+    <append field="alert_type">brute_force</append>
+    <append field="severity">high</append>
+  </rule>
 </root>
 ```
 

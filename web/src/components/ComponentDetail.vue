@@ -496,7 +496,7 @@
 </template>
 
 <script setup>
-import { ref, watch, inject, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, inject, computed, onMounted, onBeforeUnmount, watchEffect } from 'vue'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
 import MonacoEditor from '@/components/MonacoEditor.vue'
@@ -509,6 +509,7 @@ import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
 import { useComponentSave } from '../composables/useComponentSave'
 import { extractLineNumber } from '../utils/common'
+import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
 
 import { getDefaultTemplate } from '../utils/templateGenerator'
 
@@ -924,7 +925,15 @@ async function saveEdit(content) {
     validateBeforeSave,
     verifyAfterSave,
     fetchDetail,
-    onSuccess: (item) => emit('updated', item)
+    onSuccess: (item) => {
+      // Clear test cache after successful save
+      if (currentItem.type === 'rulesets') {
+        RulesetTestCache.clear(currentItem.id);
+      } else if (currentItem.type === 'projects') {
+        ProjectTestCache.clear(currentItem.id);
+      }
+      emit('updated', item)
+    }
   })
   
   if (success) {
@@ -963,7 +972,15 @@ async function saveNew(content) {
   await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
     validateBeforeSave,
     verifyAfterSave,
-    onSuccess: (item) => emit('created', item)
+    onSuccess: (item) => {
+      // Clear test cache after successful save
+      if (currentItem.type === 'rulesets') {
+        RulesetTestCache.clear(currentItem.id);
+      } else if (currentItem.type === 'projects') {
+        ProjectTestCache.clear(currentItem.id);
+      }
+      emit('created', item)
+    }
   })
 }
 
@@ -974,6 +991,16 @@ function cancelEdit() {
   // Clear error messages
   saveError.value = ''
   errorLines.value = [] // 清空错误行
+  
+  // Clear test cache when canceling edit
+  if (props.item?.id) {
+    if (isRuleset.value) {
+      RulesetTestCache.clear(props.item.id);
+    } else if (isProject.value) {
+      ProjectTestCache.clear(props.item.id);
+    }
+  }
+  
   // Exit edit mode
   emit('cancel-edit', props.item)
 }
@@ -1211,10 +1238,10 @@ function setupStatusRefresh() {
               const oldStatus = detail.value.status;
               detail.value.status = projectStatus.status || 'stopped';
               
-              // 只有在间隔需要显著改变时才重新设置定时器
+              // 检查是否需要调整刷新间隔
               const newInterval = getRefreshInterval();
               
-              if (Math.abs(newInterval - currentStatusInterval.value) > 500) {
+              if (newInterval !== currentStatusInterval.value) {
                 clearInterval(statusRefreshInterval.value);
                 currentStatusInterval.value = newInterval;
                 statusRefreshInterval.value = setInterval(refreshStatus, newInterval);
@@ -1233,6 +1260,9 @@ function setupStatusRefresh() {
     currentStatusInterval.value = initialInterval;
     statusRefreshInterval.value = setInterval(refreshStatus, initialInterval);
     console.log(`ComponentDetail refresh started with ${initialInterval}ms for project ${props.item?.id}`);
+    
+    // 立即执行一次刷新
+    refreshStatus();
   }
 }
 
@@ -1259,6 +1289,17 @@ watch(() => props.item?.id, (newVal, oldVal) => {
     clearStatusRefresh();
     if (isProject.value) {
       setupStatusRefresh();
+    }
+    
+    // Clear test cache when switching between different components
+    if (oldVal && oldVal !== newVal) {
+      if (props.item?.type === 'rulesets') {
+        RulesetTestCache.clear(oldVal);
+        console.log(`[ComponentDetail] Cleared test cache for previous ruleset: ${oldVal}`);
+      } else if (props.item?.type === 'projects') {
+        ProjectTestCache.clear(oldVal);
+        console.log(`[ComponentDetail] Cleared test cache for previous project: ${oldVal}`);
+      }
     }
     
     // Clear any existing validation errors when switching components
@@ -1301,6 +1342,17 @@ onBeforeUnmount(() => {
   }
   if (pluginValidationTimeout.value) {
     clearTimeout(pluginValidationTimeout.value);
+  }
+  
+  // Clear test cache when leaving component interface
+  if (props.item?.id) {
+    if (isRuleset.value) {
+      RulesetTestCache.clear(props.item.id);
+      console.log(`[ComponentDetail] Cleared test cache for ruleset: ${props.item.id}`);
+    } else if (isProject.value) {
+      ProjectTestCache.clear(props.item.id);
+      console.log(`[ComponentDetail] Cleared test cache for project: ${props.item.id}`);
+    }
   }
 });
 

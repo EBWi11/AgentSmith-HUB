@@ -6,7 +6,6 @@ import (
 	"AgentSmith-HUB/local_plugin/parse_json_data"
 
 	// time plugins
-	tago "AgentSmith-HUB/local_plugin/time/ago"
 	tday "AgentSmith-HUB/local_plugin/time/dayofweek"
 	thour "AgentSmith-HUB/local_plugin/time/hourofday"
 	tnow "AgentSmith-HUB/local_plugin/time/now"
@@ -39,6 +38,11 @@ import (
 
 	// alert suppression
 	suppressonce "AgentSmith-HUB/local_plugin/suppress_once"
+
+	// threat intelligence
+	shodan "AgentSmith-HUB/local_plugin/shodan"
+	threatbook "AgentSmith-HUB/local_plugin/threatbook"
+	virustotal "AgentSmith-HUB/local_plugin/virustotal"
 )
 
 // for checknode
@@ -55,7 +59,6 @@ var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{
 
 	// time helpers
 	"now":       tnow.Eval,
-	"ago":       tago.Eval,
 	"dayOfWeek": tday.Eval,
 	"hourOfDay": thour.Eval,
 	"tsToDate":  tdate.Eval,
@@ -81,6 +84,11 @@ var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{
 	// regex
 	"regexExtract": rextract.Eval,
 	"regexReplace": rreplace.Eval,
+
+	// threat intelligence
+	"virusTotal": virustotal.Eval,
+	"shodan":     shodan.Eval,
+	"threatBook": threatbook.Eval,
 }
 
 var LocalPluginDesc = map[string]string{
@@ -92,7 +100,6 @@ var LocalPluginDesc = map[string]string{
 
 	// time append
 	"now":       "Append: current time. Args: optional format (unix|ms|rfc3339).",
-	"ago":       "Append: Unix timestamp N seconds ago. Args: seconds.",
 	"dayOfWeek": "Append: day of week 0-6 (Sun=0). Args: optional timestamp.",
 	"hourOfDay": "Append: hour of day 0-23. Args: optional timestamp.",
 	"tsToDate":  "Append: convert Unix timestamp to RFC3339 string. Args: timestamp int64.",
@@ -121,4 +128,9 @@ var LocalPluginDesc = map[string]string{
 	// regex
 	"regexExtract": "Append: extract text using regex. Returns match or capture groups. Args: input, pattern.",
 	"regexReplace": "Append: replace text using regex. Supports $1, $2 references. Args: input, pattern, replacement.",
+
+	// threat intelligence
+	"virusTotal": "Append: query VirusTotal for file hash reputation. Returns detection info with caching. Args: hash string (MD5/SHA1/SHA256), apiKey string (optional - fallback to VIRUSTOTAL_API_KEY env var).",
+	"shodan":     "Append: query Shodan for IP address infrastructure info. Returns host details with caching. Args: ip string (IPv4/IPv6), apiKey string (optional - fallback to SHODAN_API_KEY env var).",
+	"threatBook": "Append: query ThreatBook (微步在线) for threat intelligence. Returns comprehensive threat info with caching. Args: queryValue string, queryType string (ip/domain/file/url), apiKey string (optional - fallback to THREATBOOK_API_KEY env var).",
 }

@@ -317,7 +317,7 @@ func (r *Ruleset) StopForTesting() error {
 	return nil
 }
 
-// EngineCheck executes all rules in the ruleset on the provided data.
+// EngineCheck executes all rules in the ruleset on the provided data using the new flexible syntax.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
 	ruleCache := ruleCachePool.Get().(map[string]common.CheckCoreCache)
@@ -325,248 +325,361 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	for k := range ruleCache {
 		delete(ruleCache, k)
 	}
-	whiteListCount := 0
 
-	for _, rf := range r.RulesByFilter {
-		// Filter check process
-		if rf.Filter.Check {
-			checkData, exist := GetCheckDataFromCache(ruleCache, rf.Filter.Field, data, rf.Filter.FieldList)
-			if exist {
-				filterValue := rf.Filter.Value
-				if strings.HasPrefix(rf.Filter.Value, FromRawSymbol) {
-					filterValue = GetRuleValueFromRawFromCache(ruleCache, rf.Filter.Value, data)
-				}
+	// For whitelist, keep track of the last modified data
+	var lastModifiedData map[string]interface{}
 
-				filterCheckRes, _ := INCL(checkData, filterValue)
-				if !filterCheckRes {
-					continue
-				}
-			} else {
-				continue
-			}
-		}
+	// For empty whitelist, data should pass through
+	if !r.IsDetection && len(r.Rules) == 0 {
+		// Empty whitelist means all data passes through
+		ruleCachePool.Put(ruleCache)
+		return []map[string]interface{}{data}
+	}
 
-		for i := range rf.Rules {
-			rule := rf.Rules[i]
+	// Process each rule in the ruleset
+	for _, rule := range r.Rules {
+		// Create data copy for this rule execution
+		dataCopy := common.MapDeepCopy(data)
 
-			// Checklist process
-			checkListRes := false
-			ruleCheckRes := false
+		// Execute all operations in the order specified by the Queue
+		ruleCheckRes := r.executeRuleOperations(&rule, dataCopy, ruleCache)
 
-			var conditionMap map[string]bool
-
-			if rule.Checklist.ConditionFlag {
-				conditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
-			}
-
-			for _, checkNode := range rule.Checklist.CheckNodes {
-				var checkNodeValue = checkNode.Value
-				var checkNodeValueFromRaw = false
-
-				switch checkNode.Logic {
-				case "":
-					if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
-						checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
-						checkNodeValueFromRaw = true
-					}
-					checkListRes = checkNodeLogic(&checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
-				case "AND":
-					for _, v := range checkNode.DelimiterFieldList {
-						if strings.HasPrefix(v, FromRawSymbol) {
-							checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
-							checkNodeValueFromRaw = true
-						}
-						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); !checkListRes {
-							break
-						}
-					}
-				case "OR":
-					for _, v := range checkNode.DelimiterFieldList {
-						if strings.HasPrefix(v, FromRawSymbol) {
-							checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
-							checkNodeValueFromRaw = true
-						}
-
-						if checkListRes = checkNodeLogic(&checkNode, data, v, checkNodeValueFromRaw, ruleCache); checkListRes {
-							break
-						}
-					}
-				}
-
-				if rule.Checklist.ConditionFlag {
-					conditionMap[checkNode.ID] = checkListRes
-				} else {
-					if !checkListRes {
-						break
-					}
-				}
-			}
-
-			if rule.ChecklistLen == 0 {
-				ruleCheckRes = true
-			}
-
-			if rule.Checklist.ConditionFlag {
-				ruleCheckRes = rule.Checklist.ConditionAST.ExprASTResult(rule.Checklist.ConditionAST.ExprAST, rule.Checklist.ConditionMap)
-			}
-
-			if r.IsDetection && checkListRes {
-				ruleCheckRes = true
-			} else if !r.IsDetection && !checkListRes {
-				whiteListCount = whiteListCount + 1
-				if whiteListCount == r.RulesCount {
-					dataCopy := common.MapDeepCopy(data)
-					finalRes = append(finalRes, dataCopy)
-					return finalRes
-				}
-			}
-
-			if !ruleCheckRes && r.IsDetection {
-				continue
-			}
-
-			if ruleCheckRes && !r.IsDetection {
-				return finalRes
-			}
-
-			if r.IsDetection {
-				// Threshold process
-				if rule.ThresholdCheck {
-					var err error
-					ruleCheckRes = false
-
-					// Isolate by ruleset ID and rule ID
-					var groupByKey = rule.Threshold.GroupByID
-					for k, v := range rule.Threshold.GroupByList {
-						tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
-						groupByKey = groupByKey + tmpData
-					}
-					groupByKey = common.XXHash64(groupByKey)
-
-					switch rule.Threshold.CountType {
-					case "":
-						groupByKey = "F_" + groupByKey
-
-						if rule.Threshold.LocalCache {
-							ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
-						} else {
-							ruleCheckRes, err = RedisFRQSum(groupByKey, 1, rule.Threshold.RangeInt, rule.Threshold.Value)
-						}
-
-					case "SUM":
-						groupByKey = "FS_" + groupByKey
-
-						sumDataStr, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-						if !ok {
-							break
-						}
-
-						sumData, err := strconv.Atoi(sumDataStr)
-						if err != nil {
-							break
-						}
-
-						if rule.Threshold.LocalCache {
-							ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
-						} else {
-							ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, rule.Threshold.RangeInt, rule.Threshold.Value)
-						}
-
-					case "CLASSIFY":
-						groupByKey = "FC_" + groupByKey
-						classifyData, ok := GetCheckDataFromCache(ruleCache, rule.Threshold.CountField, data, rule.Threshold.CountFieldList)
-						if !ok {
-							break
-						}
-
-						tmpKey := groupByKey + "_" + common.XXHash64(classifyData)
-
-						if rule.Threshold.LocalCache {
-							ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
-						} else {
-							ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, rule.Threshold.RangeInt, rule.Threshold.Value)
-						}
-					}
-
-					if err != nil {
-						logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
-					}
-				}
-
-				if !ruleCheckRes {
-					continue
-				}
-
-				// Determine if the rule mutates data (append/del/plugin). If not, shallow copy suffices
-				var dataCopy map[string]interface{}
-				if len(rule.Appends) > 0 || len(rule.DelList) > 0 || len(rule.Plugins) > 0 {
-					dataCopy = common.MapDeepCopy(data)
-				} else {
-					dataCopy = common.MapShallowCopy(data)
-				}
-
+		// Handle rule result based on ruleset type
+		if r.IsDetection {
+			// For detection rules, if rule passes, add to results
+			if ruleCheckRes {
 				// Add rule info
-				addHitRuleID(dataCopy, r.RulesetID+"."+rule.ID)
-
-				// Append process
-				for i := range rule.Appends {
-					tmpAppend := rule.Appends[i]
-					if tmpAppend.Type == "" {
-						appendData := tmpAppend.Value
-						if strings.HasPrefix(tmpAppend.Value, FromRawSymbol) {
-							appendData = GetRuleValueFromRawFromCache(ruleCache, tmpAppend.Value, dataCopy)
-						}
-
-						dataCopy[tmpAppend.FieldName] = appendData
-					} else {
-						// Plugin
-						args := GetPluginRealArgs(tmpAppend.PluginArgs, dataCopy, ruleCache)
-						res, ok, err := tmpAppend.Plugin.FuncEvalOther(args...)
-						if err == nil && ok {
-							if tmpAppend.FieldName == PluginArgFromRawSymbol {
-								if r, ok := res.(map[string]interface{}); ok {
-									res = common.MapDeepCopy(r)
-								} else {
-									logger.PluginError("Plugin result is not a map", "plugin", tmpAppend.Plugin.Name, "result", res)
-									res = nil
-								}
-							}
-
-							dataCopy[tmpAppend.FieldName] = res
-						}
-					}
-				}
-
-				// Delete process
-				for i := range rule.DelList {
-					common.MapDel(dataCopy, rule.DelList[i])
-				}
-
-				// Plugin process
-				for i := range rule.Plugins {
-					p := rule.Plugins[i]
-					args := GetPluginRealArgs(p.PluginArgs, dataCopy, ruleCache)
-
-					ok, err := p.Plugin.FuncEvalCheckNode(args...)
-					if err != nil {
-						logger.PluginError("Plugin evaluation error", "plugin", p.Plugin.Name, "error", err)
-					}
-
-					if !ok {
-						logger.Info("Plugin check failed", "plugin", p.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
-					}
-				}
-
+				// Build hit rule ID efficiently
+				var hitRuleIDSb strings.Builder
+				hitRuleIDSb.WriteString(r.RulesetID)
+				hitRuleIDSb.WriteString(".")
+				hitRuleIDSb.WriteString(rule.ID)
+				addHitRuleID(dataCopy, hitRuleIDSb.String())
 				// Add to final result
 				finalRes = append(finalRes, dataCopy)
 			}
+		} else {
+			// For whitelist rules
+			// Always update lastModifiedData with the result of rule execution
+			lastModifiedData = dataCopy
+
+			if ruleCheckRes {
+				// If whitelist rule passes, data is whitelisted (allowed) - don't pass forward (return empty)
+				ruleCachePool.Put(ruleCache)
+				return make([]map[string]interface{}, 0)
+			}
 		}
+	}
+
+	// For whitelist: if no rule passed, data needs processing - pass forward the last modified data
+	if !r.IsDetection && len(finalRes) == 0 && lastModifiedData != nil {
+		finalRes = append(finalRes, lastModifiedData)
 	}
 
 	// put back to pool
 	ruleCachePool.Put(ruleCache)
 	ruleCache = nil
 	return finalRes
+}
+
+// executeRuleOperations executes all operations in a rule according to the Queue order
+func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	if rule.Queue == nil || len(*rule.Queue) == 0 {
+		// No operations to execute
+		// For detection rules, empty rule means no match (false)
+		// For whitelist rules, empty rule also means no match (false), allowing data to pass
+		return false
+	}
+
+	// Check if the rule has any check operations (check, checklist, threshold)
+	hasCheckOperations := false
+	for _, op := range *rule.Queue {
+		if op.Type == T_CheckList || op.Type == T_Check || op.Type == T_Threshold {
+			hasCheckOperations = true
+			break
+		}
+	}
+
+	// If no check operations, the rule should not match
+	if !hasCheckOperations {
+		return false
+	}
+
+	ruleResult := true
+
+	// Execute operations in the exact order specified by the Queue
+	for _, op := range *rule.Queue {
+		switch op.Type {
+		case T_CheckList:
+			checkResult := r.executeCheckList(rule, op.ID, data, ruleCache)
+			if !checkResult {
+				ruleResult = false
+				// For detection rules, if check fails, stop execution
+				if r.IsDetection {
+					return false
+				}
+				// For whitelist rules, continue executing other operations
+			}
+		case T_Check:
+			checkResult := r.executeCheck(rule, op.ID, data, ruleCache)
+			if !checkResult {
+				ruleResult = false
+				// For detection rules, if check fails, stop execution
+				if r.IsDetection {
+					return false
+				}
+				// For whitelist rules, continue executing other operations
+			}
+		case T_Threshold:
+			thresholdResult := r.executeThreshold(rule, op.ID, data, ruleCache)
+			if !thresholdResult {
+				ruleResult = false
+				// For detection rules, if threshold fails, stop execution
+				if r.IsDetection {
+					return false
+				}
+				// For whitelist rules, continue executing other operations
+			}
+		case T_Append:
+			// Execute append operation according to user-defined order
+			r.executeAppend(rule, op.ID, data, ruleCache)
+		case T_Del:
+			// Execute del operation according to user-defined order
+			r.executeDel(rule, op.ID, data)
+		case T_Plugin:
+			// Execute plugin operation according to user-defined order
+			r.executePlugin(rule, op.ID, data, ruleCache)
+		}
+	}
+
+	return ruleResult
+}
+
+// executeCheckList executes a checklist operation
+func (r *Ruleset) executeCheckList(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	checklist, exists := rule.ChecklistMap[operationID]
+	if !exists {
+		return true
+	}
+
+	var conditionMap map[string]bool
+
+	if checklist.ConditionFlag {
+		conditionMap = make(map[string]bool, len(checklist.CheckNodes))
+	}
+
+	// Execute each check node in the checklist
+	for _, checkNode := range checklist.CheckNodes {
+		checkResult := r.executeCheckNode(&checkNode, data, ruleCache)
+
+		if checklist.ConditionFlag {
+			conditionMap[checkNode.ID] = checkResult
+		} else {
+			// Simple AND logic for non-condition checklists
+			if !checkResult {
+				return false
+			}
+		}
+	}
+
+	// If using condition expression, evaluate it
+	if checklist.ConditionFlag {
+		return checklist.ConditionAST.ExprASTResult(checklist.ConditionAST.ExprAST, conditionMap)
+	}
+
+	return true
+}
+
+// executeCheck executes a standalone check operation
+func (r *Ruleset) executeCheck(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	checkNode, exists := rule.CheckMap[operationID]
+	if !exists {
+		return true
+	}
+
+	return r.executeCheckNode(&checkNode, data, ruleCache)
+}
+
+// executeCheckNode executes a single check node
+func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	var checkNodeValue = checkNode.Value
+	var checkNodeValueFromRaw = false
+
+	switch checkNode.Logic {
+	case "":
+		if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
+			checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
+			checkNodeValueFromRaw = true
+		}
+		return checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
+	case "AND":
+		for _, v := range checkNode.DelimiterFieldList {
+			if strings.HasPrefix(v, FromRawSymbol) {
+				checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+				checkNodeValueFromRaw = true
+			}
+			if !checkNodeLogic(checkNode, data, v, checkNodeValueFromRaw, ruleCache) {
+				return false
+			}
+		}
+		return true
+	case "OR":
+		for _, v := range checkNode.DelimiterFieldList {
+			if strings.HasPrefix(v, FromRawSymbol) {
+				checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
+				checkNodeValueFromRaw = true
+			}
+			if checkNodeLogic(checkNode, data, v, checkNodeValueFromRaw, ruleCache) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return false
+}
+
+// executeThreshold executes a threshold operation
+func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	threshold, exists := rule.ThresholdMap[operationID]
+	if !exists {
+		return true
+	}
+
+	// Isolate by ruleset ID and rule ID
+	// Use strings.Builder for better performance
+	var sb strings.Builder
+	sb.WriteString(threshold.GroupByID)
+
+	for k, v := range threshold.GroupByList {
+		tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+		sb.WriteString(tmpData)
+	}
+	groupByKey := common.XXHash64(sb.String())
+
+	var ruleCheckRes bool
+	var err error
+
+	switch threshold.CountType {
+	case "":
+		groupByKey = "F_" + groupByKey
+
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQSum(groupByKey, 1, threshold.RangeInt, threshold.Value)
+		}
+
+	case "SUM":
+		groupByKey = "FS_" + groupByKey
+
+		sumDataStr, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
+		if !ok {
+			return false
+		}
+
+		sumData, err := strconv.Atoi(sumDataStr)
+		if err != nil {
+			return false
+		}
+
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, threshold.RangeInt, threshold.Value)
+		}
+
+	case "CLASSIFY":
+		groupByKey = "FC_" + groupByKey
+		classifyData, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
+		if !ok {
+			return false
+		}
+
+		// Use strings.Builder for consistency
+		var tmpKeySb strings.Builder
+		tmpKeySb.WriteString(groupByKey)
+		tmpKeySb.WriteString("_")
+		tmpKeySb.WriteString(common.XXHash64(classifyData))
+		tmpKey := tmpKeySb.String()
+
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, threshold.RangeInt, threshold.Value)
+		}
+	}
+
+	if err != nil {
+		logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", rule.ID, "RuleSetID:", r.RulesetID)
+		return false
+	}
+
+	return ruleCheckRes
+}
+
+// executeAppend executes an append operation
+func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string]interface{}, ruleCache map[string]common.CheckCoreCache) {
+	appendOp, exists := rule.AppendsMap[operationID]
+	if !exists {
+		return
+	}
+
+	if appendOp.Type == "" {
+		appendData := appendOp.Value
+		if strings.HasPrefix(appendOp.Value, FromRawSymbol) {
+			appendData = GetRuleValueFromRawFromCache(ruleCache, appendOp.Value, dataCopy)
+		}
+
+		dataCopy[appendOp.FieldName] = appendData
+	} else {
+		// Plugin
+		args := GetPluginRealArgs(appendOp.PluginArgs, dataCopy, ruleCache)
+		res, ok, err := appendOp.Plugin.FuncEvalOther(args...)
+		if err == nil && ok {
+			if appendOp.FieldName == PluginArgFromRawSymbol {
+				if r, ok := res.(map[string]interface{}); ok {
+					res = common.MapDeepCopy(r)
+				} else {
+					logger.PluginError("Plugin result is not a map", "plugin", appendOp.Plugin.Name, "result", res)
+					res = nil
+				}
+			}
+
+			dataCopy[appendOp.FieldName] = res
+		}
+	}
+}
+
+// executeDel executes a delete operation
+func (r *Ruleset) executeDel(rule *Rule, operationID int, dataCopy map[string]interface{}) {
+	delFields, exists := rule.DelMap[operationID]
+	if !exists {
+		return
+	}
+
+	for _, fieldPath := range delFields {
+		common.MapDel(dataCopy, fieldPath)
+	}
+}
+
+// executePlugin executes a plugin operation
+func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string]interface{}, ruleCache map[string]common.CheckCoreCache) {
+	pluginOp, exists := rule.PluginMap[operationID]
+	if !exists {
+		return
+	}
+
+	args := GetPluginRealArgs(pluginOp.PluginArgs, dataCopy, ruleCache)
+
+	ok, err := pluginOp.Plugin.FuncEvalCheckNode(args...)
+	if err != nil {
+		logger.PluginError("Plugin evaluation error", "plugin", pluginOp.Plugin.Name, "error", err)
+	}
+
+	if !ok {
+		logger.Info("Plugin check failed", "plugin", pluginOp.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+	}
 }
 
 // checkNodeLogic executes the check logic for a single check node.
@@ -607,10 +720,15 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 		data = make(map[string]interface{})
 	}
 
-	if _, ok := data[HitRuleIdFieldName]; !ok {
+	if existingID, ok := data[HitRuleIdFieldName]; !ok {
 		data[HitRuleIdFieldName] = ruleID
 	} else {
-		data[HitRuleIdFieldName] = data[HitRuleIdFieldName].(string) + "," + ruleID
+		// Use strings.Builder for efficient string concatenation
+		var sb strings.Builder
+		sb.WriteString(existingID.(string))
+		sb.WriteString(",")
+		sb.WriteString(ruleID)
+		data[HitRuleIdFieldName] = sb.String()
 	}
 }
 

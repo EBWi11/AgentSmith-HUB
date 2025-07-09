@@ -131,6 +131,7 @@ import { ref, watch, onMounted, computed, onUnmounted } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
 import JsonViewer from './JsonViewer.vue';
+import { ProjectTestCache } from '../utils/cacheUtils';
 
 // Props
 const props = defineProps({
@@ -181,6 +182,24 @@ watch(() => props.projectId, (newVal) => {
   resetState();
 });
 
+// Watch for input data changes and save to cache
+watch(inputData, (newVal) => {
+  if (props.projectId && newVal) {
+    const cachedData = ProjectTestCache.get(props.projectId) || {};
+    cachedData.inputData = newVal;
+    ProjectTestCache.set(props.projectId, cachedData);
+  }
+});
+
+// Watch for selected input node changes and save to cache
+watch(selectedInputNode, (newVal) => {
+  if (props.projectId && newVal) {
+    const cachedData = ProjectTestCache.get(props.projectId) || {};
+    cachedData.selectedInputNode = newVal;
+    ProjectTestCache.set(props.projectId, cachedData);
+  }
+});
+
 // Remove event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleEscKey);
@@ -198,11 +217,22 @@ function resetState() {
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
-  selectedInputNode.value = '';
-  inputNodes.value = [];
   outputResults.value = {};
   jsonError.value = null;
   jsonErrorLine.value = null;
+  
+  // Clear input nodes first
+  inputNodes.value = [];
+  
+  // Try to restore cached data for this project
+  if (props.projectId) {
+    const cachedData = ProjectTestCache.get(props.projectId);
+    if (cachedData) {
+      inputData.value = cachedData.inputData || inputData.value;
+      selectedInputNode.value = cachedData.selectedInputNode || '';
+      console.log(`[ProjectTestModal] Restored cached test data for project: ${props.projectId}`);
+    }
+  }
 }
 
 function closeModal() {

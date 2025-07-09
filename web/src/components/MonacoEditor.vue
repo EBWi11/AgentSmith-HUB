@@ -1548,6 +1548,25 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
+  // skip_verify属性值补全
+  else if (context.currentKey === 'skip_verify') {
+    const skipVerifyValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    skipVerifyValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Skip TLS certificate verification' : 'Enable TLS certificate verification',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}` // 前缀匹配优先
+        });
+      }
+    });
+  }
+  
   // Cursor_position attribute value completion
   else if (context.currentKey === 'cursor_position') {
     const cursorPositions = ['BEGIN_CURSOR', 'END_CURSOR'];
@@ -1604,7 +1623,7 @@ function getInputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Input source type - choose from: kafka, aliyun_sls',
+        documentation: 'Input source type - choose from: kafka, kafka_azure, kafka_aws, aliyun_sls',
         insertText: 'type:',
         range: range,
         sortText: '000_type'
@@ -1612,7 +1631,7 @@ function getInputKeyCompletions(context, range, fullText) {
     }
     
     // Provide corresponding configuration sections based on type
-    const typeMatch = fullText.match(/type:\s*(kafka|aliyun_sls)/);
+    const typeMatch = fullText.match(/type:\s*(kafka|kafka_azure|kafka_aws|aliyun_sls)/);
     if (typeMatch) {
       const inputType = typeMatch[1];
       
@@ -1627,7 +1646,53 @@ function getInputKeyCompletions(context, range, fullText) {
             '    - "localhost:9092"',
             '  topic: "topic-name"',
             '  group: "group-name"',
-            '  compression:""'
+            '  compression: "none"'
+          ].join('\n'),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (inputType === 'kafka_azure' && !fullText.includes('kafka:')) {
+        suggestions.push({
+          label: 'kafka',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'Azure Event Hubs (Kafka) input configuration section',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "namespace.servicebus.windows.net:9093"',
+            '  topic: "topic-name"',
+            '  group: "group-name"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "plain"',
+            '    username: "$ConnectionString"',
+            '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+          ].join('\n'),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (inputType === 'kafka_aws' && !fullText.includes('kafka:')) {
+        suggestions.push({
+          label: 'kafka',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'AWS MSK (Kafka) input configuration section',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+            '  topic: "topic-name"',
+            '  group: "group-name"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "scram-sha-512"',
+            '    username: "username"',
+            '    password: "password"'
           ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
@@ -1647,17 +1712,40 @@ function getInputKeyCompletions(context, range, fullText) {
     }
   }
   
-  // Kafka配置段内部
+  // Kafka配置段内部 (supports all kafka types)
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
       { key: 'brokers', desc: 'Kafka broker addresses' },
       { key: 'topic', desc: 'Kafka topic name' },
       { key: 'group', desc: 'Consumer group name' },
       { key: 'compression', desc: 'Message compression type' },
-      { key: 'sasl', desc: 'SASL authentication configuration' }
+      { key: 'sasl', desc: 'SASL authentication configuration' },
+      { key: 'tls', desc: 'TLS configuration' }
     ];
     
     kafkaKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // TLS配置段内部
+  else if (context.currentSection === 'tls') {
+    const tlsKeys = [
+      { key: 'cert_path', desc: 'Path to client certificate file' },
+      { key: 'key_path', desc: 'Path to client private key file' },
+      { key: 'ca_file_path', desc: 'Path to CA certificate file' },
+      { key: 'skip_verify', desc: 'Skip TLS verification' }
+    ];
+    
+    tlsKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
@@ -1747,6 +1835,48 @@ function getDefaultInputCompletions(fullText, context, range) {
           '  topic: "topic-name"',
           '  group: "consumer-group"',
           '  compression: "none"'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'Azure Event Hubs Input Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete Azure Event Hubs (Kafka) input configuration',
+        insertText: [
+          'type: kafka_azure',
+          'kafka:',
+          '  brokers:',
+          '    - "namespace.servicebus.windows.net:9093"',
+          '  topic: "topic-name"',
+          '  group: "consumer-group"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "plain"',
+          '    username: "$ConnectionString"',
+          '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'AWS MSK Input Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete AWS MSK (Kafka) input configuration',
+        insertText: [
+          'type: kafka_aws',
+          'kafka:',
+          '  brokers:',
+          '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+          '  topic: "topic-name"',
+          '  group: "consumer-group"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "scram-sha-512"',
+          '    username: "username"',
+          '    password: "password"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -1991,6 +2121,25 @@ function getOutputValueCompletions(context, range, fullText) {
     });
   }
   
+  // skip_verify属性值补全
+  else if (context.currentKey === 'skip_verify') {
+    const skipVerifyValues = ['true', 'false'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    skipVerifyValues.forEach(val => {
+      if (!currentValue || val.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: val,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: val === 'true' ? 'Skip TLS certificate verification' : 'Enable TLS certificate verification',
+          insertText: val,
+          range: range,
+          sortText: val.toLowerCase().startsWith(currentValue) ? `0_${val}` : `1_${val}` // 前缀匹配优先
+        });
+      }
+    });
+  }
+  
   return { suggestions };
 }
 
@@ -2028,23 +2177,47 @@ function getOutputKeyCompletions(context, range, fullText) {
         });
       }
       
-      if (outputType === 'kafka_azure' && !fullText.includes('kafka_azure:')) {
+      if (outputType === 'kafka_azure' && !fullText.includes('kafka:')) {
         suggestions.push({
-          label: 'kafka_azure',
+          label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Azure Event Hubs (Kafka) output configuration section',
-          insertText: 'kafka_azure:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "namespace.servicebus.windows.net:9093"',
+            '  topic: "topic-name"',
+            '  key: "key-field"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "plain"',
+            '    username: "$ConnectionString"',
+            '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
       }
       
-      if (outputType === 'kafka_aws' && !fullText.includes('kafka_aws:')) {
+      if (outputType === 'kafka_aws' && !fullText.includes('kafka:')) {
         suggestions.push({
-          label: 'kafka_aws',
+          label: 'kafka',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'AWS MSK (Kafka) output configuration section',
-          insertText: 'kafka_aws:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertText: [
+            'kafka:',
+            '  brokers:',
+            '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+            '  topic: "topic-name"',
+            '  key: "key-field"',
+            '  compression: "none"',
+            '  sasl:',
+            '    enable: true',
+            '    mechanism: "scram-sha-512"',
+            '    username: "username"',
+            '    password: "password"'
+          ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });
@@ -2092,14 +2265,15 @@ function getOutputKeyCompletions(context, range, fullText) {
     }
   }
   
-  // Kafka配置段内部
+  // Kafka配置段内部 (supports all kafka types)
   else if (context.currentSection === 'kafka') {
     const kafkaKeys = [
       { key: 'brokers', desc: 'Kafka broker addresses' },
       { key: 'topic', desc: 'Kafka topic name' },
       { key: 'key', desc: 'Partition key for Kafka messages' },
       { key: 'compression', desc: 'Message compression type' },
-      { key: 'sasl', desc: 'SASL authentication configuration' }
+      { key: 'sasl', desc: 'SASL authentication configuration' },
+      { key: 'tls', desc: 'TLS configuration' }
     ];
     
     kafkaKeys.forEach(item => {
@@ -2149,6 +2323,28 @@ function getOutputKeyCompletions(context, range, fullText) {
     ];
     
     authKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // TLS配置段内部
+  else if (context.currentSection === 'tls') {
+    const tlsKeys = [
+      { key: 'cert_path', desc: 'Path to client certificate file' },
+      { key: 'key_path', desc: 'Path to client private key file' },
+      { key: 'ca_file_path', desc: 'Path to CA certificate file' },
+      { key: 'skip_verify', desc: 'Skip TLS verification' }
+    ];
+    
+    tlsKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
@@ -2228,6 +2424,48 @@ function getDefaultOutputCompletions(fullText, context, range) {
           '  #   type: basic  # or api_key, bearer',
           '  #   username: "elastic"',
           '  #   password: "password"'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'Azure Event Hubs Output Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete Azure Event Hubs (Kafka) output configuration',
+        insertText: [
+          'type: kafka_azure',
+          'kafka:',
+          '  brokers:',
+          '    - "namespace.servicebus.windows.net:9093"',
+          '  topic: "topic-name"',
+          '  key: "key-field"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "plain"',
+          '    username: "$ConnectionString"',
+          '    password: "Endpoint=sb://namespace.servicebus.windows.net/;SharedAccessKeyName=..."'
+        ].join('\n'),
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range
+      },
+      {
+        label: 'AWS MSK Output Template',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Complete AWS MSK (Kafka) output configuration',
+        insertText: [
+          'type: kafka_aws',
+          'kafka:',
+          '  brokers:',
+          '    - "b-1.cluster.kafka.region.amazonaws.com:9092"',
+          '  topic: "topic-name"',
+          '  key: "key-field"',
+          '  compression: "none"',
+          '  sasl:',
+          '    enable: true',
+          '    mechanism: "scram-sha-512"',
+          '    username: "username"',
+          '    password: "password"'
         ].join('\n'),
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
@@ -2644,9 +2882,9 @@ function getParentTags(textBeforeCursor) {
 function getXmlAttributeValueCompletions(context, range) {
   const suggestions = [];
   
-  // node标签的type属性
-  if (context.currentTag === 'node' && context.currentAttribute === 'type') {
-    const nodeTypes = [
+  // check或node标签的type属性（支持新的check语法）
+  if ((context.currentTag === 'check' || context.currentTag === 'node') && context.currentAttribute === 'type') {
+    const checkTypes = [
       { value: 'REGEX', description: 'Regular expression match' },
       { value: 'EQU', description: 'Equal comparison' },
       { value: 'NEQ', description: 'Not equal comparison' },
@@ -2671,7 +2909,7 @@ function getXmlAttributeValueCompletions(context, range) {
       { value: 'PLUGIN', description: 'Plugin function call' }
     ];
     
-    nodeTypes.forEach(type => {
+    checkTypes.forEach(type => {
       if (!suggestions.some(s => s.label === type.value)) {
         suggestions.push({
           label: type.value,
@@ -2684,8 +2922,8 @@ function getXmlAttributeValueCompletions(context, range) {
     });
   }
   
-  // node标签的logic属性
-  else if (context.currentTag === 'node' && context.currentAttribute === 'logic') {
+  // check或node标签的logic属性
+  else if ((context.currentTag === 'check' || context.currentTag === 'node') && context.currentAttribute === 'logic') {
     suggestions.push(
       { label: 'AND', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Logical AND operation', insertText: 'AND', range: range },
       { label: 'OR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Logical OR operation', insertText: 'OR', range: range }
@@ -2827,43 +3065,38 @@ function getXmlAttributeNameCompletions(context, range) {
       );
       break;
       
+    case 'check':
     case 'node':
       // Generate smart field suggestion with available fields  
-      let nodeFieldTemplate = 'field="field-name"';
+      let checkFieldTemplate = 'field="field-name"';
       if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
-        nodeFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+        checkFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
       }
       
-      suggestions.push(
-        { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions', insertText: 'id="node-id"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="INCL"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: nodeFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+      const checkAttrs = [
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="EQU"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: checkFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'logic', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical operation for multiple values', insertText: 'logic="OR"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'delimiter', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Delimiter for multiple values', insertText: 'delimiter="|"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
-      );
-      break;
+      ];
       
-    case 'filter':
-      // Generate smart field suggestion with available fields  
-      let filterFieldTemplate = 'field="field-name"';
-      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
-        filterFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+      // 在checklist内部的check节点需要id属性
+      if (context.parentTags.includes('checklist')) {
+        checkAttrs.unshift({ label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions (required in checklist)', insertText: 'id="node-id"', range: range });
       }
       
-      suggestions.push(
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to filter on', insertText: filterFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
-      );
+      suggestions.push(...checkAttrs);
       break;
       
     case 'checklist':
       suggestions.push(
-        { label: 'condition', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical condition using node IDs', insertText: 'condition="${1:a and b}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+        { label: 'condition', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical condition using node IDs', insertText: 'condition="a and b"', range: range }
       );
       break;
       
     case 'threshold':
       // Generate smart group_by suggestion with available fields
-      let groupByTemplate = 'group_by="${1:field1,field2}"';
+      let groupByTemplate = 'group_by="field1"';
       if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
         const topFields = dynamicFieldKeys.value.slice(0, 3).join(',');
         groupByTemplate = `group_by="${topFields}"`;
@@ -2908,7 +3141,24 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'root',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Root element for ruleset',
-        insertText: 'root author="name">\n    <rule id="rule_id">\n        <filter field="key">vaule</filter>\n        <checklist>\n            <node type="REGEX" field="exe">testcases</node>\n            <node type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>\n			<node type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</node>\n        </checklist>\n        <append field="abc">123</append>\n        <del>exe,argv</del>\n		<plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>\n    </rule>\n</root',
+        insertText: 'root author="name">\n' +
+            '    <rule id="rule_id">\n' +
+            '        <!-- Operations can be in any order -->\n' +
+            '        <check type="EQU" field="status">active</check>\n' +
+            '    \n' +
+            '        <threshold group_by="user_id" range="5m">10</threshold>\n' +
+            '    \n' +
+            '        <checklist condition="a or b">\n' +
+            '            <check id="a" type="INCL" field="message">error</check>\n' +
+            '            <check id="b" type="REGEX" field="path">.*\\.log$</check>\n' +
+            '        </checklist>\n' +
+            '\n' +
+            '        <append field="processed">true</append>\n' +
+            '        <plugin>notify("alert")</plugin>\n' +
+            '        <del>temp_field</del>\n' +
+            '    \n' +
+            '    </rule>\n' +
+            '</root',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -2919,67 +3169,74 @@ function getXmlTagNameCompletions(context, range, fullText) {
       suggestions.push({
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
-        documentation: 'Rule definition',
-        insertText: 'rule id="" name="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n    </checklist>\n</rule',
+        documentation: 'Rule definition (operations can be in any order)',
+        insertText: 'rule id="rule_id" name="rule_name">\n    <check type="EQU" field="field">value</check>\n</rule',
         range: range
       });
     }
   } else if (parentTag === 'rule') {
-    // rule内部 - 提供所有可能的子标签
+    // rule内部 - 提供所有可能的子标签，强调可以任意顺序
     const ruleChildTags = [
       {
-        label: 'filter',
+        label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Filter condition for rule',
-        insertText: 'filter field=""></filter',
-        range: range
+        documentation: 'Standalone check condition (can be placed anywhere in rule)',
+        insertText: 'check type="EQU" field="field">value</check',
+        range: range,
+        sortText: '1_check' // Higher priority
       },
       {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
-        documentation: 'Checklist with conditions',
-        insertText: 'checklist>\n    <node type="" field=""></node>\n</checklist',
-        range: range
+        documentation: 'Checklist with conditional logic (can be placed anywhere in rule)',
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
+        range: range,
+        sortText: '2_checklist'
       },
       {
         label: 'threshold',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Threshold configuration',
-        insertText: 'threshold group_by="" range="" count_type="" count_field="" local_cache=""></threshold',
-        range: range
+        documentation: 'Threshold configuration (can be placed anywhere in rule)',
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
+        range: range,
+        sortText: '3_threshold'
       },
       {
         label: 'append',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Append field to result',
-        insertText: 'append field="" type=""></append',
-        range: range
+        documentation: 'Append field to result (can be placed anywhere in rule)',
+        insertText: 'append field="field_name">value</append',
+        range: range,
+        sortText: '4_append'
       },
       {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
-        documentation: 'Plugin execution',
-        insertText: 'plugin></plugin',
-        range: range
+        documentation: 'Plugin execution (can be placed anywhere in rule)',
+        insertText: 'plugin>plugin_name()</plugin',
+        range: range,
+        sortText: '5_plugin'
       },
       {
         label: 'del',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Delete fields from result',
-        insertText: 'del></del',
-        range: range
+        documentation: 'Delete fields from result (can be placed anywhere in rule)',
+        insertText: 'del>field</del',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '6_del'
       }
     ];
     
     suggestions.push(...ruleChildTags);
   } else if (parentTag === 'checklist') {
-    // checklist内部 - 只能有node标签，确保只添加一次
-    if (!suggestions.some(s => s.label === 'node')) {
+    // checklist内部 - 只能有check标签（注意：不是node）
+    if (!suggestions.some(s => s.label === 'check')) {
       suggestions.push({
-        label: 'node',
+        label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Check node',
-        insertText: 'node id="" type="" field=""></node>',
+        documentation: 'Check node within checklist (must have id attribute for condition)',
+        insertText: 'check id="id" type="INCL" field="field">value</check',
         range: range
       });
     }
@@ -3004,10 +3261,13 @@ function getXmlTagContentCompletions(context, range, fullText) {
   
   // Enhanced plugin function completion with parameter information (optimized)
   // Only show plugin functions when NOT in function parameters
-  if (context.currentTag === 'plugin' || (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
+  if (context.currentTag === 'plugin' || 
+      (context.currentTag === 'check' && fullText.includes('type="PLUGIN"')) || 
+      (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || 
+      (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
     
-    // Determine if we're in a checknode context (which requires bool return type)
-    const isInCheckNode = context.currentTag === 'node' && fullText.includes('type="PLUGIN"');
+    // Determine if we're in a check context (which requires bool return type)
+    const isInCheckNode = (context.currentTag === 'check' || context.currentTag === 'node') && fullText.includes('type="PLUGIN"');
     
     // Use cached plugin suggestions (no async needed)
     const pluginSuggestions = getPluginSuggestions(range, isInCheckNode);
@@ -3020,8 +3280,7 @@ function getXmlTagContentCompletions(context, range, fullText) {
         label: 'plugin_name(_$ORIDATA)',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Plugin function with original data (template)',
-        insertText: '${1:plugin_name}(_$ORIDATA)',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin_name(_$ORIDATA)',
         range: range,
         sortText: '9_template_oridata' // Very low priority
       });
@@ -3030,26 +3289,30 @@ function getXmlTagContentCompletions(context, range, fullText) {
         label: 'plugin_name("arg1", arg2)',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Plugin function with custom arguments (template)',
-        insertText: '${1:plugin_name}("${2:arg1}", ${3:arg2})',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin_name("arg1", arg2)',
         range: range,
         sortText: '9_template_custom' // Very low priority
       });
     }
   }
   
-  // 过滤器值建议
-  if (context.currentTag === 'filter') {
+  // check或node标签的值建议
+  if (context.currentTag === 'check' || context.currentTag === 'node') {
     suggestions.push(
       { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
     );
-  }
-  
-  // 节点值建议
-  if (context.currentTag === 'node') {
-    suggestions.push(
-      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
-    );
+    
+    // 为field引用添加建议
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      suggestions.push({
+        label: '_$field_reference',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Reference to another field value',
+        insertText: '_$' + dynamicFieldKeys.value[0],
+        range: range,
+        sortText: '01_field_ref'
+      });
+    }
   }
   
   // del标签内容补全 - 字段列表
