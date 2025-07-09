@@ -2637,6 +2637,15 @@ async function startProject(item) {
   emitSidebarProjectOperation('start', item.id)
   
   closeAllMenus()
+  
+  // 立即设置为 starting 状态
+  if (item && items.projects) {
+    const projectItem = items.projects.find(p => p.id === item.id)
+    if (projectItem) {
+      projectItem.status = 'starting'
+    }
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -2653,15 +2662,21 @@ async function startProject(item) {
     } else if (result.success) {
       // Project started successfully
       $message?.success?.('Project started successfully')
-      // 不要立即修改状态，让刷新机制去更新状态确保同步
-      // Refresh project status only, no need to rebuild list
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
       await refreshProjectStatus()
     } else if (result.error) {
       // Start failed
       $message?.error?.('Failed to start project: ' + result.error)
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
+      await refreshProjectStatus()
     }
   } catch (error) {
     $message?.error?.('Error starting project: ' + (error.message || 'Unknown error'))
+    // 强制刷新项目状态
+    await dataCache.fetchComponents('projects', true)
+    await refreshProjectStatus()
   } finally {
     projectOperationLoading.value = false
   }
@@ -2672,6 +2687,15 @@ async function stopProject(item) {
   emitSidebarProjectOperation('stop', item.id)
   
   closeAllMenus()
+  
+  // 立即设置为 stopping 状态
+  if (item && items.projects) {
+    const projectItem = items.projects.find(p => p.id === item.id)
+    if (projectItem) {
+      projectItem.status = 'stopping'
+    }
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -2688,15 +2712,21 @@ async function stopProject(item) {
     } else if (result.success) {
       // Project stopped successfully
       $message?.success?.('Project stopped successfully')
-      // 不要立即修改状态，让刷新机制去更新状态确保同步
-      // Refresh project status only, no need to rebuild list
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
       await refreshProjectStatus()
     } else if (result.error) {
       // Stop failed
       $message?.error?.('Failed to stop project: ' + result.error)
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
+      await refreshProjectStatus()
     }
   } catch (error) {
     $message?.error?.('Error stopping project: ' + (error.message || 'Unknown error'))
+    // 强制刷新项目状态
+    await dataCache.fetchComponents('projects', true)
+    await refreshProjectStatus()
   } finally {
     projectOperationLoading.value = false
   }
@@ -2707,6 +2737,15 @@ async function restartProject(item) {
   emitSidebarProjectOperation('restart', item.id)
   
   closeAllMenus()
+  
+  // 立即设置为 stopping 状态（重启先停止）
+  if (item && items.projects) {
+    const projectItem = items.projects.find(p => p.id === item.id)
+    if (projectItem) {
+      projectItem.status = 'stopping'
+    }
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -2723,15 +2762,21 @@ async function restartProject(item) {
     } else if (result.success) {
       // Project restarted successfully
       $message?.success?.('Project restarted successfully')
-      // 不要立即修改状态，让刷新机制去更新状态确保同步
-      // Refresh project status only, no need to rebuild list
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
       await refreshProjectStatus()
     } else if (result.error) {
       // Restart failed
       $message?.error?.('Failed to restart project: ' + result.error)
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
+      await refreshProjectStatus()
     }
   } catch (error) {
     $message?.error?.('Error restarting project: ' + (error.message || 'Unknown error'))
+    // 强制刷新项目状态
+    await dataCache.fetchComponents('projects', true)
+    await refreshProjectStatus()
   } finally {
     projectOperationLoading.value = false
   }
@@ -2761,6 +2806,21 @@ async function continueProjectOperation() {
   const operationType = projectOperationType.value
   
   closeProjectWarningModal()
+  
+  // 立即设置过渡状态
+  if (item && items.projects) {
+    const projectItem = items.projects.find(p => p.id === item.id)
+    if (projectItem) {
+      if (operationType === 'start') {
+        projectItem.status = 'starting'
+      } else if (operationType === 'stop') {
+        projectItem.status = 'stopping'
+      } else if (operationType === 'restart') {
+        projectItem.status = 'stopping' // 重启先停止
+      }
+    }
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -2785,13 +2845,15 @@ async function continueProjectOperation() {
     if (result && result.success) {
       // Operation executed successfully
       $message?.success?.(`Project ${operationType}ed successfully`)
-      // 不要立即修改状态，让刷新机制去更新状态确保同步
-      
-      // Refresh project status only, no need to rebuild list
+      // 强制刷新项目状态
+      await dataCache.fetchComponents('projects', true)
       await refreshProjectStatus()
     }
   } catch (error) {
     $message?.error?.(`Error ${operationType}ing project: ` + (error.message || 'Unknown error'))
+    // 强制刷新项目状态
+    await dataCache.fetchComponents('projects', true)
+    await refreshProjectStatus()
   } finally {
     projectOperationLoading.value = false
   }
