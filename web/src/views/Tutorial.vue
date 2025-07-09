@@ -237,7 +237,7 @@ function addHeaderIds(markdown) {
     if (match) {
       const level = match[1].length
       const text = match[2]
-        .replace(/[🛡️🚀🧠📋🎯🔌⚡💼❓💡📖]/g, '')
+        .replace(/[🛡️🚀🧠📋🎯🔌⚡💼❓💡📖📚📊🔧🚨🔧]/g, '')
         .trim()
       
       if (text && level <= 3) {
@@ -534,8 +534,9 @@ onBeforeUnmount(() => {
 }
 
 .outline-content {
-  height: calc(100% - 65px);
+  height: calc(100% - 65px - 36px); /* Subtract header height (65px) and status bar height (36px) */
   overflow-y: auto;
+  padding-bottom: 8px; /* Add some extra padding for better visual spacing */
 }
 
 .outline-list {
