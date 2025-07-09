@@ -387,6 +387,9 @@ func testRuleset(c echo.Context) error {
 		logger.Warn("Failed to stop temporary ruleset: %v", err)
 	}
 
+	// Explicitly set to nil to help GC
+	tempRuleset = nil
+
 	// Return the results
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1104,6 +1107,9 @@ func testRulesetContent(c echo.Context) error {
 	if err != nil {
 		logger.Warn("Failed to stop temporary ruleset: %v", err)
 	}
+
+	// Explicitly set to nil to help GC
+	tempRuleset = nil
 
 	// Return the results
 	return c.JSON(http.StatusOK, map[string]interface{}{

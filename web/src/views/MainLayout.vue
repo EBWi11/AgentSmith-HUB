@@ -78,6 +78,7 @@ import ErrorLogs from '../views/ErrorLogs.vue'
 import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
 import ProjectTestModal from '../components/ProjectTestModal.vue'
+import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
 
 // State
 const selected = ref(null)
@@ -133,9 +134,22 @@ onMounted(() => {
 // Watch for route changes
 watch(
   () => [route.params, route.meta],
-  ([newParams, newMeta]) => {
+  ([newParams, newMeta], [oldParams, oldMeta]) => {
     const { id } = newParams
     const componentType = newMeta.componentType
+    const oldId = oldParams?.id
+    const oldComponentType = oldMeta?.componentType
+    
+    // Clear test cache when navigating away from components
+    if (oldId && oldComponentType) {
+      if (oldComponentType === 'rulesets' && oldId !== id) {
+        RulesetTestCache.clear(oldId)
+        console.log(`[MainLayout] Cleared ruleset test cache for: ${oldId}`)
+      } else if (oldComponentType === 'projects' && oldId !== id) {
+        ProjectTestCache.clear(oldId)
+        console.log(`[MainLayout] Cleared project test cache for: ${oldId}`)
+      }
+    }
     
     if (componentType) {
       if (componentType === 'home') {
@@ -318,6 +332,11 @@ function handleEscKey(event) {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscKey);
+  
+  // Clear all test caches when component unmounts
+  RulesetTestCache.clearAll();
+  ProjectTestCache.clearAll();
+  console.log('[MainLayout] Cleared all test caches on unmount');
 });
 
 // Open the ruleset test modal

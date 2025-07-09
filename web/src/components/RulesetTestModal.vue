@@ -1,6 +1,6 @@
 <template>
   <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-    <div class="bg-white rounded shadow-lg p-6 w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="bg-white rounded shadow-lg p-6 w-[1200px] max-h-[90vh] overflow-hidden flex flex-col">
       <div class="flex justify-between items-center mb-4">
         <h3 class="font-bold text-lg">Test Ruleset: {{ rulesetId }}</h3>
         <button @click="closeModal" class="text-gray-400 hover:text-gray-600">
@@ -22,6 +22,7 @@
               class="h-full" 
               :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
               style="height: 100%; min-height: 380px;"
+              @update:value="onInputDataChange"
             />
           </div>
         </div>
@@ -29,25 +30,25 @@
         <!-- Right panel: Results -->
         <div class="w-1/2 pl-3 flex flex-col overflow-hidden">
           <h4 class="text-sm font-medium text-gray-700 mb-2">Results:</h4>
-          <div class="flex-1 overflow-auto border border-gray-200 rounded-md bg-gray-50 p-3">
+          <div class="flex-1 overflow-auto border border-gray-200 rounded-md bg-gray-50" style="max-height: 400px;">
             <div v-if="testLoading" class="flex justify-center items-center h-full">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
             
-            <div v-else-if="testError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div v-else-if="testError" class="bg-red-50 border-l-4 border-red-500 p-4 m-3">
               <div class="flex">
                 <div class="flex-shrink-0">
                   <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                 </div>
-                <div class="ml-3">
-                  <p class="text-sm text-red-700">{{ testError }}</p>
+                <div class="ml-3 flex-1">
+                  <p class="text-sm text-red-700 whitespace-pre-wrap break-all">{{ testError }}</p>
                 </div>
               </div>
             </div>
             
-            <div v-else-if="testResults.length === 0" class="text-center py-8 text-gray-500">
+            <div v-else-if="testResults.length === 0" class="text-center py-8 px-3 text-gray-500">
               <p>No results yet. Click "Run Test" to execute the ruleset.</p>
               <p v-if="testExecuted" class="mt-2 text-sm text-yellow-600">
                 No output was generated. The ruleset may not have matched any rules.
@@ -55,9 +56,9 @@
             </div>
             
             <div v-else>
-              <div v-for="(result, index) in testResults" :key="index" class="mb-4">
-                <div class="bg-white border border-gray-200 rounded-md p-3">
-                  <div class="mb-2 flex justify-between">
+              <div v-for="(result, index) in testResults" :key="index" class="p-3">
+                <div class="bg-white border border-gray-200 rounded-md">
+                  <div class="px-3 py-2 border-b border-gray-100 flex justify-between items-center">
                     <span class="text-sm font-medium text-gray-700">
                       Result {{ index + 1 }}
                     </span>
@@ -65,7 +66,9 @@
                       Rule: {{ result._HUB_HIT_RULE_ID }}
                     </span>
                   </div>
-                  <JsonViewer :value="result" height="auto" />
+                  <div class="p-3">
+                    <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap break-all">{{ formatJson(result) }}</pre>
+                  </div>
                 </div>
               </div>
             </div>
@@ -96,6 +99,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
 import JsonViewer from './JsonViewer.vue';
+import { RulesetTestCache } from '../utils/cacheUtils';
 
 // Props
 const props = defineProps({
@@ -109,13 +113,16 @@ const emit = defineEmits(['close']);
 
 // Reactive state
 const showModal = ref(false);
-const inputData = ref('{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}');
+const inputData = ref('');
 const testResults = ref([]);
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
 const jsonError = ref(null);
 const jsonErrorLine = ref(null);
+
+// Default test data
+const defaultTestData = '{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}';
 
 // Debug info on mount
 onMounted(() => {
@@ -125,7 +132,7 @@ onMounted(() => {
 watch(() => props.show, (newVal) => {
   showModal.value = newVal;
   if (newVal) {
-    // Reset state when opening modal
+    // Reset state when opening modal but preserve test data
     resetState();
     // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
@@ -136,7 +143,16 @@ watch(() => props.show, (newVal) => {
 }, { immediate: true });
 
 watch(() => props.rulesetId, (newVal) => {
-  // Reset state when ruleset changes
+  if (newVal) {
+    // Load cached test data for this ruleset
+    const cachedData = RulesetTestCache.get(newVal);
+    if (cachedData) {
+      inputData.value = cachedData;
+    } else {
+      inputData.value = defaultTestData;
+    }
+  }
+  // Reset other state when ruleset changes
   testResults.value = [];
   testError.value = null;
   testExecuted.value = false;
@@ -247,9 +263,31 @@ function formatTestResult() {
   }
 }
 
+// Save test data when it changes
+function onInputDataChange(newValue) {
+  if (props.rulesetId) {
+    RulesetTestCache.set(props.rulesetId, newValue);
+  }
+}
+
+// Format JSON for display
+function formatJson(obj) {
+  try {
+    return JSON.stringify(obj, null, 2);
+  } catch (e) {
+    return String(obj);
+  }
+}
+
 function resetState() {
-  // Reset state when opening modal
-  inputData.value = '{\n  "data": "test data",\n  "data_type": "59",\n  "exe": "/bin/bash",\n  "pid": "1234",\n  "dip": "192.168.1.1",\n  "sip": "192.168.1.2",\n  "dport": "80",\n  "sport": "12345"\n}';
+  // Load cached test data or use default
+  if (props.rulesetId) {
+    const cachedData = RulesetTestCache.get(props.rulesetId);
+    inputData.value = cachedData || defaultTestData;
+  } else {
+    inputData.value = defaultTestData;
+  }
+  
   testResults.value = [];
   testError.value = null;
   testExecuted.value = false;
