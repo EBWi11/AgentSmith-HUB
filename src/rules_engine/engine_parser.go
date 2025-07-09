@@ -336,7 +336,7 @@ func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine i
 
 				if checkNode.Type == "PLUGIN" && checkNode.Value != "" {
 					// Validate plugin call syntax
-					pluginName, args, err := ParseFunctionCall(checkNode.Value)
+					pluginName, args, isNegated, err := ParseCheckNodePluginCall(checkNode.Value)
 					if err != nil {
 						return checkNode, fmt.Errorf("invalid plugin call syntax at line %d: %v", elementLine, err)
 					}
@@ -349,8 +349,10 @@ func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine i
 						return checkNode, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
 					}
 
-					// Store parsed plugin info
-					checkNode.Plugin = plugin.Plugins[pluginName]
+					// Store parsed plugin info with negation flag
+					pluginCopy := *plugin.Plugins[pluginName]
+					pluginCopy.IsNegated = isNegated
+					checkNode.Plugin = &pluginCopy
 					checkNode.PluginArgs = args
 				}
 

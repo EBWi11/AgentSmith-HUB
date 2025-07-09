@@ -39,6 +39,9 @@ type Plugin struct {
 
 	// Return type information for validation and filtering
 	ReturnType string `json:"return_type"` // "bool" or "interface{}"
+
+	// Whether the plugin result should be negated (for ! prefix)
+	IsNegated bool `json:"is_negated"`
 }
 
 // PluginParameter represents a function parameter

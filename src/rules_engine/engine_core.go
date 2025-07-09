@@ -705,6 +705,12 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		if err != nil {
 			return false
 		}
+
+		// Check if plugin function should be negated (starts with !)
+		if checkNode.Plugin.IsNegated {
+			return !result
+		}
+
 		return result
 
 	default:

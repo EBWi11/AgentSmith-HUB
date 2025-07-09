@@ -822,7 +822,7 @@ func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, plugin
 // validateCheckNodePluginCall validates plugin function call for checknode (must return bool)
 func validateCheckNodePluginCall(pluginCall string, line int, ruleID string, result *ValidationResult) {
 	// Parse the plugin function call
-	pluginName, args, err := ParseFunctionCall(pluginCall)
+	pluginName, args, _, err := ParseCheckNodePluginCall(pluginCall)
 	if err != nil {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
@@ -1353,6 +1353,34 @@ func ParseFunctionCall(input string) (string, []*PluginArg, error) {
 	return funcName, args, nil
 }
 
+// ParseCheckNodePluginCall parses a plugin call for check nodes, supporting negation with ! prefix
+func ParseCheckNodePluginCall(input string) (string, []*PluginArg, bool, error) {
+	input = strings.TrimSpace(input)
+
+	// Check for negation prefix
+	isNegated := false
+	if strings.HasPrefix(input, "!") {
+		isNegated = true
+		input = strings.TrimSpace(input[1:]) // Remove ! and trim again
+	}
+
+	re := regexpgo.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*)\)$`)
+	matches := re.FindStringSubmatch(input)
+	if len(matches) != 3 {
+		return "", nil, false, fmt.Errorf("invalid function call syntax: %s, must be in format func(arg1, arg2, ...) or !func(arg1, arg2, ...)", input)
+	}
+
+	funcName := matches[1]
+	argStr := matches[2]
+
+	args, err := parseArgs(argStr)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("failed to parse function arguments: %w", err)
+	}
+
+	return funcName, args, isNegated, nil
+}
+
 func parseArgs(s string) ([]*PluginArg, error) {
 	var args []*PluginArg
 	var current strings.Builder
@@ -1694,13 +1722,16 @@ func processCheckNode(node *CheckNodes, checklist *Checklist, ruleID string) err
 
 	switch strings.TrimSpace(node.Type) {
 	case "PLUGIN":
-		pluginName, args, err := ParseFunctionCall(node.Value)
+		pluginName, args, isNegated, err := ParseCheckNodePluginCall(node.Value)
 		if err != nil {
 			return err
 		}
 
 		if p, ok := plugin.Plugins[pluginName]; ok {
-			node.Plugin = p
+			// Create a copy of the plugin with negation flag
+			pluginCopy := *p
+			pluginCopy.IsNegated = isNegated
+			node.Plugin = &pluginCopy
 		} else {
 			// Check if it's a temporary component, temporary components should not be referenced
 			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
