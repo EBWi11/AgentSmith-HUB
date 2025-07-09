@@ -1,7 +1,5 @@
 # 🛡️ AgentSmith-HUB 规则引擎完整指南
 
-## 🚀 引言：什么是规则引擎？
-
 AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
 - 🔍 **实时检测**：从数据流中识别威胁和异常
 - 🔄 **数据转换**：对数据进行加工和丰富化
@@ -51,28 +49,12 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 **属性说明：**
 - `type`（必需）：指定检查类型，如 `EQU`（相等）、`INCL`（包含）、`REGEX`（正则匹配）等
 - `field`（必需）：要检查的数据字段路径
-- `negate`（可选）：结果取反，如 `negate="true"` 将true变为false
 - 标签内容：用于比较的值
 
 **工作原理：**
 1. 规则引擎从输入数据中提取 `field` 指定的字段值
 2. 使用 `type` 指定的比较方式，将字段值与标签内容进行比较
 3. 返回 true 或 false 的检查结果
-4. 如果设置了 `negate="true"`，则对结果取反
-
-**negate 属性示例：**
-```xml
-<!-- 检查IP不是私有地址 -->
-<check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-
-<!-- 检查文件名不以.txt结尾 -->
-<check type="END" field="filename" negate="true">.txt</check>
-```
-
-在上面的例子中，`<check type="EQU" field="username">admin</check>` 会：
-- 从数据中提取 `username` 字段的值（"admin"）
-- 检查是否等于 "admin"
-- 因为相等，返回 true，规则匹配成功
 
 #### 🔍 语法详解：`<append>` 标签
 
@@ -712,7 +694,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="suspicious_connection" name="可疑连接检测">
     <!-- 检查是否为外部连接 -->
     <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
-    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
+    <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
     
     <!-- 检查地理位置 -->
     <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
@@ -755,11 +737,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="threat_intel_detection" name="威胁情报检测">
     <!-- 第1步：检查数据类型，快速过滤 -->
     <check type="EQU" field="datatype">external_connection</check>
-    
-    <!-- 第2步：确认目标IP是公网地址 -->
-    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-    
-    <!-- 第3步：查询威胁情报，增强数据 -->
+   
+   <!-- 第2步：确认目标IP是公网地址 -->
+   <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+
+   <!-- 第3步：查询威胁情报，增强数据 -->
     <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
     
     <!-- 第4步：解析威胁情报结果 -->
@@ -1032,10 +1014,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="INCL" field="file_path" logic="OR" delimiter="|">
             /etc/passwd|/etc/shadow|.ssh/|.aws/credentials
         </check>
-        
-        <!-- 检查外联行为 -->
-        <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-        
+
+       <!-- 检查外联行为 -->
+       <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+       
         <!-- 异常传输检测 -->
         <threshold group_by="source_ip" range="1h" count_type="SUM" 
                    count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
@@ -1250,7 +1232,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 独立检查 `<check>`
 ```xml
-<check type="类型" field="字段名" logic="OR|AND" delimiter="分隔符" negate="true|false">
+<check type="类型" field="字段名" logic="OR|AND" delimiter="分隔符">
     值
 </check>
 ```
@@ -1261,7 +1243,6 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | field | 条件 | 字段名（PLUGIN类型可选） | 非PLUGIN类型必需 |
 | logic | 否 | 多值逻辑 | 使用分隔符时 |
 | delimiter | 条件 | 值分隔符 | 使用logic时必需 |
-| negate | 否 | 结果取反 | 需要反向逻辑时 |
 | id | 条件 | 节点标识符 | 在checklist中使用condition时必需 |
 
 #### 检查列表 `<checklist>`

@@ -51,28 +51,12 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 **属性说明：**
 - `type`（必需）：指定检查类型，如 `EQU`（相等）、`INCL`（包含）、`REGEX`（正则匹配）等
 - `field`（必需）：要检查的数据字段路径
-- `negate`（可选）：结果取反，如 `negate="true"` 将true变为false
 - 标签内容：用于比较的值
 
 **工作原理：**
 1. 规则引擎从输入数据中提取 `field` 指定的字段值
 2. 使用 `type` 指定的比较方式，将字段值与标签内容进行比较
 3. 返回 true 或 false 的检查结果
-4. 如果设置了 `negate="true"`，则对结果取反
-
-**negate 属性示例：**
-```xml
-<!-- 检查IP不是私有地址 -->
-<check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-
-<!-- 检查文件名不以.txt结尾 -->
-<check type="END" field="filename" negate="true">.txt</check>
-```
-
-在上面的例子中，`<check type="EQU" field="username">admin</check>` 会：
-- 从数据中提取 `username` 字段的值（"admin"）
-- 检查是否等于 "admin"
-- 因为相等，返回 true，规则匹配成功
 
 #### 🔍 语法详解：`<append>` 标签
 
@@ -698,12 +682,12 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 输入数据：
 ```json
 {
-   "event_type": "network_connection",
-   "source_ip": "10.0.0.100",
-   "dest_ip": "185.220.101.45",
-   "dest_port": 443,
-   "bytes_sent": 1024000,
-   "connection_duration": 3600
+  "event_type": "network_connection",
+  "source_ip": "10.0.0.100",
+  "dest_ip": "185.220.101.45",
+  "dest_port": 443,
+  "bytes_sent": 1024000,
+  "connection_duration": 3600
 }
 ```
 
@@ -712,7 +696,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="suspicious_connection" name="可疑连接检测">
     <!-- 检查是否为外部连接 -->
     <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
-    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
+    <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
     
     <!-- 检查地理位置 -->
     <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
@@ -755,11 +739,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="threat_intel_detection" name="威胁情报检测">
     <!-- 第1步：检查数据类型，快速过滤 -->
     <check type="EQU" field="datatype">external_connection</check>
-    
-    <!-- 第2步：确认目标IP是公网地址 -->
-    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-    
-    <!-- 第3步：查询威胁情报，增强数据 -->
+   
+   <!-- 第2步：确认目标IP是公网地址 -->
+   <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+
+   <!-- 第3步：查询威胁情报，增强数据 -->
     <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
     
     <!-- 第4步：解析威胁情报结果 -->
@@ -1032,10 +1016,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="INCL" field="file_path" logic="OR" delimiter="|">
             /etc/passwd|/etc/shadow|.ssh/|.aws/credentials
         </check>
-        
-        <!-- 检查外联行为 -->
-        <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
-        
+
+       <!-- 检查外联行为 -->
+       <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+       
         <!-- 异常传输检测 -->
         <threshold group_by="source_ip" range="1h" count_type="SUM" 
                    count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
@@ -1250,7 +1234,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 独立检查 `<check>`
 ```xml
-<check type="类型" field="字段名" logic="OR|AND" delimiter="分隔符" negate="true|false">
+<check type="类型" field="字段名" logic="OR|AND" delimiter="分隔符">
     值
 </check>
 ```
@@ -1261,7 +1245,6 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | field | 条件 | 字段名（PLUGIN类型可选） | 非PLUGIN类型必需 |
 | logic | 否 | 多值逻辑 | 使用分隔符时 |
 | delimiter | 条件 | 值分隔符 | 使用logic时必需 |
-| negate | 否 | 结果取反 | 需要反向逻辑时 |
 | id | 条件 | 节点标识符 | 在checklist中使用condition时必需 |
 
 #### 检查列表 `<checklist>`
@@ -1409,11 +1392,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 推荐：高性能操作在前 -->
 <rule id="optimized">
-   <check type="NOTNULL" field="required"></check>     <!-- 最快 -->
-   <check type="EQU" field="type">target</check>       <!-- 快 -->
-   <check type="INCL" field="message">keyword</check>  <!-- 中等 -->
-   <check type="REGEX" field="data">pattern</check>    <!-- 慢 -->
-   <check type="PLUGIN">complex_check()</check>        <!-- 最慢 -->
+    <check type="NOTNULL" field="required"></check>     <!-- 最快 -->
+    <check type="EQU" field="type">target</check>       <!-- 快 -->
+    <check type="INCL" field="message">keyword</check>  <!-- 中等 -->
+    <check type="REGEX" field="data">pattern</check>    <!-- 慢 -->
+    <check type="PLUGIN">complex_check()</check>        <!-- 最慢 -->
 </rule>
 ```
 
@@ -1422,7 +1405,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <!-- 使用本地缓存提升性能 -->
 <threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
 
-        <!-- 避免过大的时间窗口 -->
+<!-- 避免过大的时间窗口 -->
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
 ```
 
@@ -1441,13 +1424,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 错误：condition中引用不存在的id -->
 <checklist condition="a and b">
-    <check type="EQU" field="status">active</check>  <!-- 缺少id -->
+   <check type="EQU" field="status">active</check>  <!-- 缺少id -->
 </checklist>
 
-<!-- 正确 -->
+        <!-- 正确 -->
 <checklist condition="a and b">
-    <check id="a" type="EQU" field="status">active</check>
-    <check id="b" type="NOTNULL" field="user"></check>
+<check id="a" type="EQU" field="status">active</check>
+<check id="b" type="NOTNULL" field="user"></check>
 </checklist>
 ```
 
@@ -1455,13 +1438,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 问题：在大量数据上直接使用插件 -->
 <rule id="slow">
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+   <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 
-<!-- 优化：先过滤后处理 -->
+        <!-- 优化：先过滤后处理 -->
 <rule id="fast">
-    <check type="EQU" field="type">target</check>
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+<check type="EQU" field="type">target</check>
+<check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 ```
 
@@ -1470,14 +1453,14 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 1. 使用append跟踪执行流程
 ```xml
 <rule id="debug_flow">
-    <append field="_debug_step1">check started</append>
-    <check type="EQU" field="type">target</check>
-    
-    <append field="_debug_step2">check passed</append>
-    <threshold group_by="user" range="5m" value="10"/>
-    
-    <append field="_debug_step3">threshold passed</append>
-    <!-- 最终数据会包含所有debug字段，显示执行流程 -->
+   <append field="_debug_step1">check started</append>
+   <check type="EQU" field="type">target</check>
+
+   <append field="_debug_step2">check passed</append>
+   <threshold group_by="user" range="5m" value="10"/>
+
+   <append field="_debug_step3">threshold passed</append>
+   <!-- 最终数据会包含所有debug字段，显示执行流程 -->
 </rule>
 ```
 
@@ -1485,9 +1468,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 创建只包含待测试规则的规则集：
 ```xml
 <root type="DETECTION" name="test_single_rule">
-    <rule id="test_rule">
-        <!-- 你的测试规则 -->
-    </rule>
+   <rule id="test_rule">
+      <!-- 你的测试规则 -->
+   </rule>
 </root>
 ```
 
@@ -1495,9 +1478,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 使用append验证字段是否正确获取：
 ```xml
 <rule id="verify_fields">
-    <append field="debug_nested">_$user.profile.settings.theme</append>
-    <append field="debug_array">_$items.0.name</append>
-    <!-- 检查输出中的debug字段值 -->
+   <append field="debug_nested">_$user.profile.settings.theme</append>
+   <append field="debug_array">_$items.0.name</append>
+   <!-- 检查输出中的debug字段值 -->
 </rule>
 ```
 
@@ -1544,8 +1527,8 @@ func Eval(参数...) (interface{}, bool, error)
 package plugin
 
 import (
-    "strings"
-    "fmt"
+   "strings"
+   "fmt"
 )
 
 // Eval 是插件的入口函数，必须定义此函数
@@ -1560,27 +1543,27 @@ import (
 package plugin
 
 import (
-    "strings"
-    "fmt"
+   "strings"
+   "fmt"
 )
 
 // 检查邮箱是否来自指定域名
 // 返回 (bool, error) - 用于 check 节点
 func Eval(email string, allowedDomain string) (bool, error) {
-    if email == "" {
-        return false, nil
-    }
-    
-    // 提取邮箱域名
-    parts := strings.Split(email, "@")
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid email format: %s", email)
-    }
-    
-    domain := strings.ToLower(parts[1])
-    allowed := strings.ToLower(allowedDomain)
-    
-    return domain == allowed, nil
+   if email == "" {
+      return false, nil
+   }
+
+   // 提取邮箱域名
+   parts := strings.Split(email, "@")
+   if len(parts) != 2 {
+      return false, fmt.Errorf("invalid email format: %s", email)
+   }
+
+   domain := strings.ToLower(parts[1])
+   allowed := strings.ToLower(allowedDomain)
+
+   return domain == allowed, nil
 }
 ```
 
@@ -1597,44 +1580,44 @@ func Eval(email string, allowedDomain string) (bool, error) {
 package plugin
 
 import (
-    "strings"
+   "strings"
 )
 
 // 解析并提取User-Agent中的信息
 // 返回 (interface{}, bool, error) - 用于 append 或 plugin 节点
 func Eval(userAgent string) (interface{}, bool, error) {
-    if userAgent == "" {
-        return nil, false, nil
-    }
-    
-    result := make(map[string]interface{})
-    
-    // 简单的浏览器检测
-    if strings.Contains(userAgent, "Chrome") {
-        result["browser"] = "Chrome"
-    } else if strings.Contains(userAgent, "Firefox") {
-        result["browser"] = "Firefox"
-    } else if strings.Contains(userAgent, "Safari") {
-        result["browser"] = "Safari"
-    } else {
-        result["browser"] = "Unknown"
-    }
-    
-    // 操作系统检测
-    if strings.Contains(userAgent, "Windows") {
-        result["os"] = "Windows"
-    } else if strings.Contains(userAgent, "Mac") {
-        result["os"] = "macOS"
-    } else if strings.Contains(userAgent, "Linux") {
-        result["os"] = "Linux"
-    } else {
-        result["os"] = "Unknown"
-    }
-    
-    // 是否移动设备
-    result["is_mobile"] = strings.Contains(userAgent, "Mobile")
-    
-    return result, true, nil
+   if userAgent == "" {
+      return nil, false, nil
+   }
+
+   result := make(map[string]interface{})
+
+   // 简单的浏览器检测
+   if strings.Contains(userAgent, "Chrome") {
+      result["browser"] = "Chrome"
+   } else if strings.Contains(userAgent, "Firefox") {
+      result["browser"] = "Firefox"
+   } else if strings.Contains(userAgent, "Safari") {
+      result["browser"] = "Safari"
+   } else {
+      result["browser"] = "Unknown"
+   }
+
+   // 操作系统检测
+   if strings.Contains(userAgent, "Windows") {
+      result["os"] = "Windows"
+   } else if strings.Contains(userAgent, "Mac") {
+      result["os"] = "macOS"
+   } else if strings.Contains(userAgent, "Linux") {
+      result["os"] = "Linux"
+   } else {
+      result["os"] = "Unknown"
+   }
+
+   // 是否移动设备
+   result["is_mobile"] = strings.Contains(userAgent, "Mobile")
+
+   return result, true, nil
 }
 ```
 
@@ -1643,7 +1626,7 @@ func Eval(userAgent string) (interface{}, bool, error) {
 <!-- 提取信息到新字段 -->
 <append type="PLUGIN" field="ua_info">parseCustomUA(_$user_agent)</append>
 
-<!-- 后续可以访问解析结果 -->
+        <!-- 后续可以访问解析结果 -->
 <check type="EQU" field="ua_info.browser">Chrome</check>
 <check type="EQU" field="ua_info.is_mobile">true</check>
 ```
@@ -1670,18 +1653,18 @@ func Eval(ip string, cidrs ...string) (bool, error)
 #### 错误处理
 ```go
 func Eval(data string) (interface{}, bool, error) {
-    // 输入验证
-    if data == "" {
-        return nil, false, nil  // 空输入返回 false，不报错
-    }
-    
-    // 处理可能的错误
-    result, err := processData(data)
-    if err != nil {
-        return nil, false, fmt.Errorf("process data failed: %w", err)
-    }
-    
-    return result, true, nil
+// 输入验证
+if data == "" {
+return nil, false, nil  // 空输入返回 false，不报错
+}
+
+// 处理可能的错误
+result, err := processData(data)
+if err != nil {
+return nil, false, fmt.Errorf("process data failed: %w", err)
+}
+
+return result, true, nil
 }
 ```
 
@@ -1690,23 +1673,23 @@ func Eval(data string) (interface{}, bool, error) {
 package plugin
 
 import (
-    "regexp"
-    "sync"
+   "regexp"
+   "sync"
 )
 
 // 使用全局变量缓存正则表达式
 var (
-    emailRegex *regexp.Regexp
-    regexOnce  sync.Once
+   emailRegex *regexp.Regexp
+   regexOnce  sync.Once
 )
 
 func Eval(email string) (bool, error) {
-    // 确保正则只编译一次
-    regexOnce.Do(func() {
-        emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-    })
-    
-    return emailRegex.MatchString(email), nil
+   // 确保正则只编译一次
+   regexOnce.Do(func() {
+      emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+   })
+
+   return emailRegex.MatchString(email), nil
 }
 ```
 
@@ -1718,54 +1701,54 @@ func Eval(email string) (bool, error) {
 package plugin
 
 import (
-    "crypto/md5"
-    "encoding/hex"
-    "encoding/json"
-    "fmt"
-    "time"
+   "crypto/md5"
+   "encoding/hex"
+   "encoding/json"
+   "fmt"
+   "time"
 )
 
 // 生成用户行为指纹
 func Eval(userID string, actions string, timestamp int64) (interface{}, bool, error) {
-    // 解析用户行为
-    var actionList []map[string]interface{}
-    if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
-        return nil, false, fmt.Errorf("invalid actions format: %w", err)
-    }
-    
-    // 分析行为模式
-    result := map[string]interface{}{
-        "user_id": userID,
-        "timestamp": timestamp,
-        "action_count": len(actionList),
-        "time_of_day": time.Unix(timestamp, 0).Hour(),
-    }
-    
-    // 计算行为频率
-    actionTypes := make(map[string]int)
-    for _, action := range actionList {
-        if actionType, ok := action["type"].(string); ok {
-            actionTypes[actionType]++
-        }
-    }
-    result["action_types"] = actionTypes
-    
-    // 生成行为指纹
-    fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
-    hash := md5.Sum([]byte(fingerprint))
-    result["fingerprint"] = hex.EncodeToString(hash[:])
-    
-    // 风险评分
-    riskScore := 0
-    if len(actionList) > 100 {
-        riskScore += 20
-    }
-    if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
-        riskScore += 30
-    }
-    result["risk_score"] = riskScore
-    
-    return result, true, nil
+   // 解析用户行为
+   var actionList []map[string]interface{}
+   if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
+      return nil, false, fmt.Errorf("invalid actions format: %w", err)
+   }
+
+   // 分析行为模式
+   result := map[string]interface{}{
+      "user_id": userID,
+      "timestamp": timestamp,
+      "action_count": len(actionList),
+      "time_of_day": time.Unix(timestamp, 0).Hour(),
+   }
+
+   // 计算行为频率
+   actionTypes := make(map[string]int)
+   for _, action := range actionList {
+      if actionType, ok := action["type"].(string); ok {
+         actionTypes[actionType]++
+      }
+   }
+   result["action_types"] = actionTypes
+
+   // 生成行为指纹
+   fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
+   hash := md5.Sum([]byte(fingerprint))
+   result["fingerprint"] = hex.EncodeToString(hash[:])
+
+   // 风险评分
+   riskScore := 0
+   if len(actionList) > 100 {
+      riskScore += 20
+   }
+   if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
+      riskScore += 30
+   }
+   result["risk_score"] = riskScore
+
+   return result, true, nil
 }
 ```
 
@@ -1777,52 +1760,52 @@ func Eval(userID string, actions string, timestamp int64) (interface{}, bool, er
 package plugin
 
 import (
-    "sync"
-    "time"
+   "sync"
+   "time"
 )
 
 // 注意：这是一个示例，实际使用中应该使用Redis等外部存储
 var (
-    requestCount = make(map[string]*userRequest)
-    mu          sync.RWMutex
+   requestCount = make(map[string]*userRequest)
+   mu          sync.RWMutex
 )
 
 type userRequest struct {
-    count      int
-    lastUpdate time.Time
+   count      int
+   lastUpdate time.Time
 }
 
 // 检测用户请求频率是否异常
 func Eval(userID string, threshold int) (bool, error) {
-    mu.Lock()
-    defer mu.Unlock()
-    
-    now := time.Now()
-    
-    // 获取或创建用户记录
-    req, exists := requestCount[userID]
-    if !exists {
-        req = &userRequest{
-            count:      1,
-            lastUpdate: now,
-        }
-        requestCount[userID] = req
-        return false, nil
-    }
-    
-    // 如果距离上次请求超过1分钟，重置计数
-    if now.Sub(req.lastUpdate) > time.Minute {
-        req.count = 1
-        req.lastUpdate = now
-        return false, nil
-    }
-    
-    // 增加计数
-    req.count++
-    req.lastUpdate = now
-    
-    // 检查是否超过阈值
-    return req.count > threshold, nil
+   mu.Lock()
+   defer mu.Unlock()
+
+   now := time.Now()
+
+   // 获取或创建用户记录
+   req, exists := requestCount[userID]
+   if !exists {
+      req = &userRequest{
+         count:      1,
+         lastUpdate: now,
+      }
+      requestCount[userID] = req
+      return false, nil
+   }
+
+   // 如果距离上次请求超过1分钟，重置计数
+   if now.Sub(req.lastUpdate) > time.Minute {
+      req.count = 1
+      req.lastUpdate = now
+      return false, nil
+   }
+
+   // 增加计数
+   req.count++
+   req.lastUpdate = now
+
+   // 检查是否超过阈值
+   return req.count > threshold, nil
 }
 ```
 
@@ -1861,8 +1844,8 @@ func Eval(userID string, threshold int) (bool, error) {
 ```xml
 <!-- 测试规则 -->
 <rule id="test_custom_plugin">
-    <check type="PLUGIN">myCustomPlugin(_$test_field, "expected_value")</check>
-    <append type="PLUGIN" field="result">myDataPlugin(_$input_data)</append>
+   <check type="PLUGIN">myCustomPlugin(_$test_field, "expected_value")</check>
+   <append type="PLUGIN" field="result">myDataPlugin(_$input_data)</append>
 </rule>
 ```
 
