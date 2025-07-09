@@ -50,7 +50,7 @@ func getMaxPoolSize() int {
 	return maxSize
 }
 
-var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
+var ConditionRegex = regexp.MustCompile("^([a-zA-Z]+|\\(|\\)|\\s)+$")
 
 type OperatorType int
 
@@ -158,7 +158,7 @@ type PluginArg struct {
 // Threshold defines aggregation and counting logic for a rule.
 // It supports grouping by fields, time-based ranges, and different counting methods.
 type Threshold struct {
-	GroupBy        string              `xml:"group_by,attr"` // Field to group by
+	group_by       string              `xml:"group_by,attr"` // Field to group by
 	GroupByList    map[string][]string // Parsed group by fields
 	Range          string              `xml:"range,attr"` // Time range for aggregation
 	RangeInt       int                 // Parsed range in seconds
@@ -689,7 +689,7 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 
 // validateThreshold validates threshold elements
 func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
-	if threshold.GroupBy == "" && threshold.Range == "" && threshold.Value == 0 {
+	if threshold.group_by == "" && threshold.Range == "" && threshold.Value == 0 {
 		// No threshold defined, skip validation
 		return
 	}
@@ -697,7 +697,7 @@ func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleInde
 	// Find the actual threshold element line with improved accuracy
 	thresholdLine := findThresholdElementLine(xmlContent, ruleID, ruleIndex)
 
-	if threshold.GroupBy == "" || strings.TrimSpace(threshold.GroupBy) == "" {
+	if threshold.group_by == "" || strings.TrimSpace(threshold.group_by) == "" {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    thresholdLine,
@@ -1578,13 +1578,13 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 		// Process thresholds in ThresholdMap
 		for id, threshold := range rule.ThresholdMap {
-			if threshold.GroupBy == "" && threshold.Range == "" && threshold.Value == 0 {
+			if threshold.group_by == "" && threshold.Range == "" && threshold.Value == 0 {
 				// No threshold configured, skip
 				continue
 			}
 
-			if threshold.GroupBy == "" {
-				return errors.New("threshold groupby cannot be empty: " + rule.ID)
+			if threshold.group_by == "" {
+				return errors.New("threshold group_by cannot be empty: " + rule.ID)
 			}
 			if threshold.Range == "" {
 				return errors.New("threshold range cannot be empty: " + rule.ID)
@@ -1642,7 +1642,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			}
 
 			// Parse threshold group by fields
-			thresholdGroupBYList := strings.Split(strings.TrimSpace(threshold.GroupBy), ",")
+			thresholdGroupBYList := strings.Split(strings.TrimSpace(threshold.group_by), ",")
 			threshold.GroupByList = make(map[string][]string, len(thresholdGroupBYList))
 			for i := range thresholdGroupBYList {
 				tmpList := common.StringToList(thresholdGroupBYList[i])

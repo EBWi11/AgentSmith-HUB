@@ -263,7 +263,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <check type="EQU" field="event_type">security_event</check>
     
     <!-- 统计阈值可以放在任何位置 -->
-    <threshold groupby="source_ip" range="5m" value="10"/>
+    <threshold group_by="source_ip" range="5m" value="10"/>
     
     <!-- 继续其他检查（假设有自定义插件） -->
     <check type="PLUGIN">is_working_hours(_$check_time)</check>
@@ -292,16 +292,16 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 
 **基本语法：**
 ```xml
-<threshold groupby="分组字段" range="时间范围" value="阈值"/>
+<threshold group_by="分组字段" range="时间范围" value="阈值"/>
 ```
 
 **属性说明：**
-- `groupby`（必需）：按哪个字段分组统计，可以多个字段用逗号分隔
+- `group_by`（必需）：按哪个字段分组统计，可以多个字段用逗号分隔
 - `range`（必需）：时间窗口，支持 s(秒)、m(分)、h(时)、d(天)
 - `value`（必需）：触发阈值，达到这个数量时检查通过
 
 **工作原理：**
-1. 按 `groupby` 字段对事件分组（如按 source_ip 分组）
+1. 按 `group_by` 字段对事件分组（如按 source_ip 分组）
 2. 在 `range` 指定的滑动时间窗口内统计每组的事件数量
 3. 当某组的统计值达到 `value` 时，该检查通过
 
@@ -354,7 +354,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
         <append field="geo_risk">_$request.body.metadata.geo.country</append>
         
         <!-- 基于地理位置的阈值检测 -->
-        <threshold groupby="request.body.from_account,request.body.metadata.geo.country" 
+        <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
                    range="1h" value="3"/>
         
         <!-- 使用插件进行深度分析（假设有自定义插件） -->
@@ -534,7 +534,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <check type="EQU" field="event">login_failed</check>
     
     <!-- 5分钟内同一用户和IP失败5次 -->
-    <threshold groupby="user,ip" range="5m" value="5"/>
+    <threshold group_by="user,ip" range="5m" value="5"/>
     
     <append field="alert_type">brute_force_attempt</append>
     <plugin>block_ip(_$ip, 3600)</plugin>  <!-- 封禁1小时 -->
@@ -557,7 +557,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <check type="EQU" field="event">transfer</check>
     
     <!-- 24小时内累计金额超过50000 -->
-    <threshold groupby="user" range="24h" count_type="SUM" 
+    <threshold group_by="user" range="24h" count_type="SUM" 
                count_field="amount" value="50000"/>
     
     <append field="action">freeze_account</append>
@@ -572,7 +572,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - `value`：当累计和达到此值时触发
 
 **工作原理：**
-1. 按 `groupby` 分组
+1. 按 `group_by` 分组
 2. 在时间窗口内累加 `count_field` 的值
 3. 当累计值达到 `value` 时触发
 
@@ -592,7 +592,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <check type="EQU" field="action">download</check>
     
     <!-- 1小时内访问超过25个不同文件 -->
-    <threshold groupby="user" range="1h" count_type="CLASSIFY" 
+    <threshold group_by="user" range="1h" count_type="CLASSIFY" 
                count_field="file_id" value="25"/>
     
     <append field="risk_score">high</append>
@@ -608,7 +608,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - `value`：当不同值数量达到此值时触发
 
 **工作原理：**
-1. 按 `groupby` 分组
+1. 按 `group_by` 分组
 2. 在时间窗口内收集 `count_field` 的所有不同值
 3. 当不同值的数量达到 `value` 时触发
 
@@ -983,7 +983,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="INCL" field="command_line">-EncodedCommand</check>
         
         <!-- 网络连接检测 -->
-        <threshold groupby="hostname" range="10m" value="3"/>
+        <threshold group_by="hostname" range="10m" value="3"/>
         
         <!-- 威胁情报查询 -->
         <append type="PLUGIN" field="c2_url">
@@ -1016,7 +1016,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </checklist>
         
         <!-- 时间窗口检测 -->
-        <threshold groupby="source_ip,dest_ip" range="30m" value="5"/>
+        <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
         
         <!-- 风险评分（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_score">
@@ -1037,7 +1037,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
         
         <!-- 异常传输检测 -->
-        <threshold groupby="source_ip" range="1h" count_type="SUM" 
+        <threshold group_by="source_ip" range="1h" count_type="SUM" 
                    count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
         
         <!-- DNS隧道检测（假设有自定义插件） -->
@@ -1087,7 +1087,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </append>
         
         <!-- 交易速度检测 -->
-        <threshold groupby="user_id" range="10m" value="5"/>
+        <threshold group_by="user_id" range="10m" value="5"/>
         
         <!-- 风险决策（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_decision">
@@ -1123,7 +1123,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </append>
         
         <!-- 累计金额监控 -->
-        <threshold groupby="account_cluster" range="7d" count_type="SUM"
+        <threshold group_by="account_cluster" range="7d" count_type="SUM"
                    count_field="amount" value="1000000"/>
         
         <!-- 合规报告（假设有自定义插件） -->
@@ -1324,13 +1324,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 阈值检测 `<threshold>`
 ```xml
-<threshold groupby="字段1,字段2" range="时间范围" value="阈值" 
+<threshold group_by="字段1,字段2" range="时间范围" value="阈值" 
            count_type="SUM|CLASSIFY" count_field="统计字段" local_cache="true|false"/>
 ```
 
 | 属性 | 必需 | 说明 | 示例 |
 |------|------|------|------|
-| groupby | 是 | 分组字段 | `source_ip,user_id` |
+| group_by | 是 | 分组字段 | `source_ip,user_id` |
 | range | 是 | 时间范围 | `5m`, `1h`, `24h` |
 | value | 是 | 阈值 | `10` |
 | count_type | 否 | 计数类型 | 默认：计数，`SUM`：求和，`CLASSIFY`：去重计数 |
@@ -1420,10 +1420,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 阈值配置优化
 ```xml
 <!-- 使用本地缓存提升性能 -->
-<threshold groupby="user_id" range="5m" value="10" local_cache="true"/>
+<threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
 
 <!-- 避免过大的时间窗口 -->
-<threshold groupby="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
+<threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
 ```
 
 ### 5.8 常见错误和解决方案
@@ -1474,7 +1474,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <check type="EQU" field="type">target</check>
     
     <append field="_debug_step2">check passed</append>
-    <threshold groupby="user" range="5m" value="10"/>
+    <threshold group_by="user" range="5m" value="10"/>
     
     <append field="_debug_step3">threshold passed</append>
     <!-- 最终数据会包含所有debug字段，显示执行流程 -->

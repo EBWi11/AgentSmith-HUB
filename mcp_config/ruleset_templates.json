@@ -10,122 +10,95 @@
   "llm_recommended": {
     "name": "LLM Recommended Template",
     "description": "Performance-optimized template using flexible execution order",
-    "template": "<root type=\"detection\" author=\"ai_generated\">\n    <rule id=\"suspicious_process_execution\" name=\"Detect suspicious process execution patterns\">\n        <!-- NEW: Independent checks, no checklist wrapper needed -->\n        <check type=\"EQU\" field=\"event_type\">process_creation</check>\n        <check type=\"EQU\" field=\"log_source\">endpoint_security</check>\n        <check type=\"INCL\" field=\"process_name\">hack</check>\n        <threshold groupby=\"host,user\" range=\"60s\" value=\"3\" local_cache=\"true\"/>\n        <append field=\"severity\">medium</append>\n        <append field=\"detection_type\">process_monitoring</append>\n        <append field=\"confidence\">high</append>\n        <append field=\"desc\">Detected suspicious process execution patterns</append>\n    </rule>\n</root>",
-    "performance_notes": [
-      "✅ NEW SYNTAX: No <checklist> needed for simple AND logic",
-      "✅ OPTIMAL: Execution order follows XML order exactly", 
-      "✅ OPTIMAL: Most selective event_type check filters first",
-      "✅ OPTIMAL: Threshold only calculated after all checks pass",
-      "✅ OPTIMAL: Append operations execute last for efficiency"
-    ]
+    "template": "<root type=\"ruleset\" author=\"AgentSmith-LLM\" version=\"2.0\">\n  <llm-analyze>\n    <!-- Step 1: Analyze user intent - What needs detection? -->\n    <!-- Step 2: Fetch real sample data from target projects -->\n    <!-- Step 3: Identify available fields and patterns -->\n    <!-- Step 4: Design rules with optimal execution order -->\n  </llm-analyze>\n  \n  <rule id=\"llm_optimized_rule\" name=\"LLM Optimized Detection\">\n    <!-- Order by selectivity: most filtering first -->\n    <check type=\"EQU\" field=\"confirmed_field\">real_value</check>\n    <check type=\"GT\" field=\"numeric_field\">actual_threshold</check>\n    \n    <!-- Complex operations after filtering -->\n    <threshold group_by=\"host,user\" range=\"60s\" value=\"3\" local_cache=\"true\"/>\n    <append field=\"severity\">medium</append>\n    <append field=\"detection_type\">process_monitoring</append>\n    <append field=\"desc\">LLM-generated rule based on real data analysis</append>\n  </rule>\n</root>"
   },
-  "minimal_rule": {
-    "name": "Minimal Rule",
-    "description": "Simplest possible rule structure with new syntax",
-    "template": "<root type=\"detection\" author=\"user\">\n    <rule id=\"minimal_rule\" name=\"Minimal detection rule\">\n        <check type=\"INCL\" field=\"status\">error</check>\n        <append field=\"desc\">Error status detected</append>\n    </rule>\n</root>",
-    "syntax_note": "NEW: Single check doesn't need checklist wrapper"
+  "templates": {
+    "basic_security": {
+      "name": "Basic Security Detection",
+      "description": "Foundation template for security monitoring",
+      "requirements": {
+        "inputs": ["syslog", "security_logs"],
+        "fields": ["event_type", "user", "action", "result"]
+      },
+      "ruleset": "<root type=\"ruleset\" author=\"security-team\" version=\"1.0\">\n  <rule id=\"failed_login\" name=\"Failed Login Detection\">\n    <check type=\"EQU\" field=\"event_type\">authentication</check>\n    <check type=\"EQU\" field=\"result\">failure</check>\n    <threshold group_by=\"user,source_ip\" range=\"300s\" value=\"5\"/>\n    <append field=\"alert_type\">brute_force</append>\n    <append field=\"desc\">Multiple login failures detected</append>\n  </rule>\n  \n  <rule id=\"privilege_escalation\" name=\"Privilege Escalation Detection\">\n    <check type=\"EQU\" field=\"event_type\">privilege_change</check>\n    <check type=\"NEQ\" field=\"old_privilege\">admin</check>\n    <check type=\"EQU\" field=\"new_privilege\">admin</check>\n    <append field=\"alert_type\">privilege_escalation</append>\n    <append field=\"severity\">high</append>\n    <append field=\"desc\">User privilege escalation detected</append>\n  </rule>\n</root>"
+    },
+    "network_monitoring": {
+      "name": "Network Traffic Analysis",
+      "description": "Monitor network connections and traffic patterns",
+      "requirements": {
+        "inputs": ["netflow", "firewall_logs"],
+        "fields": ["src_ip", "dst_ip", "dst_port", "bytes", "protocol"]
+      },
+      "ruleset": "<root type=\"ruleset\" author=\"network-team\" version=\"1.0\">\n  <rule id=\"port_scan\" name=\"Port Scan Detection\">\n    <check type=\"EQU\" field=\"protocol\">TCP</check>\n    <check type=\"EQU\" field=\"tcp_flags\">SYN</check>\n    <threshold group_by=\"src_ip,dst_ip\" range=\"60s\" count_type=\"CLASSIFY\" count_field=\"dst_port\" value=\"20\"/>\n    <append field=\"threat_type\">port_scan</append>\n    <append field=\"desc\">Port scanning activity detected</append>\n  </rule>\n  \n  <rule id=\"data_exfiltration\" name=\"Data Exfiltration Detection\">\n    <check type=\"EQU\" field=\"direction\">outbound</check>\n    <check type=\"GT\" field=\"bytes\">104857600</check> <!-- 100MB -->\n    <check type=\"NOT_IN\" field=\"dst_ip\">10.0.0.0/8,172.16.0.0/12,192.168.0.0/16</check>\n    <append field=\"threat_type\">data_exfiltration</append>\n    <append field=\"severity\">critical</append>\n    <append field=\"desc\">Large data transfer to external IP</append>\n  </rule>\n</root>"
+    },
+    "application_monitoring": {
+      "name": "Application Performance & Security",
+      "description": "Monitor application behavior and performance",
+      "requirements": {
+        "inputs": ["app_logs", "api_logs"],
+        "fields": ["endpoint", "response_time", "status_code", "user_agent"]
+      },
+      "ruleset": "<root type=\"ruleset\" author=\"app-team\" version=\"1.0\">\n  <rule id=\"slow_api\" name=\"Slow API Detection\">\n    <check type=\"GT\" field=\"response_time\">5000</check> <!-- 5 seconds -->\n    <append field=\"performance_issue\">slow_response</append>\n    <append field=\"desc\">API response time exceeded threshold</append>\n  </rule>\n  \n  <rule id=\"api_abuse\" name=\"API Abuse Detection\">\n    <check type=\"EQU\" field=\"method\">POST</check>\n    <threshold group_by=\"client_ip,endpoint\" range=\"60s\" value=\"100\"/>\n    <append field=\"threat_type\">api_abuse</append>\n    <append field=\"desc\">Excessive API calls detected</append>\n  </rule>\n</root>"
+    },
+    "new_syntax_showcase": {
+      "name": "New Flexible Syntax Showcase",
+      "description": "Demonstrates all new syntax features with performance optimization",
+      "syntax_highlights": [
+        "Independent <check> tags without <checklist> wrapper",
+        "Flexible execution order for optimization",
+        "Complex logic only when needed with <checklist>",
+        "Progressive filtering pattern"
+      ],
+      "ruleset": "<root type=\"ruleset\" author=\"expert-team\" version=\"2.0\">\n  <!-- Rule 1: Simple AND logic - no checklist needed -->\n  <rule id=\"simple_detection\" name=\"Simple Detection Rule\">\n    <check type=\"EQU\" field=\"event_type\">error</check>\n    <check type=\"GT\" field=\"severity\">7</check>\n    <append field=\"alert\">high_severity_error</append>\n  </rule>\n  \n  <!-- Rule 2: Optimized execution order -->\n  <rule id=\"optimized_order\" name=\"Performance Optimized Rule\">\n    <!-- Most selective check first (filters 95% of events) -->\n    <check type=\"EQU\" field=\"rare_event\">true</check>\n    <!-- Medium selectivity (filters 70% of remaining) -->\n    <check type=\"IN\" field=\"category\">security,compliance</check>\n    <!-- Expensive operation last -->\n    <check type=\"REGEX\" field=\"message\">complex.*pattern.*match</check>\n    <append field=\"processed\">optimized</append>\n  </rule>\n  \n  <!-- Rule 3: Complex logic with checklist -->\n  <rule id=\"complex_logic\" name=\"Complex Boolean Logic\">\n    <!-- Simple pre-filter -->\n    <check type=\"EXIST\" field=\"user_id\"/>\n    \n    <!-- Complex OR logic requires checklist -->\n    <checklist logic=\"OR\">\n      <check type=\"EQU\" field=\"department\">IT</check>\n      <check type=\"EQU\" field=\"role\">admin</check>\n      <check type=\"GT\" field=\"access_level\">5</check>\n    </checklist>\n    \n    <!-- Threshold after filtering -->\n    <threshold group_by=\"source_ip\" range=\"60s\" value=\"1\"/>\n    \n    <!-- Additional enrichment -->\n    <append type=\"PLUGIN\" field=\"threat_score\">calculateThreatScore(_$ORIDATA, 0.8)</append>\n    <append field=\"desc\">Privileged user unusual activity</append>\n  </rule>\n</root>"
+    }
   },
-  "basic_detection": {
-    "name": "Basic Detection Rule", 
-    "description": "Simple detection rule showing independent checks",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"basic_detection_rule\" name=\"Basic detection example\">\n        <!-- NEW: Multiple independent checks = AND logic -->\n        <check type=\"EQU\" field=\"event_type\">security_event</check>\n        <check type=\"INCL\" field=\"process_name\">suspicious_process.exe</check>\n        <append field=\"alert_level\">HIGH</append>\n        <append field=\"desc\">Suspicious security event detected</append>\n    </rule>\n</root>",
-    "syntax_note": "Multiple <check> tags automatically use AND logic"
+  "patterns": {
+    "progressive_filtering": {
+      "name": "Progressive Filtering Pattern", 
+      "use_case": "High-volume data processing",
+      "example": "<rule id=\"progressive_filter\" name=\"High Volume Optimization\">\n  <!-- Stage 1: Ultra-fast exact match (hash lookup) -->\n  <check type=\"EQU\" field=\"log_level\">ERROR</check>\n  <!-- Stage 2: Fast numeric comparison -->\n  <check type=\"GT\" field=\"error_code\">500</check>\n  <!-- Stage 3: Moderate string operation -->\n  <check type=\"IN\" field=\"component\">auth,payment,api</check>\n  <!-- Stage 4: Expensive regex only on filtered data -->\n  <check type=\"REGEX\" field=\"stack_trace\">NullPointer|OutOfMemory</check>\n  <append field=\"critical_error\">true</append>\n</rule>"
+    }
   },
-  "whitelist_rule": {
-    "name": "Whitelist Rule",
-    "description": "Whitelist rule to filter out known good events", 
-    "template": "<root type=\"whitelist\" author=\"security_team\">\n    <rule id=\"known_good_processes\" name=\"Filter known good processes\">\n        <check type=\"EQU\" field=\"event_type\">process_creation</check>\n        <check type=\"INCL\" field=\"process_path\" logic=\"OR\" delimiter=\"|\">C:\\Windows\\System32\\|C:\\Program Files\\|C:\\Program Files (x86)\\</check>\n    </rule>\n</root>",
-    "syntax_note": "Whitelist: matched events are filtered out (not passed forward)"
+  "threshold_examples": {
+    "count_based": {
+      "description": "Simple event counting",
+      "example": "<rule id=\"brute_force\" name=\"Brute Force Detection\">\n  <check type=\"EQU\" field=\"action\">login</check>\n  <check type=\"EQU\" field=\"result\">failure</check>\n  <threshold group_by=\"source_ip,username\" range=\"300s\" value=\"5\" local_cache=\"true\"/>\n  <append field=\"threshold_type\">default_count</append>\n  <append field=\"desc\">Multiple login failures detected</append>\n</rule>"
+    },
+    "sum_based": {
+      "description": "Aggregate value monitoring",
+      "example": "<rule id=\"bandwidth_monitor\" name=\"Bandwidth Monitoring\">\n  <check type=\"EQU\" field=\"direction\">outbound</check>\n  <threshold group_by=\"source_ip\" range=\"3600s\" count_type=\"SUM\" count_field=\"bytes_sent\" value=\"10737418240\"/>\n  <append field=\"threshold_type\">sum_aggregation</append>\n  <append field=\"desc\">High bandwidth usage detected (>10GB/hour)</append>\n</rule>"
+    },
+    "classify_based": {
+      "description": "Unique value counting",
+      "example": "<rule id=\"scanner_detection\" name=\"Scanner Detection\">\n  <check type=\"EQU\" field=\"action\">connection_attempt</check>\n  <threshold group_by=\"source_ip\" range=\"300s\" count_type=\"CLASSIFY\" count_field=\"dst_port\" value=\"50\"/>\n  <append field=\"threshold_type\">classify_unique</append>\n  <append field=\"desc\">Port scanning behavior detected</append>\n</rule>"
+    }
   },
-  "string_exact_match": {
-    "name": "String Exact Match (EQU/NEQ)",
-    "description": "Demonstrating various string matching without unnecessary checklist",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"string_exact_match\" name=\"Exact string matching examples\">\n        <!-- NEW: Independent checks for simple AND logic -->\n        <check type=\"EQU\" field=\"auth_method\">password</check>\n        <check type=\"NEQ\" field=\"result_status\">success</check>\n        <check type=\"NCS_EQU\" field=\"user_agent\">Mozilla/5.0</check>\n        <check type=\"NCS_NEQ\" field=\"source_ip\">127.0.0.1</check>\n        <append field=\"detection_type\">authentication_analysis</append>\n        <append field=\"desc\">Authentication anomaly detected</append>\n    </rule>\n</root>",
-    "validation_notes": [
-      "NEW: No <checklist> wrapper needed",
-      "All checks must pass (AND logic)",
-      "Case-sensitive and case-insensitive options available"
-    ]
+  "plugin_examples": {
+    "check_plugin": {
+      "description": "Plugin used in check operation",
+      "example": "<check type=\"PLUGIN\" field=\"is_weekend\">isWeekend(_$TIMESTAMP)</check>"
+    },
+    "append_plugin": {
+      "description": "Plugin used for data enrichment",
+      "example": "<append type=\"PLUGIN\" field=\"risk_score\">calculateRisk(_$source_ip, _$user_id, _$action)</append>"
+    }
   },
-  "string_contains_match": {
-    "name": "String Contains Match (INCL/NI)",
-    "description": "Substring matching operations with new syntax",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"string_contains_match\" name=\"Substring matching examples\">\n        <check type=\"INCL\" field=\"url_path\">/admin/</check>\n        <check type=\"NI\" field=\"user_agent\">bot</check>\n        <check type=\"NCS_INCL\" field=\"hostname\">SUSPICIOUS</check>\n        <check type=\"NCS_NI\" field=\"referrer\">GOOGLE</check>\n        <append field=\"analysis_type\">url_analysis</append>\n        <append field=\"desc\">Suspicious URL pattern detected</append>\n    </rule>\n</root>",
-    "validation_notes": [
-      "NEW: Direct check usage for clarity",
-      "Default AND logic: All checks must match"
-    ]
-  },
-  "complex_conditions": {
-    "name": "Complex Condition Expressions",
-    "description": "Use checklist ONLY when you need OR, NOT, or complex boolean logic",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"complex_conditions\" name=\"Advanced logical conditions\">\n        <!-- Use checklist ONLY for complex boolean expressions -->\n        <checklist condition=\"(a and b) or (c and d) or (e and not f)\">\n            <check id=\"a\" type=\"EQU\" field=\"event_type\">process_creation</check>\n            <check id=\"b\" type=\"INCL\" field=\"process_name\">powershell</check>\n            <check id=\"c\" type=\"EQU\" field=\"event_type\">file_creation</check>\n            <check id=\"d\" type=\"END\" field=\"file_name\">.exe</check>\n            <check id=\"e\" type=\"EQU\" field=\"event_type\">network_connection</check>\n            <check id=\"f\" type=\"INCL\" field=\"destination_ip\">192.168</check>\n        </checklist>\n        <append field=\"complexity_level\">advanced</append>\n        <append field=\"desc\">Complex threat pattern detected</append>\n    </rule>\n</root>",
-    "validation_notes": [
-      "Use checklist ONLY for OR, NOT, or parentheses",
-      "Simple AND logic should use independent checks instead"
-    ]
-  },
-  "plugin_integration": {
-    "name": "Plugin Integration",
-    "description": "Plugin usage in various contexts with flexible ordering",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"plugin_integration\" name=\"Comprehensive plugin usage\">\n        <!-- NEW: Can enrich data before checks -->\n        <append type=\"PLUGIN\" field=\"geo_info\">geoMatch(_$source_ip)</append>\n        \n        <!-- Then use enriched data in checks -->\n        <check type=\"EQU\" field=\"geo_info\">CN</check>\n        <check type=\"PLUGIN\">isPrivateIP(_$source_ip)</check>\n        \n        <!-- Threshold after checks -->\n        <threshold groupby=\"source_ip\" range=\"60s\" value=\"1\"/>\n        \n        <!-- Additional enrichment -->\n        <append type=\"PLUGIN\" field=\"threat_score\">calculateThreatScore(_$ORIDATA, 0.8)</append>\n        <append field=\"desc\">High-risk connection from suspicious location</append>\n        \n        <!-- Action plugins -->\n        <plugin>alertSecurityTeam(_$ORIDATA, \"high_priority\")</plugin>\n    </rule>\n</root>",
-    "validation_notes": [
-      "NEW: Flexible ordering allows enrichment before detection",
-      "Plugins can be used at any point in execution flow"
-    ]
-  },
-  "threshold_configurations": {
-    "name": "Threshold Configurations",
-    "description": "All threshold modes with optimized positioning",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"threshold_default_count\" name=\"Default counting threshold\">\n        <!-- Filter first for performance -->\n        <check type=\"EQU\" field=\"event_type\">failed_login</check>\n        <check type=\"EQU\" field=\"status\">failure</check>\n        <threshold groupby=\"source_ip,username\" range=\"300s\" value=\"5\" local_cache=\"true\"/>\n        <append field=\"threshold_type\">default_count</append>\n        <append field=\"desc\">Multiple login failures detected</append>\n    </rule>\n    \n    <rule id=\"threshold_sum_count\" name=\"Sum-based threshold\">\n        <check type=\"EQU\" field=\"event_type\">transaction</check>\n        <check type=\"EQU\" field=\"transaction_type\">withdrawal</check>\n        <threshold groupby=\"account_id\" range=\"86400s\" count_type=\"SUM\" count_field=\"amount\" value=\"10000\"/>\n        <append field=\"threshold_type\">sum_aggregation</append>\n        <append field=\"desc\">High withdrawal amount detected</append>\n    </rule>\n    \n    <rule id=\"threshold_classify_count\" name=\"Classify-based threshold\">\n        <check type=\"EQU\" field=\"event_type\">access_request</check>\n        <check type=\"EQU\" field=\"access_granted\">true</check>\n        <threshold groupby=\"user_id\" range=\"3600s\" count_type=\"CLASSIFY\" count_field=\"resource_id\" value=\"20\"/>\n        <append field=\"threshold_type\">classify_unique</append>\n        <append field=\"desc\">Unusual number of resources accessed</append>\n    </rule>\n</root>",
-    "validation_notes": [
-      "Threshold positioning affects performance",
-      "Place after filtering checks for efficiency"
-    ]
-  },
-  "new_syntax_showcase": {
-    "name": "New Syntax Features Showcase",
-    "description": "Demonstrates all new flexible syntax features",
-    "template": "<root type=\"detection\" author=\"advanced_team\">\n    <!-- Example 1: Simple rule with independent checks -->\n    <rule id=\"simple_new_syntax\" name=\"Simple detection with new syntax\">\n        <check type=\"EQU\" field=\"event_type\">security</check>\n        <check type=\"MT\" field=\"severity\">8</check>\n        <append field=\"alert\">critical</append>\n        <append field=\"desc\">Critical security event</append>\n    </rule>\n    \n    <!-- Example 2: Data enrichment before detection -->\n    <rule id=\"enrich_first\" name=\"Enrichment-driven detection\">\n        <!-- Enrich first -->\n        <append type=\"PLUGIN\" field=\"hour\">hourOfDay()</append>\n        <append type=\"PLUGIN\" field=\"is_weekend\">isWeekend()</append>\n        \n        <!-- Then detect based on enriched data -->\n        <check type=\"EQU\" field=\"is_weekend\">true</check>\n        <check type=\"LT\" field=\"hour\">6</check>\n        <check type=\"EQU\" field=\"event_type\">admin_login</check>\n        \n        <append field=\"risk\">high</append>\n        <append field=\"desc\">Suspicious admin login during weekend late hours</append>\n    </rule>\n    \n    <!-- Example 3: Progressive filtering with metrics -->\n    <rule id=\"progressive\" name=\"Progressive filtering example\">\n        <!-- Stage 1: Coarse filter -->\n        <check type=\"EQU\" field=\"category\">security</check>\n        <append field=\"stage1\">passed</append>\n        \n        <!-- Stage 2: Medium filter -->\n        <check type=\"INCL\" field=\"tags\">suspicious</check>\n        <append field=\"stage2\">passed</append>\n        \n        <!-- Stage 3: Fine filter -->\n        <check type=\"REGEX\" field=\"details\">CVE-\\d{4}-\\d{4,}</check>\n        <append field=\"stage3\">passed</append>\n        \n        <append field=\"desc\">CVE vulnerability exploit detected</append>\n    </rule>\n</root>",
-    "key_features": [
-      "No unnecessary <checklist> wrappers",
-      "Flexible operation ordering",
-      "Data enrichment before detection",
-      "Progressive filtering with metrics",
-      "Clear, readable rule structure"
-    ]
-  },
-  "fromraw_symbol_advanced": {
-    "name": "FromRawSymbol Advanced Usage",
-    "description": "Dynamic value resolution in the new syntax",
-    "template": "<root type=\"detection\" author=\"security_team\">\n    <rule id=\"dynamic_values_rule\" name=\"Dynamic value resolution example\">\n        <!-- NEW: Clean syntax without unnecessary checklist -->\n        <check type=\"EQU\" field=\"actual_status\">_$expected_status</check>\n        <check type=\"MT\" field=\"risk_score\">_$risk_threshold</check>\n        <check type=\"INCL\" field=\"event.metadata.source.system\">_$critical_systems</check>\n        \n        <threshold groupby=\"_$grouping_field\" range=\"300s\" count_type=\"SUM\" count_field=\"_$metric_field\" value=\"100\"/>\n        \n        <append field=\"processed_timestamp\">_$event.metadata.timestamp</append>\n        <append field=\"context_info\">_$user.profile.department</append>\n        <append field=\"desc\">Dynamic threshold exceeded</append>\n    </rule>\n</root>",
-    "validation_notes": [
-      "FromRawSymbol (_$) works everywhere",
-      "Supports nested field access",
-      "Dynamic threshold configuration"
-    ]
-  },
-  "performance_optimized": {
-    "name": "Performance Optimized Template",
-    "description": "Best practices for high-performance rules",
-    "template": "<root type=\"detection\" author=\"performance_team\">\n    <rule id=\"optimized_detection\" name=\"Performance-optimized detection rule\">\n        <!-- Order is critical for performance -->\n        <check type=\"EQU\" field=\"event_type\">security_alert</check>      <!-- Filters 95% -->\n        <check type=\"NOTNULL\" field=\"required_field\"/>                   <!-- Fastest check -->\n        <check type=\"EQU\" field=\"alert_level\">high</check>              <!-- Simple comparison -->\n        <check type=\"INCL\" field=\"source_category\">endpoint</check>     <!-- Substring search -->\n        <check type=\"REGEX\" field=\"signature_pattern\">^[A-Z]{3}-[0-9]{4}$</check>  <!-- Most expensive -->\n        \n        <threshold groupby=\"source_host\" range=\"60s\" value=\"2\" local_cache=\"true\"/>\n        \n        <append field=\"processing_speed\">optimized</append>\n        <append field=\"desc\">High-priority security alert with pattern match</append>\n    </rule>\n</root>",
-    "performance_notes": [
-      "Execution order = XML order (top to bottom)",
-      "Most selective checks first",
-      "Expensive operations (REGEX, PLUGIN) last",
-      "Local cache for threshold performance"
-    ]
-  },
-  "comprehensive_advanced": {
-    "name": "Comprehensive Advanced Ruleset",
-    "description": "Complete ruleset showing all features with new syntax",
-    "template": "<root type=\"detection\" author=\"advanced_security_team\">\n    <!-- Rule 1: Mixed simple and complex conditions -->\n    <rule id=\"advanced_threat_detection\" name=\"Advanced multi-vector threat detection\">\n        <!-- Simple pre-filters (independent checks) -->\n        <check type=\"ISNULL\" field=\"whitelisted\"/>\n        <check type=\"EQU\" field=\"event_type\">process_creation</check>\n        \n        <!-- Complex condition (needs checklist) -->\n        <checklist condition=\"(a or b) and not c\">\n            <check id=\"a\" type=\"INCL\" field=\"command_line\" logic=\"OR\" delimiter=\"|\">powershell|cmd|wscript</check>\n            <check id=\"b\" type=\"PLUGIN\">isSuspiciousBehavior(_$ORIDATA)</check>\n            <check id=\"c\" type=\"INCL\" field=\"process_path\" logic=\"OR\" delimiter=\"|\">C:\\\\Windows\\\\System32\\\\|C:\\\\Program Files\\\\</check>\n        </checklist>\n        \n        <threshold groupby=\"host_id,user_id\" range=\"300s\" count_type=\"SUM\" count_field=\"risk_score\" value=\"200\" local_cache=\"true\"/>\n        \n        <append field=\"rule_category\">advanced_detection</append>\n        <append type=\"PLUGIN\" field=\"threat_intelligence\">getThreatIntel(_$source_ip)</append>\n        <append field=\"desc\">Advanced threat with suspicious process behavior</append>\n        \n        <plugin>escalateAlert(_$ORIDATA, \"security_team\")</plugin>\n        <del>temporary_fields,debug_info</del>\n    </rule>\n    \n    <!-- Rule 2: Data enrichment workflow -->\n    <rule id=\"enriched_detection\" name=\"Context-enriched detection\">\n        <!-- Enrich context first -->\n        <append type=\"PLUGIN\" field=\"user_risk_score\">getUserRiskScore(_$user_id)</append>\n        <append type=\"PLUGIN\" field=\"device_trust\">getDeviceTrust(_$device_id)</append>\n        \n        <!-- Detect based on enriched context -->\n        <check type=\"MT\" field=\"user_risk_score\">75</check>\n        <check type=\"LT\" field=\"device_trust\">50</check>\n        <check type=\"EQU\" field=\"action\">sensitive_data_access</check>\n        \n        <append field=\"detection_confidence\">high</append>\n        <append field=\"desc\">High-risk user on untrusted device accessing sensitive data</append>\n        \n        <plugin>requireMFA(_$user_id)</plugin>\n        <plugin>notifyDataOwner(_$ORIDATA)</plugin>\n    </rule>\n</root>",
-    "showcase_features": [
-      "Mix of independent checks and checklist",
-      "Data enrichment before detection",
-      "Complex conditions with proper syntax",
-      "Multiple rule patterns in one ruleset",
-      "Flexible execution order benefits"
+  "performance_guidelines": {
+    "execution_order": [
+      "1. Event type/category filters (>90% reduction)",
+      "2. Exact match checks (hash lookups)",
+      "3. Numeric comparisons (fast)",
+      "4. String operations (IN, CONTAIN)",
+      "5. Complex operations (REGEX, nested field access)",
+      "6. Threshold calculations",
+      "7. Plugin executions",
+      "8. Data modifications (append/del)"
+    ],
+    "optimization_tips": [
+      "Place most selective checks first",
+      "Use local_cache=\"true\" for high-frequency thresholds",
+      "Avoid regex in high-volume rules",
+      "Batch similar operations together"
     ]
   }
 } 
