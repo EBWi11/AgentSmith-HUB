@@ -2633,22 +2633,24 @@ function emitSidebarProjectOperation(operationType, projectId) {
 
 // Project operations
 async function startProject(item) {
-  // 记录操作时间并通知其他组件
+  // Record operation time and notify other components
   emitSidebarProjectOperation('start', item.id)
   
   closeAllMenus()
   
-  // 立即设置为 starting 状态
+  // Step 1: Immediately set UI to starting state for instant user feedback
   if (item && items.projects) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'starting'
+      console.log(`UI state set to 'starting' for project ${item.id}`)
     }
   }
   
   projectOperationLoading.value = true
   
   try {
+    // Step 2: Call API (this may take time, but UI already shows feedback)
     const result = await hubApi.startProject(item.id)
     
     if (result.warning) {
@@ -2659,127 +2661,214 @@ async function startProject(item) {
       showProjectWarningModal.value = true
       activeModal.value = 'projectWarning'
       addEscKeyListener()
-    } else if (result.success) {
-      // Project started successfully
-      $message?.success?.('Project started successfully')
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
-    } else if (result.error) {
-      // Start failed
-      $message?.error?.('Failed to start project: ' + result.error)
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
+      
+      // Reset UI state since user needs to confirm
+      if (item && items.projects) {
+        const projectItem = items.projects.find(p => p.id === item.id)
+        if (projectItem) {
+          projectItem.status = 'stopped'
+        }
+      }
+    } else {
+      // Step 3: API succeeded, start polling for real status
+      $message?.success?.('Project start command sent successfully')
+      pollProjectStatusUntilStable(item.id, 'starting')
     }
   } catch (error) {
-    $message?.error?.('Error starting project: ' + (error.message || 'Unknown error'))
-    // 强制刷新项目状态
-    await dataCache.fetchComponents('projects', true)
-    await refreshProjectStatus()
+    // Step 4: API failed, reset UI state and show error
+    console.error('Start project API failed:', error)
+    $message?.error?.(`Failed to start project: ${error.message || error}`)
+    
+    if (item && items.projects) {
+      const projectItem = items.projects.find(p => p.id === item.id)
+      if (projectItem) {
+        projectItem.status = 'stopped' // Reset to original state
+      }
+    }
   } finally {
     projectOperationLoading.value = false
   }
 }
 
 async function stopProject(item) {
-  // 记录操作时间并通知其他组件
+  // Record operation time and notify other components
   emitSidebarProjectOperation('stop', item.id)
   
   closeAllMenus()
   
-  // 立即设置为 stopping 状态
+  // Step 1: Immediately set UI to stopping state for instant user feedback
   if (item && items.projects) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'stopping'
+      console.log(`UI state set to 'stopping' for project ${item.id}`)
     }
   }
   
   projectOperationLoading.value = true
   
   try {
+    // Step 2: Call API
     const result = await hubApi.stopProject(item.id)
     
-    if (result.warning) {
-      // If there are warnings (e.g., temporary files exist), show warning modal
-      projectWarningMessage.value = result.message
-      projectOperationItem.value = item
-      projectOperationType.value = 'stop'
-      showProjectWarningModal.value = true
-      activeModal.value = 'projectWarning'
-      addEscKeyListener()
-    } else if (result.success) {
-      // Project stopped successfully
-      $message?.success?.('Project stopped successfully')
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
-    } else if (result.error) {
-      // Stop failed
-      $message?.error?.('Failed to stop project: ' + result.error)
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
-    }
+    // Step 3: API succeeded, start polling for real status
+    $message?.success?.('Project stop command sent successfully')
+    pollProjectStatusUntilStable(item.id, 'stopping')
   } catch (error) {
-    $message?.error?.('Error stopping project: ' + (error.message || 'Unknown error'))
-    // 强制刷新项目状态
-    await dataCache.fetchComponents('projects', true)
-    await refreshProjectStatus()
+    // Step 4: API failed, reset UI state and show error
+    console.error('Stop project API failed:', error)
+    $message?.error?.(`Failed to stop project: ${error.message || error}`)
+    
+    if (item && items.projects) {
+      const projectItem = items.projects.find(p => p.id === item.id)
+      if (projectItem) {
+        projectItem.status = 'running' // Reset to original state
+      }
+    }
   } finally {
     projectOperationLoading.value = false
   }
 }
 
 async function restartProject(item) {
-  // 记录操作时间并通知其他组件
+  // Record operation time and notify other components
   emitSidebarProjectOperation('restart', item.id)
   
   closeAllMenus()
   
-  // 立即设置为 stopping 状态（重启先停止）
+  // Step 1: Immediately set UI to stopping state (restart starts with stop)
   if (item && items.projects) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'stopping'
+      console.log(`UI state set to 'stopping' for project restart ${item.id}`)
     }
   }
   
   projectOperationLoading.value = true
   
   try {
+    // Step 2: Call API
     const result = await hubApi.restartProject(item.id)
     
     if (result.warning) {
-      // If there are warnings (e.g., temporary files exist), show warning modal
+      // If there are warnings, show warning modal
       projectWarningMessage.value = result.message
       projectOperationItem.value = item
       projectOperationType.value = 'restart'
       showProjectWarningModal.value = true
       activeModal.value = 'projectWarning'
       addEscKeyListener()
-    } else if (result.success) {
-      // Project restarted successfully
-      $message?.success?.('Project restarted successfully')
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
-    } else if (result.error) {
-      // Restart failed
-      $message?.error?.('Failed to restart project: ' + result.error)
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
+      
+      // Reset UI state since user needs to confirm
+      if (item && items.projects) {
+        const projectItem = items.projects.find(p => p.id === item.id)
+        if (projectItem) {
+          projectItem.status = 'running' // Reset to original state
+        }
+      }
+    } else {
+      // Step 3: API succeeded, start polling for real status
+      $message?.success?.('Project restart command sent successfully')
+      
+      // For restart, we expect: stopping -> starting -> running
+      pollProjectStatusUntilStable(item.id, 'stopping')
     }
   } catch (error) {
-    $message?.error?.('Error restarting project: ' + (error.message || 'Unknown error'))
-    // 强制刷新项目状态
-    await dataCache.fetchComponents('projects', true)
-    await refreshProjectStatus()
+    // Step 4: API failed, reset UI state and show error
+    console.error('Restart project API failed:', error)
+    $message?.error?.(`Failed to restart project: ${error.message || error}`)
+    
+    if (item && items.projects) {
+      const projectItem = items.projects.find(p => p.id === item.id)
+      if (projectItem) {
+        projectItem.status = 'running' // Reset to original state
+      }
+    }
   } finally {
     projectOperationLoading.value = false
   }
+}
+
+// New function: Poll project status until it reaches a stable state
+async function pollProjectStatusUntilStable(projectId, expectedTransitionState) {
+  const maxAttempts = 60 // Maximum 60 attempts (2 minutes with 2s intervals)
+  const pollInterval = 2000 // Poll every 2 seconds
+  let attempts = 0
+  
+  console.log(`Starting status polling for project ${projectId}, expecting transition from '${expectedTransitionState}'`)
+  
+  const poll = async () => {
+    attempts++
+    
+    try {
+      // Force refresh to get latest status
+      await dataCache.fetchComponents('projects', true)
+      const response = await dataCache.fetchComponents('projects')
+      
+      if (Array.isArray(response)) {
+        const project = response.find(p => p.id === projectId)
+        
+        if (project) {
+          const currentStatus = project.status
+          console.log(`Poll attempt ${attempts}: Project ${projectId} status is '${currentStatus}'`)
+          
+          // Update UI with real status from backend
+          if (items.projects) {
+            const projectItem = items.projects.find(p => p.id === projectId)
+            if (projectItem) {
+              projectItem.status = currentStatus
+              projectItem.hasTemp = project.hasTemp
+              projectItem.errorMessage = project.errorMessage || ''
+            }
+          }
+          
+          // Check if we've reached a stable state
+          const isStableState = !['starting', 'stopping'].includes(currentStatus)
+          
+          if (isStableState) {
+            console.log(`Project ${projectId} reached stable state: '${currentStatus}'`)
+            
+            // Show final result message
+            if (currentStatus === 'running') {
+              $message?.success?.(`Project ${projectId} is now running`)
+            } else if (currentStatus === 'stopped') {
+              $message?.success?.(`Project ${projectId} is now stopped`)
+            } else if (currentStatus === 'error') {
+              $message?.error?.(`Project ${projectId} encountered an error`)
+            }
+            
+            return // Stop polling
+          }
+          
+          // Continue polling if still in transition state
+          if (attempts < maxAttempts) {
+            setTimeout(poll, pollInterval)
+          } else {
+            console.warn(`Polling timeout for project ${projectId} after ${maxAttempts} attempts`)
+            $message?.warning?.(`Status polling timeout for project ${projectId}`)
+          }
+        } else {
+          console.error(`Project ${projectId} not found in response`)
+          if (attempts < maxAttempts) {
+            setTimeout(poll, pollInterval)
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error polling status for project ${projectId}:`, error)
+      
+      // Retry on error, but don't spam
+      if (attempts < maxAttempts) {
+        setTimeout(poll, pollInterval * 2) // Double interval on error
+      } else {
+        $message?.error?.(`Failed to get final status for project ${projectId}`)
+      }
+    }
+  }
+  
+  // Start polling after a short delay to allow backend to process
+  setTimeout(poll, 1000)
 }
 
 // Close project operation warning modal
@@ -2807,16 +2896,19 @@ async function continueProjectOperation() {
   
   closeProjectWarningModal()
   
-  // 立即设置过渡状态
+  // Step 1: Immediately set UI to transition state for instant user feedback
   if (item && items.projects) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       if (operationType === 'start') {
         projectItem.status = 'starting'
+        console.log(`UI state set to 'starting' for project ${item.id} (continue operation)`)
       } else if (operationType === 'stop') {
         projectItem.status = 'stopping'
+        console.log(`UI state set to 'stopping' for project ${item.id} (continue operation)`)
       } else if (operationType === 'restart') {
-        projectItem.status = 'stopping' // 重启先停止
+        projectItem.status = 'stopping' // Restart starts with stop
+        console.log(`UI state set to 'stopping' for project restart ${item.id} (continue operation)`)
       }
     }
   }
@@ -2826,7 +2918,7 @@ async function continueProjectOperation() {
   try {
     let result
     
-    // Perform operations on the original project
+    // Step 2: Perform operations on the original project
     if (operationType === 'start') {
       // Start using original project ID
       const response = await hubApi.startProject(item.id)
@@ -2836,24 +2928,32 @@ async function continueProjectOperation() {
       const response = await hubApi.stopProject(item.id)
       result = { success: true, data: response.data }
     } else if (operationType === 'restart') {
-      // Stop first, then start
-      await hubApi.stopProject(item.id)
-      const response = await hubApi.startProject(item.id)
+      // Restart using original project ID
+      const response = await hubApi.restartProject(item.id)
       result = { success: true, data: response.data }
     }
     
     if (result && result.success) {
-      // Operation executed successfully
-      $message?.success?.(`Project ${operationType}ed successfully`)
-      // 强制刷新项目状态
-      await dataCache.fetchComponents('projects', true)
-      await refreshProjectStatus()
+      // Step 3: API succeeded, start polling for real status
+      $message?.success?.(`Project ${operationType} command sent successfully`)
+      pollProjectStatusUntilStable(item.id, operationType === 'start' ? 'starting' : 'stopping')
     }
   } catch (error) {
-    $message?.error?.(`Error ${operationType}ing project: ` + (error.message || 'Unknown error'))
-    // 强制刷新项目状态
-    await dataCache.fetchComponents('projects', true)
-    await refreshProjectStatus()
+    // Step 4: API failed, reset UI state and show error
+    console.error(`${operationType} project API failed:`, error)
+    $message?.error?.(`Failed to ${operationType} project: ${error.message || error}`)
+    
+    // Reset UI state based on operation type
+    if (item && items.projects) {
+      const projectItem = items.projects.find(p => p.id === item.id)
+      if (projectItem) {
+        if (operationType === 'start') {
+          projectItem.status = 'stopped' // Reset to original state
+        } else if (operationType === 'stop' || operationType === 'restart') {
+          projectItem.status = 'running' // Reset to original state
+        }
+      }
+    }
   } finally {
     projectOperationLoading.value = false
   }
