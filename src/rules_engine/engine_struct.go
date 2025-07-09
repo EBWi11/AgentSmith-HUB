@@ -484,6 +484,21 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 		})
 	}
 
+	// Check if rule has at least one check operation (check, checklist, threshold)
+	hasCheckOperation := false
+	if len(rule.ChecklistMap) > 0 || len(rule.CheckMap) > 0 || len(rule.ThresholdMap) > 0 {
+		hasCheckOperation = true
+	}
+
+	if !hasCheckOperation {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    ruleLine,
+			Message: "Rule must have at least one check operation (check, checklist, or threshold)",
+			Detail:  fmt.Sprintf("Rule ID: %s", rule.ID),
+		})
+	}
+
 	// Check for duplicate elements within this rule
 	validateRuleDuplicateElements(xmlContent, ruleID, ruleIndex, result)
 

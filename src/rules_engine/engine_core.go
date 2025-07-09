@@ -391,6 +391,20 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 		return false
 	}
 
+	// Check if the rule has any check operations (check, checklist, threshold)
+	hasCheckOperations := false
+	for _, op := range *rule.Queue {
+		if op.Type == T_CheckList || op.Type == T_Check || op.Type == T_Threshold {
+			hasCheckOperations = true
+			break
+		}
+	}
+
+	// If no check operations, the rule should not match
+	if !hasCheckOperations {
+		return false
+	}
+
 	ruleResult := true
 
 	// Execute operations in the exact order specified by the Queue
