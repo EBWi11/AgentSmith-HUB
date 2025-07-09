@@ -586,6 +586,13 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 | `parseJSON` | 解析JSON字符串 | `jsonString` (string) | `<append type="PLUGIN" field="parsed">parseJSON(json_data)</append>` |
 | `parseUA` | 解析User-Agent | `userAgent` (string) | `<append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>` |
 
+##### 威胁情报插件
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | `hash` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(file_hash)</append>` |
+| `shodan` | 查询Shodan IP地址基础设施情报 | `ip` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(ip_address)</append>` |
+| `threatBook` | 查询微步在线威胁情报 | `queryValue` (string), `queryType` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(target_ip, "ip")</append>` |
+
 ### 内置插件使用示例
 
 #### 1. 网络安全检测
@@ -674,6 +681,36 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 </rule>
 ```
 
+#### 5. 威胁情报分析
+```xml
+<rule id="threat_intelligence" name="威胁情报分析">
+    <filter field="event_type">security_event</filter>
+    
+    <checklist condition="ip_check and (file_check or url_check or domain_check)">
+        <!-- 检查是否有IP地址 -->
+        <node id="ip_check" type="NOTNULL" field="source_ip"></node>
+        <!-- 检查是否有文件哈希 -->
+        <node id="file_check" type="NOTNULL" field="file_hash"></node>
+        <!-- 检查是否有URL -->
+        <node id="url_check" type="NOTNULL" field="suspicious_url"></node>
+        <!-- 检查是否有域名 -->
+        <node id="domain_check" type="NOTNULL" field="domain"></node>
+    </checklist>
+    
+    <!-- 威胁情报丰富化 -->
+    <append type="PLUGIN" field="shodan_intel">shodan(source_ip)</append>
+    <append type="PLUGIN" field="virustotal_scan">virusTotal(file_hash)</append>
+    <append type="PLUGIN" field="threatbook_ip">threatBook(source_ip, "ip")</append>
+    <append type="PLUGIN" field="threatbook_file">threatBook(file_hash, "file", "api_key")</append>
+    <append type="PLUGIN" field="threatbook_domain">threatBook(domain, "domain", "api_key")</append>
+    <append type="PLUGIN" field="threatbook_url">threatBook(suspicious_url, "url")</append>
+    
+    <!-- 综合威胁评分 -->
+    <append type="PLUGIN" field="threat_score">calculate_threat_score(_$ORIDATA)</append>
+    <append type="PLUGIN" field="analysis_time">now()</append>
+</rule>
+```
+
 ### ⚠️ 告警抑制最佳实践（suppressOnce）
 
 #### 为什么需要 ruleid 参数？
@@ -732,7 +769,8 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 1. **检查节点插件**：`isPrivateIP`, `cidrMatch` - 纯计算，性能较高
 2. **字符串处理插件**：`replace`, `hashMD5/SHA1/SHA256` - 中等性能
 3. **正则表达式插件**：`regexExtract`, `regexReplace` - 性能较低
-4. **外部依赖插件**：`geoMatch` - 需要数据库查询，性能最低
+4. **数据库查询插件**：`geoMatch` - 需要数据库查询，性能较低
+5. **威胁情报插件**：`virusTotal`, `shodan`, `threatBook` - 外部API调用，性能最低
 
 #### 优化建议：
 ```xml
@@ -746,6 +784,20 @@ AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎�
 <checklist>
     <node type="PLUGIN">geoMatch(source_ip, "US")</node>
 </checklist>
+
+<!-- 威胁情报插件优化：利用缓存和条件判断 -->
+<rule id="threat_intel_optimized">
+    <filter field="event_type">security_event</filter>
+    
+    <checklist condition="has_suspicious_indicators and need_enrichment">
+        <!-- 先用高性能检查确认需要查询 -->
+        <node id="has_suspicious_indicators" type="INCL" field="alert_level">high</node>
+        <node id="need_enrichment" type="NOTNULL" field="source_ip"></node>
+    </checklist>
+    
+    <!-- 然后才使用威胁情报插件 -->
+    <append type="PLUGIN" field="threat_intel">threatBook(source_ip, "ip")</append>
+</rule>
 ```
 
 ### 插件类型
@@ -1117,6 +1169,72 @@ return analyzeString(str)
 
         <plugin>block_connection(_$source_ip, _$dest_ip)</plugin>
         <plugin>escalate_to_soc(_$ORIDATA)</plugin>
+    </rule>
+</root>
+```
+
+### 案例5：综合威胁情报分析
+
+```xml
+<root type="DETECTION" name="comprehensive_threat_intel" author="security_team">
+    <rule id="multi_source_threat_analysis" name="多源威胁情报分析">
+        <filter field="event_type">security_alert</filter>
+
+        <checklist condition="has_indicators and (high_risk or multiple_sources)">
+            <node id="has_indicators" type="NOTNULL" field="threat_indicator"></node>
+            <node id="high_risk" type="INCL" field="alert_level">high</node>
+            <node id="multiple_sources" type="INCL" field="source_count">3</node>
+        </checklist>
+
+        <!-- 10分钟内同一威胁指标不重复分析 -->
+        <threshold group_by="threat_indicator" range="600s" local_cache="true">1</threshold>
+
+        <!-- 多源威胁情报查询 -->
+        <append type="PLUGIN" field="virustotal_intel">virusTotal(file_hash)</append>
+        <append type="PLUGIN" field="shodan_intel">shodan(source_ip)</append>
+        <append type="PLUGIN" field="threatbook_ip">threatBook(source_ip, "ip", "prod_api_key")</append>
+        <append type="PLUGIN" field="threatbook_domain">threatBook(domain, "domain", "prod_api_key")</append>
+        <append type="PLUGIN" field="threatbook_file">threatBook(file_hash, "file", "prod_api_key")</append>
+        <append type="PLUGIN" field="threatbook_url">threatBook(suspicious_url, "url", "prod_api_key")</append>
+
+        <!-- 综合分析 -->
+        <append type="PLUGIN" field="threat_score">calculate_comprehensive_threat_score(_$ORIDATA)</append>
+        <append type="PLUGIN" field="malware_family">identify_malware_family(_$ORIDATA)</append>
+        <append type="PLUGIN" field="attack_timeline">construct_attack_timeline(_$ORIDATA)</append>
+        <append type="PLUGIN" field="ioc_correlation">correlate_iocs(_$ORIDATA)</append>
+
+        <!-- 分析结果 -->
+        <append field="analysis_type">comprehensive_threat_intelligence</append>
+        <append type="PLUGIN" field="analysis_timestamp">now()</append>
+        <append type="PLUGIN" field="analyst_recommendations">generate_recommendations(_$threat_score, _$malware_family)</append>
+
+        <!-- 自动化响应 -->
+        <plugin>enrich_threat_database(_$ORIDATA)</plugin>
+        <plugin>trigger_automated_response(_$threat_score, _$analyst_recommendations)</plugin>
+        <plugin>notify_threat_intel_team(_$ORIDATA)</plugin>
+    </rule>
+
+    <rule id="chinese_threat_analysis" name="中文威胁情报分析">
+        <filter field="event_type">apt_activity</filter>
+
+        <checklist condition="chinese_context and needs_local_intel">
+            <node id="chinese_context" type="INCL" field="geo_location" logic="OR" delimiter="|">CN|HK|TW|SG</node>
+            <node id="needs_local_intel" type="INCL" field="threat_category">apt</node>
+        </checklist>
+
+        <!-- 使用微步在线进行中文威胁情报分析 -->
+        <append type="PLUGIN" field="threatbook_comprehensive">threatBook(threat_indicator, indicator_type, "china_api_key")</append>
+        <append type="PLUGIN" field="chinese_malware_family">identify_chinese_malware(_$threatbook_comprehensive)</append>
+        <append type="PLUGIN" field="apt_group_attribution">attribute_apt_group(_$threatbook_comprehensive)</append>
+
+        <!-- 结合其他情报源 -->
+        <append type="PLUGIN" field="global_context">combine_global_local_intel(_$threatbook_comprehensive, _$virustotal_intel)</append>
+
+        <!-- 生成中文威胁报告 -->
+        <append type="PLUGIN" field="chinese_threat_report">generate_chinese_report(_$ORIDATA)</append>
+        <append field="report_language">zh-CN</append>
+
+        <plugin>alert_chinese_security_team(_$ORIDATA)</plugin>
     </rule>
 </root>
 ```
