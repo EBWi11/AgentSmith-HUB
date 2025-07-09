@@ -99,16 +99,29 @@ kafka:
   topic: "kafka_output_demo"`
 
 const NewRulesetData = `<root author="name">
-    <rule id="rule_id">
-        <filter field="key">vaule</filter>
-        <checklist>
-            <node type="REGEX" field="exe">testcases</node>
-            <node type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>
-			<node type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</node>
-        </checklist>
+    <rule id="rule_id" name="Example rule with flexible execution order">
+        <!-- New flexible syntax: operations execute in order of appearance -->
+        
+        <!-- Standalone check - no longer requires checklist wrapper -->
+        <check type="REGEX" field="exe">testcases</check>
+        
+        <!-- Threshold can appear anywhere -->
+        <threshold groupby="src_ip" range="1m" value="100" />
+        
+        <!-- Multiple checks in sequence -->
+        <check type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</check>
+        <check type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</check>
+        
+        <!-- Post-processing operations -->
         <append field="abc">123</append>
         <del>exe,argv</del>
-		<plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>
+        <plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>
+        
+        <!-- Can also use traditional checklist for grouped checks -->
+        <checklist condition="1 AND 2">
+            <check id="1" type="EQU" field="status">200</check>
+            <check id="2" type="NEXCL" field="path">favicon.ico</check>
+        </checklist>
     </rule>
 </root>`
 
@@ -672,21 +685,30 @@ func getPlugins(c echo.Context) error {
 			// Check if plugin is used in any rule within this ruleset
 			for _, rule := range r.Rules {
 				// Check in checklist nodes
-				for _, node := range rule.Checklist.CheckNodes {
+				for _, checklist := range rule.ChecklistMap {
+					for _, node := range checklist.CheckNodes {
+						if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
+							rulesets = append(rulesets, r.RulesetID)
+							goto nextRuleset
+						}
+					}
+				}
+				// Check in standalone check nodes
+				for _, node := range rule.CheckMap {
 					if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
 						goto nextRuleset
 					}
 				}
 				// Check in append elements
-				for _, appendElem := range rule.Appends {
+				for _, appendElem := range rule.AppendsMap {
 					if appendElem.Type == "PLUGIN" && strings.Contains(appendElem.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
 						goto nextRuleset
 					}
 				}
 				// Check in plugin elements
-				for _, pluginElem := range rule.Plugins {
+				for _, pluginElem := range rule.PluginMap {
 					if strings.Contains(pluginElem.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
 						goto nextRuleset

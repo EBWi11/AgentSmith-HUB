@@ -10,22 +10,31 @@
  * @returns {string} - XML template for the ruleset
  */
 export function generateRulesetTemplate(id) {
-  return `<root type="DETECTION">
+  return `<root type="DETECTION" name="${id}">
     <rule id="${id}_01" name="Example Rule">
-        <filter field="data_type">59</filter>
-        <checklist condition="a and (b or c)">
-            <node id="a" type="INCL" field="data" logic="or" delimiter="|">test1|test2</node>
-            <node id="b" type="REGEX" field="data">^example.*pattern$</node>
-            <node id="c" type="PLUGIN">plugin_name(_$ORIDATA)</node>
-        </checklist>
-
-        <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="SUM" count_field="dip">5</threshold>
-
-        <append field="data_type">10</append>
-        <append type="PLUGIN" field="data_type">plugin_name(_$ORIDATA)</append>
+        <!-- Operations can be placed in any order -->
         
-        <plugin>plugin_name(_$ORIDATA)</plugin>
-        <del>sport,dport</del>
+        <!-- Standalone check examples -->
+        <check type="EQU" field="event_type">login</check>
+        <check type="INCL" field="source" logic="OR" delimiter="|">api|web|mobile</check>
+        
+        <!-- Threshold example -->
+        <threshold group_by="user_id,ip" range="5m">10</threshold>
+        
+        <!-- Checklist with conditional logic -->
+        <checklist condition="a and (b or c)">
+            <check id="a" type="INCL" field="data" logic="OR" delimiter="|">test1|test2</check>
+            <check id="b" type="REGEX" field="data">^example.*pattern$</check>
+            <check id="c" type="MT" field="score">80</check>
+        </checklist>
+        
+        <!-- Additional operations -->
+        <append field="risk_level">high</append>
+        <append type="PLUGIN" field="timestamp">now()</append>
+        
+        <plugin>alert("security_team")</plugin>
+        
+        <del>temp_field,debug_info</del>
     </rule>
 </root>`;
 }

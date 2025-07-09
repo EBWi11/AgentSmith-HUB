@@ -1,34 +1,37 @@
 {
   "RULE_TEMPLATES": {
     "description": "Comprehensive rule templates for AgentSmith-HUB with intelligent data-driven design",
-    "version": "2.0.0",
+    "version": "3.0.0",
     
     "BASIC_TEMPLATES": {
       "minimal_rule": {
         "name": "Minimal Rule Template",
         "description": "Simple rule with single condition - perfect for beginners",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist>\n    <node type=\"EQU\" field=\"{field_name}\">{field_value}</node>\n  </checklist>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"{field_name}\">{field_value}</check>\n</rule>",
         "required_fields": ["rule_id", "rule_name", "field_name", "field_value"],
         "use_case": "Simple detection with exact match",
-        "performance": "Fastest - single condition check"
+        "performance": "Fastest - single condition check",
+        "syntax_note": "NEW: No need for <checklist> wrapper with single check"
       },
       
-      "filtered_detection": {
+      "sequential_detection": {
         "name": "Performance-Optimized Rule",
-        "description": "Rule with filter for high-volume data processing",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"{filter_field}\">{filter_value}</filter>\n  <checklist>\n    <node type=\"{node_type}\" field=\"{check_field}\">{check_value}</node>\n  </checklist>\n</rule>",
-        "required_fields": ["rule_id", "rule_name", "filter_field", "filter_value", "node_type", "check_field", "check_value"],
-        "use_case": "High-volume data with coarse filtering",
-        "performance": "Optimized - filter reduces volume by 80%+"
+        "description": "Rule with sequential checks for high-volume data processing",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Order matters! Most selective checks first -->\n  <check type=\"EQU\" field=\"{coarse_field}\">{coarse_value}</check>\n  <check type=\"{check_type}\" field=\"{check_field}\">{check_value}</check>\n  <append field=\"desc\">{rule_name}</append>\n</rule>",
+        "required_fields": ["rule_id", "rule_name", "coarse_field", "coarse_value", "check_type", "check_field", "check_value"],
+        "use_case": "High-volume data with sequential filtering",
+        "performance": "Optimized - early checks reduce volume by 80%+",
+        "syntax_note": "NEW: Independent checks execute in order, no checklist needed"
       },
       
       "multi_condition": {
         "name": "Multi-Condition Rule",
         "description": "Rule with boolean logic and multiple conditions",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"{boolean_condition}\">\n    <node id=\"a\" type=\"{type_a}\" field=\"{field_a}\">{value_a}</node>\n    <node id=\"b\" type=\"{type_b}\" field=\"{field_b}\">{value_b}</node>\n    <node id=\"c\" type=\"{type_c}\" field=\"{field_c}\">{value_c}</node>\n  </checklist>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"{boolean_condition}\">\n    <check id=\"a\" type=\"{type_a}\" field=\"{field_a}\">{value_a}</check>\n    <check id=\"b\" type=\"{type_b}\" field=\"{field_b}\">{value_b}</check>\n    <check id=\"c\" type=\"{type_c}\" field=\"{field_c}\">{value_c}</check>\n  </checklist>\n  <append field=\"desc\">{rule_name}</append>\n</rule>",
         "required_fields": ["rule_id", "rule_name", "boolean_condition", "type_a", "field_a", "value_a", "type_b", "field_b", "value_b", "type_c", "field_c", "value_c"],
-        "use_case": "Complex detection with multiple conditions",
-        "performance": "Variable - depends on condition complexity"
+        "use_case": "Complex detection with custom boolean logic",
+        "performance": "Variable - depends on condition complexity",
+        "syntax_note": "Use <checklist> ONLY when you need OR, NOT, or complex conditions"
       }
     },
 
@@ -36,37 +39,41 @@
       "high_volume_optimized": {
         "name": "High Volume Data Rule",
         "description": "Optimized for processing millions of events",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"event_type\">{event_type}</filter>\n  <checklist>\n    <node type=\"NOTNULL\" field=\"timestamp\"/>\n    <node type=\"EQU\" field=\"level\">ERROR</node>\n    <node type=\"{detection_type}\" field=\"{detection_field}\">{detection_value}</node>\n  </checklist>\n</rule>",
-        "architecture_notes": "Filter reduces volume by 90%, NOTNULL is tier-1 performance, specific detection last",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Flexible order: arrange checks for optimal performance -->\n  <check type=\"EQU\" field=\"event_type\">{event_type}</check>\n  <check type=\"NOTNULL\" field=\"timestamp\"/>\n  <check type=\"EQU\" field=\"level\">ERROR</check>\n  <check type=\"{detection_type}\" field=\"{detection_field}\">{detection_value}</check>\n  <append field=\"desc\">{rule_name}</append>\n</rule>",
+        "architecture_notes": "NEW: Execution order follows XML order - place most selective checks first",
         "use_case": "High-frequency log processing",
-        "performance": "Excellent - optimized data flow"
+        "performance": "Excellent - optimized execution order",
+        "syntax_note": "No <checklist> needed - all checks use AND logic by default"
       },
       
       "threshold_counting": {
         "name": "Threshold-Based Detection",
-        "description": "Event counting and aggregation with performance optimization",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <filter field=\"{filter_field}\">{filter_value}</filter>\n  <checklist>\n    <node type=\"EQU\" field=\"{event_field}\">{event_value}</node>\n  </checklist>\n  <threshold group_by=\"{group_field}\" range=\"{time_range}\">{threshold_count}</threshold>\n</rule>",
+        "description": "Event counting and aggregation with flexible positioning",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"{filter_field}\">{filter_value}</check>\n  <check type=\"EQU\" field=\"{event_field}\">{event_value}</check>\n  <!-- Threshold can be placed anywhere in the execution order -->\n  <threshold groupby=\"{group_field}\" range=\"{time_range}\" value=\"{threshold_count}\"/>\n  <append field=\"desc\">{rule_name}</append>\n</rule>",
         "required_fields": ["rule_id", "rule_name", "filter_field", "filter_value", "event_field", "event_value", "group_field", "time_range", "threshold_count"],
         "use_case": "Rate limiting, anomaly detection",
-        "performance": "Good - efficient counting with grouping"
+        "performance": "Good - efficient counting with grouping",
+        "syntax_note": "NEW: Threshold executes where it appears in XML"
       }
     },
 
     "SECURITY_TEMPLATES": {
       "network_anomaly": {
         "name": "Network Anomaly Detection",
-        "description": "Detect suspicious network connections",
-        "xml": "<rule id=\"network_anomaly_{timestamp}\" name=\"Network Anomaly Detection\">\n  <filter field=\"event_type\">network</filter>\n  <checklist condition=\"a and (b or c)\">\n    <node id=\"a\" type=\"EQU\" field=\"connection_type\">outbound</node>\n    <node id=\"b\" type=\"REGEX\" field=\"dst_ip\">^(?!192\\.168\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*</node>\n    <node id=\"c\" type=\"MT\" field=\"dst_port\">1024</node>\n  </checklist>\n  <append field=\"detection_category\">network_security</append>\n</rule>",
-        "data_requirements": "Fields: event_type, connection_type, dst_ip, dst_port",
-        "use_case": "External connection monitoring"
+        "description": "Detect suspicious network connections with optimized check order",
+        "xml": "<rule id=\"network_anomaly_{timestamp}\" name=\"Network Anomaly Detection\">\n  <!-- Fast checks first -->\n  <check type=\"EQU\" field=\"event_type\">network</check>\n  <check type=\"EQU\" field=\"connection_type\">outbound</check>\n  <!-- More expensive checks later -->\n  <checklist condition=\"(ext_ip or high_port) and not system_path\">\n    <check id=\"ext_ip\" type=\"REGEX\" field=\"dst_ip\">^(?!192\\.168\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.).*</check>\n    <check id=\"high_port\" type=\"MT\" field=\"dst_port\">1024</check>\n    <check id=\"system_path\" type=\"INCL\" field=\"process_path\" logic=\"OR\" delimiter=\"|\" negate=\"true\">C:\\\\Windows\\\\System32\\\\|C:\\\\Program Files\\\\</check>\n  </checklist>\n  <append field=\"detection_category\">network_security</append>\n  <append field=\"desc\">Detected suspicious outbound network connection</append>\n</rule>",
+        "data_requirements": "Fields: event_type, connection_type, dst_ip, dst_port, process_path",
+        "use_case": "External connection monitoring",
+        "syntax_note": "Combines independent checks with checklist for complex logic"
       },
       
       "authentication_failure": {
         "name": "Authentication Failure Pattern",
-        "description": "Detect authentication attack patterns",
-        "xml": "<rule id=\"auth_failure_{timestamp}\" name=\"Authentication Failure Pattern\">\n  <filter field=\"event_category\">authentication</filter>\n  <checklist>\n    <node type=\"EQU\" field=\"result\">failure</node>\n    <node type=\"INCL\" field=\"reason\">invalid</node>\n  </checklist>\n  <threshold group_by=\"source_ip\" range=\"300s\">5</threshold>\n  <append field=\"alert_level\">medium</append>\n</rule>",
+        "description": "Detect authentication attack patterns with early filtering",
+        "xml": "<rule id=\"auth_failure_{timestamp}\" name=\"Authentication Failure Pattern\">\n  <!-- Quick filters first -->\n  <check type=\"EQU\" field=\"event_category\">authentication</check>\n  <check type=\"EQU\" field=\"result\">failure</check>\n  <check type=\"INCL\" field=\"reason\">invalid</check>\n  <!-- Threshold after filtering -->\n  <threshold groupby=\"source_ip\" range=\"300s\" value=\"5\"/>\n  <append field=\"alert_level\">medium</append>\n  <append field=\"desc\">Multiple authentication failures from same IP</append>\n</rule>",
         "data_requirements": "Fields: event_category, result, reason, source_ip",
-        "use_case": "Brute force attack detection"
+        "use_case": "Brute force attack detection",
+        "syntax_note": "Independent checks provide clear, readable logic flow"
       }
     },
 
@@ -79,20 +86,39 @@
           "step_2": "Identify target projects: Which projects need this rule?",
           "step_3": "Fetch relevant sample data from target projects",
           "step_4": "Generate optimized rule with actual field names",
-          "step_5": "Apply performance architecture principles"
+          "step_5": "Apply flexible execution order for performance"
         },
-        "xml_template": "<rule id=\"{intelligent_id}\" name=\"{context_name}\">\n  <filter field=\"{optimal_filter_field}\">{filter_value}</filter>\n  <checklist condition=\"{ai_generated_condition}\">\n    {ai_generated_nodes}\n  </checklist>\n  {optional_threshold}\n  <append field=\"ai_context\">{generation_context}</append>\n</rule>",
+        "xml_template": "<rule id=\"{intelligent_id}\" name=\"{context_name}\">\n  {ai_generated_checks}\n  {optional_threshold}\n  <append field=\"ai_context\">{generation_context}</append>\n  <append field=\"desc\">{context_name}</append>\n</rule>",
         "ai_features": [
           "Auto-field discovery from sample data",
-          "Performance optimization suggestions",
+          "Optimal check ordering based on selectivity",
           "Context-aware naming and descriptions",
-          "Real data validation"
+          "Real data validation",
+          "NEW: Leverages flexible execution order"
         ]
       }
     },
 
+    "FLEXIBLE_ORDER_TEMPLATES": {
+      "data_enrichment_first": {
+        "name": "Data Enrichment First Pattern",
+        "description": "Enrich data before detection for more intelligent rules",
+        "xml": "<rule id=\"enrichment_first\" name=\"Enrichment-Based Detection\">\n  <!-- Enrich data first -->\n  <append type=\"PLUGIN\" field=\"geo_location\">geoMatch(_$source_ip)</append>\n  <append type=\"PLUGIN\" field=\"hour_of_day\">hourOfDay()</append>\n  <!-- Then use enriched data in detection -->\n  <check type=\"EQU\" field=\"geo_location\">CN</check>\n  <check type=\"MT\" field=\"hour_of_day\">22</check>\n  <check type=\"EQU\" field=\"event_type\">login</check>\n  <append field=\"risk_score\">high</append>\n  <append field=\"desc\">Suspicious login from high-risk location at unusual time</append>\n</rule>",
+        "use_case": "Context-aware detection using enriched data",
+        "syntax_note": "NEW: Append operations can execute before checks"
+      },
+      
+      "progressive_filtering": {
+        "name": "Progressive Filtering Pattern",
+        "description": "Filter data progressively with performance metrics",
+        "xml": "<rule id=\"progressive_filter\" name=\"Progressive Filtering Example\">\n  <!-- Stage 1: Coarse filter (eliminates 90%) -->\n  <check type=\"EQU\" field=\"log_level\">ERROR</check>\n  <append field=\"stage1_passed\">true</append>\n  \n  <!-- Stage 2: Medium filter (eliminates 70% of remaining) -->\n  <check type=\"INCL\" field=\"component\">security</check>\n  <append field=\"stage2_passed\">true</append>\n  \n  <!-- Stage 3: Fine filter (precise detection) -->\n  <check type=\"REGEX\" field=\"message\">authentication.*failed.*admin</check>\n  <append field=\"stage3_passed\">true</append>\n  \n  <!-- Final processing -->\n  <threshold groupby=\"source_system\" range=\"5m\" value=\"3\"/>\n  <append field=\"desc\">Admin authentication failures detected</append>\n</rule>",
+        "use_case": "High-volume data processing with metrics",
+        "syntax_note": "Track filtering effectiveness at each stage"
+      }
+    },
+
     "SYNTAX_REFERENCE": {
-      "node_types": {
+      "check_types": {
         "string_operations": {
           "EQU": "Exact match (case-sensitive)",
           "NEQ": "Not equal (case-sensitive)", 
@@ -127,15 +153,34 @@
         }
       },
       
-      "performance_optimization": {
-        "architecture_principle": "Filter first (coarse) → CheckNode second (specific)",
-        "filter_purpose": "Reduce data volume by 80%+ using event_type, data_type, category",
-        "checknode_purpose": "Precise detection logic with specific field values",
-        "performance_tiers": {
-          "tier_1_fastest": ["ISNULL", "NOTNULL"],
-          "tier_2_fast": ["EQU", "NEQ", "MT", "LT"],
-          "tier_3_slower": ["INCL", "NI", "START", "END", "REGEX", "PLUGIN"]
+      "new_syntax_features": {
+        "flexible_execution_order": "Operations execute in the order they appear in XML",
+        "independent_checks": "Use <check> directly without <checklist> wrapper for AND logic",
+        "checklist_usage": "Use <checklist> only for OR, NOT, or complex boolean expressions",
+        "deprecated_tags": {
+          "node": "DEPRECATED - use <check> instead",
+          "filter": "REMOVED - use <check> for all conditions"
+        },
+        "performance_optimization": {
+          "principle": "Place most selective checks first to filter early",
+          "example_order": [
+            "1. Event type checks (filters 90%+)",
+            "2. Fast field checks (NOTNULL, EQU)",
+            "3. Substring checks (INCL, START)",
+            "4. Complex checks (REGEX, PLUGIN)",
+            "5. Threshold calculations",
+            "6. Data modifications (append, del)"
+          ]
         }
+      },
+      
+      "check_attributes": {
+        "type": "Check operation type (EQU, INCL, etc.)",
+        "field": "Field to check (supports nested: user.profile.name)",
+        "logic": "Multi-value logic: OR or AND (optional)",
+        "delimiter": "Value separator when using logic (optional)",
+        "negate": "Invert check result: true or false (optional)",
+        "id": "Unique identifier for use in checklist conditions"
       }
     },
 
@@ -146,14 +191,14 @@
         "user_intent": "Ask: What should this rule detect?",
         "project_context": "Ask: Which projects will use this rule?",
         "auto_data_fetch": "Automatically fetch sample data from target projects",
-        "ai_analysis": "Analyze data quality and suggest optimal fields",
-        "performance_check": "Validate architecture for performance optimization"
+        "ai_analysis": "Analyze data quality and suggest optimal check ordering",
+        "performance_check": "Validate execution order for performance"
       },
       "quality_assurance": [
         "Rules tested with real sample data",
         "Field names verified against actual data structure",
         "Performance impact assessed",
-        "Architecture follows filter→checknode pattern"
+        "Execution order optimized for early filtering"
       ]
     },
 
@@ -162,8 +207,8 @@
         "context": "Target projects: web-frontend, api-gateway",
         "sample_data_analysis": "Found fields: request_method, url_path, status_code, response_time",
         "user_intent": "Detect SQL injection attempts",
-        "generated_rule": "<rule id=\"sql_injection_detection\" name=\"SQL Injection Detection\">\n  <filter field=\"event_type\">web_request</filter>\n  <checklist condition=\"a and b\">\n    <node id=\"a\" type=\"INCL\" field=\"url_path\">SELECT</node>\n    <node id=\"b\" type=\"REGEX\" field=\"url_path\">.*('|\\\"|;|--|/\\*|\\*/|xp_|sp_).*</node>\n  </checklist>\n  <append field=\"threat_type\">sql_injection</append>\n</rule>",
-        "optimization_notes": "Filter reduces volume by 95%, INCL check is faster than REGEX for initial filtering"
+        "generated_rule": "<rule id=\"sql_injection_detection\" name=\"SQL Injection Detection\">\n  <!-- Fast event type check first -->\n  <check type=\"EQU\" field=\"event_type\">web_request</check>\n  <!-- Quick string check before expensive regex -->\n  <check type=\"INCL\" field=\"url_path\">SELECT</check>\n  <!-- Complex regex check last -->\n  <check type=\"REGEX\" field=\"url_path\">.*('|\\\"|;|--|/\\*|\\*/|xp_|sp_).*</check>\n  <append field=\"threat_type\">sql_injection</append>\n  <append field=\"desc\">Potential SQL injection attempt detected</append>\n</rule>",
+        "optimization_notes": "Event type check reduces volume by 95%, INCL check is 10x faster than REGEX"
       }
     }
   }

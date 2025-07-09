@@ -52,21 +52,48 @@ func getMaxPoolSize() int {
 
 var ConditionRegex = regexp.MustCompile("^([a-z]+|\\(|\\)|\\s)+$")
 
-// Ruleset represents a collection of rules and associated metadata.
+type OperatorType int
+
+const (
+	T_CheckList OperatorType = iota // CheckList = 0
+	T_Check                         // Check = 1
+	T_Threshold                     // Threshold = 2
+	T_Append                        // Append = 3
+	T_Del                           // Del = 4
+	T_Plugin                        // Plugin = 5
+)
+
+type EngineOperator struct {
+	Type OperatorType
+	ID   int
+}
+
+type Rule struct {
+	ID   string `xml:"id,attr"`
+	Name string `xml:"name,attr"`
+
+	Queue *[]EngineOperator
+
+	ChecklistMap map[int]Checklist
+	CheckMap     map[int]CheckNodes
+	ThresholdMap map[int]Threshold
+	AppendsMap   map[int]Append
+	PluginMap    map[int]Plugin
+	DelMap       map[int][][]string
+}
+
 type Ruleset struct {
 	Path                string
-	XMLName             xml.Name `xml:"root"`
-	Name                string   `xml:"name,attr"`
-	Author              string   `xml:"author,attr"`
-	RulesetID           string   `json:"RulesetID"`
+	XMLName             xml.Name
+	Name                string
+	Author              string
+	RulesetID           string
 	ProjectNodeSequence string
-	Type                string `xml:"type,attr"`
+	Type                string
 
 	IsDetection bool
-	Rules       []Rule `xml:"rule"`
+	Rules       []Rule
 	RulesCount  int
-
-	RulesByFilter map[string]*RulesByFilter
 
 	UpStream   map[string]*chan map[string]interface{}
 	DownStream map[string]*chan map[string]interface{}
@@ -89,42 +116,6 @@ type Ruleset struct {
 	wg           sync.WaitGroup // WaitGroup for goroutine management
 
 	OwnerProjects []string `json:"-"`
-}
-
-type RulesByFilter struct {
-	Filter Filter
-	Rules  []*Rule
-}
-
-// Rule represents a single rule with its logic and metadata.
-type Rule struct {
-	ID             string    `xml:"id,attr"`
-	Name           string    `xml:"name,attr"`
-	Filter         Filter    `xml:"filter"`
-	Checklist      Checklist `xml:"checklist"`
-	ChecklistLen   int
-	ThresholdCheck bool
-	Threshold      Threshold  `xml:"threshold"`
-	Appends        []Append   `xml:"append"`
-	Plugins        []Plugin   `xml:"plugin"`
-	Del            string     `xml:"del"`
-	DelList        [][]string // parsed field path
-}
-
-// Filter defines the field and value for rule filtering.
-type Filter struct {
-	Field     string   `xml:"field,attr"`
-	FieldList []string // parsed field path
-	Value     string   `xml:",chardata"`
-	Check     bool
-}
-
-func (f *Filter) ToStr() string {
-	str := f.Field + ">>" + f.Value
-	if str == "" {
-		return "nil"
-	}
-	return str
 }
 
 // Checklist contains the logical condition and nodes to check.
@@ -232,21 +223,10 @@ func ValidateWithDetails(path string, raw string) (*ValidationResult, error) {
 		Warnings: []ValidationWarning{},
 	}
 
-	// Parse XML first to check basic syntax
-	var ruleset Ruleset
-	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
-		// Use enhanced error handling for better error messages and line numbers
-		if enhancedErr := enhanceXMLParsingError(err, string(rawRuleset)); enhancedErr != nil {
-			result.IsValid = false
-			result.Errors = append(result.Errors, ValidationError{
-				Line:    extractLineFromEnhancedError(enhancedErr.Error()),
-				Message: "Threshold validation error",
-				Detail:  enhancedErr.Error(),
-			})
-			return result, nil
-		}
-
-		// Fallback to original error handling
+	// Parse XML using new ParseRuleset function
+	ruleset, err := ParseRuleset(rawRuleset)
+	if err != nil {
+		// Extract line number from error if possible
 		lineNum := extractLineFromXMLError(err.Error())
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
@@ -258,7 +238,7 @@ func ValidateWithDetails(path string, raw string) (*ValidationResult, error) {
 	}
 
 	// Perform detailed validation
-	validateRulesetStructure(&ruleset, string(rawRuleset), result)
+	validateRulesetStructure(ruleset, string(rawRuleset), result)
 
 	return result, nil
 }
@@ -507,28 +487,24 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	// Check for duplicate elements within this rule
 	validateRuleDuplicateElements(xmlContent, ruleID, ruleIndex, result)
 
-	// Validate filter
-	if rule.Filter.Field == "" || strings.TrimSpace(rule.Filter.Field) == "" {
-		result.Warnings = append(result.Warnings, ValidationWarning{
-			Line:    findElementInRule(xmlContent, ruleID, "<filter", ruleIndex, 0),
-			Message: "Filter field is empty",
-		})
+	// Validate checklists in ChecklistMap
+	for _, checklist := range rule.ChecklistMap {
+		validateChecklist(&checklist, xmlContent, ruleID, ruleIndex, result)
 	}
 
-	// Validate checklist
-	validateChecklist(&rule.Checklist, xmlContent, ruleID, ruleIndex, result)
-
-	// Validate threshold
-	validateThreshold(&rule.Threshold, xmlContent, ruleID, ruleIndex, result)
-
-	// Validate appends
-	for appendIndex, appendElem := range rule.Appends {
-		validateAppend(&appendElem, xmlContent, ruleID, ruleIndex, appendIndex, result)
+	// Validate thresholds in ThresholdMap
+	for _, threshold := range rule.ThresholdMap {
+		validateThreshold(&threshold, xmlContent, ruleID, ruleIndex, result)
 	}
 
-	// Validate plugins
-	for pluginIndex, plugin := range rule.Plugins {
-		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, pluginIndex, result)
+	// Validate appends in AppendsMap
+	for _, appendElem := range rule.AppendsMap {
+		validateAppend(&appendElem, xmlContent, ruleID, ruleIndex, 0, result)
+	}
+
+	// Validate plugins in PluginMap
+	for _, plugin := range rule.PluginMap {
+		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, 0, result)
 	}
 }
 
@@ -1169,7 +1145,8 @@ func Verify(path string, raw string) error {
 		return fmt.Errorf("failed to read ruleset configuration: %w", err)
 	}
 
-	_, err = ParseRulesetFromByte(rawRuleset)
+	// Parse with new flexible ruleset syntax
+	ruleset, err := ParseRuleset(rawRuleset)
 	if err != nil {
 		// Try to extract line number from XML error
 		if strings.Contains(err.Error(), "line") {
@@ -1177,6 +1154,17 @@ func Verify(path string, raw string) error {
 		}
 		return fmt.Errorf("failed to parse resource: %w (line: unknown)", err)
 	}
+
+	// Build and validate the ruleset completely
+	err = RulesetBuild(ruleset)
+	if err != nil {
+		// RulesetBuild provides detailed validation with rule context
+		if strings.Contains(err.Error(), "line") {
+			return fmt.Errorf("failed to validate resource: %w", err)
+		}
+		return fmt.Errorf("failed to validate resource: %w", err)
+	}
+
 	return nil
 }
 
@@ -1191,15 +1179,31 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	}
 
 	if path != "" {
-		xmlFile, _ := os.Open(path)
+		xmlFile, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s: %w", path, err)
+		}
 		defer xmlFile.Close()
 
-		rawRuleset, _ = io.ReadAll(xmlFile)
+		rawRuleset, err = io.ReadAll(xmlFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file %s: %w", path, err)
+		}
 	} else {
 		rawRuleset = []byte(raw)
 	}
 
-	ruleset, _ := ParseRulesetFromByte(rawRuleset)
+	ruleset, err := ParseRuleset(rawRuleset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ruleset: %w", err)
+	}
+
+	// IMPORTANT: Must call RulesetBuild to initialize all the parsed components
+	err = RulesetBuild(ruleset)
+	if err != nil {
+		return nil, fmt.Errorf("ruleset build error: %s %w", id, err)
+	}
+
 	ruleset.Path = path
 
 	if len(ruleset.UpStream) == 0 {
@@ -1216,6 +1220,10 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	if cluster.IsLeader {
 		ruleset.sampler = common.GetSampler("ruleset." + id)
 	}
+
+	// Store the raw config for later use
+	ruleset.RawConfig = string(rawRuleset)
+
 	return ruleset, nil
 }
 
@@ -1236,22 +1244,69 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
 		Type:                existing.Type,
 		IsDetection:         existing.IsDetection,
-		Rules:               existing.Rules,         // Share the same rules
-		RulesCount:          existing.RulesCount,    // Copy the rules count
-		RulesByFilter:       existing.RulesByFilter, // Share the same rule mappings
+		Rules:               existing.Rules,      // Share the same rules
+		RulesCount:          existing.RulesCount, // Copy the rules count
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
-		Cache:               existing.Cache,            // Share the same cache
-		CacheForClassify:    existing.CacheForClassify, // Share the same classify cache
-		RawConfig:           existing.RawConfig,
+		// Note: Cache and CacheForClassify are NOT shared to avoid concurrent access issues
+		// They will be created when needed during RulesetBuild if threshold operations exist
+		Cache:            nil,
+		CacheForClassify: nil,
+		RawConfig:        existing.RawConfig,
 		// Note: Runtime fields (stopChan, antsPool, metricStop, wg, etc.) are intentionally not copied
 		// as they will be initialized when the ruleset starts
 		// Metrics fields (processTotal, processQPS) are also not copied as they are instance-specific
+		// RulesByFilter field has been removed in the new flexible syntax design
 	}
 
 	// Only create sampler on leader node for performance
 	if cluster.IsLeader {
 		newRuleset.sampler = common.GetSampler("ruleset." + existing.RulesetID)
+	}
+
+	// Check if any rules have threshold operations that require cache initialization
+	var needsCache bool
+	var needsClassifyCache bool
+
+	for _, rule := range newRuleset.Rules {
+		if len(rule.ThresholdMap) > 0 {
+			needsCache = true
+			// Check if any threshold uses CLASSIFY mode
+			for _, threshold := range rule.ThresholdMap {
+				if threshold.CountType == "CLASSIFY" {
+					needsClassifyCache = true
+					break
+				}
+			}
+		}
+		if needsCache && needsClassifyCache {
+			break
+		}
+	}
+
+	// Initialize caches if needed
+	if needsCache {
+		var err error
+		newRuleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+			NumCounters: 10_000_000,       // number of keys to track frequency of.
+			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+			BufferItems: 32,               // number of keys per Get buffer.
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create local cache: %w", err)
+		}
+	}
+
+	if needsClassifyCache {
+		var err error
+		newRuleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+			NumCounters: 10_000_000,       // number of keys to track frequency of.
+			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+			BufferItems: 32,               // number of keys per Get buffer.
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create classify cache: %w", err)
+		}
 	}
 
 	return newRuleset, nil
@@ -1392,7 +1447,7 @@ func parseValue(s string) (*PluginArg, error) {
 	return nil, fmt.Errorf("unsupported argument: %s", s)
 }
 
-// RulesetBuild parses and validates a Ruleset, initializing all field paths and check functions.
+// RulesetBuild parses and validates a Ruleset with new flexible rule syntax, initializing all field paths and check functions.
 func RulesetBuild(ruleset *Ruleset) error {
 	var err error
 	//for init local cache, local cache only work for threshold check
@@ -1421,23 +1476,54 @@ func RulesetBuild(ruleset *Ruleset) error {
 			}
 		}
 
-		if strings.TrimSpace(rule.Checklist.Condition) != "" {
-			if _, _, ok := ConditionRegex.Find(strings.TrimSpace(rule.Checklist.Condition)); ok {
-				rule.Checklist.ConditionAST = GetAST(strings.TrimSpace(rule.Checklist.Condition))
-				rule.Checklist.ConditionMap = make(map[string]bool, len(rule.Checklist.CheckNodes))
-				rule.Checklist.ConditionFlag = true
-			} else {
-				return errors.New("checklist condition is not a valid expression")
+		// Process checklists in ChecklistMap
+		for id, checklist := range rule.ChecklistMap {
+			if strings.TrimSpace(checklist.Condition) != "" {
+				if _, _, ok := ConditionRegex.Find(strings.TrimSpace(checklist.Condition)); ok {
+					checklist.ConditionAST = GetAST(strings.TrimSpace(checklist.Condition))
+					checklist.ConditionMap = make(map[string]bool, len(checklist.CheckNodes))
+					checklist.ConditionFlag = true
+				} else {
+					return errors.New("checklist condition is not a valid expression")
+				}
 			}
+
+			// Process check nodes in this checklist
+			for j := range checklist.CheckNodes {
+				node := &checklist.CheckNodes[j]
+				err := processCheckNode(node, &checklist, rule.ID)
+				if err != nil {
+					return err
+				}
+			}
+
+			// Sort check nodes for optimization
+			checklist.CheckNodes = sortCheckNodes(checklist.CheckNodes)
+			// Update the checklist in the map
+			rule.ChecklistMap[id] = checklist
 		}
 
-		for i := range rule.Appends {
-			appendNode := &rule.Appends[i]
+		// Process standalone check nodes in CheckMap
+		for id, checkNode := range rule.CheckMap {
+			err := processCheckNode(&checkNode, nil, rule.ID)
+			if err != nil {
+				return err
+			}
+			// Update the check node in the map
+			rule.CheckMap[id] = checkNode
+		}
+
+		// Process appends in AppendsMap
+		for id, appendNode := range rule.AppendsMap {
 			appendType := strings.TrimSpace(appendNode.Type)
 			appendValue := strings.TrimSpace(appendNode.Value)
 
 			if appendType != "" && appendType != "PLUGIN" {
-				return errors.New("append type or field name cannot be empty")
+				return errors.New("append type must be empty or 'PLUGIN': " + rule.ID)
+			}
+
+			if appendNode.FieldName == "" {
+				return errors.New("append field name cannot be empty: " + rule.ID)
 			}
 
 			if appendNode.Type == "PLUGIN" {
@@ -1458,14 +1544,16 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 				appendNode.PluginArgs = args
 			}
+			// Update the append node in the map
+			rule.AppendsMap[id] = appendNode
 		}
 
-		for i := range rule.Plugins {
-			pluginNode := &rule.Plugins[i]
+		// Process plugins in PluginMap
+		for id, pluginNode := range rule.PluginMap {
 			value := strings.TrimSpace(pluginNode.Value)
 
 			if value == "" {
-				return errors.New("plugin value cannot be empty: " + pluginNode.Plugin.Name)
+				return errors.New("plugin value cannot be empty: " + rule.ID)
 			}
 
 			pluginName, args, err := ParseFunctionCall(value)
@@ -1480,49 +1568,50 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
 					return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 				}
-				return errors.New("not fount this plugin: " + pluginName)
+				return errors.New("not found this plugin: " + pluginName)
 			}
 
 			pluginNode.PluginArgs = args
+			// Update the plugin node in the map
+			rule.PluginMap[id] = pluginNode
 		}
 
-		if rule.Threshold.GroupBy == "" && rule.Threshold.Range == "" && rule.Threshold.Value == 0 {
-			rule.ThresholdCheck = false
-		} else {
-			if rule.Threshold.GroupBy == "" {
+		// Process thresholds in ThresholdMap
+		for id, threshold := range rule.ThresholdMap {
+			if threshold.GroupBy == "" && threshold.Range == "" && threshold.Value == 0 {
+				// No threshold configured, skip
+				continue
+			}
+
+			if threshold.GroupBy == "" {
 				return errors.New("threshold groupby cannot be empty: " + rule.ID)
 			}
-			if rule.Threshold.Range == "" {
+			if threshold.Range == "" {
 				return errors.New("threshold range cannot be empty: " + rule.ID)
 			}
-			if rule.Threshold.Value <= 0 {
+			if threshold.Value <= 0 {
 				return errors.New("threshold value must be a positive integer (greater than 0): " + rule.ID)
 			}
 
-			if !(rule.Threshold.CountType == "" || rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY") {
+			if !(threshold.CountType == "" || threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY") {
 				return errors.New("threshold count_type must be empty (default count mode), 'SUM', or 'CLASSIFY': " + rule.ID)
 			}
 
-			if rule.Threshold.CountType == "SUM" || rule.Threshold.CountType == "CLASSIFY" {
-				if rule.Threshold.CountField == "" {
+			if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+				if threshold.CountField == "" {
 					return errors.New("threshold count_field cannot be empty when count_type is 'SUM' or 'CLASSIFY': " + rule.ID)
 				} else {
 					// Parse threshold count field path
-					rule.Threshold.CountFieldList = common.StringToList(strings.TrimSpace(rule.Threshold.CountField))
+					threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
 				}
 			}
 
-			rule.Threshold.RangeInt, err = common.ParseDurationToSecondsInt(rule.Threshold.Range)
+			threshold.RangeInt, err = common.ParseDurationToSecondsInt(threshold.Range)
 			if err != nil {
 				return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
 			}
 
-			if !(rule.Threshold.Value > 0) {
-				return errors.New("threshold value must be a positive integer (greater than 0): " + rule.ID)
-			}
-
-			rule.ThresholdCheck = true
-			rule.Threshold.GroupByID = ruleset.RulesetID + rule.ID
+			threshold.GroupByID = ruleset.RulesetID + rule.ID
 
 			if !createLocalCache {
 				ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
@@ -1537,7 +1626,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				createLocalCache = true
 			}
 
-			if rule.Threshold.CountType == "CLASSIFY" {
+			if threshold.CountType == "CLASSIFY" {
 				if !createLocalCacheForClassify {
 					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
 						NumCounters: 10_000_000,       // number of keys to track frequency of.
@@ -1551,191 +1640,141 @@ func RulesetBuild(ruleset *Ruleset) error {
 					createLocalCacheForClassify = true
 				}
 			}
-		}
 
-		thresholdGroupBYList := strings.Split(strings.TrimSpace(rule.Threshold.GroupBy), ",")
-		rule.Threshold.GroupByList = make(map[string][]string, len(thresholdGroupBYList))
-		for i := range thresholdGroupBYList {
-			tmpList := common.StringToList(thresholdGroupBYList[i])
-			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = make([]string, len(tmpList))
-			rule.Threshold.GroupByList[thresholdGroupBYList[i]] = tmpList
-		}
-
-		// Parse filter field path
-		rule.Filter.Field = strings.TrimSpace(rule.Filter.Field)
-		rule.Filter.FieldList = common.StringToList(strings.TrimSpace(rule.Filter.Field))
-		if len(rule.Filter.FieldList) > 0 {
-			rule.Filter.Check = true
-		}
-
-		// Parse each node's field path and assign check function
-		for j := range rule.Checklist.CheckNodes {
-			node := &rule.Checklist.CheckNodes[j]
-			node.FieldList = common.StringToList(strings.TrimSpace(node.Field))
-
-			if rule.Checklist.ConditionFlag {
-				id := strings.TrimSpace(node.ID)
-				node.ID = id
-
-				if id == "" {
-					return errors.New("check node id cannot be empty: " + rule.ID)
-				}
-
-				if _, ok := rule.Checklist.ConditionMap[id]; ok {
-					return errors.New("check node id cannot be repeated: " + rule.ID)
-				} else {
-					rule.Checklist.ConditionMap[id] = false
-				}
+			// Parse threshold group by fields
+			thresholdGroupBYList := strings.Split(strings.TrimSpace(threshold.GroupBy), ",")
+			threshold.GroupByList = make(map[string][]string, len(thresholdGroupBYList))
+			for i := range thresholdGroupBYList {
+				tmpList := common.StringToList(thresholdGroupBYList[i])
+				threshold.GroupByList[thresholdGroupBYList[i]] = make([]string, len(tmpList))
+				threshold.GroupByList[thresholdGroupBYList[i]] = tmpList
 			}
-
-			switch strings.TrimSpace(node.Type) {
-			case "PLUGIN":
-				pluginName, args, err := ParseFunctionCall(node.Value)
-				if err != nil {
-					return err
-				}
-
-				if p, ok := plugin.Plugins[pluginName]; ok {
-					node.Plugin = p
-				} else {
-					// Check if it's a temporary component, temporary components should not be referenced
-					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
-						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first (rule id: " + rule.ID + ")")
-					}
-					return errors.New("not found this plugin: " + pluginName + " rule id: " + rule.ID)
-				}
-
-				node.PluginArgs = args
-
-			case "END":
-				node.CheckFunc = END
-			case "START":
-				node.CheckFunc = START
-			case "NEND":
-				node.CheckFunc = NEND
-			case "NSTART":
-				node.CheckFunc = NSTART
-			case "INCL":
-				node.CheckFunc = INCL
-			case "NI":
-				node.CheckFunc = NI
-			case "NCS_END":
-				node.CheckFunc = NCS_END
-			case "NCS_START":
-				node.CheckFunc = NCS_START
-			case "NCS_NEND":
-				node.CheckFunc = NCS_NEND
-			case "NCS_NSTART":
-				node.CheckFunc = NCS_NSTART
-			case "NCS_INCL":
-				node.CheckFunc = NCS_INCL
-			case "NCS_NI":
-				node.CheckFunc = NCS_NI
-			case "MT":
-				node.CheckFunc = MT
-			case "LT":
-				node.CheckFunc = LT
-			case "REGEX":
-				// REGEX handled below
-			case "ISNULL":
-				node.CheckFunc = ISNULL
-			case "NOTNULL":
-				node.CheckFunc = NOTNULL
-			case "EQU":
-				node.CheckFunc = EQU
-			case "NEQ":
-				node.CheckFunc = NEQ
-			case "NCS_EQU":
-				node.CheckFunc = NCS_EQU
-			case "NCS_NEQ":
-				node.CheckFunc = NCS_NEQ
-			default:
-				return errors.New("unknown check node type, " + common.AnyToString(j) + ", rule id: " + rule.ID)
-			}
-
-			// Compile regex if needed
-			if node.Type == "REGEX" {
-				var err error
-				node.Regex, err = regexp.Compile(node.Value)
-				if err != nil {
-					return err
-				}
-			}
-
-			if node.Logic != "" || node.Delimiter != "" {
-				if node.Logic == "" {
-					return errors.New("logic cannot be empty: " + rule.ID)
-				}
-
-				if node.Logic != "AND" && node.Logic != "OR" {
-					return errors.New("threshold count type must be 'AND' or 'OR': " + rule.ID)
-				}
-
-				if node.Delimiter == "" {
-					return errors.New("delimiter cannot be empty: " + rule.ID)
-				}
-
-				if strings.Contains(strings.TrimSpace(node.Value), node.Delimiter) {
-					node.DelimiterFieldList = strings.Split(strings.TrimSpace(node.Value), node.Delimiter)
-					if node.Logic == "OR" {
-						rule.ChecklistLen = len(rule.Checklist.CheckNodes)
-					} else {
-						rule.ChecklistLen = len(rule.Checklist.CheckNodes) + len(node.DelimiterFieldList) - 1
-					}
-				} else {
-					return errors.New("check node value does not exist in delimiter: " + rule.ID)
-				}
-			} else {
-				rule.ChecklistLen = len(rule.Checklist.CheckNodes)
-			}
+			// Update the threshold in the map
+			rule.ThresholdMap[id] = threshold
 		}
 
-		rule.Checklist.CheckNodes = sortCheckNodes(rule.Checklist.CheckNodes)
-
-		delList := strings.Split(strings.TrimSpace(rule.Del), ",")
-
-		rule.DelList = make([][]string, len(delList))
-		for i := range delList {
-			tmpList := common.StringToList(delList[i])
-			rule.DelList[i] = make([]string, len(tmpList))
-			rule.DelList[i] = tmpList
-		}
-
-		// Cluster rules by filter
-		filterStr := rule.Filter.ToStr()
-		if rulesByFilter, ok := ruleset.RulesByFilter[filterStr]; ok {
-			rulesByFilter.Rules = append(rulesByFilter.Rules, rule)
-		} else {
-			ruleset.RulesByFilter[filterStr] = &RulesByFilter{
-				Filter: rule.Filter,
-				Rules:  []*Rule{rule},
-			}
-		}
+		// Process del operations in DelMap (no additional processing needed as DelMap already contains parsed field paths)
 	}
 	return nil
 }
 
-// ParseRulesetFromByte parses XML bytes into a Ruleset struct and processes field paths.
-func ParseRulesetFromByte(rawRuleset []byte) (*Ruleset, error) {
-	var ruleset Ruleset
-	ruleset.RawConfig = string(rawRuleset)
-	ruleset.RulesByFilter = make(map[string]*RulesByFilter, 0)
+// processCheckNode handles the common logic for processing check nodes
+func processCheckNode(node *CheckNodes, checklist *Checklist, ruleID string) error {
+	node.FieldList = common.StringToList(strings.TrimSpace(node.Field))
 
-	if err := xml.Unmarshal(rawRuleset, &ruleset); err != nil {
-		// Enhanced error handling for XML parsing errors, especially threshold value errors
-		if enhancedErr := enhanceXMLParsingError(err, string(rawRuleset)); enhancedErr != nil {
-			return nil, enhancedErr
+	if checklist != nil && checklist.ConditionFlag {
+		id := strings.TrimSpace(node.ID)
+		node.ID = id
+
+		if id == "" {
+			return errors.New("check node id cannot be empty: " + ruleID)
 		}
-		return nil, err
+
+		if _, ok := checklist.ConditionMap[id]; ok {
+			return errors.New("check node id cannot be repeated: " + ruleID)
+		} else {
+			checklist.ConditionMap[id] = false
+		}
 	}
-	err := RulesetBuild(&ruleset)
-	if err != nil {
-		return nil, err
+
+	switch strings.TrimSpace(node.Type) {
+	case "PLUGIN":
+		pluginName, args, err := ParseFunctionCall(node.Value)
+		if err != nil {
+			return err
+		}
+
+		if p, ok := plugin.Plugins[pluginName]; ok {
+			node.Plugin = p
+		} else {
+			// Check if it's a temporary component, temporary components should not be referenced
+			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+				return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first (rule id: " + ruleID + ")")
+			}
+			return errors.New("not found this plugin: " + pluginName + " rule id: " + ruleID)
+		}
+
+		node.PluginArgs = args
+
+	case "END":
+		node.CheckFunc = END
+	case "START":
+		node.CheckFunc = START
+	case "NEND":
+		node.CheckFunc = NEND
+	case "NSTART":
+		node.CheckFunc = NSTART
+	case "INCL":
+		node.CheckFunc = INCL
+	case "NI":
+		node.CheckFunc = NI
+	case "NCS_END":
+		node.CheckFunc = NCS_END
+	case "NCS_START":
+		node.CheckFunc = NCS_START
+	case "NCS_NEND":
+		node.CheckFunc = NCS_NEND
+	case "NCS_NSTART":
+		node.CheckFunc = NCS_NSTART
+	case "NCS_INCL":
+		node.CheckFunc = NCS_INCL
+	case "NCS_NI":
+		node.CheckFunc = NCS_NI
+	case "MT":
+		node.CheckFunc = MT
+	case "LT":
+		node.CheckFunc = LT
+	case "REGEX":
+		// REGEX handled below
+	case "ISNULL":
+		node.CheckFunc = ISNULL
+	case "NOTNULL":
+		node.CheckFunc = NOTNULL
+	case "EQU":
+		node.CheckFunc = EQU
+	case "NEQ":
+		node.CheckFunc = NEQ
+	case "NCS_EQU":
+		node.CheckFunc = NCS_EQU
+	case "NCS_NEQ":
+		node.CheckFunc = NCS_NEQ
+	default:
+		return errors.New("unknown check node type: " + node.Type + ", rule id: " + ruleID)
 	}
-	ruleset.RulesCount = len(ruleset.Rules)
-	return &ruleset, nil
+
+	// Compile regex if needed
+	if node.Type == "REGEX" {
+		var err error
+		node.Regex, err = regexp.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+	}
+
+	if node.Logic != "" || node.Delimiter != "" {
+		if node.Logic == "" {
+			return errors.New("logic cannot be empty: " + ruleID)
+		}
+
+		if node.Logic != "AND" && node.Logic != "OR" {
+			return errors.New("check node logic must be 'AND' or 'OR': " + ruleID)
+		}
+
+		if node.Delimiter == "" {
+			return errors.New("delimiter cannot be empty: " + ruleID)
+		}
+
+		if strings.Contains(strings.TrimSpace(node.Value), node.Delimiter) {
+			node.DelimiterFieldList = strings.Split(strings.TrimSpace(node.Value), node.Delimiter)
+		} else {
+			return errors.New("check node value does not contain delimiter: " + ruleID)
+		}
+	}
+
+	return nil
 }
 
+// Legacy ParseRulesetFromByte has been removed - use ParseRuleset + RulesetBuild instead
 func sortCheckNodes(checkNodes []CheckNodes) []CheckNodes {
 	sortedIndex := 0
 	sorted := make([]CheckNodes, len(checkNodes))
@@ -1778,161 +1817,4 @@ func sortCheckNodes(checkNodes []CheckNodes) []CheckNodes {
 	}
 
 	return sorted
-}
-
-// enhanceXMLParsingError provides better error messages for XML parsing errors
-func enhanceXMLParsingError(err error, xmlContent string) error {
-	errorStr := err.Error()
-
-	// Check for XML syntax errors related to attributes
-	if strings.Contains(errorStr, "unquoted or missing attribute value") {
-		// Extract line number from original error if present
-		re := regexpgo.MustCompile(`line (\d+):`)
-		matches := re.FindStringSubmatch(errorStr)
-		var lineNum int = 1
-		if len(matches) > 1 {
-			if num, err := strconv.Atoi(matches[1]); err == nil {
-				lineNum = num
-			}
-		}
-
-		// Try to find the specific line and provide better error message
-		lines := strings.Split(xmlContent, "\n")
-		if lineNum > 0 && lineNum <= len(lines) {
-			line := lines[lineNum-1]
-			if strings.Contains(line, "local_cache") {
-				// Check for common local_cache syntax issues
-				if strings.Contains(line, `local_cache="`) {
-					// Find the attribute value
-					start := strings.Index(line, `local_cache="`)
-					if start != -1 {
-						start += 13 // length of `local_cache="`
-						end := strings.Index(line[start:], `"`)
-						if end != -1 {
-							value := line[start : start+end]
-							if value != "true" && value != "false" {
-								return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s' at line %d)", value, lineNum)
-							}
-						}
-					}
-				}
-				// If we found a line with local_cache but couldn't parse it properly, it's likely a syntax error
-				return fmt.Errorf("local_cache attribute has syntax error at line %d", lineNum)
-			}
-		}
-
-		// Generic XML syntax error with line number if available
-		if lineNum > 1 {
-			return fmt.Errorf("XML syntax error: unquoted or missing attribute value at line %d", lineNum)
-		}
-		return fmt.Errorf("XML syntax error: unquoted or missing attribute value")
-	}
-
-	// Check for boolean parsing errors (local_cache attribute)
-	if strings.Contains(errorStr, "strconv.ParseBool") && strings.Contains(errorStr, "invalid syntax") {
-		// Extract the invalid value from the error message - handle both single and double quotes
-		var invalidValue string
-		var found bool
-
-		// Try double quotes first (more common)
-		start := strings.Index(errorStr, `parsing "`)
-		if start != -1 {
-			start += 9 // length of `parsing "`
-			end := strings.Index(errorStr[start:], `"`)
-			if end != -1 {
-				invalidValue = errorStr[start : start+end]
-				found = true
-			}
-		}
-
-		// Try single quotes if double quotes not found
-		if !found {
-			start = strings.Index(errorStr, "parsing '")
-			if start != -1 {
-				start += 9 // length of "parsing '"
-				end := strings.Index(errorStr[start:], "'")
-				if end != -1 {
-					invalidValue = errorStr[start : start+end]
-					found = true
-				}
-			}
-		}
-
-		if found {
-			// Find the line number where this invalid local_cache value appears
-			lines := strings.Split(xmlContent, "\n")
-			for i, line := range lines {
-				if strings.Contains(line, "local_cache") && strings.Contains(line, invalidValue) {
-					return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s' at line %d)", invalidValue, i+1)
-				}
-			}
-
-			// Fallback: general local_cache parsing error
-			return fmt.Errorf("local_cache attribute must be 'true' or 'false' (found '%s')", invalidValue)
-		}
-
-		// Generic local_cache parsing error
-		return fmt.Errorf("local_cache attribute must be 'true' or 'false'")
-	}
-
-	// Check for threshold value parsing errors
-	if strings.Contains(errorStr, "strconv.ParseInt") && strings.Contains(errorStr, "invalid syntax") {
-		// Extract the invalid value from the error message - handle both single and double quotes
-		var invalidValue string
-		var found bool
-
-		// Try double quotes first (more common)
-		start := strings.Index(errorStr, `parsing "`)
-		if start != -1 {
-			start += 9 // length of `parsing "`
-			end := strings.Index(errorStr[start:], `"`)
-			if end != -1 {
-				invalidValue = errorStr[start : start+end]
-				found = true
-			}
-		}
-
-		// Try single quotes if double quotes not found
-		if !found {
-			start = strings.Index(errorStr, "parsing '")
-			if start != -1 {
-				start += 9 // length of "parsing '"
-				end := strings.Index(errorStr[start:], "'")
-				if end != -1 {
-					invalidValue = errorStr[start : start+end]
-					found = true
-				}
-			}
-		}
-
-		if found {
-			// Find the line number where this invalid threshold value appears
-			lines := strings.Split(xmlContent, "\n")
-			for i, line := range lines {
-				if strings.Contains(line, "<threshold") && strings.Contains(line, invalidValue) {
-					return fmt.Errorf("threshold value must be a positive integer (found '%s' at line %d)", invalidValue, i+1)
-				}
-				// Also check for threshold content on separate lines
-				if strings.Contains(line, invalidValue) && i > 0 {
-					prevLine := lines[i-1]
-					if strings.Contains(prevLine, "<threshold") || strings.Contains(line, "</threshold>") {
-						return fmt.Errorf("threshold value must be a positive integer (found '%s' at line %d)", invalidValue, i+1)
-					}
-				}
-			}
-
-			// Fallback: general threshold parsing error
-			return fmt.Errorf("threshold value must be a positive integer (found '%s')", invalidValue)
-		}
-
-		// Generic threshold parsing error
-		return fmt.Errorf("threshold value must be a positive integer")
-	}
-
-	// For other XML parsing errors, try to extract line information
-	if strings.Contains(errorStr, "line") {
-		return err // Return original error as it already contains line info
-	}
-
-	return nil // Return nil to use the original error
 }

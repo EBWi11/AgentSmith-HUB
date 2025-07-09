@@ -2882,9 +2882,9 @@ function getParentTags(textBeforeCursor) {
 function getXmlAttributeValueCompletions(context, range) {
   const suggestions = [];
   
-  // node标签的type属性
-  if (context.currentTag === 'node' && context.currentAttribute === 'type') {
-    const nodeTypes = [
+  // check或node标签的type属性（支持新的check语法）
+  if ((context.currentTag === 'check' || context.currentTag === 'node') && context.currentAttribute === 'type') {
+    const checkTypes = [
       { value: 'REGEX', description: 'Regular expression match' },
       { value: 'EQU', description: 'Equal comparison' },
       { value: 'NEQ', description: 'Not equal comparison' },
@@ -2909,7 +2909,7 @@ function getXmlAttributeValueCompletions(context, range) {
       { value: 'PLUGIN', description: 'Plugin function call' }
     ];
     
-    nodeTypes.forEach(type => {
+    checkTypes.forEach(type => {
       if (!suggestions.some(s => s.label === type.value)) {
         suggestions.push({
           label: type.value,
@@ -2922,8 +2922,8 @@ function getXmlAttributeValueCompletions(context, range) {
     });
   }
   
-  // node标签的logic属性
-  else if (context.currentTag === 'node' && context.currentAttribute === 'logic') {
+  // check或node标签的logic属性
+  else if ((context.currentTag === 'check' || context.currentTag === 'node') && context.currentAttribute === 'logic') {
     suggestions.push(
       { label: 'AND', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Logical AND operation', insertText: 'AND', range: range },
       { label: 'OR', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Logical OR operation', insertText: 'OR', range: range }
@@ -3065,32 +3065,27 @@ function getXmlAttributeNameCompletions(context, range) {
       );
       break;
       
+    case 'check':
     case 'node':
       // Generate smart field suggestion with available fields  
-      let nodeFieldTemplate = 'field="field-name"';
+      let checkFieldTemplate = 'field="field-name"';
       if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
-        nodeFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+        checkFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
       }
       
-      suggestions.push(
-        { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions', insertText: 'id="node-id"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="INCL"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: nodeFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+      const checkAttrs = [
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Check type', insertText: 'type="EQU"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to check', insertText: checkFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'logic', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical operation for multiple values', insertText: 'logic="OR"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'delimiter', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Delimiter for multiple values', insertText: 'delimiter="|"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
-      );
-      break;
+      ];
       
-    case 'filter':
-      // Generate smart field suggestion with available fields  
-      let filterFieldTemplate = 'field="field-name"';
-      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
-        filterFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
+      // 在checklist内部的check节点需要id属性
+      if (context.parentTags.includes('checklist')) {
+        checkAttrs.unshift({ label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions (required in checklist)', insertText: 'id="${1:node-id}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range });
       }
       
-      suggestions.push(
-        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to filter on', insertText: filterFieldTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
-      );
+      suggestions.push(...checkAttrs);
       break;
       
     case 'checklist':
@@ -3146,7 +3141,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'root',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Root element for ruleset',
-        insertText: 'root author="name">\n    <rule id="rule_id">\n        <filter field="key">vaule</filter>\n        <checklist>\n            <node type="REGEX" field="exe">testcases</node>\n            <node type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</node>\n			<node type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</node>\n        </checklist>\n        <append field="abc">123</append>\n        <del>exe,argv</del>\n		<plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>\n    </rule>\n</root',
+        insertText: 'root type="DETECTION" name="ruleset-name">\n    <rule id="rule_id" name="rule_name">\n        <!-- Operations can be in any order -->\n        <check type="EQU" field="status">active</check>\n        <threshold group_by="user_id" range="5m">10</threshold>\n        <checklist condition="a and b">\n            <check id="a" type="INCL" field="message">error</check>\n            <check id="b" type="REGEX" field="path">.*\\.log$</check>\n        </checklist>\n        <append field="processed">true</append>\n        <plugin>notify("alert")</plugin>\n        <del>temp_field</del>\n    </rule>\n</root',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -3157,67 +3152,81 @@ function getXmlTagNameCompletions(context, range, fullText) {
       suggestions.push({
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
-        documentation: 'Rule definition',
-        insertText: 'rule id="" name="">\n    <filter field=""></filter>\n    <checklist>\n       <node type="" field=""></node>\n    </checklist>\n</rule',
+        documentation: 'Rule definition (operations can be in any order)',
+        insertText: 'rule id="${1:rule_id}" name="${2:rule_name}">\n    ${3:<!-- Add any operations in any order -->}\n    <check type="${4:EQU}" field="${5:field}">${6:value}</check>\n</rule',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
     }
   } else if (parentTag === 'rule') {
-    // rule内部 - 提供所有可能的子标签
+    // rule内部 - 提供所有可能的子标签，强调可以任意顺序
     const ruleChildTags = [
       {
-        label: 'filter',
+        label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Filter condition for rule',
-        insertText: 'filter field=""></filter',
-        range: range
+        documentation: 'Standalone check condition (can be placed anywhere in rule)',
+        insertText: 'check type="${1:EQU}" field="${2:field}">${3:value}</check',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '1_check' // Higher priority
       },
       {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
-        documentation: 'Checklist with conditions',
-        insertText: 'checklist>\n    <node type="" field=""></node>\n</checklist',
-        range: range
+        documentation: 'Checklist with conditional logic (can be placed anywhere in rule)',
+        insertText: 'checklist condition="${1:a and b}">\n    <check id="${2:a}" type="${3:EQU}" field="${4:field}">${5:value}</check>\n    <check id="${6:b}" type="${7:INCL}" field="${8:field}">${9:value}</check>\n</checklist',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '2_checklist'
       },
       {
         label: 'threshold',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Threshold configuration',
-        insertText: 'threshold group_by="" range="" count_type="" count_field="" local_cache=""></threshold',
-        range: range
+        documentation: 'Threshold configuration (can be placed anywhere in rule)',
+        insertText: 'threshold group_by="${1:user_id}" range="${2:5m}">${3:10}</threshold',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '3_threshold'
       },
       {
         label: 'append',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Append field to result',
-        insertText: 'append field="" type=""></append',
-        range: range
+        documentation: 'Append field to result (can be placed anywhere in rule)',
+        insertText: 'append field="${1:field_name}">${2:value}</append',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '4_append'
       },
       {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
-        documentation: 'Plugin execution',
-        insertText: 'plugin></plugin',
-        range: range
+        documentation: 'Plugin execution (can be placed anywhere in rule)',
+        insertText: 'plugin>${1:plugin_name()}${2}</plugin',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '5_plugin'
       },
       {
         label: 'del',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Delete fields from result',
-        insertText: 'del></del',
-        range: range
+        documentation: 'Delete fields from result (can be placed anywhere in rule)',
+        insertText: 'del>${1:field1,field2}</del',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '6_del'
       }
     ];
     
     suggestions.push(...ruleChildTags);
   } else if (parentTag === 'checklist') {
-    // checklist内部 - 只能有node标签，确保只添加一次
-    if (!suggestions.some(s => s.label === 'node')) {
+    // checklist内部 - 只能有check标签（注意：不是node）
+    if (!suggestions.some(s => s.label === 'check')) {
       suggestions.push({
-        label: 'node',
+        label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Check node',
-        insertText: 'node id="" type="" field=""></node>',
+        documentation: 'Check node within checklist (must have id attribute for condition)',
+        insertText: 'check id="${1:id}" type="${2:EQU}" field="${3:field}">${4:value}</check',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
     }
@@ -3242,10 +3251,13 @@ function getXmlTagContentCompletions(context, range, fullText) {
   
   // Enhanced plugin function completion with parameter information (optimized)
   // Only show plugin functions when NOT in function parameters
-  if (context.currentTag === 'plugin' || (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
+  if (context.currentTag === 'plugin' || 
+      (context.currentTag === 'check' && fullText.includes('type="PLUGIN"')) || 
+      (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || 
+      (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
     
-    // Determine if we're in a checknode context (which requires bool return type)
-    const isInCheckNode = context.currentTag === 'node' && fullText.includes('type="PLUGIN"');
+    // Determine if we're in a check context (which requires bool return type)
+    const isInCheckNode = (context.currentTag === 'check' || context.currentTag === 'node') && fullText.includes('type="PLUGIN"');
     
     // Use cached plugin suggestions (no async needed)
     const pluginSuggestions = getPluginSuggestions(range, isInCheckNode);
@@ -3276,18 +3288,24 @@ function getXmlTagContentCompletions(context, range, fullText) {
     }
   }
   
-  // 过滤器值建议
-  if (context.currentTag === 'filter') {
+  // check或node标签的值建议
+  if (context.currentTag === 'check' || context.currentTag === 'node') {
     suggestions.push(
       { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
     );
-  }
-  
-  // 节点值建议
-  if (context.currentTag === 'node') {
-    suggestions.push(
-      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
-    );
+    
+    // 为field引用添加建议
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      suggestions.push({
+        label: '_$field_reference',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Reference to another field value',
+        insertText: '_$${1:' + dynamicFieldKeys.value[0] + '}',
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range: range,
+        sortText: '01_field_ref'
+      });
+    }
   }
   
   // del标签内容补全 - 字段列表

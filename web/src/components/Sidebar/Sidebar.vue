@@ -2097,7 +2097,7 @@ kafka:
   topic: test-topic
   group: test` }
     case 'rulesets':
-      return { id, raw: addRaw.value || `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root type=\"DETECTION\" />` }
+      return { id, raw: addRaw.value || `<root type="DETECTION" name="${id}">\n    <rule id="${id}_01" name="New Rule">\n        <!-- Add operations in any order -->\n        <check type="EQU" field="status">active</check>\n    </rule>\n</root>` }
     case 'projects':
       return { id, raw: addRaw.value || `name: "${id}"
 flow:
