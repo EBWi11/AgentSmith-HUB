@@ -430,6 +430,8 @@
                         :class="{
                           'bg-green-100 text-green-800': item.status === 'running',
                           'bg-gray-100 text-gray-800': item.status === 'stopped',
+                          'bg-blue-100 text-blue-800 animate-pulse': item.status === 'starting',
+                          'bg-orange-100 text-orange-800 animate-pulse': item.status === 'stopping',
                           'bg-red-100 text-red-800': item.status === 'error'
                         }"
                         @mouseenter="showTooltip($event, getStatusTitle(item))"
@@ -2097,7 +2099,7 @@ kafka:
   topic: test-topic
   group: test` }
     case 'rulesets':
-      return { id, raw: addRaw.value || `<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root type=\"DETECTION\" />` }
+      return { id, raw: addRaw.value || `<root type="DETECTION" name="${id}">\n    <rule id="${id}_01" name="New Rule">\n        <!-- Add operations in any order -->\n        <check type="EQU" field="status">active</check>\n    </rule>\n</root>` }
     case 'projects':
       return { id, raw: addRaw.value || `name: "${id}"
 flow:
@@ -2549,8 +2551,8 @@ function setupProjectStatusRefresh() {
       // 状态刷新后，检查是否需要调整刷新间隔
       const newInterval = getRefreshInterval()
       
-      // 只有当间隔发生显著变化时才重新设置定时器
-      if (projectStatusRefreshInterval.value && Math.abs(newInterval - currentSidebarInterval.value) > 500) {
+      // 如果间隔需要改变，重新设置定时器
+      if (newInterval !== currentSidebarInterval.value) {
         clearInterval(projectStatusRefreshInterval.value)
         currentSidebarInterval.value = newInterval
         projectStatusRefreshInterval.value = setInterval(refreshProjects, newInterval)
@@ -2566,6 +2568,9 @@ function setupProjectStatusRefresh() {
   currentSidebarInterval.value = initialInterval
   projectStatusRefreshInterval.value = setInterval(refreshProjects, initialInterval)
   console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
+  
+  // 立即执行一次刷新
+  refreshProjects()
 }
 
 // 清除项目状态刷新

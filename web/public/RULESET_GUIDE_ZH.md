@@ -1,1368 +1,1904 @@
 # 🛡️ AgentSmith-HUB 规则引擎完整指南
-## 🚀 快速上手
 
-### 什么是 AgentSmith-HUB 规则引擎？
+## 🚀 引言：什么是规则引擎？
 
-AgentSmith-HUB 规则引擎是一个基于XML配置的实时数据处理引擎，用于：
-- **数据过滤**：根据条件筛选数据
-- **威胁检测**：识别安全威胁和异常行为
-- **数据转换**：对数据进行加工和处理
-- **实时分析**：对数据流进行实时监控
+AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
+- 🔍 **实时检测**：从数据流中识别威胁和异常
+- 🔄 **数据转换**：对数据进行加工和丰富化
+- 📊 **统计分析**：进行阈值检测和频率分析
+- 🚨 **自动响应**：触发告警和自动化操作
 
+### 核心理念：灵活的执行顺序
+
+规则引擎采用**灵活的执行顺序**，操作按照在XML中的出现顺序执行，让你可以根据具体需求自由组合各种操作。
+
+## 📚 第一部分：从零开始
+
+### 1.1 你的第一个规则
+
+假设我们有这样的数据流入：
+```json
+{
+  "event_type": "login",
+  "username": "admin",
+  "source_ip": "192.168.1.100",
+  "timestamp": 1699999999
+}
 ```
-输入数据 → 过滤器(Filter) → 检查列表(CheckList) → 阈值检测(Threshold) → 数据处理(Append/Del/Plugin) → 输出数据
-```
 
-### 1分钟写出第一个规则
-
+最简单的规则：检测admin登录
 ```xml
-<root type="DETECTION" name="my_first_ruleset" author="your_name">
-    <rule id="detect_powershell" name="检测PowerShell执行">
-        <!-- 1. 过滤器：只处理进程创建事件 -->
-        <filter field="event_type">process_creation</filter>
-
-        <!-- 2. 检查列表：检查进程名是否包含powershell -->
-        <checklist>
-            <node type="INCL" field="process_name">powershell</node>
-        </checklist>
-
-        <!-- 3. 添加字段：标记为可疑活动 -->
-        <append field="alert_type">suspicious_powershell</append>
+<root author="beginner">
+    <rule id="detect_admin_login" name="检测管理员登录">
+        <!-- 独立的check，不需要checklist包装 -->
+        <check type="EQU" field="username">admin</check>
+        
+        <!-- 添加标记 -->
+        <append field="alert">admin login detected</append>
     </rule>
 </root>
 ```
 
-**这个规则做了什么？**
-1. 监听所有进程创建事件（event_type = process_creation）
-2. 检查进程名（process_name字段）是否包含（INCL）"powershell"
-3. 如果匹配，添加一个`alert_type`字段标记为可疑活动(suspicious_powershell)
+#### 🔍 语法详解：`<check>` 标签
 
-### 更复杂的嵌套数据示例
+`<check>` 是规则引擎中最基础的检查单元，用于对数据进行条件判断。
 
+**基本语法：**
 ```xml
-<root type="DETECTION" name="advanced_detection" author="your_name">
-    <rule id="nested_data_rule" name="嵌套数据检测">
-        <!-- 对于这样的JSON数据：{"event":{"source":{"host":"web01","type":"login"}}} -->
-        <filter field="event.source.type">login</filter>
+<check type="检查类型" field="字段名">比较值</check>
+```
 
-        <checklist condition="host_check and user_check">
-            <!-- 检查主机名 -->
-            <node id="host_check" type="EQU" field="event.source.host">web01</node>
-            <!-- 检查用户信息：{"user":{"profile":{"level":"admin"}}} -->
-            <node id="user_check" type="EQU" field="user.profile.level">admin</node>
-        </checklist>
+**属性说明：**
+- `type`（必需）：指定检查类型，如 `EQU`（相等）、`INCL`（包含）、`REGEX`（正则匹配）等
+- `field`（必需）：要检查的数据字段路径
+- `negate`（可选）：结果取反，如 `negate="true"` 将true变为false
+- 标签内容：用于比较的值
 
-        <!-- 添加分析结果 -->
-        <append field="detection_result">admin_login_detected</append>
+**工作原理：**
+1. 规则引擎从输入数据中提取 `field` 指定的字段值
+2. 使用 `type` 指定的比较方式，将字段值与标签内容进行比较
+3. 返回 true 或 false 的检查结果
+4. 如果设置了 `negate="true"`，则对结果取反
+
+**negate 属性示例：**
+```xml
+<!-- 检查IP不是私有地址 -->
+<check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
+
+<!-- 检查文件名不以.txt结尾 -->
+<check type="END" field="filename" negate="true">.txt</check>
+```
+
+在上面的例子中，`<check type="EQU" field="username">admin</check>` 会：
+- 从数据中提取 `username` 字段的值（"admin"）
+- 检查是否等于 "admin"
+- 因为相等，返回 true，规则匹配成功
+
+#### 🔍 语法详解：`<append>` 标签
+
+`<append>` 用于向数据中添加新字段或修改现有字段。
+
+**基本语法：**
+```xml
+<append field="字段名">要添加的值</append>
+```
+
+**属性说明：**
+- `field`（必需）：要添加或修改的字段名
+- `type`（可选）：当值为 "PLUGIN" 时，表示使用插件生成值
+
+**工作原理：**
+当规则匹配成功后，`<append>` 操作会执行，向数据中添加指定的字段和值。
+
+输出数据将变成：
+```json
+{
+  "event_type": "login",
+  "username": "admin", 
+  "source_ip": "192.168.1.100",
+  "timestamp": 1699999999,
+  "alert": "admin login detected"  // 新添加的字段
+}
+```
+
+### 1.2 添加更多检查条件
+
+输入数据：
+```json
+{
+  "event_type": "login",
+  "username": "admin",
+  "source_ip": "192.168.1.100",
+  "login_time": 23,  // 23点（晚上11点）
+  "failed_attempts": 5
+}
+```
+
+检测异常时间的admin登录：
+```xml
+<root author="learner">
+    <rule id="suspicious_admin_login" name="可疑管理员登录">
+        <!-- 灵活顺序：先检查用户名 -->
+        <check type="EQU" field="username">admin</check>
+        
+        <!-- 再检查时间（深夜） -->
+        <check type="MT" field="login_time">22</check>  <!-- 大于22点 -->
+        
+        <!-- 或者检查失败次数 -->
+        <check type="MT" field="failed_attempts">3</check>
+        
+        <!-- 所有check默认是AND关系，全部满足才继续 -->
+        
+        <!-- 添加告警信息 -->
+        <append field="risk_level">high</append>
+        <append field="alert_reason">admin login at unusual time</append>
+        
+        <!-- 触发告警插件（假设已配置好） -->
+        <plugin>send_security_alert(_$ORIDATA)</plugin>
     </rule>
 </root>
 ```
 
-**嵌套数据访问说明**：
-- `field="event.source.type"` - 直接访问多层嵌套的字段
-- `field="user.profile.level"` - 访问用户配置中的级别信息
-- 支持任意深度的嵌套：`a.b.c.d.e...`
+#### 💡 重要概念：多条件检查的默认逻辑
 
----
+当一个规则中有多个 `<check>` 标签时：
+- 默认使用 **AND** 逻辑：所有检查都必须通过，规则才匹配
+- 检查按顺序执行：如果某个检查失败，后续检查不会执行（短路求值）
+- 这种设计提高了性能：尽早失败，避免不必要的检查
 
-## 🧠 核心概念
+在上面的例子中，三个检查条件必须**全部满足**：
+1. username 等于 "admin" 
+2. login_time 大于 22（晚上10点后）
+3. failed_attempts 大于 3
 
-### 规则集(Ruleset)类型
-- **DETECTION**：检测规则集，匹配到后数据向后传递，不填写默认为 DETECTION
-- **WHITELIST**：白名单规则集，匹配时丢弃数据，未匹配到的数据向后传递；白名单规则不支持 `<append>`、`<del>`、`<plugin>`等数据处理操作
+#### 🔍 语法详解：`<plugin>` 标签
 
-### 规则(Rule)执行流程
-1. **Filter过滤**：快速过滤不相关数据
-2. **CheckList检查**：执行具体的检测逻辑
-3. **Threshold阈值**：统计频率和数量
-4. **数据处理**：添加（Append）、删除（Del）字段或执行插件（Plugin）
+`<plugin>` 用于执行自定义操作，通常用于响应动作。
 
-### ⚠️ 重要约束
-- **每个 `<rule>` 只能包含一个 `<checklist>`**：所有检查逻辑必须在同一个 checklist 中完成
-- **如需多个检查条件，请使用 `condition` 属性组合逻辑**：如 `condition="a and b"` 或 `condition="(a or b) and c"`
-
-### 性能优化机制
-- **自动排序**：系统自动按性能优化节点执行顺序
-- **智能缓存**：缓存常用计算结果
-- **动态线程调整**：随着规则引擎负载自动调整线程数
-- **正则优化**：使用高性能正则引擎
-
----
-
-## 📖 字段访问语法
-
-### 静态值与动态值
-
-#### 静态值（直接写入）
+**基本语法：**
 ```xml
-<!-- 固定值 -->
-<node type="EQU" field="status">active</node>
-<filter field="event_type">process_creation</filter>
-<append field="alert_type">malware_detected</append>
+<plugin>插件名称(参数1, 参数2, ...)</plugin>
 ```
 
-#### 动态值（从数据中获取）
-使用 `_$` 前缀从当前数据中动态获取值：
-```xml
-<!-- 动态值：从数据中获取 expected_status 字段的值 -->
-<node type="EQU" field="status">_$expected_status</node>
-<filter field="event_type">_$monitoring_target</filter>
-<append field="reference_id">_$original_event_id</append>
-```
+**特点：**
+- 执行操作但不返回值到数据中
+- 通常用于外部动作：发送告警、执行阻断、记录日志等
+- 只在规则匹配成功后执行
 
-### 嵌套字段访问（a.b.c语法）
+**与 `<append type="PLUGIN">` 的区别：**
+- `<plugin>`：执行操作，不返回值
+- `<append type="PLUGIN">`：执行插件并将返回值添加到数据中
 
-#### 两种嵌套访问方式
+### 1.3 使用动态值
 
-##### 1. 在 field 属性中直接使用嵌套路径
-用于访问输入数据中的深层字段：
-```xml
-<!-- 示例数据：{"user":{"profile":{"level":"admin"}}} -->
-<node type="EQU" field="user.profile.level">admin</node>
-
-<!-- 示例数据：{"event":{"source":{"host":"server01"}}} -->
-<filter field="event.source.host">server01</filter>
-
-<!-- 示例数据：{"request":{"headers":{"authorization":"Bearer token123"}}} -->
-<node type="NOTNULL" field="request.headers.authorization"></node>
-
-<!-- 示例数据：{"a":{"b":{"c":"test100"}}} -->
-<node type="EQU" field="a.b.c">test100</node>
-```
-
-##### 2. 在值部分使用动态引用（_$前缀）
-用于从数据中动态获取比较值：
-```xml
-<!-- 从配置中获取期望的安全级别进行比较 -->
-<node type="EQU" field="user_level">_$config.expected_level</node>
-
-<!-- 从嵌套配置中获取目标系统名称 -->
-<filter field="event_type">_$monitoring.target_events</filter>
-
-<!-- 从用户配置中获取认证令牌 -->
-<node type="EQU" field="auth_token">_$user.session.token</node>
-```
-
-#### 完整对比示例
-
-假设输入数据为：
+输入数据：
 ```json
 {
+  "event_type": "transaction",
+  "amount": 10000,
   "user": {
     "id": "user123",
-    "profile": {
-      "level": "admin",
-      "department": "security"
-    }
-  },
-  "config": {
-    "min_level": "admin",
-    "allowed_departments": "security,it"
-  },
-  "event": {
-    "risk_score": 85,
-    "details": {
-      "source": "internal"
-    }
+    "daily_limit": 5000,
+    "vip_level": "gold"
   }
 }
 ```
 
-**不同的嵌套访问方式：**
+检测超过用户限额的交易：
 ```xml
-<rule id="nested_access_demo" name="嵌套访问演示">
-    <!-- 1. field中使用嵌套路径：直接访问输入数据 -->
-    <checklist condition="level_check and score_check and source_check">
-        <!-- 检查用户级别是否为admin -->
-        <node id="level_check" type="EQU" field="user.profile.level">admin</node>
+<root author="dynamic_learner">
+    <rule id="over_limit_transaction" name="超限交易检测">
+        <!-- 动态比较：交易金额 > 用户日限额 -->
+        <check type="MT" field="amount">_$user.daily_limit</check>
         
-        <!-- 检查风险分数是否大于80 -->
-        <node id="score_check" type="MT" field="event.risk_score">80</node>
+        <!-- 使用插件计算超出比例（假设有自定义插件） -->
+        <append type="PLUGIN" field="over_ratio">
+            calculate_ratio(_$amount, _$user.daily_limit)
+        </append>
         
-        <!-- 检查事件来源 -->
-        <node id="source_check" type="EQU" field="event.details.source">internal</node>
-    </checklist>
+        <!-- 根据VIP等级添加不同处理 -->
+        <check type="EQU" field="user.vip_level">gold</check>
+        <append field="action">notify_vip_service</append>
+    </rule>
+</root>
+```
+
+#### 🔍 语法详解：动态引用（_$ 前缀）
+
+`_$` 前缀用于动态引用数据中的其他字段值，而不是使用静态的字符串。
+
+**语法格式：**
+- `_$字段名`：引用单个字段
+- `_$父字段.子字段`：引用嵌套字段
+- `_$ORIDATA`：引用整个原始数据对象
+
+**工作原理：**
+1. 当规则引擎遇到 `_$` 前缀时，会将其识别为动态引用
+2. 从当前处理的数据中提取对应字段的值
+3. 使用提取的值进行比较或处理
+
+**在上面的例子中：**
+- `_$user.daily_limit` 从数据中提取 `user.daily_limit` 的值（5000）
+- `_$amount` 提取 `amount` 字段的值（10000）
+- 动态比较：10000 > 5000，条件满足
+
+**常见用法：**
+```xml
+<!-- 动态比较两个字段 -->
+<check type="NEQ" field="current_user">_$login_user</check>
+
+<!-- 在 append 中使用动态值 -->
+<append field="message">User _$username logged in from _$source_ip</append>
+
+<!-- 在插件参数中使用 -->
+<plugin>blockIP(_$malicious_ip, _$block_duration)</plugin>
+```
+
+**_$ORIDATA 的使用：**
+`_$ORIDATA` 代表整个原始数据对象，常用于：
+- 将完整数据传递给插件进行复杂处理
+- 生成包含所有信息的告警
+- 数据备份或归档
+
+```xml
+<!-- 将整个数据对象发送给分析插件 -->
+<append type="PLUGIN" field="risk_analysis">analyzeFullData(_$ORIDATA)</append>
+
+<!-- 生成完整告警 -->
+<plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
+```
+
+## 📊 第二部分：数据处理进阶
+
+### 2.1 灵活的执行顺序
+
+规则引擎的一大特点是灵活的执行顺序：
+
+```xml
+<rule id="flexible_way" name="灵活处理示例">
+    <!-- 可以先添加时间戳 -->
+    <append type="PLUGIN" field="check_time">now()</append>
     
-    <!-- 2. 值中使用_$：动态获取比较值 -->
-    <checklist condition="dynamic_level_check and dept_check">
-        <!-- 用户级别与配置中的最小级别比较 -->
-        <node id="dynamic_level_check" type="EQU" field="user.profile.level">_$config.min_level</node>
-        
-        <!-- 检查部门是否在允许列表中 -->
-        <node id="dept_check" type="INCL" field="_$config.allowed_departments">_$user.profile.department</node>
-    </checklist>
+    <!-- 然后进行检查 -->
+    <check type="EQU" field="event_type">security_event</check>
     
-    <!-- 3. 在阈值和插件中使用嵌套字段 -->
-    <threshold group_by="user.profile.department" range="300s">5</threshold>
+    <!-- 统计阈值可以放在任何位置 -->
+    <threshold group_by="source_ip" range="5m" value="10"/>
     
-    <append type="PLUGIN" field="user_info">get_user_details(_$user.profile.id)</append>
+    <!-- 继续其他检查（假设有自定义插件） -->
+    <check type="PLUGIN">is_working_hours(_$check_time)</check>
+    
+    <!-- 最后处理 -->
+    <append field="processed">true</append>
 </rule>
 ```
 
-#### 语法要点总结
+#### 💡 重要概念：执行顺序的意义
 
-| 用法 | 完整XML示例 | 说明 | 适用数据场景 |
-|------|-------------|------|-------------|
-| **field属性嵌套** | `<node type="EQU" field="user.profile.level">admin</node>` | 直接访问输入数据的嵌套字段，与固定值比较 | 输入数据：`{"user":{"profile":{"level":"admin"}}}` |
-| **值的动态引用** | `<node type="EQU" field="status">_$config.expected_status</node>` | field访问简单字段，值从其他字段动态获取 | 输入数据：`{"status":"active", "config":{"expected_status":"active"}}` |
-| **双重嵌套访问** | `<node type="EQU" field="user.profile.level">_$system.security.min_level</node>` | field访问嵌套字段，值也从嵌套字段动态获取 | 输入数据：`{"user":{"profile":{"level":"admin"}}, "system":{"security":{"min_level":"admin"}}}` |
+**为什么执行顺序很重要？**
 
-#### 语法综合示例
+1. **数据增强**：可以先添加字段，然后基于新字段做检查
+2. **性能优化**：将快速检查放在前面，复杂操作放在后面
+3. **条件处理**：某些操作可能依赖前面操作的结果
 
-假设有如下输入数据：
+**执行流程：**
+1. 规则引擎按照 XML 中标签的出现顺序执行操作
+2. 检查类操作（check、threshold）如果失败，规则立即结束
+3. 处理类操作（append、del、plugin）只在所有检查通过后执行
+
+#### 🔍 语法详解：`<threshold>` 标签
+
+`<threshold>` 用于检测在指定时间窗口内事件发生的频率。
+
+**基本语法：**
+```xml
+<threshold group_by="分组字段" range="时间范围" value="阈值"/>
+```
+
+**属性说明：**
+- `group_by`（必需）：按哪个字段分组统计，可以多个字段用逗号分隔
+- `range`（必需）：时间窗口，支持 s(秒)、m(分)、h(时)、d(天)
+- `value`（必需）：触发阈值，达到这个数量时检查通过
+
+**工作原理：**
+1. 按 `group_by` 字段对事件分组（如按 source_ip 分组）
+2. 在 `range` 指定的滑动时间窗口内统计每组的事件数量
+3. 当某组的统计值达到 `value` 时，该检查通过
+
+**在上面的例子中：**
+- 按 source_ip 分组
+- 统计 5 分钟内的事件数
+- 如果某个 IP 在 5 分钟内触发 10 次，则阈值检查通过
+
+### 2.2 复杂的嵌套数据处理
+
+输入数据：
 ```json
 {
-  "user": {
-    "id": "user123",
-    "profile": {
-      "level": "admin",
-      "department": "security"
+  "request": {
+    "method": "POST",
+    "url": "https://api.example.com/transfer",
+    "headers": {
+      "user-agent": "Mozilla/5.0...",
+      "authorization": "Bearer token123"
+    },
+    "body": {
+      "from_account": "ACC001",
+      "to_account": "ACC999",
+      "amount": 50000,
+      "metadata": {
+        "source": "mobile_app",
+        "geo": {
+          "country": "CN",
+          "city": "Shanghai"
+        }
+      }
     }
   },
-  "system": {
-    "security": {
-      "min_level": "admin",
-      "allowed_departments": ["security", "it"]
-    }
-  },
-  "event": {
-    "type": "login",
-    "timestamp": 1640995200
-  }
+  "timestamp": 1700000000
 }
 ```
 
-**对应的规则写法：**
+处理嵌套数据的规则：
 ```xml
-<rule id="access_control" name="访问控制检测">
-    <checklist condition="level_check and dept_check and event_check">
-        <!-- 1. field属性嵌套：检查用户级别是否为admin -->
-        <node id="level_check" type="EQU" field="user.profile.level">admin</node>
+<root type="DETECTION" author="advanced">
+    <rule id="complex_transaction_check" name="复杂交易检测">
+        <!-- 检查基本条件 -->
+        <check type="EQU" field="request.method">POST</check>
+        <check type="INCL" field="request.url">transfer</check>
         
-        <!-- 2. 值的动态引用：用户级别与系统要求的最低级别比较 -->
-        <node id="dynamic_check" type="EQU" field="user.profile.level">_$system.security.min_level</node>
+        <!-- 检查金额 -->
+        <check type="MT" field="request.body.amount">10000</check>
         
-        <!-- 3. 双重嵌套访问：事件类型与系统配置中的监控类型比较 -->
-        <node id="event_check" type="EQU" field="event.type">login</node>
+        <!-- 添加地理位置标记 -->
+        <append field="geo_risk">_$request.body.metadata.geo.country</append>
         
-        <!-- 4. 部门权限检查：用户部门必须在允许列表中 -->
-        <node id="dept_check" type="INCL" field="_$system.security.allowed_departments">_$user.profile.department</node>
-    </checklist>
-</rule>
+        <!-- 基于地理位置的阈值检测 -->
+        <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
+                   range="1h" value="3"/>
+        
+        <!-- 使用插件进行深度分析（假设有自定义插件） -->
+        <check type="PLUGIN">analyze_transfer_risk(_$request.body)</check>
+        
+        <!-- 提取和处理user-agent -->
+        <append type="PLUGIN" field="client_info">parseUA(_$request.headers.user-agent)</append>
+        
+        <!-- 清理敏感信息 -->
+        <del>request.headers.authorization</del>
+    </rule>
+</root>
 ```
 
-### 原始数据访问（_$ORIDATA）
+#### 🔍 语法详解：`<del>` 标签
 
-#### 什么是_$ORIDATA
-`_$ORIDATA` 是一个特殊的保留字段，代表完整的原始数据对象。它包含了传入规则引擎的所有原始字段和值。
+`<del>` 用于从数据中删除指定的字段。
 
-#### 使用场景
+**基本语法：**
 ```xml
-<!-- 1. 插件中传递完整数据进行复杂分析 -->
-<node type="PLUGIN">complex_analysis(_$ORIDATA)</node>
-
-<!-- 2. 在Append中使用插件处理完整数据 -->
-<append type="PLUGIN" field="threat_score">calculate_threat_score(_$ORIDATA)</append>
-
-<!-- 3. 在独立插件中发送完整数据 -->
-<plugin>send_alert(_$ORIDATA, "HIGH")</plugin>
-<plugin>log_security_event(_$ORIDATA)</plugin>
+<del>字段1,字段2,字段3</del>
 ```
 
-#### 实际示例
-```xml
-<rule id="comprehensive_analysis" name="综合分析示例">
-    <filter field="event_type">security_event</filter>
-    
-    <checklist>
-        <!-- 基础检查使用具体字段 -->
-        <node type="MT" field="risk_score">_$thresholds.min_risk</node>
-        <!-- 复杂分析使用完整数据 -->
-        <node type="PLUGIN">deep_threat_analysis(_$ORIDATA)</node>
-    </checklist>
-    
-    <!-- 使用嵌套字段进行分组 -->
-    <threshold group_by="_$event.source.host,_$user.department" range="600s">5</threshold>
-    
-    <!-- 丰富化数据 -->
-    <append type="PLUGIN" field="enriched_data">enrich_with_context(_$ORIDATA)</append>
-    
-    <!-- 发送告警 -->
-    <plugin>send_comprehensive_alert(_$ORIDATA, _$analysis.priority)</plugin>
-</rule>
+**特点：**
+- 使用逗号分隔多个字段
+- 支持嵌套字段路径：`user.password,session.token`
+- 如果字段不存在，不会报错，静默忽略
+- 只在规则匹配成功后执行
+
+**使用场景：**
+- 删除敏感信息（密码、token、密钥等）
+- 清理临时字段
+- 减少数据体积，避免传输不必要的信息
+
+**在上面的例子中：**
+- `request.headers.authorization` 包含敏感的认证信息
+- 使用 `<del>` 在数据处理后删除该字段
+- 确保敏感信息不会被存储或传输
+
+### 2.3 条件组合逻辑
+
+输入数据：
+```json
+{
+  "event_type": "file_upload",
+  "filename": "document.exe",
+  "size": 1048576,
+  "source": "email_attachment",
+  "sender": "unknown@suspicious.com",
+  "hash": "a1b2c3d4..."
+}
 ```
 
-### 字段访问最佳实践
-
-#### 1. 性能优化
+使用条件组合的规则：
 ```xml
-<!-- 好：先用简单字段过滤，再用复杂分析 -->
-<rule id="optimized_rule">
-    <filter field="event_type">_$config.monitored_event</filter>
-    <checklist condition="basic_check and complex_check">
-        <node id="basic_check" type="INCL" field="process_name">_$patterns.suspicious_process</node>
-        <node id="complex_check" type="PLUGIN">analyze_full_context(_$ORIDATA)</node>
-    </checklist>
-</rule>
+<root author="logic_master">
+    <rule id="malware_detection" name="恶意软件检测">
+        <!-- 方式1：使用独立check（默认AND关系） -->
+        <check type="END" field="filename">.exe</check>
+        <check type="MT" field="size">1000000</check>  <!-- 大于1MB -->
+        
+        <!-- 方式2：使用checklist进行复杂逻辑组合 -->
+        <checklist condition="suspicious_file and (email_threat or unknown_hash)">
+            <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
+                .exe|.dll|.scr|.bat
+            </check>
+            <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
+            <check id="unknown_hash" type="PLUGIN">
+                is_known_malware(_$hash)
+            </check>
+        </checklist>
+        
+        <!-- 丰富化数据 -->
+        <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
+        <append field="threat_level">high</append>
+        
+        <!-- 自动响应（假设有自定义插件） -->
+        <plugin>quarantine_file(_$filename)</plugin>
+        <plugin>notify_security_team(_$ORIDATA)</plugin>
+    </rule>
+</root>
 ```
 
-#### 2. 错误处理
+#### 🔍 语法详解：`<checklist>` 标签
+
+`<checklist>` 允许你使用自定义的逻辑表达式组合多个检查条件。
+
+**基本语法：**
 ```xml
-<!-- 确保嵌套字段存在 -->
-<checklist condition="field_exists and value_check">
-    <node id="field_exists" type="NOTNULL" field="user.profile.id"></node>
-    <node id="value_check" type="EQU" field="status">_$user.profile.expected_status</node>
+<checklist condition="逻辑表达式">
+    <check id="标识符1" ...>...</check>
+    <check id="标识符2" ...>...</check>
 </checklist>
 ```
 
-#### 3. 灵活配置
+**属性说明：**
+- `condition`（必需）：使用检查节点的 `id` 构建的逻辑表达式
+
+**逻辑表达式语法：**
+- 使用 `and`、`or` 连接条件
+- 使用 `()` 分组，控制优先级
+- 使用 `not` 取反
+- 只能使用小写的逻辑操作符
+
+**示例表达式：**
+- `a and b and c`：所有条件都满足
+- `a or b or c`：任一条件满足
+- `(a or b) and not c`：a或b满足，且c不满足
+- `a and (b or (c and d))`：复杂嵌套条件
+
+**工作原理：**
+1. 执行所有带 `id` 的检查节点，记录每个节点的结果（true/false）
+2. 将结果代入 `condition` 表达式计算最终结果
+3. 如果最终结果为 true，则 checklist 通过
+
+#### 🔍 语法详解：多值匹配（logic 和 delimiter）
+
+当需要检查一个字段是否匹配多个值时，可以使用多值匹配语法。
+
+**基本语法：**
 ```xml
-<!-- 使用动态配置实现灵活的规则 -->
-<rule id="configurable_rule">
-    <filter field="_$config.filter_field">_$config.filter_value</filter>
-    <checklist>
-        <node type="_$config.check_type" field="_$config.target_field">_$config.expected_value</node>
-    </checklist>
-    <threshold group_by="_$config.group_fields" range="_$config.time_window">_$config.threshold_value</threshold>
+<check type="类型" field="字段" logic="OR|AND" delimiter="分隔符">
+    值1分隔符值2分隔符值3
+</check>
+```
+
+**属性说明：**
+- `logic`："OR" 或 "AND"，指定多个值之间的逻辑关系
+- `delimiter`：分隔符，用于分割多个值
+
+**工作原理：**
+1. 使用 `delimiter` 将标签内容分割成多个值
+2. 对每个值分别进行检查
+3. 根据 `logic` 决定最终结果：
+   - `logic="OR"`：任一值匹配即返回 true
+   - `logic="AND"`：所有值都匹配才返回 true
+
+**在上面的例子中：**
+```xml
+<check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
+    .exe|.dll|.scr|.bat
+</check>
+```
+- 检查 filename 是否包含 .exe、.dll、.scr 或 .bat
+- 使用 OR 逻辑：任一扩展名匹配即可
+- 使用 | 作为分隔符
+
+## 🔧 第三部分：高级特性详解
+
+### 3.1 阈值检测的三种模式
+
+`<threshold>` 标签不仅可以简单计数，还支持三种强大的统计模式：
+
+1. **默认模式（计数）**：统计事件发生次数
+2. **SUM 模式**：对指定字段求和
+3. **CLASSIFY 模式**：统计不同值的数量（去重计数）
+
+#### 场景1：登录失败次数统计（默认计数）
+
+输入数据流：
+```json
+// 10:00
+{"event": "login_failed", "user": "john", "ip": "1.2.3.4"}
+// 10:01
+{"event": "login_failed", "user": "john", "ip": "1.2.3.4"}
+// 10:02
+{"event": "login_failed", "user": "john", "ip": "1.2.3.4"}
+// 10:03
+{"event": "login_failed", "user": "john", "ip": "1.2.3.4"}
+// 10:04
+{"event": "login_failed", "user": "john", "ip": "1.2.3.4"}
+```
+
+规则：
+```xml
+<rule id="brute_force_detection" name="暴力破解检测">
+    <check type="EQU" field="event">login_failed</check>
+    
+    <!-- 5分钟内同一用户和IP失败5次 -->
+    <threshold group_by="user,ip" range="5m" value="5"/>
+    
+    <append field="alert_type">brute_force_attempt</append>
+    <plugin>block_ip(_$ip, 3600)</plugin>  <!-- 封禁1小时 -->
 </rule>
 ```
 
----
+#### 场景2：交易金额统计（SUM模式）
 
-## 📋 字段详解
-
-### Root根元素
-```xml
-<root type="DETECTION" name="ruleset_name" author="author_name">
+输入数据流：
+```json
+// 今天的交易
+{"event": "transfer", "user": "alice", "amount": 5000}
+{"event": "transfer", "user": "alice", "amount": 8000}
+{"event": "transfer", "user": "alice", "amount": 40000}  // 累计53000，触发！
 ```
 
-| 属性 | 必需 | 说明           | 可选值 |
-|------|----|--------------|--------|
-| `type` | 否  | 规则集类型，不填默认为'DETECTION' | `DETECTION`, `WHITELIST` |
-| `name` | 否  | 规则集名称        | 任意字符串 |
-| `author` | 否  | 作者信息         | 任意字符串 |
-
-### Rule规则元素
+规则：
 ```xml
-<rule id="unique_rule_id" name="readable_rule_name">
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|------|------|------|
-| `id` | 是 | 规则唯一标识符 | `detect_malware_01` |
-| `name` | 否 | 规则可读名称 | `检测恶意软件` |
-
-### Filter过滤器
-```xml
-<filter field="field_name">value</filter>
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|----|------|------|
-| `field` | 是  | 要过滤的字段名，**支持嵌套语法 a.b.c** | `event_type`, `user.profile.level` |
-
-**用途**：在执行复杂检查前快速过滤数据，显著提升性能；filter 本身不是必填项
-
-#### filter 嵌套字段示例
-```xml
-<!-- 简单过滤 -->
-<filter field="event_type">process_creation</filter>
-
-<!-- 嵌套过滤：过滤 {"event":{"source":{"type":"security"}}} -->
-<filter field="event.source.type">security</filter>
-
-<!-- 深层嵌套过滤 -->
-<filter field="request.headers.content_type">application/json</filter>
-```
-
-### CheckList检查列表
-```xml
-<checklist condition="logic_expression">
-    <node id="node_id" type="check_type" field="field_name">value</node>
-</checklist>
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|------|------|------|
-| `condition` | 否 | 逻辑表达式 | `a and (b or c)` |
-
-**逻辑表达式语法**：
-- `and`：逻辑与
-- `or`：逻辑或
-- `()`：分组
-- 节点ID：引用具体检查节点
-
-### Node检查节点
-```xml
-<node id="node_id" type="check_type" field="field_name" logic="OR" delimiter="|">value</node>
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|------|------|------|
-| `id` | 条件 | 节点标识符（使用condition时必需） | `check_process` |
-| `type` | 是 | 检查类型 | `INCL`, `EQU`, `REGEX`等 |
-| `field` | 条件 | 要检查的字段名（PLUGIN类型可选），**支持嵌套语法 a.b.c** | `process_name`, `user.profile.level` |
-| `logic` | 否 | 多值逻辑 | `OR`, `AND` |
-| `delimiter` | 条件 | 分隔符（使用logic时必需） | `|`, `,` |
-
-#### field 字段嵌套访问示例
-```xml
-<!-- 简单字段 -->
-<node type="EQU" field="username">admin</node>
-
-<!-- 嵌套字段：访问 {"user":{"profile":{"level":"admin"}}} 中的 level -->
-<node type="EQU" field="user.profile.level">admin</node>
-
-<!-- 深层嵌套：访问 {"a":{"b":{"c":"test100"}}} 中的 c -->
-<node type="EQU" field="a.b.c">test100</node>
-
-<!-- 过滤器中的嵌套字段 -->
-<filter field="event.source.system">web_server</filter>
-```
-
-### Threshold阈值检测
-```xml
-<threshold group_by="field1,field2" range="300s" count_type="SUM" count_field="amount" local_cache="true">10</threshold>
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|------|------|------|
-| `group_by` | 是 | 分组字段 | `source_ip,user_id` |
-| `range` | 是 | 时间范围 | `300s`, `5m`, `1h` |
-| `count_type` | 否 | 计数类型 | `SUM`, `CLASSIFY` |
-| `count_field` | 条件 | 计数字段（SUM/CLASSIFY时必需） | `bytes`, `resource_id` |
-| `local_cache` | 否 | 使用本地缓存 | `true`, `false` |
-
-### Append字段追加
-```xml
-<append field="new_field" type="PLUGIN">value_or_plugin_call</append>
-```
-
-| 属性 | 必需 | 说明 | 示例 |
-|------|------|------|------|
-| `field` | 是 | 要添加的字段名 | `alert_level`, `geo_info` |
-| `type` | 否 | 追加类型 | `PLUGIN` |
-
-### Plugin插件执行
-```xml
-<plugin>plugin_function(arg1, arg2)</plugin>
-```
-
-**用途**：执行副作用操作，如发送告警、记录日志等。
-
-### Del字段删除
-```xml
-<del>field1,field2,field3</del>
-```
-
-**用途**：删除不需要的字段，减少内存占用。
-
----
-
-## 🎯 节点类型完整参考
-
-### 字符串匹配类（高性能）
-
-| 类型 | 功能 | 示例 | 说明 |
-|------|------|------|------|
-| `EQU` | 完全相等 | `<node type="EQU" field="status">active</node>` | 大小写敏感 |
-| `NEQ` | 完全不等 | `<node type="NEQ" field="user">guest</node>` | 大小写敏感 |
-| `INCL` | 包含子串 | `<node type="INCL" field="path">/admin/</node>` | 大小写敏感 |
-| `NI` | 不包含子串 | `<node type="NI" field="agent">bot</node>` | 大小写敏感 |
-| `START` | 开头匹配 | `<node type="START" field="cmd">powershell</node>` | 大小写敏感 |
-| `END` | 结尾匹配 | `<node type="END" field="file">.exe</node>` | 大小写敏感 |
-| `NSTART` | 开头不匹配 | `<node type="NSTART" field="path">C:\Windows</node>` | 大小写敏感 |
-| `NEND` | 结尾不匹配 | `<node type="NEND" field="file">.tmp</node>` | 大小写敏感 |
-
-### 大小写忽略类（高性能）
-
-| 类型 | 功能 | 示例 |
-|------|------|------|
-| `NCS_EQU` | 忽略大小写相等 | `<node type="NCS_EQU" field="browser">CHROME</node>` |
-| `NCS_NEQ` | 忽略大小写不等 | `<node type="NCS_NEQ" field="os">windows</node>` |
-| `NCS_INCL` | 忽略大小写包含 | `<node type="NCS_INCL" field="domain">SUSPICIOUS</node>` |
-| `NCS_NI` | 忽略大小写不包含 | `<node type="NCS_NI" field="referrer">GOOGLE</node>` |
-| `NCS_START` | 忽略大小写开头 | `<node type="NCS_START" field="cmd">POWERSHELL</node>` |
-| `NCS_END` | 忽略大小写结尾 | `<node type="NCS_END" field="script">.PS1</node>` |
-| `NCS_NSTART` | 忽略大小写开头不匹配 | `<node type="NCS_NSTART" field="user">ADMIN</node>` |
-| `NCS_NEND` | 忽略大小写结尾不匹配 | `<node type="NCS_NEND" field="domain">TRUSTED</node>` |
-
-### 数值比较类（高性能）
-
-| 类型 | 功能 | 示例 |
-|------|------|------|
-| `MT` | 大于 | `<node type="MT" field="score">75.5</node>` |
-| `LT` | 小于 | `<node type="LT" field="cpu_usage">90</node>` |
-
-### 空值检查类（最高性能）
-
-| 类型 | 功能 | 示例 |
-|------|------|------|
-| `ISNULL` | 字段为空 | `<node type="ISNULL" field="optional_field"></node>` |
-| `NOTNULL` | 字段非空 | `<node type="NOTNULL" field="required_field"></node>` |
-
-### 正则表达式类（低性能）
-
-| 类型 | 功能 | 示例 |
-|------|------|------|
-| `REGEX` | 正则匹配 | `<node type="REGEX" field="ip">^192\.168\.\d+\.\d+$</node>` |
-
-### 插件调用类（最低性能）
-
-| 类型 | 功能 | 示例 |
-|------|------|------|
-| `PLUGIN` | 插件函数 | `<node type="PLUGIN">is_malicious_domain(domain_name)</node>` |
-
-### 多值匹配
-
-```xml
-<!-- OR逻辑：匹配任意一个值 -->
-<node type="INCL" field="process" logic="OR" delimiter="|">malware.exe|virus.exe|trojan.exe</node>
-
-        <!-- AND逻辑：必须包含所有值 -->
-<node type="INCL" field="command" logic="AND" delimiter="|">-exec|-payload</node>
-```
-
----
-
-## 🔌 插件系统详解
-
-### 插件基础概念
-
-插件是扩展规则引擎功能的重要机制，允许执行复杂的自定义逻辑。
-
-### 🧩 内置插件列表
-
-系统提供了丰富的内置插件，无需额外开发即可使用。插件分为两类：
-
-#### 检查节点插件（CheckNode）
-用于条件判断，返回布尔值，可在 `<node type="PLUGIN">` 中使用：
-
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `isPrivateIP` | 检查IP是否为私有地址 | `ip` (string) | `<node type="PLUGIN">isPrivateIP(source_ip)</node>` |
-| `cidrMatch` | 检查IP是否在CIDR范围内 | `ip` (string), `cidr` (string) | `<node type="PLUGIN">cidrMatch(client_ip, "192.168.1.0/24")</node>` |
-| `geoMatch` | 检查IP地理位置是否匹配 | `ip` (string), `countryISO` (string) | `<node type="PLUGIN">geoMatch(source_ip, "US")</node>` |
-| `suppressOnce` | 告警抑制：时间窗口内只触发一次 | `key` (any), `windowSec` (int), `ruleid` (string, 可选) | `<node type="PLUGIN">suppressOnce(alert_key, 300, "rule_001")</node>` |
-
-#### 数据处理插件（Append）
-用于数据转换和丰富化，可在 `<append type="PLUGIN">` 中使用：
-
-##### 时间处理插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `now` | 获取当前时间戳 | 可选: `format` (unix/ms/rfc3339) | `<append type="PLUGIN" field="timestamp">now()</append>` |
-| `ago` | 获取N秒前的时间戳 | `seconds` (int/float/string) | `<append type="PLUGIN" field="past_time">ago(3600)</append>` |
-| `dayOfWeek` | 获取星期几(0-6, 0=周日) | 可选: `timestamp` (int64) | `<append type="PLUGIN" field="weekday">dayOfWeek()</append>` |
-| `hourOfDay` | 获取小时(0-23) | 可选: `timestamp` (int64) | `<append type="PLUGIN" field="hour">hourOfDay()</append>` |
-| `tsToDate` | 时间戳转RFC3339格式 | `timestamp` (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(event_time)</append>` |
-
-##### 编码和哈希插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `base64Encode` | Base64编码 | `input` (string) | `<append type="PLUGIN" field="encoded">base64Encode(raw_data)</append>` |
-| `base64Decode` | Base64解码 | `encoded` (string) | `<append type="PLUGIN" field="decoded">base64Decode(encoded_data)</append>` |
-| `hashMD5` | 计算MD5哈希 | `input` (string) | `<append type="PLUGIN" field="md5">hashMD5(password)</append>` |
-| `hashSHA1` | 计算SHA1哈希 | `input` (string) | `<append type="PLUGIN" field="sha1">hashSHA1(content)</append>` |
-| `hashSHA256` | 计算SHA256哈希 | `input` (string) | `<append type="PLUGIN" field="sha256">hashSHA256(file_data)</append>` |
-
-##### URL处理插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `extractDomain` | 从URL提取域名 | `urlOrHost` (string) | `<append type="PLUGIN" field="domain">extractDomain(request_url)</append>` |
-| `extractTLD` | 从域名提取顶级域名 | `domain` (string) | `<append type="PLUGIN" field="tld">extractTLD(hostname)</append>` |
-| `extractSubdomain` | 从主机名提取子域名 | `host` (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(full_hostname)</append>` |
-
-##### 字符串处理插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `replace` | 字符串替换 | `input` (string), `old` (string), `new` (string) | `<append type="PLUGIN" field="cleaned">replace(raw_text, "bad", "good")</append>` |
-| `regexExtract` | 正则表达式提取 | `input` (string), `pattern` (string) | `<append type="PLUGIN" field="extracted">regexExtract(log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
-| `regexReplace` | 正则表达式替换 | `input` (string), `pattern` (string), `replacement` (string) | `<append type="PLUGIN" field="masked">regexReplace(email, "(.+)@(.+)", "$1@***")</append>` |
-
-##### 数据解析插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `parseJSON` | 解析JSON字符串 | `jsonString` (string) | `<append type="PLUGIN" field="parsed">parseJSON(json_data)</append>` |
-| `parseUA` | 解析User-Agent | `userAgent` (string) | `<append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>` |
-
-##### 威胁情报插件
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | `hash` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(file_hash)</append>` |
-| `shodan` | 查询Shodan IP地址基础设施情报 | `ip` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(ip_address)</append>` |
-| `threatBook` | 查询微步在线威胁情报 | `queryValue` (string), `queryType` (string), `apiKey` (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(target_ip, "ip")</append>` |
-
-### 内置插件使用示例
-
-#### 1. 网络安全检测
-```xml
-<rule id="network_security" name="网络安全检测">
-    <filter field="event_type">network_connection</filter>
+<rule id="daily_limit_check" name="日限额检测">
+    <check type="EQU" field="event">transfer</check>
     
-    <checklist condition="(external_conn and (suspicious_geo or private_ip_abuse)) and suppress_check">
-        <!-- 检查是否为外部连接 -->
-        <node id="external_conn" type="PLUGIN">isPrivateIP(dest_ip)</node>
-        <!-- 检查地理位置 -->
-        <node id="suspicious_geo" type="PLUGIN">geoMatch(source_ip, "CN")</node>
-        <!-- 检查源IP是否在可疑网段 -->
-        <node id="private_ip_abuse" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</node>
-        <!-- 告警抑制：同一IP 5分钟内只告警一次（使用ruleid隔离不同规则） -->
-        <node id="suppress_check" type="PLUGIN">suppressOnce(source_ip, 300, "network_security")</node>
-    </checklist>
+    <!-- 24小时内累计金额超过50000 -->
+    <threshold group_by="user" range="24h" count_type="SUM" 
+               count_field="amount" value="50000"/>
     
-    <!-- 数据丰富化 -->
-    <append type="PLUGIN" field="source_domain">extractDomain(source_url)</append>
+    <append field="action">freeze_account</append>
+</rule>
+```
+
+#### 🔍 高级语法：threshold 的 SUM 模式
+
+**属性说明：**
+- `count_type="SUM"`：启用求和模式
+- `count_field`（必需）：要求和的字段名
+- `value`：当累计和达到此值时触发
+
+**工作原理：**
+1. 按 `group_by` 分组
+2. 在时间窗口内累加 `count_field` 的值
+3. 当累计值达到 `value` 时触发
+
+#### 场景3：访问资源统计（CLASSIFY模式）
+
+输入数据流：
+```json
+{"user": "bob", "action": "download", "file_id": "doc001"}
+{"user": "bob", "action": "download", "file_id": "doc002"}
+{"user": "bob", "action": "download", "file_id": "doc003"}
+// ... 访问了26个不同文件
+```
+
+规则：
+```xml
+<rule id="data_exfiltration_check" name="数据外泄检测">
+    <check type="EQU" field="action">download</check>
+    
+    <!-- 1小时内访问超过25个不同文件 -->
+    <threshold group_by="user" range="1h" count_type="CLASSIFY" 
+               count_field="file_id" value="25"/>
+    
+    <append field="risk_score">high</append>
+    <plugin>alert_dlp_team(_$ORIDATA)</plugin>
+</rule>
+```
+
+#### 🔍 高级语法：threshold 的 CLASSIFY 模式
+
+**属性说明：**
+- `count_type="CLASSIFY"`：启用去重计数模式
+- `count_field`（必需）：要统计不同值的字段
+- `value`：当不同值数量达到此值时触发
+
+**工作原理：**
+1. 按 `group_by` 分组
+2. 在时间窗口内收集 `count_field` 的所有不同值
+3. 当不同值的数量达到 `value` 时触发
+
+**使用场景：**
+- 检测扫描行为（访问多个不同端口/IP）
+- 数据外泄检测（访问多个不同文件）
+- 异常行为检测（使用多个不同账号）
+
+### 3.2 内置插件系统
+
+AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用。
+
+#### 🧩 内置插件完整列表
+
+##### 检查类插件（用于条件判断）
+可在 `<check type="PLUGIN">` 中使用，返回布尔值：
+
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `isPrivateIP` | 检查IP是否为私有地址 | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
+| `cidrMatch` | 检查IP是否在CIDR范围内 | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(_$client_ip, "192.168.1.0/24")</check>` |
+| `geoMatch` | 检查IP是否属于指定国家 | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(_$source_ip, "US")</check>` |
+| `suppressOnce` | 告警抑制：时间窗口内只触发一次 | key (any), windowSec (int), ruleid (string, 可选) | `<check type="PLUGIN">suppressOnce(_$alert_key, 300, "rule_001")</check>` |
+
+**注意插件参数格式**：
+- 当引用数据中的字段时，使用 `_$` 前缀：`_$source_ip`
+- 当使用静态值时，直接使用字符串（带引号）：`"192.168.1.0/24"`
+- 当使用数字时，不需要引号：`300`
+
+##### 数据处理插件（用于数据转换）
+可在 `<append type="PLUGIN">` 中使用，返回各种类型的值：
+
+**时间处理插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `now` | 获取当前时间戳 | 可选: format (unix/ms/rfc3339) | `<append type="PLUGIN" field="timestamp">now()</append>` |
+| `ago` | 获取N秒前的时间戳 | seconds (int/float/string) | `<append type="PLUGIN" field="past_time">ago(3600)</append>` |
+| `dayOfWeek` | 获取星期几(0-6, 0=周日) | 可选: timestamp (int64) | `<append type="PLUGIN" field="weekday">dayOfWeek()</append>` |
+| `hourOfDay` | 获取小时(0-23) | 可选: timestamp (int64) | `<append type="PLUGIN" field="hour">hourOfDay()</append>` |
+| `tsToDate` | 时间戳转RFC3339格式 | timestamp (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(_$event_time)</append>` |
+
+**编码和哈希插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `base64Encode` | Base64编码 | input (string) | `<append type="PLUGIN" field="encoded">base64Encode(_$raw_data)</append>` |
+| `base64Decode` | Base64解码 | encoded (string) | `<append type="PLUGIN" field="decoded">base64Decode(_$encoded_data)</append>` |
+| `hashMD5` | 计算MD5哈希 | input (string) | `<append type="PLUGIN" field="md5">hashMD5(_$password)</append>` |
+| `hashSHA1` | 计算SHA1哈希 | input (string) | `<append type="PLUGIN" field="sha1">hashSHA1(_$content)</append>` |
+| `hashSHA256` | 计算SHA256哈希 | input (string) | `<append type="PLUGIN" field="sha256">hashSHA256(_$file_data)</append>` |
+
+**URL处理插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `extractDomain` | 从URL提取域名 | urlOrHost (string) | `<append type="PLUGIN" field="domain">extractDomain(_$request_url)</append>` |
+| `extractTLD` | 从域名提取顶级域名 | domain (string) | `<append type="PLUGIN" field="tld">extractTLD(_$hostname)</append>` |
+| `extractSubdomain` | 从主机名提取子域名 | host (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(_$full_hostname)</append>` |
+
+**字符串处理插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `replace` | 字符串替换 | input (string), old (string), new (string) | `<append type="PLUGIN" field="cleaned">replace(_$raw_text, "bad", "good")</append>` |
+| `regexExtract` | 正则表达式提取 | input (string), pattern (string) | `<append type="PLUGIN" field="extracted">regexExtract(_$log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
+| `regexReplace` | 正则表达式替换 | input (string), pattern (string), replacement (string) | `<append type="PLUGIN" field="masked">regexReplace(_$email, "(.+)@(.+)", "$1@***")</append>` |
+
+**数据解析插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `parseJSON` | 解析JSON字符串 | jsonString (string) | `<append type="PLUGIN" field="parsed">parseJSON(_$json_data)</append>` |
+| `parseUA` | 解析User-Agent | userAgent (string) | `<append type="PLUGIN" field="browser_info">parseUA(_$user_agent)</append>` |
+
+**威胁情报插件**
+| 插件名 | 功能 | 参数 | 示例 |
+|--------|------|------|------|
+| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | hash (string), apiKey (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(_$file_hash)</append>` |
+| `shodan` | 查询Shodan IP地址基础设施情报 | ip (string), apiKey (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(_$ip_address)</append>` |
+| `threatBook` | 查询微步在线威胁情报 | queryValue (string), queryType (string), apiKey (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(_$target_ip, "ip")</append>` |
+
+**威胁情报插件配置说明**：
+- API Key 可以在配置文件中统一设置，也可以在插件调用时传入
+- 如果不提供 API Key，某些功能可能受限
+- 建议在系统配置中统一管理 API Key，避免在规则中硬编码
+
+#### 内置插件使用示例
+
+##### 网络安全场景
+
+输入数据：
+```json
+{
+  "event_type": "network_connection",
+  "source_ip": "10.0.0.100",
+  "dest_ip": "185.220.101.45",
+  "dest_port": 443,
+  "bytes_sent": 1024000,
+  "connection_duration": 3600
+}
+```
+
+使用内置插件的规则：
+```xml
+<rule id="suspicious_connection" name="可疑连接检测">
+    <!-- 检查是否为外部连接 -->
+    <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
+    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
+    
+    <!-- 检查地理位置 -->
+    <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
+    
+    <!-- 添加时间戳 -->
     <append type="PLUGIN" field="detection_time">now()</append>
-    <append type="PLUGIN" field="url_hash">hashSHA256(request_url)</append>
+    <append type="PLUGIN" field="detection_hour">hourOfDay()</append>
+    
+    <!-- 计算数据外泄风险 -->
+    <check type="MT" field="bytes_sent">1000000</check>  <!-- 大于1MB -->
+    
+    <!-- 生成告警 -->
+    <append field="alert_type">potential_data_exfiltration</append>
+    
+    <!-- 查询威胁情报（如果有配置） -->
+    <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
 </rule>
 ```
 
-#### 2. 日志分析和处理
+##### 威胁情报检测场景
+
+展示灵活执行顺序的优势：先检查基础条件，再查询威胁情报，最后基于结果决策。
+
+输入数据：
+```json
+{
+  "event_type": "network_traffic",
+  "datatype": "external_connection",
+  "source_ip": "192.168.1.100",
+  "dest_ip": "45.142.120.181",
+  "dest_port": 443,
+  "protocol": "tcp",
+  "bytes_sent": 5000,
+  "timestamp": 1700000000
+}
+```
+
+威胁情报检测规则：
 ```xml
-<rule id="log_analysis" name="日志分析处理">
-    <filter field="event_type">application_log</filter>
+<rule id="threat_intel_detection" name="威胁情报检测">
+    <!-- 第1步：检查数据类型，快速过滤 -->
+    <check type="EQU" field="datatype">external_connection</check>
     
-    <checklist>
-        <!-- 检查是否包含JSON数据 -->
-        <node type="INCL" field="log_message">{"</node>
+    <!-- 第2步：确认目标IP是公网地址 -->
+    <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
+    
+    <!-- 第3步：查询威胁情报，增强数据 -->
+    <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
+    
+    <!-- 第4步：解析威胁情报结果 -->
+    <append type="PLUGIN" field="threat_level">
+        parseJSON(_$threat_intel).severity_level
+    </append>
+    
+    <!-- 第5步：基于威胁等级进行判断 -->
+    <checklist condition="high_threat or (medium_threat and has_data_transfer)">
+        <check id="high_threat" type="EQU" field="threat_level">high</check>
+        <check id="medium_threat" type="EQU" field="threat_level">medium</check>
+        <check id="has_data_transfer" type="MT" field="bytes_sent">1000</check>
     </checklist>
     
-    <!-- 解析和丰富化 -->
-    <append type="PLUGIN" field="parsed_log">parseJSON(log_message)</append>
-    <append type="PLUGIN" field="log_hour">hourOfDay()</append>
-    <append type="PLUGIN" field="log_weekday">dayOfWeek()</append>
-    <append type="PLUGIN" field="user_agent_info">parseUA(user_agent)</append>
+    <!-- 第6步：丰富告警信息 -->
+    <append field="alert_title">Malicious IP Communication Detected</append>
+    <append type="PLUGIN" field="ip_reputation">
+        parseJSON(_$threat_intel).reputation_score
+    </append>
+    <append type="PLUGIN" field="threat_tags">
+        parseJSON(_$threat_intel).tags
+    </append>
     
-    <!-- 数据清理 -->
-    <append type="PLUGIN" field="cleaned_path">regexReplace(request_path, "/\\d+", "/ID")</append>
-    <append type="PLUGIN" field="masked_email">regexReplace(email, "(.{2}).*@(.+)", "$1***@$2")</append>
+    <!-- 第7步：生成详细告警（假设有自定义插件） -->
+    <plugin>generateThreatAlert(_$ORIDATA, _$threat_intel)</plugin>
 </rule>
 ```
 
-#### 3. 时间窗口分析
+#### 💡 关键优势展示
+
+这个示例展示了灵活执行顺序的几个关键优势：
+
+1. **性能优化**：先执行快速检查（datatype），避免对所有数据查询威胁情报
+2. **逐步增强**：先确认是公网IP，再查询威胁情报，避免无效查询
+3. **动态决策**：基于威胁情报的返回结果动态调整后续处理
+4. **条件响应**：只对高威胁等级执行响应操作
+5. **数据利用**：充分利用威胁情报返回的丰富数据
+
+如果使用固定执行顺序，就无法实现这种"先查询情报，再基于结果决策"的灵活处理方式。
+
+##### 日志分析场景
+
+输入数据：
+```json
+{
+  "timestamp": 1700000000,
+  "log_level": "ERROR",
+  "message": "Failed login attempt",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+  "request_body": "{\"username\":\"admin\",\"password\":\"***\"}",
+  "stack_trace": "java.lang.Exception: Authentication failed\n\tat com.example..."
+}
+```
+
+日志处理规则：
 ```xml
-<rule id="time_window_analysis" name="时间窗口分析">
-    <filter field="event_type">user_activity</filter>
+<rule id="log_analysis" name="错误日志分析">
+    <check type="EQU" field="log_level">ERROR</check>
     
-    <!-- 数据预处理 -->
-    <append type="PLUGIN" field="one_hour_ago">ago(3600)</append>
-    <append type="PLUGIN" field="activity_hour">hourOfDay(activity_timestamp)</append>
+    <!-- 解析JSON数据 -->
+    <append type="PLUGIN" field="parsed_body">parseJSON(_$request_body)</append>
     
-    <!-- 时间范围检查 -->
-    <checklist condition="work_hours and recent_activity">
-        <node id="work_hours" type="MT" field="activity_hour">8</node>
-        <node id="recent_activity" type="MT" field="activity_timestamp">_$one_hour_ago</node>
-    </checklist>
+    <!-- 解析User-Agent -->
+    <append type="PLUGIN" field="browser_info">parseUA(_$user_agent)</append>
     
-    <!-- 生成报告时间 -->
-    <append type="PLUGIN" field="report_time">tsToDate(activity_timestamp)</append>
+    <!-- 提取错误信息 -->
+    <append type="PLUGIN" field="error_type">
+        regexExtract(_$stack_trace, "([A-Za-z.]+Exception)")
+    </append>
+    
+    <!-- 时间处理 -->
+    <append type="PLUGIN" field="readable_time">tsToDate(_$timestamp)</append>
+    <append type="PLUGIN" field="hour">hourOfDay(_$timestamp)</append>
+    
+    <!-- 数据脱敏 -->
+    <append type="PLUGIN" field="sanitized_message">
+        regexReplace(_$message, "password\":\"[^\"]+", "password\":\"***")
+    </append>
+    
+    <!-- 告警抑制：同类错误5分钟只报一次 -->
+    <check type="PLUGIN">suppressOnce(_$error_type, 300, "error_log_analysis")</check>
+    
+    <!-- 生成告警（假设有自定义插件） -->
+    <plugin>sendToElasticsearch(_$ORIDATA)</plugin>
 </rule>
 ```
 
-#### 4. 数据脱敏和安全处理
+##### 数据脱敏和安全处理
+
 ```xml
 <rule id="data_masking" name="数据脱敏处理">
-    <filter field="contains_sensitive_data">true</filter>
+    <check type="EQU" field="contains_sensitive_data">true</check>
     
     <!-- 数据哈希化 -->
-    <append type="PLUGIN" field="user_id_hash">hashSHA256(user_id)</append>
-    <append type="PLUGIN" field="session_hash">hashMD5(session_id)</append>
+    <append type="PLUGIN" field="user_id_hash">hashSHA256(_$user_id)</append>
+    <append type="PLUGIN" field="session_hash">hashMD5(_$session_id)</append>
     
     <!-- 敏感信息编码 -->
-    <append type="PLUGIN" field="encoded_payload">base64Encode(sensitive_payload)</append>
+    <append type="PLUGIN" field="encoded_payload">base64Encode(_$sensitive_payload)</append>
     
     <!-- 清理和替换 -->
-    <append type="PLUGIN" field="cleaned_log">replace(raw_log, user_password, "***")</append>
-    <append type="PLUGIN" field="masked_phone">regexReplace(phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
+    <append type="PLUGIN" field="cleaned_log">replace(_$raw_log, _$user_password, "***")</append>
+    <append type="PLUGIN" field="masked_phone">regexReplace(_$phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
     
     <!-- 删除原始敏感数据 -->
     <del>user_password,raw_sensitive_data,unencrypted_payload</del>
 </rule>
 ```
 
-#### 5. 威胁情报分析
-```xml
-<rule id="threat_intelligence" name="威胁情报分析">
-    <filter field="event_type">security_event</filter>
-    
-    <checklist condition="ip_check and (file_check or url_check or domain_check)">
-        <!-- 检查是否有IP地址 -->
-        <node id="ip_check" type="NOTNULL" field="source_ip"></node>
-        <!-- 检查是否有文件哈希 -->
-        <node id="file_check" type="NOTNULL" field="file_hash"></node>
-        <!-- 检查是否有URL -->
-        <node id="url_check" type="NOTNULL" field="suspicious_url"></node>
-        <!-- 检查是否有域名 -->
-        <node id="domain_check" type="NOTNULL" field="domain"></node>
-    </checklist>
-    
-    <!-- 威胁情报丰富化 -->
-    <append type="PLUGIN" field="shodan_intel">shodan(source_ip)</append>
-    <append type="PLUGIN" field="virustotal_scan">virusTotal(file_hash)</append>
-    <append type="PLUGIN" field="threatbook_ip">threatBook(source_ip, "ip")</append>
-    <append type="PLUGIN" field="threatbook_file">threatBook(file_hash, "file", "api_key")</append>
-    <append type="PLUGIN" field="threatbook_domain">threatBook(domain, "domain", "api_key")</append>
-    <append type="PLUGIN" field="threatbook_url">threatBook(suspicious_url, "url")</append>
-    
-    <!-- 综合威胁评分 -->
-    <append type="PLUGIN" field="threat_score">calculate_threat_score(_$ORIDATA)</append>
-    <append type="PLUGIN" field="analysis_time">now()</append>
-</rule>
-```
+#### ⚠️ 告警抑制最佳实践（suppressOnce）
 
-### ⚠️ 告警抑制最佳实践（suppressOnce）
+告警抑制插件可以防止同一告警在短时间内重复触发。
 
-#### 为什么需要 ruleid 参数？
+**为什么需要 ruleid 参数？**
 
-**问题示例**：
+如果不使用 `ruleid` 参数，不同规则对同一key的抑制会相互影响：
+
 ```xml
 <!-- 规则A：网络威胁检测 -->
 <rule id="network_threat">
-    <checklist>
-        <node type="PLUGIN">suppressOnce(source_ip, 300)</node>
-    </checklist>
+    <check type="PLUGIN">suppressOnce(_$source_ip, 300)</check>
 </rule>
 
 <!-- 规则B：登录异常检测 -->  
 <rule id="login_anomaly">
-    <checklist>
-        <node type="PLUGIN">suppressOnce(source_ip, 300)</node>
-    </checklist>
+    <check type="PLUGIN">suppressOnce(_$source_ip, 300)</check>
 </rule>
 ```
 
 **问题**：规则A触发后，规则B对同一IP也会被抑制！
 
-#### 正确用法
+**正确用法**：使用 `ruleid` 参数隔离不同规则：
 
-**解决方案**：使用 `ruleid` 参数隔离不同规则：
 ```xml
 <!-- 规则A：网络威胁检测 -->
 <rule id="network_threat">
-    <checklist>
-        <node type="PLUGIN">suppressOnce(source_ip, 300, "network_threat")</node>
-    </checklist>
+    <check type="PLUGIN">suppressOnce(_$source_ip, 300, "network_threat")</check>
 </rule>
 
 <!-- 规则B：登录异常检测 -->  
 <rule id="login_anomaly">
-    <checklist>
-        <node type="PLUGIN">suppressOnce(source_ip, 300, "login_anomaly")</node>
-    </checklist>
+    <check type="PLUGIN">suppressOnce(_$source_ip, 300, "login_anomaly")</check>
 </rule>
 ```
 
-#### Redis Key 结构
-- **不带 ruleid**：`suppress_once:192.168.1.100`
-- **带 ruleid**：`suppress_once:network_threat:192.168.1.100`
+#### 插件性能说明
 
-这样不同规则的抑制机制完全独立！
-
-#### 推荐命名规范
-- 使用规则ID作为 ruleid：`suppressOnce(key, window, "rule_id")`
-- 或使用业务标识：`suppressOnce(key, window, "login_brute_force")`
-
-### 插件性能说明
-
-#### 性能等级（从高到低）：
+性能等级（从高到低）：
 1. **检查节点插件**：`isPrivateIP`, `cidrMatch` - 纯计算，性能较高
 2. **字符串处理插件**：`replace`, `hashMD5/SHA1/SHA256` - 中等性能
 3. **正则表达式插件**：`regexExtract`, `regexReplace` - 性能较低
-4. **数据库查询插件**：`geoMatch` - 需要数据库查询，性能较低
-5. **威胁情报插件**：`virusTotal`, `shodan`, `threatBook` - 外部API调用，性能最低
+4. **威胁情报插件**：`virusTotal`, `shodan`, `threatBook` - 外部API调用，性能最低
 
-#### 优化建议：
+优化建议：
 ```xml
-<!-- 好：先用高性能检查，再用低性能插件 -->
-<checklist condition="basic_check and geo_check">
-    <node id="basic_check" type="PLUGIN">isPrivateIP(source_ip)</node>
-    <node id="geo_check" type="PLUGIN">geoMatch(source_ip, "US")</node>
-</checklist>
-
-<!-- 避免：在大量数据上频繁使用低性能插件 -->
-<checklist>
-    <node type="PLUGIN">geoMatch(source_ip, "US")</node>
-</checklist>
-
-<!-- 威胁情报插件优化：利用缓存和条件判断 -->
-<rule id="threat_intel_optimized">
-    <filter field="event_type">security_event</filter>
-    
-    <checklist condition="has_suspicious_indicators and need_enrichment">
-        <!-- 先用高性能检查确认需要查询 -->
-        <node id="has_suspicious_indicators" type="INCL" field="alert_level">high</node>
-        <node id="need_enrichment" type="NOTNULL" field="source_ip"></node>
-    </checklist>
-    
-    <!-- 然后才使用威胁情报插件 -->
-    <append type="PLUGIN" field="threat_intel">threatBook(source_ip, "ip")</append>
+<!-- 推荐：先用高性能检查，再用低性能插件 -->
+<rule id="optimized">
+    <check type="INCL" field="alert_level">high</check>
+    <check type="NOTNULL" field="source_ip"></check>
+    <append type="PLUGIN" field="threat_intel">threatBook(_$source_ip, "ip")</append>
 </rule>
 ```
 
-### 插件类型
+### 3.3 白名单规则集
 
-#### 1. CheckNode插件（检查节点插件）
-用于复杂的条件判断，必须返回布尔值。
+白名单用于过滤掉不需要处理的数据。白名单的特殊行为：
+- 当白名单规则匹配时，数据被"允许通过"（即被过滤掉，不再继续处理）
+- 当白名单规则不匹配时，数据继续传递给后续处理
+- 白名单中的 `append`、`del`、`plugin` 操作不会执行（因为匹配的数据会被过滤）
 
 ```xml
-<checklist>
-    <node type="PLUGIN">is_suspicious_ip(source_ip)</node>
-    <node type="PLUGIN">is_malicious_domain(domain_name)</node>
-    <node type="PLUGIN">check_user_behavior(_$user_id, _$recent_activities)</node>
+<root type="WHITELIST" name="security_whitelist" author="security_team">
+    <!-- 白名单规则1：信任的IP -->
+    <rule id="trusted_ips">
+        <check type="INCL" field="source_ip" logic="OR" delimiter="|">
+            10.0.0.1|10.0.0.2|10.0.0.3
+        </check>
+        <!-- 注意：以下操作不会执行，因为匹配的数据会被过滤 -->
+        <append field="whitelisted">true</append>
+    </rule>
+    
+    <!-- 白名单规则2：已知的良性进程 -->
+    <rule id="benign_processes">
+        <check type="INCL" field="process_name" logic="OR" delimiter="|">
+            chrome.exe|firefox.exe|explorer.exe
+        </check>
+        <!-- 可以添加多个检查条件，全部满足才会被白名单过滤 -->
+        <check type="PLUGIN">isPrivateIP(_$source_ip)</check>
+    </rule>
+    
+    <!-- 白名单规则3：内部测试流量 -->
+    <rule id="test_traffic">
+        <check type="INCL" field="user_agent">internal-testing-bot</check>
+        <check type="PLUGIN">cidrMatch(_$source_ip, "192.168.100.0/24")</check>
+    </rule>
+</root>
+```
+
+## 🚨 第四部分：实战案例集
+
+### 案例1：APT攻击检测
+
+完整的APT攻击检测规则集（使用内置插件和假设的自定义插件）：
+
+```xml
+<root type="DETECTION" name="apt_detection_suite" author="threat_hunting_team">
+    <!-- 规则1：PowerShell Empire检测 -->
+    <rule id="powershell_empire" name="PowerShell Empire C2检测">
+        <!-- 灵活顺序：先enrichment再检测 -->
+        <append type="PLUGIN" field="decoded_cmd">base64Decode(_$command_line)</append>
+        
+        <!-- 检查进程名 -->
+        <check type="INCL" field="process_name">powershell</check>
+        
+        <!-- 检测Empire特征 -->
+        <check type="INCL" field="decoded_cmd" logic="OR" delimiter="|">
+            System.Net.WebClient|DownloadString|IEX|Invoke-Expression
+        </check>
+        
+        <!-- 检测编码命令 -->
+        <check type="INCL" field="command_line">-EncodedCommand</check>
+        
+        <!-- 网络连接检测 -->
+        <threshold group_by="hostname" range="10m" value="3"/>
+        
+        <!-- 威胁情报查询 -->
+        <append type="PLUGIN" field="c2_url">
+            regexExtract(_$decoded_cmd, "https?://[^\\s]+")
+        </append>
+        
+        <!-- 生成IoC -->
+        <append field="ioc_type">powershell_empire_c2</append>
+        <append type="PLUGIN" field="ioc_hash">hashSHA256(_$decoded_cmd)</append>
+        
+        <!-- 自动响应（假设有自定义插件） -->
+        <plugin>isolateHost(_$hostname)</plugin>
+        <plugin>extractAndShareIoCs(_$ORIDATA)</plugin>
+    </rule>
+    
+    <!-- 规则2：横向移动检测 -->
+    <rule id="lateral_movement" name="横向移动检测">
+        <!-- 多种横向移动技术检测 -->
+        <checklist condition="(wmi_exec or psexec or rdp_brute) and not internal_scan">
+            <!-- WMI执行 -->
+            <check id="wmi_exec" type="INCL" field="process_name">wmic.exe</check>
+            <!-- PsExec -->
+            <check id="psexec" type="INCL" field="service_name">PSEXESVC</check>
+            <!-- RDP暴力破解 -->
+            <check id="rdp_brute" type="EQU" field="event_id">4625</check>
+            <!-- 排除内部扫描 -->
+            <check id="internal_scan" type="PLUGIN">
+                isPrivateIP(_$source_ip)
+            </check>
+        </checklist>
+        
+        <!-- 时间窗口检测 -->
+        <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
+        
+        <!-- 风险评分（假设有自定义插件） -->
+        <append type="PLUGIN" field="risk_score">
+            calculateLateralMovementRisk(_$ORIDATA)
+        </append>
+        
+        <plugin>updateAttackGraph(_$source_ip, _$dest_ip)</plugin>
+    </rule>
+    
+    <!-- 规则3：数据外泄检测 -->
+    <rule id="data_exfiltration" name="数据外泄检测">
+        <!-- 先检查是否为敏感数据访问 -->
+        <check type="INCL" field="file_path" logic="OR" delimiter="|">
+            /etc/passwd|/etc/shadow|.ssh/|.aws/credentials
+        </check>
+        
+        <!-- 检查外联行为 -->
+        <check type="PLUGIN" negate="true">isPrivateIP(_$dest_ip)</check>
+        
+        <!-- 异常传输检测 -->
+        <threshold group_by="source_ip" range="1h" count_type="SUM" 
+                   count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
+        
+        <!-- DNS隧道检测（假设有自定义插件） -->
+        <checklist condition="dns_tunnel_check">
+            <check id="dns_tunnel_check" type="PLUGIN">
+                detectDNSTunnel(_$dns_queries)
+            </check>
+        </checklist>
+        
+        <!-- 生成告警 -->
+        <append field="alert_severity">critical</append>
+        <append type="PLUGIN" field="data_classification">
+            classifyData(_$file_path)
+        </append>
+        
+        <plugin>blockDataTransfer(_$source_ip, _$dest_ip)</plugin>
+        <plugin>triggerIncidentResponse(_$ORIDATA)</plugin>
+    </rule>
+</root>
+```
+
+### 案例2：金融欺诈实时检测
+
+```xml
+<root type="DETECTION" name="fraud_detection_system" author="risk_team">
+    <!-- 规则1：账户接管检测 -->
+    <rule id="account_takeover" name="账户接管检测">
+        <!-- 实时设备指纹（假设有自定义插件） -->
+        <append type="PLUGIN" field="device_fingerprint">
+            generateFingerprint(_$user_agent, _$screen_resolution, _$timezone)
+        </append>
+        
+        <!-- 检查设备变更（假设有自定义插件） -->
+        <check type="PLUGIN">
+            isNewDevice(_$user_id, _$device_fingerprint)
+        </check>
+        
+        <!-- 地理位置异常（假设有自定义插件） -->
+        <append type="PLUGIN" field="geo_distance">
+            calculateGeoDistance(_$user_id, _$current_ip, _$last_ip)
+        </append>
+        <check type="MT" field="geo_distance">500</check>  <!-- 500km -->
+        
+        <!-- 行为模式分析（假设有自定义插件） -->
+        <append type="PLUGIN" field="behavior_score">
+            analyzeBehaviorPattern(_$user_id, _$recent_actions)
+        </append>
+        
+        <!-- 交易速度检测 -->
+        <threshold group_by="user_id" range="10m" value="5"/>
+        
+        <!-- 风险决策（假设有自定义插件） -->
+        <append type="PLUGIN" field="risk_decision">
+            makeRiskDecision(_$behavior_score, _$geo_distance, _$device_fingerprint)
+        </append>
+        
+        <!-- 实时干预（假设有自定义插件） -->
+        <plugin>requireMFA(_$user_id, _$transaction_id)</plugin>
+        <plugin>notifyUser(_$user_id, "suspicious_activity")</plugin>
+    </rule>
+    
+    <!-- 规则2：洗钱行为检测 -->
+    <rule id="money_laundering" name="洗钱行为检测">
+        <!-- 分散-聚合模式（假设有自定义插件） -->
+        <checklist condition="structuring or layering or integration">
+            <!-- 结构化拆分 -->
+            <check id="structuring" type="PLUGIN">
+                detectStructuring(_$user_id, _$transaction_history)
+            </check>
+            <!-- 分层处理 -->
+            <check id="layering" type="PLUGIN">
+                detectLayering(_$account_network, _$transaction_flow)
+            </check>
+            <!-- 整合阶段 -->
+            <check id="integration" type="PLUGIN">
+                detectIntegration(_$merchant_category, _$transaction_pattern)
+            </check>
+        </checklist>
+        
+        <!-- 关联分析（假设有自定义插件） -->
+        <append type="PLUGIN" field="network_risk">
+            analyzeAccountNetwork(_$user_id, _$connected_accounts)
+        </append>
+        
+        <!-- 累计金额监控 -->
+        <threshold group_by="account_cluster" range="7d" count_type="SUM"
+                   count_field="amount" value="1000000"/>
+        
+        <!-- 合规报告（假设有自定义插件） -->
+        <append type="PLUGIN" field="sar_report">
+            generateSAR(_$ORIDATA)  <!-- Suspicious Activity Report -->
+        </append>
+        
+        <plugin>freezeAccountCluster(_$account_cluster)</plugin>
+        <plugin>notifyCompliance(_$sar_report)</plugin>
+    </rule>
+</root>
+```
+
+### 案例3：零信任安全架构
+
+```xml
+<root type="DETECTION" name="zero_trust_security" author="security_architect">
+    <!-- 规则1：持续身份验证 -->
+    <rule id="continuous_auth" name="持续身份验证">
+        <!-- 每次请求都验证 -->
+        <check type="NOTNULL" field="auth_token"></check>
+        
+        <!-- 验证token有效性（假设有自定义插件） -->
+        <check type="PLUGIN">validateToken(_$auth_token)</check>
+        
+        <!-- 上下文感知（假设有自定义插件） -->
+        <append type="PLUGIN" field="trust_score">
+            calculateTrustScore(
+                _$user_id,
+                _$device_trust,
+                _$network_location,
+                _$behavior_baseline,
+                _$time_of_access
+            )
+        </append>
+        
+        <!-- 动态权限调整 -->
+        <checklist condition="low_trust or anomaly_detected">
+            <check id="low_trust" type="LT" field="trust_score">0.7</check>
+            <check id="anomaly_detected" type="PLUGIN">
+                detectAnomaly(_$current_behavior, _$baseline_behavior)
+            </check>
+        </checklist>
+        
+        <!-- 微分段策略（假设有自定义插件） -->
+        <append type="PLUGIN" field="allowed_resources">
+            applyMicroSegmentation(_$trust_score, _$requested_resource)
+        </append>
+        
+        <!-- 实时策略执行（假设有自定义插件） -->
+        <plugin>enforcePolicy(_$user_id, _$allowed_resources)</plugin>
+        <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
+    </rule>
+    
+    <!-- 规则2：设备信任评估 -->
+    <rule id="device_trust" name="设备信任评估">
+        <!-- 设备健康检查（假设有自定义插件） -->
+        <append type="PLUGIN" field="device_health">
+            checkDeviceHealth(_$device_id)
+        </append>
+        
+        <!-- 合规性验证（假设有自定义插件） -->
+        <checklist condition="patch_level and antivirus and encryption and mdm_enrolled">
+            <check id="patch_level" type="PLUGIN">
+                isPatchCurrent(_$os_version, _$patch_level)
+            </check>
+            <check id="antivirus" type="PLUGIN">
+                isAntivirusActive(_$av_status)
+            </check>
+            <check id="encryption" type="PLUGIN">
+                isDiskEncrypted(_$device_id)
+            </check>
+            <check id="mdm_enrolled" type="PLUGIN">
+                isMDMEnrolled(_$device_id)
+            </check>
+        </checklist>
+        
+        <!-- 证书验证（假设有自定义插件） -->
+        <check type="PLUGIN">
+            validateDeviceCertificate(_$device_cert)
+        </check>
+        
+        <!-- 信任评分（假设有自定义插件） -->
+        <append type="PLUGIN" field="device_trust_score">
+            calculateDeviceTrust(_$ORIDATA)
+        </append>
+        
+        <!-- 访问决策（假设有自定义插件） -->
+        <plugin>applyDevicePolicy(_$device_id, _$device_trust_score)</plugin>
+    </rule>
+</root>
+```
+
+## 📖 第五部分：语法参考手册
+
+### 5.1 规则集结构
+
+#### 根元素 `<root>`
+```xml
+<root type="DETECTION|WHITELIST" name="规则集名称" author="作者">
+    <!-- 规则列表 -->
+</root>
+```
+
+| 属性 | 必需 | 说明 | 默认值 |
+|------|------|------|--------|
+| type | 否 | 规则集类型 | DETECTION |
+| name | 否 | 规则集名称 | - |
+| author | 否 | 作者信息 | - |
+
+#### 规则元素 `<rule>`
+```xml
+<rule id="唯一标识符" name="规则描述">
+    <!-- 操作列表：按出现顺序执行 -->
+</rule>
+```
+
+| 属性 | 必需 | 说明 |
+|------|------|------|
+| id | 是 | 规则唯一标识符 |
+| name | 否 | 规则可读描述 |
+
+### 5.2 检查操作
+
+#### 独立检查 `<check>`
+```xml
+<check type="类型" field="字段名" logic="OR|AND" delimiter="分隔符" negate="true|false">
+    值
+</check>
+```
+
+| 属性 | 必需 | 说明 | 适用场景 |
+|------|------|------|----------|
+| type | 是 | 检查类型 | 所有 |
+| field | 条件 | 字段名（PLUGIN类型可选） | 非PLUGIN类型必需 |
+| logic | 否 | 多值逻辑 | 使用分隔符时 |
+| delimiter | 条件 | 值分隔符 | 使用logic时必需 |
+| negate | 否 | 结果取反 | 需要反向逻辑时 |
+| id | 条件 | 节点标识符 | 在checklist中使用condition时必需 |
+
+#### 检查列表 `<checklist>`
+```xml
+<checklist condition="逻辑表达式">
+    <check id="a" ...>...</check>
+    <check id="b" ...>...</check>
 </checklist>
 ```
 
-**特点**：
-- 必须返回`bool`类型
-- 用于条件判断
-- 可与其他节点组合使用
+| 属性 | 必需 | 说明 |
+|------|------|------|
+| condition | 否 | 逻辑表达式（如：`a and (b or c)`） |
 
-#### 2. Append插件（字段追加插件）
-用于生成新的字段值，可返回任意类型。
+### 5.3 检查类型完整列表
 
+#### 字符串匹配类
+| 类型 | 说明 | 大小写 | 示例 |
+|------|------|--------|------|
+| EQU | 完全相等 | 敏感 | `<check type="EQU" field="status">active</check>` |
+| NEQ | 完全不等 | 敏感 | `<check type="NEQ" field="status">inactive</check>` |
+| INCL | 包含子串 | 敏感 | `<check type="INCL" field="message">error</check>` |
+| NI | 不包含子串 | 敏感 | `<check type="NI" field="message">success</check>` |
+| START | 开头匹配 | 敏感 | `<check type="START" field="path">/admin</check>` |
+| END | 结尾匹配 | 敏感 | `<check type="END" field="file">.exe</check>` |
+| NSTART | 开头不匹配 | 敏感 | `<check type="NSTART" field="path">/public</check>` |
+| NEND | 结尾不匹配 | 敏感 | `<check type="NEND" field="file">.txt</check>` |
+
+#### 大小写忽略类
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| NCS_EQU | 忽略大小写相等 | `<check type="NCS_EQU" field="protocol">HTTP</check>` |
+| NCS_NEQ | 忽略大小写不等 | `<check type="NCS_NEQ" field="method">get</check>` |
+| NCS_INCL | 忽略大小写包含 | `<check type="NCS_INCL" field="header">Content-Type</check>` |
+| NCS_NI | 忽略大小写不包含 | `<check type="NCS_NI" field="useragent">bot</check>` |
+| NCS_START | 忽略大小写开头 | `<check type="NCS_START" field="domain">WWW.</check>` |
+| NCS_END | 忽略大小写结尾 | `<check type="NCS_END" field="email">.COM</check>` |
+| NCS_NSTART | 忽略大小写开头不匹配 | `<check type="NCS_NSTART" field="url">HTTP://</check>` |
+| NCS_NEND | 忽略大小写结尾不匹配 | `<check type="NCS_NEND" field="filename">.EXE</check>` |
+
+#### 数值比较类
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| MT | 大于 | `<check type="MT" field="score">80</check>` |
+| LT | 小于 | `<check type="LT" field="age">18</check>` |
+
+#### 空值检查类
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| ISNULL | 字段为空 | `<check type="ISNULL" field="optional_field"></check>` |
+| NOTNULL | 字段非空 | `<check type="NOTNULL" field="required_field"></check>` |
+
+#### 高级匹配类
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
+| PLUGIN | 插件函数 | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+
+### 5.4 数据处理操作
+
+#### 阈值检测 `<threshold>`
 ```xml
-<append type="PLUGIN" field="geo_location">get_geolocation(source_ip)</append>
-<append type="PLUGIN" field="threat_score">calculate_threat_score(_$ORIDATA)</append>
-<append type="PLUGIN" field="user_profile">get_user_info(_$user_id)</append>
+<threshold group_by="字段1,字段2" range="时间范围" value="阈值" 
+           count_type="SUM|CLASSIFY" count_field="统计字段" local_cache="true|false"/>
 ```
 
-**特点**：
-- 可返回任意类型（字符串、数字、对象等）
-- 用于数据丰富化
-- 结果作为新字段添加到数据中
+| 属性 | 必需 | 说明 | 示例 |
+|------|------|------|------|
+| group_by | 是 | 分组字段 | `source_ip,user_id` |
+| range | 是 | 时间范围 | `5m`, `1h`, `24h` |
+| value | 是 | 阈值 | `10` |
+| count_type | 否 | 计数类型 | 默认：计数，`SUM`：求和，`CLASSIFY`：去重计数 |
+| count_field | 条件 | 统计字段 | 使用SUM/CLASSIFY时必需 |
+| local_cache | 否 | 使用本地缓存 | `true` 或 `false` |
 
-#### 3. Standalone插件（独立插件）
-用于执行副作用操作，返回值被忽略。
-
+#### 字段追加 `<append>`
 ```xml
-<plugin>send_alert(_$ORIDATA, "HIGH")</plugin>
-<plugin>log_security_event(_$ORIDATA)</plugin>
-<plugin>update_threat_intelligence(_$indicators)</plugin>
+<append field="字段名" type="PLUGIN">值或插件调用</append>
 ```
 
-**特点**：
-- 返回值被忽略
-- 用于副作用操作
-- 如发送告警、记录日志、更新数据库等
+| 属性 | 必需 | 说明 |
+|------|------|------|
+| field | 是 | 要添加的字段名 |
+| type | 否 | 追加类型（`PLUGIN`表示插件调用） |
 
-### 插件参数类型
+#### 字段删除 `<del>`
+```xml
+<del>字段1,字段2,字段3</del>
+```
 
-插件调用支持多种参数类型，请参考前面的"字段访问语法"章节了解详细用法。
+#### 插件执行 `<plugin>`
+```xml
+<plugin>插件函数(参数1, 参数2)</plugin>
+```
 
-#### 参数类型概述
-- **字面量参数**：直接写入固定值，如 `"high"`, `100`, `true`
-- **字段引用参数**：直接引用数据中的字段，如 `user_id`, `session_token`
-- **动态字段参数**：使用 `_$` 前缀引用字段，如 `_$user.profile.id`
-- **原始数据参数**：使用 `_$ORIDATA` 传递完整数据
+### 5.5 字段访问语法
 
-### 插件开发指南
+#### 基本访问
+- **直接字段**：`field_name`
+- **嵌套字段**：`parent.child.grandchild`
+- **数组索引**：`array.0.field`（访问第一个元素）
 
-#### Go插件示例
+#### 动态引用（_$前缀）
+- **字段引用**：`_$field_name`
+- **嵌套引用**：`_$parent.child.field`
+- **原始数据**：`_$ORIDATA`
+
+#### 示例对比
+```xml
+<!-- 静态值 -->
+<check type="EQU" field="status">active</check>
+
+<!-- 动态值 -->
+<check type="EQU" field="status">_$expected_status</check>
+
+<!-- 嵌套字段 -->
+<check type="EQU" field="user.profile.role">admin</check>
+
+<!-- 动态嵌套 -->
+<check type="EQU" field="current_level">_$config.min_level</check>
+```
+
+### 5.6 内置插件快速参考
+
+#### 检查类插件（返回bool）
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| isPrivateIP | 检查私有IP | ip | `isPrivateIP(_$ip)` |
+| cidrMatch | CIDR匹配 | ip, cidr | `cidrMatch(_$ip, "10.0.0.0/8")` |
+| geoMatch | 地理位置匹配 | ip, country | `geoMatch(_$ip, "US")` |
+| suppressOnce | 告警抑制 | key, seconds, ruleid | `suppressOnce(_$ip, 300, "rule1")` |
+
+#### 数据处理插件（返回各种类型）
+| 插件 | 功能 | 返回类型 | 示例 |
+|------|------|----------|------|
+| now | 当前时间 | int64 | `now()` |
+| base64Encode | Base64编码 | string | `base64Encode(_$data)` |
+| hashSHA256 | SHA256哈希 | string | `hashSHA256(_$content)` |
+| parseJSON | JSON解析 | object | `parseJSON(_$json_str)` |
+| regexExtract | 正则提取 | string | `regexExtract(_$text, pattern)` |
+
+### 5.7 性能优化建议
+
+#### 操作顺序优化
+```xml
+<!-- 推荐：高性能操作在前 -->
+<rule id="optimized">
+    <check type="NOTNULL" field="required"></check>     <!-- 最快 -->
+    <check type="EQU" field="type">target</check>       <!-- 快 -->
+    <check type="INCL" field="message">keyword</check>  <!-- 中等 -->
+    <check type="REGEX" field="data">pattern</check>    <!-- 慢 -->
+    <check type="PLUGIN">complex_check()</check>        <!-- 最慢 -->
+</rule>
+```
+
+#### 阈值配置优化
+```xml
+<!-- 使用本地缓存提升性能 -->
+<threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
+
+<!-- 避免过大的时间窗口 -->
+<threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
+```
+
+### 5.8 常见错误和解决方案
+
+#### XML语法错误
+```xml
+<!-- 错误：特殊字符未转义 -->
+<check type="INCL" field="xml"><tag>value</tag></check>
+
+<!-- 正确：使用CDATA -->
+<check type="INCL" field="xml"><![CDATA[<tag>value</tag>]]></check>
+```
+
+#### 逻辑错误
+```xml
+<!-- 错误：condition中引用不存在的id -->
+<checklist condition="a and b">
+    <check type="EQU" field="status">active</check>  <!-- 缺少id -->
+</checklist>
+
+<!-- 正确 -->
+<checklist condition="a and b">
+    <check id="a" type="EQU" field="status">active</check>
+    <check id="b" type="NOTNULL" field="user"></check>
+</checklist>
+```
+
+#### 性能问题
+```xml
+<!-- 问题：在大量数据上直接使用插件 -->
+<rule id="slow">
+    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+</rule>
+
+<!-- 优化：先过滤后处理 -->
+<rule id="fast">
+    <check type="EQU" field="type">target</check>
+    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+</rule>
+```
+
+### 5.9 调试技巧
+
+#### 1. 使用append跟踪执行流程
+```xml
+<rule id="debug_flow">
+    <append field="_debug_step1">check started</append>
+    <check type="EQU" field="type">target</check>
+    
+    <append field="_debug_step2">check passed</append>
+    <threshold group_by="user" range="5m" value="10"/>
+    
+    <append field="_debug_step3">threshold passed</append>
+    <!-- 最终数据会包含所有debug字段，显示执行流程 -->
+</rule>
+```
+
+#### 2. 测试单个规则
+创建只包含待测试规则的规则集：
+```xml
+<root type="DETECTION" name="test_single_rule">
+    <rule id="test_rule">
+        <!-- 你的测试规则 -->
+    </rule>
+</root>
+```
+
+#### 3. 验证字段访问
+使用append验证字段是否正确获取：
+```xml
+<rule id="verify_fields">
+    <append field="debug_nested">_$user.profile.settings.theme</append>
+    <append field="debug_array">_$items.0.name</append>
+    <!-- 检查输出中的debug字段值 -->
+</rule>
+```
+
+## 🔧 第六部分：自定义插件开发
+
+### 6.1 插件分类
+
+AgentSmith-HUB 支持两种类型的插件：
+
+#### 插件运行方式分类
+1. **本地插件（Local Plugin）**：编译到程序中的内置插件，性能最高
+2. **Yaegi插件（Yaegi Plugin）**：使用 Yaegi 解释器运行的动态插件，灵活度最高
+
+#### 插件返回类型分类
+1. **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
+2. **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
+
+### 6.2 插件函数签名
+
+#### 重要：Eval函数签名说明
+
+插件必须定义一个名为 `Eval` 的函数，根据插件用途选择正确的函数签名：
+
+**检查类插件签名**：
 ```go
-package main
+func Eval(参数...) (bool, error)
+```
+- 第一个返回值：检查结果（true/false）
+- 第二个返回值：错误信息（如果有）
+
+**数据处理插件签名**：
+```go
+func Eval(参数...) (interface{}, bool, error)
+```
+- 第一个返回值：处理结果（任意类型）
+- 第二个返回值：是否成功（true/false）
+- 第三个返回值：错误信息（如果有）
+
+### 6.3 编写自定义插件
+
+#### 基本结构
+
+```go
+package plugin
 
 import (
-	"fmt"
-	"strings"
+    "strings"
+    "fmt"
 )
 
-// CheckNode插件：检查IP是否可疑
-func IsSuspiciousIP(ip string) bool {
-	// 检查是否为内网IP
-	if strings.HasPrefix(ip, "192.168.") ||
-		strings.HasPrefix(ip, "10.") ||
-		strings.HasPrefix(ip, "172.") {
-		return false
-	}
-
-	// 检查是否在黑名单中
-	blacklist := []string{"1.2.3.4", "5.6.7.8"}
-	for _, blocked := range blacklist {
-		if ip == blocked {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Append插件：获取地理位置信息
-func GetGeolocation(ip string) map[string]interface{} {
-	// 模拟地理位置查询
-	return map[string]interface{}{
-		"country": "US",
-		"city": "New York",
-		"latitude": 40.7128,
-		"longitude": -74.0060,
-	}
-}
-
-// Standalone插件：发送告警
-func SendAlert(data map[string]interface{}, level string) {
-	fmt.Printf("ALERT [%s]: %v\n", level, data)
-	// 实际实现中会调用告警系统API
-}
+// Eval 是插件的入口函数，必须定义此函数
+// 根据插件用途选择合适的函数签名
 ```
 
-#### 插件注册
+#### 检查类插件示例
+
+用于条件判断，返回 bool 值：
+
 ```go
-// 在插件系统中注册函数
-func init() {
-RegisterPlugin("is_suspicious_ip", IsSuspiciousIP)
-RegisterPlugin("get_geolocation", GetGeolocation)
-RegisterPlugin("send_alert", SendAlert)
+package plugin
+
+import (
+    "strings"
+    "fmt"
+)
+
+// 检查邮箱是否来自指定域名
+// 返回 (bool, error) - 用于 check 节点
+func Eval(email string, allowedDomain string) (bool, error) {
+    if email == "" {
+        return false, nil
+    }
+    
+    // 提取邮箱域名
+    parts := strings.Split(email, "@")
+    if len(parts) != 2 {
+        return false, fmt.Errorf("invalid email format: %s", email)
+    }
+    
+    domain := strings.ToLower(parts[1])
+    allowed := strings.ToLower(allowedDomain)
+    
+    return domain == allowed, nil
 }
 ```
 
-### 插件最佳实践
-
-#### 1. 性能优化
+使用示例：
 ```xml
-<!-- 好：先用高性能节点过滤，再用插件 -->
-<rule id="optimized_rule">
-    <checklist condition="basic_check and plugin_check">
-        <node id="basic_check" type="INCL" field="process_name">suspicious</node>
-        <node id="plugin_check" type="PLUGIN">deep_analysis(_$ORIDATA)</node>
-    </checklist>
-</rule>
-
-<!-- 不好：直接使用插件 -->
-<rule id="slow_rule">
-    <checklist>
-        <node type="PLUGIN">complex_analysis(_$ORIDATA)</node>
-    </checklist>
-</rule>
+<check type="PLUGIN">checkEmailDomain(_$email, "company.com")</check>
 ```
 
-#### 2. 错误处理
-```xml
-<rule id="safe_rule">
-    <!-- 插件应该优雅处理错误 -->
-    <checklist condition="safe_check and plugin_check">
-        <node id="safe_check" type="NOTNULL" field="required_field"></node>
-        <node id="plugin_check" type="PLUGIN">safe_analysis(_$required_field)</node>
-    </checklist>
-</rule>
-```
+#### 数据处理插件示例
 
-#### 3. 数据验证
+用于数据转换、计算等，返回任意类型：
+
 ```go
-func SafeAnalysis(data interface{}) bool {
-// 验证输入数据
-if data == nil {
-return false
+package plugin
+
+import (
+    "strings"
+)
+
+// 解析并提取User-Agent中的信息
+// 返回 (interface{}, bool, error) - 用于 append 或 plugin 节点
+func Eval(userAgent string) (interface{}, bool, error) {
+    if userAgent == "" {
+        return nil, false, nil
+    }
+    
+    result := make(map[string]interface{})
+    
+    // 简单的浏览器检测
+    if strings.Contains(userAgent, "Chrome") {
+        result["browser"] = "Chrome"
+    } else if strings.Contains(userAgent, "Firefox") {
+        result["browser"] = "Firefox"
+    } else if strings.Contains(userAgent, "Safari") {
+        result["browser"] = "Safari"
+    } else {
+        result["browser"] = "Unknown"
+    }
+    
+    // 操作系统检测
+    if strings.Contains(userAgent, "Windows") {
+        result["os"] = "Windows"
+    } else if strings.Contains(userAgent, "Mac") {
+        result["os"] = "macOS"
+    } else if strings.Contains(userAgent, "Linux") {
+        result["os"] = "Linux"
+    } else {
+        result["os"] = "Unknown"
+    }
+    
+    // 是否移动设备
+    result["is_mobile"] = strings.Contains(userAgent, "Mobile")
+    
+    return result, true, nil
+}
+```
+
+使用示例：
+```xml
+<!-- 提取信息到新字段 -->
+<append type="PLUGIN" field="ua_info">parseCustomUA(_$user_agent)</append>
+
+<!-- 后续可以访问解析结果 -->
+<check type="EQU" field="ua_info.browser">Chrome</check>
+<check type="EQU" field="ua_info.is_mobile">true</check>
+```
+
+### 6.4 插件开发规范
+
+#### 命名规范
+- 插件名使用驼峰命名法：`isValidEmail`、`extractDomain`
+- 检查类插件通常以 `is`、`has`、`check` 开头
+- 处理类插件通常以动词开头：`parse`、`extract`、`calculate`
+
+#### 参数设计
+```go
+// 推荐：参数明确，易于理解
+func Eval(ip string, cidr string) (bool, error)
+
+// 避免：参数过多
+func Eval(a, b, c, d, e string) (bool, error)
+
+// 支持可变参数
+func Eval(ip string, cidrs ...string) (bool, error)
+```
+
+#### 错误处理
+```go
+func Eval(data string) (interface{}, bool, error) {
+    // 输入验证
+    if data == "" {
+        return nil, false, nil  // 空输入返回 false，不报错
+    }
+    
+    // 处理可能的错误
+    result, err := processData(data)
+    if err != nil {
+        return nil, false, fmt.Errorf("process data failed: %w", err)
+    }
+    
+    return result, true, nil
+}
+```
+
+#### 性能考虑
+```go
+package plugin
+
+import (
+    "regexp"
+    "sync"
+)
+
+// 使用全局变量缓存正则表达式
+var (
+    emailRegex *regexp.Regexp
+    regexOnce  sync.Once
+)
+
+func Eval(email string) (bool, error) {
+    // 确保正则只编译一次
+    regexOnce.Do(func() {
+        emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+    })
+    
+    return emailRegex.MatchString(email), nil
+}
+```
+
+### 6.5 高级插件示例
+
+#### 复杂数据处理插件
+
+```go
+package plugin
+
+import (
+    "crypto/md5"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "time"
+)
+
+// 生成用户行为指纹
+func Eval(userID string, actions string, timestamp int64) (interface{}, bool, error) {
+    // 解析用户行为
+    var actionList []map[string]interface{}
+    if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
+        return nil, false, fmt.Errorf("invalid actions format: %w", err)
+    }
+    
+    // 分析行为模式
+    result := map[string]interface{}{
+        "user_id": userID,
+        "timestamp": timestamp,
+        "action_count": len(actionList),
+        "time_of_day": time.Unix(timestamp, 0).Hour(),
+    }
+    
+    // 计算行为频率
+    actionTypes := make(map[string]int)
+    for _, action := range actionList {
+        if actionType, ok := action["type"].(string); ok {
+            actionTypes[actionType]++
+        }
+    }
+    result["action_types"] = actionTypes
+    
+    // 生成行为指纹
+    fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
+    hash := md5.Sum([]byte(fingerprint))
+    result["fingerprint"] = hex.EncodeToString(hash[:])
+    
+    // 风险评分
+    riskScore := 0
+    if len(actionList) > 100 {
+        riskScore += 20
+    }
+    if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
+        riskScore += 30
+    }
+    result["risk_score"] = riskScore
+    
+    return result, true, nil
+}
+```
+
+#### 状态管理插件（不推荐）
+
+虽然技术上可行，但不推荐在插件中管理全局状态，因为这会带来并发问题：
+
+```go
+package plugin
+
+import (
+    "sync"
+    "time"
+)
+
+// 注意：这是一个示例，实际使用中应该使用Redis等外部存储
+var (
+    requestCount = make(map[string]*userRequest)
+    mu          sync.RWMutex
+)
+
+type userRequest struct {
+    count      int
+    lastUpdate time.Time
 }
 
-// 类型断言
-str, ok := data.(string)
-if !ok {
-return false
+// 检测用户请求频率是否异常
+func Eval(userID string, threshold int) (bool, error) {
+    mu.Lock()
+    defer mu.Unlock()
+    
+    now := time.Now()
+    
+    // 获取或创建用户记录
+    req, exists := requestCount[userID]
+    if !exists {
+        req = &userRequest{
+            count:      1,
+            lastUpdate: now,
+        }
+        requestCount[userID] = req
+        return false, nil
+    }
+    
+    // 如果距离上次请求超过1分钟，重置计数
+    if now.Sub(req.lastUpdate) > time.Minute {
+        req.count = 1
+        req.lastUpdate = now
+        return false, nil
+    }
+    
+    // 增加计数
+    req.count++
+    req.lastUpdate = now
+    
+    // 检查是否超过阈值
+    return req.count > threshold, nil
 }
-
-// 执行分析
-return analyzeString(str)
-}
 ```
 
----
+### 6.6 插件限制和注意事项
 
-## 🚀 高级特性
+#### 允许的标准库包
+插件只能导入 Go 标准库，不能使用第三方包。常用的标准库包括：
+- 基础：`fmt`, `strings`, `strconv`, `errors`
+- 编码：`encoding/json`, `encoding/base64`, `encoding/hex`
+- 加密：`crypto/md5`, `crypto/sha256`, `crypto/rand`
+- 时间：`time`
+- 正则：`regexp`
+- 网络：`net`, `net/url`
 
-### 阈值检测详解
+#### 安全限制
+1. 不能进行文件系统操作
+2. 不能发起网络请求（威胁情报插件除外）
+3. 不能执行系统命令
+4. 不能创建 goroutine
 
-#### 默认计数模式
+#### 最佳实践
+1. **保持简单**：插件应该专注于单一功能
+2. **快速返回**：避免复杂计算，考虑使用缓存
+3. **优雅降级**：错误时返回合理的默认值
+4. **充分测试**：测试各种边界情况
+
+### 6.7 插件部署和管理
+
+#### 创建插件
+1. 在 Web UI 的插件管理页面点击"新建插件"
+2. 输入插件名称和代码
+3. 系统会自动验证插件语法和安全性
+4. 保存后立即可用
+
+#### 测试插件
 ```xml
-<threshold group_by="source_ip,user_id" range="300s" local_cache="true">5</threshold>
-```
-
-**用途**：统计事件发生次数
-**示例**：5分钟内同一IP和用户的失败登录超过5次
-
-#### SUM聚合模式
-```xml
-<threshold group_by="account_id" range="86400s" count_type="SUM" count_field="amount">50000</threshold>
-```
-
-**用途**：统计数值字段的总和
-**示例**：24小时内同一账户的交易总额超过50000
-
-#### CLASSIFY唯一计数模式
-```xml
-<threshold group_by="user_id" range="3600s" count_type="CLASSIFY" count_field="resource_id">25</threshold>
-```
-
-**用途**：统计唯一值的数量
-**示例**：1小时内同一用户访问超过25个不同资源
-
-### 复杂逻辑表达式
-
-#### 基础逻辑
-```xml
-<!-- AND逻辑（默认） -->
-<rule id="and_logic_rule">
-    <checklist>
-        <node type="INCL" field="process">malware</node>
-        <node type="INCL" field="path">temp</node>
-    </checklist>
-</rule>
-
-<!-- OR逻辑 -->
-<rule id="or_logic_rule">
-    <checklist condition="a or b">
-        <node id="a" type="INCL" field="process">malware</node>
-        <node id="b" type="INCL" field="path">suspicious</node>
-    </checklist>
+<!-- 测试规则 -->
+<rule id="test_custom_plugin">
+    <check type="PLUGIN">myCustomPlugin(_$test_field, "expected_value")</check>
+    <append type="PLUGIN" field="result">myDataPlugin(_$input_data)</append>
 </rule>
 ```
 
-#### 复杂组合
-```xml
-<checklist condition="(threat_detected or anomaly_detected) and not whitelisted">
-    <node id="threat_detected" type="PLUGIN">detect_threat(_$ORIDATA)</node>
-    <node id="anomaly_detected" type="MT" field="anomaly_score">0.8</node>
-    <node id="whitelisted" type="PLUGIN">is_whitelisted(_$source_ip)</node>
-</checklist>
-```
+#### 插件版本管理
+- 修改插件会创建新版本
+- 可以查看插件修改历史
+- 支持回滚到之前版本
 
-### XML特殊字符处理
+### 6.8 常见问题解答
 
-#### 使用CDATA
-```xml
-<!-- 错误：包含XML特殊字符 -->
-<node type="REGEX" field="html"><script>alert('xss')</script></node>
+#### Q: 如何知道应该使用哪种函数签名？
+A: 根据插件的使用场景：
+- 在 `<check type="PLUGIN">` 中使用：返回 `(bool, error)`
+- 在 `<append type="PLUGIN">` 或 `<plugin>` 中使用：返回 `(interface{}, bool, error)`
 
-        <!-- 正确：使用CDATA -->
-<node type="REGEX" field="html"><![CDATA[<script>alert('xss')</script>]]></node>
+#### Q: 插件可以修改输入数据吗？
+A: 不可以。插件接收的参数是值传递，修改不会影响原始数据。如需修改数据，应通过返回值实现。
 
-        <!-- 复杂正则表达式 -->
-<node type="REGEX" field="sql_query"><![CDATA[(?i)(union\s+select|insert\s+into|drop\s+table)]]></node>
-```
+#### Q: 如何在插件之间共享数据？
+A: 推荐通过规则引擎的数据流：
+1. 第一个插件返回结果到字段
+2. 第二个插件从该字段读取数据
 
-**何时使用CDATA**：
-- 包含 `<` `>` `&` `"` `'` 字符时
-- 复杂的正则表达式
-- HTML/XML内容匹配
+#### Q: 插件执行超时怎么办？
+A: 系统有默认的超时保护机制。如果插件执行时间过长，会被强制终止并返回错误。
 
----
+## 🎯 总结
 
-## 💡 实战案例
+AgentSmith-HUB 规则引擎的核心优势：
 
-### 案例1：恶意PowerShell检测
+1. **完全灵活的执行顺序**：操作按XML中的出现顺序执行
+2. **简洁的语法**：独立的 `<check>` 标签，支持灵活组合
+3. **强大的数据处理**：丰富的内置插件和灵活的字段访问
+4. **可扩展性**：支持自定义插件开发
+5. **高性能设计**：智能优化和缓存机制
 
-```xml
-<root type="DETECTION" name="powershell_detection" author="security_team">
-    <rule id="malicious_powershell" name="恶意PowerShell检测">
-        <!-- 过滤：只处理进程创建事件 -->
-        <filter field="event_type">process_creation</filter>
+记住核心理念：**按需组合，灵活编排**。根据你的具体需求，自由组合各种操作，创建最适合的规则。
 
-        <!-- 检查：PowerShell + 可疑参数 -->
-        <checklist condition="powershell_proc and (encoded_cmd or bypass_policy or download_cradle)">
-            <node id="powershell_proc" type="INCL" field="process_name">powershell</node>
-            <node id="encoded_cmd" type="INCL" field="command_line">-EncodedCommand</node>
-            <node id="bypass_policy" type="INCL" field="command_line">-ExecutionPolicy Bypass</node>
-            <node id="download_cradle" type="PLUGIN">detect_download_cradle(_$command_line)</node>
-        </checklist>
-
-        <!-- 阈值：10分钟内同一主机超过3次 -->
-        <threshold group_by="hostname" range="600s" local_cache="true">3</threshold>
-
-        <!-- 数据丰富化 -->
-        <append field="alert_type">malicious_powershell</append>
-        <append field="severity">high</append>
-        <append type="PLUGIN" field="decoded_command">decode_powershell(_$command_line)</append>
-
-        <!-- 执行响应动作 -->
-        <plugin>send_alert(_$ORIDATA, "HIGH")</plugin>
-        <plugin>isolate_host_if_confirmed(_$hostname, _$confidence_score)</plugin>
-
-        <!-- 清理敏感信息 -->
-        <del>raw_log,internal_metadata</del>
-    </rule>
-</root>
-```
-
-### 案例2：Web攻击检测
-
-```xml
-<root type="DETECTION" name="web_security" author="security_team">
-    <rule id="sql_injection" name="SQL注入检测">
-        <filter field="event_type">web_request</filter>
-
-        <checklist condition="sql_patterns and not false_positive">
-            <node id="sql_patterns" type="REGEX" field="request_body"><![CDATA[(?i)(union\s+select|insert\s+into|delete\s+from|drop\s+table|exec\s*\(|xp_cmdshell)]]></node>
-            <node id="false_positive" type="PLUGIN">is_legitimate_request(_$request_context)</node>
-        </checklist>
-
-        <threshold group_by="source_ip" range="300s">5</threshold>
-
-        <append field="attack_type">sql_injection</append>
-        <append type="PLUGIN" field="payload_analysis">analyze_sql_payload(_$request_body)</append>
-
-        <plugin>block_ip(_$source_ip)</plugin>
-        <plugin>alert_security_team(_$ORIDATA)</plugin>
-    </rule>
-
-    <rule id="xss_detection" name="XSS攻击检测">
-        <filter field="event_type">web_request</filter>
-
-        <checklist>
-            <node type="REGEX" field="request_params"><![CDATA[(?i)(<script[^>]*>|javascript:|on\w+\s*=|eval\s*\(|alert\s*\()]]></node>
-        </checklist>
-
-        <threshold group_by="source_ip,target_url" range="600s">3</threshold>
-
-        <append field="attack_type">cross_site_scripting</append>
-        <append type="PLUGIN" field="xss_payload">extract_xss_payload(_$request_params)</append>
-
-        <plugin>sanitize_and_log(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 案例3：金融欺诈检测
-
-```xml
-<root type="DETECTION" name="fraud_detection" author="fraud_team">
-    <rule id="suspicious_transaction" name="可疑交易检测">
-        <filter field="event_type">financial_transaction</filter>
-
-        <checklist condition="large_amount and (velocity_anomaly or location_anomaly or time_anomaly)">
-            <node id="large_amount" type="MT" field="amount">_$user.daily_limit</node>
-            <node id="velocity_anomaly" type="PLUGIN">detect_velocity_anomaly(_$user_id, _$amount)</node>
-            <node id="location_anomaly" type="PLUGIN">detect_location_anomaly(_$user_id, _$location)</node>
-            <node id="time_anomaly" type="PLUGIN">detect_time_anomaly(_$user_id, _$timestamp)</node>
-        </checklist>
-
-        <!-- 24小时内交易总额阈值 -->
-        <threshold group_by="user_id" range="86400s" count_type="SUM" count_field="amount">_$user.daily_limit</threshold>
-
-        <append field="fraud_type">suspicious_transaction</append>
-        <append type="PLUGIN" field="risk_score">calculate_risk_score(_$ORIDATA)</append>
-        <append type="PLUGIN" field="recommended_action">determine_action(_$risk_score)</append>
-
-        <plugin>freeze_account_if_high_risk(_$user_id, _$risk_score)</plugin>
-        <plugin>notify_fraud_team(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 案例4：网络威胁检测
-
-```xml
-<root type="DETECTION" name="network_threat" author="security_team">
-    <rule id="c2_communication" name="C2通信检测">
-        <filter field="event_type">network_connection</filter>
-
-        <checklist condition="external_connection and (suspicious_port or known_malware_domain or beacon_pattern)">
-            <node id="external_connection" type="PLUGIN">is_external_connection(_$dest_ip)</node>
-            <node id="suspicious_port" type="INCL" field="dest_port" logic="OR" delimiter="|">4444|5555|6666|8080</node>
-            <node id="known_malware_domain" type="PLUGIN">is_malware_domain(_$dest_domain)</node>
-            <node id="beacon_pattern" type="PLUGIN">detect_beacon_pattern(_$connection_history)</node>
-        </checklist>
-
-        <!-- 统计不同目标IP的连接数 -->
-        <threshold group_by="source_ip" range="3600s" count_type="CLASSIFY" count_field="dest_ip">10</threshold>
-
-        <append field="threat_type">c2_communication</append>
-        <append type="PLUGIN" field="threat_intelligence">get_threat_intel(_$dest_ip, _$dest_domain)</append>
-
-        <plugin>block_connection(_$source_ip, _$dest_ip)</plugin>
-        <plugin>escalate_to_soc(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 案例5：综合威胁情报分析
-
-```xml
-<root type="DETECTION" name="comprehensive_threat_intel" author="security_team">
-    <rule id="multi_source_threat_analysis" name="多源威胁情报分析">
-        <filter field="event_type">security_alert</filter>
-
-        <checklist condition="has_indicators and (high_risk or multiple_sources)">
-            <node id="has_indicators" type="NOTNULL" field="threat_indicator"></node>
-            <node id="high_risk" type="INCL" field="alert_level">high</node>
-            <node id="multiple_sources" type="INCL" field="source_count">3</node>
-        </checklist>
-
-        <!-- 10分钟内同一威胁指标不重复分析 -->
-        <threshold group_by="threat_indicator" range="600s" local_cache="true">1</threshold>
-
-        <!-- 多源威胁情报查询 -->
-        <append type="PLUGIN" field="virustotal_intel">virusTotal(file_hash)</append>
-        <append type="PLUGIN" field="shodan_intel">shodan(source_ip)</append>
-        <append type="PLUGIN" field="threatbook_ip">threatBook(source_ip, "ip", "prod_api_key")</append>
-        <append type="PLUGIN" field="threatbook_domain">threatBook(domain, "domain", "prod_api_key")</append>
-        <append type="PLUGIN" field="threatbook_file">threatBook(file_hash, "file", "prod_api_key")</append>
-        <append type="PLUGIN" field="threatbook_url">threatBook(suspicious_url, "url", "prod_api_key")</append>
-
-        <!-- 综合分析 -->
-        <append type="PLUGIN" field="threat_score">calculate_comprehensive_threat_score(_$ORIDATA)</append>
-        <append type="PLUGIN" field="malware_family">identify_malware_family(_$ORIDATA)</append>
-        <append type="PLUGIN" field="attack_timeline">construct_attack_timeline(_$ORIDATA)</append>
-        <append type="PLUGIN" field="ioc_correlation">correlate_iocs(_$ORIDATA)</append>
-
-        <!-- 分析结果 -->
-        <append field="analysis_type">comprehensive_threat_intelligence</append>
-        <append type="PLUGIN" field="analysis_timestamp">now()</append>
-        <append type="PLUGIN" field="analyst_recommendations">generate_recommendations(_$threat_score, _$malware_family)</append>
-
-        <!-- 自动化响应 -->
-        <plugin>enrich_threat_database(_$ORIDATA)</plugin>
-        <plugin>trigger_automated_response(_$threat_score, _$analyst_recommendations)</plugin>
-        <plugin>notify_threat_intel_team(_$ORIDATA)</plugin>
-    </rule>
-
-    <rule id="chinese_threat_analysis" name="中文威胁情报分析">
-        <filter field="event_type">apt_activity</filter>
-
-        <checklist condition="chinese_context and needs_local_intel">
-            <node id="chinese_context" type="INCL" field="geo_location" logic="OR" delimiter="|">CN|HK|TW|SG</node>
-            <node id="needs_local_intel" type="INCL" field="threat_category">apt</node>
-        </checklist>
-
-        <!-- 使用微步在线进行中文威胁情报分析 -->
-        <append type="PLUGIN" field="threatbook_comprehensive">threatBook(threat_indicator, indicator_type, "china_api_key")</append>
-        <append type="PLUGIN" field="chinese_malware_family">identify_chinese_malware(_$threatbook_comprehensive)</append>
-        <append type="PLUGIN" field="apt_group_attribution">attribute_apt_group(_$threatbook_comprehensive)</append>
-
-        <!-- 结合其他情报源 -->
-        <append type="PLUGIN" field="global_context">combine_global_local_intel(_$threatbook_comprehensive, _$virustotal_intel)</append>
-
-        <!-- 生成中文威胁报告 -->
-        <append type="PLUGIN" field="chinese_threat_report">generate_chinese_report(_$ORIDATA)</append>
-        <append field="report_language">zh-CN</append>
-
-        <plugin>alert_chinese_security_team(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
----
-
-## ❓ 常见问题
-
-### XML语法错误
-
-#### 问题：标签未闭合
-```xml
-<!-- 错误 -->
-<rule id="test">
-    <filter field="type">59</filter>
-    <!-- 缺少</rule> -->
-
-    <!-- 正确 -->
-    <rule id="test">
-        <filter field="type">59</filter>
-    </rule>
-```
-
-#### 问题：特殊字符未处理
-```xml
-<!-- 错误 -->
-<node type="REGEX" field="html"><script>alert('xss')</script></node>
-
-        <!-- 正确 -->
-<node type="REGEX" field="html"><![CDATA[<script>alert('xss')</script>]]></node>
-```
-
-### 规则结构错误
-
-#### 问题：在同一个rule中使用多个checklist
-```xml
-<!-- 错误：一个rule中有多个checklist -->
-<rule id="wrong_rule">
-    <checklist>
-        <node type="INCL" field="process">malware</node>
-    </checklist>
-    <checklist>
-        <node type="INCL" field="path">temp</node>
-    </checklist>
-</rule>
-
-<!-- 正确：一个rule只有一个checklist -->
-<rule id="correct_rule">
-    <checklist condition="malware_check and path_check">
-        <node id="malware_check" type="INCL" field="process">malware</node>
-        <node id="path_check" type="INCL" field="path">temp</node>
-    </checklist>
-</rule>
-```
-
-### 属性依赖错误
-
-#### 问题：使用condition但节点缺少id
-```xml
-<!-- 错误 -->
-<checklist condition="a and b">
-    <node type="INCL" field="exe">malware</node>
-    <node type="INCL" field="path">temp</node>
-</checklist>
-
-        <!-- 正确 -->
-<checklist condition="a and b">
-<node id="a" type="INCL" field="exe">malware</node>
-<node id="b" type="INCL" field="path">temp</node>
-</checklist>
-```
-
-#### 问题：使用logic但缺少delimiter
-```xml
-<!-- 错误 -->
-<node type="INCL" field="process" logic="OR">malware.exe|virus.exe</node>
-
-        <!-- 正确 -->
-<node type="INCL" field="process" logic="OR" delimiter="|">malware.exe|virus.exe</node>
-```
-
-### 阈值配置错误
-
-#### 问题：SUM类型缺少count_field
-```xml
-<!-- 错误 -->
-<threshold group_by="user_id" range="1h" count_type="SUM">1000</threshold>
-
-        <!-- 正确 -->
-<threshold group_by="user_id" range="1h" count_type="SUM" count_field="amount">1000</threshold>
-```
-
-### 性能优化建议
-
-#### 1. 使用Filter提升性能
-```xml
-<!-- 好：先用filter过滤 -->
-<rule id="optimized_rule">
-    <filter field="event_type">process_creation</filter>
-    <checklist>
-        <node type="INCL" field="process_name">suspicious</node>
-    </checklist>
-</rule>
-
-        <!-- 不好：没有filter -->
-<rule id="slow_rule">
-<checklist>
-    <node type="EQU" field="event_type">process_creation</node>
-    <node type="INCL" field="process_name">suspicious</node>
-</checklist>
-</rule>
-```
-
-#### 2. 节点类型选择
-```xml
-<!-- 好：按性能排序 -->
-<checklist condition="null_check and string_check and regex_check">
-    <node id="null_check" type="NOTNULL" field="required_field"></node>
-    <node id="string_check" type="INCL" field="process_name">suspicious</node>
-    <node id="regex_check" type="REGEX" field="command_line">^.*malware.*$</node>
-</checklist>
-```
-
-#### 3. 合理使用阈值
-```xml
-<!-- 好：使用local_cache -->
-<threshold group_by="source_ip" range="300s" local_cache="true">10</threshold>
-
-        <!-- 注意：CLASSIFY类型内存消耗较大 -->
-<threshold group_by="user_id" range="3600s" count_type="CLASSIFY" count_field="resource_id">100</threshold>
-```
+祝你使用愉快！🚀

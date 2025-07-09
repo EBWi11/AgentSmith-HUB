@@ -169,12 +169,26 @@ func loadLocalComponents() {
 		name := common.GetFileNameWithoutExt(f)
 		_ = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
 	}
+	// Load plugin .new files
+	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go.new") {
+		name := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".go")
+		if content, err := os.ReadFile(f); err == nil {
+			plugin.PluginsNew[name] = string(content)
+		}
+	}
 
 	// inputs
 	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
 		if inp, err := input.NewInput(f, "", id); err == nil {
 			project.GlobalProject.Inputs[id] = inp
+		}
+	}
+	// Load input .new files
+	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
+		if content, err := os.ReadFile(f); err == nil {
+			project.GlobalProject.InputsNew[id] = string(content)
 		}
 	}
 
@@ -185,12 +199,26 @@ func loadLocalComponents() {
 			project.GlobalProject.Outputs[id] = out
 		}
 	}
+	// Load output .new files
+	for _, f := range traverseComponents(path.Join(root, "output"), ".yaml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
+		if content, err := os.ReadFile(f); err == nil {
+			project.GlobalProject.OutputsNew[id] = string(content)
+		}
+	}
 
 	// rulesets
 	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml") {
 		id := common.GetFileNameWithoutExt(f)
 		if rs, err := rules_engine.NewRuleset(f, "", id); err == nil {
 			project.GlobalProject.Rulesets[id] = rs
+		}
+	}
+	// Load ruleset .new files
+	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".xml")
+		if content, err := os.ReadFile(f); err == nil {
+			project.GlobalProject.RulesetsNew[id] = string(content)
 		}
 	}
 }
@@ -223,6 +251,14 @@ func loadLocalProjects() {
 			project.GlobalProject.Projects[id] = p
 		} else {
 			logger.Error("Failed to create project", "id", id, "error", err)
+		}
+	}
+
+	// Load project .new files
+	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
+		if content, err := os.ReadFile(f); err == nil {
+			project.GlobalProject.ProjectsNew[id] = string(content)
 		}
 	}
 

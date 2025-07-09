@@ -21,7 +21,7 @@ const props = defineProps({
   type: {
     type: String,
     required: true,
-    validator: (value) => ['local', 'temp', 'running', 'stopped', 'error'].includes(value)
+    validator: (value) => ['local', 'temp', 'running', 'stopped', 'starting', 'stopping', 'error'].includes(value)
   },
   tooltip: {
     type: String,
@@ -39,6 +39,8 @@ const badgeClass = computed(() => {
     temp: 'bg-blue-100 text-blue-800',
     running: 'bg-green-100 text-green-800',
     stopped: 'bg-gray-100 text-gray-800',
+    starting: 'bg-blue-100 text-blue-800',
+    stopping: 'bg-orange-100 text-orange-800',
     error: 'bg-red-100 text-red-800'
   }
   return classes[props.type] || 'bg-gray-100 text-gray-800'

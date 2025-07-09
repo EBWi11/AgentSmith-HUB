@@ -1,11 +1,10 @@
 <root type="detection">
     <rule id="reverse_shell_01" name="反弹shell检测">
-        <filter field="data_typedd">59</filter>
         <checklist condition="a and (b or c) ">
-            <node id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</node>
-            <node id="b" type="INCL" field="data" logic="or" delimiter="|">test1|test2</node>
-            <node id="b" type="REGEX" field="data">abc</node>
-            <node id="c" type="PLUGIN">plugin_name(_$ORIDATA)</node>
+            <check id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</check>
+            <check id="b" type="INCL" field="data" logic="or" delimiter="|">test1|test2</check>
+            <check id="b" type="REGEX" field="data">abc</check>
+            <check id="c" type="PLUGIN">plugin_name(_$ORIDATA)</check>
         </checklist>
 
         <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
@@ -13,6 +12,11 @@
         <append field="data_type">10</append>
         <append type="PLUGIN" field="data_type">plugin_name(_$ORIDATA)</append>
         <append type="PLUGIN" field="data_type">plugin_name("test", 123 , pid)</append>
+
+        <plugin>plugin_name(_$ORIDATA)</plugin>>
+
+        <check type="INCL" field="a.b">test</check>
+        <check type="EQU" field="a.b.c">123</check>
 
         <del>sport,dport</del>
         <plugin>plugin_name(_$ORIDATA)</plugin>>
