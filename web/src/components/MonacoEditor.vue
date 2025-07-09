@@ -3082,7 +3082,7 @@ function getXmlAttributeNameCompletions(context, range) {
       
       // 在checklist内部的check节点需要id属性
       if (context.parentTags.includes('checklist')) {
-        checkAttrs.unshift({ label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions (required in checklist)', insertText: 'id="${1:node-id}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range });
+        checkAttrs.unshift({ label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Node identifier for conditions (required in checklist)', insertText: 'id="node-id"', range: range });
       }
       
       suggestions.push(...checkAttrs);
@@ -3090,13 +3090,13 @@ function getXmlAttributeNameCompletions(context, range) {
       
     case 'checklist':
       suggestions.push(
-        { label: 'condition', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical condition using node IDs', insertText: 'condition="${1:a and b}"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+        { label: 'condition', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Logical condition using node IDs', insertText: 'condition="a and b"', range: range }
       );
       break;
       
     case 'threshold':
       // Generate smart group_by suggestion with available fields
-      let groupByTemplate = 'group_by="${1:field1,field2}"';
+      let groupByTemplate = 'group_by="field1"';
       if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
         const topFields = dynamicFieldKeys.value.slice(0, 3).join(',');
         groupByTemplate = `group_by="${topFields}"`;
@@ -3141,7 +3141,24 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'root',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Root element for ruleset',
-        insertText: 'root type="DETECTION" name="ruleset-name">\n    <rule id="rule_id" name="rule_name">\n        <!-- Operations can be in any order -->\n        <check type="EQU" field="status">active</check>\n        <threshold group_by="user_id" range="5m">10</threshold>\n        <checklist condition="a and b">\n            <check id="a" type="INCL" field="message">error</check>\n            <check id="b" type="REGEX" field="path">.*\\.log$</check>\n        </checklist>\n        <append field="processed">true</append>\n        <plugin>notify("alert")</plugin>\n        <del>temp_field</del>\n    </rule>\n</root',
+        insertText: 'root author="name">\n' +
+            '    <rule id="rule_id">\n' +
+            '        <!-- Operations can be in any order -->\n' +
+            '        <check type="EQU" field="status">active</check>\n' +
+            '    \n' +
+            '        <threshold group_by="user_id" range="5m">10</threshold>\n' +
+            '    \n' +
+            '        <checklist condition="a or b">\n' +
+            '            <check id="a" type="INCL" field="message">error</check>\n' +
+            '            <check id="b" type="REGEX" field="path">.*\\.log$</check>\n' +
+            '        </checklist>\n' +
+            '\n' +
+            '        <append field="processed">true</append>\n' +
+            '        <plugin>notify("alert")</plugin>\n' +
+            '        <del>temp_field</del>\n' +
+            '    \n' +
+            '    </rule>\n' +
+            '</root',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
@@ -3153,8 +3170,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'rule',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Rule definition (operations can be in any order)',
-        insertText: 'rule id="${1:rule_id}" name="${2:rule_name}">\n    ${3:<!-- Add any operations in any order -->}\n    <check type="${4:EQU}" field="${5:field}">${6:value}</check>\n</rule',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'rule id="rule_id" name="rule_name">\n    <check type="EQU" field="field">value</check>\n</rule',
         range: range
       });
     }
@@ -3165,8 +3181,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Standalone check condition (can be placed anywhere in rule)',
-        insertText: 'check type="${1:EQU}" field="${2:field}">${3:value}</check',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'check type="EQU" field="field">value</check',
         range: range,
         sortText: '1_check' // Higher priority
       },
@@ -3174,8 +3189,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Checklist with conditional logic (can be placed anywhere in rule)',
-        insertText: 'checklist condition="${1:a and b}">\n    <check id="${2:a}" type="${3:EQU}" field="${4:field}">${5:value}</check>\n    <check id="${6:b}" type="${7:INCL}" field="${8:field}">${9:value}</check>\n</checklist',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
         range: range,
         sortText: '2_checklist'
       },
@@ -3183,8 +3197,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'threshold',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Threshold configuration (can be placed anywhere in rule)',
-        insertText: 'threshold group_by="${1:user_id}" range="${2:5m}">${3:10}</threshold',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
         range: range,
         sortText: '3_threshold'
       },
@@ -3192,8 +3205,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'append',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Append field to result (can be placed anywhere in rule)',
-        insertText: 'append field="${1:field_name}">${2:value}</append',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'append field="field_name">value</append',
         range: range,
         sortText: '4_append'
       },
@@ -3201,8 +3213,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
         documentation: 'Plugin execution (can be placed anywhere in rule)',
-        insertText: 'plugin>${1:plugin_name()}${2}</plugin',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin>plugin_name()</plugin',
         range: range,
         sortText: '5_plugin'
       },
@@ -3210,7 +3221,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'del',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Delete fields from result (can be placed anywhere in rule)',
-        insertText: 'del>${1:field1,field2}</del',
+        insertText: 'del>field</del',
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range,
         sortText: '6_del'
@@ -3225,8 +3236,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Check node within checklist (must have id attribute for condition)',
-        insertText: 'check id="${1:id}" type="${2:EQU}" field="${3:field}">${4:value}</check',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'check id="id" type="INCL" field="field">value</check',
         range: range
       });
     }
@@ -3270,8 +3280,7 @@ function getXmlTagContentCompletions(context, range, fullText) {
         label: 'plugin_name(_$ORIDATA)',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Plugin function with original data (template)',
-        insertText: '${1:plugin_name}(_$ORIDATA)',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin_name(_$ORIDATA)',
         range: range,
         sortText: '9_template_oridata' // Very low priority
       });
@@ -3280,8 +3289,7 @@ function getXmlTagContentCompletions(context, range, fullText) {
         label: 'plugin_name("arg1", arg2)',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Plugin function with custom arguments (template)',
-        insertText: '${1:plugin_name}("${2:arg1}", ${3:arg2})',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: 'plugin_name("arg1", arg2)',
         range: range,
         sortText: '9_template_custom' // Very low priority
       });
@@ -3300,8 +3308,7 @@ function getXmlTagContentCompletions(context, range, fullText) {
         label: '_$field_reference',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Reference to another field value',
-        insertText: '_$${1:' + dynamicFieldKeys.value[0] + '}',
-        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        insertText: '_$' + dynamicFieldKeys.value[0],
         range: range,
         sortText: '01_field_ref'
       });
