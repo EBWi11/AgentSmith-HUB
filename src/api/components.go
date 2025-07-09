@@ -2315,6 +2315,10 @@ func deleteRulesetRule(c echo.Context) error {
 
 	// Clean up the temporary ruleset (it was only for validation)
 	if tempRuleset != nil {
+		// Use StopForTesting for quick cleanup of validation-only rulesets
+		if err := tempRuleset.StopForTesting(); err != nil {
+			logger.Warn("Failed to stop temporary ruleset", "error", err)
+		}
 		tempRuleset = nil
 	}
 
@@ -2371,7 +2375,7 @@ func addRulesetRule(c echo.Context) error {
 
 	if request.RuleRaw == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error": "❌ REQUEST VALIDATION FAILED: Missing rule content.\n\n🔧 HOW TO FIX: Provide the complete rule XML in the 'rule_raw' field.\n\n📝 REQUIRED FORMAT:\n<rule id=\"unique_id\" name=\"Detailed description\">\n    <filter field=\"field_name\">value</filter>\n    <checklist>\n        <node type=\"NODE_TYPE\" field=\"field_name\">value</node>\n    </checklist>\n</rule>",
+			"error": "❌ REQUEST VALIDATION FAILED: Missing rule content.\n\n🔧 HOW TO FIX: Provide the complete rule XML in the 'rule_raw' field.\n\n📝 REQUIRED FORMAT:\n<rule id=\"unique_id\" name=\"Detailed description\">\n    <check type=\"EQU\" field=\"field_name\">value</check>\n    <threshold group_by=\"field\" range=\"5m\" value=\"10\"/>\n    <append field=\"alert_type\">threat_detected</append>\n</rule>",
 			"helpful_commands": []string{
 				"get_rule_templates - View example rules",
 				"get_ruleset_syntax_guide - Learn proper syntax",
@@ -2455,7 +2459,10 @@ func addRulesetRule(c echo.Context) error {
 
 	// Clean up the temporary ruleset (it was only for validation)
 	if tempRuleset != nil {
-		// The NewRuleset call above already did full validation, no need to start/stop
+		// Use StopForTesting for quick cleanup of validation-only rulesets
+		if err := tempRuleset.StopForTesting(); err != nil {
+			logger.Warn("Failed to stop temporary ruleset", "error", err)
+		}
 		tempRuleset = nil
 	}
 
@@ -2495,7 +2502,11 @@ func addRulesetRule(c echo.Context) error {
 
 // removeRuleFromXML removes a rule with the specified ID from the XML
 func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
-	// Find and remove the rule element
+	// Use regex to find the exact rule with the specified ID
+	// This pattern matches: <rule id="exact_id" or <rule id="exact_id" followed by space/other attributes
+	rulePattern := fmt.Sprintf(`<rule\s+[^>]*id\s*=\s*"%s"[^>]*>`, regexp.QuoteMeta(ruleId))
+	ruleRegex := regexp.MustCompile(rulePattern)
+
 	lines := strings.Split(xmlContent, "\n")
 	var result []string
 	skipMode := false
@@ -2504,8 +2515,8 @@ func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
-		// Check if this line starts a rule with the target ID
-		if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleId)) {
+		// Check if this line contains a rule with the target ID using regex
+		if ruleRegex.MatchString(line) {
 			found = true
 			// Check if it's a self-closing tag
 			if strings.Contains(line, "/>") {
@@ -2539,9 +2550,13 @@ func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
 
 // ruleExistsInXML checks if a rule with the specified ID exists in the XML
 func ruleExistsInXML(xmlContent, ruleId string) bool {
+	// Use regex to find the exact rule with the specified ID
+	rulePattern := fmt.Sprintf(`<rule\s+[^>]*id\s*=\s*"%s"[^>]*>`, regexp.QuoteMeta(ruleId))
+	ruleRegex := regexp.MustCompile(rulePattern)
+
 	lines := strings.Split(xmlContent, "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "<rule") && strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleId)) {
+		if ruleRegex.MatchString(line) {
 			return true
 		}
 	}
@@ -2564,7 +2579,7 @@ func validateAndExtractRuleId(ruleRaw string) (string, string, error) {
 	}
 
 	if err := xml.Unmarshal([]byte(tempXML), &tempRuleset); err != nil {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: XML syntax error.\n\n🔧 HOW TO FIX: Check your XML structure for common issues:\n- Missing closing tags\n- Unescaped special characters (< > & \" ')\n- Incorrect attribute quotes\n- Malformed tag structure\n\n🐛 XML ERROR: %v\n\n📝 VALID EXAMPLE:\n<rule id=\"example_rule\" name=\"Detailed description here\">\n    <filter field=\"event_type\">security</filter>\n    <checklist>\n        <node type=\"INCL\" field=\"command\">suspicious_command</node>\n    </checklist>\n</rule>\n\n💡 Use an XML validator to check your syntax before submitting!", err)
+		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: XML syntax error.\n\n🔧 HOW TO FIX: Check your XML structure for common issues:\n- Missing closing tags\n- Unescaped special characters (< > & \" ')\n- Incorrect attribute quotes\n- Malformed tag structure\n\n🐛 XML ERROR: %v\n\n📝 VALID EXAMPLE:\n<rule id=\"example_rule\" name=\"Detailed description here\">\n    <check type=\"EQU\" field=\"event_type\">security</check>\n    <threshold group_by=\"source_ip\" range=\"5m\" value=\"5\"/>\n    <append field=\"alert_type\">suspicious_activity</append>\n</rule>\n\n💡 Use an XML validator to check your syntax before submitting!", err)
 	}
 
 	if len(tempRuleset.Rules) != 1 {

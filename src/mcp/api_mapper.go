@@ -27,6 +27,9 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
+// Package-level variable to track if introduction has been shown
+var introShown bool
+
 // APIMapper handles the mapping between MCP tools and existing HTTP API endpoints
 type APIMapper struct {
 	baseURL string
@@ -1220,11 +1223,7 @@ func (m *APIMapper) handleGetErrorLogs(args map[string]interface{}) (common.MCPT
 
 // handleGetProjects retrieves comprehensive list of all projects
 func (m *APIMapper) handleGetProjects(args map[string]interface{}) (common.MCPToolResult, error) {
-	var results []string
-	results = append(results, "=== PROJECT LIST ===\n")
-
-	// Step 1: Retrieve projects
-	results = append(results, "Step 1: Retrieving projects...")
+	// Simply retrieve projects without verbose step-by-step output
 	projectsResponse, err := m.makeHTTPRequest("GET", "/projects", nil, true)
 	if err != nil {
 		return common.MCPToolResult{
@@ -1232,29 +1231,12 @@ func (m *APIMapper) handleGetProjects(args map[string]interface{}) (common.MCPTo
 			IsError: true,
 		}, nil
 	}
-	results = append(results, fmt.Sprintf("✓ Projects retrieved: %s\n", string(projectsResponse)))
 
-	// Step 2: Add critical guidance
-	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
-	results = append(results, "📋 **Check Project Health:**")
-	results = append(results, "   → Use 'get_project_error' with id='<project_name>' to check for errors")
-	results = append(results, "   → Use 'project_control' with action='status' to check running status")
-	results = append(results, "")
-	results = append(results, "🔗 **Check Component Dependencies:**")
-	results = append(results, "   → Use 'get_project_components' with id='<project_name>' to see used components")
-	results = append(results, "   → Use 'get_project_component_sequences' to see data flow")
-	results = append(results, "")
-	results = append(results, "📋 **Check Component Status:**")
-	results = append(results, "   → Use 'get_pending_changes' to see if any components have unpublished changes")
-	results = append(results, "   → Components with pending changes may affect project behavior!")
-	results = append(results, "")
-	results = append(results, "⚡ **Common Actions:**")
-	results = append(results, "   → 'test_project' - Test project end-to-end")
-	results = append(results, "   → 'project_control' - Start/stop/restart projects")
-	results = append(results, "   → 'apply_changes' - Deploy pending component changes")
+	// Return just the project data with minimal guidance
+	result := fmt.Sprintf("%s\n\n💡 Next: Use 'get_project' with specific ID for details, or 'get_pending_changes' to check deployment status.", string(projectsResponse))
 
 	return common.MCPToolResult{
-		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+		Content: []common.MCPToolContent{{Type: "text", Text: result}},
 	}, nil
 }
 
@@ -1694,71 +1676,38 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 
 // generateSystemIntroduction provides comprehensive AgentSmith-HUB system overview
 func (m *APIMapper) generateSystemIntroduction() (common.MCPToolResult, error) {
+	if introShown {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "System introduction already provided. Use other tools to interact with AgentSmith-HUB."}},
+		}, nil
+	}
+
+	introShown = true
+
 	var results []string
 
-	results = append(results, "🏛️ ===============================")
-	results = append(results, "🏛️  AGENTSMITH-HUB SYSTEM OVERVIEW")
-	results = append(results, "🏛️ ===============================\n")
+	results = append(results, "🏛️ AgentSmith-HUB System Overview")
+	results = append(results, "=====================================\n")
 
-	results = append(results, "🎯 **SYSTEM ARCHITECTURE**")
-	results = append(results, "AgentSmith-HUB is a distributed security detection platform and security data pipeline platform with:")
-	results = append(results, "• Data-driven security detection with component-based architecture")
-	results = append(results, "• Input → Multi-Ruleset → Output pipeline with real-time processing")
-	results = append(results, "• The rule engine supports complex data filtering and detection")
-	results = append(results, "• Leader-follower cluster architecture with automatic failover\n")
+	results = append(results, "AgentSmith-HUB is a security data pipeline platform with built-in rules engine for real-time threat detection.\n")
 
-	results = append(results, "🧩 **COMPONENT TYPES**")
-	results = append(results, "┌─ INPUT: Data ingestion (kafka, aliyun sls) [YAML config]")
-	results = append(results, "├─ RULESET: Security detection logic [XML with custom DSL]")
-	results = append(results, "│  └─ Filter → CheckNode architecture for performance")
-	results = append(results, "├─ OUTPUT: Alert delivery (print to log file, aliyun sls, elasticsearch, kafka) [YAML config]")
-	results = append(results, "├─ PLUGIN: Custom functions (yaegi) [Go code]")
-	results = append(results, "└─ PROJECT: Component orchestration [YAML workflow]\n")
+	results = append(results, "🧩 **Core Components**")
+	results = append(results, "• **INPUT**: Ingests data from Kafka, Aliyun SLS, etc.")
+	results = append(results, "• **RULESET**: Security detection rules with custom DSL")
+	results = append(results, "• **OUTPUT**: Delivers alerts to Elasticsearch, Kafka, etc.")
+	results = append(results, "• **PLUGIN**: Custom functions for data processing")
+	results = append(results, "• **PROJECT**: Orchestrates components into workflows\n")
 
-	results = append(results, "🔑 **KEY CONCEPTS**")
-	results = append(results, "⚡ Temporary Files: Changes go to .new files → deploy via apply_changes")
-	results = append(results, "⚠️  CRITICAL: Temporary changes are NOT ACTIVE until deployed!")
-	results = append(results, "📈 Sample Data: Auto-collected at each component for rule creation Or ask the user to provide Or use the intelligent sample data tool")
-	results = append(results, "🎯 ProjectNodeSequence: Used to describe the specific location of a component within a project, like: INPUT.name.RULESET.name.OUTPUT.name")
-	results = append(results, "📊 Data-Driven: NEVER create rules without sample data\n")
+	results = append(results, "🔄 **Data Flow**: Input → Ruleset → Output\n")
 
-	results = append(results, "🚀 **DEPLOYMENT WORKFLOW**")
-	results = append(results, "1. 📝 Create/Edit → Saves to temporary (.new) files")
-	results = append(results, "2. 🔍 Review → Use 'get_pending_changes' to see what's staged")
-	results = append(results, "3. 🧪 Test → Validate with real data using test tools\n")
-	results = append(results, "4. 🚀 Deploy → Use 'apply_changes' to activate in production")
+	results = append(results, "🔑 **Key Features**")
+	results = append(results, "• Real-time security detection")
+	results = append(results, "• Flexible rule engine")
+	results = append(results, "• Component-based architecture")
+	results = append(results, "• Distributed cluster support")
+	results = append(results, "• Safe configuration changes via temporary files\n")
 
-	results = append(results, "🛡️ **RULE ENGINE ARCHITECTURE**")
-	results = append(results, "Performance Design: Filter → CheckNode")
-	results = append(results, "• Filter: Coarse filtering (reduce volume 80%+)")
-	results = append(results, "• CheckNode: Precise detection with field matching")
-	results = append(results, "• Node Types: FASTEST[ISNULL,NOTNULL] → FAST[EQU,NEQ,MT,LT] → SLOWER[INCL,REGEX,PLUGIN]")
-	results = append(results, "• Validation: Uppercase types required (DETECTION/WHITELIST)")
-	results = append(results, "• Append: Only Type,FieldName,Value fields (NO desc!)\n")
-
-	results = append(results, "📊 **DATA REQUIREMENTS** 🚨")
-	results = append(results, "✅ MANDATORY: All rules based on actual sample data")
-	results = append(results, "❌ FORBIDDEN: Imagined data like 'data_type=59', 'exe=msfconsole'")
-	results = append(results, "📥 Sources: get_samplers_data API OR user-provided real JSON")
-	results = append(results, "🔍 Validation: Field names must exist in actual data\n")
-
-	results = append(results, "🎯 **COMMON WORKFLOWS**")
-	results = append(results, "📝 Rule Creation:")
-	results = append(results, "   1. get_samplers_data → 2. Analyze fields → 3. Create rule → 4. Test → 5. Deploy")
-	results = append(results, "⚙️  Component Updates:")
-	results = append(results, "   1. Edit (creates .new) → 2. get_pending_changes → 3. Test → 4. apply_changes")
-	results = append(results, "🔧 Troubleshooting:")
-	results = append(results, "   1. Check status → 2. Review logs → 3. Validate data flow → 4. Test components\n")
-
-	results = append(results, "⚠️  **CRITICAL WARNINGS**")
-	results = append(results, "🚨 Deployment: Temporary changes NOT ACTIVE until apply_changes")
-	results = append(results, "🚨 Data-Driven: NEVER create rules without real sample data")
-	results = append(results, "🚨 Syntax: Rule engine syntax must be exact - errors break ruleset")
-	results = append(results, "🚨 Testing: Always test with real data before production")
-	results = append(results, "🚨 Cluster: Only leader nodes collect sample data\n")
-
-	results = append(results, "\n🎉 **YOU'RE READY TO USE AGENTSMITH-HUB!**")
-	results = append(results, "Remember: Always work with real data, review before deploying, test thoroughly!")
+	results = append(results, "💡 Use available tools to explore components and manage your security pipeline.")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},

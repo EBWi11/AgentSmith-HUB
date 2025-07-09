@@ -116,21 +116,10 @@ func (s *StandardMCPServer) HandleJSONRPCRequest(requestData []byte) ([]byte, er
 
 // handleInitialize handles the initialize method
 func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
-	// Get system introduction from API mapper
-	systemIntro, err := s.apiMapper.generateSystemIntroduction()
-	var instructions string
-	if err != nil {
-		logger.Error("Failed to generate system introduction", "error", err)
-		instructions = "AgentSmith-HUB MCP Server initialized. Use 'smart_assistant' with task='system_intro' for complete system overview."
-	} else {
-		if len(systemIntro.Content) > 0 {
-			instructions = systemIntro.Content[0].Text
-		} else {
-			instructions = "AgentSmith-HUB MCP Server initialized. System overview generation completed."
-		}
-	}
+	// Simple, concise initialization message
+	instructions := "AgentSmith-HUB MCP Server ready. Use tools to interact with the system."
 
-	// Return protocol information with system introduction
+	// Return protocol information with minimal introduction
 	result := map[string]interface{}{
 		"protocolVersion": common.MCPVersion,
 		"capabilities": map[string]interface{}{
