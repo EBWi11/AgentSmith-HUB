@@ -100,27 +100,19 @@ kafka:
 
 const NewRulesetData = `<root author="name">
     <rule id="rule_id" name="Example rule with flexible execution order">
-        <!-- New flexible syntax: operations execute in order of appearance -->
-        
-        <!-- Standalone check - no longer requires checklist wrapper -->
         <check type="REGEX" field="exe">testcases</check>
         
-        <!-- Threshold can appear anywhere -->
-        <threshold groupby="src_ip" range="1m" value="100" />
+        <threshold group_by="src_ip" range="1m" value="100" />
         
-        <!-- Multiple checks in sequence -->
         <check type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</check>
-        <check type="PLUGIN" field="exe">plugin_name(_$ORIDATA)</check>
+        <check type="PLUGIN" field="exe">isPrivateIP("127.0.0.1")</check>
         
-        <!-- Post-processing operations -->
         <append field="abc">123</append>
         <del>exe,argv</del>
-        <plugin>plugin_name(_$ORIDATA, "test", field1)</plugin>
         
-        <!-- Can also use traditional checklist for grouped checks -->
-        <checklist condition="1 AND 2">
-            <check id="1" type="EQU" field="status">200</check>
-            <check id="2" type="NEXCL" field="path">favicon.ico</check>
+        <checklist condition="a or b">
+            <check id="a" type="EQU" field="status">200</check>
+            <check id="b" type="NEXCL" field="path">favicon.ico</check>
         </checklist>
     </rule>
 </root>`
