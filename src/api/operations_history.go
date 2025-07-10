@@ -125,7 +125,6 @@ func matchesOperationFilter(record common.OperationRecord, filter OperationHisto
 			!strings.Contains(strings.ToLower(record.ProjectID), keyword) &&
 			!strings.Contains(strings.ToLower(record.Error), keyword) &&
 			!strings.Contains(strings.ToLower(record.Diff), keyword) &&
-			!strings.Contains(strings.ToLower(record.UserIP), keyword) &&
 			!strings.Contains(strings.ToLower(nodeID), keyword) {
 			return false
 		}
@@ -419,7 +418,7 @@ func uploadOperationHistoryToRedis() {
 }
 
 // RecordChangePush records a change push operation to Redis
-func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg, userIP string) {
+func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
 	record := common.OperationRecord{
 		Type:          common.OpTypeChangePush,
 		Timestamp:     time.Now(),
@@ -430,7 +429,6 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 		Diff:          diff,
 		Status:        status,
 		Error:         errorMsg,
-		UserIP:        userIP,
 	}
 
 	// Serialize record to JSON and store to Redis

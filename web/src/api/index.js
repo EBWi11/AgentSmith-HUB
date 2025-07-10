@@ -1501,6 +1501,17 @@ export const hubApi = {
     }
   },
 
+  async getClusterOperationsHistory(params = '') {
+    try {
+      const url = '/cluster-operations-history' + (params ? '?' + params : '');
+      const response = await api.get(url);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching cluster operations history:', error);
+      throw error;
+    }
+  },
+
   async getOperationsStats() {
     try {
       const response = await api.get('/operations-stats');

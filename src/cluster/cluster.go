@@ -553,14 +553,21 @@ func (cm *ClusterManager) getProjectStatesFromRedis(nodeID string) []ProjectStat
 		return []ProjectStatus{}
 	}
 
-	// Convert to ProjectStatus format
+	// Convert to ProjectStatus format (only stable states)
 	projectStates := make([]ProjectStatus, 0, len(projectStateMap))
 	for projectID, status := range projectStateMap {
-		projectState := ProjectStatus{
-			ID:     projectID,
-			Status: status,
+		// Only include stable states in cluster coordination
+		if status == "running" || status == "stopped" {
+			// For states loaded from Redis, we don't have exact timestamp info
+			// Use current time as a reasonable fallback
+			now := time.Now()
+			projectState := ProjectStatus{
+				ID:              projectID,
+				Status:          status,
+				StatusChangedAt: &now,
+			}
+			projectStates = append(projectStates, projectState)
 		}
-		projectStates = append(projectStates, projectState)
 	}
 
 	return projectStates
@@ -1153,29 +1160,48 @@ func (cm *ClusterManager) startProjectStatusSubscriber() {
 					return
 				}
 				var evt struct {
-					NodeID    string `json:"node_id"`
-					ProjectID string `json:"project_id"`
-					Status    string `json:"status"`
+					NodeID          string `json:"node_id"`
+					ProjectID       string `json:"project_id"`
+					Status          string `json:"status"`
+					StatusChangedAt string `json:"status_changed_at,omitempty"`
 				}
 				if err := json.Unmarshal([]byte(m.Payload), &evt); err == nil {
+					// Only process stable states for cluster coordination
+					if evt.Status != "running" && evt.Status != "stopped" {
+						logger.Debug("Skipping transient project status event", "node_id", evt.NodeID, "project_id", evt.ProjectID, "status", evt.Status)
+						continue
+					}
+
 					cm.Mu.Lock()
 					if cm.NodeProjectStates == nil {
 						cm.NodeProjectStates = make(map[string][]ProjectStatus)
 					}
 					list := cm.NodeProjectStates[evt.NodeID]
 					updated := false
+
+					// Parse timestamp if provided
+					var statusChangedAt *time.Time
+					if evt.StatusChangedAt != "" {
+						if parsedTime, err := time.Parse(time.RFC3339, evt.StatusChangedAt); err == nil {
+							statusChangedAt = &parsedTime
+						}
+					}
+					if statusChangedAt == nil {
+						// Fallback to current time if timestamp parsing fails
+						now := time.Now()
+						statusChangedAt = &now
+					}
+
 					for i := range list {
 						if list[i].ID == evt.ProjectID {
 							list[i].Status = evt.Status
-							now := time.Now()
-							list[i].StatusChangedAt = &now
+							list[i].StatusChangedAt = statusChangedAt
 							updated = true
 							break
 						}
 					}
 					if !updated {
-						now := time.Now()
-						list = append(list, ProjectStatus{ID: evt.ProjectID, Status: evt.Status, StatusChangedAt: &now})
+						list = append(list, ProjectStatus{ID: evt.ProjectID, Status: evt.Status, StatusChangedAt: statusChangedAt})
 					}
 					cm.NodeProjectStates[evt.NodeID] = list
 					cm.Mu.Unlock()
@@ -1222,24 +1248,50 @@ func (cm *ClusterManager) reconcileProjectStates() {
 	}
 	cm.Mu.RUnlock()
 
-	// Desired statuses from leader hash
+	// Desired statuses from leader hash (only stable states)
 	desired := make(map[string]string)
 	if leaderHash, err := common.RedisHGetAll("cluster:proj_states:" + cm.SelfID); err == nil {
 		for pid, status := range leaderHash {
-			desired[pid] = status
+			// Only consider stable states for reconciliation
+			if status == "running" || status == "stopped" {
+				desired[pid] = status
+			}
 		}
 	}
 
-	// Compare and publish commands
+	// Compare and publish commands only when there's a real mismatch
 	for nodeID, states := range snapshot {
+		// Skip self node (leader)
+		if nodeID == cm.SelfID {
+			continue
+		}
+
 		for _, st := range states {
-			want, ok := desired[st.ID]
-			if !ok {
-				// Unknown project, instruct stop
-				publishProjCmd(nodeID, st.ID, "stop")
+			// Only consider stable states for reconciliation
+			if st.Status != "running" && st.Status != "stopped" {
+				logger.Debug("Skipping reconciliation for transient project status", "node_id", nodeID, "project_id", st.ID, "status", st.Status)
 				continue
 			}
+
+			want, ok := desired[st.ID]
+			if !ok {
+				// Unknown project on follower, instruct stop only if not already stopped
+				if st.Status != "stopped" {
+					logger.Info("Unknown project on follower, sending stop command", "node_id", nodeID, "project_id", st.ID, "current_status", st.Status)
+					publishProjCmd(nodeID, st.ID, "stop")
+				}
+				continue
+			}
+
+			// Only send command if there's an actual status mismatch
 			if want != st.Status {
+				// Avoid sending redundant commands
+				// Check if the status changed recently to avoid command spam
+				if st.StatusChangedAt != nil && time.Since(*st.StatusChangedAt) < 5*time.Second {
+					// Status was recently updated, skip reconciliation to avoid command spam
+					continue
+				}
+
 				// Convert status to action
 				var action string
 				switch want {
@@ -1250,7 +1302,31 @@ func (cm *ClusterManager) reconcileProjectStates() {
 				default:
 					action = "stop" // Default to stop for unknown states
 				}
+
+				logger.Info("Project status mismatch detected, sending reconciliation command",
+					"node_id", nodeID,
+					"project_id", st.ID,
+					"desired_status", want,
+					"current_status", st.Status,
+					"action", action)
 				publishProjCmd(nodeID, st.ID, action)
+			}
+		}
+
+		// Check for missing projects on follower (projects that exist on leader but not on follower)
+		followerProjects := make(map[string]bool)
+		for _, st := range states {
+			followerProjects[st.ID] = true
+		}
+
+		for projectID, desiredStatus := range desired {
+			if !followerProjects[projectID] && desiredStatus == "running" {
+				// Project should be running but doesn't exist on follower
+				logger.Info("Missing running project on follower, sending start command",
+					"node_id", nodeID,
+					"project_id", projectID,
+					"desired_status", desiredStatus)
+				publishProjCmd(nodeID, projectID, "start")
 			}
 		}
 	}

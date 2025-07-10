@@ -2489,13 +2489,25 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 		return
 	}
 
+	// Only sync stable states (running, stopped). Skip transient states (starting, stopping, error).
+	if status != ProjectStatusRunning && status != ProjectStatusStopped {
+		logger.Debug("Skipping Redis sync for transient project status", "node_id", nodeID, "project_id", projectID, "status", status)
+		return
+	}
+
+	// Ensure we use the correct node ID for consistency
+	actualNodeID := nodeID
+	if actualNodeID == "" {
+		actualNodeID = common.Config.LocalIP
+	}
+
 	// Update project status in Redis hash with retry
-	hashKey := "cluster:proj_states:" + nodeID
+	hashKey := "cluster:proj_states:" + actualNodeID
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := common.RedisHSet(hashKey, projectID, string(status)); err != nil {
-			logger.Error("Failed to update project status in Redis", "node_id", nodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
+			logger.Error("Failed to update project status in Redis", "node_id", actualNodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
 			if attempt == 2 {
-				logger.Error("Failed to update project status after 3 attempts", "node_id", nodeID, "project_id", projectID)
+				logger.Error("Failed to update project status after 3 attempts", "node_id", actualNodeID, "project_id", projectID)
 				return
 			}
 			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
@@ -2504,23 +2516,25 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 		break
 	}
 
-	// Publish project status event with retry
-	evt := map[string]string{
-		"node_id":    nodeID,
-		"project_id": projectID,
-		"status":     string(status),
+	// Publish project status event with retry and timestamp
+	now := time.Now()
+	evt := map[string]interface{}{
+		"node_id":           actualNodeID,
+		"project_id":        projectID,
+		"status":            string(status),
+		"status_changed_at": now.Format(time.RFC3339),
 	}
 	data, err := json.Marshal(evt)
 	if err != nil {
-		logger.Error("Failed to marshal project status event", "node_id", nodeID, "project_id", projectID, "error", err)
+		logger.Error("Failed to marshal project status event", "node_id", actualNodeID, "project_id", projectID, "error", err)
 		return
 	}
 
 	for attempt := 0; attempt < 3; attempt++ {
 		if err := common.RedisPublish("cluster:proj_status", string(data)); err != nil {
-			logger.Error("Failed to publish project status event", "node_id", nodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
+			logger.Error("Failed to publish project status event", "node_id", actualNodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
 			if attempt == 2 {
-				logger.Error("Failed to publish project status after 3 attempts", "node_id", nodeID, "project_id", projectID)
+				logger.Error("Failed to publish project status after 3 attempts", "node_id", actualNodeID, "project_id", projectID)
 				return
 			}
 			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
@@ -2529,5 +2543,5 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 		break
 	}
 
-	logger.Debug("Project status updated successfully", "node_id", nodeID, "project_id", projectID, "status", status)
+	logger.Debug("Project status updated successfully", "node_id", actualNodeID, "project_id", projectID, "status", status, "timestamp", now.Format(time.RFC3339))
 }

@@ -131,6 +131,9 @@ func main() {
 	} else {
 		// Start error log uploader for follower nodes
 		api.StartErrorLogUploader()
+
+		// Start operation history uploader for follower nodes
+		api.StartOperationHistoryUploader()
 	}
 
 	// Start QPS collector on all nodes (leader and followers)
@@ -280,6 +283,14 @@ func loadLocalProjects() {
 			}
 
 			project.GlobalProject.Projects[id] = p
+
+			// Ensure project status is synced to Redis for cluster visibility
+			// This is important for follower nodes so leader can see their project states
+			if err := p.SaveProjectStatus(); err != nil {
+				logger.Warn("Failed to sync project status to Redis", "id", p.Id, "error", err)
+			} else {
+				logger.Debug("Synced project status to Redis", "id", p.Id, "status", p.Status)
+			}
 		} else {
 			logger.Error("Failed to create project", "id", id, "error", err)
 		}

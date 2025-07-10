@@ -204,6 +204,7 @@ func ServerStart(listener string) error {
 
 	// Operations history endpoints - REQUIRE AUTH
 	auth.GET("/operations-history", GetOperationsHistory)
+	auth.GET("/cluster-operations-history", GetClusterOperationsHistory)
 	auth.GET("/operations-stats", GetOperationsStats)
 
 	// MCP (Model Context Protocol) endpoints - REQUIRE AUTH
