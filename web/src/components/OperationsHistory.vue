@@ -33,32 +33,7 @@
 
     <!-- Filters -->
     <div class="p-4 border-b border-gray-200 bg-gray-50">
-      <!-- Mode Toggle -->
-      <div class="mb-4 flex items-center space-x-4">
-        <label class="block text-sm font-medium text-gray-700">View Mode:</label>
-        <div class="flex items-center space-x-2">
-          <label class="flex items-center">
-            <input 
-              type="radio" 
-              v-model="viewMode" 
-              value="local" 
-              @change="handleViewModeChange"
-              class="mr-2"
-            >
-            Local Node Only
-          </label>
-          <label class="flex items-center">
-            <input 
-              type="radio" 
-              v-model="viewMode" 
-              value="cluster" 
-              @change="handleViewModeChange"
-              class="mr-2"
-            >
-            All Cluster Nodes
-          </label>
-        </div>
-      </div>
+      <!-- (View mode toggle removed) -->
 
       <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <!-- Operation Type Filter -->
@@ -97,11 +72,11 @@
           </select>
         </div>
 
-        <!-- Node Filter (only show in cluster mode) -->
-        <div v-if="viewMode === 'cluster'">
+        <!-- Node Filter -->
+        <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Node</label>
           <select v-model="filters.nodeId" @change="applyFilters" class="filter-select">
-            <option value="">All Nodes</option>
+            <option value="all">All Nodes</option>
             <option v-for="nodeId in availableNodes" :key="nodeId" :value="nodeId">
               {{ nodeId }}
             </option>
@@ -156,8 +131,8 @@
         </div>
       </div>
       
-      <!-- Node Statistics (only show in cluster mode) -->
-      <div v-if="viewMode === 'cluster' && Object.keys(nodeStats).length > 0" class="mt-4 p-3 bg-blue-50 rounded-lg">
+      <!-- Node Statistics -->
+      <div v-if="isClusterMode && Object.keys(nodeStats).length > 0" class="mt-4 p-3 bg-blue-50 rounded-lg">
         <h4 class="text-sm font-medium text-gray-900 mb-2">Node Statistics</h4>
         <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
           <div v-for="(stats, nodeId) in nodeStats" :key="nodeId" class="bg-white p-2 rounded border">
@@ -214,7 +189,7 @@
                   </h3>
                   <div class="flex items-center space-x-2 text-sm text-gray-500">
                     <span>{{ formatTimestamp(operation.timestamp) }}</span>
-                    <span v-if="viewMode === 'cluster' && operation.details?.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
+                    <span v-if="isClusterMode && operation.details?.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       Node: {{ operation.details.node_id }}
                     </span>
                   </div>
@@ -261,11 +236,11 @@
                     <dt class="text-gray-500">Project ID:</dt>
                     <dd class="col-span-2 text-gray-900">{{ operation.project_id }}</dd>
                   </div>
-                  <div v-if="viewMode === 'cluster' && operation.details?.node_id" class="grid grid-cols-3 gap-1">
+                  <div v-if="isClusterMode && operation.details?.node_id" class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Node ID:</dt>
                     <dd class="col-span-2 text-gray-900">{{ operation.details.node_id }}</dd>
                   </div>
-                  <div v-if="viewMode === 'cluster' && operation.details?.node_address" class="grid grid-cols-3 gap-1">
+                  <div v-if="isClusterMode && operation.details?.node_address" class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Node Address:</dt>
                     <dd class="col-span-2 text-gray-900">{{ operation.details.node_address }}</dd>
                   </div>
@@ -371,9 +346,9 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const expandedOperations = ref(new Set())
-const viewMode = ref('local') // 'local' or 'cluster'
 const nodeStats = ref({})
 const availableNodes = ref([])
+const isClusterMode = computed(() => availableNodes.value.length > 1)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -387,7 +362,7 @@ const filters = ref({
   startDate: '',
   endDate: '',
   keyword: '',
-  nodeId: ''
+  nodeId: 'all'
 })
 
 // Computed properties
@@ -471,7 +446,7 @@ async function fetchOperationsHistory() {
     if (filters.value.keyword) {
       params.append('keyword', filters.value.keyword)
     }
-    if (filters.value.nodeId && viewMode.value === 'cluster') {
+    if (filters.value.nodeId && filters.value.nodeId !== 'all') {
       params.append('node_id', filters.value.nodeId)
     }
     // Use local time string concatenated with ISO format, with local timezone
@@ -488,19 +463,31 @@ async function fetchOperationsHistory() {
     params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
     
     let response
-    if (viewMode.value === 'cluster') {
+    if (isClusterMode.value && filters.value.nodeId === 'all') {
       response = await hubApi.getClusterOperationsHistory(params.toString())
-      // Update available nodes from response
       if (response.node_stats) {
         nodeStats.value = response.node_stats
-        availableNodes.value = Object.keys(response.node_stats)
       }
     } else {
       response = await optimizedFetchHistory(params.toString())
+      nodeStats.value = {}
     }
     
     operations.value = response.operations || []
     totalCount.value = response.total_count || 0
+    
+    // Update available nodes information
+    if (response.available_nodes) {
+      availableNodes.value = response.available_nodes
+    } else if (response.node_stats) {
+      availableNodes.value = Object.keys(response.node_stats)
+    } else {
+      const nodesSet = new Set()
+      operations.value.forEach(op => {
+        if (op.details?.node_id) nodesSet.add(op.details.node_id)
+      })
+      availableNodes.value = Array.from(nodesSet)
+    }
     
     // Wait for DOM update then refresh editor layout
     await nextTick()
@@ -540,11 +527,7 @@ function applyFilters() {
   fetchOperationsHistory()
 }
 
-function handleViewModeChange() {
-  // Reset node filter when switching modes
-  filters.value.nodeId = ''
-  applyFilters()
-}
+// handleViewModeChange removed (no longer needed)
 
 const debouncedSearch = debounce(() => {
   applyFilters()
