@@ -1,6 +1,6 @@
 <template>
-  <div class="h-full flex flex-col p-4">
-    <div class="flex items-center justify-between mb-4">
+  <div class="h-full flex flex-col bg-white">
+    <div class="flex items-center justify-between p-4 border-b border-gray-200">
       <h1 class="text-xl font-semibold text-gray-900">Error Logs</h1>
       <div class="flex items-center space-x-2">
         <button
@@ -31,8 +31,8 @@
     </div>
 
     <!-- Filters -->
-    <div class="p-4 mb-4 bg-gray-50 rounded-lg">
-      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+    <div class="p-4 border-b border-gray-200 bg-gray-50">
+      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <!-- Source Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Source</label>
@@ -77,6 +77,9 @@
             <option value="FATAL">Fatal</option>
           </select>
         </div>
+
+        <!-- Placeholder to keep 6-column alignment -->
+        <div class="hidden lg:block"></div>
 
         <!-- Search -->
         <div>
@@ -143,7 +146,7 @@
       No error logs found
     </div>
     
-    <div v-else class="flex-1 overflow-auto space-y-2">
+    <div v-else class="flex-1 overflow-auto space-y-2 p-4">
         <div
           v-for="(log, index) in logs"
           :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
@@ -233,7 +236,7 @@
     </div>
 
     <!-- Pagination -->
-    <div v-if="totalCount > 0" class="flex items-center justify-between pt-4">
+    <div v-if="totalCount > 0" class="flex items-center justify-between p-4 border-t border-gray-200 bg-gray-50">
       <div class="text-sm text-gray-700">
         Showing {{ ((currentPage - 1) * pageSize) + 1 }} to {{ Math.min(currentPage * pageSize, totalCount) }} of {{ totalCount }} logs
       </div>
