@@ -98,7 +98,7 @@ export function normalizeComponentData(data, type) {
  * @param {number} timestamp - Data timestamp
  * @param {number} ttl - Time to live (milliseconds)
  */
-export function isDataExpired(timestamp, ttl = 30000) {
+export function isDataExpired(timestamp, ttl = 60000) {
   if (!timestamp || timestamp <= 0) return true
   return Date.now() - timestamp > ttl
 }

@@ -60,6 +60,7 @@
           <select v-model="filters.timeRange" @change="handleTimeRangeChange" class="filter-select">
             <option value="1h">Last Hour</option>
             <option value="6h">Last 6 Hours</option>
+            <option value="12h">Last 12 Hours</option>
             <option value="24h">Last 24 Hours</option>
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
@@ -282,7 +283,7 @@ const expandedLogs = ref(new Set())
 const filters = reactive({
   source: 'all',
   nodeId: 'all',
-  timeRange: '24h',
+  timeRange: '1h',
   level: '',
   keyword: '',
   startDate: '',
@@ -330,9 +331,9 @@ function toLocalISOString(date) {
 
 function setDefaultTimeRange() {
   const now = new Date()
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
   
-  filters.startDate = toLocalISOString(twentyFourHoursAgo)
+  filters.startDate = toLocalISOString(oneHourAgo)
   filters.endDate = toLocalISOString(now)
 }
 
@@ -348,6 +349,9 @@ function handleTimeRangeChange() {
       case '6h':
         startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
         break
+      case '12h':
+        startTime = new Date(now.getTime() - 12 * 60 * 60 * 1000)
+        break
       case '24h':
         startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
         break
@@ -358,7 +362,7 @@ function handleTimeRangeChange() {
         startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
         break
       default:
-        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+        startTime = new Date(now.getTime() - 60 * 60 * 1000)
     }
     
     filters.startDate = toLocalISOString(startTime)

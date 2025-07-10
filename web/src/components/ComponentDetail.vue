@@ -607,7 +607,7 @@ const projectOperationType = ref('') // 'start', 'stop', 'restart'
 // Project status refresh
 const statusRefreshInterval = ref(null)
 const lastProjectOperation = ref(0) // 记录最近项目操作时间
-const currentStatusInterval = ref(60000) // 记录当前刷新间隔
+const currentStatusInterval = ref(300000) // 记录当前刷新间隔
 
 // Watch for item changes
 watch(
@@ -1224,7 +1224,7 @@ function setupStatusRefresh() {
         return 1000; // 1秒 - 最近操作后快速刷新
       }
       // 稳定状态使用正常频率
-      return 60000; // 60秒
+      return 300000; // 5分钟
     };
     
     const refreshStatus = async () => {

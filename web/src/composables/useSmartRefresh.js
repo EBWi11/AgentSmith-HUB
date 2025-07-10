@@ -347,8 +347,8 @@ export function useDashboardSmartRefresh(refreshFunction, options = {}) {
 // 专门用于列表的智能刷新
 export function useListSmartRefresh(refreshFunction, options = {}) {
   return useSmartRefresh(refreshFunction, {
-    baseInterval: 30000,    // 30秒
-    fastInterval: 5000,     // 5秒
+    baseInterval: 300000,   // 5分钟
+    fastInterval: 1000,     // 1秒
     slowInterval: 300000,   // 5分钟
     enableUserActivity: false, // 列表不需要用户活动检测
     debug: false,

@@ -63,7 +63,7 @@ export const useDataCacheStore = defineStore('dataCache', {
   
   getters: {
     // Check if data is expired
-    isExpired: (state) => (key, ttl = 30000) => {
+    isExpired: (state) => (key, ttl = 60000) => {
       const cache = state[key]
       if (!cache) return true
       return Date.now() - cache.timestamp > ttl
@@ -75,7 +75,7 @@ export const useDataCacheStore = defineStore('dataCache', {
     },
     
     // Check if component data is expired
-    isComponentExpired: (state) => (type, ttl = 30000) => {
+    isComponentExpired: (state) => (type, ttl = 60000) => {
       const cache = state.components[type]
       if (!cache) return true
       return Date.now() - cache.timestamp > ttl
@@ -151,7 +151,7 @@ export const useDataCacheStore = defineStore('dataCache', {
     },
 
     // Generic cache fetch method
-    async fetchWithCache(key, fetcher, ttl = 30000, forceRefresh = false) {
+    async fetchWithCache(key, fetcher, ttl = 60000, forceRefresh = false) {
       // Initialize event listeners on first use
       this.initializeEventListeners()
       
@@ -228,7 +228,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
       
       // If data not expired and not forcing refresh, return cached data
-      if (!forceRefresh && !this.isComponentExpired(type, 30000)) {
+      if (!forceRefresh && !this.isComponentExpired(type, 60000)) {
         return cache.data
       }
       
@@ -272,7 +272,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       return this.fetchWithCache(
         'messageStats',
         () => hubApi.getAggregatedDailyMessages(),
-        30000, // 30s TTL
+        60000, // 1min TTL
         forceRefresh
       )
     },
@@ -337,7 +337,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       return this.fetchWithCache(
         'clusterInfo',
         () => hubApi.fetchClusterStatus(),
-        30000, // 30s TTL
+        60000, // 1min TTL
         forceRefresh
       )
     },
@@ -374,7 +374,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       
       // Check if cache exists and is not expired
       const cache = this.operationsHistory.get(paramsKey)
-      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 30000) {
+      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 60000) {
         // Move to end (LRU)
         this.operationsHistory.delete(paramsKey)
         this.operationsHistory.set(paramsKey, cache)
@@ -430,7 +430,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       
       // Check component cache first - if we have recent list data, use it
       const listCache = this.components[type]
-      if (!forceRefresh && listCache && listCache.data && (Date.now() - listCache.timestamp) <= 30000) {
+      if (!forceRefresh && listCache && listCache.data && (Date.now() - listCache.timestamp) <= 60000) {
         // Try to find the component in the list cache first
         const cachedComponent = listCache.data.find(item => {
           const itemId = item.id || item.name

@@ -195,13 +195,7 @@
                                  class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
                                  @mouseenter="showTooltip($event, 'Plugin Node')"
                                  @mouseleave="hideTooltip">
-                             A
-                           </span>
-                           <!-- Built-in Plugin badge -->
-                           <span class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                                 @mouseenter="showTooltip($event, 'Built-in Plugin')"
-                                 @mouseleave="hideTooltip">
-                             B
+                             P
                            </span>
                          </div>
                         
@@ -287,7 +281,7 @@
                            class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
                            @mouseenter="showTooltip($event, 'Plugin Node')"
                            @mouseleave="hideTooltip">
-                       A
+                       P
                      </span>
                      <!-- Temporary file badge -->
                      <span v-if="item.hasTemp" 
@@ -408,15 +402,9 @@
                         class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
                         @mouseenter="showTooltip($event, 'Plugin Node')"
                         @mouseleave="hideTooltip">
-                    A
+                    P
                   </span>
-                  <!-- Plugin type badge -->
-                  <span v-if="type === 'plugins' && item.type === 'local'" 
-                        class="ml-2 text-xs bg-gray-100 text-gray-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                        @mouseenter="showTooltip($event, 'Built-in Plugin')"
-                        @mouseleave="hideTooltip">
-                    B
-                  </span>
+
                   <!-- Temporary file badge -->
                   <span v-if="item.hasTemp" 
                         class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
@@ -1535,8 +1523,8 @@ const sidebarSmartRefresh = useListSmartRefresh(async () => {
   })
   await Promise.all(promises)
 }, {
-  baseInterval: 30000,    // 30s base interval
-  fastInterval: 5000,     // 5s fast interval
+  baseInterval: 300000,   // 5min base interval
+  fastInterval: 1000,     // 1s fast interval
   slowInterval: 300000,   // 5min slow interval
   debug: false
 })
@@ -1711,7 +1699,7 @@ function startProjectPolling() {
     if (!collapsed.projects) {
       await refreshProjectStatus()
     }
-  }, 60000)
+  }, 300000)
 }
 
 function openAddModal(type) {
@@ -2547,7 +2535,7 @@ function setupProjectStatusRefresh() {
     if (hasTransitionProjects || recentOperation) {
       return 1000 // 1秒 - 快速刷新过渡状态或最近操作后
     }
-    return 60000 // 60秒 - 正常刷新稳定状态
+    return 300000 // 5分钟 - 正常刷新稳定状态
   }
   
   const refreshProjects = async () => {
