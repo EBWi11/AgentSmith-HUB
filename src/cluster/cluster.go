@@ -206,14 +206,17 @@ func (cm *ClusterManager) GetClusterStatus() map[string]interface{} {
 
 	nodes := make([]map[string]interface{}, 0)
 	for _, node := range cm.Nodes {
-		nodes = append(nodes, map[string]interface{}{
-			"id":         node.ID,
-			"address":    node.Address,
-			"status":     node.Status,
-			"last_seen":  node.LastSeen,
-			"is_healthy": node.IsHealthy,
-			"miss_count": node.MissCount,
-		})
+		// Only include healthy nodes in the cluster status
+		if node.IsHealthy {
+			nodes = append(nodes, map[string]interface{}{
+				"id":         node.ID,
+				"address":    node.Address,
+				"status":     node.Status,
+				"last_seen":  node.LastSeen,
+				"is_healthy": node.IsHealthy,
+				"miss_count": node.MissCount,
+			})
+		}
 	}
 	status["nodes"] = nodes
 
@@ -290,7 +293,7 @@ func (cm *ClusterManager) cleanupUnhealthyNodes() {
 						ID:        nodeID,
 						Address:   hb.NodeAddr,
 						Status:    NodeStatusFollower,
-						LastSeen:  time.Now(),
+						LastSeen:  hb.Timestamp, // Use actual heartbeat timestamp
 						IsHealthy: true,
 						MissCount: 0,
 					}
@@ -1083,13 +1086,13 @@ func (cm *ClusterManager) StartRedisHeartbeatSubscriber() {
 							ID:        hb.NodeID,
 							Address:   hb.NodeAddr,
 							Status:    NodeStatusFollower,
-							LastSeen:  time.Now(),
+							LastSeen:  hb.Timestamp, // Use actual heartbeat timestamp
 							IsHealthy: true,
 							MissCount: 0,
 						}
 						logger.Info("Discovered follower via PubSub", "node_id", hb.NodeID, "addr", hb.NodeAddr)
 					} else {
-						node.LastSeen = time.Now()
+						node.LastSeen = hb.Timestamp // Use actual heartbeat timestamp
 						node.IsHealthy = true
 						node.MissCount = 0
 

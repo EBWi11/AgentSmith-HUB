@@ -40,8 +40,21 @@ func getClusterProjectStates(c echo.Context) error {
 
 	cm.Mu.RLock()
 	nodeProjectStates := make(map[string][]cluster.ProjectStatus)
+
+	// Get healthy node IDs from cluster status
+	healthyNodeIDs := make(map[string]bool)
+	healthyNodeIDs[cm.SelfID] = true // Self is always considered healthy
+	for _, node := range cm.Nodes {
+		if node.IsHealthy {
+			healthyNodeIDs[node.ID] = true
+		}
+	}
+
+	// Only include project states for healthy nodes
 	for nodeID, projectStates := range cm.NodeProjectStates {
-		nodeProjectStates[nodeID] = projectStates
+		if healthyNodeIDs[nodeID] {
+			nodeProjectStates[nodeID] = projectStates
+		}
 	}
 	clusterStatus := cm.GetClusterStatus()
 	cm.Mu.RUnlock()
