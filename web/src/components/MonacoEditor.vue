@@ -1704,7 +1704,7 @@ function getInputKeyCompletions(context, range, fullText) {
           label: 'aliyun_sls',
           kind: monaco.languages.CompletionItemKind.Module,
           documentation: 'Aliyun SLS input configuration section',
-          insertText: 'aliyun_sls\naliyun_sls:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
+          insertText: 'aliyun_sls:\n  endpoint: "cn-beijing.log.aliyuncs.com"\n  access_key_id: "YOUR_ACCESS_KEY_ID"\n  access_key_secret: "YOUR_ACCESS_KEY_SECRET"\n  project: "project-name"\n  logstore: "logstore-name"\n  consumer_group_name: "consumer-group"\n  consumer_name: "consumer-name"\n  cursor_position: "BEGIN_CURSOR"\n  query: "*"',
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
         });

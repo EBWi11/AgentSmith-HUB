@@ -29,7 +29,7 @@ func main() {
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
 		port      = flag.Int("port", 8080, "HTTP listen port (leader only)")
 		showVer   = flag.Bool("version", false, "show version")
-		buildVers = "v0.1.4"
+		buildVers = "v0.1.5"
 	)
 	flag.Parse()
 

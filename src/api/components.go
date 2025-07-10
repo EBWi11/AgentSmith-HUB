@@ -77,19 +77,7 @@ kafka:
   brokers:
     - 127.0.0.1:9092
   topic: test-topic
-  group: test
-  
-#type: aliyun_sls
-#aliyun_sls:
-#  endpoint: "cn-beijing.log.aliyuncs.com"
-#  access_key_id: "xx"
-#  access_key_secret: "xx"
-#  project: "xx"
-#  logstore: "xx"
-#  consumer_group_name: "xx"
-#  consumer_name: "xx"
-#  cursor_position: "BEGIN_CURSOR"
-#  query: "xx"`
+  group: test`
 
 const NewOutputData = `name: kafka_output_demo
 type: kafka
