@@ -33,7 +33,34 @@
 
     <!-- Filters -->
     <div class="p-4 border-b border-gray-200 bg-gray-50">
-      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <!-- Mode Toggle -->
+      <div class="mb-4 flex items-center space-x-4">
+        <label class="block text-sm font-medium text-gray-700">View Mode:</label>
+        <div class="flex items-center space-x-2">
+          <label class="flex items-center">
+            <input 
+              type="radio" 
+              v-model="viewMode" 
+              value="local" 
+              @change="handleViewModeChange"
+              class="mr-2"
+            >
+            Local Node Only
+          </label>
+          <label class="flex items-center">
+            <input 
+              type="radio" 
+              v-model="viewMode" 
+              value="cluster" 
+              @change="handleViewModeChange"
+              class="mr-2"
+            >
+            All Cluster Nodes
+          </label>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <!-- Operation Type Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Operation Type</label>
@@ -70,6 +97,17 @@
           </select>
         </div>
 
+        <!-- Node Filter (only show in cluster mode) -->
+        <div v-if="viewMode === 'cluster'">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Node</label>
+          <select v-model="filters.nodeId" @change="applyFilters" class="filter-select">
+            <option value="">All Nodes</option>
+            <option v-for="nodeId in availableNodes" :key="nodeId" :value="nodeId">
+              {{ nodeId }}
+            </option>
+          </select>
+        </div>
+
         <!-- Time Range Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
@@ -90,7 +128,7 @@
             v-model="filters.keyword" 
             @input="debouncedSearch"
             type="text" 
-            placeholder="Search operations..."
+            placeholder="Search operations, components, errors, or node IDs..."
             class="filter-input"
           >
         </div>
@@ -115,6 +153,21 @@
             type="datetime-local" 
             class="filter-input"
           >
+        </div>
+      </div>
+      
+      <!-- Node Statistics (only show in cluster mode) -->
+      <div v-if="viewMode === 'cluster' && Object.keys(nodeStats).length > 0" class="mt-4 p-3 bg-blue-50 rounded-lg">
+        <h4 class="text-sm font-medium text-gray-900 mb-2">Node Statistics</h4>
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
+          <div v-for="(stats, nodeId) in nodeStats" :key="nodeId" class="bg-white p-2 rounded border">
+            <div class="font-medium text-gray-900">{{ nodeId }}</div>
+            <div class="text-gray-600">
+              <span class="text-green-600">{{ stats.success_ops }}</span> success, 
+              <span class="text-red-600">{{ stats.failed_ops }}</span> failed
+            </div>
+            <div class="text-gray-500">Total: {{ stats.total_ops }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -159,8 +212,11 @@
                       Project: {{ operation.project_id }}
                     </span>
                   </h3>
-                  <div class="text-sm text-gray-500">
-                    {{ formatTimestamp(operation.timestamp) }}
+                  <div class="flex items-center space-x-2 text-sm text-gray-500">
+                    <span>{{ formatTimestamp(operation.timestamp) }}</span>
+                    <span v-if="viewMode === 'cluster' && operation.details?.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
+                      Node: {{ operation.details.node_id }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -204,6 +260,14 @@
                   <div v-if="operation.project_id" class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Project ID:</dt>
                     <dd class="col-span-2 text-gray-900">{{ operation.project_id }}</dd>
+                  </div>
+                  <div v-if="viewMode === 'cluster' && operation.details?.node_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Node ID:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.details.node_id }}</dd>
+                  </div>
+                  <div v-if="viewMode === 'cluster' && operation.details?.node_address" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Node Address:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.details.node_address }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Status:</dt>
@@ -307,6 +371,9 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const expandedOperations = ref(new Set())
+const viewMode = ref('local') // 'local' or 'cluster'
+const nodeStats = ref({})
+const availableNodes = ref([])
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -319,7 +386,8 @@ const filters = ref({
   timeRange: '1h',
   startDate: '',
   endDate: '',
-  keyword: ''
+  keyword: '',
+  nodeId: ''
 })
 
 // Computed properties
@@ -403,6 +471,9 @@ async function fetchOperationsHistory() {
     if (filters.value.keyword) {
       params.append('keyword', filters.value.keyword)
     }
+    if (filters.value.nodeId && viewMode.value === 'cluster') {
+      params.append('node_id', filters.value.nodeId)
+    }
     // Use local time string concatenated with ISO format, with local timezone
     if (filters.value.startDate) {
       const start = new Date(filters.value.startDate)
@@ -416,7 +487,17 @@ async function fetchOperationsHistory() {
     params.append('limit', pageSize.value.toString())
     params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
     
-    const response = await optimizedFetchHistory(params.toString())
+    let response
+    if (viewMode.value === 'cluster') {
+      response = await hubApi.getClusterOperationsHistory(params.toString())
+      // Update available nodes from response
+      if (response.node_stats) {
+        nodeStats.value = response.node_stats
+        availableNodes.value = Object.keys(response.node_stats)
+      }
+    } else {
+      response = await optimizedFetchHistory(params.toString())
+    }
     
     operations.value = response.operations || []
     totalCount.value = response.total_count || 0
@@ -457,6 +538,12 @@ function refreshEditorsLayout() {
 function applyFilters() {
   currentPage.value = 1
   fetchOperationsHistory()
+}
+
+function handleViewModeChange() {
+  // Reset node filter when switching modes
+  filters.value.nodeId = ''
+  applyFilters()
 }
 
 const debouncedSearch = debounce(() => {
