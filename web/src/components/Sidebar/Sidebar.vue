@@ -1414,12 +1414,12 @@ const collapsed = reactive({
 
 const sections = reactive({
   inputs: { 
-    title: 'Input', 
-    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 
+    title: 'Input',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v6m-3-3l3-3 3 3"/></svg>'
   },
   outputs: { 
-    title: 'Output', 
-    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 15l-3-3 3-3m-5 3h8M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>' 
+    title: 'Output',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 15V9m-3 3l3 3 3-3"/></svg>'
   },
   rulesets: { 
     title: 'Ruleset', 
