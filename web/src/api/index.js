@@ -156,11 +156,14 @@ export const hubApi = {
           return true;
         });
         
-        // Ensure all components have hasTemp property
+        // Ensure all components have hasTemp property - directly from backend response
         for (const item of response) {
+          // hasTemp should be set by backend, but ensure it exists
           if (item.hasTemp === undefined) {
             item.hasTemp = false;
           }
+          // Don't override backend hasTemp value with path checking here
+          // The backend hasTemp is authoritative as it checks memory state
         }
       }
       
@@ -1579,20 +1582,20 @@ fetchComponentsByType = async (type, endpoint) => {
     // Create a map to track unique components by ID
     const uniqueItems = new Map();
     
-    // Add temporary file information to each item
+    // Process each item without additional temp file checking
     for (const item of items) {
       // Get component ID (for plugins, use name as ID)
       const id = item.id || item.name;
       if (!id) continue;
       
-      // Check for temporary files and ensure that only components of the current type are checked
-      const tempInfo = await hubApi.checkTemporaryFile(type, id);
-      
-      // Set hasTemp property
-      item.hasTemp = tempInfo.hasTemp;
+      // Backend already provides hasTemp property based on memory state
+      // This is more reliable than checking file existence
+      if (item.hasTemp === undefined) {
+        item.hasTemp = false;
+      }
       
       // Store in Map, ensuring that each ID has only one component
-      // If there is already a component with the same ID, it should only be replaced when the new component is a temporary file
+      // If there is already a component with the same ID, prefer the one with hasTemp=true
       if (!uniqueItems.has(id) || item.hasTemp) {
         uniqueItems.set(id, item);
       }

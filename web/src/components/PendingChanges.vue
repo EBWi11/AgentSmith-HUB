@@ -445,6 +445,15 @@ async function applyChanges() {
       dataCache.clearComponentCache(type)
     })
     
+    // Force refresh all component lists to ensure hasTemp is updated
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
+    
     // Refresh the list
     await refreshChanges()
     
@@ -510,6 +519,15 @@ async function applySingleChange(change) {
     dataCache.clearCache('pendingChanges')
     // Also clear the affected component type cache for immediate UI update
     dataCache.clearComponentCache(change.type)
+    
+    // Force refresh all component lists to ensure hasTemp is updated
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
     
     // Refresh the list
     await refreshChanges()
@@ -613,6 +631,15 @@ async function cancelUpgrade(change) {
     // Also clear the affected component type cache for immediate UI update
     dataCache.clearComponentCache(change.type)
     
+    // Force refresh all component lists to ensure hasTemp is updated
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
+    
     // Refresh the list to remove the cancelled change
     await refreshChanges()
     
@@ -656,6 +683,15 @@ async function cancelAllChanges() {
     ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
       dataCache.clearComponentCache(type)
     })
+    
+    // Force refresh all component lists to ensure hasTemp is updated
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
     
     // Refresh the list to remove all cancelled changes
     await refreshChanges()

@@ -419,7 +419,7 @@ async function loadSingleChange(change) {
     
     // Dispatch global event for the component change
     window.dispatchEvent(new CustomEvent('localChangesLoaded', { 
-      detail: { type: change.type, id: change.id, timestamp: Date.now() }
+      detail: { types: [change.type], id: change.id, timestamp: Date.now() }
     }))
     
     // Ensure editor layout is correct

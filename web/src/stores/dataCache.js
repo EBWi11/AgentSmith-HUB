@@ -99,10 +99,26 @@ export const useDataCacheStore = defineStore('dataCache', {
             break
           case 'updated':
             this.clearComponentCache(type)
+            // Also clear the specific component detail cache
+            if (id) {
+              const detailCacheKey = `detail_${type}_${id}`
+              ongoingRequests.delete(detailCacheKey)
+            }
             break
           case 'deleted':
-            this.clearComponentCache(type)
+            // Use specialized method for deletion
+            if (id) {
+              this.clearComponentRelatedCaches(type, id)
+            } else {
+              this.clearComponentCache(type)
+            }
             break
+        }
+        
+        // For projects, also clear cluster info cache as project status might change
+        if (type === 'projects') {
+          this.clearCache('clusterInfo')
+          this.clearCache('clusterProjectStates')
         }
       })
       
@@ -526,6 +542,18 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
     },
     
+    // Clear all caches related to a specific component
+    clearComponentRelatedCaches(type, id) {
+      // Clear from component list cache
+      this.removeComponentItem(type, id)
+      
+      // Clear component detail cache
+      const detailCacheKey = `detail_${type}_${id}`
+      ongoingRequests.delete(detailCacheKey)
+      
+      console.log(`[DataCache] Cleared all caches for component: ${type}/${id}`)
+    },
+    
     // Clear component cache
     clearComponentCache(type) {
       if (this.components[type]) {
@@ -533,6 +561,17 @@ export const useDataCacheStore = defineStore('dataCache', {
         this.components[type].timestamp = 0
         this.components[type].loading = false
       }
+      
+      // Also clear component detail caches for this type
+      const keysToDelete = []
+      for (const [key] of ongoingRequests) {
+        if (key.startsWith(`detail_${type}_`)) {
+          keysToDelete.push(key)
+        }
+      }
+      keysToDelete.forEach(key => ongoingRequests.delete(key))
+      
+      console.log(`[DataCache] Cleared component cache and ${keysToDelete.length} detail caches for type: ${type}`)
     },
     
     // Clear all cache
