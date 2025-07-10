@@ -133,20 +133,23 @@
           </div>
         </div>
       </div>
+    </div>
 
-    <div v-if="loading && !logs.length" class="flex-1 flex items-center justify-center">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-    </div>
-    
-    <div v-else-if="error" class="flex-1 flex items-center justify-center text-red-500">
-      {{ error }}
-    </div>
-    
-    <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
-      No error logs found
-    </div>
-    
-    <div v-else class="flex-1 overflow-auto space-y-2 p-4">
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto">
+      <div v-if="loading && !logs.length" class="flex items-center justify-center h-64">
+        <div class="text-gray-500">Loading error logs...</div>
+      </div>
+      
+      <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+        {{ error }}
+      </div>
+      
+      <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
+        No error logs found
+      </div>
+      
+      <div v-else class="space-y-2 p-4">
         <div
           v-for="(log, index) in logs"
           :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
@@ -562,6 +565,6 @@ onMounted(async () => {
 }
 
 .btn-sm {
-  @apply px-3 py-2 text-sm;
+  @apply px-2 py-1 text-xs;
 }
 </style> 
