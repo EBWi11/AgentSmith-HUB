@@ -126,16 +126,17 @@ main() {
     
     print_info "Found binary: $BINARY_PATH"
     
-    # Determine run mode
-    if [ -n "$LEADER_ADDR" ]; then
-        print_info "Running in FOLLOWER mode, connecting to leader: $LEADER_ADDR"
+    # Determine run mode based on command line flag
+    if [ "$IS_FOLLOWER" = "true" ]; then
+        print_info "Running in FOLLOWER mode"
         RUN_MODE="follower"
     else
         print_info "Running in LEADER mode (default)"
         RUN_MODE="leader"
-        # Check and setup configuration for leader mode
-        check_config "$BINARY_PATH"
     fi
+    
+    # Check and setup configuration directory (both leader and follower need config)
+    check_config "$BINARY_PATH"
     
     # Setup library path
     setup_library_path "$BINARY_PATH"
@@ -153,48 +154,44 @@ main() {
     
     print_info "Working directory: $SCRIPT_DIR"
     print_info "Library path: ${LD_LIBRARY_PATH:-'not set'}"
-    
-    if [ "$RUN_MODE" = "leader" ]; then
-        print_info "Config root: $CONFIG_ROOT"
-    fi
+    print_info "Config root: $CONFIG_ROOT"
     echo ""
     
+    # Calculate config path for binary
+    BINARY_DIR="$(dirname "$BINARY_PATH")"
+    
+    # If CONFIG_ROOT is absolute, use it directly; otherwise calculate relative path
+    if [[ "$CONFIG_ROOT" = /* ]]; then
+        # Absolute path - use as is
+        CONFIG_ARG="$CONFIG_ROOT"
+    else
+        # Relative path - calculate relative to binary location
+        CONFIG_ARG=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
+    fi
+    
     # Start the application based on mode
+    cd "$(dirname "$BINARY_PATH")"
     if [ "$RUN_MODE" = "follower" ]; then
         print_info "Starting AgentSmith-HUB in FOLLOWER mode..."
-        print_info "Connecting to leader: $LEADER_ADDR"
+        print_info "Will auto-discover cluster via Redis"
         print_info "Press Ctrl+C to stop"
         echo ""
         
-        # Start as follower
-        cd "$(dirname "$BINARY_PATH")"
-        exec LEADER_ADDR="$LEADER_ADDR" "./$BINARY_NAME"
+        # Start as follower (no -leader flag)
+        exec "./$BINARY_NAME" -config_root "$CONFIG_ARG"
     else
         print_info "Starting AgentSmith-HUB in LEADER mode..."
         print_info "Web interface will be available at: http://localhost:8080"
         print_info "Press Ctrl+C to stop"
         echo ""
         
-        # Calculate config path for binary
-        BINARY_DIR="$(dirname "$BINARY_PATH")"
-        
-        # If CONFIG_ROOT is absolute, use it directly; otherwise calculate relative path
-        if [[ "$CONFIG_ROOT" = /* ]]; then
-            # Absolute path - use as is
-            CONFIG_ARG="$CONFIG_ROOT"
-        else
-            # Relative path - calculate relative to binary location
-            CONFIG_ARG=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
-        fi
-        
-        # Start as leader (requires -leader flag)
-        cd "$(dirname "$BINARY_PATH")"
+        # Start as leader (with -leader flag)
         exec "./$BINARY_NAME" -config_root "$CONFIG_ARG" -leader
     fi
 }
 
 # Parse command line arguments
-LEADER_ADDR=""
+IS_FOLLOWER="false"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
@@ -206,10 +203,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h           Show this help message"
             echo "  --version, -v        Show version information and exit"
             echo "  --check, -c          Check dependencies and configuration"
-            echo "  --follower ADDR      Run as follower, connecting to leader at ADDR"
+            echo "  --follower           Run as follower node (auto-discovers cluster via Redis)"
             echo ""
-            echo "Default Mode: Leader (requires config directory)"
-            echo "Follower Mode: --follower <leader_address>"
+            echo "Default Mode: Leader (starts with web interface on port 8080)"
+            echo "Follower Mode: Connects to existing cluster via Redis configuration"
             echo ""
             echo "This script automatically detects the binary location and configuration."
             echo "It will look for the binary in the following order:"
@@ -223,14 +220,17 @@ while [[ $# -gt 0 ]]; do
             echo "  3. ./config (current directory)"
             echo ""
             echo "Examples:"
-            echo "  $0                           # Start as leader (default)"
-            echo "  $0 --follower 192.168.1.100 # Start as follower"
+            echo "  $0                    # Start as leader (default)"
+            echo "  $0 --follower         # Start as follower"
+            echo ""
+            echo "Note: Both leader and follower nodes need the same Redis configuration"
+            echo "      in their config.yaml file to join the same cluster."
             echo ""
             exit 0
             ;;
         --follower)
-            LEADER_ADDR="$2"
-            shift 2
+            IS_FOLLOWER="true"
+            shift
             ;;
         --version|-v)
             BINARY_PATH=$(find_binary)

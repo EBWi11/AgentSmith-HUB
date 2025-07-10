@@ -355,6 +355,48 @@ func storeLocalLogsToRedis(nodeID string, logs []ErrorLogEntry) {
 	_, _ = common.RedisSet("cluster:error_logs:"+nodeID, string(data), 120)
 }
 
+// StartErrorLogUploader starts periodic error log upload for follower nodes
+func StartErrorLogUploader() {
+	if cluster.IsLeader {
+		return // Leader doesn't need to upload logs
+	}
+
+	go func() {
+		ticker := time.NewTicker(60 * time.Second) // Upload every 60 seconds
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				uploadErrorLogsToRedis()
+			}
+		}
+	}()
+
+	logger.Info("Error log uploader started for follower node")
+}
+
+// uploadErrorLogsToRedis uploads recent error logs to Redis
+func uploadErrorLogsToRedis() {
+	filter := ErrorLogFilter{
+		Source:    "all",
+		StartTime: time.Now().Add(-5 * time.Minute), // Last 5 minutes
+		EndTime:   time.Now(),
+		Limit:     100,
+	}
+
+	logs, err := getLocalErrorLogs(filter)
+	if err != nil {
+		logger.Error("Failed to get local error logs for upload", "error", err)
+		return
+	}
+
+	if len(logs) > 0 {
+		storeLocalLogsToRedis(common.Config.LocalIP, logs)
+		logger.Debug("Uploaded error logs to Redis", "count", len(logs))
+	}
+}
+
 // API Handlers
 
 // getErrorLogs handles GET /error-logs

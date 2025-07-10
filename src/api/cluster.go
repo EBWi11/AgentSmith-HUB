@@ -438,3 +438,80 @@ func getClusterSystemStats(c echo.Context) error {
 	stats := common.GlobalClusterSystemManager.GetStats()
 	return c.JSON(http.StatusOK, stats)
 }
+
+// getClusterHealth returns comprehensive cluster health information
+func getClusterHealth(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Cluster health is only available on leader node",
+		})
+	}
+
+	health := make(map[string]interface{})
+
+	// Basic cluster info
+	if cluster.ClusterInstance != nil {
+		status := cluster.ClusterInstance.GetClusterStatus()
+		health["cluster_status"] = status
+
+		// Node health summary
+		healthy := 0
+		unhealthy := 0
+		if nodes, ok := status["nodes"].([]map[string]interface{}); ok {
+			for _, node := range nodes {
+				if isHealthy, ok := node["is_healthy"].(bool); ok && isHealthy {
+					healthy++
+				} else {
+					unhealthy++
+				}
+			}
+		}
+		// Add leader as healthy
+		healthy++
+
+		health["node_summary"] = map[string]interface{}{
+			"total_nodes":     healthy + unhealthy,
+			"healthy_nodes":   healthy,
+			"unhealthy_nodes": unhealthy,
+			"leader_node":     status["self_id"],
+		}
+	}
+
+	// Redis connectivity
+	redisHealthy := false
+	if err := common.RedisPing(); err == nil {
+		redisHealthy = true
+	}
+	health["redis_healthy"] = redisHealthy
+
+	// QPS Manager status
+	qpsHealthy := false
+	if common.GlobalQPSManager != nil {
+		qpsStats := common.GlobalQPSManager.GetStats()
+		qpsHealthy = true
+		health["qps_manager"] = qpsStats
+	}
+	health["qps_manager_healthy"] = qpsHealthy
+
+	// System Monitor status
+	systemHealthy := false
+	if common.GlobalSystemMonitor != nil {
+		systemStats := common.GlobalSystemMonitor.GetStats()
+		systemHealthy = true
+		health["system_monitor"] = systemStats
+	}
+	health["system_monitor_healthy"] = systemHealthy
+
+	// Overall health
+	healthyNodeCount := 0
+	if nodeSum, ok := health["node_summary"].(map[string]interface{}); ok {
+		if hc, ok := nodeSum["healthy_nodes"].(int); ok {
+			healthyNodeCount = hc
+		}
+	}
+	overallHealthy := redisHealthy && qpsHealthy && systemHealthy && (healthyNodeCount > 0)
+	health["overall_healthy"] = overallHealthy
+	health["timestamp"] = time.Now()
+
+	return c.JSON(http.StatusOK, health)
+}

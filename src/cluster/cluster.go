@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+
+	"github.com/cespare/xxhash/v2"
 )
 
 // NodeStatus represents the status of a cluster node
@@ -32,12 +33,14 @@ const (
 
 // NodeInfo represents information about a cluster node
 type NodeInfo struct {
-	ID        string     `json:"id"`
-	Address   string     `json:"address"`
-	Status    NodeStatus `json:"status"`
-	LastSeen  time.Time  `json:"last_seen"`
-	IsHealthy bool       `json:"is_healthy"`
-	MissCount int        `json:"miss_count"` // Count of consecutive missed heartbeats
+	ID             string     `json:"id"`
+	Address        string     `json:"address"`
+	Status         NodeStatus `json:"status"`
+	LastSeen       time.Time  `json:"last_seen"`
+	IsHealthy      bool       `json:"is_healthy"`
+	MissCount      int        `json:"miss_count"`                 // Count of consecutive missed heartbeats
+	ConfigVersion  string     `json:"config_version,omitempty"`   // Current config version
+	LastConfigSync time.Time  `json:"last_config_sync,omitempty"` // Last successful config sync time
 }
 
 // ProjectStatus represents a project's current status
@@ -49,13 +52,20 @@ type ProjectStatus struct {
 
 // HeartbeatMessage represents a heartbeat message sent to the leader
 type HeartbeatMessage struct {
-	NodeID    string    `json:"node_id"`
-	NodeAddr  string    `json:"node_addr"`
-	Timestamp time.Time `json:"timestamp"`
-	Status    string    `json:"status"`
+	NodeID        string    `json:"node_id"`
+	NodeAddr      string    `json:"node_addr"`
+	Timestamp     time.Time `json:"timestamp"`
+	Status        string    `json:"status"`
+	ConfigVersion string    `json:"config_version,omitempty"` // Add config version for drift detection
 }
 
 var ClusterInstance *ClusterManager
+
+// Global configuration update tracking
+var (
+	lastConfigUpdateTime time.Time
+	configUpdateMutex    sync.RWMutex
+)
 
 // ClusterManager manages the cluster state
 type ClusterManager struct {
@@ -88,8 +98,9 @@ type ClusterManager struct {
 
 	stopSubProj chan struct{}
 
-	stopProjCmdSub chan struct{}
-	stopReconcile  chan struct{}
+	stopProjCmdSub    chan struct{}
+	stopReconcile     chan struct{}
+	stopComponentSync chan struct{}
 }
 
 var (
@@ -219,21 +230,38 @@ func (cm *ClusterManager) StartHeartbeatLoop() {
 		ticker := time.NewTicker(cm.HeartbeatInterval)
 		defer ticker.Stop()
 
+		consecutiveFailures := 0
+		maxConsecutiveFailures := 5
+
 		for {
 			select {
 			case <-ticker.C:
 				if err := cm.SendRedisHeartbeat(); err != nil {
-					// Log error but continue
-					fmt.Printf("Failed to send heartbeat: %v\n", err)
+					consecutiveFailures++
+					logger.Error("Failed to send heartbeat", "error", err, "consecutive_failures", consecutiveFailures)
 
-					// If we're a follower and can't reach the leader, we might need to start an election
+					// If we're a follower and can't reach Redis consistently, try to reconnect
 					cm.Mu.Lock()
 					isFollower := cm.Status == NodeStatusFollower
 					cm.Mu.Unlock()
 
-					if isFollower {
-						// TODO: Implement leader election logic
-						fmt.Printf("Lost connection to leader, might need to start election\n")
+					if isFollower && consecutiveFailures >= maxConsecutiveFailures {
+						logger.Warn("Too many consecutive heartbeat failures, attempting Redis reconnection", "failures", consecutiveFailures)
+						// Try to reconnect to Redis
+						if err := common.RedisPing(); err != nil {
+							logger.Error("Redis ping failed during reconnection attempt", "error", err)
+							// TODO: Implement leader election logic or enter degraded mode
+							logger.Warn("Lost connection to Redis, cluster coordination may be affected")
+						} else {
+							logger.Info("Redis reconnection successful")
+							consecutiveFailures = 0 // Reset counter on successful reconnection
+						}
+					}
+				} else {
+					// Successful heartbeat, reset failure counter
+					if consecutiveFailures > 0 {
+						logger.Info("Heartbeat successful after failures", "previous_failures", consecutiveFailures)
+						consecutiveFailures = 0
 					}
 				}
 			case <-cm.stopChan:
@@ -303,6 +331,21 @@ func (cm *ClusterManager) StartCleanupLoop() {
 	}()
 }
 
+// StartLeaderServices starts additional services that only run on the leader node
+func (cm *ClusterManager) StartLeaderServices() {
+	if !cm.IsLeader() {
+		return
+	}
+
+	// Start project status subscriber to track follower project states
+	cm.startProjectStatusSubscriber()
+
+	// Start project reconciler to ensure follower states match leader expectations
+	cm.startProjectReconciler()
+
+	logger.Info("Leader-specific services started")
+}
+
 // Stop stops all background processes
 func (cm *ClusterManager) Stop() error {
 	logger.Info("Stopping cluster manager")
@@ -314,6 +357,30 @@ func (cm *ClusterManager) Stop() error {
 	if cm.stopHeartbeatMonitor != nil {
 		close(cm.stopHeartbeatMonitor)
 		cm.stopHeartbeatMonitor = nil
+	}
+
+	// Stop component sync subscriber
+	if cm.stopComponentSync != nil {
+		close(cm.stopComponentSync)
+		cm.stopComponentSync = nil
+	}
+
+	// Stop project command subscriber
+	if cm.stopProjCmdSub != nil {
+		close(cm.stopProjCmdSub)
+		cm.stopProjCmdSub = nil
+	}
+
+	// Stop project status subscriber
+	if cm.stopSubProj != nil {
+		close(cm.stopSubProj)
+		cm.stopSubProj = nil
+	}
+
+	// Stop project reconciler
+	if cm.stopReconcile != nil {
+		close(cm.stopReconcile)
+		cm.stopReconcile = nil
 	}
 
 	// Stop QPS manager if this is the leader
@@ -347,6 +414,9 @@ func (cm *ClusterManager) Start() {
 
 		// Start component sync subscriber
 		cm.startComponentSyncSubscriber()
+
+		// Start project command subscriber
+		cm.startProjectCommandSubscriber()
 	}
 
 	// Start cleanup loop
@@ -443,155 +513,178 @@ func (cm *ClusterManager) StartProjectStatesSyncLoop() {
 	}()
 }
 
-// syncAllNodesProjectStates syncs project states from all nodes (including self)
+// syncAllNodesProjectStates syncs project states from Redis (Redis-only approach)
 func (cm *ClusterManager) syncAllNodesProjectStates() {
+	// Get all healthy nodes including self
 	cm.Mu.RLock()
-	nodesToSync := make(map[string]string) // nodeID -> address
-
-	// Add self - use localhost with extracted port for API access
-	selfPort := extractPortFromAddress(cm.SelfAddress)
-	if selfPort == "" {
-		selfPort = "8080" // fallback to default port
+	allNodes := make(map[string]*NodeInfo)
+	allNodes[cm.SelfID] = &NodeInfo{
+		ID:        cm.SelfID,
+		Address:   cm.SelfAddress,
+		Status:    cm.Status,
+		IsHealthy: true,
 	}
-	nodesToSync[cm.SelfID] = fmt.Sprintf("127.0.0.1:%s", selfPort)
-
-	// Add all follower nodes
 	for nodeID, node := range cm.Nodes {
 		if node.IsHealthy {
-			nodesToSync[nodeID] = node.Address
+			allNodes[nodeID] = node
 		}
 	}
 	cm.Mu.RUnlock()
 
-	// Reduce log verbosity: only log when there are sync errors
-	// logger.Debug("Syncing project states from nodes", "node_count", len(nodesToSync))
+	// Sync project states from Redis for each healthy node
+	for nodeID := range allNodes {
+		projectStates := cm.getProjectStatesFromRedis(nodeID)
 
-	// Sync from each node
-	for nodeID, address := range nodesToSync {
-		var projectStates []ProjectStatus
-
-		// Leader node: get project states directly from local
-		if nodeID == cm.SelfID {
-			projectStates = cm.getLocalProjectStates()
-		} else {
-			// Other nodes: fetch via HTTP API
-			projectStates = cm.fetchProjectStatesFromNode(nodeID, address)
-		}
-
+		cm.Mu.Lock()
 		if len(projectStates) >= 0 { // Even empty states are valid
-			cm.Mu.Lock()
 			cm.NodeProjectStates[nodeID] = projectStates
-			cm.Mu.Unlock()
-			// Reduce log verbosity: only log errors
-			// logger.Debug("Updated project states for node", "node_id", nodeID, "project_count", len(projectStates))
 		}
+		cm.Mu.Unlock()
 	}
 }
 
-// fetchProjectStatesFromNode fetches project states from a specific node
-func (cm *ClusterManager) fetchProjectStatesFromNode(nodeID, address string) []ProjectStatus {
-	// Extract port from address
-	port := extractPortFromAddress(address)
-	if port == "" {
-		// Reduce log verbosity: only log errors
-		// logger.Debug("Failed to extract port from address", "node_id", nodeID, "address", address)
-		return nil
-	}
-
-	// Create request - use proper HTTP URL format with protocol handling
-	var url string
-	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
-		url = fmt.Sprintf("%s/projects", address)
-	} else {
-		// For localhost addresses, use the address as-is
-		if strings.Contains(address, "127.0.0.1") || strings.Contains(address, "localhost") {
-			url = fmt.Sprintf("http://%s/projects", address)
-		} else {
-			// For remote addresses, construct with port
-			url = fmt.Sprintf("http://%s:%s/projects", strings.Split(address, ":")[0], port)
-		}
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
+// getProjectStatesFromRedis fetches project states from Redis for a specific node
+func (cm *ClusterManager) getProjectStatesFromRedis(nodeID string) []ProjectStatus {
+	// Get project states from Redis hash
+	hashKey := "cluster:proj_states:" + nodeID
+	projectStateMap, err := common.RedisHGetAll(hashKey)
 	if err != nil {
-		// Reduce log verbosity: only log errors
-		// logger.Debug("Failed to create request for project states", "node_id", nodeID, "error", err)
-		return nil
-	}
-
-	// Add authorization header if token is available
-	if common.Config.Token != "" {
-		req.Header.Set("token", common.Config.Token)
-	}
-
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		// Reduce log verbosity: only log errors
-		// logger.Debug("Failed to get project states from node", "node_id", nodeID, "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Reduce log verbosity: only log errors
-		// logger.Debug("Failed to get project states from node", "node_id", nodeID, "status", resp.StatusCode)
-		return nil
-	}
-
-	var projects []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-		// Reduce log verbosity: only log errors
-		// logger.Debug("Failed to decode project states from node", "node_id", nodeID, "error", err)
-		return nil
+		// No error logging for Redis misses, it's normal for new nodes
+		return []ProjectStatus{}
 	}
 
 	// Convert to ProjectStatus format
-	projectStates := make([]ProjectStatus, 0, len(projects))
-	for _, proj := range projects {
-		if id, ok := proj["id"].(string); ok {
-			if status, ok := proj["status"].(string); ok {
-				projectState := ProjectStatus{
-					ID:     id,
-					Status: status,
-				}
-
-				// Try to parse status_changed_at if available
-				if statusChangedAt, ok := proj["status_changed_at"]; ok && statusChangedAt != nil {
-					if statusTimeStr, ok := statusChangedAt.(string); ok {
-						if statusTime, err := time.Parse(time.RFC3339, statusTimeStr); err == nil {
-							projectState.StatusChangedAt = &statusTime
-						}
-					}
-				}
-
-				projectStates = append(projectStates, projectState)
-			}
+	projectStates := make([]ProjectStatus, 0, len(projectStateMap))
+	for projectID, status := range projectStateMap {
+		projectState := ProjectStatus{
+			ID:     projectID,
+			Status: status,
 		}
+		projectStates = append(projectStates, projectState)
 	}
 
 	return projectStates
 }
 
-// getLocalProjectStates gets project states from local API
-func (cm *ClusterManager) getLocalProjectStates() []ProjectStatus {
-	// Use localhost with extracted port for local API access
-	selfPort := extractPortFromAddress(cm.SelfAddress)
-	if selfPort == "" {
-		selfPort = "8080" // fallback to default port
+// startProjectCommandSubscriber listens for project commands from leader (follower only)
+func (cm *ClusterManager) startProjectCommandSubscriber() {
+	if cm.IsLeader() {
+		return // leader doesn't need to subscribe to its own commands
 	}
-	localAddress := fmt.Sprintf("127.0.0.1:%s", selfPort)
-	return cm.fetchProjectStatesFromNode(cm.SelfID, localAddress)
+
+	client := common.GetRedisClient()
+	if client == nil {
+		return
+	}
+
+	pubsub := client.Subscribe(context.Background(), "cluster:proj_cmd")
+	if cm.stopProjCmdSub == nil {
+		cm.stopProjCmdSub = make(chan struct{})
+	}
+
+	go func() {
+		ch := pubsub.Channel()
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+
+				var cmd map[string]string
+				if err := json.Unmarshal([]byte(msg.Payload), &cmd); err != nil {
+					continue
+				}
+
+				// Only process commands directed at this node
+				if cmd["node_id"] != cm.SelfID {
+					continue
+				}
+
+				projectID := cmd["project_id"]
+				action := cmd["action"]
+
+				logger.Info("Received project command", "project_id", projectID, "action", action)
+
+				// Execute the command
+				cm.executeProjectCommand(projectID, action)
+
+			case <-cm.stopProjCmdSub:
+				_ = pubsub.Close()
+				return
+			}
+		}
+	}()
 }
 
-// extractPortFromAddress extracts port from address format like "127.0.0.1:8080"
-func extractPortFromAddress(address string) string {
-	// Extract port from "127.0.0.1:8080" format
-	parts := strings.Split(address, ":")
-	if len(parts) == 2 {
-		return parts[1]
+// ProjectCommandHandler is an interface for handling project commands
+// This interface is implemented in the project package to avoid circular dependencies
+type ProjectCommandHandler interface {
+	ExecuteCommand(projectID, action string) error
+}
+
+// Global project command handler (set by project package)
+var globalProjectCmdHandler ProjectCommandHandler
+
+// SetProjectCommandHandler sets the global project command handler
+func SetProjectCommandHandler(handler ProjectCommandHandler) {
+	globalProjectCmdHandler = handler
+}
+
+// executeProjectCommand executes a project command on follower node
+func (cm *ClusterManager) executeProjectCommand(projectID, action string) {
+	logger.Info("Executing project command", "project_id", projectID, "action", action)
+
+	if globalProjectCmdHandler == nil {
+		logger.Error("Project command handler not initialized", "project_id", projectID, "action", action)
+		// Report failure status to leader
+		cm.reportProjectCommandFailure(projectID, action, "Project command handler not initialized")
+		return
 	}
-	return "8080" // default port
+
+	err := globalProjectCmdHandler.ExecuteCommand(projectID, action)
+	if err != nil {
+		logger.Error("Failed to execute project command", "project_id", projectID, "action", action, "error", err)
+		// Report failure status to leader
+		cm.reportProjectCommandFailure(projectID, action, err.Error())
+	} else {
+		logger.Info("Successfully executed project command", "project_id", projectID, "action", action)
+	}
+}
+
+// reportProjectCommandFailure reports command execution failure to leader
+func (cm *ClusterManager) reportProjectCommandFailure(projectID, action, errorMsg string) {
+	// Determine the expected status based on the failed action
+	var actualStatus string
+	switch action {
+	case "start":
+		actualStatus = "stopped" // If start failed, project remains stopped
+	case "stop":
+		actualStatus = "running" // If stop failed, project remains running
+	case "restart":
+		actualStatus = "unknown" // Restart failure could leave project in any state
+	default:
+		actualStatus = "unknown"
+	}
+
+	// Report the actual status to Redis for leader visibility
+	if common.GetRedisClient() != nil {
+		hashKey := "cluster:proj_states:" + cm.SelfID
+		if err := common.RedisHSet(hashKey, projectID, actualStatus); err != nil {
+			logger.Error("Failed to report project command failure status", "project_id", projectID, "error", err)
+		}
+
+		// Also publish the failure event
+		evt := map[string]string{
+			"node_id":    cm.SelfID,
+			"project_id": projectID,
+			"status":     actualStatus,
+			"error":      errorMsg,
+		}
+		if data, err := json.Marshal(evt); err == nil {
+			_ = common.RedisPublish("cluster:proj_status", string(data))
+		}
+	}
 }
 
 // ===================== Redis-based Heartbeat =====================
@@ -600,10 +693,11 @@ func extractPortFromAddress(address string) string {
 func (cm *ClusterManager) SendRedisHeartbeat() error {
 	// Store basic info for debugging/metrics (address + timestamp)
 	hb := HeartbeatMessage{
-		NodeID:    cm.SelfID,
-		NodeAddr:  cm.SelfAddress,
-		Timestamp: time.Now(),
-		Status:    "active",
+		NodeID:        cm.SelfID,
+		NodeAddr:      cm.SelfAddress,
+		Timestamp:     time.Now(),
+		Status:        "active",
+		ConfigVersion: calculateConfigVersion(), // Add config version for drift detection
 	}
 
 	jsonData, err := json.Marshal(hb)
@@ -621,6 +715,332 @@ func (cm *ClusterManager) SendRedisHeartbeat() error {
 		return err
 	}
 	return nil
+}
+
+// calculateConfigVersion computes a hash of the current configuration content for drift detection
+func calculateConfigVersion() string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	// Use xxhash for fast content hashing (non-cryptographic)
+	hash := xxhash.New()
+
+	// Add a base string to ensure non-empty hash even with empty configs
+	hash.Write([]byte("agentsmith-hub-config-v1"))
+
+	// Hash all component configurations in deterministic order
+	// Inputs
+	if common.AllInputsRawConfig != nil {
+		inputKeys := make([]string, 0, len(common.AllInputsRawConfig))
+		for k := range common.AllInputsRawConfig {
+			inputKeys = append(inputKeys, k)
+		}
+		sort.Strings(inputKeys)
+		for _, k := range inputKeys {
+			hash.Write([]byte("input:" + k + ":" + common.AllInputsRawConfig[k]))
+		}
+	}
+
+	// Outputs
+	if common.AllOutputsRawConfig != nil {
+		outputKeys := make([]string, 0, len(common.AllOutputsRawConfig))
+		for k := range common.AllOutputsRawConfig {
+			outputKeys = append(outputKeys, k)
+		}
+		sort.Strings(outputKeys)
+		for _, k := range outputKeys {
+			hash.Write([]byte("output:" + k + ":" + common.AllOutputsRawConfig[k]))
+		}
+	}
+
+	// Rulesets
+	if common.AllRulesetsRawConfig != nil {
+		rulesetKeys := make([]string, 0, len(common.AllRulesetsRawConfig))
+		for k := range common.AllRulesetsRawConfig {
+			rulesetKeys = append(rulesetKeys, k)
+		}
+		sort.Strings(rulesetKeys)
+		for _, k := range rulesetKeys {
+			hash.Write([]byte("ruleset:" + k + ":" + common.AllRulesetsRawConfig[k]))
+		}
+	}
+
+	// Projects
+	if common.AllProjectRawConfig != nil {
+		projectKeys := make([]string, 0, len(common.AllProjectRawConfig))
+		for k := range common.AllProjectRawConfig {
+			projectKeys = append(projectKeys, k)
+		}
+		sort.Strings(projectKeys)
+		for _, k := range projectKeys {
+			hash.Write([]byte("project:" + k + ":" + common.AllProjectRawConfig[k]))
+		}
+	}
+
+	// Plugins
+	if common.AllPluginsRawConfig != nil {
+		pluginKeys := make([]string, 0, len(common.AllPluginsRawConfig))
+		for k := range common.AllPluginsRawConfig {
+			pluginKeys = append(pluginKeys, k)
+		}
+		sort.Strings(pluginKeys)
+		for _, k := range pluginKeys {
+			hash.Write([]byte("plugin:" + k + ":" + common.AllPluginsRawConfig[k]))
+		}
+	}
+
+	// Include project running states in configuration version
+	// This ensures that project start/stop operations change the config version
+	if ClusterInstance != nil {
+		nodeID := ClusterInstance.SelfID
+		if nodeID != "" {
+			projectStates, err := common.RedisHGetAll("cluster:proj_states:" + nodeID)
+			if err == nil && len(projectStates) > 0 {
+				// Sort project states for deterministic hashing
+				stateKeys := make([]string, 0, len(projectStates))
+				for k := range projectStates {
+					stateKeys = append(stateKeys, k)
+				}
+				sort.Strings(stateKeys)
+				for _, k := range stateKeys {
+					hash.Write([]byte("proj_state:" + k + ":" + projectStates[k]))
+				}
+			}
+		}
+	}
+
+	// Return xxhash as hex string (16 characters for readability)
+	return fmt.Sprintf("%016x", hash.Sum64())
+}
+
+// triggerNodeConfigSync forces a specific node to resync its configuration
+func triggerNodeConfigSync(nodeID string) {
+	// Step 1: First sync project states (which projects should be running)
+	syncProjectStatesToNode(nodeID)
+
+	// Step 2: Then sync all component configurations
+	componentTypes := []string{"input", "output", "ruleset", "plugin"} // Remove "project" from config sync
+
+	for _, componentType := range componentTypes {
+		// Get all components of this type
+		var componentMap map[string]string
+		common.GlobalMu.RLock()
+		switch componentType {
+		case "input":
+			componentMap = common.AllInputsRawConfig
+		case "output":
+			componentMap = common.AllOutputsRawConfig
+		case "ruleset":
+			componentMap = common.AllRulesetsRawConfig
+		case "plugin":
+			componentMap = common.AllPluginsRawConfig
+		}
+		common.GlobalMu.RUnlock()
+
+		// Publish sync events for all components of this type
+		// Note: This is syncing existing config, not updating it, so no timestamp update needed
+		for id, content := range componentMap {
+			PublishComponentSync(&CompSyncEvt{
+				Op:   "update",
+				Type: componentType,
+				ID:   id,
+				Raw:  content,
+			})
+		}
+	}
+
+	// Step 3: Finally sync running projects (config + start commands)
+	// This happens after a small delay to ensure components are synced first
+	go func() {
+		time.Sleep(1 * time.Second) // Wait for component sync to complete
+		syncRunningProjectsToNode(nodeID)
+	}()
+
+	logger.Info("Triggered full configuration sync for node", "node_id", nodeID)
+}
+
+// syncProjectStatesToNode syncs project states (which projects should be running) to a specific node
+func syncProjectStatesToNode(nodeID string) {
+	// Get running projects from leader's Redis state
+	leaderProjectStates, err := common.RedisHGetAll("cluster:proj_states:" + ClusterInstance.SelfID)
+	if err != nil {
+		logger.Error("Failed to get leader project states", "error", err)
+		return
+	}
+
+	// First, send stop commands for all projects to clear follower state
+	for projectID := range leaderProjectStates {
+		publishProjCmd(nodeID, projectID, "stop")
+	}
+
+	logger.Info("Synced project states to node", "node_id", nodeID, "projects", len(leaderProjectStates))
+}
+
+// syncRunningProjectsToNode syncs only the running projects to a specific node
+func syncRunningProjectsToNode(nodeID string) {
+	// Get running projects from leader's Redis state
+	leaderProjectStates, err := common.RedisHGetAll("cluster:proj_states:" + ClusterInstance.SelfID)
+	if err != nil {
+		logger.Error("Failed to get leader project states", "error", err)
+		return
+	}
+
+	// For each running project, sync its configuration and start it
+	for projectID, state := range leaderProjectStates {
+		if state == "running" {
+			// First sync the project configuration
+			common.GlobalMu.RLock()
+			projectConfig, exists := common.AllProjectRawConfig[projectID]
+			common.GlobalMu.RUnlock()
+
+			if exists {
+				// Sync project configuration
+				// Note: This is syncing existing config, not updating it, so no timestamp update needed
+				PublishComponentSync(&CompSyncEvt{
+					Op:   "update",
+					Type: "project",
+					ID:   projectID,
+					Raw:  projectConfig,
+				})
+
+				// Then start the project
+				publishProjCmd(nodeID, projectID, "start")
+			}
+		}
+	}
+
+	logger.Info("Synced running projects to node", "node_id", nodeID, "count", len(leaderProjectStates))
+}
+
+// SyncProjectStateChange syncs project state changes (start/stop/delete/restart) to all followers
+func SyncProjectStateChange(projectID, action string) {
+	if !IsLeader {
+		return // Only leader can sync project state changes
+	}
+
+	// Get all healthy follower nodes
+	if ClusterInstance == nil {
+		return
+	}
+
+	ClusterInstance.Mu.RLock()
+	nodes := make(map[string]*NodeInfo)
+	for k, v := range ClusterInstance.Nodes {
+		if v.IsHealthy {
+			nodes[k] = v
+		}
+	}
+	ClusterInstance.Mu.RUnlock()
+
+	// Send command to each follower node
+	for nodeID := range nodes {
+		switch action {
+		case "start":
+			// Sync project config and send start command
+			common.GlobalMu.RLock()
+			projectConfig, exists := common.AllProjectRawConfig[projectID]
+			common.GlobalMu.RUnlock()
+
+			if exists {
+				// Note: This is syncing config as part of a state change, not just passive sync
+				PublishComponentSync(&CompSyncEvt{
+					Op:        "update",
+					Type:      "project",
+					ID:        projectID,
+					Raw:       projectConfig,
+					IsRunning: true,
+				})
+			}
+			publishProjCmd(nodeID, projectID, "start")
+
+		case "stop":
+			publishProjCmd(nodeID, projectID, "stop")
+
+		case "restart":
+			// For restart, first stop then start the project
+			publishProjCmd(nodeID, projectID, "stop")
+			// Add a small delay to ensure stop is processed
+			time.Sleep(100 * time.Millisecond)
+
+			// Sync project config and send start command
+			common.GlobalMu.RLock()
+			projectConfig, exists := common.AllProjectRawConfig[projectID]
+			common.GlobalMu.RUnlock()
+
+			if exists {
+				// Note: This is syncing config as part of a state change, not just passive sync
+				PublishComponentSync(&CompSyncEvt{
+					Op:        "update",
+					Type:      "project",
+					ID:        projectID,
+					Raw:       projectConfig,
+					IsRunning: true,
+				})
+			}
+			publishProjCmd(nodeID, projectID, "start")
+
+		case "delete":
+			// Stop project first, then remove config
+			publishProjCmd(nodeID, projectID, "stop")
+			// Note: This is a config change (deletion), not just passive sync
+			PublishComponentSync(&CompSyncEvt{
+				Op:   "delete",
+				Type: "project",
+				ID:   projectID,
+			})
+		}
+	}
+
+	// Update config timestamp since this represents actual project state changes
+	UpdateConfigTimestamp()
+
+	logger.Info("Synced project state change to all followers", "project_id", projectID, "action", action)
+}
+
+// triggerForcedNodeSync forces a specific node to resync its configuration
+func triggerForcedNodeSync(nodeID string) {
+	logger.Warn("Forcing node config sync due to timeout or drift", "node_id", nodeID)
+
+	// For severely outdated nodes (>1 min), send stop command for all projects first
+	cm := ClusterInstance
+	if cm != nil {
+		cm.Mu.RLock()
+		node, exists := cm.Nodes[nodeID]
+		cm.Mu.RUnlock()
+
+		if exists && time.Since(node.LastConfigSync) > time.Minute {
+			logger.Warn("Node severely outdated, stopping all projects before sync",
+				"node_id", nodeID,
+				"last_sync", node.LastConfigSync)
+
+			// Get all projects from leader and send stop commands
+			if leaderStates, err := common.RedisHGetAll("cluster:proj_states:" + cm.SelfID); err == nil {
+				for projectID := range leaderStates {
+					publishProjCmd(nodeID, projectID, "stop")
+				}
+
+				// Wait a moment for stops to process
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}
+
+	// Trigger full configuration sync
+	triggerNodeConfigSync(nodeID)
+}
+
+// UpdateConfigTimestamp should be called whenever leader updates configuration
+func UpdateConfigTimestamp() {
+	configUpdateMutex.Lock()
+	defer configUpdateMutex.Unlock()
+	lastConfigUpdateTime = time.Now()
+}
+
+// GetLastConfigUpdateTime returns the last configuration update time
+func GetLastConfigUpdateTime() time.Time {
+	configUpdateMutex.RLock()
+	defer configUpdateMutex.RUnlock()
+	return lastConfigUpdateTime
 }
 
 // StartRedisHeartbeatSubscriber subscribes to Redis channel for real-time heartbeats (leader only)
@@ -665,6 +1085,41 @@ func (cm *ClusterManager) StartRedisHeartbeatSubscriber() {
 						node.LastSeen = time.Now()
 						node.IsHealthy = true
 						node.MissCount = 0
+
+						// Update node's config version
+						if hb.ConfigVersion != "" {
+							node.ConfigVersion = hb.ConfigVersion
+						}
+
+						// Check for configuration drift
+						leaderVersion := calculateConfigVersion()
+						configOutdated := false
+
+						if hb.ConfigVersion != "" && hb.ConfigVersion != leaderVersion {
+							logger.Warn("Configuration drift detected",
+								"node_id", hb.NodeID,
+								"node_version", hb.ConfigVersion,
+								"leader_version", leaderVersion)
+							configOutdated = true
+						}
+
+						// Check if node hasn't synced for more than 1 minute
+						lastUpdate := GetLastConfigUpdateTime()
+						if !lastUpdate.IsZero() && time.Since(node.LastConfigSync) > time.Minute {
+							logger.Warn("Node config sync timeout detected",
+								"node_id", hb.NodeID,
+								"last_sync", node.LastConfigSync,
+								"last_update", lastUpdate)
+							configOutdated = true
+						}
+
+						// Trigger forced sync if needed
+						if configOutdated {
+							go triggerForcedNodeSync(hb.NodeID)
+						} else {
+							// Update last sync time if config is up to date
+							node.LastConfigSync = time.Now()
+						}
 					}
 					cm.Mu.Unlock()
 				}
@@ -785,7 +1240,17 @@ func (cm *ClusterManager) reconcileProjectStates() {
 				continue
 			}
 			if want != st.Status {
-				publishProjCmd(nodeID, st.ID, want)
+				// Convert status to action
+				var action string
+				switch want {
+				case "running":
+					action = "start"
+				case "stopped":
+					action = "stop"
+				default:
+					action = "stop" // Default to stop for unknown states
+				}
+				publishProjCmd(nodeID, st.ID, action)
 			}
 		}
 	}

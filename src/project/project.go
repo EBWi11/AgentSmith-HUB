@@ -1,7 +1,6 @@
 package project
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
@@ -20,6 +19,104 @@ import (
 )
 
 var GlobalProject *GlobalProjectInfo
+
+// projectCommandHandler implements cluster.ProjectCommandHandler interface
+type projectCommandHandler struct{}
+
+// ExecuteCommand implements the ProjectCommandHandler interface
+func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
+	proj, exists := GlobalProject.Projects[projectID]
+	if !exists {
+		return fmt.Errorf("project not found: %s", projectID)
+	}
+
+	// Get node ID from common config instead of cluster package
+	nodeID := common.Config.LocalIP
+
+	switch action {
+	case "start":
+		if proj.Status == ProjectStatusRunning {
+			logger.Info("Project already running", "project_id", projectID)
+			return nil
+		}
+		err := proj.Start()
+		if err != nil {
+			// Record operation failure
+			common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "failed", err.Error(), map[string]interface{}{
+				"triggered_by": "cluster_command",
+				"node_id":      nodeID,
+			})
+			return fmt.Errorf("failed to start project: %w", err)
+		}
+		// Record operation success
+		common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "success", "", map[string]interface{}{
+			"triggered_by": "cluster_command",
+			"node_id":      nodeID,
+		})
+		logger.Info("Project started successfully via cluster command", "project_id", projectID)
+		return nil
+
+	case "stop":
+		if proj.Status == ProjectStatusStopped {
+			logger.Info("Project already stopped", "project_id", projectID)
+			return nil
+		}
+		err := proj.Stop()
+		if err != nil {
+			// Record operation failure
+			common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "failed", err.Error(), map[string]interface{}{
+				"triggered_by": "cluster_command",
+				"node_id":      nodeID,
+			})
+			return fmt.Errorf("failed to stop project: %w", err)
+		}
+		// Record operation success
+		common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "success", "", map[string]interface{}{
+			"triggered_by": "cluster_command",
+			"node_id":      nodeID,
+		})
+		logger.Info("Project stopped successfully via cluster command", "project_id", projectID)
+		return nil
+
+	case "restart":
+		// First stop if running
+		if proj.Status == ProjectStatusRunning {
+			err := proj.Stop()
+			if err != nil {
+				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
+					"triggered_by": "cluster_command",
+					"node_id":      nodeID,
+				})
+				return fmt.Errorf("failed to stop project for restart: %w", err)
+			}
+		}
+
+		// Then start
+		err := proj.Start()
+		if err != nil {
+			common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+				"triggered_by": "cluster_command",
+				"node_id":      nodeID,
+			})
+			return fmt.Errorf("failed to start project for restart: %w", err)
+		}
+		// Record operation success
+		common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
+			"triggered_by": "cluster_command",
+			"node_id":      nodeID,
+		})
+		logger.Info("Project restarted successfully via cluster command", "project_id", projectID)
+		return nil
+
+	default:
+		return fmt.Errorf("unknown action: %s", action)
+	}
+}
+
+// GetProjectCommandHandler returns the project command handler for registration
+func GetProjectCommandHandler() interface{} {
+	return &projectCommandHandler{}
+}
 
 func init() {
 	GlobalProject = &GlobalProjectInfo{}
@@ -1546,7 +1643,7 @@ func (p *Project) SaveProjectStatus() error {
 	}
 
 	// Write to Redis for cluster-wide visibility
-	updateProjectStatusRedis(cluster.NodeID, p.Id, p.Status)
+	updateProjectStatusRedis(common.Config.LocalIP, p.Id, p.Status)
 
 	return nil
 }
@@ -2385,18 +2482,52 @@ func decrementChannelRef(channelId string) int64 {
 	return newVal
 }
 
-// updateProjectStatusRedis writes status to Redis hash and publishes event
+// updateProjectStatusRedis writes status to Redis hash and publishes event with error handling
 func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 	if common.GetRedisClient() == nil {
+		logger.Warn("Redis client not available, cannot update project status", "node_id", nodeID, "project_id", projectID)
 		return
 	}
-	_ = common.RedisHSet("cluster:proj_states:"+nodeID, projectID, string(status))
+
+	// Update project status in Redis hash with retry
+	hashKey := "cluster:proj_states:" + nodeID
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := common.RedisHSet(hashKey, projectID, string(status)); err != nil {
+			logger.Error("Failed to update project status in Redis", "node_id", nodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
+			if attempt == 2 {
+				logger.Error("Failed to update project status after 3 attempts", "node_id", nodeID, "project_id", projectID)
+				return
+			}
+			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
+			continue
+		}
+		break
+	}
+
+	// Publish project status event with retry
 	evt := map[string]string{
 		"node_id":    nodeID,
 		"project_id": projectID,
 		"status":     string(status),
 	}
-	if data, err := json.Marshal(evt); err == nil {
-		_ = common.RedisPublish("cluster:proj_status", string(data))
+	data, err := json.Marshal(evt)
+	if err != nil {
+		logger.Error("Failed to marshal project status event", "node_id", nodeID, "project_id", projectID, "error", err)
+		return
 	}
+
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := common.RedisPublish("cluster:proj_status", string(data)); err != nil {
+			logger.Error("Failed to publish project status event", "node_id", nodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
+			if attempt == 2 {
+				logger.Error("Failed to publish project status after 3 attempts", "node_id", nodeID, "project_id", projectID)
+				return
+			}
+			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
+			continue
+		}
+		break
+	}
+
+	logger.Debug("Project status updated successfully", "node_id", nodeID, "project_id", projectID, "status", status)
 }

@@ -4,19 +4,16 @@ import (
 	"encoding/json"
 
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 )
 
 // publishProjCmd publishes a project command (start/stop/restart) to a follower via Redis Pub/Sub.
-// desiredStatus should be one of "running", "stopped" or other to imply restart.
-func publishProjCmd(nodeID, projectID, desiredStatus string) {
-	var action string
-	switch desiredStatus {
-	case "running":
-		action = "start"
-	case "stopped":
-		action = "stop"
-	default:
-		action = "restart"
+// action should be one of "start", "stop", "restart"
+func publishProjCmd(nodeID, projectID, action string) {
+	// Validate action
+	if action != "start" && action != "stop" && action != "restart" {
+		logger.Error("Invalid project action", "action", action, "project_id", projectID)
+		return
 	}
 
 	evt := map[string]string{
@@ -24,7 +21,16 @@ func publishProjCmd(nodeID, projectID, desiredStatus string) {
 		"project_id": projectID,
 		"action":     action,
 	}
-	if data, err := json.Marshal(evt); err == nil {
-		_ = common.RedisPublish("cluster:proj_cmd", string(data))
+
+	data, err := json.Marshal(evt)
+	if err != nil {
+		logger.Error("Failed to marshal project command", "error", err)
+		return
+	}
+
+	if err := common.RedisPublish("cluster:proj_cmd", string(data)); err != nil {
+		logger.Error("Failed to publish project command", "error", err)
+	} else {
+		logger.Debug("Published project command", "node_id", nodeID, "project_id", projectID, "action", action)
 	}
 }

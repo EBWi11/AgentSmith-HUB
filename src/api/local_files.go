@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
@@ -861,8 +862,110 @@ func loadComponentDirectly(componentType, id, content string) error {
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
 
-	// NOTE: loadComponentDirectly is for local operations only, no need to sync to followers
-	// Followers will get updates when changes are formally applied via ApplyPendingChanges
+	// Update global component config maps for follower access (if leader)
+	if cluster.IsLeader {
+		updateGlobalComponentConfigMapForLocalLoad(componentType, id, content)
+
+		// Sync to followers - components loaded directly should be synchronized immediately
+		// since they bypass the temporary file system
+		syncComponentToFollowersForLocalLoad(componentType, id)
+	}
 
 	return nil
+}
+
+// updateGlobalComponentConfigMapForLocalLoad updates the global component config map for local loads
+func updateGlobalComponentConfigMapForLocalLoad(componentType, id, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Initialize maps if they are nil
+	if common.AllInputsRawConfig == nil {
+		common.AllInputsRawConfig = make(map[string]string)
+	}
+	if common.AllOutputsRawConfig == nil {
+		common.AllOutputsRawConfig = make(map[string]string)
+	}
+	if common.AllRulesetsRawConfig == nil {
+		common.AllRulesetsRawConfig = make(map[string]string)
+	}
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	if common.AllPluginsRawConfig == nil {
+		common.AllPluginsRawConfig = make(map[string]string)
+	}
+
+	// Update the appropriate global config map
+	switch componentType {
+	case "input":
+		common.AllInputsRawConfig[id] = content
+	case "output":
+		common.AllOutputsRawConfig[id] = content
+	case "ruleset":
+		common.AllRulesetsRawConfig[id] = content
+	case "project":
+		common.AllProjectRawConfig[id] = content
+	case "plugin":
+		common.AllPluginsRawConfig[id] = content
+	}
+
+	logger.Debug("Updated global component config map for local load", "type", componentType, "id", id)
+}
+
+// syncComponentToFollowersForLocalLoad syncs a locally loaded component to follower nodes
+func syncComponentToFollowersForLocalLoad(componentType string, id string) {
+	// Prepare sync data using the content from the loaded component
+	var content string
+	var isRunning bool
+
+	common.GlobalMu.RLock()
+	switch componentType {
+	case "input":
+		if input, exists := project.GlobalProject.Inputs[id]; exists {
+			content = input.Config.RawConfig
+		}
+	case "output":
+		if output, exists := project.GlobalProject.Outputs[id]; exists {
+			content = output.Config.RawConfig
+		}
+	case "ruleset":
+		if ruleset, exists := project.GlobalProject.Rulesets[id]; exists {
+			content = ruleset.RawConfig
+		}
+	case "project":
+		if proj, exists := project.GlobalProject.Projects[id]; exists {
+			content = proj.Config.RawConfig
+			isRunning = (proj.Status == project.ProjectStatusRunning)
+		}
+	case "plugin":
+		if plug, exists := plugin.Plugins[id]; exists && plug.Type == plugin.YAEGI_PLUGIN {
+			content = string(plug.Payload)
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	if content == "" {
+		logger.Error("Failed to get content for local load sync", "type", componentType, "id", id)
+		return
+	}
+
+	// Publish sync event via Redis
+	evt := &cluster.CompSyncEvt{
+		Op:        "update",
+		Type:      componentType,
+		ID:        id,
+		Raw:       content,
+		IsRunning: isRunning,
+	}
+
+	cluster.PublishComponentSync(evt)
+
+	// Update config timestamp since this is called after actual config loading
+	cluster.UpdateConfigTimestamp()
+
+	logger.Info("Published local load component sync event via Redis",
+		"type", componentType,
+		"id", id,
+	)
 }

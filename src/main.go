@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,6 +38,8 @@ func main() {
 		fmt.Println(buildVers)
 		return
 	}
+
+	// config_root is required for both leader and follower
 	if *cfgRoot == "" {
 		fmt.Println("config_root is required")
 		return
@@ -48,14 +51,19 @@ func main() {
 		return
 	}
 
+	if *isLeader {
+		// Initialize Redis-based sample manager (stores component data samples)
+		common.InitRedisSampleManager()
+		logger.Info("Starting in leader mode", "config_root", *cfgRoot)
+	} else {
+		logger.Info("Starting in follower mode", "config_root", *cfgRoot)
+	}
+
 	// Init Redis (mandatory). If fails, terminate Hub immediately.
 	if err := common.RedisInit(common.Config.Redis, common.Config.RedisPassword); err != nil {
 		logger.Error("failed to connect redis, hub will exit", "error", err)
 		os.Exit(1)
 	}
-
-	// Initialize Redis-based sample manager (stores component data samples)
-	common.InitRedisSampleManager()
 
 	// Initialize daily statistics manager (tracks real message counts)
 	common.InitDailyStatsManager()
@@ -64,26 +72,43 @@ func main() {
 	ip, _ := common.GetLocalIP()
 	common.Config.LocalIP = ip
 
-	// Self address used by cluster components (include port only for leader)
-	selfAddr := ip
-	if *isLeader {
-		selfAddr = fmt.Sprintf("%s:%d", ip, *port)
-	}
+	// Self address used by cluster components (include port for both leader and follower)
+	selfAddr := fmt.Sprintf("%s:%d", ip, *port)
 
 	cm := cluster.ClusterInit(ip, selfAddr)
 	cluster.NodeID = ip
 
+	// Register project command handler with cluster package
+	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
+
 	if *isLeader {
+		// Leader mode
 		common.Config.Leader = ip
 		cm.SetLeader(ip, selfAddr)
-		cm.StartHeartbeatLoop()
 		cm.StartProjectStatesSyncLoop()
 		token, _ := readToken(true)
 		common.Config.Token = token
+
+		// Start leader-specific cluster services
+		cm.StartRedisHeartbeatSubscriber()
+		cm.StartLeaderServices()
+
+		// Initialize global component raw config maps for follower access
+		initializeGlobalComponentMaps()
 	} else {
+		// Follower mode
 		cm.StartHeartbeatLoop() // follower heartbeats only
 		// Followers don't expose HTTP API, no token needed
 		common.Config.Token = ""
+		logger.Info("Follower mode initialized")
+
+		// Sync components from leader before loading local components
+		if err := syncComponentsFromLeader(); err != nil {
+			logger.Warn("Failed to sync components from leader, using local components", "error", err)
+		}
+
+		// Start periodic sync check to ensure we have latest configurations
+		go startPeriodicComponentSync()
 	}
 
 	// Load components & projects
@@ -93,6 +118,9 @@ func main() {
 	// Init monitors
 	common.InitSystemMonitor(cluster.NodeID)
 
+	// Start cluster background processes (heartbeat, cleanup, etc.)
+	cm.Start()
+
 	if *isLeader {
 		// Leader extra services
 		common.InitQPSManager()
@@ -100,6 +128,9 @@ func main() {
 
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port
+	} else {
+		// Start error log uploader for follower nodes
+		api.StartErrorLogUploader()
 	}
 
 	// Start QPS collector on all nodes (leader and followers)
@@ -270,18 +301,215 @@ func readToken(create bool) (string, error) {
 	tokenPath := common.GetConfigPath(".token")
 	if data, err := os.ReadFile(tokenPath); err == nil {
 		return strings.TrimSpace(string(data)), nil
+	} else if create {
+		token := common.NewUUID()
+		if err := os.WriteFile(tokenPath, []byte(token), 0600); err != nil {
+			return "", err
+		}
+		return token, nil
 	}
-	if !create {
-		return "", fmt.Errorf("token not found")
+	return "", fmt.Errorf("token file not found")
+}
+
+// syncComponentsFromLeader syncs components from Redis during follower startup
+func syncComponentsFromLeader() error {
+	logger.Info("Syncing components from Redis")
+
+	// Wait for Redis connection to be established
+	for i := 0; i < 30; i++ {
+		if err := common.RedisPing(); err == nil {
+			break
+		}
+		if i == 29 {
+			return fmt.Errorf("failed to connect to Redis after 30 attempts")
+		}
+		time.Sleep(1 * time.Second)
 	}
-	if err := os.MkdirAll(filepath.Dir(tokenPath), 0755); err != nil {
-		return "", err
+
+	configRoot := common.Config.ConfigRoot
+	syncCount := 0
+
+	// Sync components directly from Redis
+	// Try to get the latest components from Redis keys used by the leader
+
+	// Sync inputs
+	if err := syncComponentTypeFromRedis("input", configRoot); err != nil {
+		logger.Warn("Failed to sync inputs from Redis", "error", err)
+	} else {
+		syncCount++
 	}
-	uuid := common.NewUUID()
-	if err := os.WriteFile(tokenPath, []byte(uuid), 0644); err != nil {
-		return "", err
+
+	// Sync outputs
+	if err := syncComponentTypeFromRedis("output", configRoot); err != nil {
+		logger.Warn("Failed to sync outputs from Redis", "error", err)
+	} else {
+		syncCount++
 	}
-	return uuid, nil
+
+	// Sync rulesets
+	if err := syncComponentTypeFromRedis("ruleset", configRoot); err != nil {
+		logger.Warn("Failed to sync rulesets from Redis", "error", err)
+	} else {
+		syncCount++
+	}
+
+	// Sync projects
+	if err := syncComponentTypeFromRedis("project", configRoot); err != nil {
+		logger.Warn("Failed to sync projects from Redis", "error", err)
+	} else {
+		syncCount++
+	}
+
+	// Sync plugins
+	if err := syncComponentTypeFromRedis("plugin", configRoot); err != nil {
+		logger.Warn("Failed to sync plugins from Redis", "error", err)
+	} else {
+		syncCount++
+	}
+
+	if syncCount > 0 {
+		logger.Info("Successfully synced components from Redis", "synced_types", syncCount)
+	} else {
+		logger.Warn("No components synced from Redis, using local components")
+	}
+
+	return nil
+}
+
+// startPeriodicComponentSync periodically checks for component updates from leader
+func startPeriodicComponentSync() {
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Only sync if we're still a follower
+			if !cluster.IsLeader {
+				if err := syncComponentsFromLeader(); err != nil {
+					logger.Debug("Periodic component sync failed", "error", err)
+				}
+			} else {
+				// If we became leader, stop periodic sync
+				return
+			}
+		}
+	}
+}
+
+// syncComponentTypeFromRedis syncs a specific component type from Redis to local files
+func syncComponentTypeFromRedis(componentType, configRoot string) error {
+	// Get the appropriate global config map
+	var configMap map[string]string
+	var ext, dir string
+
+	switch componentType {
+	case "input":
+		configMap = common.AllInputsRawConfig
+		ext = ".yaml"
+		dir = "input"
+	case "output":
+		configMap = common.AllOutputsRawConfig
+		ext = ".yaml"
+		dir = "output"
+	case "ruleset":
+		configMap = common.AllRulesetsRawConfig
+		ext = ".xml"
+		dir = "ruleset"
+	case "project":
+		configMap = common.AllProjectRawConfig
+		ext = ".yaml"
+		dir = "project"
+	case "plugin":
+		configMap = common.AllPluginsRawConfig
+		ext = ".go"
+		dir = "plugin"
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	if len(configMap) == 0 {
+		logger.Debug("No components in global config map", "type", componentType)
+		return nil
+	}
+
+	// Create directory if it doesn't exist
+	dirPath := filepath.Join(configRoot, dir)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+	}
+
+	// Write each component to file
+	for id, content := range configMap {
+		filePath := filepath.Join(dirPath, id+ext)
+		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			logger.Error("Failed to write component file", "type", componentType, "id", id, "path", filePath, "error", err)
+			continue
+		}
+		logger.Debug("Synced component from global config map", "type", componentType, "id", id, "path", filePath)
+	}
+
+	logger.Info("Synced component type from global config map", "type", componentType, "count", len(configMap))
+	return nil
+}
+
+// initializeGlobalComponentMaps initializes the global component raw config maps with current components
+func initializeGlobalComponentMaps() {
+	logger.Info("Initializing global component raw config maps")
+
+	// Initialize the maps if they are nil
+	if common.AllInputsRawConfig == nil {
+		common.AllInputsRawConfig = make(map[string]string)
+	}
+	if common.AllOutputsRawConfig == nil {
+		common.AllOutputsRawConfig = make(map[string]string)
+	}
+	if common.AllRulesetsRawConfig == nil {
+		common.AllRulesetsRawConfig = make(map[string]string)
+	}
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	if common.AllPluginsRawConfig == nil {
+		common.AllPluginsRawConfig = make(map[string]string)
+	}
+
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Populate inputs
+	for id, input := range project.GlobalProject.Inputs {
+		common.AllInputsRawConfig[id] = input.Config.RawConfig
+	}
+
+	// Populate outputs
+	for id, output := range project.GlobalProject.Outputs {
+		common.AllOutputsRawConfig[id] = output.Config.RawConfig
+	}
+
+	// Populate rulesets
+	for id, ruleset := range project.GlobalProject.Rulesets {
+		common.AllRulesetsRawConfig[id] = ruleset.RawConfig
+	}
+
+	// Populate projects
+	for id, proj := range project.GlobalProject.Projects {
+		common.AllProjectRawConfig[id] = proj.Config.RawConfig
+	}
+
+	// Populate plugins
+	for name, plug := range plugin.Plugins {
+		if plug.Type == plugin.YAEGI_PLUGIN {
+			common.AllPluginsRawConfig[name] = string(plug.Payload)
+		}
+	}
+
+	logger.Info("Global component raw config maps initialized",
+		"inputs", len(common.AllInputsRawConfig),
+		"outputs", len(common.AllOutputsRawConfig),
+		"rulesets", len(common.AllRulesetsRawConfig),
+		"projects", len(common.AllProjectRawConfig),
+		"plugins", len(common.AllPluginsRawConfig))
 }
 
 // loadHubConfig loads config.yaml inside given root directory into common.Config.
