@@ -235,3 +235,8 @@ func RedisLPush(key string, value interface{}, maxLen int64) error {
 func RedisLRange(key string, start, stop int64) ([]string, error) {
 	return rdb.LRange(ctx, key, start, stop).Result()
 }
+
+// RedisExpire sets the expiration time for a key
+func RedisExpire(key string, expiration int) error {
+	return rdb.Expire(ctx, key, time.Duration(expiration)*time.Second).Err()
+}

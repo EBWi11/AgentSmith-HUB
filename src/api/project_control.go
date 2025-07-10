@@ -162,26 +162,24 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
-	// Check if project is running, if so stop it first
-	if p.Status == project.ProjectStatusRunning {
-		if err := p.Stop(); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": fmt.Sprintf("Failed to stop project: %v", err),
-			})
-		}
-	}
-
-	// Start the project
-	if err := p.Start(); err != nil {
-		// Record failed operation
-		RecordProjectOperation(OpTypeProjectRestart, req.ProjectID, "failed", err.Error(), nil)
+	// Use RestartProjectsSafely to avoid duplicate operation history records
+	restartedCount, err := project.RestartProjectsSafely([]string{req.ProjectID}, "user_action")
+	if err != nil {
+		// Note: RestartProjectsSafely already records failed operations, so we don't record again
 		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("Failed to start project: %v", err),
+			"error": fmt.Sprintf("Failed to restart project: %v", err),
 		})
 	}
 
-	// Record successful operation
-	RecordProjectOperation(OpTypeProjectRestart, req.ProjectID, "success", "", nil)
+	if restartedCount == 0 {
+		// Project was not restarted (probably not running)
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Project is not in a restartable state",
+		})
+	}
+
+	// Note: Operation history is already recorded in RestartProjectsSafely
+	// So we don't need to record it again here
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",

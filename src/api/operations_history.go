@@ -1,15 +1,11 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,165 +50,13 @@ type OperationHistoryResponse struct {
 	HasMore    bool                     `json:"has_more"`
 }
 
-// getOperationsLogDir returns the operations history log directory
-func getOperationsLogDir() string {
-	if runtime.GOOS == "darwin" {
-		return "/tmp/hub_logs/operations"
-	}
-	return "/var/log/hub_logs/operations"
-}
-
-// ensureOperationsLogDir creates the operations log directory if it doesn't exist
-func ensureOperationsLogDir() error {
-	logDir := getOperationsLogDir()
-	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(logDir, 0755); err != nil {
-			// Fallback to local directory
-			localLogDir := "./logs/operations"
-			if _, err := os.Stat(localLogDir); os.IsNotExist(err) {
-				if err := os.MkdirAll(localLogDir, 0755); err != nil {
-					return fmt.Errorf("failed to create any operations log directory: %w", err)
-				}
-			}
-			return nil
-		}
-	}
-	return nil
-}
-
-// getOperationsLogPath returns the full path for operations log file
-func getOperationsLogPath(month string) string {
-	logDir := getOperationsLogDir()
-
-	// Try to ensure operations log directory exists
-	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(logDir, 0755); err == nil {
-			return filepath.Join(logDir, fmt.Sprintf("operations_%s.log", month))
-		}
-		// Failed to create system directory, fall back to local
-	} else if err == nil {
-		return filepath.Join(logDir, fmt.Sprintf("operations_%s.log", month))
-	}
-
-	// Fallback to local directory
-	localLogDir := "./logs/operations"
-	if _, err := os.Stat(localLogDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(localLogDir, 0755); err != nil {
-			logger.Error("Failed to create operations log directory", "system_dir", logDir, "local_dir", localLogDir, "error", err)
-		}
-	}
-
-	return filepath.Join(localLogDir, fmt.Sprintf("operations_%s.log", month))
-}
-
-// recordOperation records an operation to the monthly log file
-func recordOperation(record common.OperationRecord) error {
-	// Get monthly log file path
-	monthKey := record.Timestamp.Format("2006-01")
-	logPath := getOperationsLogPath(monthKey)
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("failed to marshal operation record: %w", err)
-	}
-
-	// Append to log file
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open operations log file: %w", err)
-	}
-	defer file.Close()
-
-	_, err = file.WriteString(string(jsonData) + "\n")
-	if err != nil {
-		return fmt.Errorf("failed to write to operations log file: %w", err)
-	}
-
-	// Followers publish to Redis for leader aggregation; leader writes log file only
-	if !cluster.IsLeader {
-		_ = common.RedisLPush("cluster:ops_history", string(jsonData), 50000)
-	}
-
-	logger.Info("Operation recorded", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID, "project", record.ProjectID)
-	return nil
-}
-
-// readOperationsFromFile reads operations from a specific log file
-func readOperationsFromFile(filePath string, filter OperationHistoryFilter) ([]common.OperationRecord, error) {
-	var operations []common.OperationRecord
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return operations, nil // Return empty if file doesn't exist
-		}
-		return nil, fmt.Errorf("failed to open operations log file %s: %w", filePath, err)
-	}
-	defer file.Close()
-
-	// Read file content
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read operations log file: %w", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Parse the operation log line
-		var operation common.OperationRecord
-		if err := json.Unmarshal([]byte(line), &operation); err != nil {
-			// Reduce log verbosity: only log critical parsing errors
-			// logger.Debug("Failed to parse operation log line", "line", line, "error", err)
-			continue
-		}
-
-		// Apply time filters
-		if !filter.StartTime.IsZero() && operation.Timestamp.Before(filter.StartTime) {
-			// Reduce log verbosity: only log if needed for debugging
-			// logger.Debug("Record filtered out by start_time",
-			// 	"operation_time", operation.Timestamp,
-			// 	"start_time", filter.StartTime)
-			continue
-		}
-
-		if !filter.EndTime.IsZero() && operation.Timestamp.After(filter.EndTime) {
-			// Reduce log verbosity: only log if needed for debugging
-			// logger.Debug("Record filtered out by end_time",
-			// 	"operation_time", operation.Timestamp,
-			// 	"end_time", filter.EndTime)
-			continue
-		}
-
-		// Apply filters
-		if !matchesOperationFilter(operation, filter) {
-			continue
-		}
-
-		operations = append(operations, operation)
-	}
-
-	return operations, nil
-}
-
 // matchesOperationFilter checks if a record matches the filter criteria
 func matchesOperationFilter(record common.OperationRecord, filter OperationHistoryFilter) bool {
 	// Time range filter
 	if !filter.StartTime.IsZero() && record.Timestamp.Before(filter.StartTime) {
-		logger.Debug("Record filtered out by start_time",
-			"record_time", record.Timestamp.Format(time.RFC3339),
-			"filter_start", filter.StartTime.Format(time.RFC3339))
 		return false
 	}
 	if !filter.EndTime.IsZero() && record.Timestamp.After(filter.EndTime) {
-		logger.Debug("Record filtered out by end_time",
-			"record_time", record.Timestamp.Format(time.RFC3339),
-			"filter_end", filter.EndTime.Format(time.RFC3339))
 		return false
 	}
 
@@ -255,12 +99,17 @@ func matchesOperationFilter(record common.OperationRecord, filter OperationHisto
 	return true
 }
 
-// getOperationHistory retrieves operations based on filter criteria
+// getOperationHistory retrieves operations from Redis only
 func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecord, error) {
 	var allOperations []common.OperationRecord
 
-	// Fetch logs cached in Redis list first (cluster-wide)
-	redisLines, _ := common.RedisLRange("cluster:ops_history", 0, 49999)
+	// Read from Redis (cluster-wide operations history)
+	redisLines, err := common.RedisLRange("cluster:ops_history", 0, 99999)
+	if err != nil {
+		logger.Error("Failed to read operations from Redis", "error", err)
+		return allOperations, nil // Return empty list instead of error
+	}
+
 	for _, line := range redisLines {
 		var op common.OperationRecord
 		if err := json.Unmarshal([]byte(line), &op); err == nil {
@@ -268,49 +117,6 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 				allOperations = append(allOperations, op)
 			}
 		}
-	}
-
-	// Then read local monthly files
-
-	// Determine which log files to read based on time range
-	var monthsToRead []string
-
-	if filter.StartTime.IsZero() && filter.EndTime.IsZero() {
-		// No time filter, read current month and previous month
-		now := time.Now()
-		monthsToRead = append(monthsToRead, now.Format("2006-01"))
-		prevMonth := now.AddDate(0, -1, 0)
-		monthsToRead = append(monthsToRead, prevMonth.Format("2006-01"))
-	} else {
-		// Generate list of months to read based on time range
-		start := filter.StartTime
-		if start.IsZero() {
-			start = time.Now().AddDate(0, -3, 0) // Default to 3 months ago
-		}
-
-		end := filter.EndTime
-		if end.IsZero() {
-			end = time.Now()
-		}
-
-		current := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
-		endMonth := time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, end.Location())
-
-		for current.Before(endMonth) || current.Equal(endMonth) {
-			monthsToRead = append(monthsToRead, current.Format("2006-01"))
-			current = current.AddDate(0, 1, 0)
-		}
-	}
-
-	// Read operations from each month file
-	for _, month := range monthsToRead {
-		logPath := getOperationsLogPath(month)
-		operations, err := readOperationsFromFile(logPath, filter)
-		if err != nil {
-			logger.Error("Failed to read operations from file", "path", logPath, "error", err)
-			continue
-		}
-		allOperations = append(allOperations, operations...)
 	}
 
 	// Sort by timestamp (newest first)
@@ -321,7 +127,7 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 	return allOperations, nil
 }
 
-// RecordChangePush records a change push operation
+// RecordChangePush records a change push operation to Redis
 func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
 	record := common.OperationRecord{
 		Type:          common.OpTypeChangePush,
@@ -335,12 +141,23 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 		Error:         errorMsg,
 	}
 
-	if err := recordOperation(record); err != nil {
-		logger.Error("Failed to record change push operation", "error", err)
+	// Serialize record to JSON and store to Redis
+	if jsonData, err := json.Marshal(record); err == nil {
+		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+			logger.Error("Failed to record change push operation to Redis", "error", err)
+		} else {
+			// Set TTL for the entire list to 31 days
+			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+				logger.Warn("Failed to set TTL for operations history", "error", err)
+			}
+			logger.Info("Change push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
+		}
+	} else {
+		logger.Error("Failed to marshal change push operation", "error", err)
 	}
 }
 
-// RecordLocalPush records a local push operation
+// RecordLocalPush records a local push operation to Redis
 func RecordLocalPush(componentType, componentID, content, status, errorMsg string) {
 	record := common.OperationRecord{
 		Type:          common.OpTypeLocalPush,
@@ -352,14 +169,25 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 		Error:         errorMsg,
 	}
 
-	if err := recordOperation(record); err != nil {
-		logger.Error("Failed to record local push operation", "error", err)
+	// Serialize record to JSON and store to Redis
+	if jsonData, err := json.Marshal(record); err == nil {
+		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+			logger.Error("Failed to record local push operation to Redis", "error", err)
+		} else {
+			// Set TTL for the entire list to 31 days
+			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+				logger.Warn("Failed to set TTL for operations history", "error", err)
+			}
+			logger.Info("Local push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
+		}
+	} else {
+		logger.Error("Failed to marshal local push operation", "error", err)
 	}
 }
 
 // RecordProjectOperation records a project operation
 func RecordProjectOperation(operationType OperationType, projectID, status, errorMsg string, details map[string]interface{}) {
-	// Delegate to common package to avoid circular dependency
+	// Delegate to common package
 	common.RecordProjectOperation(common.OperationType(operationType), projectID, status, errorMsg, details)
 }
 
@@ -373,7 +201,6 @@ func GetOperationsHistory(c echo.Context) error {
 	if startTimeStr := c.QueryParam("start_time"); startTimeStr != "" {
 		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
 			filter.StartTime = startTime
-			logger.Info("Parsed start_time", "input", startTimeStr, "parsed", startTime.Format(time.RFC3339))
 		} else {
 			logger.Error("Failed to parse start_time", "input", startTimeStr, "error", err)
 		}
@@ -382,7 +209,6 @@ func GetOperationsHistory(c echo.Context) error {
 	if endTimeStr := c.QueryParam("end_time"); endTimeStr != "" {
 		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
 			filter.EndTime = endTime
-			logger.Info("Parsed end_time", "input", endTimeStr, "parsed", endTime.Format(time.RFC3339))
 		} else {
 			logger.Error("Failed to parse end_time", "input", endTimeStr, "error", err)
 		}
@@ -410,26 +236,13 @@ func GetOperationsHistory(c echo.Context) error {
 		}
 	}
 
-	// Log filter parameters for debugging
-	logger.Debug("Operations history filter",
-		"start_time", filter.StartTime.Format(time.RFC3339),
-		"end_time", filter.EndTime.Format(time.RFC3339),
-		"operation_type", filter.OperationType,
-		"component_type", filter.ComponentType,
-		"status", filter.Status,
-		"keyword", filter.Keyword,
-		"limit", filter.Limit,
-		"offset", filter.Offset)
-
-	// Get operations
+	// Get operations from Redis
 	operations, err := getOperationHistory(filter)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to retrieve operations history: %v", err),
 		})
 	}
-
-	logger.Debug("Retrieved operations", "count", len(operations))
 
 	totalCount := len(operations)
 

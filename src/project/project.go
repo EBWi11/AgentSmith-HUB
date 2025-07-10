@@ -2165,12 +2165,13 @@ func (p *Project) createChannelConnections(flowGraph map[string][]string) error 
 
 // RestartProjectsSafely restarts multiple projects with proper shared component handling
 // Returns the number of successfully restarted projects
-func RestartProjectsSafely(projectIDs []string) (int, error) {
+// trigger: "user_action" for direct user restarts, "component_change" for component-triggered restarts
+func RestartProjectsSafely(projectIDs []string, trigger string) (int, error) {
 	if len(projectIDs) == 0 {
 		return 0, nil
 	}
 
-	logger.Info("Starting batch project restart", "count", len(projectIDs))
+	logger.Info("Starting batch project restart", "count", len(projectIDs), "trigger", trigger)
 	restartedCount := 0
 
 	// Sort project IDs to ensure consistent restart order
@@ -2196,9 +2197,9 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 			if err := proj.Stop(); err != nil {
 				logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
 				// Record failed restart operation to Operations History
-				// Note: recordOperation already handles leader/follower logic
+				// Note: All nodes record to Redis with TTL
 				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
-					"trigger": "component_change",
+					"trigger": trigger,
 					"phase":   "stop",
 				})
 				continue // Skip starting if stop failed
@@ -2209,19 +2210,19 @@ func RestartProjectsSafely(projectIDs []string) (int, error) {
 			if err := proj.Start(); err != nil {
 				logger.Error("Failed to start project during restart", "id", projectID, "error", err)
 				// Record failed restart operation to Operations History
-				// Note: recordOperation already handles leader/follower logic
+				// Note: All nodes record to Redis with TTL
 				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
-					"trigger": "component_change",
+					"trigger": trigger,
 					"phase":   "start",
 				})
 			} else {
 				restartedCount++
 				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
 				// Record successful restart operation to Operations History
-				// Note: recordOperation already handles leader/follower logic - followers will publish to Redis, leader will write to file
+				// Note: All nodes record to Redis with TTL
 				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
 					"duration_ms": time.Since(startTime).Milliseconds(),
-					"trigger":     "component_change",
+					"trigger":     trigger,
 				})
 			}
 		} else if proj.Status == ProjectStatusStarting {

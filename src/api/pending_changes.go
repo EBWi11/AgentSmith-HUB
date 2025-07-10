@@ -1455,7 +1455,7 @@ func ApplyPendingChanges(c echo.Context) error {
 
 		// Use unified restart function for better maintainability
 		var err error
-		restartedCount, err = project.RestartProjectsSafely(projectIDs)
+		restartedCount, err = project.RestartProjectsSafely(projectIDs, "component_change")
 		if err != nil {
 			logger.Error("Error during batch project restart", "error", err)
 		}
@@ -1799,7 +1799,7 @@ func ApplySingleChange(c echo.Context) error {
 		logger.Info("Restarting affected projects", "count", len(affectedProjects))
 
 		// Use unified restart function for better maintainability
-		restartedCount, err := project.RestartProjectsSafely(affectedProjects)
+		restartedCount, err := project.RestartProjectsSafely(affectedProjects, "component_change")
 		if err != nil {
 			logger.Error("Error during affected project restart", "error", err)
 		}
@@ -1850,7 +1850,7 @@ func RestartAllProjects(c echo.Context) error {
 	}
 
 	// Use unified restart function for better maintainability
-	startedCount, err := project.RestartProjectsSafely(projectIDs)
+	startedCount, err := project.RestartProjectsSafely(projectIDs, "user_action")
 	if err != nil {
 		logger.Error("Error during all projects restart", "error", err)
 	}
