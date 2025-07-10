@@ -39,6 +39,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       timestamp: 0,
       loading: false
     },
+    clusterProjectStates: { data: {}, timestamp: 0, loading: false },
     
     // Pending changes cache
     pendingChanges: {
@@ -336,8 +337,18 @@ export const useDataCacheStore = defineStore('dataCache', {
     async fetchClusterInfo(forceRefresh = false) {
       return this.fetchWithCache(
         'clusterInfo',
-        () => hubApi.fetchClusterStatus(),
+        () => hubApi.fetchClusterInfo(),
         60000, // 1min TTL
+        forceRefresh
+      )
+    },
+
+    // Get cluster project states (leader only)
+    async fetchClusterProjectStates(forceRefresh = false) {
+      return this.fetchWithCache(
+        'clusterProjectStates',
+        () => hubApi.getClusterProjectStates(),
+        10000, // 10s TTL – project state can change quickly
         forceRefresh
       )
     },

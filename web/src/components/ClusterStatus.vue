@@ -369,16 +369,16 @@ async function fetchAllData() {
       nodeMessageData.value = {}
     }
     
-    // Fetch system metrics for all nodes using dataCache
-    if (cluster.status === 'leader') {
-      // Leader can fetch cluster-wide system metrics
-      try {
-        const systemResponse = await dataCache.fetchSystemMetrics(true) // Force refresh
-        const clusterMetrics = systemResponse.metrics || systemResponse || {}
-        
-        // Store cluster metrics directly - API already returns the correct format
-        systemMetrics.value = clusterMetrics
-      } catch (systemError) {
+    // Fetch system metrics for all nodes (leader returns full data, follower may get 400)
+    try {
+      const systemResponse = await dataCache.fetchSystemMetrics(true) // Force refresh
+      if (systemResponse && systemResponse.metrics) {
+        // Leader path: aggregated metrics
+        systemMetrics.value = systemResponse.metrics
+      }
+    } catch (systemError) {
+      // Followers receive 400 (non-leader); ignore, continue with self metrics fallback
+      if (systemError?.response?.status !== 400) {
         console.warn('Failed to fetch cluster system metrics:', systemError)
       }
     }

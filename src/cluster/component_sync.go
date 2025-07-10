@@ -60,12 +60,10 @@ func (cm *ClusterManager) startComponentSyncSubscriber() {
 	}
 
 	pubsub := client.Subscribe(context.Background(), "cluster:component_sync")
-
-	// Create dedicated stop channel for component sync subscriber
+	// Ensure global stopChan exists so that we can stop subscriber gracefully
 	if cm.stopChan == nil {
 		cm.stopChan = make(chan struct{})
 	}
-	stopComponentSync := make(chan struct{})
 
 	go func() {
 		defer func() {
@@ -99,7 +97,7 @@ func (cm *ClusterManager) startComponentSyncSubscriber() {
 
 					// For non-project components, restart affected projects
 					if evt.Type != "project" {
-						go restartAffectedProjectsOnFollower(evt.Type, evt.ID)
+						go handleAffectedProjectsOnFollower(&evt)
 					}
 
 					// Note: We don't update config timestamp here because this is passive sync,
@@ -107,9 +105,7 @@ func (cm *ClusterManager) startComponentSyncSubscriber() {
 					// through the heartbeat mechanism when Leader detects drift.
 				}
 
-			case <-stopComponentSync:
-				logger.Info("Component sync subscriber stopped")
-				return
+			// Removed dedicated stop channel; global stopChan is sufficient
 			case <-cm.stopChan:
 				logger.Info("Component sync subscriber stopped via global stop")
 				return
@@ -117,8 +113,7 @@ func (cm *ClusterManager) startComponentSyncSubscriber() {
 		}
 	}()
 
-	// Store the stop channel for proper cleanup
-	cm.stopComponentSync = stopComponentSync
+	// No separate stop channel needed – rely on cm.stopChan
 	logger.Info("Component sync subscriber started")
 }
 
@@ -208,50 +203,59 @@ func applyComponentSyncFollower(evt *CompSyncEvt) error {
 	return nil
 }
 
-// updateComponentInstanceOnFollower updates the actual component instance on follower nodes
-func updateComponentInstanceOnFollower(evt *CompSyncEvt) error {
-	if evt.Op == "delete" {
-		return nil // Deletion is handled by the config map update
-	}
-
-	// We need to avoid circular imports, so we'll use a different approach
-	// For now, we'll rely on the project restart mechanism to pick up the new config
-	// TODO: Implement proper component instance updates without circular imports
-
-	logger.Debug("Component instance update deferred to project restart", "type", evt.Type, "id", evt.ID)
-	return nil
-}
-
-// restartAffectedProjectsOnFollower restarts projects affected by component changes on follower nodes
-func restartAffectedProjectsOnFollower(componentType, componentID string) {
-	// For plugin updates, use safe update mechanism
-	if componentType == "plugin" {
-		handlePluginUpdateOnFollower(componentType, componentID)
+// handleAffectedProjectsOnFollower decides whether to stop / restart affected projects based on operation.
+func handleAffectedProjectsOnFollower(evt *CompSyncEvt) {
+	if evt == nil {
 		return
 	}
 
-	// For other components, use the existing restart logic
-	affectedProjects := getAffectedProjectsOnFollower(componentType, componentID)
+	// If component was deleted, stop affected projects to avoid runtime errors.
+	if evt.Op == "delete" {
+		affected := getAffectedProjectsOnFollower(evt.Type, evt.ID)
+		if len(affected) == 0 {
+			logger.Debug("No projects affected by component deletion", "type", evt.Type, "id", evt.ID)
+			return
+		}
+
+		logger.Info("Stopping affected projects on follower due to component deletion", "component_type", evt.Type, "component_id", evt.ID, "count", len(affected))
+		for _, pid := range affected {
+			if err := executeProjectCmdOnFollower(pid, "stop"); err != nil {
+				logger.Error("Failed to stop project on follower after component deletion", "project", pid, "error", err)
+			} else {
+				logger.Info("Project stopped on follower after component deletion", "project", pid)
+			}
+		}
+		return
+	}
+
+	// For add/update operations
+	if evt.Type == "plugin" {
+		// Safe plugin update path (stop, reload, restart)
+		handlePluginUpdateOnFollower(evt.Type, evt.ID)
+		return
+	}
+
+	// Generic restart path for other component types
+	affectedProjects := getAffectedProjectsOnFollower(evt.Type, evt.ID)
 
 	if len(affectedProjects) == 0 {
-		logger.Debug("No projects affected by component update", "type", componentType, "id", componentID)
+		logger.Debug("No projects affected by component update", "type", evt.Type, "id", evt.ID)
 		return
 	}
 
-	logger.Info("Restarting affected projects on follower", "component_type", componentType, "component_id", componentID, "affected_count", len(affectedProjects))
+	logger.Info("Restarting affected projects on follower", "component_type", evt.Type, "component_id", evt.ID, "affected_count", len(affectedProjects))
 
-	// Restart affected projects using the same logic as project package
-	restartedCount := 0
-	for _, projectID := range affectedProjects {
-		if err := restartProjectOnFollower(projectID); err != nil {
-			logger.Error("Failed to restart affected project on follower", "project_id", projectID, "error", err)
+	restarted := 0
+	for _, pid := range affectedProjects {
+		if err := executeProjectCmdOnFollower(pid, "restart"); err != nil {
+			logger.Error("Failed to restart affected project on follower", "project_id", pid, "error", err)
 		} else {
-			restartedCount++
-			logger.Info("Successfully restarted affected project on follower", "project_id", projectID)
+			restarted++
+			logger.Info("Successfully restarted affected project on follower", "project_id", pid)
 		}
 	}
 
-	logger.Info("Completed restarting affected projects on follower", "component_type", componentType, "component_id", componentID, "restarted", restartedCount, "total", len(affectedProjects))
+	logger.Info("Completed restarting affected projects on follower", "component_type", evt.Type, "component_id", evt.ID, "restarted", restarted, "total", len(affectedProjects))
 }
 
 // handlePluginUpdateOnFollower handles safe plugin updates on follower nodes
@@ -269,7 +273,7 @@ func handlePluginUpdateOnFollower(componentType, componentID string) {
 		logger.Info("Stopping affected projects for plugin update on follower", "plugin", pluginID, "projects", affectedProjects)
 
 		for _, projectID := range affectedProjects {
-			if err := stopProjectOnFollower(projectID); err != nil {
+			if err := executeProjectCmdOnFollower(projectID, "stop"); err != nil {
 				logger.Error("Failed to stop project on follower for plugin update", "project", projectID, "error", err)
 			}
 		}
@@ -302,7 +306,7 @@ func handlePluginUpdateOnFollower(componentType, componentID string) {
 	// Phase 3: Restart affected projects
 	logger.Info("Restarting affected projects with new plugin on follower", "plugin", pluginID, "projects", affectedProjects)
 	for _, projectID := range affectedProjects {
-		if err := restartProjectOnFollower(projectID); err != nil {
+		if err := executeProjectCmdOnFollower(projectID, "restart"); err != nil {
 			logger.Error("Failed to restart project on follower after plugin update", "project", projectID, "error", err)
 		} else {
 			logger.Info("Successfully restarted project on follower after plugin update", "project", projectID)
@@ -342,15 +346,6 @@ func updatePluginInstanceSafelyOnFollower(pluginID, newContent string) error {
 
 	logger.Info("Plugin instance updated safely on follower", "plugin", pluginID)
 	return nil
-}
-
-// stopProjectOnFollower stops a project on follower node
-func stopProjectOnFollower(projectID string) error {
-	if globalProjectCmdHandler == nil {
-		return fmt.Errorf("project command handler not initialized")
-	}
-
-	return globalProjectCmdHandler.ExecuteCommand(projectID, "stop")
 }
 
 // getAffectedProjectsOnFollower returns the list of project IDs affected by component changes (follower version)
@@ -396,12 +391,10 @@ func getAffectedProjectsOnFollower(componentType string, componentID string) []s
 	return result
 }
 
-// restartProjectOnFollower restarts a single project on follower node
-func restartProjectOnFollower(projectID string) error {
+// executeProjectCmdOnFollower wraps project command execution for follower
+func executeProjectCmdOnFollower(projectID, action string) error {
 	if globalProjectCmdHandler == nil {
 		return fmt.Errorf("project command handler not initialized")
 	}
-
-	// Use the project command handler to restart the project
-	return globalProjectCmdHandler.ExecuteCommand(projectID, "restart")
+	return globalProjectCmdHandler.ExecuteCommand(projectID, action)
 }

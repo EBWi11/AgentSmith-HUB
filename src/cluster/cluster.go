@@ -279,25 +279,19 @@ func (cm *ClusterManager) cleanupUnhealthyNodes() {
 	cm.Mu.Lock()
 	defer cm.Mu.Unlock()
 
-	// === Discover new nodes via heartbeats hash ===
+	// Refresh LastSeen of known nodes from Redis hash (fallback when Pub/Sub lost)
 	hmap, err := common.RedisHGetAll("cluster:heartbeats")
 	if err == nil {
 		for nodeID, payload := range hmap {
 			if nodeID == cm.SelfID {
 				continue
 			}
-			if _, exists := cm.Nodes[nodeID]; !exists {
+			if existing, exists := cm.Nodes[nodeID]; exists {
 				var hb HeartbeatMessage
 				if jsonErr := json.Unmarshal([]byte(payload), &hb); jsonErr == nil {
-					cm.Nodes[nodeID] = &NodeInfo{
-						ID:        nodeID,
-						Address:   hb.NodeAddr,
-						Status:    NodeStatusFollower,
-						LastSeen:  hb.Timestamp, // Use actual heartbeat timestamp
-						IsHealthy: true,
-						MissCount: 0,
-					}
-					logger.Info("Discovered follower via hash", "node_id", nodeID)
+					existing.LastSeen = hb.Timestamp
+					existing.IsHealthy = true
+					existing.MissCount = 0
 				}
 			}
 		}
@@ -356,6 +350,11 @@ func (cm *ClusterManager) Stop() error {
 	cm.Mu.Lock()
 	defer cm.Mu.Unlock()
 
+	// Stop background ticker loops (heartbeat send/cleanup etc.)
+	if cm.stopChan != nil {
+		close(cm.stopChan)
+		cm.stopChan = nil
+	}
 	// Stop heartbeat monitoring
 	if cm.stopHeartbeatMonitor != nil {
 		close(cm.stopHeartbeatMonitor)
@@ -422,8 +421,10 @@ func (cm *ClusterManager) Start() {
 		cm.startProjectCommandSubscriber()
 	}
 
-	// Start cleanup loop
-	cm.StartCleanupLoop()
+	// Followers need a separate cleanup loop; leader already cleans via monitorHeartbeats
+	if !cm.IsLeader() {
+		cm.StartCleanupLoop()
+	}
 }
 
 // StartAsLeader starts this node as cluster leader
@@ -471,6 +472,9 @@ func StartAsLeader(config *ClusterConfig) error {
 
 	// Start reconcile loop for project states
 	cm.startProjectReconciler()
+
+	// One-time discovery of existing followers from heartbeat hash
+	cm.discoverFollowersFromHash()
 
 	logger.Info("Cluster leader started", "node_id", config.NodeID, "listen_addr", config.ListenAddr)
 	return nil
@@ -719,6 +723,9 @@ func (cm *ClusterManager) SendRedisHeartbeat() error {
 	if err := common.RedisHSet("cluster:heartbeats", cm.SelfID, string(jsonData)); err != nil {
 		return err
 	}
+
+	// Ensure the heartbeats hash expires if no nodes send heartbeats within 60 seconds
+	_ = common.RedisExpire("cluster:heartbeats", 60) // 60-second TTL
 
 	// Publish for real-time update
 	if err := common.RedisPublish("cluster:heartbeat", string(jsonData)); err != nil {
@@ -1331,6 +1338,34 @@ func (cm *ClusterManager) reconcileProjectStates() {
 					"desired_status", desiredStatus)
 				publishProjCmd(nodeID, projectID, "start")
 			}
+		}
+	}
+}
+
+// discoverFollowersFromHash adds any nodes found in Redis heartbeat hash to cm.Nodes (only at startup)
+func (cm *ClusterManager) discoverFollowersFromHash() {
+	if !cm.IsLeader() {
+		return
+	}
+	hmap, err := common.RedisHGetAll("cluster:heartbeats")
+	if err != nil {
+		return
+	}
+	for nodeID, payload := range hmap {
+		if nodeID == cm.SelfID {
+			continue
+		}
+		var hb HeartbeatMessage
+		if jsonErr := json.Unmarshal([]byte(payload), &hb); jsonErr != nil {
+			continue
+		}
+		cm.Nodes[nodeID] = &NodeInfo{
+			ID:        nodeID,
+			Address:   hb.NodeAddr,
+			Status:    NodeStatusFollower,
+			LastSeen:  hb.Timestamp,
+			IsHealthy: true,
+			MissCount: 0,
 		}
 	}
 }

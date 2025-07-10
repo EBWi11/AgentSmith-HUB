@@ -218,6 +218,7 @@
                       'bg-orange-500': project.status === 'stopping',
                       'bg-red-500': project.status === 'error'
                     }"></span>
+              <span v-if="project.mismatch" class="w-2 h-2 bg-yellow-400 rounded-full mr-1"></span>
               <div>
                 <p class="font-medium text-gray-900">{{ project.id }}</p>
                 <p class="text-sm text-gray-500 capitalize transition-all duration-300">{{ project.status }}</p>
@@ -969,24 +970,46 @@ async function fetchDashboardData() {
       dataCache.fetchClusterInfo()
     ])
 
+    let mismatchProjects = new Set()
+    if (clusterResponse.status === 'leader') {
+      try {
+        const projStates = await dataCache.fetchClusterProjectStates()
+        /* projStates format: { project_states: { nodeID: [ {id,status} ] } } */
+        if (projStates && projStates.project_states) {
+          const stateMap = {}
+          Object.values(projStates.project_states).forEach(list => {
+            list.forEach(p => {
+              if (!stateMap[p.id]) stateMap[p.id] = new Set()
+              stateMap[p.id].add(p.status)
+            })
+          })
+          Object.entries(stateMap).forEach(([pid, set]) => {
+            if (set.size > 1) mismatchProjects.add(pid)
+          })
+        }
+      } catch (e) {
+        console.warn('Failed to fetch cluster project states', e)
+      }
+    }
+ 
     projectList.value = projectsResponse.map(project => ({
       ...project,
       messages: 0, // Will be calculated from message data
-      components: 0 // Will be calculated from project details
+      components: 0, // Will be calculated from project details
+      mismatch: mismatchProjects.has(project.id)
     }))
 
     clusterInfo.value = clusterResponse // Store full cluster info
 
-    // Fetch cluster system metrics for initial load (if current node is leader)
+    // Fetch system metrics for all nodes (leader returns full data)
     if (clusterResponse.status === 'leader') {
       try {
-        const clusterSystemResponse = await hubApi.getClusterSystemMetrics()
-        if (clusterSystemResponse && clusterSystemResponse.metrics) {
-          // Initialize systemData with cluster system metrics
-          systemData.value = { ...systemData.value, ...clusterSystemResponse.metrics }
+        const systemResponse = await dataCache.fetchSystemMetrics(true)
+        if (systemResponse && systemResponse.metrics) {
+          systemData.value = systemResponse.metrics
         }
-      } catch (clusterSystemError) {
-        console.warn('Failed to fetch cluster system metrics on initial load:', clusterSystemError)
+      } catch (e) {
+        console.warn('Failed to fetch cluster system metrics:', e)
       }
     }
     

@@ -24,6 +24,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// stopPeriodicSync is closed on graceful shutdown to stop the component sync goroutine
+var stopPeriodicSync chan struct{}
+
 func main() {
 	var (
 		cfgRoot   = flag.String("config_root", "", "directory containing config.yaml and component sub dirs (required)")
@@ -108,6 +111,7 @@ func main() {
 		}
 
 		// Start periodic sync check to ensure we have latest configurations
+		stopPeriodicSync = make(chan struct{})
 		go startPeriodicComponentSync()
 	}
 
@@ -153,6 +157,9 @@ func main() {
 	go func() {
 		<-shutdownCtx.Done()
 		logger.Info("shutdown signal received, stopping Hub components ...")
+		if stopPeriodicSync != nil {
+			close(stopPeriodicSync)
+		}
 
 		// 1. Stop all running projects (but don't save status - preserve user intention)
 		for id, p := range project.GlobalProject.Projects {
@@ -404,6 +411,9 @@ func startPeriodicComponentSync() {
 				// If we became leader, stop periodic sync
 				return
 			}
+		case <-stopPeriodicSync:
+			logger.Info("Stopping periodic component sync due to graceful shutdown")
+			return
 		}
 	}
 }
