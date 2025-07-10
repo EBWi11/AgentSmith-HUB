@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -825,26 +827,38 @@ func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart 
 
 // Component-specific apply functions
 func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
-	// Remove existing plugin from memory before applying
-	common.GlobalMu.Lock()
-	delete(plugin.Plugins, change.ID)
-	common.GlobalMu.Unlock()
+	pluginID := change.ID
+	newContent := change.NewContent
 
-	// Write directly to file (skip .new file approach)
-	configRoot := common.Config.ConfigRoot
-	pluginPath := path.Join(configRoot, "plugin", change.ID+".go")
+	logger.Info("Starting safe plugin update", "plugin", pluginID)
 
-	err := os.WriteFile(pluginPath, []byte(change.NewContent), 0644)
-	if err != nil {
-		logger.Error("Failed to apply plugin change", "id", change.ID, "error", err)
-		return nil, fmt.Errorf("failed to write plugin file: %w", err)
+	// Phase 1: Get affected projects and stop them
+	affectedProjects := project.GetAffectedProjects("plugin", pluginID)
+	if len(affectedProjects) > 0 {
+		logger.Info("Stopping affected projects for plugin update", "plugin", pluginID, "projects", affectedProjects)
+
+		for _, projectID := range affectedProjects {
+			if err := stopProjectSafelyForPluginUpdate(projectID); err != nil {
+				logger.Error("Failed to stop project for plugin update", "project", projectID, "error", err)
+				// Continue with other projects, don't fail completely
+			}
+		}
+
+		// Wait for projects to fully stop
+		if err := waitForProjectsToStop(affectedProjects, 30*time.Second); err != nil {
+			logger.Warn("Timeout waiting for projects to stop, continuing with plugin update", "plugin", pluginID, "error", err)
+			// Continue anyway, the update might still work
+		}
+
+		logger.Info("All affected projects stopped", "plugin", pluginID)
 	}
 
-	// Reload plugin into memory
-	reloadErr := plugin.NewPlugin(pluginPath, "", change.ID, plugin.YAEGI_PLUGIN)
-	if reloadErr != nil {
-		logger.Error("Failed to reload plugin after merge", "id", change.ID, "error", reloadErr)
-		return nil, fmt.Errorf("failed to reload plugin: %w", reloadErr)
+	// Phase 2: Update plugin safely
+	if err := updatePluginInstanceSafely(pluginID, newContent); err != nil {
+		logger.Error("Plugin update failed, attempting to restart projects", "plugin", pluginID, "error", err)
+		// Try to restart projects even if update failed
+		restartAffectedProjectsSafely(affectedProjects, pluginID)
+		return nil, fmt.Errorf("failed to update plugin safely: %w", err)
 	}
 
 	// Clear from legacy storage
@@ -852,15 +866,18 @@ func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
 	delete(plugin.PluginsNew, change.ID)
 	common.GlobalMu.Unlock()
 
-	// Get affected projects
-	affectedProjects := project.GetAffectedProjects("plugin", change.ID)
-
-	// Sync to followers
+	// Phase 3: Sync to followers (they will also do stop-update-start)
 	syncComponentToFollowers("plugin", change.ID)
 
-	logger.Info("Plugin change applied successfully", "id", change.ID, "affected_projects", len(affectedProjects))
+	// Phase 4: Restart projects with new plugin
+	logger.Info("Restarting affected projects with new plugin", "plugin", pluginID, "projects", affectedProjects)
+	if err := restartAffectedProjectsSafely(affectedProjects, pluginID); err != nil {
+		logger.Error("Failed to restart some projects after plugin update", "plugin", pluginID, "error", err)
+	}
 
-	// 新增：记录操作历史
+	logger.Info("Safe plugin update completed successfully", "plugin", pluginID, "affected_projects", len(affectedProjects))
+
+	// Record operation history
 	RecordChangePush("plugin", change.ID, change.OldContent, change.NewContent, "", "success", "")
 
 	return affectedProjects, nil
@@ -1976,33 +1993,69 @@ func syncComponentToFollowers(componentType string, id string) {
 	}
 
 	configRoot := common.Config.ConfigRoot
-	filePath := path.Join(configRoot, dir, id+suffix)
+	filePath := filepath.Join(configRoot, dir, id+suffix)
 
-	// Read the file content
-	data, err := os.ReadFile(filePath)
+	// Read the updated content
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		logger.Error("Failed to read component file for sync", "path", filePath, "error", err)
 		return
 	}
 
-	// Prepare sync data
-	syncData := ComponentSyncRequest{
-		Type:    componentType,
-		ID:      id,
-		Content: string(data),
+	// Update global component config maps for follower access
+	updateGlobalComponentConfigMap(componentType, id, string(content))
+
+	// Publish component sync event to followers
+	cluster.PublishComponentSync(&cluster.CompSyncEvt{
+		Op:   "update",
+		Type: componentType,
+		ID:   id,
+		Raw:  string(content),
+	})
+
+	// Update config timestamp since this is called after actual config changes
+	cluster.UpdateConfigTimestamp()
+
+	logger.Info("Synced component to followers", "type", componentType, "id", id)
+}
+
+// updateGlobalComponentConfigMap updates the global component config map with the latest content
+func updateGlobalComponentConfigMap(componentType, id, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Initialize maps if they are nil
+	if common.AllInputsRawConfig == nil {
+		common.AllInputsRawConfig = make(map[string]string)
+	}
+	if common.AllOutputsRawConfig == nil {
+		common.AllOutputsRawConfig = make(map[string]string)
+	}
+	if common.AllRulesetsRawConfig == nil {
+		common.AllRulesetsRawConfig = make(map[string]string)
+	}
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	if common.AllPluginsRawConfig == nil {
+		common.AllPluginsRawConfig = make(map[string]string)
 	}
 
-	// For projects, also check and sync running status
-	if componentType == "project" {
-		common.GlobalMu.RLock()
-		if proj, exists := project.GlobalProject.Projects[id]; exists {
-			syncData.IsRunning = (proj.Status == project.ProjectStatusRunning)
-		}
-		common.GlobalMu.RUnlock()
+	// Update the appropriate global config map
+	switch componentType {
+	case "input":
+		common.AllInputsRawConfig[id] = content
+	case "output":
+		common.AllOutputsRawConfig[id] = content
+	case "ruleset":
+		common.AllRulesetsRawConfig[id] = content
+	case "project":
+		common.AllProjectRawConfig[id] = content
+	case "plugin":
+		common.AllPluginsRawConfig[id] = content
 	}
 
-	// Sync to followers
-	syncComponentToFollowersWithData(syncData)
+	logger.Debug("Updated global component config map", "type", componentType, "id", id)
 }
 
 // syncComponentToFollowersWithData syncs a component to follower nodes
@@ -2016,6 +2069,7 @@ func syncComponentToFollowersWithData(syncData ComponentSyncRequest) {
 		IsRunning: syncData.IsRunning,
 	}
 
+	// Note: UpdateConfigTimestamp is now handled automatically in PublishComponentSync
 	cluster.PublishComponentSync(evt)
 
 	logger.Info("Published component sync event via Redis",
@@ -2256,4 +2310,120 @@ func DeleteTempFile(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "Temp file deleted successfully",
 	})
+}
+
+// waitForProjectsToStop waits for projects to completely stop with timeout
+func waitForProjectsToStop(projectIDs []string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		allStopped := true
+
+		common.GlobalMu.RLock()
+		for _, projectID := range projectIDs {
+			if proj, exists := project.GlobalProject.Projects[projectID]; exists {
+				if proj.Status != project.ProjectStatusStopped {
+					allStopped = false
+					break
+				}
+			}
+		}
+		common.GlobalMu.RUnlock()
+
+		if allStopped {
+			return nil
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for projects to stop")
+}
+
+// stopProjectSafelyForPluginUpdate stops a project safely for plugin update
+func stopProjectSafelyForPluginUpdate(projectID string) error {
+	common.GlobalMu.RLock()
+	proj, exists := project.GlobalProject.Projects[projectID]
+	common.GlobalMu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("project not found: %s", projectID)
+	}
+
+	if proj.Status == project.ProjectStatusStopped {
+		return nil // Already stopped
+	}
+
+	logger.Info("Stopping project for plugin update", "project", projectID)
+	return proj.Stop()
+}
+
+// updatePluginInstanceSafely safely updates a plugin instance with proper cleanup
+func updatePluginInstanceSafely(pluginID, newContent string) error {
+	// Phase 1: Clean up old plugin instance
+	common.GlobalMu.Lock()
+	oldPlugin, exists := plugin.Plugins[pluginID]
+	if exists {
+		// Clear Yaegi interpreter instance to prevent memory leaks
+		if oldPlugin.Type == plugin.YAEGI_PLUGIN && oldPlugin != nil {
+			// The yaegi interpreter will be garbage collected
+			oldPlugin = nil
+		}
+		// Remove from global mapping
+		delete(plugin.Plugins, pluginID)
+	}
+	common.GlobalMu.Unlock()
+
+	// Phase 2: Force garbage collection to clean up old interpreter state
+	runtime.GC()
+	time.Sleep(100 * time.Millisecond) // Give GC some time
+
+	// Phase 3: Write new plugin file
+	configRoot := common.Config.ConfigRoot
+	pluginPath := filepath.Join(configRoot, "plugin", pluginID+".go")
+	if err := os.WriteFile(pluginPath, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write plugin file: %w", err)
+	}
+
+	// Phase 4: Create new plugin instance
+	if err := plugin.NewPlugin(pluginPath, "", pluginID, plugin.YAEGI_PLUGIN); err != nil {
+		return fmt.Errorf("failed to create new plugin: %w", err)
+	}
+
+	logger.Info("Plugin instance updated safely", "plugin", pluginID)
+	return nil
+}
+
+// restartAffectedProjectsSafely restarts affected projects after plugin update
+func restartAffectedProjectsSafely(affectedProjects []string, pluginID string) error {
+	if len(affectedProjects) == 0 {
+		return nil
+	}
+
+	logger.Info("Restarting affected projects after plugin update", "plugin", pluginID, "projects", affectedProjects)
+
+	successCount := 0
+	for _, projectID := range affectedProjects {
+		common.GlobalMu.RLock()
+		proj, exists := project.GlobalProject.Projects[projectID]
+		common.GlobalMu.RUnlock()
+
+		if !exists {
+			logger.Error("Project not found for restart", "project", projectID)
+			continue
+		}
+
+		if err := proj.Start(); err != nil {
+			logger.Error("Failed to restart project after plugin update", "project", projectID, "error", err)
+			continue
+		}
+
+		successCount++
+		logger.Info("Successfully restarted project after plugin update", "project", projectID)
+	}
+
+	logger.Info("Completed restarting projects after plugin update",
+		"plugin", pluginID, "total", len(affectedProjects), "success", successCount)
+
+	return nil
 }

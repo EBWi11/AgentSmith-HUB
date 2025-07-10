@@ -1326,6 +1326,17 @@ export const hubApi = {
     }
   },
 
+  // Get plugin usage information
+  async getPluginUsage(pluginId) {
+    try {
+      const response = await api.get(`/plugins/${pluginId}/usage`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching plugin usage for ${pluginId}:`, error);
+      throw error;
+    }
+  },
+
   async getAggregatedDailyMessages() {
     try {
       const response = await publicApi.get('/daily-messages', { 

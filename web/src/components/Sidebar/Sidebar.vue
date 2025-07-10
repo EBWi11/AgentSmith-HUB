@@ -338,6 +338,14 @@
                           Copy Name
                         </a>
                         
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openPluginUsageModal(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          View Usage
+                        </a>
+                        
                         <!-- Delete action -->
                         <div class="border-t border-gray-100 my-1"></div>
                         <a href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
@@ -1332,6 +1340,141 @@
         </div>
       </div>
     </div>
+
+    <!-- Plugin Usage Modal -->
+    <div v-if="showPluginUsageModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl">
+        <div class="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 class="text-lg font-medium">Plugin Usage - {{ selectedPluginForUsage?.id || selectedPluginForUsage?.name }}</h3>
+          <button @click="closePluginUsageModal" class="text-gray-400 hover:text-gray-500">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="p-6 max-h-[70vh] overflow-auto">
+          <div v-if="pluginUsageLoading" class="flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+          <div v-else-if="pluginUsageError" class="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-red-700">{{ pluginUsageError }}</p>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="pluginUsageData">
+            <!-- Plugin Usage Content -->
+            <div class="space-y-4">
+              <!-- Summary -->
+              <div class="bg-gray-50 rounded-lg p-4">
+                <h4 class="font-medium text-gray-900 mb-2">Usage Summary</h4>
+                <div class="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span class="text-gray-500">Total Usage:</span>
+                    <span class="ml-2 font-semibold">{{ pluginUsageData.total_usage || 0 }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500">Used in Rulesets:</span>
+                    <span class="ml-2 font-semibold">{{ pluginUsageData.used_by_rulesets ? pluginUsageData.used_by_rulesets.length : 0 }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500">Used in Projects:</span>
+                    <span class="ml-2 font-semibold">{{ pluginUsageData.used_by_projects ? pluginUsageData.used_by_projects.length : 0 }}</span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Rulesets using this plugin -->
+              <div v-if="pluginUsageData.used_by_rulesets && pluginUsageData.used_by_rulesets.length > 0">
+                <h4 class="font-medium text-gray-900 mb-2">Rulesets Using This Plugin</h4>
+                <div class="space-y-2">
+                  <div v-for="ruleset in pluginUsageData.used_by_rulesets" :key="ruleset.ruleset_id" 
+                       class="bg-white border border-gray-200 rounded-lg p-3">
+                    <div class="flex justify-between items-start">
+                      <div class="flex-1">
+                        <div class="flex items-center mb-1">
+                          <span class="font-medium text-gray-900">{{ ruleset.ruleset_id }}</span>
+                          <span class="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                            {{ ruleset.usage_count }} uses
+                          </span>
+                        </div>
+                        <div class="text-sm text-gray-600 mb-1">
+                          <span class="font-medium">Usage Types:</span>
+                          <span v-for="(type, index) in ruleset.usage_types" :key="type" class="ml-1">
+                            <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">{{ type }}</span>
+                            <span v-if="index < ruleset.usage_types.length - 1">, </span>
+                          </span>
+                        </div>
+                        <div v-if="ruleset.rule_ids && ruleset.rule_ids.length > 0" class="text-sm text-gray-600">
+                          <span class="font-medium">Rules:</span>
+                          <span class="ml-1">{{ ruleset.rule_ids.join(', ') }}</span>
+                        </div>
+                      </div>
+                      <button @click="navigateToRuleset(ruleset.ruleset_id)" 
+                              class="ml-2 text-blue-600 hover:text-blue-800 text-sm">
+                        View →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Projects using this plugin -->
+              <div v-if="pluginUsageData.used_by_projects && pluginUsageData.used_by_projects.length > 0">
+                <h4 class="font-medium text-gray-900 mb-2">Projects Using This Plugin</h4>
+                <div class="space-y-2">
+                  <div v-for="project in pluginUsageData.used_by_projects" :key="project.project_id" 
+                       class="bg-white border border-gray-200 rounded-lg p-3">
+                    <div class="flex justify-between items-start">
+                      <div class="flex-1">
+                        <div class="flex items-center mb-1">
+                          <span class="font-medium text-gray-900">{{ project.project_id }}</span>
+                          <span class="ml-2 w-2 h-2 rounded-full" 
+                                :class="{
+                                  'bg-green-500': project.project_status === 'running',
+                                  'bg-gray-500': project.project_status === 'stopped',
+                                  'bg-red-500': project.project_status === 'error'
+                                }"></span>
+                          <span class="ml-1 text-xs text-gray-600">{{ project.project_status }}</span>
+                        </div>
+                        <div class="text-sm text-gray-600">
+                          <span class="font-medium">Through Rulesets:</span>
+                          <span class="ml-1">{{ project.ruleset_ids.join(', ') }}</span>
+                        </div>
+                      </div>
+                      <button @click="navigateToProject(project.project_id)" 
+                              class="ml-2 text-blue-600 hover:text-blue-800 text-sm">
+                        View →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- No usage message -->
+              <div v-if="(!pluginUsageData.used_by_rulesets || pluginUsageData.used_by_rulesets.length === 0) && 
+                         (!pluginUsageData.used_by_projects || pluginUsageData.used_by_projects.length === 0)" 
+                   class="text-center py-8 text-gray-500">
+                <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="text-lg font-medium text-gray-900 mb-2">No Usage Found</p>
+                <p class="text-gray-500">This plugin is not currently being used by any rulesets or projects.</p>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-center py-8 text-gray-500">
+            No usage data available for this plugin
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -1649,6 +1792,9 @@ function closeActiveModal() {
       break
     case 'pluginStats':
       closePluginStatsModal()
+      break
+    case 'pluginUsage':
+      closePluginUsageModal()
       break
   }
   
@@ -2991,6 +3137,13 @@ const usageComponentType = ref('')
 const usageComponentId = ref('')
 const usageProjects = ref([])
 
+// Variables related to plugin usage
+const showPluginUsageModal = ref(false)
+const pluginUsageLoading = ref(false)
+const pluginUsageError = ref(null)
+const pluginUsageData = ref(null)
+const selectedPluginForUsage = ref(null)
+
 // Add the "View Usage" option to the three-point menu
 function openUsageModal(type, item) {
   closeAllMenus()
@@ -3006,6 +3159,22 @@ function openUsageModal(type, item) {
   
   // Obtain component usage status
   fetchComponentUsage(type, item.id || item.name)
+}
+
+// Open plugin usage modal
+function openPluginUsageModal(item) {
+  closeAllMenus()
+  pluginUsageLoading.value = true
+  pluginUsageError.value = null
+  pluginUsageData.value = null
+  selectedPluginForUsage.value = item
+  showPluginUsageModal.value = true
+  activeModal.value = 'pluginUsage'
+  
+  addEscKeyListener()
+  
+  // Fetch plugin usage data
+  fetchPluginUsage(item.id || item.name)
 }
 
 // Close the usage mode box
@@ -3030,9 +3199,32 @@ async function fetchComponentUsage(type, id) {
   }
 }
 
+// Fetch plugin usage data
+async function fetchPluginUsage(pluginId) {
+  try {
+    const result = await hubApi.getPluginUsage(pluginId)
+    pluginUsageData.value = result.usage || {}
+  } catch (error) {
+    pluginUsageError.value = error.message || 'Failed to fetch plugin usage'
+  } finally {
+    pluginUsageLoading.value = false
+  }
+}
+
+// Close plugin usage modal
+function closePluginUsageModal() {
+  showPluginUsageModal.value = false
+  activeModal.value = null
+  
+  if (!isAnyModalOpen()) {
+    removeEscKeyListener()
+  }
+}
+
 // Jump to the project details page
 function navigateToProject(projectId) {
   closeUsageModal()
+  closePluginUsageModal()
   
   router.push(`/app/projects/${projectId}`)
   
@@ -3040,6 +3232,21 @@ function navigateToProject(projectId) {
   emit('select-item', {
     type: 'projects',
     id: projectId,
+    isEdit: false,
+    _timestamp: Date.now()
+  })
+}
+
+// Navigate to ruleset details page
+function navigateToRuleset(rulesetId) {
+  closePluginUsageModal()
+  
+  router.push(`/app/rulesets/${rulesetId}`)
+  
+  // Notify the parent component that a ruleset has been selected
+  emit('select-item', {
+    type: 'rulesets',
+    id: rulesetId,
     isEdit: false,
     _timestamp: Date.now()
   })

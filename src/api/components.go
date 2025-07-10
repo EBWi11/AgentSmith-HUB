@@ -1204,12 +1204,27 @@ func deleteComponent(componentType string, c echo.Context) error {
 			if err := os.Remove(componentPath); err != nil {
 				logger.Error("failed to delete component file", "path", componentPath, "error", err)
 			}
-			// Notify followers via Redis
-			cluster.PublishComponentSync(&cluster.CompSyncEvt{
-				Op:   "delete",
-				Type: componentType,
-				ID:   id,
-			})
+
+			// Update global config maps for leader as well
+			common.GlobalMu.Lock()
+			delete(globalMapToUpdate, id)
+			common.GlobalMu.Unlock()
+
+			// Special handling for project deletion
+			if componentType == "project" {
+				// Sync project deletion to all followers
+				cluster.SyncProjectStateChange(id, "delete")
+			} else {
+				// Notify followers via Redis for other components
+				cluster.PublishComponentSync(&cluster.CompSyncEvt{
+					Op:   "delete",
+					Type: componentType,
+					ID:   id,
+				})
+
+				// Update config timestamp since this is an actual config change
+				cluster.UpdateConfigTimestamp()
+			}
 		}
 	}
 
@@ -2818,4 +2833,178 @@ func GetRulesetFieldsForID(id string) map[string]interface{} {
 		"fieldKeys":   fieldKeys,
 		"sampleCount": len(fieldKeys),
 	}
+}
+
+// getPluginUsage returns which rulesets are using a specific plugin
+func getPluginUsage(c echo.Context) error {
+	pluginID := c.Param("id")
+	if pluginID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "plugin ID is required"})
+	}
+
+	// Check if plugin exists
+	common.GlobalMu.RLock()
+	_, exists := plugin.Plugins[pluginID]
+	common.GlobalMu.RUnlock()
+
+	if !exists {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
+	}
+
+	usage := analyzePluginUsage(pluginID)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"plugin_id": pluginID,
+		"usage":     usage,
+	})
+}
+
+// PluginUsageInfo represents plugin usage information
+type PluginUsageInfo struct {
+	UsedByRulesets []RulesetUsageInfo `json:"used_by_rulesets"`
+	UsedByProjects []ProjectUsageInfo `json:"used_by_projects"`
+	TotalUsage     int                `json:"total_usage"`
+}
+
+// RulesetUsageInfo represents how a ruleset uses a plugin
+type RulesetUsageInfo struct {
+	RulesetID  string   `json:"ruleset_id"`
+	UsageCount int      `json:"usage_count"`
+	UsageTypes []string `json:"usage_types"` // "checknode", "append"
+	RuleIDs    []string `json:"rule_ids"`    // which rules use this plugin
+}
+
+// ProjectUsageInfo represents how a project uses a plugin (through rulesets)
+type ProjectUsageInfo struct {
+	ProjectID     string   `json:"project_id"`
+	ProjectStatus string   `json:"project_status"`
+	RulesetIDs    []string `json:"ruleset_ids"` // which rulesets in this project use the plugin
+}
+
+// analyzePluginUsage analyzes how a plugin is used across rulesets and projects
+func analyzePluginUsage(pluginID string) PluginUsageInfo {
+	usage := PluginUsageInfo{
+		UsedByRulesets: []RulesetUsageInfo{},
+		UsedByProjects: []ProjectUsageInfo{},
+		TotalUsage:     0,
+	}
+
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	// Analyze ruleset usage
+	rulesetUsageMap := make(map[string]*RulesetUsageInfo)
+
+	for rulesetID, ruleset := range project.GlobalProject.Rulesets {
+		if ruleset == nil || ruleset.RawConfig == "" {
+			continue
+		}
+
+		rulesetUsage := analyzePluginUsageInRuleset(pluginID, rulesetID, ruleset.RawConfig)
+		if rulesetUsage.UsageCount > 0 {
+			rulesetUsageMap[rulesetID] = &rulesetUsage
+			usage.UsedByRulesets = append(usage.UsedByRulesets, rulesetUsage)
+			usage.TotalUsage += rulesetUsage.UsageCount
+		}
+	}
+
+	// Analyze project usage (which projects use rulesets that use this plugin)
+	projectUsageMap := make(map[string]*ProjectUsageInfo)
+
+	for projectID, proj := range project.GlobalProject.Projects {
+		if proj == nil {
+			continue
+		}
+
+		projectUsage := ProjectUsageInfo{
+			ProjectID:     projectID,
+			ProjectStatus: string(proj.Status),
+			RulesetIDs:    []string{},
+		}
+
+		// Check which rulesets in this project use the plugin
+		for rulesetID := range proj.Rulesets {
+			if _, usesPlugin := rulesetUsageMap[rulesetID]; usesPlugin {
+				projectUsage.RulesetIDs = append(projectUsage.RulesetIDs, rulesetID)
+			}
+		}
+
+		if len(projectUsage.RulesetIDs) > 0 {
+			projectUsageMap[projectID] = &projectUsage
+			usage.UsedByProjects = append(usage.UsedByProjects, projectUsage)
+		}
+	}
+
+	return usage
+}
+
+// analyzePluginUsageInRuleset analyzes how a plugin is used in a specific ruleset
+func analyzePluginUsageInRuleset(pluginID, rulesetID, rulesetContent string) RulesetUsageInfo {
+	usage := RulesetUsageInfo{
+		RulesetID:  rulesetID,
+		UsageCount: 0,
+		UsageTypes: []string{},
+		RuleIDs:    []string{},
+	}
+
+	// Parse the ruleset XML to find plugin usage
+	// Look for plugin usage patterns in the content
+
+	// Pattern 1: Plugin used in checknode - <node type="PLUGIN" field="...">pluginName(...)</node>
+	checknodePattern := `<node[^>]*type="PLUGIN"[^>]*>([^<]*` + pluginID + `[^<]*)</node>`
+	if matches := regexp.MustCompile(checknodePattern).FindAllString(rulesetContent, -1); len(matches) > 0 {
+		usage.UsageCount += len(matches)
+		usage.UsageTypes = append(usage.UsageTypes, "checknode")
+	}
+
+	// Pattern 2: Plugin used in append - <append ... type="PLUGIN">pluginName(...)</append>
+	appendPattern := `<append[^>]*type="PLUGIN"[^>]*>([^<]*` + pluginID + `[^<]*)</append>`
+	if matches := regexp.MustCompile(appendPattern).FindAllString(rulesetContent, -1); len(matches) > 0 {
+		usage.UsageCount += len(matches)
+		if !containsString(usage.UsageTypes, "append") {
+			usage.UsageTypes = append(usage.UsageTypes, "append")
+		}
+	}
+
+	// Pattern 3: Plugin used in condition - <plugin>pluginName(...)</plugin>
+	conditionPattern := `<plugin[^>]*>([^<]*` + pluginID + `[^<]*)</plugin>`
+	if matches := regexp.MustCompile(conditionPattern).FindAllString(rulesetContent, -1); len(matches) > 0 {
+		usage.UsageCount += len(matches)
+		if !containsString(usage.UsageTypes, "condition") {
+			usage.UsageTypes = append(usage.UsageTypes, "condition")
+		}
+	}
+
+	// Extract rule IDs that use this plugin (simplified approach)
+	if usage.UsageCount > 0 {
+		// Look for rule IDs in the vicinity of plugin usage
+		ruleIDPattern := `<rule[^>]*id="([^"]+)"[^>]*>`
+		ruleMatches := regexp.MustCompile(ruleIDPattern).FindAllStringSubmatch(rulesetContent, -1)
+		for _, match := range ruleMatches {
+			if len(match) > 1 {
+				ruleID := match[1]
+				// Check if this rule contains the plugin (simplified check)
+				ruleStart := strings.Index(rulesetContent, match[0])
+				ruleEnd := strings.Index(rulesetContent[ruleStart:], "</rule>")
+				if ruleEnd > 0 {
+					ruleContent := rulesetContent[ruleStart : ruleStart+ruleEnd]
+					if strings.Contains(ruleContent, pluginID) {
+						usage.RuleIDs = append(usage.RuleIDs, ruleID)
+					}
+				}
+			}
+		}
+	}
+
+	return usage
+}
+
+// containsString checks if a string slice contains a specific string
+func containsString(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

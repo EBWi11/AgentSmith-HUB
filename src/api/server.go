@@ -79,6 +79,7 @@ func ServerStart(listener string) error {
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
 	e.GET("/cluster-system-stats", getClusterSystemStats)
 	e.GET("/cluster-status", getClusterStatus)
+	e.GET("/cluster-health", getClusterHealth)
 	e.GET("/cluster", getCluster)
 
 	// Create authenticated group for management endpoints
@@ -139,6 +140,7 @@ func ServerStart(listener string) error {
 	auth.GET("/available-plugins", getAvailablePlugins)
 	auth.GET("/plugin-parameters/:id", GetPluginParameters)
 	auth.GET("/plugin-parameters", GetBatchPluginParameters)
+	auth.GET("/plugins/:id/usage", getPluginUsage)
 
 	// Component verification and testing - REQUIRE AUTH
 	auth.POST("/verify/:type/:id", verifyComponent)
