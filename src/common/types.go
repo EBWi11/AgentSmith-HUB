@@ -40,6 +40,5 @@ type OperationRecord struct {
 	NewContent    string                 `json:"new_content,omitempty"`
 	Status        string                 `json:"status"`
 	Error         string                 `json:"error,omitempty"`
-	UserIP        string                 `json:"user_ip,omitempty"`
 	Details       map[string]interface{} `json:"details,omitempty"`
 }

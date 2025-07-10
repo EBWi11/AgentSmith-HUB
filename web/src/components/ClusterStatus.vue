@@ -356,12 +356,16 @@ async function fetchAllData() {
     const cluster = await dataCache.fetchClusterInfo(true) // Force refresh for real-time updates
     clusterInfo.value = cluster
     
-    // Fetch node-level message data from any node (no longer leader-only)
+    // Fetch node-level message data (only available from leader)
     try {
       const nodeMessagesResponse = await hubApi.getAllNodeDailyMessages()
       nodeMessageData.value = nodeMessagesResponse.data || {}
     } catch (messageError) {
       console.warn('Failed to fetch node message data:', messageError)
+      // If we get 403 (forbidden), it means this node is not leader
+      if (messageError.response?.status === 403) {
+        console.info('Node message data is only available from leader node')
+      }
       nodeMessageData.value = {}
     }
     

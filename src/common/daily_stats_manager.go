@@ -116,7 +116,89 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 }
 
 // GetDailyStats returns daily statistics for a specific date and optional filters
+// This method now reads directly from Redis to get real-time cluster data
 func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[string]*DailyStatsData {
+	if !dsm.redisEnabled {
+		// Fallback to memory data if Redis is disabled
+		return dsm.getMemoryStats(date, projectID, nodeID)
+	}
+
+	// Read directly from Redis to get real-time cluster data
+	result := make(map[string]*DailyStatsData)
+
+	// Use default date if not specified
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	// Build Redis key pattern based on filters
+	var pattern string
+	if nodeID != "" && projectID != "" {
+		// Most specific: date_nodeID_projectID_*
+		pattern = fmt.Sprintf("%s%s_%s_%s_*", dsm.redisKeyPrefix, date, nodeID, projectID)
+	} else if nodeID != "" {
+		// Node specific: date_nodeID_*
+		pattern = fmt.Sprintf("%s%s_%s_*", dsm.redisKeyPrefix, date, nodeID)
+	} else if projectID != "" {
+		// Project specific: date_*_projectID_*
+		pattern = fmt.Sprintf("%s%s_*_%s_*", dsm.redisKeyPrefix, date, projectID)
+	} else {
+		// All data for the date: date_*
+		pattern = fmt.Sprintf("%s%s_*", dsm.redisKeyPrefix, date)
+	}
+
+	keys, err := RedisKeys(pattern)
+	if err != nil {
+		logger.Error("Failed to get daily stats keys from Redis", "pattern", pattern, "error", err)
+		// Fallback to memory data
+		return dsm.getMemoryStats(date, projectID, nodeID)
+	}
+
+	for _, key := range keys {
+		jsonData, err := RedisGet(key)
+		if err != nil {
+			logger.Error("Failed to get daily stats from Redis", "key", key, "error", err)
+			continue
+		}
+
+		var statsData DailyStatsData
+		if err := json.Unmarshal([]byte(jsonData), &statsData); err != nil {
+			logger.Error("Failed to unmarshal daily stats from Redis", "key", key, "error", err)
+			continue
+		}
+
+		// Apply additional filters
+		if date != "" && statsData.Date != date {
+			continue
+		}
+		if projectID != "" && statsData.ProjectID != projectID {
+			continue
+		}
+		if nodeID != "" && statsData.NodeID != nodeID {
+			continue
+		}
+
+		// Generate internal key for result map
+		internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+
+		// Create a copy to prevent external modification
+		result[internalKey] = &DailyStatsData{
+			NodeID:              statsData.NodeID,
+			ProjectID:           statsData.ProjectID,
+			ComponentID:         statsData.ComponentID,
+			ComponentType:       statsData.ComponentType,
+			ProjectNodeSequence: statsData.ProjectNodeSequence,
+			Date:                statsData.Date,
+			TotalMessages:       statsData.TotalMessages,
+			LastUpdate:          statsData.LastUpdate,
+		}
+	}
+
+	return result
+}
+
+// getMemoryStats returns daily statistics from memory (fallback method)
+func (dsm *DailyStatsManager) getMemoryStats(date, projectID, nodeID string) map[string]*DailyStatsData {
 	dsm.mutex.RLock()
 	defer dsm.mutex.RUnlock()
 
@@ -298,24 +380,21 @@ func StopDailyStatsManager() {
 }
 
 // GetAggregatedDailyStats returns aggregated statistics for a date
+// This method now reads directly from Redis to get real-time cluster data
 func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]interface{} {
-	dsm.mutex.RLock()
-	defer dsm.mutex.RUnlock()
-
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
+
+	// Get all data for the date from Redis (real-time cluster data)
+	allData := dsm.GetDailyStats(date, "", "")
 
 	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> totalMessages
 	totalInputMessages := uint64(0)
 	totalOutputMessages := uint64(0)
 	totalRulesetMessages := uint64(0)
 
-	for _, data := range dsm.data {
-		if data.Date != date {
-			continue
-		}
-
+	for _, data := range allData {
 		if _, exists := projectStats[data.ProjectID]; !exists {
 			projectStats[data.ProjectID] = make(map[string]uint64)
 		}
