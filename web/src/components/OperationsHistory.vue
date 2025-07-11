@@ -131,20 +131,7 @@
         </div>
       </div>
       
-      <!-- Node Statistics -->
-      <div v-if="isClusterMode && Object.keys(nodeStats).length > 0" class="mt-4 p-3 bg-blue-50 rounded-lg">
-        <h4 class="text-sm font-medium text-gray-900 mb-2">Node Statistics</h4>
-        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-2 text-xs">
-          <div v-for="(stats, nodeId) in nodeStats" :key="nodeId" class="bg-white p-2 rounded border">
-            <div class="font-medium text-gray-900">{{ nodeId }}</div>
-            <div class="text-gray-600">
-              <span class="text-green-600">{{ stats.success_ops }}</span> success, 
-              <span class="text-red-600">{{ stats.failed_ops }}</span> failed
-            </div>
-            <div class="text-gray-500">Total: {{ stats.total_ops }}</div>
-          </div>
-        </div>
-      </div>
+      <!-- Node Statistics section removed per requirement -->
     </div>
 
     <!-- Content -->
@@ -348,7 +335,8 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const expandedOperations = ref(new Set())
-const nodeStats = ref({})
+// Node statistics no longer used (feature removed)
+const nodeStats = ref({}) // kept empty for backward compatibility
 const availableNodes = ref([])
 const isClusterMode = computed(() => availableNodes.value.length > 1)
 
@@ -483,7 +471,7 @@ async function fetchOperationsHistory() {
       if (isLeaderNode) {
         // call local leader endpoint
         response = await hubApi.getClusterOperationsHistory(params.toString())
-        if (response.node_stats) nodeStats.value = response.node_stats
+        // Node statistics feature removed – ignore response.node_stats
       } else if (clusterInfo.value.leader_address) {
         // call remote leader address directly
         const leaderBase = `http://${clusterInfo.value.leader_address}`
@@ -492,7 +480,7 @@ async function fetchOperationsHistory() {
         const url = '/cluster-operations-history' + (params ? '?' + params.toString() : '')
         const res = await instance.get(url)
         response = res.data
-        if (response.node_stats) nodeStats.value = response.node_stats
+        // ignore node stats
       }
     }
 

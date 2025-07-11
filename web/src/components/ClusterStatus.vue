@@ -359,8 +359,8 @@ async function fetchAllData() {
     // Fetch node-level message data (only available from leader)
     try {
       const nodeMessagesResponse = await hubApi.getAllNodeDailyMessages()
-      // 后端格式为 { data: { nodeId: { input_messages, ... }, ... }, timestamp: ... }
-      nodeMessageData.value = (nodeMessagesResponse?.data?.data) || {}
+      // Response shape: { data: { nodeId: {...} }, ... }
+      nodeMessageData.value = (nodeMessagesResponse?.data) || {}
     } catch (messageError) {
       console.warn('Failed to fetch node message data:', messageError)
       // If we get 403 (forbidden), it means this node is not leader

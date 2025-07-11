@@ -113,23 +113,7 @@
         </div>
       </div>
 
-      <!-- Statistics -->
-      <div v-if="nodeStats && Object.keys(nodeStats).length > 0" class="mt-4">
-        <div class="text-sm font-medium text-gray-700 mb-2">Error Statistics</div>
-        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div v-for="(stat, nodeId) in nodeStats" :key="nodeId" class="bg-white px-3 py-2 rounded-md border border-gray-200">
-            <div class="text-xs font-medium text-gray-500 truncate">{{ stat.node_id }}</div>
-            <div class="flex items-center space-x-2 mt-1">
-              <span class="text-sm font-semibold text-red-600">{{ stat.total_errors }}</span>
-              <span class="text-xs text-gray-500">errors</span>
-            </div>
-            <div class="flex space-x-2 text-xs text-gray-400 mt-1">
-              <span>H: {{ stat.hub_errors }}</span>
-              <span>P: {{ stat.plugin_errors }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Node statistics section removed per requirement -->
     </div>
 
     <!-- Content -->
@@ -275,6 +259,7 @@ const $message = inject('$message')
 const loading = ref(false)
 const error = ref(null)
 const logs = ref([])
+// Node statistics feature removed; keep placeholder for compatibility
 const nodeStats = ref({})
 const totalCount = ref(0)
 const currentPage = ref(1)
@@ -419,9 +404,8 @@ const fetchErrorLogs = async () => {
     let response
     if (isClusterMode.value && filters.nodeId === 'all') {
       response = await hubApi.getClusterErrorLogs(params)
-      if (response.node_stats) {
-        nodeStats.value = response.node_stats
-      }
+      // ignore node_stats in response
+      nodeStats.value = {}
     } else {
       response = await hubApi.getErrorLogs(params)
       nodeStats.value = {}

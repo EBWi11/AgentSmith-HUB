@@ -1189,23 +1189,21 @@ func (cm *ClusterManager) startProjectStatusSubscriber() {
 					list := cm.NodeProjectStates[evt.NodeID]
 					updated := false
 
-					// Parse timestamp if provided
+					// Parse timestamp if provided; keep nil on failure so we don't overwrite with inaccurate time
 					var statusChangedAt *time.Time
 					if evt.StatusChangedAt != "" {
 						if parsedTime, err := time.Parse(time.RFC3339, evt.StatusChangedAt); err == nil {
 							statusChangedAt = &parsedTime
 						}
 					}
-					if statusChangedAt == nil {
-						// Fallback to current time if timestamp parsing fails
-						now := time.Now()
-						statusChangedAt = &now
-					}
 
 					for i := range list {
 						if list[i].ID == evt.ProjectID {
 							list[i].Status = evt.Status
-							list[i].StatusChangedAt = statusChangedAt
+							if statusChangedAt != nil {
+								// Only overwrite timestamp when we have a valid parsed value
+								list[i].StatusChangedAt = statusChangedAt
+							}
 							updated = true
 							break
 						}
