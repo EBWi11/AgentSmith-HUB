@@ -351,8 +351,8 @@ func storeLocalLogsToRedis(nodeID string, logs []ErrorLogEntry) {
 	if err != nil {
 		return
 	}
-	// Keep for 120 seconds; refreshed on each query
-	_, _ = common.RedisSet("cluster:error_logs:"+nodeID, string(data), 120)
+	// Keep for 31 days; refreshed on each upload
+	_, _ = common.RedisSet("cluster:error_logs:"+nodeID, string(data), 31*24*60*60)
 }
 
 // StartErrorLogUploader starts periodic error log upload for follower nodes
@@ -380,9 +380,9 @@ func StartErrorLogUploader() {
 func uploadErrorLogsToRedis() {
 	filter := ErrorLogFilter{
 		Source:    "all",
-		StartTime: time.Now().Add(-5 * time.Minute), // Last 5 minutes
+		StartTime: time.Now().Add(-24 * time.Hour), // Last 24 hours
 		EndTime:   time.Now(),
-		Limit:     100,
+		Limit:     1000,
 	}
 
 	logs, err := getLocalErrorLogs(filter)
