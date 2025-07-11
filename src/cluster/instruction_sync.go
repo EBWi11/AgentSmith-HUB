@@ -88,11 +88,13 @@ func (im *InstructionManager) CompactInstructions() error {
 	}
 
 	im.mu.Lock()
-	defer im.mu.Unlock()
+	originalVersion := im.currentVersion
+	im.mu.Unlock()
 
 	// Step 2: Set version to 0 to signal followers to skip
-	originalVersion := im.currentVersion
+	im.mu.Lock()
 	im.currentVersion = 0
+	im.mu.Unlock()
 
 	// Notify followers that compaction is starting
 	compactionSignal := map[string]interface{}{
@@ -120,7 +122,7 @@ func (im *InstructionManager) CompactInstructions() error {
 		logger.Warn("Failed to clear old instructions", "error", err)
 	}
 
-	// Step 5: Store compacted instructions with new version numbers
+	// Step 5: Store compacted instructions with new version numbers (starting from 1)
 	newVersion := int64(1)
 	for _, instruction := range compactedInstructions {
 		instruction.Version = newVersion
@@ -142,7 +144,9 @@ func (im *InstructionManager) CompactInstructions() error {
 	}
 
 	// Step 6: Update current version
+	im.mu.Lock()
 	im.currentVersion = newVersion - 1
+	im.mu.Unlock()
 
 	// Step 7: Notify followers that compaction is complete
 	compactionComplete := map[string]interface{}{
@@ -469,20 +473,19 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 
 	// Keep version at 0 during initialization so followers skip processing
 	im.mu.Lock()
-	originalVersion := im.currentVersion
 	im.currentVersion = 0
 	im.mu.Unlock()
+
+	var instructionCount int64 = 0
 
 	// Defer version restoration
 	defer func() {
 		im.mu.Lock()
 		// Set version to the number of instructions we've created
-		im.currentVersion = originalVersion
+		im.currentVersion = instructionCount
 		im.mu.Unlock()
 		logger.Info("Leader instructions initialized", "version", im.GetCurrentVersion())
 	}()
-
-	var instructionCount int64 = 0
 
 	// Helper function to publish instruction without triggering compaction
 	publishInstructionDirectly := func(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
@@ -492,7 +495,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		requiresRestart := im.operationRequiresRestart(operation, componentType)
 
 		instruction := Instruction{
-			Version:         instructionCount,
+			Version:         instructionCount, // Starts from 1, not 0
 			ComponentName:   componentName,
 			ComponentType:   componentType,
 			Content:         content,
@@ -584,10 +587,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		}
 	}
 
-	// Update the final version count
-	im.mu.Lock()
-	im.currentVersion = instructionCount
-	im.mu.Unlock()
+	// Update the final version count - this will be handled by the defer function
 
 	return nil
 }
@@ -637,7 +637,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 
 	// Sync instructions one by one
 	for version := startVersion + 1; version <= endVersion; version++ {
-		// Skip version 0 (compaction in progress signal)
+		// Skip version 0 (compaction in progress signal - followers should ignore)
 		if version == 0 {
 			logger.Info("Skipping version 0 (compaction in progress)")
 			continue

@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/logger"
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 )
@@ -150,6 +151,12 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 	}
 
 	leaderVersion := GlobalInstructionManager.GetCurrentVersion()
+	// Skip sync if leader is in compaction mode (version 0)
+	if strings.HasSuffix(leaderVersion, ".0") {
+		logger.Debug("Leader in compaction mode, skipping sync", "leader_version", leaderVersion)
+		return
+	}
+
 	if heartbeat.Version != leaderVersion {
 		logger.Debug("Version mismatch detected",
 			"node", heartbeat.NodeID,
