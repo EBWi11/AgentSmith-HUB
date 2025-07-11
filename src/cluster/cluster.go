@@ -289,9 +289,12 @@ func (cm *ClusterManager) cleanupUnhealthyNodes() {
 			if existing, exists := cm.Nodes[nodeID]; exists {
 				var hb HeartbeatMessage
 				if jsonErr := json.Unmarshal([]byte(payload), &hb); jsonErr == nil {
-					existing.LastSeen = hb.Timestamp
-					existing.IsHealthy = true
-					existing.MissCount = 0
+					// Only treat as healthy if the heartbeat timestamp is recent
+					if time.Since(hb.Timestamp) <= cm.HeartbeatTimeout {
+						existing.LastSeen = hb.Timestamp
+						existing.IsHealthy = true
+						existing.MissCount = 0
+					}
 				}
 			}
 		}
