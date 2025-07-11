@@ -289,6 +289,10 @@ func (cm *ClusterManager) cleanupUnhealthyNodes() {
 			if existing, exists := cm.Nodes[nodeID]; exists {
 				var hb HeartbeatMessage
 				if jsonErr := json.Unmarshal([]byte(payload), &hb); jsonErr == nil {
+					// Ignore records with zero timestamp (parse failure)
+					if hb.Timestamp.IsZero() {
+						continue
+					}
 					// Only treat as healthy if the heartbeat timestamp is recent
 					if time.Since(hb.Timestamp) <= cm.HeartbeatTimeout {
 						existing.LastSeen = hb.Timestamp
@@ -563,16 +567,24 @@ func (cm *ClusterManager) getProjectStatesFromRedis(nodeID string) []ProjectStat
 		return []ProjectStatus{}
 	}
 
+	// Load timestamp map (may be empty on old data)
+	tsMap, _ := common.RedisHGetAll("cluster:proj_status_ts:" + nodeID)
+
 	// Convert to ProjectStatus format (only stable states)
 	projectStates := make([]ProjectStatus, 0, len(projectStateMap))
 	for projectID, status := range projectStateMap {
 		// Only include stable states in cluster coordination
 		if status == "running" || status == "stopped" {
-			// Timestamp unknown, leave nil so UI shows "Unknown"
+			var tsPtr *time.Time
+			if tsStr, ok := tsMap[projectID]; ok {
+				if t, err := time.Parse(time.RFC3339, tsStr); err == nil {
+					tsPtr = &t
+				}
+			}
 			projectState := ProjectStatus{
-				ID:     projectID,
-				Status: status,
-				// StatusChangedAt remains nil
+				ID:              projectID,
+				Status:          status,
+				StatusChangedAt: tsPtr,
 			}
 			projectStates = append(projectStates, projectState)
 		}
@@ -710,7 +722,7 @@ func (cm *ClusterManager) SendRedisHeartbeat() error {
 	hb := HeartbeatMessage{
 		NodeID:        cm.SelfID,
 		NodeAddr:      cm.SelfAddress,
-		Timestamp:     time.Now(),
+		Timestamp:     time.Now().UTC(),
 		Status:        "active",
 		ConfigVersion: calculateConfigVersion(), // Add config version for drift detection
 	}
