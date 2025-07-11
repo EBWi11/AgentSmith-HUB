@@ -565,13 +565,11 @@ func (cm *ClusterManager) getProjectStatesFromRedis(nodeID string) []ProjectStat
 	for projectID, status := range projectStateMap {
 		// Only include stable states in cluster coordination
 		if status == "running" || status == "stopped" {
-			// For states loaded from Redis, we don't have exact timestamp info
-			// Use current time as a reasonable fallback
-			now := time.Now()
+			// Timestamp unknown, leave nil so UI shows "Unknown"
 			projectState := ProjectStatus{
-				ID:              projectID,
-				Status:          status,
-				StatusChangedAt: &now,
+				ID:     projectID,
+				Status: status,
+				// StatusChangedAt remains nil
 			}
 			projectStates = append(projectStates, projectState)
 		}
