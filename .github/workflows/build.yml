@@ -77,11 +77,43 @@ jobs:
           export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         fi
         
+        # Debug: Show current directory and file structure
+        echo "Current directory: $(pwd)"
+        echo "Library directory structure:"
+        find ../lib -type f -name "*.so" 2>/dev/null || echo "No .so files found"
+        
         # Verify library exists and show debug info
-        echo "Library path: ${LIB_PATH}"
-        ls -la "${LIB_PATH}/"
-        echo "CGO_LDFLAGS: $CGO_LDFLAGS"
-        echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+        echo "Expected library path: ${LIB_PATH}"
+        if [ -f "${LIB_PATH}/librure.so" ]; then
+          echo "✓ Library file found"
+          ls -la "${LIB_PATH}/"
+        else
+          echo "✗ Library file not found, checking alternative locations..."
+          # Check if library exists in alternative locations
+          if [ -f "../lib/linux/librure.so" ]; then
+            echo "Found library in ../lib/linux/"
+            LIB_PATH="../lib/linux"
+          elif [ -f "../lib/librure.so" ]; then
+            echo "Found library in ../lib/"
+            LIB_PATH="../lib"
+          else
+            echo "ERROR: Cannot find librure.so in any expected location"
+            echo "Directory contents:"
+            ls -la ../lib/ || echo "lib directory not found"
+            exit 1
+          fi
+        fi
+        
+        # Update CGO flags with correct path
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+        else
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+        fi
+        export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
+        
+        echo "Updated CGO_LDFLAGS: $CGO_LDFLAGS"
+        echo "Updated LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
         
         # Build with version information
         VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
@@ -89,41 +121,20 @@ jobs:
         GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
         
-        # Try building with different approaches
-        BUILD_SUCCESS=false
-        
-        # Method 1: Try copying library to system path first
-        echo "Attempting to copy library to system path..."
+        # Copy library to system path for linking
+        echo "Copying library to system path..."
         sudo cp "${LIB_PATH}/librure.so" /usr/lib/
         sudo ldconfig
         
-        echo "Attempting CGO build with system library..."
+        # Build the binary
+        echo "Building binary..."
         if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
-          BUILD_SUCCESS=true
-          echo "CGO build with system library succeeded"
-        else
-          echo "CGO build with system library failed"
-          
-          # Method 2: Try with library path
-          echo "Attempting CGO build with library path..."
-          if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
-            BUILD_SUCCESS=true
-            echo "CGO build with library path succeeded"
-          else
-            echo "CGO build with library path failed"
-            echo "Note: This project requires CGO and librure.so for regex functionality"
-            echo "Static build without CGO is not supported due to rure-go dependency"
-            exit 1
-          fi
-        fi
-        
-        if [ "$BUILD_SUCCESS" = "true" ]; then
-          echo "Build completed successfully"
+          echo "✓ Build completed successfully"
           ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
           echo "Checking binary dependencies:"
-          ldd ../build/${BINARY_NAME}-${{ matrix.arch }} || echo "ldd not available or static binary"
+          ldd ../build/${BINARY_NAME}-${{ matrix.arch }} || echo "ldd not available"
         else
-          echo "Build failed"
+          echo "✗ Build failed"
           exit 1
         fi
     
@@ -172,6 +183,7 @@ jobs:
         cp -r mcp_config "$ARCHIVE_DIR/"
         
         # Generate architecture-aware scripts
+        chmod +x ./script/create_scripts.sh
         ./script/create_scripts.sh "$ARCHIVE_DIR" "${{ matrix.arch }}"
         
         # Copy documentation

@@ -115,8 +115,7 @@ backend-docker:
 			sh -c "apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/arm64/ && \
 				cp /workspace/lib/linux/arm64/librure.so /usr/lib/ && ldconfig && \
-				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 . || \
-				(echo 'CGO build failed, trying static build...' && CGO_ENABLED=0 go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 .)"; \
+				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 ."; \
 	else \
 		echo "Building for AMD64 architecture..."; \
 		docker run --rm -v "$(PWD):/workspace" -w /workspace/$(BACKEND_DIR) \
@@ -129,8 +128,7 @@ backend-docker:
 			sh -c "apt-get update && apt-get install -y build-essential && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/amd64/ && \
 				cp /workspace/lib/linux/amd64/librure.so /usr/lib/ && ldconfig && \
-				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 . || \
-				(echo 'CGO build failed, trying static build...' && CGO_ENABLED=0 go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 .)"; \
+				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 ."; \
 	fi
 
 # Build for specific architectures
