@@ -490,8 +490,18 @@ async function fetchOperationsHistory() {
       nodeStats.value = {}
     }
     
-    operations.value = response.operations || []
-    totalCount.value = response.total_count || 0
+    // Ensure each operation has node_id; default to self if missing
+    const selfId = clusterInfo.value.self_id || 'leader'
+    const ops = (response.operations || []).map(op => {
+      if (!op.node_id && !(op.details && op.details.node_id)) {
+        if (!op.details) op.details = {}
+        op.details.node_id = selfId
+      }
+      return op
+    })
+    operations.value = ops
+
+    totalCount.value = response.total_count || ops.length
     
     // Update available nodes information
     if (response.available_nodes) {
@@ -500,10 +510,20 @@ async function fetchOperationsHistory() {
       availableNodes.value = Object.keys(response.node_stats)
     } else {
       const nodesSet = new Set()
-      operations.value.forEach(op => {
+      ops.forEach(op => {
         if (op.details?.node_id) nodesSet.add(op.details.node_id)
       })
       availableNodes.value = Array.from(nodesSet)
+
+      // Ensure current selected nodeId exists in list (except 'all')
+      if (filters.value.nodeId !== 'all' && !availableNodes.value.includes(filters.value.nodeId)) {
+        availableNodes.value.push(filters.value.nodeId)
+      }
+    }
+
+    // Fallback: ensure self node appears at least once
+    if (availableNodes.value.length === 0 && selfId) {
+      availableNodes.value = [selfId]
     }
     
     // Wait for DOM update then refresh editor layout

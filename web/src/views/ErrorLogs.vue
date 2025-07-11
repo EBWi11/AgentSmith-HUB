@@ -436,6 +436,10 @@ const fetchErrorLogs = async () => {
         id: nodeId,
         name: nodeId
       }))
+
+      if (filters.nodeId !== 'all' && !availableNodes.value.some(n => n.id === filters.nodeId)) {
+        availableNodes.value.push({ id: filters.nodeId, name: filters.nodeId })
+      }
     }
 
     // Ensure self node present
