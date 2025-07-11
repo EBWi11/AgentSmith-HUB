@@ -420,6 +420,13 @@
                         @mouseleave="hideTooltip">
                     T
                   </span>
+                  <!-- Cluster inconsistency warning -->
+                  <span v-if="type === 'projects' && hasClusterInconsistency(item.id)" 
+                        class="ml-2 w-3 h-3 bg-yellow-400 rounded-full cursor-help animate-pulse"
+                        @mouseenter="showTooltip($event, 'Cluster status inconsistency detected')"
+                        @mouseleave="hideTooltip">
+                  </span>
+                  
                   <!-- Project status badge -->
                   <span v-if="type === 'projects' && item.status" 
                         class="ml-2 text-xs w-5 h-5 flex items-center justify-center rounded-full cursor-help"
@@ -1191,7 +1198,7 @@
                       {{ nodeId }}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <span v-if="nodeId === clusterProjectStates.cluster_status?.leader_id" 
+                      <span v-if="nodeId === clusterProjectStates.cluster_status?.node_id" 
                             class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                         Leader
                       </span>
@@ -1200,19 +1207,19 @@
                       </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <template v-if="getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
+                      <template v-if="projects && getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
                         <span :class="'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ' + getStatusColorClass(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status)">
                           {{ getStatusDisplayText(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status) }}
                         </span>
                       </template>
                       <template v-else>
                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
-                          Not Found
+                          {{ projects === null ? 'No Data' : 'Not Found' }}
                         </span>
                       </template>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <template v-if="getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
+                      <template v-if="projects && getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name)">
                         {{ getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at ? 
                             new Date(getProjectStatusForNode(projects, selectedProjectForCluster?.id || selectedProjectForCluster?.name).status_changed_at).toLocaleString('en-US', {
                               year: 'numeric',
@@ -1639,6 +1646,10 @@ const clusterProjectStatesLoading = ref(false)
 const clusterProjectStatesError = ref(null)
 const clusterProjectStates = ref({})
 
+// Cluster consistency checking
+const clusterConsistencyData = ref({})
+const clusterConsistencyLoading = ref(false)
+
 // Plugin Stats Modal states
 const showPluginStatsModal = ref(false)
 const selectedPluginForStats = ref(null)
@@ -1805,6 +1816,9 @@ function closeActiveModal() {
 onMounted(async () => {
   await fetchAllItems()
   startProjectPolling()
+  
+  // Start cluster consistency checking
+  await loadClusterConsistencyData()
   
   // Add click event listener to close menus when clicking outside
   document.addEventListener('click', handleOutsideClick)
@@ -2688,6 +2702,9 @@ function setupProjectStatusRefresh() {
     try {
       await refreshProjectStatus()
       
+      // Also update cluster consistency data
+      await loadClusterConsistencyData()
+      
       // 状态刷新后，检查是否需要调整刷新间隔
       const newInterval = getRefreshInterval()
       
@@ -3412,7 +3429,59 @@ function getStatusColorClass(status) {
 }
 
 function getProjectStatusForNode(projects, projectId) {
+  if (!projects || !Array.isArray(projects)) {
+    return null;
+  }
   return projects.find(project => project.id === projectId);
+}
+
+// Check if project has cluster status inconsistency
+function hasClusterInconsistency(projectId) {
+  if (!clusterConsistencyData.value || !clusterConsistencyData.value.project_states) {
+    return false;
+  }
+
+  const projectStates = clusterConsistencyData.value.project_states;
+  const nodeIds = Object.keys(projectStates);
+  
+  if (nodeIds.length < 2) {
+    return false; // Need at least 2 nodes to have inconsistency
+  }
+
+  // Collect all statuses from all nodes
+  let allStatuses = new Set();
+  
+  for (const nodeId of nodeIds) {
+    const projects = projectStates[nodeId];
+    if (projects && Array.isArray(projects)) {
+      const project = projects.find(p => p.id === projectId);
+      allStatuses.add(project ? project.status : 'missing');
+    } else {
+      // Node has no project data
+      allStatuses.add('no_data');
+    }
+  }
+
+  // If there's more than one unique status, it's inconsistent
+  return allStatuses.size > 1;
+}
+
+// Load cluster consistency data in background
+async function loadClusterConsistencyData() {
+  if (clusterConsistencyLoading.value) {
+    return; // Already loading
+  }
+
+  clusterConsistencyLoading.value = true;
+  try {
+    const response = await hubApi.getClusterProjectStates();
+    clusterConsistencyData.value = response || {};
+  } catch (error) {
+    console.warn('Failed to fetch cluster consistency data:', error);
+    clusterConsistencyData.value = {};
+  } finally {
+    clusterConsistencyLoading.value = false;
+  }
 }
 
 // Handle pending changes applied event

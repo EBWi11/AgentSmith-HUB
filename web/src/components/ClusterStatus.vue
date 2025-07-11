@@ -256,7 +256,7 @@ const processedNodes = computed(() => {
           address: node.address,
           isLeader: node.status === 'leader',
           isHealthy: node.is_healthy,
-          lastSeen: new Date(node.last_seen),
+          lastSeen: new Date(node.last_seen * 1000), // Convert Unix timestamp (seconds) to milliseconds
           metrics: getNodeMetrics(node.id),
           hasStatusIssue: checkStatusConsistency(node),
           hasPerformanceIssue: false

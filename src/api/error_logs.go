@@ -52,8 +52,9 @@ type ErrorLogResponse struct {
 
 // ClusterErrorLogResponse represents aggregated error logs from cluster
 type ClusterErrorLogResponse struct {
-	Logs      []ErrorLogEntry     `json:"logs"`
-	NodeStats map[string]NodeStat `json:"node_stats"`
+	Logs       []ErrorLogEntry     `json:"logs"`
+	NodeStats  map[string]NodeStat `json:"node_stats"`
+	TotalCount int                 `json:"total_count"`
 }
 
 // NodeStat represents error statistics for a node
@@ -512,7 +513,7 @@ func getClusterErrorLogs(c echo.Context) error {
 	}
 
 	// Collect logs from all cluster nodes
-	allLogs, nodeStats, err := aggregateClusterErrorLogs(filter)
+	allLogs, nodeStats, totalCount, err := aggregateClusterErrorLogs(filter)
 	if err != nil {
 		logger.Error("Failed to aggregate cluster error logs", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -521,17 +522,19 @@ func getClusterErrorLogs(c echo.Context) error {
 	}
 
 	response := ClusterErrorLogResponse{
-		Logs:      allLogs,
-		NodeStats: nodeStats,
+		Logs:       allLogs,
+		NodeStats:  nodeStats,
+		TotalCount: totalCount,
 	}
 
 	return c.JSON(http.StatusOK, response)
 }
 
 // aggregateClusterErrorLogs collects error logs from all cluster nodes
-func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[string]NodeStat, error) {
+func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[string]NodeStat, int, error) {
 	var allLogs []ErrorLogEntry
 	nodeStats := make(map[string]NodeStat)
+	totalCount := 0
 
 	// Get leader's own logs first
 	leaderLogs, err := getLocalErrorLogs(filter)
@@ -539,6 +542,7 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 		logger.Error("Failed to get leader error logs", "error", err)
 	} else {
 		allLogs = append(allLogs, leaderLogs...)
+		totalCount += len(leaderLogs)
 
 		// Calculate leader stats
 		leaderStat := NodeStat{
@@ -555,55 +559,67 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 		nodeStats[common.Config.LocalIP] = leaderStat
 	}
 
-	// Get logs from follower nodes via Redis cache only
-	// For now, just get logs from Redis cache without cluster state
-	// This will be enhanced when the new cluster system is fully integrated
-	if cluster.GlobalHeartbeatManager != nil {
-		nodes := cluster.GlobalHeartbeatManager.GetNodes()
-		for nodeID := range nodes {
+	// Get all logs from Redis cache (from all nodes)
+	pattern := "cluster:error_logs:*"
+	keys, err := common.RedisKeys(pattern)
+	if err != nil {
+		logger.Error("Failed to get error log keys from Redis", "error", err)
+	} else {
+		for _, key := range keys {
+			// Extract node ID from key
+			nodeID := strings.TrimPrefix(key, "cluster:error_logs:")
+
+			// Skip leader's own logs (already processed above)
 			if nodeID == common.Config.LocalIP {
-				continue // Skip self
+				continue
 			}
 
-			// Get logs from Redis cache only
-			var followerLogs []ErrorLogEntry
-			if cached, err := common.RedisGet("cluster:error_logs:" + nodeID); err == nil && cached != "" {
-				if err := json.Unmarshal([]byte(cached), &followerLogs); err != nil {
-					logger.Error("Failed to unmarshal follower error logs from Redis", "node", nodeID, "error", err)
+			// Get logs from Redis cache
+			var cachedLogs []ErrorLogEntry
+			if cached, err := common.RedisGet(key); err == nil && cached != "" {
+				if err := json.Unmarshal([]byte(cached), &cachedLogs); err != nil {
+					logger.Error("Failed to unmarshal error logs from Redis", "node", nodeID, "error", err)
 					continue
 				}
 			} else {
-				logger.Debug("No error logs found in Redis cache for follower node", "node", nodeID)
 				continue
 			}
 
-			if len(followerLogs) == 0 {
-				continue
-			}
+			// Process each log and apply filters
+			for i := range cachedLogs {
+				cachedLogs[i].NodeID = nodeID
+				cachedLogs[i].NodeAddress = nodeID // Use nodeID as address for now
 
-			// Set node information for follower logs
-			for i := range followerLogs {
-				followerLogs[i].NodeID = nodeID
-				followerLogs[i].NodeAddress = nodeID // Use nodeID as address for now
-			}
-
-			allLogs = append(allLogs, followerLogs...)
-
-			// Calculate follower stats
-			followerStat := NodeStat{
-				NodeID: nodeID,
-			}
-			for _, log := range followerLogs {
-				if log.Source == "hub" {
-					followerStat.HubErrors++
-				} else if log.Source == "plugin" {
-					followerStat.PluginErrors++
+				// Apply filters
+				if matchesFilter(cachedLogs[i], filter) {
+					allLogs = append(allLogs, cachedLogs[i])
 				}
-				followerStat.TotalErrors++
 			}
-			nodeStats[nodeID] = followerStat
 		}
 	}
+
+	// Calculate node statistics from all collected logs
+	for _, log := range allLogs {
+		if log.NodeID == "" {
+			continue
+		}
+
+		stat, exists := nodeStats[log.NodeID]
+		if !exists {
+			stat = NodeStat{NodeID: log.NodeID}
+		}
+
+		if log.Source == "hub" {
+			stat.HubErrors++
+		} else if log.Source == "plugin" {
+			stat.PluginErrors++
+		}
+		stat.TotalErrors++
+		nodeStats[log.NodeID] = stat
+	}
+
+	// Update total count
+	totalCount = len(allLogs)
 
 	// Sort all logs by timestamp (newest first)
 	sort.Slice(allLogs, func(i, j int) bool {
@@ -619,6 +635,8 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 			}
 		}
 		allLogs = filteredLogs
+		// Update total count after filtering
+		totalCount = len(allLogs)
 	}
 
 	// Apply pagination
@@ -633,5 +651,5 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 		allLogs = allLogs[start:end]
 	}
 
-	return allLogs, nodeStats, nil
+	return allLogs, nodeStats, totalCount, nil
 }

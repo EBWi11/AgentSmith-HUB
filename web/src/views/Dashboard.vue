@@ -212,13 +212,13 @@
             <div class="flex items-center">
               <span class="w-3 h-3 rounded-full mr-3 transition-colors duration-300" 
                     :class="{
-                      'bg-green-500': project.status === 'running',
-                      'bg-gray-400': project.status === 'stopped',
-                      'bg-blue-500': project.status === 'starting',
-                      'bg-orange-500': project.status === 'stopping',
-                      'bg-red-500': project.status === 'error'
+                      'bg-yellow-500 animate-pulse': project.mismatch,
+                      'bg-green-500': !project.mismatch && project.status === 'running',
+                      'bg-gray-400': !project.mismatch && project.status === 'stopped',
+                      'bg-blue-500': !project.mismatch && project.status === 'starting',
+                      'bg-orange-500': !project.mismatch && project.status === 'stopping',
+                      'bg-red-500': !project.mismatch && project.status === 'error'
                     }"></span>
-              <span v-if="project.mismatch" class="w-2 h-2 bg-yellow-400 rounded-full mr-1"></span>
               <div>
                 <p class="font-medium text-gray-900">{{ project.id }}</p>
                 <p class="text-sm text-gray-500 capitalize transition-all duration-300">{{ project.status }}</p>
@@ -491,6 +491,10 @@ const lastUpdated = ref('')
 const refreshInterval = ref(null)
 const statsRefreshInterval = ref(null) // New interval for frequent stats updates
 
+// Cluster consistency checking
+const clusterConsistencyData = ref({})
+const clusterConsistencyLoading = ref(false)
+
 // Process cluster nodes similar to ClusterStatus.vue
 const clusterNodes = computed(() => {
   const nodes = []
@@ -525,7 +529,7 @@ const clusterNodes = computed(() => {
           memory_usage: getNodeSystemMetrics(node.id).memory_percent,
           isLeader: node.status === 'leader',
           isHealthy: node.is_healthy,
-          lastSeen: new Date(node.last_seen)
+          lastSeen: new Date(node.last_seen * 1000) // Convert Unix timestamp (seconds) to milliseconds
         }
         
         nodes.push(processedNode)
@@ -632,6 +636,60 @@ const hubTotalStats = computed(() => {
     total: input + output
   }
 })
+
+// Check if project has cluster status inconsistency
+function hasClusterInconsistency(projectId) {
+  if (!clusterConsistencyData.value || !clusterConsistencyData.value.project_states) {
+    return false;
+  }
+
+  const projectStates = clusterConsistencyData.value.project_states;
+  const nodeIds = Object.keys(projectStates);
+  
+  if (nodeIds.length < 2) {
+    return false; // Need at least 2 nodes to have inconsistency
+  }
+
+  // Collect all statuses from all nodes
+  let allStatuses = new Set();
+  
+  for (const nodeId of nodeIds) {
+    const projects = projectStates[nodeId];
+    if (projects && Array.isArray(projects)) {
+      const project = projects.find(p => p.id === projectId);
+      allStatuses.add(project ? project.status : 'missing');
+    } else {
+      // Node has no project data
+      allStatuses.add('no_data');
+    }
+  }
+
+  // If there's more than one unique status, it's inconsistent
+  return allStatuses.size > 1;
+}
+
+// Load cluster consistency data in background
+async function loadClusterConsistencyData() {
+  if (clusterConsistencyLoading.value) {
+    return; // Already loading
+  }
+
+  clusterConsistencyLoading.value = true;
+  try {
+    const response = await hubApi.getClusterProjectStates();
+    clusterConsistencyData.value = response || {};
+    
+    // Update mismatch flag for projects
+    projectList.value.forEach(project => {
+      project.mismatch = hasClusterInconsistency(project.id);
+    });
+  } catch (error) {
+    console.warn('Failed to fetch cluster consistency data:', error);
+    clusterConsistencyData.value = {};
+  } finally {
+    clusterConsistencyLoading.value = false;
+  }
+}
 
 // Get message statistics for a specific project from aggregated cluster data
 function getProjectMessageStats(projectId) {
@@ -966,6 +1024,9 @@ async function refreshStats() {
     // Wait for all component count updates to complete
     await Promise.all(componentCountPromises)
 
+    // Also update cluster consistency data
+    await loadClusterConsistencyData()
+    
     // Update last updated time
     lastUpdated.value = new Date().toLocaleTimeString()
     
@@ -1055,6 +1116,9 @@ async function fetchDashboardData() {
       }
     }
 
+    // Load cluster consistency data
+    await loadClusterConsistencyData()
+    
     // Now refresh stats (this will also update message and system data)
     await refreshStats()
 

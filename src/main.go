@@ -78,6 +78,9 @@ func main() {
 	// Initialize new cluster system
 	cluster.InitCluster(ip, *isLeader)
 
+	// IMPORTANT: Set common.IsLeader for component sampler creation
+	common.SetLeaderState(*isLeader, ip)
+
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
 

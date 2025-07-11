@@ -206,78 +206,88 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 		nodeStats[common.Config.LocalIP] = leaderStat
 	}
 
-	// Get operations from follower nodes via Redis cache only
-	// For now, just get operations from Redis cache without cluster state
-	// This will be enhanced when the new cluster system is fully integrated
-	if cluster.GlobalHeartbeatManager != nil {
-		nodes := cluster.GlobalHeartbeatManager.GetNodes()
-		for nodeID := range nodes {
+	// Get all operations from Redis cache (from all nodes)
+	pattern := "cluster:operations:*"
+	keys, err := common.RedisKeys(pattern)
+	if err != nil {
+		logger.Error("Failed to get operation keys from Redis", "error", err)
+	} else {
+		for _, key := range keys {
+			// Extract node ID from key
+			nodeID := strings.TrimPrefix(key, "cluster:operations:")
+
+			// Skip leader's own operations (already processed above)
 			if nodeID == common.Config.LocalIP {
-				continue // Skip self
+				continue
 			}
 
-			// Get operations from Redis cache only
-			var followerOps []common.OperationRecord
-			if cached, err := common.RedisGet("cluster:operations:" + nodeID); err == nil && cached != "" {
-				if err := json.Unmarshal([]byte(cached), &followerOps); err != nil {
-					logger.Error("Failed to unmarshal follower operations from Redis", "node", nodeID, "error", err)
+			// Get operations from Redis cache
+			var cachedOps []common.OperationRecord
+			if cached, err := common.RedisGet(key); err == nil && cached != "" {
+				if err := json.Unmarshal([]byte(cached), &cachedOps); err != nil {
+					logger.Error("Failed to unmarshal operations from Redis", "node", nodeID, "error", err)
 					continue
 				}
 			} else {
-				logger.Debug("No operations found in Redis cache for follower node", "node", nodeID)
 				continue
 			}
 
-			if len(followerOps) == 0 {
-				continue
-			}
+			// Process each operation and apply filters
+			for i := range cachedOps {
+				// Set node info
+				if cachedOps[i].Details == nil {
+					cachedOps[i].Details = make(map[string]interface{})
+				}
+				cachedOps[i].Details["node_id"] = nodeID
+				cachedOps[i].Details["node_address"] = nodeID // Use nodeID as address for now
 
-			// Apply filter to followerOps in case we loaded them from Redis (Redis cache may contain mixed types)
-			var filteredOps []common.OperationRecord
-			for _, op := range followerOps {
-				if matchesOperationFilter(op, filter) {
-					// Set node info
-					if op.Details == nil {
-						op.Details = make(map[string]interface{})
-					}
-					op.Details["node_id"] = nodeID
-					op.Details["node_address"] = nodeID // Use nodeID as address for now
-					filteredOps = append(filteredOps, op)
+				// Apply filters
+				if matchesOperationFilter(cachedOps[i], filter) {
+					allOperations = append(allOperations, cachedOps[i])
 				}
 			}
-
-			if len(filteredOps) == 0 {
-				continue
-			}
-
-			allOperations = append(allOperations, filteredOps...)
-
-			// Calculate follower stats
-			followerStat := NodeOpStat{
-				NodeID: nodeID,
-			}
-			for _, op := range filteredOps {
-				switch op.Type {
-				case common.OpTypeChangePush:
-					followerStat.ChangePushOps++
-				case common.OpTypeLocalPush:
-					followerStat.LocalPushOps++
-				case common.OpTypeProjectStart:
-					followerStat.ProjectStartOps++
-				case common.OpTypeProjectStop:
-					followerStat.ProjectStopOps++
-				case common.OpTypeProjectRestart:
-					followerStat.ProjectRestartOps++
-				}
-				followerStat.TotalOps++
-				if op.Status == "success" {
-					followerStat.SuccessOps++
-				} else {
-					followerStat.FailedOps++
-				}
-			}
-			nodeStats[nodeID] = followerStat
 		}
+	}
+
+	// Calculate node statistics from all collected operations
+	for _, op := range allOperations {
+		nodeID := ""
+		if op.Details != nil {
+			if nodeIDValue, exists := op.Details["node_id"]; exists {
+				if nodeIDStr, ok := nodeIDValue.(string); ok {
+					nodeID = nodeIDStr
+				}
+			}
+		}
+
+		if nodeID == "" {
+			continue
+		}
+
+		stat, exists := nodeStats[nodeID]
+		if !exists {
+			stat = NodeOpStat{NodeID: nodeID}
+		}
+
+		switch op.Type {
+		case common.OpTypeChangePush:
+			stat.ChangePushOps++
+		case common.OpTypeLocalPush:
+			stat.LocalPushOps++
+		case common.OpTypeProjectStart:
+			stat.ProjectStartOps++
+		case common.OpTypeProjectStop:
+			stat.ProjectStopOps++
+		case common.OpTypeProjectRestart:
+			stat.ProjectRestartOps++
+		}
+		stat.TotalOps++
+		if op.Status == "success" {
+			stat.SuccessOps++
+		} else {
+			stat.FailedOps++
+		}
+		nodeStats[nodeID] = stat
 	}
 
 	// Sort all operations by timestamp (newest first)

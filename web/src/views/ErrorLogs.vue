@@ -148,10 +148,12 @@
                 <!-- Log Info -->
                 <div>
                   <h3 class="font-medium text-gray-900">{{ log.message }}</h3>
-                  <div class="text-sm text-gray-500">
-                    {{ formatTimestamp(log.timestamp) }}
-                    <span v-if="log.node_id" class="ml-2">{{ log.node_id }}</span>
-                    <span class="ml-2">Line: {{ log.line }}</span>
+                  <div class="flex items-center space-x-2 text-sm text-gray-500">
+                    <span>{{ formatTimestamp(log.timestamp) }}</span>
+                    <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
+                      {{ log.node_id }}
+                    </span>
+                    <span class="text-xs">Line: {{ log.line }}</span>
                   </div>
                 </div>
               </div>
@@ -274,7 +276,7 @@ const expandedLogs = ref(new Set())
 const filters = reactive({
   source: 'all',
   nodeId: 'all',
-  timeRange: '1h',
+  timeRange: '24h',
   level: '',
   keyword: '',
   startDate: '',
@@ -322,9 +324,9 @@ function toLocalISOString(date) {
 
 function setDefaultTimeRange() {
   const now = new Date()
-  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
   
-  filters.startDate = toLocalISOString(oneHourAgo)
+  filters.startDate = toLocalISOString(oneDayAgo)
   filters.endDate = toLocalISOString(now)
 }
 
@@ -407,24 +409,30 @@ const fetchErrorLogs = async () => {
     let response
     if (isClusterMode.value && filters.nodeId === 'all') {
       response = await hubApi.getClusterErrorLogs(params)
-      // ignore node_stats in response
-      nodeStats.value = {}
+      // Handle cluster response format (ClusterErrorLogResponse)
+      logs.value = response.logs || []
+      totalCount.value = response.total_count || 0
+      
+      // Extract available nodes from node_stats
+      if (response.node_stats) {
+        availableNodes.value = Object.keys(response.node_stats).map(nodeId => ({
+          id: nodeId,
+          name: nodeId
+        }))
+      }
+      
+      // Store node stats for potential future use
+      nodeStats.value = response.node_stats || {}
     } else {
       response = await hubApi.getErrorLogs(params)
+      // Handle regular response format (ErrorLogResponse)
+      logs.value = response.logs || []
+      totalCount.value = response.total_count || 0
       nodeStats.value = {}
     }
 
-    logs.value = response.logs || []
-    totalCount.value = response.total_count || 0
-
-    // Update available nodes from cluster info or logs
-    if (response.available_nodes) {
-      availableNodes.value = response.available_nodes.map(nodeId => ({
-        id: nodeId,
-        name: nodeId
-      }))
-    } else {
-      // Fallback: extract from logs
+    // Fallback: extract available nodes from logs if not already set
+    if (availableNodes.value.length === 0) {
       const nodes = new Set()
       logs.value.forEach(log => {
         if (log.node_id) {
