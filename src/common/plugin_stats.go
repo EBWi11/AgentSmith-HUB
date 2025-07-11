@@ -30,4 +30,8 @@ func RecordPluginInvoke(pluginName string, success bool) {
 	// Updated key format: plugin_stats:{date}:{nodeID}:{pluginName}:{status}
 	key := fmt.Sprintf("plugin_stats:%s:%s:%s:%s", date, nodeID, pluginName, status)
 	_, _ = RedisIncr(key)
+
+	// Ensure the key expires (data retention). Keep 90 days for historical lookup.
+	// Expire is refreshed on each increment so counters for today persist.
+	_ = RedisExpire(key, 90*24*60*60)
 }
