@@ -87,7 +87,7 @@ kafka:
   topic: "kafka_output_demo"`
 
 const NewRulesetData = `<root author="name">
-    <rule id="rule_id" name="Example rule with flexible execution order">
+    <rule id="rule_id" name="name">
         <check type="REGEX" field="exe">testcases</check>
         
         <threshold group_by="src_ip" range="1m" value="100" />

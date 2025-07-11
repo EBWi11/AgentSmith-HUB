@@ -6,14 +6,22 @@
 set -e
 
 # Check if target directory is provided
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <target_directory>"
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    echo "Usage: $0 <target_directory> [architecture]"
     echo "This script creates start.sh and stop.sh in the target directory"
+    echo "Architecture: amd64 (default) or arm64"
     exit 1
 fi
 
 TARGET_DIR="$1"
+ARCHITECTURE="${2:-amd64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Validate architecture
+if [ "$ARCHITECTURE" != "amd64" ] && [ "$ARCHITECTURE" != "arm64" ]; then
+    echo "Error: Architecture must be 'amd64' or 'arm64'"
+    exit 1
+fi
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -32,6 +40,7 @@ print_warn() {
 mkdir -p "$TARGET_DIR"
 
 print_info "Creating deployment scripts in $TARGET_DIR"
+print_info "Target architecture: $ARCHITECTURE"
 
 # Create start.sh (based on run.sh)
 if [ -f "$SCRIPT_DIR/run.sh" ]; then
@@ -170,19 +179,23 @@ fi
 
 # Create README for deployment
 print_info "Creating deployment README..."
-cat > "$TARGET_DIR/README.md" << 'EOF'
+cat > "$TARGET_DIR/README.md" << EOF
 # AgentSmith-HUB Deployment
 
 This directory contains a complete AgentSmith-HUB deployment package.
 
+## Architecture
+
+This package is built for **Linux $ARCHITECTURE** architecture.
+
 ## Files
 
-- `agentsmith-hub` - Main application binary (Linux amd64)
-- `web/` - Frontend web interface files
-- `lib/` - Required shared libraries
-- `config/` - Configuration files
-- `start.sh` - Script to start the services
-- `stop.sh` - Script to stop the services
+- \`agentsmith-hub\` - Main application binary (Linux $ARCHITECTURE)
+- \`web/\` - Frontend web interface files
+- \`lib/\` - Required shared libraries ($ARCHITECTURE)
+- \`config/\` - Configuration files
+- \`start.sh\` - Script to start the services (with architecture detection)
+- \`stop.sh\` - Script to stop the services
 
 ## Quick Start
 
@@ -259,7 +272,8 @@ For more information, visit: https://github.com/EBWi11/AgentSmith-HUB
 EOF
 
 print_info "Deployment scripts created successfully!"
+print_info "Target architecture: $ARCHITECTURE"
 print_info "Created files:"
-print_info "  - $TARGET_DIR/start.sh"
-print_info "  - $TARGET_DIR/stop.sh" 
-print_info "  - $TARGET_DIR/README.md" 
+print_info "  - $TARGET_DIR/start.sh (with architecture detection)"
+print_info "  - $TARGET_DIR/stop.sh"
+print_info "  - $TARGET_DIR/README.md (architecture-specific)" 

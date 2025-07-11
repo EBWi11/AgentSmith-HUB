@@ -13,6 +13,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
     
     steps:
     - name: Checkout code
@@ -23,7 +26,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24.3'
+        go-version: '1.24.5'
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -41,10 +44,42 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential
+        # Install cross-compilation tools for ARM64
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+        fi
     
-    - name: Build project
+    - name: Build frontend
       run: |
-        make all
+        cd web
+        npm run build
+    
+    - name: Build backend
+      run: |
+        cd src
+        mkdir -p ../build
+        
+        # Set architecture-specific build variables
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export CC=aarch64-linux-gnu-gcc
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_LDFLAGS="-L$(pwd)/../lib/linux/arm64 -lrure"
+        else
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=amd64
+          export CGO_LDFLAGS="-L$(pwd)/../lib/linux/amd64 -lrure"
+        fi
+        
+        # Build with version information
+        VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
+        BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
+        
+        go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .
     
     - name: Get version info
       id: version
@@ -66,21 +101,43 @@ jobs:
       run: |
         # Create a clean directory structure for the archive
         RELEASE_NAME="${{ steps.version.outputs.release_name }}"
-        ARCHIVE_DIR="agentsmith-hub"
-        ARCHIVE_NAME="agentsmith-hub.tar.gz"
+        ARCHIVE_DIR="agentsmith-hub-${{ matrix.arch }}"
+        ARCHIVE_NAME="agentsmith-hub-${{ matrix.arch }}.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
-        echo "Archive directory: $ARCHIVE_DIR"
+        echo "Architecture: ${{ matrix.arch }}"
         
-        # Create the archive directory and copy all files
+        # Create the archive directory
         mkdir -p "$ARCHIVE_DIR"
-        cp -r dist/* "$ARCHIVE_DIR/"
+        
+        # Copy binary (rename to standard name)
+        cp "build/${BINARY_NAME}-${{ matrix.arch }}" "$ARCHIVE_DIR/$BINARY_NAME"
+        chmod +x "$ARCHIVE_DIR/$BINARY_NAME"
+        
+        # Copy frontend files
+        cp -r web/dist "$ARCHIVE_DIR/web"
+        
+        # Copy architecture-specific libraries
+        mkdir -p "$ARCHIVE_DIR/lib"
+        cp -r "lib/linux/${{ matrix.arch }}"/* "$ARCHIVE_DIR/lib/"
+        
+        # Copy configuration files
+        cp -r config "$ARCHIVE_DIR/"
+        cp -r mcp_config "$ARCHIVE_DIR/"
+        
+        # Generate architecture-aware scripts
+        ./script/create_scripts.sh "$ARCHIVE_DIR" "${{ matrix.arch }}"
+        
+        # Copy documentation
+        cp README.md "$ARCHIVE_DIR/"
+        cp VERSION "$ARCHIVE_DIR/"
         
         # Show what we're packaging
         echo "Contents to be archived:"
-        ls -la "$ARCHIVE_DIR"
+        find "$ARCHIVE_DIR" -type f | head -20
+        echo "..."
         
-        # Create the tar.gz archive with proper directory structure
+        # Create the tar.gz archive
         tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
         
         # Create checksum
@@ -92,15 +149,13 @@ jobs:
         echo "Archive created successfully: $ARCHIVE_NAME"
         ls -la *.tar.gz*
     
-    # Note: GitHub Actions will automatically zip the artifacts
-    # The actual deployment file is the .tar.gz inside the zip
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: agentsmith-hub-${{ steps.version.outputs.release_name }}
+        name: agentsmith-hub-${{ matrix.arch }}-${{ steps.version.outputs.release_name }}
         path: |
-          agentsmith-hub.tar.gz
-          agentsmith-hub.tar.gz.sha256
+          agentsmith-hub-${{ matrix.arch }}.tar.gz
+          agentsmith-hub-${{ matrix.arch }}.tar.gz.sha256
         retention-days: 30
     
     - name: Create Release (on tag)
@@ -108,34 +163,49 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          agentsmith-hub.tar.gz
-          agentsmith-hub.tar.gz.sha256
+          agentsmith-hub-${{ matrix.arch }}.tar.gz
+          agentsmith-hub-${{ matrix.arch }}.tar.gz.sha256
         body: |
           ## AgentSmith-HUB Release ${{ github.ref_name }}
           
           ### What's Included
           
-          - Pre-built Linux binary (amd64)
+          - Pre-built Linux binary (${{ matrix.arch }})
           - Frontend web application
-          - Required libraries (librure.so)
+          - Required libraries (librure.so for ${{ matrix.arch }})
           - Configuration templates
-          - Start and stop scripts
+          - Architecture-aware start and stop scripts
           - Deployment documentation
           
           ### Quick Start
           
-          1. Download and extract the archive:
+          1. Download the appropriate archive for your architecture:
+             - For AMD64: `agentsmith-hub-amd64.tar.gz`
+             - For ARM64: `agentsmith-hub-arm64.tar.gz`
+          
+          2. Extract and deploy:
              ```bash
-             tar -xzf agentsmith-hub.tar.gz
-             cd agentsmith-hub
+             tar -xzf agentsmith-hub-${{ matrix.arch }}.tar.gz
+             cd agentsmith-hub-${{ matrix.arch }}
              ```
-          2. Configure your settings in `config/config.yaml`
-          3. Run `./start.sh` to start the application
-          4. Access the web interface at http://localhost:8080
+          
+          3. Configure your settings in `config/config.yaml`
+          
+          4. Run `./start.sh` to start the application
+          
+          5. Access the web interface at http://localhost:8080
+          
+          ### Architecture Support
+          
+          - **AMD64**: Standard x86_64 architecture (Intel/AMD processors)
+          - **ARM64**: ARM 64-bit architecture (Apple Silicon, ARM servers)
+          
+          The scripts automatically detect your system architecture and use the appropriate libraries.
           
           ### Version Information
           
           - Version: ${{ steps.version.outputs.version }}
+          - Architecture: ${{ matrix.arch }}
           - Git Commit: ${{ github.sha }}
           - Build Date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
           

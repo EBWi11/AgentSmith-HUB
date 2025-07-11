@@ -22,6 +22,22 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to detect system architecture
+detect_architecture() {
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        *)
+            echo "amd64"
+            ;;
+    esac
+}
+
 # Function to show help
 show_help() {
     echo "AgentSmith-HUB Stop Script"
@@ -35,6 +51,9 @@ show_help() {
     echo ""
     echo "This script stops all AgentSmith-HUB processes gracefully."
     echo "If graceful shutdown fails, it will force terminate the processes."
+    echo ""
+    echo "System Information:"
+    echo "  - Architecture: $(uname -m) (mapped to: $(detect_architecture))"
 }
 
 # Function to check for running processes

@@ -57,19 +57,46 @@ find_binary() {
     return 1
 }
 
-# Function to set library path
+# Function to detect system architecture
+detect_architecture() {
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64)
+            echo "amd64"
+            ;;
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        *)
+            print_warn "Unknown architecture: $arch, defaulting to amd64"
+            echo "amd64"
+            ;;
+    esac
+}
+
+# Function to set library path with architecture detection
 setup_library_path() {
     local binary_dir="$(dirname "$1")"
+    local system_arch=$(detect_architecture)
     
-    # Check for lib directory relative to binary
+    # Check for lib directory relative to binary (preferred)
     if [ -d "$binary_dir/lib" ]; then
         export LD_LIBRARY_PATH="$binary_dir/lib:${LD_LIBRARY_PATH}"
         print_info "Using library path: $binary_dir/lib"
+    # Check for architecture-specific lib directory in project root
+    elif [ -d "lib/linux/$system_arch" ]; then
+        export LD_LIBRARY_PATH="$(pwd)/lib/linux/$system_arch:${LD_LIBRARY_PATH}"
+        print_info "Using library path: $(pwd)/lib/linux/$system_arch (detected architecture: $system_arch)"
+    # Fallback to generic linux lib directory
     elif [ -d "lib/linux" ]; then
         export LD_LIBRARY_PATH="$(pwd)/lib/linux:${LD_LIBRARY_PATH}"
-        print_info "Using library path: $(pwd)/lib/linux"
+        print_info "Using library path: $(pwd)/lib/linux (fallback)"
     else
         print_warn "No lib directory found, continuing without setting LD_LIBRARY_PATH"
+        print_warn "Expected locations:"
+        print_warn "  - $binary_dir/lib (preferred)"
+        print_warn "  - $(pwd)/lib/linux/$system_arch (architecture-specific)"
+        print_warn "  - $(pwd)/lib/linux (fallback)"
     fi
 }
 
@@ -152,6 +179,9 @@ main() {
         print_warn "Could not retrieve version information"
     fi
     
+    # Show system architecture information
+    local system_arch=$(detect_architecture)
+    print_info "System architecture: $(uname -m) (mapped to: $system_arch)"
     print_info "Working directory: $SCRIPT_DIR"
     print_info "Library path: ${LD_LIBRARY_PATH:-'not set'}"
     print_info "Config root: $CONFIG_ROOT"
@@ -219,6 +249,15 @@ while [[ $# -gt 0 ]]; do
             echo "  2. <binary_dir>/config (relative to binary)"
             echo "  3. ./config (current directory)"
             echo ""
+            echo "Library path search order:"
+            echo "  1. <binary_dir>/lib (preferred - architecture-specific libraries)"
+            echo "  2. ./lib/linux/<arch> (architecture-specific: amd64/arm64)"
+            echo "  3. ./lib/linux (fallback)"
+            echo ""
+            echo "Architecture Detection:"
+            echo "  - Current system: $(uname -m)"
+            echo "  - Mapped to: $(detect_architecture)"
+            echo ""
             echo "Examples:"
             echo "  $0                    # Start as leader (default)"
             echo "  $0 --follower         # Start as follower"
@@ -244,6 +283,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --check|-c)
             print_info "Checking dependencies and configuration..."
+            
+            # Show system information
+            local system_arch=$(detect_architecture)
+            print_info "System architecture: $(uname -m) (mapped to: $system_arch)"
             
             # Check binary
             BINARY_PATH=$(find_binary)
