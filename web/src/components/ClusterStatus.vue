@@ -72,29 +72,30 @@
               
               <!-- Status Indicators -->
               <div class="flex items-center space-x-2 flex-shrink-0">
-                <!-- Health Status -->
-                <div 
+                <!-- Health Status (always rendered to reserve width) -->
+                <div
                   class="w-3 h-3 rounded-full"
-                  :class="{
-                    'bg-green-500': node.isHealthy,
-                    'bg-red-500': !node.isHealthy
-                  }"
+                  :class="node.isHealthy ? 'bg-green-500' : 'bg-red-500'"
                   :title="node.isHealthy ? 'Healthy' : 'Unhealthy'"
                 ></div>
-                
+
                 <!-- Status Consistency -->
-                <div 
-                  v-if="node.hasStatusIssue"
-                  class="w-3 h-3 rounded-full bg-red-500 animate-pulse"
-                  title="Status inconsistent with leader"
-                ></div>
-                
+                <div class="w-3 h-3">
+                  <div
+                    v-if="node.hasStatusIssue"
+                    class="w-3 h-3 rounded-full bg-red-500 animate-pulse"
+                    title="Status inconsistent with leader"
+                  ></div>
+                </div>
+
                 <!-- Performance Warning -->
-                <div 
-                  v-if="node.hasPerformanceIssue"
-                  class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
-                  title="Performance issue detected"
-                ></div>
+                <div class="w-3 h-3">
+                  <div
+                    v-if="node.hasPerformanceIssue"
+                    class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"
+                    title="Performance issue detected"
+                  ></div>
+                </div>
               </div>
             </div>
 
