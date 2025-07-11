@@ -372,8 +372,8 @@ func storeLocalOperationsToRedis(nodeID string, operations []common.OperationRec
 	if err != nil {
 		return
 	}
-	// Keep for 120 seconds; refreshed on each query
-	_, _ = common.RedisSet("cluster:operations:"+nodeID, string(data), 120)
+	// Keep for 31 days; refreshed on each upload
+	_, _ = common.RedisSet("cluster:operations:"+nodeID, string(data), 31*24*60*60)
 }
 
 // StartOperationHistoryUploader starts periodic operation history upload for follower nodes

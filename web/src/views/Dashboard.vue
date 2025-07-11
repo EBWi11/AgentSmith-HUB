@@ -608,26 +608,24 @@ const sortedProjects = computed(() => {
 // Hub total statistics (all projects, not just running) - uses aggregated cluster data
 // Focus on Hub's input and output throughput
 const hubTotalStats = computed(() => {
+  // 如果后端已提供汇总字段，直接使用
+  if (messageData.value.total_input_messages !== undefined) {
+    return {
+      input: messageData.value.total_input_messages || 0,
+      output: messageData.value.total_output_messages || 0,
+      total: (messageData.value.total_input_messages || 0) + (messageData.value.total_output_messages || 0)
+    }
+  }
+
+  // 兼容旧格式：从 project_breakdown 汇总
   let input = 0
   let output = 0
-  
-  // Use aggregated message data for total hub statistics
-  // Data format: { project_breakdown: { projectID: { input: count, output: count, ruleset: count } } }
   if (messageData.value.project_breakdown) {
     Object.values(messageData.value.project_breakdown).forEach(projectData => {
       input += projectData.input || 0
       output += projectData.output || 0
     })
   }
-  
-  // Debug info for troubleshooting
-  if (process.env.NODE_ENV === 'development' && messageData.value.project_breakdown) {
-    console.log('[MSG/D Debug] Hub Total Stats:', {
-      breakdown: messageData.value.project_breakdown,
-      totals: { input, output }
-    })
-  }
-  
   return {
     input,
     output,
@@ -728,15 +726,40 @@ function getProjectMessageStats(projectId) {
 }
 
 const systemStats = computed(() => {
-  // Use aggregated system metrics directly from API
   if (!systemData.value || Object.keys(systemData.value).length === 0) {
     return { avgCPU: 0, avgMemory: 0, totalGoroutines: 0 }
   }
 
+  // 如果后端返回了聚合字段（旧格式），直接使用
+  if (systemData.value.avg_cpu_percent !== undefined) {
+    return {
+      avgCPU: systemData.value.avg_cpu_percent || 0,
+      avgMemory: systemData.value.avg_memory_percent || 0,
+      totalGoroutines: systemData.value.total_goroutines || 0
+    }
+  }
+
+  // 新格式：systemData 为 { nodeID: { cpu_percent, memory_percent, goroutine_count, ... } }
+  let nodes = Object.values(systemData.value)
+  let totalCPU = 0
+  let totalMem = 0
+  let totalG = 0
+  let count = 0
+  nodes.forEach(m => {
+    if (m && typeof m === 'object') {
+      totalCPU += m.cpu_percent || 0
+      totalMem += m.memory_percent || 0
+      totalG += m.goroutine_count || 0
+      count++
+    }
+  })
+  if (count === 0) {
+    return { avgCPU: 0, avgMemory: 0, totalGoroutines: 0 }
+  }
   return {
-    avgCPU: systemData.value.avg_cpu_percent || 0,
-    avgMemory: systemData.value.avg_memory_percent || 0,
-    totalGoroutines: systemData.value.total_goroutines || 0
+    avgCPU: totalCPU / count,
+    avgMemory: totalMem / count,
+    totalGoroutines: totalG
   }
 })
 

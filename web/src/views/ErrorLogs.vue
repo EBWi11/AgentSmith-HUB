@@ -54,6 +54,16 @@
           </select>
         </div>
 
+        <!-- Level Filter -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Level</label>
+          <select v-model="filters.level" @change="applyFilters" class="filter-select">
+            <option value="">All Levels</option>
+            <option value="ERROR">Error</option>
+            <option value="FATAL">Fatal</option>
+          </select>
+        </div>
+
         <!-- Time Range Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Time Range</label>
@@ -68,28 +78,15 @@
           </select>
         </div>
 
-        <!-- Level Filter -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Level</label>
-          <select v-model="filters.level" @change="applyFilters" class="filter-select">
-            <option value="">All Levels</option>
-            <option value="ERROR">Error</option>
-            <option value="FATAL">Fatal</option>
-          </select>
-        </div>
-
-        <!-- Placeholder to keep 6-column alignment -->
-        <div class="hidden lg:block"></div>
-
-        <!-- Search -->
-        <div>
+        <!-- Search (fill remaining columns) -->
+        <div class="lg:col-span-2">
           <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
           <input 
             v-model="filters.keyword" 
             @input="debouncedSearch"
             type="text" 
             placeholder="Search messages..."
-            class="filter-input"
+            class="filter-input w-full"
           >
         </div>
       </div>

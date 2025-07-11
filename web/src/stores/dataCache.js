@@ -278,7 +278,8 @@ export const useDataCacheStore = defineStore('dataCache', {
     async fetchSystemMetrics(forceRefresh = false) {
       return this.fetchWithCache(
         'systemMetrics',
-        () => hubApi.getAggregatedSystemMetrics(),
+        // 使用集群系统指标接口可返回各节点详细数据（leader 节点可用；follower 节点将返回 400 并在调用处兜底）
+        () => hubApi.getClusterSystemMetrics(),
         15000, // 15s TTL, system metrics update frequently
         forceRefresh
       )

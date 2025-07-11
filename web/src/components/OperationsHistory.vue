@@ -189,8 +189,8 @@
                   </h3>
                   <div class="flex items-center space-x-2 text-sm text-gray-500">
                     <span>{{ formatTimestamp(operation.timestamp) }}</span>
-                    <span v-if="isClusterMode && operation.details?.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
-                      Node: {{ operation.details.node_id }}
+                    <span v-if="operation.details?.node_id || operation.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
+                      {{ operation.details?.node_id || operation.node_id }}
                     </span>
                   </div>
                 </div>
@@ -334,7 +334,9 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, inject } from 'vue'
+import axios from 'axios'
 import { hubApi } from '../api'
+import { useDataCacheStore } from '../stores/dataCache'
 import MonacoEditor from './MonacoEditor.vue'
 import { debounce, createOptimizedApiCall } from '../utils/performance'
 
@@ -369,9 +371,20 @@ const filters = ref({
 const totalPages = computed(() => Math.ceil(totalCount.value / pageSize.value))
 
 // Lifecycle hooks
+const dataCache = useDataCacheStore()
+const clusterInfo = ref({})
+
+async function loadClusterInfo() {
+  try {
+    clusterInfo.value = await dataCache.fetchClusterInfo()
+  } catch (e) {
+    clusterInfo.value = {}
+  }
+}
+
 onMounted(() => {
   setDefaultTimeRange()
-  fetchOperationsHistory()
+  loadClusterInfo().then(fetchOperationsHistory)
 })
 
 // Create optimized API call
@@ -461,14 +474,30 @@ async function fetchOperationsHistory() {
     
     params.append('limit', pageSize.value.toString())
     params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
-    
+
     let response
-    if (isClusterMode.value && filters.value.nodeId === 'all') {
-      response = await hubApi.getClusterOperationsHistory(params.toString())
-      if (response.node_stats) {
-        nodeStats.value = response.node_stats
+    const needCluster = filters.value.nodeId === 'all'
+    const isLeaderNode = clusterInfo.value.status === 'leader'
+
+    if (needCluster) {
+      if (isLeaderNode) {
+        // call local leader endpoint
+        response = await hubApi.getClusterOperationsHistory(params.toString())
+        if (response.node_stats) nodeStats.value = response.node_stats
+      } else if (clusterInfo.value.leader_address) {
+        // call remote leader address directly
+        const leaderBase = `http://${clusterInfo.value.leader_address}`
+        const token = localStorage.getItem('auth_token') || ''
+        const instance = axios.create({ baseURL: leaderBase, timeout: 15000, headers: { token } })
+        const url = '/cluster-operations-history' + (params ? '?' + params.toString() : '')
+        const res = await instance.get(url)
+        response = res.data
+        if (response.node_stats) nodeStats.value = response.node_stats
       }
-    } else {
+    }
+
+    // if response still undefined fall back to local history
+    if (!response) {
       response = await optimizedFetchHistory(params.toString())
       nodeStats.value = {}
     }
