@@ -355,6 +355,12 @@ func loadLocalComponents() {
 }
 
 func loadLocalProjects() {
+	// Followers don't have local project files, only leaders do
+	if !cluster.IsLeader {
+		logger.Info("Follower node: skipping local project loading, will receive projects via cluster sync")
+		return
+	}
+
 	root := common.Config.ConfigRoot
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
