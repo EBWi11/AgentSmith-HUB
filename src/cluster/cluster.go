@@ -737,9 +737,7 @@ func (cm *ClusterManager) SendRedisHeartbeat() error {
 		return err
 	}
 
-	// Ensure the heartbeats hash expires if no nodes send heartbeats within 60 seconds
-	_ = common.RedisExpire("cluster:heartbeats", 60) // 60-second TTL
-
+	// NOTE: 不再每次刷新整个 hash 的 TTL；让 leader 通过 hb.Timestamp 判断健康
 	// Publish for real-time update
 	if err := common.RedisPublish("cluster:heartbeat", string(jsonData)); err != nil {
 		return err

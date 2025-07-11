@@ -316,22 +316,31 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 				continue
 			}
 
-			// Set node information for follower operations
-			for i := range followerOps {
-				if followerOps[i].Details == nil {
-					followerOps[i].Details = make(map[string]interface{})
+			// Apply filter to followerOps in case we loaded them from Redis (Redis cache may contain mixed types)
+			var filteredOps []common.OperationRecord
+			for _, op := range followerOps {
+				if matchesOperationFilter(op, filter) {
+					// Set node info
+					if op.Details == nil {
+						op.Details = make(map[string]interface{})
+					}
+					op.Details["node_id"] = nodeID
+					op.Details["node_address"] = nodeInfo.Address
+					filteredOps = append(filteredOps, op)
 				}
-				followerOps[i].Details["node_id"] = nodeID
-				followerOps[i].Details["node_address"] = nodeInfo.Address
 			}
 
-			allOperations = append(allOperations, followerOps...)
+			if len(filteredOps) == 0 {
+				continue
+			}
+
+			allOperations = append(allOperations, filteredOps...)
 
 			// Calculate follower stats
 			followerStat := NodeOpStat{
 				NodeID: nodeID,
 			}
-			for _, op := range followerOps {
+			for _, op := range filteredOps {
 				switch op.Type {
 				case common.OpTypeChangePush:
 					followerStat.ChangePushOps++
