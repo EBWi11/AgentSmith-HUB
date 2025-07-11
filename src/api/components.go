@@ -1039,17 +1039,25 @@ func createComponent(componentType string, c echo.Context) error {
 	common.GlobalMu.Lock()
 	switch componentType {
 	case "plugin":
-		plugin.PluginsNew[request.ID] = NewPluginData
+		plugin.PluginsNew[request.ID] = request.Raw
 	case "input":
-		project.GlobalProject.InputsNew[request.ID] = NewInputData
+		project.GlobalProject.InputsNew[request.ID] = request.Raw
 	case "output":
-		project.GlobalProject.OutputsNew[request.ID] = NewOutputData
+		project.GlobalProject.OutputsNew[request.ID] = request.Raw
 	case "ruleset":
-		project.GlobalProject.RulesetsNew[request.ID] = NewRulesetData
+		project.GlobalProject.RulesetsNew[request.ID] = request.Raw
 	case "project":
-		project.GlobalProject.ProjectsNew[request.ID] = NewProjectData
+		project.GlobalProject.ProjectsNew[request.ID] = request.Raw
 	}
 	common.GlobalMu.Unlock()
+
+	// Publish instruction for component creation (NEW - this was missing!)
+	if cluster.IsLeader && cluster.GlobalInstructionManager != nil {
+		if err := cluster.GlobalInstructionManager.PublishComponentAdd(componentType, request.ID, request.Raw); err != nil {
+			logger.Error("Failed to publish component creation instruction", "type", componentType, "id", request.ID, "error", err)
+			// Don't fail the request, but log the error
+		}
+	}
 
 	// Create enhanced response with deployment guidance
 	componentTypeName := strings.ToTitle(componentType)
@@ -1096,61 +1104,138 @@ func createPlugin(c echo.Context) error {
 
 func deleteComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
-	if id == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "id is required"})
+
+	// Create distributed lock for this component deletion
+	lockKey := fmt.Sprintf("delete_%s_%s", componentType, id)
+	lock := common.NewDistributedLock(lockKey, 30*time.Second)
+
+	// Try to acquire lock with timeout
+	if err := lock.TryAcquire(10 * time.Second); err != nil {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "Another deletion operation is in progress for this component",
+		})
 	}
+	defer lock.Release()
 
-	// Check file existence without lock (file system operations are atomic)
-	tempPath, tempExists := GetComponentPath(componentType, id, true)         // .new file
-	componentPath, formalExists := GetComponentPath(componentType, id, false) // formal file
-
-	// Check if component exists and perform memory operations
-	var componentExists bool
+	// Determine file paths and extensions
+	var suffix string
+	var dir string
 	var globalMapToUpdate map[string]string
 
-	common.GlobalMu.Lock()
+	switch componentType {
+	case "ruleset":
+		suffix = ".xml"
+		dir = "ruleset"
+		globalMapToUpdate = common.AllRulesetsRawConfig
+	case "input":
+		suffix = ".yaml"
+		dir = "input"
+		globalMapToUpdate = common.AllInputsRawConfig
+	case "output":
+		suffix = ".yaml"
+		dir = "output"
+		globalMapToUpdate = common.AllOutputsRawConfig
+	case "project":
+		suffix = ".yaml"
+		dir = "project"
+		globalMapToUpdate = common.AllProjectRawConfig
+	case "plugin":
+		suffix = ".go"
+		dir = "plugin"
+		globalMapToUpdate = common.AllPluginsRawConfig
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid component type",
+		})
+	}
 
-	// Get corresponding global mapping based on component type
+	configRoot := common.Config.ConfigRoot
+	componentPath := filepath.Join(configRoot, dir, id+suffix)
+	tempPath := filepath.Join(configRoot, dir, id+suffix+".new")
+
+	// Check if files exist
+	_, formalErr := os.Stat(componentPath)
+	_, tempErr := os.Stat(tempPath)
+	formalExists := formalErr == nil
+	tempExists := tempErr == nil
+
+	if !formalExists && !tempExists {
+		return c.JSON(http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("%s not found", componentType),
+		})
+	}
+
+	// Critical section: Check usage and perform deletion atomically
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	var componentExists bool
+
+	// Check if component exists in global mapping and is in use
 	switch componentType {
 	case "ruleset":
 		_, componentExists = project.GlobalProject.Rulesets[id]
-		globalMapToUpdate = common.AllRulesetsRawConfig
 	case "input":
 		_, componentExists = project.GlobalProject.Inputs[id]
-		globalMapToUpdate = common.AllInputsRawConfig
 	case "output":
 		_, componentExists = project.GlobalProject.Outputs[id]
-		globalMapToUpdate = common.AllOutputsRawConfig
 	case "project":
 		_, componentExists = project.GlobalProject.Projects[id]
-		globalMapToUpdate = common.AllProjectRawConfig
 	case "plugin":
 		_, componentExists = plugin.Plugins[id]
-		globalMapToUpdate = common.AllPluginsRawConfig
-	default:
-		common.GlobalMu.Unlock()
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown component type"})
 	}
 
-	// If it's a formal component (not temporary file), check if it's in use
 	if componentExists {
-		// Check if component is used by any project
-		projects := project.GlobalProject.Projects
-		for _, p := range projects {
-			var inUse bool
-			switch componentType {
-			case "ruleset":
-				_, inUse = p.Rulesets[id]
-			case "input":
-				_, inUse = p.Inputs[id]
-			case "output":
-				_, inUse = p.Outputs[id]
+		// For projects, check if it's running and stop it first
+		if componentType == "project" {
+			if proj, exists := project.GlobalProject.Projects[id]; exists {
+				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
+					logger.Info("Stopping running project before deletion", "project_id", id)
+					if err := proj.Stop(); err != nil {
+						return c.JSON(http.StatusConflict, map[string]string{
+							"error": fmt.Sprintf("Failed to stop project before deletion: %v", err),
+						})
+					}
+
+					// Wait for project to fully stop
+					timeout := time.After(30 * time.Second)
+					ticker := time.NewTicker(500 * time.Millisecond)
+					defer ticker.Stop()
+
+					for {
+						select {
+						case <-timeout:
+							return c.JSON(http.StatusConflict, map[string]string{
+								"error": "Timeout waiting for project to stop",
+							})
+						case <-ticker.C:
+							if proj.Status == project.ProjectStatusStopped {
+								goto projectStopped
+							}
+						}
+					}
+				projectStopped:
+					logger.Info("Project stopped successfully before deletion", "project_id", id)
+				}
 			}
-			if inUse {
-				common.GlobalMu.Unlock()
-				return c.JSON(http.StatusConflict, map[string]string{
-					"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
-				})
+		} else {
+			// For other components, check if used by any project
+			projects := project.GlobalProject.Projects
+			for _, p := range projects {
+				var inUse bool
+				switch componentType {
+				case "ruleset":
+					_, inUse = p.Rulesets[id]
+				case "input":
+					_, inUse = p.Inputs[id]
+				case "output":
+					_, inUse = p.Outputs[id]
+				}
+				if inUse {
+					return c.JSON(http.StatusConflict, map[string]string{
+						"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
+					})
+				}
 			}
 		}
 
@@ -1183,15 +1268,18 @@ func deleteComponent(componentType string, c echo.Context) error {
 		delete(plugin.PluginsNew, id)
 	}
 
-	// For follower nodes, also delete from global config maps
-	if !cluster.IsLeader {
-		delete(globalMapToUpdate, id)
-	}
-
-	common.GlobalMu.Unlock()
+	// Delete from global config maps
+	delete(globalMapToUpdate, id)
 
 	// If it's leader node, delete files and notify followers
 	if cluster.IsLeader {
+		// Get affected projects before deletion
+		affectedProjects := []string{}
+		if componentType != "project" {
+			// For non-project components, get affected projects
+			affectedProjects = project.GetAffectedProjects(componentType, id)
+		}
+
 		// Delete temporary file if exists
 		if tempExists {
 			if err := os.Remove(tempPath); err != nil {
@@ -1204,26 +1292,31 @@ func deleteComponent(componentType string, c echo.Context) error {
 			if err := os.Remove(componentPath); err != nil {
 				logger.Error("failed to delete component file", "path", componentPath, "error", err)
 			}
+		}
 
-			// Update global config maps for leader as well
-			common.GlobalMu.Lock()
-			delete(globalMapToUpdate, id)
-			common.GlobalMu.Unlock()
+		// Publish deletion instruction regardless of which files existed
+		// This ensures followers are notified of the deletion
+		if componentType == "project" {
+			// Delete project config from Redis
+			if err := common.DeleteProjectConfig(id); err != nil {
+				logger.Warn("Failed to delete project config from Redis", "project", id, "error", err)
+			}
 
-			// Special handling for project deletion
-			if componentType == "project" {
-				// Sync project deletion to all followers
-				cluster.SyncProjectStateChange(id, "delete")
-			} else {
-				// Notify followers via Redis for other components
-				cluster.PublishComponentSync(&cluster.CompSyncEvt{
-					Op:   "delete",
-					Type: componentType,
-					ID:   id,
-				})
+			// Publish project deletion instruction
+			if err := cluster.GlobalInstructionManager.PublishComponentDelete("project", id, []string{id}); err != nil {
+				logger.Error("Failed to publish project deletion instruction", "project", id, "error", err)
+			}
+		} else {
+			// For other components, publish deletion instruction with affected projects
+			if err := cluster.GlobalInstructionManager.PublishComponentDelete(componentType, id, affectedProjects); err != nil {
+				logger.Error("Failed to publish component deletion instruction", "type", componentType, "id", id, "error", err)
+			}
 
-				// Update config timestamp since this is an actual config change
-				cluster.UpdateConfigTimestamp()
+			// Restart affected projects
+			if len(affectedProjects) > 0 {
+				if err := cluster.GlobalInstructionManager.PublishProjectsRestart(affectedProjects, "component_deleted"); err != nil {
+					logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+				}
 			}
 		}
 	}
@@ -1342,6 +1435,14 @@ func updateComponent(componentType string, c echo.Context) error {
 	err = WriteComponentFile(tempPath, req.Raw)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
+	}
+
+	// Publish instruction for component update (NEW - this was missing!)
+	if cluster.IsLeader && cluster.GlobalInstructionManager != nil {
+		if err := cluster.GlobalInstructionManager.PublishComponentUpdate(componentType, id, req.Raw, nil); err != nil {
+			logger.Error("Failed to publish component update instruction", "type", componentType, "id", id, "error", err)
+			// Don't fail the request, but log the error
+		}
 	}
 
 	// Create enhanced response with deployment guidance
@@ -3008,3 +3109,6 @@ func containsString(slice []string, item string) bool {
 	}
 	return false
 }
+
+// ComponentOperations has been moved to common package
+// API handlers will use common.GlobalComponentOperations.CreateComponentDirect() etc.

@@ -1,6 +1,9 @@
 package common
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // CheckCoreCache for rule engine
 type CheckCoreCache struct {
@@ -42,3 +45,48 @@ type OperationRecord struct {
 	Error         string                 `json:"error,omitempty"`
 	Details       map[string]interface{} `json:"details,omitempty"`
 }
+
+// Cluster startup coordination constants
+const (
+	ClusterLeaderReadyKey    = "cluster:leader:ready"
+	ClusterStartupTimeoutSec = 60 // Wait up to 60 seconds for leader to be ready
+)
+
+// StartupCoordinator manages cluster startup coordination
+type StartupCoordinator struct {
+	isLeader     bool
+	leaderReady  bool
+	startupMutex sync.RWMutex
+}
+
+// Component update states
+type ComponentUpdateState int
+
+const (
+	UpdateStateIdle ComponentUpdateState = iota
+	UpdateStatePreparing
+	UpdateStateUpdating
+	UpdateStateCompleting
+	UpdateStateFailed
+)
+
+// ComponentUpdateManager manages component update operations
+type ComponentUpdateManager struct {
+	activeUpdates map[string]*ComponentUpdateOperation
+	mutex         sync.RWMutex
+}
+
+// ComponentUpdateOperation represents an ongoing component update
+type ComponentUpdateOperation struct {
+	ComponentType    string
+	ComponentID      string
+	State            ComponentUpdateState
+	StartTime        time.Time
+	LastUpdate       time.Time
+	AffectedProjects []string
+	Lock             *DistributedLock
+	mutex            sync.RWMutex
+}
+
+// Global component update manager
+var GlobalComponentUpdateManager *ComponentUpdateManager

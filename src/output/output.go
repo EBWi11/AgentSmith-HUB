@@ -1,7 +1,6 @@
 package output
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"encoding/json"
@@ -211,7 +210,7 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 	}
 
 	// Only create sampler on leader node for performance
-	if cluster.IsLeader {
+	if common.IsLeader {
 		out.sampler = common.GetSampler("output." + id)
 	}
 	return out, nil
@@ -1048,7 +1047,7 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 	}
 
 	// Only create sampler on leader node for performance
-	if cluster.IsLeader {
+	if common.IsLeader {
 		newOutput.sampler = common.GetSampler("output." + existing.Id)
 	}
 

@@ -866,8 +866,10 @@ func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
 	delete(plugin.PluginsNew, change.ID)
 	common.GlobalMu.Unlock()
 
-	// Phase 3: Sync to followers (they will also do stop-update-start)
-	syncComponentToFollowers("plugin", change.ID)
+	// Phase 3: Sync to followers using instruction system
+	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("plugin", change.ID, change.NewContent, affectedProjects); err != nil {
+		logger.Error("Failed to publish plugin push change instruction", "plugin", change.ID, "error", err)
+	}
 
 	// Phase 4: Restart projects with new plugin
 	logger.Info("Restarting affected projects with new plugin", "plugin", pluginID, "projects", affectedProjects)
@@ -969,8 +971,10 @@ func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("ruleset", change.ID)
 	}
 
-	// Sync to followers
-	syncComponentToFollowers(change.Type, change.ID)
+	// Sync to followers using instruction system
+	if err := cluster.GlobalInstructionManager.PublishComponentPushChange(change.Type, change.ID, change.NewContent, affectedProjects); err != nil {
+		logger.Error("Failed to publish component push change instruction", "type", change.Type, "id", change.ID, "error", err)
+	}
 
 	logger.Info("Component change applied successfully", "type", change.Type, "id", change.ID, "affected_projects", len(affectedProjects))
 
@@ -1036,8 +1040,10 @@ func applyProjectChange(change *EnhancedPendingChange) error {
 	delete(project.GlobalProject.ProjectsNew, change.ID)
 	common.GlobalMu.Unlock()
 
-	// Sync to followers
-	syncComponentToFollowers("project", change.ID)
+	// Sync to followers using instruction system
+	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("project", change.ID, change.NewContent, nil); err != nil {
+		logger.Error("Failed to publish project push change instruction", "project", change.ID, "error", err)
+	}
 
 	logger.Info("Project change applied successfully", "id", change.ID)
 
@@ -1127,8 +1133,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				common.GlobalMu.Unlock()
 
 				successCount++
-				// Sync to follower nodes
-				syncComponentToFollowers("plugin", name)
+				// Get affected projects and add them to restart list
+				affectedProjects := project.GetAffectedProjects("plugin", name)
+
+				// Sync to follower nodes using instruction system
+				if err := cluster.GlobalInstructionManager.PublishComponentPushChange("plugin", name, content, affectedProjects); err != nil {
+					logger.Error("Failed to publish plugin push change instruction", "plugin", name, "error", err)
+				}
 
 				// Record operation history
 				var oldContent string
@@ -1136,9 +1147,6 @@ func ApplyPendingChanges(c echo.Context) error {
 					oldContent = string(existingPlugin.Payload)
 				}
 				RecordChangePush("plugin", name, oldContent, content, "", "success", "")
-
-				// Get affected projects and add them to restart list
-				affectedProjects := project.GetAffectedProjects("plugin", name)
 				for _, projectID := range affectedProjects {
 					projectsToRestart[projectID] = struct{}{}
 				}
@@ -1204,8 +1212,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				common.GlobalMu.Unlock()
 
 				successCount++
-				// Sync to follower nodes
-				syncComponentToFollowers("input", id)
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("input", id)
+
+				// Sync to follower nodes using instruction system
+				if err := cluster.GlobalInstructionManager.PublishComponentPushChange("input", id, content, affectedProjects); err != nil {
+					logger.Error("Failed to publish input push change instruction", "input", id, "error", err)
+				}
 
 				// Record operation history
 				var oldContent string
@@ -1213,9 +1226,6 @@ func ApplyPendingChanges(c echo.Context) error {
 					oldContent = oldInput.Config.RawConfig
 				}
 				RecordChangePush("input", id, oldContent, content, "", "success", "")
-
-				// Get affected projects
-				affectedProjects := project.GetAffectedProjects("input", id)
 				for _, projectID := range affectedProjects {
 					projectsToRestart[projectID] = struct{}{}
 				}
@@ -1280,8 +1290,13 @@ func ApplyPendingChanges(c echo.Context) error {
 				common.GlobalMu.Unlock()
 
 				successCount++
-				// Sync to follower nodes
-				syncComponentToFollowers("output", id)
+				// Get affected projects
+				affectedProjects := project.GetAffectedProjects("output", id)
+
+				// Sync to follower nodes using instruction system
+				if err := cluster.GlobalInstructionManager.PublishComponentPushChange("output", id, content, affectedProjects); err != nil {
+					logger.Error("Failed to publish output push change instruction", "output", id, "error", err)
+				}
 
 				// Record operation history
 				var oldContent string
@@ -1289,9 +1304,6 @@ func ApplyPendingChanges(c echo.Context) error {
 					oldContent = oldOutput.Config.RawConfig
 				}
 				RecordChangePush("output", id, oldContent, content, "", "success", "")
-
-				// Get affected projects
-				affectedProjects := project.GetAffectedProjects("output", id)
 				for _, projectID := range affectedProjects {
 					projectsToRestart[projectID] = struct{}{}
 				}
@@ -1453,8 +1465,7 @@ func ApplyPendingChanges(c echo.Context) error {
 		}
 	}
 
-	// Reload components after applying changes
-	reloadComponents()
+	// Components are reloaded during the individual change application process
 
 	// Update project dependencies
 	project.AnalyzeProjectDependencies()
@@ -1951,20 +1962,6 @@ func mergePluginFile(name string) error {
 	return nil
 }
 
-// reloadComponents reloads components after applying changes
-// reloadComponents is deprecated - use enhanced manager instead
-// Kept for legacy compatibility only
-func reloadComponents() {
-	// Clear the temporary files maps with proper locking
-	common.GlobalMu.Lock()
-	plugin.PluginsNew = make(map[string]string)
-	project.GlobalProject.InputsNew = make(map[string]string)
-	project.GlobalProject.OutputsNew = make(map[string]string)
-	project.GlobalProject.RulesetsNew = make(map[string]string)
-	project.GlobalProject.ProjectsNew = make(map[string]string)
-	common.GlobalMu.Unlock()
-}
-
 // syncComponentToFollowers syncs a component change to follower nodes
 func syncComponentToFollowers(componentType string, id string) {
 	// Determine the file path based on component type
@@ -2005,16 +2002,18 @@ func syncComponentToFollowers(componentType string, id string) {
 	// Update global component config maps for follower access
 	updateGlobalComponentConfigMap(componentType, id, string(content))
 
-	// Publish component sync event to followers
-	cluster.PublishComponentSync(&cluster.CompSyncEvt{
-		Op:   "update",
-		Type: componentType,
-		ID:   id,
-		Raw:  string(content),
-	})
-
-	// Update config timestamp since this is called after actual config changes
-	cluster.UpdateConfigTimestamp()
+	// Publish instruction for component change
+	if componentType == "project" {
+		if err := cluster.GlobalInstructionManager.PublishComponentUpdate("project", id, string(content), nil); err != nil {
+			logger.Error("Failed to publish project update instruction", "project", id, "error", err)
+		}
+	} else {
+		// For other components, publish update instruction
+		affectedProjects := project.GetAffectedProjects(componentType, id)
+		if err := cluster.GlobalInstructionManager.PublishComponentUpdate(componentType, id, string(content), affectedProjects); err != nil {
+			logger.Error("Failed to publish component update instruction", "type", componentType, "id", id, "error", err)
+		}
+	}
 
 	logger.Info("Synced component to followers", "type", componentType, "id", id)
 }
@@ -2060,21 +2059,27 @@ func updateGlobalComponentConfigMap(componentType, id, content string) {
 
 // syncComponentToFollowersWithData syncs a component to follower nodes
 func syncComponentToFollowersWithData(syncData ComponentSyncRequest) {
-	// Translate old syncData to new CompSyncEvt and publish via Redis
-	evt := &cluster.CompSyncEvt{
-		Op:        "update", // apply_changes implies add or update; follower just upserts
-		Type:      syncData.Type,
-		ID:        syncData.ID,
-		Raw:       syncData.Content,
-		IsRunning: syncData.IsRunning,
+	// Publish instruction for component sync
+	if syncData.Type == "project" {
+		if err := cluster.GlobalInstructionManager.PublishComponentUpdate("project", syncData.ID, syncData.Content, nil); err != nil {
+			logger.Error("Failed to publish project update instruction", "project", syncData.ID, "error", err)
+		}
+		if syncData.IsRunning {
+			if err := cluster.GlobalInstructionManager.PublishProjectStart(syncData.ID); err != nil {
+				logger.Error("Failed to publish project start instruction", "project", syncData.ID, "error", err)
+			}
+		}
+	} else {
+		// For other components, publish update instruction
+		affectedProjects := project.GetAffectedProjects(syncData.Type, syncData.ID)
+		if err := cluster.GlobalInstructionManager.PublishComponentUpdate(syncData.Type, syncData.ID, syncData.Content, affectedProjects); err != nil {
+			logger.Error("Failed to publish component update instruction", "type", syncData.Type, "id", syncData.ID, "error", err)
+		}
 	}
 
-	// Note: UpdateConfigTimestamp is now handled automatically in PublishComponentSync
-	cluster.PublishComponentSync(evt)
-
 	logger.Info("Published component sync event via Redis",
-		"type", evt.Type,
-		"id", evt.ID,
+		"type", syncData.Type,
+		"id", syncData.ID,
 	)
 }
 

@@ -27,7 +27,34 @@ type projectCommandHandler struct{}
 func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
 	proj, exists := GlobalProject.Projects[projectID]
 	if !exists {
-		return fmt.Errorf("project not found: %s", projectID)
+		// Try to create project from global config if it doesn't exist
+		logger.Info("Project not found locally, attempting to create from global config", "project_id", projectID)
+
+		// First try to get config from Redis (most reliable source)
+		projectConfig, err := common.GetProjectConfig(projectID)
+		if err != nil || projectConfig == "" {
+			// Fallback to global config map
+			common.GlobalMu.RLock()
+			projectConfig = common.AllProjectRawConfig[projectID]
+			common.GlobalMu.RUnlock()
+		}
+
+		if projectConfig != "" {
+			// Create project from config
+			newProj, err := NewProject("", projectConfig, projectID)
+			if err != nil {
+				logger.Error("Failed to create project from config", "project_id", projectID, "error", err)
+				return fmt.Errorf("failed to create project from config: %w", err)
+			}
+
+			// Add to global projects
+			GlobalProject.Projects[projectID] = newProj
+			proj = newProj
+			logger.Info("Successfully created project from config", "project_id", projectID)
+		} else {
+			logger.Error("Project config not found in Redis or global config", "project_id", projectID)
+			return fmt.Errorf("project not found: %s", projectID)
+		}
 	}
 
 	// Get node ID from common config instead of cluster package
@@ -252,10 +279,25 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
-	// Note: Project status is now properly loaded from .project_status file in main.go
-	// No need to override it here - preserve the loaded status
-	logger.Info("Project created with loaded status", "id", p.Id, "status", p.Status)
+	logger.Info("Project created successfully", "id", p.Id, "status", p.Status)
 
+	// Add to global project registry
+	GlobalProject.Projects[p.Id] = p
+
+	// Update global project config map for cluster synchronization
+	common.GlobalMu.Lock()
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	common.AllProjectRawConfig[p.Id] = p.Config.RawConfig
+	common.GlobalMu.Unlock()
+
+	// Store project config in Redis for cluster-wide access
+	if err := common.StoreProjectConfig(p.Id, p.Config.RawConfig); err != nil {
+		logger.Warn("Failed to store project config in Redis", "project", p.Id, "error", err)
+	}
+
+	logger.Info("Project created successfully", "project", p.Id)
 	return p, nil
 }
 
@@ -856,6 +898,10 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 
 // Start starts the project and manages shared components safely
 func (p *Project) Start() error {
+	// CRITICAL FIX: Only update config maps once to avoid redundant Redis operations
+	// The config will be updated again in SaveProjectStatus(), so we skip it here
+	// This reduces Redis load and prevents race conditions
+
 	// Check if this is test mode (any output has TestCollectionChan set)
 	isTestMode := false
 	for _, out := range p.Outputs {
@@ -1272,28 +1318,19 @@ func (p *Project) stopComponents() error {
 		p.stopChan = nil
 	}
 
-	// Set status to stopped and save (only if not shutdown stop)
+	// Set status to stopped and save
 	now := time.Now()
 	p.Status = ProjectStatusStopped
 	p.StatusChangedAt = &now
 
-	// Only save status if this is not a shutdown stop (preserve user intention)
-	if !p.isShutdownStop {
-		err := p.SaveProjectStatus()
-		if err != nil {
-			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
-		}
-	} else {
-		logger.Info("Skipping status save during shutdown to preserve user intention", "project", p.Id)
+	// Save project status to Redis
+	err := p.SaveProjectStatus()
+	if err != nil {
+		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
 	}
 
 	logger.Info("Finished stopping project components", "project", p.Id)
 	return nil
-}
-
-// SetShutdownMode sets the shutdown flag to control whether status should be saved
-func (p *Project) SetShutdownMode(isShutdown bool) {
-	p.isShutdownStop = isShutdown
 }
 
 // Stop stops the project and all its components in proper order
@@ -1344,15 +1381,77 @@ func (p *Project) Stop() error {
 		logger.Info("Project stopped successfully", "project", p.Id)
 		return nil
 	case <-overallTimeout:
-		logger.Error("Project stop timeout exceeded", "project", p.Id)
+		logger.Error("Project stop timeout exceeded, forcing cleanup", "project", p.Id)
+
+		// Force cleanup
+		if err := p.forceCleanup(); err != nil {
+			logger.Error("Force cleanup failed", "project", p.Id, "error", err)
+		}
+
 		now := time.Now()
-		p.Status = ProjectStatusError
+		p.Status = ProjectStatusStopped // Mark as stopped even if cleanup failed
 		p.StatusChangedAt = &now
 
-		// Skip persisting error status
+		// Save status to Redis
+		if err := p.SaveProjectStatus(); err != nil {
+			logger.Warn("Failed to save project status after force cleanup", "id", p.Id, "error", err)
+		}
 
-		return fmt.Errorf("project stop timeout exceeded for %s", p.Id)
+		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
 	}
+}
+
+// forceCleanup performs aggressive cleanup when normal stop fails
+func (p *Project) forceCleanup() error {
+	logger.Warn("Performing force cleanup for project", "project", p.Id)
+
+	// Force close all channels without waiting
+	for _, channelId := range p.MsgChannels {
+		GlobalProject.EdgeMapMu.Lock()
+		if ch, exists := GlobalProject.msgChans[channelId]; exists {
+			// Don't wait for graceful channel closure
+			select {
+			case <-ch:
+				// Channel already closed
+			default:
+				close(ch)
+			}
+			delete(GlobalProject.msgChans, channelId)
+			delete(GlobalProject.msgChansCounter, channelId)
+		}
+		GlobalProject.EdgeMapMu.Unlock()
+	}
+
+	// Force stop metrics collection
+	if p.metricsStop != nil {
+		select {
+		case <-p.metricsStop:
+			// Already closed
+		default:
+			close(p.metricsStop)
+		}
+		p.metricsStop = nil
+	}
+
+	// Force close project stop channel
+	if p.stopChan != nil {
+		select {
+		case <-p.stopChan:
+			// Already closed
+		default:
+			close(p.stopChan)
+		}
+		p.stopChan = nil
+	}
+
+	// Clear component references immediately
+	p.Inputs = make(map[string]*input.Input)
+	p.Outputs = make(map[string]*output.Output)
+	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.MsgChannels = []string{}
+
+	logger.Warn("Force cleanup completed for project", "project", p.Id)
+	return nil
 }
 
 // collectMetrics collects runtime metrics
@@ -1581,117 +1680,25 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	return result
 }
 
-// SaveProjectStatus saves the current status of a project to a file
-// This method saves the "user intention" status, not the actual runtime status
+// SaveProjectStatus saves project status to Redis for cluster visibility
 func (p *Project) SaveProjectStatus() error {
-	// Only persist durable states (running, stopped). Skip starting, stopping, error.
-	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStopped {
-		return nil
+	// Update global project config map for cluster synchronization
+	common.GlobalMu.Lock()
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
 	}
-	// Skip test projects (IDs starting with "test_")
-	if strings.HasPrefix(p.Id, "test_") {
-		return nil
-	}
-	statusFile := common.GetConfigPath(".project_status")
+	common.AllProjectRawConfig[p.Id] = p.Config.RawConfig
+	common.GlobalMu.Unlock()
 
-	// Read existing statuses
-	projectStatuses := make(map[string]string)
-
-	// Check if the file exists
-	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
-		// Create the file if it doesn't exist
-		f, err := os.Create(statusFile)
-		if err != nil {
-			return fmt.Errorf("failed to create status file: %w", err)
-		}
-		_ = f.Close()
-	} else {
-		// Read the status file if it exists
-		data, err := os.ReadFile(statusFile)
-		if err == nil {
-			// Parse the content
-			lines := strings.Split(string(data), "\n")
-			for _, line := range lines {
-				if line == "" {
-					continue
-				}
-
-				parts := strings.Split(line, ":")
-				if len(parts) == 2 {
-					projectStatuses[parts[0]] = parts[1]
-				}
-			}
-		}
-	}
-
-	// Update the status for this project
-	projectStatuses[p.Id] = string(p.Status)
-
-	// Create or open the status file
-	f, err := os.OpenFile(statusFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open status file: %w", err)
-	}
-	defer f.Close()
-
-	// Write all project statuses to the file
-	for id, status := range projectStatuses {
-		_, err = fmt.Fprintf(f, "%s:%s\n", id, status)
-		if err != nil {
-			return fmt.Errorf("failed to write project status: %w", err)
-		}
+	// Store project config in Redis for cluster-wide access
+	if err := common.StoreProjectConfig(p.Id, p.Config.RawConfig); err != nil {
+		logger.Warn("Failed to store project config in Redis", "project", p.Id, "error", err)
 	}
 
 	// Write to Redis for cluster-wide visibility
-	updateProjectStatusRedis(common.Config.LocalIP, p.Id, p.Status)
+	updateProjectStatusRedis(common.Config.LocalIP, p.Id, p.Status, p.StatusChangedAt)
 
 	return nil
-}
-
-// LoadProjectStatus loads the project status from a file
-func (p *Project) LoadProjectStatus() (ProjectStatus, error) {
-	statusFile := common.GetConfigPath(".project_status")
-
-	// Check if the file exists
-	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
-		// File doesn't exist, create an empty one
-		f, err := os.Create(statusFile)
-		if err != nil {
-			return ProjectStatusStopped, fmt.Errorf("failed to create status file: %w", err)
-		}
-		_ = f.Close()
-		return ProjectStatusStopped, nil
-	}
-
-	// Read the status file
-	data, err := os.ReadFile(statusFile)
-	if err != nil {
-		return ProjectStatusStopped, fmt.Errorf("failed to read status file: %w", err)
-	}
-
-	// Parse the content
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		parts := strings.Split(line, ":")
-		if len(parts) != 2 {
-			continue
-		}
-
-		projectID := parts[0]
-		status := parts[1]
-
-		// If this is the project we're looking for
-		if projectID == p.Id {
-			return ProjectStatus(status), nil
-		}
-	}
-
-	// Project not found in the status file
-	return ProjectStatusStopped, nil
 }
 
 // StopForTesting stops the project quickly for testing purposes and ensures complete cleanup
@@ -2483,7 +2490,7 @@ func decrementChannelRef(channelId string) int64 {
 }
 
 // updateProjectStatusRedis writes status to Redis hash and publishes event with error handling
-func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
+func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, statusChangedAt *time.Time) {
 	if common.GetRedisClient() == nil {
 		logger.Warn("Redis client not available, cannot update project status", "node_id", nodeID, "project_id", projectID)
 		return
@@ -2501,28 +2508,34 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 		actualNodeID = common.Config.LocalIP
 	}
 
-	// Update project status in Redis hash with retry
+	// Update project status in Redis hash with improved retry mechanism
 	hashKey := "cluster:proj_states:" + actualNodeID
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := common.RedisHSet(hashKey, projectID, string(status)); err != nil {
-			logger.Error("Failed to update project status in Redis", "node_id", actualNodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
-			if attempt == 2 {
-				logger.Error("Failed to update project status after 3 attempts", "node_id", actualNodeID, "project_id", projectID)
-				return
-			}
-			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
-			continue
-		}
-		break
+	if err := common.RedisHSetWithRetry(hashKey, projectID, string(status)); err != nil {
+		logger.Error("Failed to update project status in Redis after retries", "node_id", actualNodeID, "project_id", projectID, "error", err)
+		return
 	}
 
-	// Publish project status event with retry and timestamp
-	now := time.Now()
+	// Store timestamp in separate hash for cluster coordination
+	// Use the actual project status change time if available, otherwise use current time
+	var timestamp time.Time
+	if statusChangedAt != nil {
+		timestamp = *statusChangedAt
+	} else {
+		timestamp = time.Now()
+	}
+
+	timestampKey := "cluster:proj_status_ts:" + actualNodeID
+	if err := common.RedisHSetWithRetry(timestampKey, projectID, timestamp.Format(time.RFC3339)); err != nil {
+		logger.Error("Failed to update project status timestamp in Redis", "node_id", actualNodeID, "project_id", projectID, "error", err)
+		// Continue with event publishing even if timestamp storage fails
+	}
+
+	// Publish project status event with improved retry mechanism
 	evt := map[string]interface{}{
 		"node_id":           actualNodeID,
 		"project_id":        projectID,
 		"status":            string(status),
-		"status_changed_at": now.Format(time.RFC3339),
+		"status_changed_at": timestamp.Format(time.RFC3339),
 	}
 	data, err := json.Marshal(evt)
 	if err != nil {
@@ -2530,18 +2543,10 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus) {
 		return
 	}
 
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := common.RedisPublish("cluster:proj_status", string(data)); err != nil {
-			logger.Error("Failed to publish project status event", "node_id", actualNodeID, "project_id", projectID, "attempt", attempt+1, "error", err)
-			if attempt == 2 {
-				logger.Error("Failed to publish project status after 3 attempts", "node_id", actualNodeID, "project_id", projectID)
-				return
-			}
-			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond) // Exponential backoff
-			continue
-		}
-		break
+	if err := common.RedisPublishWithRetry("cluster:proj_status", string(data)); err != nil {
+		logger.Error("Failed to publish project status after retries", "node_id", actualNodeID, "project_id", projectID, "error", err)
+		return
 	}
 
-	logger.Debug("Project status updated successfully", "node_id", actualNodeID, "project_id", projectID, "status", status, "timestamp", now.Format(time.RFC3339))
+	logger.Debug("Project status updated successfully", "node_id", actualNodeID, "project_id", projectID, "status", status, "timestamp", timestamp.Format(time.RFC3339))
 }

@@ -162,11 +162,7 @@ func readErrorLogsFromFile(filePath string, source string, filter ErrorLogFilter
 
 		// Set node information
 		entry.NodeID = common.Config.LocalIP
-		if cluster.ClusterInstance != nil && cluster.ClusterInstance.SelfAddress != "" {
-			entry.NodeAddress = cluster.ClusterInstance.SelfAddress
-		} else {
-			entry.NodeAddress = common.Config.LocalIP
-		}
+		entry.NodeAddress = common.Config.LocalIP
 
 		logs = append(logs, entry)
 	}
@@ -559,34 +555,26 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 		nodeStats[common.Config.LocalIP] = leaderStat
 	}
 
-	// Get logs from follower nodes
-	if cluster.ClusterInstance != nil {
-		cluster.ClusterInstance.Mu.RLock()
-		nodes := make(map[string]*cluster.NodeInfo)
-		for k, v := range cluster.ClusterInstance.Nodes {
-			nodes[k] = v
-		}
-		cluster.ClusterInstance.Mu.RUnlock()
-
-		for nodeID, nodeInfo := range nodes {
-			if nodeID == common.Config.LocalIP || !nodeInfo.IsHealthy {
-				continue // Skip self and unhealthy nodes
+	// Get logs from follower nodes via Redis cache only
+	// For now, just get logs from Redis cache without cluster state
+	// This will be enhanced when the new cluster system is fully integrated
+	if cluster.GlobalHeartbeatManager != nil {
+		nodes := cluster.GlobalHeartbeatManager.GetNodes()
+		for nodeID := range nodes {
+			if nodeID == common.Config.LocalIP {
+				continue // Skip self
 			}
 
-			// Attempt Redis cache
+			// Get logs from Redis cache only
 			var followerLogs []ErrorLogEntry
 			if cached, err := common.RedisGet("cluster:error_logs:" + nodeID); err == nil && cached != "" {
-				_ = json.Unmarshal([]byte(cached), &followerLogs)
-			}
-
-			// Fallback to HTTP if cache missing
-			if len(followerLogs) == 0 {
-				flogs, err := getFollowerErrorLogs(nodeInfo.Address, filter)
-				if err != nil {
-					logger.Error("Failed to get follower error logs", "node", nodeID, "error", err)
+				if err := json.Unmarshal([]byte(cached), &followerLogs); err != nil {
+					logger.Error("Failed to unmarshal follower error logs from Redis", "node", nodeID, "error", err)
 					continue
 				}
-				followerLogs = flogs
+			} else {
+				logger.Debug("No error logs found in Redis cache for follower node", "node", nodeID)
+				continue
 			}
 
 			if len(followerLogs) == 0 {
@@ -596,7 +584,7 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 			// Set node information for follower logs
 			for i := range followerLogs {
 				followerLogs[i].NodeID = nodeID
-				followerLogs[i].NodeAddress = nodeInfo.Address
+				followerLogs[i].NodeAddress = nodeID // Use nodeID as address for now
 			}
 
 			allLogs = append(allLogs, followerLogs...)
@@ -646,73 +634,4 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 	}
 
 	return allLogs, nodeStats, nil
-}
-
-// getFollowerErrorLogs fetches error logs from a follower node
-func getFollowerErrorLogs(followerAddress string, filter ErrorLogFilter) ([]ErrorLogEntry, error) {
-	// Build query parameters
-	params := make(map[string]string)
-	if filter.Source != "" {
-		params["source"] = filter.Source
-	}
-	if filter.Keyword != "" {
-		params["keyword"] = filter.Keyword
-	}
-	if !filter.StartTime.IsZero() {
-		params["start_time"] = filter.StartTime.Format(time.RFC3339)
-	}
-	if !filter.EndTime.IsZero() {
-		params["end_time"] = filter.EndTime.Format(time.RFC3339)
-	}
-	params["limit"] = strconv.Itoa(filter.Limit)
-	params["offset"] = strconv.Itoa(filter.Offset)
-
-	// Build URL with proper protocol handling
-	var url string
-	if strings.HasPrefix(followerAddress, "http://") || strings.HasPrefix(followerAddress, "https://") {
-		url = fmt.Sprintf("%s/error-logs", followerAddress)
-	} else {
-		url = fmt.Sprintf("http://%s/error-logs", followerAddress)
-	}
-	if len(params) > 0 {
-		url += "?"
-		var paramPairs []string
-		for k, v := range params {
-			paramPairs = append(paramPairs, fmt.Sprintf("%s=%s", k, v))
-		}
-		url += strings.Join(paramPairs, "&")
-	}
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Create request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add authentication token
-	req.Header.Set("token", common.Config.Token)
-
-	// Send request
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request to follower: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("follower returned status %d", resp.StatusCode)
-	}
-
-	// Parse response
-	var response ErrorLogResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode follower response: %w", err)
-	}
-
-	return response.Logs, nil
 }

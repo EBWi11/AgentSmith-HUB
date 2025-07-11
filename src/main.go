@@ -21,11 +21,11 @@ import (
 	"syscall"
 	"time"
 
+	"runtime"
+	"sync"
+
 	"gopkg.in/yaml.v3"
 )
-
-// stopPeriodicSync is closed on graceful shutdown to stop the component sync goroutine
-var stopPeriodicSync chan struct{}
 
 func main() {
 	var (
@@ -75,11 +75,8 @@ func main() {
 	ip, _ := common.GetLocalIP()
 	common.Config.LocalIP = ip
 
-	// Self address used by cluster components (include port for both leader and follower)
-	selfAddr := fmt.Sprintf("%s:%d", ip, *port)
-
-	cm := cluster.ClusterInit(ip, selfAddr)
-	cluster.NodeID = ip
+	// Initialize new cluster system
+	cluster.InitCluster(ip, *isLeader)
 
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
@@ -87,43 +84,27 @@ func main() {
 	if *isLeader {
 		// Leader mode
 		common.Config.Leader = ip
-		cm.SetLeader(ip, selfAddr)
-		cm.StartProjectStatesSyncLoop()
 		token, _ := readToken(true)
 		common.Config.Token = token
-
-		// Start leader-specific cluster services
-		cm.StartRedisHeartbeatSubscriber()
-		cm.StartLeaderServices()
-
-		// Initialize global component raw config maps for follower access
-		initializeGlobalComponentMaps()
+		logger.Info("Leader mode initialized")
 	} else {
 		// Follower mode
-		cm.StartHeartbeatLoop() // follower heartbeats only
-		// Followers don't expose HTTP API, no token needed
+		// Followers don't need token since they don't expose HTTP API
 		common.Config.Token = ""
 		logger.Info("Follower mode initialized")
-
-		// Sync components from leader before loading local components
-		if err := syncComponentsFromLeader(); err != nil {
-			logger.Warn("Failed to sync components from leader, using local components", "error", err)
-		}
-
-		// Start periodic sync check to ensure we have latest configurations
-		stopPeriodicSync = make(chan struct{})
-		go startPeriodicComponentSync()
 	}
 
-	// Load components & projects
+	// Load components & projects (this will use the synced configurations)
 	loadLocalComponents()
 	loadLocalProjects()
 
 	// Init monitors
-	common.InitSystemMonitor(cluster.NodeID)
+	common.InitSystemMonitor(ip)
 
 	// Start cluster background processes (heartbeat, cleanup, etc.)
-	cm.Start()
+	if cluster.GlobalClusterManager != nil {
+		cluster.GlobalClusterManager.Start()
+	}
 
 	if *isLeader {
 		// Leader extra services
@@ -141,8 +122,8 @@ func main() {
 	}
 
 	// Start QPS collector on all nodes (leader and followers)
-	common.InitQPSCollector(cluster.NodeID, func() []common.QPSMetrics {
-		return project.GetQPSDataForNode(cluster.NodeID)
+	common.InitQPSCollector(ip, func() []common.QPSMetrics {
+		return project.GetQPSDataForNode(ip)
 	}, func() *common.SystemMetrics {
 		if common.GlobalSystemMonitor != nil {
 			return common.GlobalSystemMonitor.GetCurrentMetrics()
@@ -156,33 +137,138 @@ func main() {
 
 	go func() {
 		<-shutdownCtx.Done()
-		logger.Info("shutdown signal received, stopping Hub components ...")
-		if stopPeriodicSync != nil {
-			close(stopPeriodicSync)
-		}
+		logger.Info("shutdown signal received, starting graceful shutdown process...")
 
-		// 1. Stop all running projects (but don't save status - preserve user intention)
-		for id, p := range project.GlobalProject.Projects {
-			if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
-				logger.Info("stopping project for shutdown", "id", id)
-				// Set a flag to indicate this is a shutdown stop (don't save status)
-				p.SetShutdownMode(true)
-				if err := p.Stop(); err != nil {
-					logger.Warn("project shutdown stop error", "id", id, "error", err)
+		// Create a timeout context for the entire shutdown process
+		shutdownTimeout := 60 * time.Second
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer shutdownCancel()
+
+		// Channel to track shutdown completion
+		shutdownComplete := make(chan struct{})
+
+		go func() {
+			defer close(shutdownComplete)
+
+			// Phase 1: Stop accepting new requests and notify cluster
+			logger.Info("Phase 1: Stopping API server and notifying cluster...")
+
+			// Notify other cluster nodes that this node is shutting down
+			if *isLeader {
+				// Remove leader ready flag
+				if err := common.RedisDel(common.ClusterLeaderReadyKey); err != nil {
+					logger.Warn("Failed to remove leader ready flag", "error", err)
+				}
+			}
+
+			// Phase 2: Stop all running projects gracefully
+			logger.Info("Phase 2: Stopping all running projects...")
+			projectStopTimeout := 30 * time.Second
+			projectStopCtx, projectStopCancel := context.WithTimeout(context.Background(), projectStopTimeout)
+			defer projectStopCancel()
+
+			var projectWg sync.WaitGroup
+			projectStopResults := make(chan struct {
+				id  string
+				err error
+			}, len(project.GlobalProject.Projects))
+
+			for id, p := range project.GlobalProject.Projects {
+				if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
+					projectWg.Add(1)
+					go func(projectID string, proj *project.Project) {
+						defer projectWg.Done()
+						logger.Info("Stopping project for shutdown", "id", projectID)
+
+						// Create a timeout for individual project stop
+						projectCtx, projectCancel := context.WithTimeout(projectStopCtx, 20*time.Second)
+						defer projectCancel()
+
+						stopComplete := make(chan error, 1)
+						go func() {
+							stopComplete <- proj.Stop()
+						}()
+
+						select {
+						case err := <-stopComplete:
+							projectStopResults <- struct {
+								id  string
+								err error
+							}{projectID, err}
+						case <-projectCtx.Done():
+							logger.Warn("Project stop timeout, will force cleanup", "id", projectID)
+							projectStopResults <- struct {
+								id  string
+								err error
+							}{projectID, fmt.Errorf("stop timeout")}
+						}
+					}(id, p)
+				}
+			}
+
+			// Wait for all projects to stop or timeout
+			go func() {
+				projectWg.Wait()
+				close(projectStopResults)
+			}()
+
+			// Collect results
+			stoppedCount := 0
+			failedCount := 0
+			for result := range projectStopResults {
+				if result.err != nil {
+					logger.Warn("Project stop failed", "id", result.id, "error", result.err)
+					failedCount++
+				} else {
+					logger.Info("Project stopped successfully", "id", result.id)
+					stoppedCount++
+				}
+			}
+
+			logger.Info("Project shutdown phase completed", "stopped", stoppedCount, "failed", failedCount)
+
+			// Phase 3: Stop cluster services
+			logger.Info("Phase 3: Stopping cluster services...")
+			if cluster.GlobalClusterManager != nil {
+				cluster.GlobalClusterManager.Stop()
+			}
+
+			// Phase 4: Stop background services
+			logger.Info("Phase 4: Stopping background services...")
+			common.StopQPSCollector()
+			common.StopQPSManager()
+			common.StopClusterSystemManager()
+			common.StopDailyStatsManager()
+			if rsm := common.GetRedisSampleManager(); rsm != nil {
+				rsm.Close()
+			}
+
+			// Phase 5: Final cleanup
+			logger.Info("Phase 5: Final cleanup...")
+			// Force garbage collection to clean up any remaining resources
+			runtime.GC()
+			time.Sleep(100 * time.Millisecond)
+
+			logger.Info("Graceful shutdown completed successfully")
+		}()
+
+		// Wait for shutdown completion or timeout
+		select {
+		case <-shutdownComplete:
+			logger.Info("Shutdown completed within timeout")
+		case <-shutdownCtx.Done():
+			logger.Error("Shutdown timeout exceeded, forcing exit")
+			// Force cleanup of critical resources
+			for id, p := range project.GlobalProject.Projects {
+				if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
+					logger.Warn("Force stopping project", "id", id)
+					// Don't wait for graceful stop, just mark as stopped
+					p.Status = project.ProjectStatusStopped
 				}
 			}
 		}
 
-		// 2. Stop collectors & managers
-		common.StopQPSCollector()
-		common.StopQPSManager()
-		common.StopClusterSystemManager()
-		common.StopDailyStatsManager()
-		if rsm := common.GetRedisSampleManager(); rsm != nil {
-			rsm.Close()
-		}
-
-		logger.Info("hub shutdown complete — bye ❄️")
+		logger.Info("Hub shutdown complete — bye ❄️")
 		os.Exit(0)
 	}()
 
@@ -269,25 +355,8 @@ func loadLocalProjects() {
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
 		if p, err := project.NewProject(f, "", id); err == nil {
-			// Load persisted status from .project_status file (if any)
-			if savedStatus, err2 := p.LoadProjectStatus(); err2 == nil {
-				// If project was running before restart, start it now
-				if savedStatus == project.ProjectStatusRunning {
-					if err := p.Start(); err != nil {
-						logger.Error("Failed to start project from saved status", "project", p.Id, "error", err)
-						if cluster.IsLeader {
-							common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), nil)
-						}
-					} else {
-						logger.Info("Successfully started project from saved status", "project", p.Id)
-						if cluster.IsLeader {
-							common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", nil)
-						}
-					}
-				}
-			} else {
-				logger.Warn("Failed to load project status, using default stopped status", "id", id, "error", err2)
-			}
+			// Projects now start as stopped by default
+			// Status will be synced from Redis if this is a follower node
 
 			project.GlobalProject.Projects[id] = p
 
@@ -327,210 +396,6 @@ func readToken(create bool) (string, error) {
 		return token, nil
 	}
 	return "", fmt.Errorf("token file not found")
-}
-
-// syncComponentsFromLeader syncs components from Redis during follower startup
-func syncComponentsFromLeader() error {
-	logger.Info("Syncing components from Redis")
-
-	// Wait for Redis connection to be established
-	for i := 0; i < 30; i++ {
-		if err := common.RedisPing(); err == nil {
-			break
-		}
-		if i == 29 {
-			return fmt.Errorf("failed to connect to Redis after 30 attempts")
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	configRoot := common.Config.ConfigRoot
-	syncCount := 0
-
-	// Sync components directly from Redis
-	// Try to get the latest components from Redis keys used by the leader
-
-	// Sync inputs
-	if err := syncComponentTypeFromRedis("input", configRoot); err != nil {
-		logger.Warn("Failed to sync inputs from Redis", "error", err)
-	} else {
-		syncCount++
-	}
-
-	// Sync outputs
-	if err := syncComponentTypeFromRedis("output", configRoot); err != nil {
-		logger.Warn("Failed to sync outputs from Redis", "error", err)
-	} else {
-		syncCount++
-	}
-
-	// Sync rulesets
-	if err := syncComponentTypeFromRedis("ruleset", configRoot); err != nil {
-		logger.Warn("Failed to sync rulesets from Redis", "error", err)
-	} else {
-		syncCount++
-	}
-
-	// Sync projects
-	if err := syncComponentTypeFromRedis("project", configRoot); err != nil {
-		logger.Warn("Failed to sync projects from Redis", "error", err)
-	} else {
-		syncCount++
-	}
-
-	// Sync plugins
-	if err := syncComponentTypeFromRedis("plugin", configRoot); err != nil {
-		logger.Warn("Failed to sync plugins from Redis", "error", err)
-	} else {
-		syncCount++
-	}
-
-	if syncCount > 0 {
-		logger.Info("Successfully synced components from Redis", "synced_types", syncCount)
-	} else {
-		logger.Warn("No components synced from Redis, using local components")
-	}
-
-	return nil
-}
-
-// startPeriodicComponentSync periodically checks for component updates from leader
-func startPeriodicComponentSync() {
-	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Only sync if we're still a follower
-			if !cluster.IsLeader {
-				if err := syncComponentsFromLeader(); err != nil {
-					logger.Debug("Periodic component sync failed", "error", err)
-				}
-			} else {
-				// If we became leader, stop periodic sync
-				return
-			}
-		case <-stopPeriodicSync:
-			logger.Info("Stopping periodic component sync due to graceful shutdown")
-			return
-		}
-	}
-}
-
-// syncComponentTypeFromRedis syncs a specific component type from Redis to local files
-func syncComponentTypeFromRedis(componentType, configRoot string) error {
-	// Get the appropriate global config map
-	var configMap map[string]string
-	var ext, dir string
-
-	switch componentType {
-	case "input":
-		configMap = common.AllInputsRawConfig
-		ext = ".yaml"
-		dir = "input"
-	case "output":
-		configMap = common.AllOutputsRawConfig
-		ext = ".yaml"
-		dir = "output"
-	case "ruleset":
-		configMap = common.AllRulesetsRawConfig
-		ext = ".xml"
-		dir = "ruleset"
-	case "project":
-		configMap = common.AllProjectRawConfig
-		ext = ".yaml"
-		dir = "project"
-	case "plugin":
-		configMap = common.AllPluginsRawConfig
-		ext = ".go"
-		dir = "plugin"
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	if len(configMap) == 0 {
-		logger.Debug("No components in global config map", "type", componentType)
-		return nil
-	}
-
-	// Create directory if it doesn't exist
-	dirPath := filepath.Join(configRoot, dir)
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
-	}
-
-	// Write each component to file
-	for id, content := range configMap {
-		filePath := filepath.Join(dirPath, id+ext)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			logger.Error("Failed to write component file", "type", componentType, "id", id, "path", filePath, "error", err)
-			continue
-		}
-		logger.Debug("Synced component from global config map", "type", componentType, "id", id, "path", filePath)
-	}
-
-	logger.Info("Synced component type from global config map", "type", componentType, "count", len(configMap))
-	return nil
-}
-
-// initializeGlobalComponentMaps initializes the global component raw config maps with current components
-func initializeGlobalComponentMaps() {
-	logger.Info("Initializing global component raw config maps")
-
-	// Initialize the maps if they are nil
-	if common.AllInputsRawConfig == nil {
-		common.AllInputsRawConfig = make(map[string]string)
-	}
-	if common.AllOutputsRawConfig == nil {
-		common.AllOutputsRawConfig = make(map[string]string)
-	}
-	if common.AllRulesetsRawConfig == nil {
-		common.AllRulesetsRawConfig = make(map[string]string)
-	}
-	if common.AllProjectRawConfig == nil {
-		common.AllProjectRawConfig = make(map[string]string)
-	}
-	if common.AllPluginsRawConfig == nil {
-		common.AllPluginsRawConfig = make(map[string]string)
-	}
-
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	// Populate inputs
-	for id, input := range project.GlobalProject.Inputs {
-		common.AllInputsRawConfig[id] = input.Config.RawConfig
-	}
-
-	// Populate outputs
-	for id, output := range project.GlobalProject.Outputs {
-		common.AllOutputsRawConfig[id] = output.Config.RawConfig
-	}
-
-	// Populate rulesets
-	for id, ruleset := range project.GlobalProject.Rulesets {
-		common.AllRulesetsRawConfig[id] = ruleset.RawConfig
-	}
-
-	// Populate projects
-	for id, proj := range project.GlobalProject.Projects {
-		common.AllProjectRawConfig[id] = proj.Config.RawConfig
-	}
-
-	// Populate plugins
-	for name, plug := range plugin.Plugins {
-		if plug.Type == plugin.YAEGI_PLUGIN {
-			common.AllPluginsRawConfig[name] = string(plug.Payload)
-		}
-	}
-
-	logger.Info("Global component raw config maps initialized",
-		"inputs", len(common.AllInputsRawConfig),
-		"outputs", len(common.AllOutputsRawConfig),
-		"rulesets", len(common.AllRulesetsRawConfig),
-		"projects", len(common.AllProjectRawConfig),
-		"plugins", len(common.AllPluginsRawConfig))
 }
 
 // loadHubConfig loads config.yaml inside given root directory into common.Config.

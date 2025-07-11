@@ -1,7 +1,6 @@
 package input
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"fmt"
@@ -187,7 +186,7 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 	}
 
 	// Only create sampler on leader node for performance
-	if cluster.IsLeader {
+	if common.IsLeader {
 		in.sampler = common.GetSampler("input." + id)
 	}
 	return in, nil

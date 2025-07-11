@@ -3,6 +3,7 @@ package api
 import (
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
@@ -11,58 +12,26 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 func getClusterStatus(c echo.Context) error {
-	cm := cluster.ClusterInstance
-	if cm == nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "cluster manager not initialized",
-		})
-	}
-
-	return c.JSON(http.StatusOK, cm.GetClusterStatus())
+	status := cluster.GetClusterStatus()
+	return c.JSON(http.StatusOK, status)
 }
 
 func getClusterProjectStates(c echo.Context) error {
-	cm := cluster.ClusterInstance
-	if cm == nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "cluster manager not initialized",
-		})
-	}
+	// Return cluster status with project states
+	status := cluster.GetClusterStatus()
 
-	// Allow all nodes to provide cluster project states for read-only access
-	// Non-leader nodes will return what they know about the cluster state
-
-	cm.Mu.RLock()
-	nodeProjectStates := make(map[string][]cluster.ProjectStatus)
-
-	// Get healthy node IDs from cluster status
-	healthyNodeIDs := make(map[string]bool)
-	healthyNodeIDs[cm.SelfID] = true // Self is always considered healthy
-	for _, node := range cm.Nodes {
-		if node.IsHealthy {
-			healthyNodeIDs[node.ID] = true
-		}
-	}
-
-	// Only include project states for healthy nodes
-	for nodeID, projectStates := range cm.NodeProjectStates {
-		if healthyNodeIDs[nodeID] {
-			nodeProjectStates[nodeID] = projectStates
-		}
-	}
-	clusterStatus := cm.GetClusterStatus()
-	cm.Mu.RUnlock()
-
-	// Combine cluster status and project states
+	// For now, return empty project states - this will be populated by the instruction system
 	response := map[string]interface{}{
-		"cluster_status": clusterStatus,
-		"project_states": nodeProjectStates,
+		"cluster_status": status,
+		"project_states": make(map[string]interface{}),
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -177,7 +146,8 @@ func downloadConfig(c echo.Context) error {
 }
 
 func getCluster(c echo.Context) error {
-	data, _ := json.Marshal(cluster.ClusterInstance)
+	status := cluster.GetClusterStatus()
+	data, _ := json.Marshal(status)
 	return c.String(http.StatusOK, string(data))
 }
 
@@ -463,31 +433,31 @@ func getClusterHealth(c echo.Context) error {
 	health := make(map[string]interface{})
 
 	// Basic cluster info
-	if cluster.ClusterInstance != nil {
-		status := cluster.ClusterInstance.GetClusterStatus()
-		health["cluster_status"] = status
+	status := cluster.GetClusterStatus()
+	health["cluster_status"] = status
 
-		// Node health summary
-		healthy := 0
-		unhealthy := 0
-		if nodes, ok := status["nodes"].([]map[string]interface{}); ok {
-			for _, node := range nodes {
-				if isHealthy, ok := node["is_healthy"].(bool); ok && isHealthy {
+	// Node health summary
+	healthy := 0
+	unhealthy := 0
+	if nodes, ok := status["nodes"].(map[string]interface{}); ok {
+		for _, node := range nodes {
+			if nodeInfo, ok := node.(map[string]interface{}); ok {
+				if online, ok := nodeInfo["online"].(bool); ok && online {
 					healthy++
 				} else {
 					unhealthy++
 				}
 			}
 		}
-		// Add leader as healthy
-		healthy++
+	}
+	// Add leader as healthy
+	healthy++
 
-		health["node_summary"] = map[string]interface{}{
-			"total_nodes":     healthy + unhealthy,
-			"healthy_nodes":   healthy,
-			"unhealthy_nodes": unhealthy,
-			"leader_node":     status["self_id"],
-		}
+	health["node_summary"] = map[string]interface{}{
+		"total_nodes":     healthy + unhealthy,
+		"healthy_nodes":   healthy,
+		"unhealthy_nodes": unhealthy,
+		"leader_node":     status["node_id"],
 	}
 
 	// Redis connectivity
@@ -527,4 +497,153 @@ func getClusterHealth(c echo.Context) error {
 	health["timestamp"] = time.Now()
 
 	return c.JSON(http.StatusOK, health)
+}
+
+// compactInstructions manually triggers instruction compaction (leader only)
+func compactInstructions(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Instruction compaction is only available on leader node",
+		})
+	}
+
+	if cluster.GlobalInstructionManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Instruction manager not initialized",
+		})
+	}
+
+	// Get current stats before compaction
+	currentVersion := cluster.GlobalInstructionManager.GetCurrentVersion()
+
+	// Perform compaction
+	if err := cluster.GlobalInstructionManager.CompactInstructions(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Compaction failed: %v", err),
+		})
+	}
+
+	// Get new stats after compaction
+	newVersion := cluster.GlobalInstructionManager.GetCurrentVersion()
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message":          "Instruction compaction completed successfully",
+		"previous_version": currentVersion,
+		"new_version":      newVersion,
+		"timestamp":        time.Now(),
+	})
+}
+
+// getInstructionStats returns instruction statistics
+func getInstructionStats(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Instruction statistics are only available on leader node",
+		})
+	}
+
+	if cluster.GlobalInstructionManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Instruction manager not initialized",
+		})
+	}
+
+	currentVersion := cluster.GlobalInstructionManager.GetCurrentVersion()
+
+	// Count existing instructions in Redis
+	instructionCount := int64(0)
+	if parts := strings.Split(currentVersion, "."); len(parts) == 2 {
+		if version, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+			instructionCount = version
+		}
+	}
+
+	// Get active followers
+	activeFollowers, err := cluster.GlobalInstructionManager.GetActiveFollowers()
+	if err != nil {
+		logger.Warn("Failed to get active followers", "error", err)
+		activeFollowers = []string{}
+	}
+
+	// Calculate if compaction would be triggered
+	compactionEnabled := true             // From initialization
+	shouldCompact := instructionCount > 0 // Always compact on new instructions
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"current_version":     currentVersion,
+		"instruction_count":   instructionCount,
+		"compaction_enabled":  compactionEnabled,
+		"should_compact":      shouldCompact,
+		"active_followers":    activeFollowers,
+		"followers_executing": len(activeFollowers),
+		"can_compact_now":     len(activeFollowers) == 0,
+		"compaction_strategy": "every_instruction",
+		"timestamp":           time.Now(),
+	})
+}
+
+// getFollowerExecutionStatus returns the execution status of all followers
+func getFollowerExecutionStatus(c echo.Context) error {
+	if !cluster.IsLeader {
+		return c.JSON(http.StatusForbidden, map[string]string{
+			"error": "Follower execution status is only available on leader node",
+		})
+	}
+
+	if cluster.GlobalInstructionManager == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "Instruction manager not initialized",
+		})
+	}
+
+	// Get active followers
+	activeFollowers, err := cluster.GlobalInstructionManager.GetActiveFollowers()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Failed to get active followers: %v", err),
+		})
+	}
+
+	// Get all known nodes from heartbeat
+	clusterStatus := cluster.GetClusterStatus()
+	allNodes := []string{}
+	if nodes, ok := clusterStatus["nodes"].(map[string]interface{}); ok {
+		for nodeID := range nodes {
+			allNodes = append(allNodes, nodeID)
+		}
+	}
+
+	// Build execution status for each node
+	nodeStatus := make(map[string]interface{})
+	for _, nodeID := range allNodes {
+		isExecuting := false
+		for _, activeNode := range activeFollowers {
+			if activeNode == nodeID {
+				isExecuting = true
+				break
+			}
+		}
+
+		nodeStatus[nodeID] = map[string]interface{}{
+			"executing": isExecuting,
+			"role":      "follower",
+		}
+	}
+
+	// Add leader status
+	if leaderID, ok := clusterStatus["node_id"].(string); ok {
+		nodeStatus[leaderID] = map[string]interface{}{
+			"executing": false, // Leader doesn't execute instructions
+			"role":      "leader",
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"node_status":         nodeStatus,
+		"total_nodes":         len(allNodes) + 1, // +1 for leader
+		"executing_followers": len(activeFollowers),
+		"idle_followers":      len(allNodes) - len(activeFollowers),
+		"can_compact":         len(activeFollowers) == 0,
+		"timestamp":           time.Now(),
+	})
 }

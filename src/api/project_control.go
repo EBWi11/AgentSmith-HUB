@@ -2,12 +2,10 @@ package api
 
 import (
 	"AgentSmith-HUB/cluster"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
-	"encoding/json"
 	"fmt"
 	"net/http"
-
-	"AgentSmith-HUB/common"
 
 	"github.com/labstack/echo/v4"
 )
@@ -20,40 +18,17 @@ type ProjectStatusSyncRequest struct {
 
 // syncProjectOperationToFollowers syncs project operation to all follower nodes
 func syncProjectOperationToFollowers(projectID, action string) {
-	if !cluster.IsLeader {
-		return // Only leader can sync operations
-	}
-
-	// Get all healthy follower nodes
-	if cluster.ClusterInstance == nil {
-		return
-	}
-
-	cluster.ClusterInstance.Mu.RLock()
-	nodes := make(map[string]*cluster.NodeInfo)
-	for k, v := range cluster.ClusterInstance.Nodes {
-		if v.IsHealthy {
-			nodes[k] = v
-		}
-	}
-	cluster.ClusterInstance.Mu.RUnlock()
-
-	// Send command to each follower node
-	for nodeID := range nodes {
-		publishProjCmd(nodeID, projectID, action)
-	}
-}
-
-// publishProjCmd publishes a project command to a specific follower node
-func publishProjCmd(nodeID, projectID, action string) {
-	cmd := map[string]string{
-		"node_id":    nodeID,
-		"project_id": projectID,
-		"action":     action,
-	}
-
-	if data, err := json.Marshal(cmd); err == nil {
-		_ = common.RedisPublish("cluster:proj_cmd", string(data))
+	// This function is now handled by the instruction system
+	// Just publish the project instruction
+	switch action {
+	case "start":
+		cluster.GlobalInstructionManager.PublishProjectStart(projectID)
+	case "stop":
+		cluster.GlobalInstructionManager.PublishProjectStop(projectID)
+	case "restart":
+		cluster.GlobalInstructionManager.PublishProjectRestart(projectID)
+	default:
+		logger.Warn("Unknown project action", "action", action, "project", projectID)
 	}
 }
 
@@ -105,7 +80,7 @@ func StartProject(c echo.Context) error {
 	RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "success", "", nil)
 
 	// Sync operation to follower nodes
-	cluster.SyncProjectStateChange(req.ProjectID, "start")
+	syncProjectOperationToFollowers(req.ProjectID, "start")
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Project started successfully"})
 }
@@ -156,7 +131,7 @@ func StopProject(c echo.Context) error {
 	RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "success", "", nil)
 
 	// Sync operation to follower nodes
-	cluster.SyncProjectStateChange(req.ProjectID, "stop")
+	syncProjectOperationToFollowers(req.ProjectID, "stop")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",
@@ -224,7 +199,7 @@ func RestartProject(c echo.Context) error {
 	// So we don't need to record it again here
 
 	// Sync operation to follower nodes
-	cluster.SyncProjectStateChange(req.ProjectID, "restart")
+	syncProjectOperationToFollowers(req.ProjectID, "restart")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",

@@ -2,12 +2,109 @@ package common
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// Circuit breaker states
+type CircuitState int
+
+const (
+	CircuitClosed CircuitState = iota
+	CircuitOpen
+	CircuitHalfOpen
+)
+
+// CircuitBreaker implements circuit breaker pattern for Redis operations
+type CircuitBreaker struct {
+	maxFailures     int
+	resetTimeout    time.Duration
+	state           CircuitState
+	failures        int
+	lastFailureTime time.Time
+	mutex           sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker
+func NewCircuitBreaker(maxFailures int, resetTimeout time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		maxFailures:  maxFailures,
+		resetTimeout: resetTimeout,
+		state:        CircuitClosed,
+	}
+}
+
+// Call executes a function with circuit breaker protection
+func (cb *CircuitBreaker) Call(fn func() error) error {
+	cb.mutex.Lock()
+	defer cb.mutex.Unlock()
+
+	// Check if we should transition from Open to Half-Open
+	if cb.state == CircuitOpen {
+		if time.Since(cb.lastFailureTime) > cb.resetTimeout {
+			cb.state = CircuitHalfOpen
+			cb.failures = 0
+		} else {
+			return fmt.Errorf("circuit breaker is open")
+		}
+	}
+
+	// Execute the function
+	err := fn()
+
+	if err != nil {
+		cb.failures++
+		cb.lastFailureTime = time.Now()
+
+		if cb.failures >= cb.maxFailures {
+			cb.state = CircuitOpen
+		}
+		return err
+	}
+
+	// Success - reset circuit breaker
+	cb.failures = 0
+	cb.state = CircuitClosed
+	return nil
+}
+
+// IsOpen returns true if circuit breaker is open
+func (cb *CircuitBreaker) IsOpen() bool {
+	cb.mutex.RLock()
+	defer cb.mutex.RUnlock()
+	return cb.state == CircuitOpen
+}
+
+// RedisFailureHandler handles Redis operation failures with retry and circuit breaker
+type RedisFailureHandler struct {
+	circuitBreaker *CircuitBreaker
+	localCache     map[string]CacheEntry
+	cacheMutex     sync.RWMutex
+}
+
+// CacheEntry represents a cached Redis value
+type CacheEntry struct {
+	Value     string
+	Timestamp time.Time
+	TTL       time.Duration
+}
+
+// NewRedisFailureHandler creates a new Redis failure handler
+func NewRedisFailureHandler() *RedisFailureHandler {
+	return &RedisFailureHandler{
+		circuitBreaker: NewCircuitBreaker(5, 30*time.Second), // 5 failures, 30s reset
+		localCache:     make(map[string]CacheEntry),
+	}
+}
+
+// Global Redis failure handler instance
+var redisFailureHandler *RedisFailureHandler
 
 var ctx = context.Background()
 var rdb *redis.Client
@@ -143,6 +240,9 @@ func RedisInit(addr string, passwd string) error {
 		MaxRetries:      2,
 	})
 
+	// Initialize failure handler
+	redisFailureHandler = NewRedisFailureHandler()
+
 	return RedisPing()
 }
 
@@ -213,6 +313,11 @@ func RedisHGetAll(hash string) (map[string]string, error) {
 	return rdb.HGetAll(ctx, hash).Result()
 }
 
+// RedisHDel deletes a field from a Redis hash
+func RedisHDel(key string, field string) error {
+	return rdb.HDel(ctx, key, field).Err()
+}
+
 // GetRedisClient returns underlying redis client for advanced operations
 func GetRedisClient() *redis.Client {
 	return rdb
@@ -239,4 +344,274 @@ func RedisLRange(key string, start, stop int64) ([]string, error) {
 // RedisExpire sets the expiration time for a key
 func RedisExpire(key string, expiration int) error {
 	return rdb.Expire(ctx, key, time.Duration(expiration)*time.Second).Err()
+}
+
+// ===================== Project Config Helpers =====================
+
+// StoreProjectConfig stores project configuration in Redis
+func StoreProjectConfig(projectID string, config string) error {
+	key := "cluster:project_config:" + projectID
+	// Store with 7 days TTL
+	return rdb.Set(ctx, key, config, 7*24*time.Hour).Err()
+}
+
+// GetProjectConfig retrieves project configuration from Redis
+func GetProjectConfig(projectID string) (string, error) {
+	key := "cluster:project_config:" + projectID
+	return rdb.Get(ctx, key).Result()
+}
+
+// GetAllProjectConfigs retrieves all project configurations from Redis
+func GetAllProjectConfigs() (map[string]string, error) {
+	pattern := "cluster:project_config:*"
+	keys, err := rdb.Keys(ctx, pattern).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	configs := make(map[string]string)
+	for _, key := range keys {
+		// Extract project ID from key
+		projectID := strings.TrimPrefix(key, "cluster:project_config:")
+		config, err := rdb.Get(ctx, key).Result()
+		if err == nil && config != "" {
+			configs[projectID] = config
+		}
+	}
+
+	return configs, nil
+}
+
+// DeleteProjectConfig removes project configuration from Redis
+func DeleteProjectConfig(projectID string) error {
+	key := "cluster:project_config:" + projectID
+	return rdb.Del(ctx, key).Err()
+}
+
+// SetLeaderReady sets the leader ready flag in Redis with TTL
+func SetLeaderReady(nodeID string, ttlSeconds int) error {
+	key := ClusterLeaderReadyKey
+	value := map[string]interface{}{
+		"node_id":   nodeID,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"ready":     true,
+	}
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	_, err = RedisSet(key, string(data), ttlSeconds)
+	return err
+}
+
+// IsLeaderReady checks if leader is ready
+func IsLeaderReady() (bool, string, error) {
+	key := ClusterLeaderReadyKey
+	data, err := RedisGet(key)
+	if err != nil {
+		return false, "", err
+	}
+
+	if data == "" {
+		return false, "", nil
+	}
+
+	var value map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &value); err != nil {
+		return false, "", err
+	}
+
+	nodeID, _ := value["node_id"].(string)
+	ready, _ := value["ready"].(bool)
+
+	return ready, nodeID, nil
+}
+
+// WaitForLeaderReady waits for leader to be ready with timeout
+func WaitForLeaderReady(timeoutSeconds int) (bool, string, error) {
+	timeout := time.After(time.Duration(timeoutSeconds) * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return false, "", fmt.Errorf("timeout waiting for leader to be ready")
+		case <-ticker.C:
+			ready, nodeID, err := IsLeaderReady()
+			if err != nil {
+				continue // Keep trying on Redis errors
+			}
+			if ready {
+				return true, nodeID, nil
+			}
+		}
+	}
+}
+
+// RetryWithExponentialBackoff executes a function with exponential backoff retry
+func RetryWithExponentialBackoff(fn func() error, maxRetries int, baseDelay time.Duration) error {
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		if i < maxRetries-1 {
+			delay := baseDelay * time.Duration(1<<uint(i)) // Exponential backoff
+			time.Sleep(delay)
+		}
+	}
+
+	return lastErr
+}
+
+// RedisGetWithFallback gets a value from Redis with local cache fallback
+func RedisGetWithFallback(key string) (string, error) {
+	var result string
+	var redisErr error
+
+	// Try Redis with circuit breaker
+	err := redisFailureHandler.circuitBreaker.Call(func() error {
+		val, err := rdb.Get(ctx, key).Result()
+		if err != nil {
+			redisErr = err
+			return err
+		}
+		result = val
+
+		// Cache the value locally
+		redisFailureHandler.cacheMutex.Lock()
+		redisFailureHandler.localCache[key] = CacheEntry{
+			Value:     val,
+			Timestamp: time.Now(),
+			TTL:       5 * time.Minute, // Cache for 5 minutes
+		}
+		redisFailureHandler.cacheMutex.Unlock()
+
+		return nil
+	})
+
+	if err != nil {
+		// Try local cache
+		redisFailureHandler.cacheMutex.RLock()
+		entry, exists := redisFailureHandler.localCache[key]
+		redisFailureHandler.cacheMutex.RUnlock()
+
+		if exists && time.Since(entry.Timestamp) < entry.TTL {
+			return entry.Value, nil
+		}
+
+		return "", redisErr
+	}
+
+	return result, nil
+}
+
+// RedisSetWithRetry sets a value in Redis with exponential backoff retry
+func RedisSetWithRetry(key string, value interface{}, expiration int) error {
+	return RetryWithExponentialBackoff(func() error {
+		return redisFailureHandler.circuitBreaker.Call(func() error {
+			_, err := rdb.Set(ctx, key, value, time.Duration(expiration)*time.Second).Result()
+			return err
+		})
+	}, 3, 100*time.Millisecond)
+}
+
+// RedisHSetWithRetry sets a hash field in Redis with exponential backoff retry
+func RedisHSetWithRetry(key, field string, value interface{}) error {
+	return RetryWithExponentialBackoff(func() error {
+		return redisFailureHandler.circuitBreaker.Call(func() error {
+			return rdb.HSet(ctx, key, field, value).Err()
+		})
+	}, 3, 100*time.Millisecond)
+}
+
+// RedisPublishWithRetry publishes a message with exponential backoff retry
+func RedisPublishWithRetry(channel string, message string) error {
+	return RetryWithExponentialBackoff(func() error {
+		return redisFailureHandler.circuitBreaker.Call(func() error {
+			return rdb.Publish(ctx, channel, message).Err()
+		})
+	}, 3, 100*time.Millisecond)
+}
+
+// DistributedLock represents a Redis-based distributed lock
+type DistributedLock struct {
+	key        string
+	value      string
+	expiration time.Duration
+	acquired   bool
+}
+
+// NewDistributedLock creates a new distributed lock
+func NewDistributedLock(key string, expiration time.Duration) *DistributedLock {
+	return &DistributedLock{
+		key:        "lock:" + key,
+		value:      fmt.Sprintf("%d", time.Now().UnixNano()),
+		expiration: expiration,
+	}
+}
+
+// Acquire attempts to acquire the distributed lock
+func (dl *DistributedLock) Acquire() error {
+	return redisFailureHandler.circuitBreaker.Call(func() error {
+		acquired, err := rdb.SetNX(ctx, dl.key, dl.value, dl.expiration).Result()
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			return fmt.Errorf("lock already acquired")
+		}
+		dl.acquired = true
+		return nil
+	})
+}
+
+// Release releases the distributed lock
+func (dl *DistributedLock) Release() error {
+	if !dl.acquired {
+		return nil
+	}
+
+	// Use Lua script to ensure atomic release
+	script := `
+		if redis.call("get", KEYS[1]) == ARGV[1] then
+			return redis.call("del", KEYS[1])
+		else
+			return 0
+		end
+	`
+
+	return redisFailureHandler.circuitBreaker.Call(func() error {
+		_, err := rdb.Eval(ctx, script, []string{dl.key}, dl.value).Result()
+		if err != nil {
+			return err
+		}
+		dl.acquired = false
+		return nil
+	})
+}
+
+// TryAcquire attempts to acquire the lock with a timeout
+func (dl *DistributedLock) TryAcquire(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		err := dl.Acquire()
+		if err == nil {
+			return nil
+		}
+
+		// Wait a bit before retrying
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("failed to acquire lock within timeout")
 }

@@ -78,9 +78,6 @@ type Project struct {
 	stopChan chan struct{}  `json:"-"`
 	wg       sync.WaitGroup `json:"-"`
 
-	// Flag to indicate if this is a shutdown stop (don't save status)
-	isShutdownStop bool `json:"-"`
-
 	// Dependencies tracking
 	DependsOn      []string `json:"-"` // Projects this project depends on
 	DependedBy     []string `json:"-"` // Projects that depend on this project

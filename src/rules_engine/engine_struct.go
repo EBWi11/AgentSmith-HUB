@@ -1,7 +1,6 @@
 package rules_engine
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/plugin"
 	"encoding/xml"
@@ -1234,7 +1233,7 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	ruleset.RulesetID = id
 
 	// Only create sampler on leader node for performance
-	if cluster.IsLeader {
+	if common.IsLeader {
 		ruleset.sampler = common.GetSampler("ruleset." + id)
 	}
 
@@ -1277,7 +1276,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 	}
 
 	// Only create sampler on leader node for performance
-	if cluster.IsLeader {
+	if common.IsLeader {
 		newRuleset.sampler = common.GetSampler("ruleset." + existing.RulesetID)
 	}
 

@@ -950,19 +950,30 @@ func syncComponentToFollowersForLocalLoad(componentType string, id string) {
 		return
 	}
 
-	// Publish sync event via Redis
-	evt := &cluster.CompSyncEvt{
-		Op:        "update",
-		Type:      componentType,
-		ID:        id,
-		Raw:       content,
-		IsRunning: isRunning,
+	// Publish instruction for component update
+	if componentType == "project" {
+		if err := cluster.GlobalInstructionManager.PublishComponentLocalPush("project", id, content, nil); err != nil {
+			logger.Error("Failed to publish project local push instruction", "project", id, "error", err)
+		}
+		if isRunning {
+			if err := cluster.GlobalInstructionManager.PublishProjectStart(id); err != nil {
+				logger.Error("Failed to publish project start instruction", "project", id, "error", err)
+			}
+		}
+	} else {
+		// For other components, publish local push instruction
+		affectedProjects := project.GetAffectedProjects(componentType, id)
+		if err := cluster.GlobalInstructionManager.PublishComponentLocalPush(componentType, id, content, affectedProjects); err != nil {
+			logger.Error("Failed to publish component local push instruction", "type", componentType, "id", id, "error", err)
+		}
+
+		// Restart affected projects
+		if len(affectedProjects) > 0 {
+			if err := cluster.GlobalInstructionManager.PublishProjectsRestart(affectedProjects, "component_local_push"); err != nil {
+				logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+			}
+		}
 	}
-
-	cluster.PublishComponentSync(evt)
-
-	// Update config timestamp since this is called after actual config loading
-	cluster.UpdateConfigTimestamp()
 
 	logger.Info("Published local load component sync event via Redis",
 		"type", componentType,

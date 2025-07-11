@@ -153,11 +153,7 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 					op.Details = make(map[string]interface{})
 				}
 				op.Details["node_id"] = common.Config.LocalIP
-				if cluster.ClusterInstance != nil && cluster.ClusterInstance.SelfAddress != "" {
-					op.Details["node_address"] = cluster.ClusterInstance.SelfAddress
-				} else {
-					op.Details["node_address"] = common.Config.LocalIP
-				}
+				op.Details["node_address"] = common.Config.LocalIP
 				allOperations = append(allOperations, op)
 			}
 		}
@@ -169,78 +165,6 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 	})
 
 	return allOperations, nil
-}
-
-// getFollowerOperationHistory fetches operation history from a follower node via HTTP
-func getFollowerOperationHistory(nodeAddress string, filter OperationHistoryFilter) ([]common.OperationRecord, error) {
-	// Build query parameters
-	params := make(map[string]string)
-	if !filter.StartTime.IsZero() {
-		params["start_time"] = filter.StartTime.Format(time.RFC3339)
-	}
-	if !filter.EndTime.IsZero() {
-		params["end_time"] = filter.EndTime.Format(time.RFC3339)
-	}
-	if filter.OperationType != "" {
-		params["operation_type"] = string(filter.OperationType)
-	}
-	if filter.ComponentType != "" {
-		params["component_type"] = filter.ComponentType
-	}
-	if filter.ComponentID != "" {
-		params["component_id"] = filter.ComponentID
-	}
-	if filter.ProjectID != "" {
-		params["project_id"] = filter.ProjectID
-	}
-	if filter.Status != "" {
-		params["status"] = filter.Status
-	}
-	if filter.Keyword != "" {
-		params["keyword"] = filter.Keyword
-	}
-	if filter.Limit > 0 {
-		params["limit"] = fmt.Sprintf("%d", filter.Limit)
-	}
-	if filter.Offset > 0 {
-		params["offset"] = fmt.Sprintf("%d", filter.Offset)
-	}
-
-	// Make HTTP request to follower
-	url := fmt.Sprintf("http://%s/operations-history", nodeAddress)
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Add query parameters
-	q := req.URL.Query()
-	for key, value := range params {
-		q.Add(key, value)
-	}
-	req.URL.RawQuery = q.Encode()
-
-	// Add authentication token
-	req.Header.Set("token", common.Config.Token)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to request follower operations: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("follower returned status %d", resp.StatusCode)
-	}
-
-	var response OperationHistoryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("failed to decode follower response: %w", err)
-	}
-
-	return response.Operations, nil
 }
 
 // aggregateClusterOperationHistory collects operation history from all cluster nodes
@@ -282,34 +206,26 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 		nodeStats[common.Config.LocalIP] = leaderStat
 	}
 
-	// Get operations from follower nodes
-	if cluster.ClusterInstance != nil {
-		cluster.ClusterInstance.Mu.RLock()
-		nodes := make(map[string]*cluster.NodeInfo)
-		for k, v := range cluster.ClusterInstance.Nodes {
-			nodes[k] = v
-		}
-		cluster.ClusterInstance.Mu.RUnlock()
-
-		for nodeID, nodeInfo := range nodes {
-			if nodeID == common.Config.LocalIP || !nodeInfo.IsHealthy {
-				continue // Skip self and unhealthy nodes
+	// Get operations from follower nodes via Redis cache only
+	// For now, just get operations from Redis cache without cluster state
+	// This will be enhanced when the new cluster system is fully integrated
+	if cluster.GlobalHeartbeatManager != nil {
+		nodes := cluster.GlobalHeartbeatManager.GetNodes()
+		for nodeID := range nodes {
+			if nodeID == common.Config.LocalIP {
+				continue // Skip self
 			}
 
-			// Attempt Redis cache first
+			// Get operations from Redis cache only
 			var followerOps []common.OperationRecord
 			if cached, err := common.RedisGet("cluster:operations:" + nodeID); err == nil && cached != "" {
-				_ = json.Unmarshal([]byte(cached), &followerOps)
-			}
-
-			// Fallback to HTTP if cache missing
-			if len(followerOps) == 0 {
-				fops, err := getFollowerOperationHistory(nodeInfo.Address, filter)
-				if err != nil {
-					logger.Error("Failed to get follower operation history", "node", nodeID, "error", err)
+				if err := json.Unmarshal([]byte(cached), &followerOps); err != nil {
+					logger.Error("Failed to unmarshal follower operations from Redis", "node", nodeID, "error", err)
 					continue
 				}
-				followerOps = fops
+			} else {
+				logger.Debug("No operations found in Redis cache for follower node", "node", nodeID)
+				continue
 			}
 
 			if len(followerOps) == 0 {
@@ -325,7 +241,7 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 						op.Details = make(map[string]interface{})
 					}
 					op.Details["node_id"] = nodeID
-					op.Details["node_address"] = nodeInfo.Address
+					op.Details["node_address"] = nodeID // Use nodeID as address for now
 					filteredOps = append(filteredOps, op)
 				}
 			}
