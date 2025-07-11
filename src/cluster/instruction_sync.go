@@ -521,18 +521,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		return nil
 	}
 
-	// 1. Add all plugins first
-	common.GlobalMu.RLock()
-	if common.AllPluginsRawConfig != nil {
-		for pluginID, config := range common.AllPluginsRawConfig {
-			if err := publishInstructionDirectly(pluginID, "plugin", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish plugin add instruction", "plugin", pluginID, "error", err)
-			}
-		}
-	}
-	common.GlobalMu.RUnlock()
-
-	// 2. Add all inputs
+	// 1. Add all inputs first (projects depend on inputs)
 	common.GlobalMu.RLock()
 	if common.AllInputsRawConfig != nil {
 		for inputID, config := range common.AllInputsRawConfig {
@@ -543,7 +532,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 	common.GlobalMu.RUnlock()
 
-	// 3. Add all outputs
+	// 2. Add all outputs (projects depend on outputs)
 	common.GlobalMu.RLock()
 	if common.AllOutputsRawConfig != nil {
 		for outputID, config := range common.AllOutputsRawConfig {
@@ -554,7 +543,18 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 	common.GlobalMu.RUnlock()
 
-	// 4. Add all rulesets
+	// 3. Add all plugins (rulesets may depend on plugins)
+	common.GlobalMu.RLock()
+	if common.AllPluginsRawConfig != nil {
+		for pluginID, config := range common.AllPluginsRawConfig {
+			if err := publishInstructionDirectly(pluginID, "plugin", config, "add", nil, nil); err != nil {
+				logger.Error("Failed to publish plugin add instruction", "plugin", pluginID, "error", err)
+			}
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	// 4. Add all rulesets (projects depend on rulesets)
 	common.GlobalMu.RLock()
 	if common.AllRulesetsRawConfig != nil {
 		for rulesetID, config := range common.AllRulesetsRawConfig {
@@ -565,7 +565,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 	common.GlobalMu.RUnlock()
 
-	// 5. Add all projects (default to stopped state - follower不会自动启动)
+	// 5. Add all projects LAST (projects depend on all above components)
 	common.GlobalMu.RLock()
 	if common.AllProjectRawConfig != nil {
 		for projectID, config := range common.AllProjectRawConfig {
