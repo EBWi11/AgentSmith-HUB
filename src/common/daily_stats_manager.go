@@ -75,20 +75,15 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 
 	var statsData *DailyStatsData
 	if existing, exists := dsm.data[key]; exists {
-		// Update existing data - use the maximum value to handle component restarts
-		// This ensures we don't lose accumulated data when components restart and counters reset
-		if totalMessages > existing.TotalMessages {
-			existing.TotalMessages = totalMessages
-			existing.LastUpdate = now
-			logger.Debug("Updated daily stats with new maximum",
-				"component", componentID,
-				"sequence", projectNodeSequence,
-				"old_total", existing.TotalMessages,
-				"new_total", totalMessages)
-		} else {
-			// Update timestamp even if message count didn't increase (for liveness tracking)
-			existing.LastUpdate = now
-		}
+		// Overwrite with latest totalMessages unconditionally.
+		// If a component restarts and counter resets, we allow the value to drop;
+		// downstream dashboards display real per-node message count since midnight.
+		existing.TotalMessages = totalMessages
+		existing.LastUpdate = now
+		logger.Debug("Daily stats updated",
+			"component", componentID,
+			"sequence", projectNodeSequence,
+			"total", totalMessages)
 		statsData = existing
 	} else {
 		// Create new data
