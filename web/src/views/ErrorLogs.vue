@@ -251,6 +251,7 @@
 import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/common'
+import { useDataCacheStore } from '../stores/dataCache'
 
 // Inject global message service
 const $message = inject('$message')
@@ -265,6 +266,8 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const availableNodes = ref([])
+const dataCache = useDataCacheStore()
+const clusterInfo = ref({})
 const expandedLogs = ref(new Set())
 
 // Filters
@@ -435,6 +438,11 @@ const fetchErrorLogs = async () => {
       }))
     }
 
+    // Ensure self node present
+    if (availableNodes.value.length === 0 && clusterInfo.value.self_id) {
+      availableNodes.value = [{ id: clusterInfo.value.self_id, name: clusterInfo.value.self_id }]
+    }
+
   } catch (err) {
     error.value = err.message
     $message?.error?.('Failed to fetch error logs: ' + err.message)
@@ -524,6 +532,9 @@ const exportLogs = () => {
 // Lifecycle
 onMounted(async () => {
   setDefaultTimeRange()
+  try {
+    clusterInfo.value = await dataCache.fetchClusterInfo()
+  } catch {}
   await fetchErrorLogs()
 })
 </script>
