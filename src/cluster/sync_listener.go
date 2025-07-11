@@ -78,7 +78,7 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 		return
 	}
 
-	logger.Info("Received sync command", "leader_version", leaderVersion)
+	logger.Debug("Received sync command", "leader_version", leaderVersion)
 
 	// Get current version
 	currentVersion := "v0.0"
@@ -86,9 +86,15 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 		currentVersion = GlobalInstructionManager.GetCurrentVersion()
 	}
 
+	// Check if sync is needed
+	if currentVersion == leaderVersion {
+		logger.Debug("Already up to date", "version", currentVersion)
+		return
+	}
+
 	// Sync instructions
 	if GlobalInstructionManager != nil {
-		if err := GlobalInstructionManager.SyncInstructions(currentVersion); err != nil {
+		if err := GlobalInstructionManager.SyncInstructions(currentVersion, leaderVersion); err != nil {
 			logger.Error("Failed to sync instructions", "error", err)
 		} else {
 			logger.Info("Instructions synced successfully", "from", currentVersion, "to", leaderVersion)
@@ -132,22 +138,22 @@ func (sl *SyncListener) handleCompactionSignal(signal map[string]interface{}) {
 	switch action {
 	case "compaction_start":
 		originalVersion, _ := signal["original_version"].(float64) // JSON numbers are float64
-		logger.Info("Leader started instruction compaction", "original_version", int64(originalVersion))
+		logger.Debug("Leader started instruction compaction", "original_version", int64(originalVersion))
 
 		// Followers should pause processing version 0 and wait for compaction_complete
 		// This is handled automatically by the SyncInstructions method which skips version 0
 
 	case "compaction_complete":
 		newVersion, _ := signal["new_version"].(string)
-		logger.Info("Leader completed instruction compaction", "new_version", newVersion)
+		logger.Debug("Leader completed instruction compaction", "new_version", newVersion)
 
 		// Trigger immediate sync to get the compacted instructions
 		if GlobalInstructionManager != nil {
 			currentVersion := GlobalInstructionManager.GetCurrentVersion()
-			if err := GlobalInstructionManager.SyncInstructions(currentVersion); err != nil {
+			if err := GlobalInstructionManager.SyncInstructions(currentVersion, newVersion); err != nil {
 				logger.Error("Failed to sync after compaction", "error", err)
 			} else {
-				logger.Info("Successfully synced compacted instructions", "new_version", newVersion)
+				logger.Debug("Successfully synced compacted instructions", "new_version", newVersion)
 			}
 		}
 

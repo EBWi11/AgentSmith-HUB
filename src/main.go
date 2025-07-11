@@ -186,7 +186,8 @@ func main() {
 
 						stopComplete := make(chan error, 1)
 						go func() {
-							stopComplete <- proj.Stop()
+							// Use StopForShutdown to avoid changing project status in Redis
+							stopComplete <- proj.StopForShutdown()
 						}()
 
 						select {
@@ -355,13 +356,37 @@ func loadLocalProjects() {
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
 		if p, err := project.NewProject(f, "", id); err == nil {
-			// Projects now start as stopped by default
-			// Status will be synced from Redis if this is a follower node
-
 			project.GlobalProject.Projects[id] = p
 
-			// Ensure project status is synced to Redis for cluster visibility
-			// This is important for follower nodes so leader can see their project states
+			// Try to restore project status from Redis and actually start if needed
+			hashKey := "cluster:proj_states:" + common.Config.LocalIP
+			if savedStatus, err := common.RedisHGet(hashKey, id); err == nil && savedStatus != "" {
+				// Restore status from Redis
+				switch savedStatus {
+				case "running":
+					// Actually start the project, don't just set status
+					logger.Info("Restoring project to running state", "id", p.Id)
+					if err := p.Start(); err != nil {
+						logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
+						p.Status = project.ProjectStatusStopped
+					} else {
+						logger.Info("Successfully restored project to running state", "id", p.Id)
+					}
+				case "stopped":
+					p.Status = project.ProjectStatusStopped
+					logger.Info("Restored project status from Redis", "id", p.Id, "status", "stopped")
+				default:
+					// For other statuses (starting, stopping, error), default to stopped
+					p.Status = project.ProjectStatusStopped
+					logger.Info("Restored project status from Redis with fallback", "id", p.Id, "saved_status", savedStatus, "final_status", "stopped")
+				}
+			} else {
+				// No saved status or Redis error, default to stopped
+				p.Status = project.ProjectStatusStopped
+				logger.Info("No saved status in Redis, defaulting to stopped", "id", p.Id)
+			}
+
+			// Sync current status to Redis for cluster visibility
 			if err := p.SaveProjectStatus(); err != nil {
 				logger.Warn("Failed to sync project status to Redis", "id", p.Id, "error", err)
 			} else {

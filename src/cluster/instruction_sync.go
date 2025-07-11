@@ -372,7 +372,7 @@ func (im *InstructionManager) PublishInstruction(componentName, componentType, c
 		return fmt.Errorf("failed to store instruction: %w", err)
 	}
 
-	logger.Info("Published instruction", "version", version, "component", componentName, "operation", operation, "requires_restart", requiresRestart)
+	logger.Debug("Published instruction", "version", version, "component", componentName, "operation", operation, "requires_restart", requiresRestart)
 	return nil
 }
 
@@ -514,7 +514,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 			return fmt.Errorf("failed to store instruction: %w", err)
 		}
 
-		logger.Info("Published initialization instruction", "version", instructionCount, "component", componentName, "operation", operation)
+		logger.Debug("Published initialization instruction", "version", instructionCount, "component", componentName, "operation", operation)
 		return nil
 	}
 
@@ -592,8 +592,8 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	return nil
 }
 
-// SyncInstructions syncs instructions from a specific version (follower only)
-func (im *InstructionManager) SyncInstructions(fromVersion string) error {
+// SyncInstructions syncs instructions from a specific version to target version (follower only)
+func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) error {
 	if IsLeader {
 		return fmt.Errorf("leader doesn't need to sync instructions")
 	}
@@ -621,16 +621,15 @@ func (im *InstructionManager) SyncInstructions(fromVersion string) error {
 		return fmt.Errorf("invalid version number: %s", parts[1])
 	}
 
-	// Get current leader version
-	leaderVersion := im.GetCurrentVersion()
-	leaderParts := strings.Split(leaderVersion, ".")
+	// Parse target version (leader version)
+	leaderParts := strings.Split(toVersion, ".")
 	if len(leaderParts) != 2 {
-		return fmt.Errorf("invalid leader version format: %s", leaderVersion)
+		return fmt.Errorf("invalid target version format: %s", toVersion)
 	}
 
 	endVersion, err := strconv.ParseInt(leaderParts[1], 10, 64)
 	if err != nil {
-		return fmt.Errorf("invalid leader version number: %s", leaderParts[1])
+		return fmt.Errorf("invalid target version number: %s", leaderParts[1])
 	}
 
 	// Track successfully applied instructions
@@ -680,7 +679,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion string) error {
 	im.baseVersion = leaderParts[0]
 	im.mu.Unlock()
 
-	logger.Info("Instructions synced successfully", "from", fromVersion, "to", leaderVersion)
+	logger.Info("Instructions synced successfully", "from", fromVersion, "to", toVersion)
 	return nil
 }
 
@@ -697,7 +696,7 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 		return fmt.Errorf("failed to unmarshal instruction %d: %w", version, err)
 	}
 
-	logger.Info("Applying instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation)
+	logger.Debug("Applying instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation)
 
 	switch instruction.Operation {
 	case "add":
@@ -739,11 +738,11 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 
 			// Only restart if the project is currently running
 			if proj.Status != project.ProjectStatusRunning {
-				logger.Info("Skipping restart for non-running project", "project", instruction.ComponentName, "status", proj.Status)
+				logger.Debug("Skipping restart for non-running project", "project", instruction.ComponentName, "status", proj.Status)
 				return nil
 			}
 
-			logger.Info("Restarting running project", "project", instruction.ComponentName)
+			logger.Debug("Restarting running project", "project", instruction.ComponentName)
 
 			if globalProjectCmdHandler != nil {
 				return globalProjectCmdHandler.ExecuteCommand(instruction.ComponentName, "restart")

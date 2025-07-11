@@ -151,7 +151,7 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 
 	leaderVersion := GlobalInstructionManager.GetCurrentVersion()
 	if heartbeat.Version != leaderVersion {
-		logger.Info("Version mismatch detected",
+		logger.Debug("Version mismatch detected",
 			"node", heartbeat.NodeID,
 			"follower_version", heartbeat.Version,
 			"leader_version", leaderVersion)
@@ -189,7 +189,7 @@ func (hm *HeartbeatManager) cleanupOfflineNodes() {
 			for nodeID, heartbeat := range hm.nodes {
 				if now-heartbeat.Timestamp > 20 {
 					delete(hm.nodes, nodeID)
-					logger.Info("Removed offline node", "node_id", nodeID)
+					logger.Debug("Removed offline node", "node_id", nodeID)
 				}
 			}
 			hm.mu.Unlock()

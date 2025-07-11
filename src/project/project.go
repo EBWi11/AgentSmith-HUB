@@ -20,6 +20,23 @@ import (
 
 var GlobalProject *GlobalProjectInfo
 
+// Global flag to track if system is shutting down
+var systemShuttingDown int32 // Use atomic operations for thread safety
+
+// SetSystemShuttingDown sets the global shutdown flag
+func SetSystemShuttingDown(shutting bool) {
+	if shutting {
+		atomic.StoreInt32(&systemShuttingDown, 1)
+	} else {
+		atomic.StoreInt32(&systemShuttingDown, 0)
+	}
+}
+
+// IsSystemShuttingDown checks if system is shutting down
+func IsSystemShuttingDown() bool {
+	return atomic.LoadInt32(&systemShuttingDown) == 1
+}
+
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
 type projectCommandHandler struct{}
 
@@ -1201,7 +1218,11 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 // stopComponents is an internal function that performs the actual component stopping
 // This is used by the public Stop() method and sets the status to stopped
 func (p *Project) stopComponents() error {
-	logger.Info("Stopping project components", "project", p.Id)
+	return p.stopComponentsInternal(true) // Default: save status to Redis
+}
+
+func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
+	logger.Info("Stopping project components", "project", p.Id, "save_status_to_redis", saveStatusToRedis)
 
 	// Use centralized component usage counter for better performance and code maintainability
 
@@ -1323,13 +1344,16 @@ func (p *Project) stopComponents() error {
 	p.Status = ProjectStatusStopped
 	p.StatusChangedAt = &now
 
-	// Save project status to Redis
-	err := p.SaveProjectStatus()
-	if err != nil {
-		logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+	// Save project status to Redis only if requested
+	if saveStatusToRedis {
+		err := p.SaveProjectStatus()
+		if err != nil {
+			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
+		}
+		logger.Info("Finished stopping project components", "project", p.Id)
+	} else {
+		logger.Info("Finished stopping project components (Redis status preserved)", "project", p.Id)
 	}
-
-	logger.Info("Finished stopping project components", "project", p.Id)
 	return nil
 }
 
@@ -1368,7 +1392,7 @@ func (p *Project) Stop() error {
 		}()
 
 		// Use the internal stopComponents function
-		err := p.stopComponents()
+		err := p.stopComponentsInternal(true) // Normal stop: save status to Redis
 		stopCompleted <- err
 	}()
 
@@ -1398,6 +1422,62 @@ func (p *Project) Stop() error {
 		}
 
 		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
+	}
+}
+
+// StopForShutdown stops the project during system shutdown without updating Redis status
+// This preserves the user's intended project state for next startup
+func (p *Project) StopForShutdown() error {
+	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStarting {
+		if p.Status == ProjectStatusStopping {
+			return fmt.Errorf("project is already stopping %s", p.Id)
+		}
+		return fmt.Errorf("project is not running %s", p.Id)
+	}
+
+	// Set status to stopping immediately to prevent duplicate operations
+	now := time.Now()
+	p.Status = ProjectStatusStopping
+	p.StatusChangedAt = &now
+	logger.Info("Project status set to stopping for shutdown", "id", p.Id)
+
+	// Overall timeout for the entire stop process
+	overallTimeout := time.After(2 * time.Minute) // 2 minute overall timeout
+	stopCompleted := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic during project shutdown stop", "project", p.Id, "panic", r)
+				stopCompleted <- fmt.Errorf("panic during shutdown stop: %v", r)
+			}
+		}()
+
+		// Use the internal stopComponents function but don't save status to Redis
+		err := p.stopComponentsInternal(false) // Shutdown: don't save status to Redis
+		stopCompleted <- err
+	}()
+
+	select {
+	case err := <-stopCompleted:
+		if err != nil {
+			logger.Error("Project shutdown stop completed with error", "project", p.Id, "error", err)
+			return err
+		}
+		logger.Info("Project stopped successfully for shutdown", "project", p.Id)
+		return nil
+	case <-overallTimeout:
+		logger.Error("Project shutdown stop timeout exceeded, forcing cleanup", "project", p.Id)
+
+		// Force cleanup
+		if err := p.forceCleanup(); err != nil {
+			logger.Error("Force cleanup failed during shutdown", "project", p.Id, "error", err)
+		}
+
+		// Don't update Redis status during shutdown - preserve original state
+		logger.Info("Shutdown stop timeout completed, original status preserved", "project", p.Id)
+
+		return fmt.Errorf("project shutdown stop timeout exceeded, forced cleanup completed for %s", p.Id)
 	}
 }
 

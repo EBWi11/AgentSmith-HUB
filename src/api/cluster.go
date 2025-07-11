@@ -28,10 +28,85 @@ func getClusterProjectStates(c echo.Context) error {
 	// Return cluster status with project states
 	status := cluster.GetClusterStatus()
 
-	// For now, return empty project states - this will be populated by the instruction system
+	// Get real project states from Redis for all nodes
+	projectStates := make(map[string]interface{})
+
+	// Always try to get current node's project states first
+	currentNodeID := common.Config.LocalIP
+	if currentNodeID != "" {
+		redisKey := "cluster:proj_states:" + currentNodeID
+		timestampKey := "cluster:proj_status_ts:" + currentNodeID
+
+		if nodeStates, err := common.RedisHGetAll(redisKey); err == nil {
+			// Get timestamps for this node
+			nodeTimestamps, _ := common.RedisHGetAll(timestampKey)
+
+			// Convert Redis hash to array of project state objects
+			var projectList []map[string]interface{}
+			for projectID, status := range nodeStates {
+				projectData := map[string]interface{}{
+					"id":     projectID,
+					"status": status,
+				}
+
+				// Add timestamp if available
+				if timestamp, exists := nodeTimestamps[projectID]; exists && timestamp != "" {
+					projectData["status_changed_at"] = timestamp
+				}
+
+				projectList = append(projectList, projectData)
+			}
+			projectStates[currentNodeID] = projectList
+		} else {
+			// If Redis error, return empty array for this node
+			projectStates[currentNodeID] = []map[string]interface{}{}
+		}
+	}
+
+	// Get all nodes from cluster status for additional nodes
+	if nodes, ok := status["nodes"].([]map[string]interface{}); ok {
+		for _, node := range nodes {
+			if nodeID, ok := node["id"].(string); ok {
+				// Skip if already processed current node
+				if nodeID == currentNodeID {
+					continue
+				}
+
+				// Get project states for this node from Redis
+				redisKey := "cluster:proj_states:" + nodeID
+				timestampKey := "cluster:proj_status_ts:" + nodeID
+
+				if nodeStates, err := common.RedisHGetAll(redisKey); err == nil {
+					// Get timestamps for this node
+					nodeTimestamps, _ := common.RedisHGetAll(timestampKey)
+
+					// Convert Redis hash to array of project state objects
+					var projectList []map[string]interface{}
+					for projectID, status := range nodeStates {
+						projectData := map[string]interface{}{
+							"id":     projectID,
+							"status": status,
+						}
+
+						// Add timestamp if available
+						if timestamp, exists := nodeTimestamps[projectID]; exists && timestamp != "" {
+							projectData["status_changed_at"] = timestamp
+						}
+
+						projectList = append(projectList, projectData)
+					}
+					projectStates[nodeID] = projectList
+				} else {
+					// If Redis error, return empty array for this node
+					projectStates[nodeID] = []map[string]interface{}{}
+				}
+			}
+		}
+	}
+
 	response := map[string]interface{}{
 		"cluster_status": status,
-		"project_states": make(map[string]interface{}),
+		"project_states": projectStates,
 	}
 
 	return c.JSON(http.StatusOK, response)

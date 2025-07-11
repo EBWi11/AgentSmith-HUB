@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"AgentSmith-HUB/logger"
+	"time"
 )
 
 // Global cluster state
@@ -84,25 +85,90 @@ func (cm *ClusterManager) Stop() {
 }
 
 // GetClusterStatus returns cluster status
+// Returns both old format (is_leader, node_id) and new format (self_id, self_address, status) for compatibility
 func GetClusterStatus() map[string]interface{} {
 	status := map[string]interface{}{
+		// Legacy fields - keep for backward compatibility
 		"is_leader": IsLeader,
 		"node_id":   NodeID,
-		"nodes":     make(map[string]interface{}),
+		// New fields - required by frontend ClusterStatus.vue
+		"self_id":      NodeID,
+		"self_address": NodeID,
+		"status":       "follower", // Default to follower
+		"nodes":        make(map[string]interface{}),
 	}
 
-	if GlobalHeartbeatManager != nil {
+	// Set current node status based on leader flag
+	if IsLeader {
+		status["status"] = "leader"
+	}
+
+	nodeList := make(map[string]interface{})
+
+	// Always include current node in the list
+	if IsLeader {
+		// Leader node - always show, regardless of GlobalInstructionManager state
+		version := "unknown"
+		if GlobalInstructionManager != nil {
+			version = GlobalInstructionManager.GetCurrentVersion()
+		}
+		nodeList[NodeID] = map[string]interface{}{
+			"version":   version,
+			"timestamp": time.Now().Unix(),
+			"online":    true,
+			"role":      "leader",
+		}
+	} else {
+		// Follower node
+		nodeList[NodeID] = map[string]interface{}{
+			"version":   "follower", // Followers don't track version
+			"timestamp": time.Now().Unix(),
+			"online":    true,
+			"role":      "follower",
+		}
+	}
+
+	// Add other follower nodes (only for leader)
+	if IsLeader && GlobalHeartbeatManager != nil {
 		nodes := GlobalHeartbeatManager.GetNodes()
-		nodeList := make(map[string]interface{})
 		for nodeID, heartbeat := range nodes {
 			nodeList[nodeID] = map[string]interface{}{
 				"version":   heartbeat.Version,
 				"timestamp": heartbeat.Timestamp,
 				"online":    true,
+				"role":      "follower",
 			}
 		}
-		status["nodes"] = nodeList
 	}
+
+	// Convert nodeList object to array for frontend compatibility
+	// Frontend ClusterStatus.vue expects nodes as array with specific field names
+	nodeArray := make([]map[string]interface{}, 0)
+	for nodeID, nodeInfo := range nodeList {
+		if nodeMap, ok := nodeInfo.(map[string]interface{}); ok {
+			// Add required fields for frontend
+			nodeMap["id"] = nodeID      // Frontend expects 'id' field
+			nodeMap["address"] = nodeID // Frontend expects 'address' field (use nodeID as address)
+
+			// Convert role to status for frontend compatibility
+			if role, exists := nodeMap["role"]; exists {
+				nodeMap["status"] = role // Frontend expects 'status' field instead of 'role'
+			}
+
+			// Add health status field
+			nodeMap["is_healthy"] = nodeMap["online"] // Frontend expects 'is_healthy' field
+
+			// Convert timestamp to proper format
+			if timestamp, exists := nodeMap["timestamp"]; exists {
+				nodeMap["last_seen"] = timestamp // Frontend expects 'last_seen' field
+			}
+
+			nodeArray = append(nodeArray, nodeMap)
+		}
+	}
+
+	// Set nodes as array (frontend expects array, not object)
+	status["nodes"] = nodeArray
 
 	if GlobalInstructionManager != nil {
 		status["version"] = GlobalInstructionManager.GetCurrentVersion()
