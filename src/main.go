@@ -372,8 +372,18 @@ func loadLocalProjects() {
 					if err := p.Start(); err != nil {
 						logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
 						p.Status = project.ProjectStatusStopped
+						// Record failed restore operation
+						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
+							"triggered_by": "system_restore",
+							"node_id":      common.Config.LocalIP,
+						})
 					} else {
 						logger.Info("Successfully restored project to running state", "id", p.Id)
+						// Record successful restore operation
+						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
+							"triggered_by": "system_restore",
+							"node_id":      common.Config.LocalIP,
+						})
 					}
 				case "stopped":
 					p.Status = project.ProjectStatusStopped
