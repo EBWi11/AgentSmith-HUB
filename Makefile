@@ -50,18 +50,21 @@ backend:
 	mkdir -p $(BUILD_DIR)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
 		echo "Cross-compiling from macOS to Linux $(TARGET_GOARCH)..."; \
+		echo "Note: This project requires CGO and librure library for regex functionality"; \
+		echo "Cross-compilation from macOS with CGO is complex, using Docker is recommended"; \
+		echo "Attempting cross-compilation (may fail)..."; \
 		if [ "$(TARGET_GOARCH)" = "arm64" ]; then \
-			echo "Cross-compiling to ARM64 (CGO disabled for compatibility)..."; \
+			echo "Cross-compiling to ARM64 (CGO disabled - will likely fail)..."; \
 			cd $(BACKEND_DIR) && \
 			CGO_ENABLED=0 GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 			go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) . || \
-			(echo "Cross-compilation failed. Please use: make backend-docker TARGET_GOARCH=$(TARGET_GOARCH)" && exit 1); \
+			(echo "Cross-compilation failed as expected. Please use: make backend-docker TARGET_GOARCH=$(TARGET_GOARCH)" && exit 1); \
 		else \
-			echo "Cross-compiling to AMD64 (CGO disabled for compatibility)..."; \
+			echo "Cross-compiling to AMD64 (CGO disabled - will likely fail)..."; \
 			cd $(BACKEND_DIR) && \
 			CGO_ENABLED=0 GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 			go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) . || \
-			(echo "Cross-compilation failed. Please use: make backend-docker TARGET_GOARCH=$(TARGET_GOARCH)" && exit 1); \
+			(echo "Cross-compilation failed as expected. Please use: make backend-docker TARGET_GOARCH=$(TARGET_GOARCH)" && exit 1); \
 		fi; \
 	else \
 		echo "Building on Linux natively for $(TARGET_GOARCH)..."; \
@@ -106,18 +109,28 @@ backend-docker:
 			-e CC=aarch64-linux-gnu-gcc \
 			-e GOOS=linux \
 			-e GOARCH=arm64 \
-			-e CGO_LDFLAGS="-L/workspace/lib/linux/arm64 -lrure" \
+			-e CGO_LDFLAGS="-L/workspace/lib/linux/arm64 -lrure -Wl,-rpath,/workspace/lib/linux/arm64" \
+			-e LD_LIBRARY_PATH="/workspace/lib/linux/arm64" \
 			golang:1.21 \
-			sh -c "apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu && go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 ."; \
+			sh -c "apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu && \
+				echo 'Library files:' && ls -la /workspace/lib/linux/arm64/ && \
+				cp /workspace/lib/linux/arm64/librure.so /usr/lib/ && ldconfig && \
+				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 . || \
+				(echo 'CGO build failed, trying static build...' && CGO_ENABLED=0 go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-arm64 .)"; \
 	else \
 		echo "Building for AMD64 architecture..."; \
 		docker run --rm -v "$(PWD):/workspace" -w /workspace/$(BACKEND_DIR) \
 			-e CGO_ENABLED=1 \
 			-e GOOS=linux \
 			-e GOARCH=amd64 \
-			-e CGO_LDFLAGS="-L/workspace/lib/linux/amd64 -lrure" \
+			-e CGO_LDFLAGS="-L/workspace/lib/linux/amd64 -lrure -Wl,-rpath,/workspace/lib/linux/amd64" \
+			-e LD_LIBRARY_PATH="/workspace/lib/linux/amd64" \
 			golang:1.21 \
-			sh -c "apt-get update && apt-get install -y build-essential && go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 ."; \
+			sh -c "apt-get update && apt-get install -y build-essential && \
+				echo 'Library files:' && ls -la /workspace/lib/linux/amd64/ && \
+				cp /workspace/lib/linux/amd64/librure.so /usr/lib/ && ldconfig && \
+				go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 . || \
+				(echo 'CGO build failed, trying static build...' && CGO_ENABLED=0 go build -ldflags \"-s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'\" -o ../$(BUILD_DIR)/$(BINARY_NAME)-amd64 .)"; \
 	fi
 
 # Build for specific architectures
@@ -249,8 +262,13 @@ help:
 	@echo "  - Override with: make TARGET_GOARCH=arm64 <target>"
 	@echo ""
 	@echo "Cross-compilation:"
-	@echo "  - macOS: Uses CGO_ENABLED=0 (or Docker for CGO)"
+	@echo "  - macOS: Requires Docker for CGO (librure dependency)"
 	@echo "  - Linux: Uses native or cross-compilation with CGO"
+	@echo ""
+	@echo "Dependencies:"
+	@echo "  - This project requires CGO and librure.so for regex functionality"
+	@echo "  - Static builds (CGO_ENABLED=0) are not supported"
+	@echo "  - For macOS development, use Docker builds for production"
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  make all                    # Build for current architecture"

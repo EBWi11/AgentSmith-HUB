@@ -65,13 +65,23 @@ jobs:
           export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=arm64
-          export CGO_LDFLAGS="-L$(pwd)/../lib/linux/arm64 -lrure"
+          LIB_PATH="$(pwd)/../lib/linux/arm64"
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         else
           export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=amd64
-          export CGO_LDFLAGS="-L$(pwd)/../lib/linux/amd64 -lrure"
+          LIB_PATH="$(pwd)/../lib/linux/amd64"
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         fi
+        
+        # Verify library exists and show debug info
+        echo "Library path: ${LIB_PATH}"
+        ls -la "${LIB_PATH}/"
+        echo "CGO_LDFLAGS: $CGO_LDFLAGS"
+        echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
         
         # Build with version information
         VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
@@ -79,7 +89,43 @@ jobs:
         GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
         
-        go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .
+        # Try building with different approaches
+        BUILD_SUCCESS=false
+        
+        # Method 1: Try copying library to system path first
+        echo "Attempting to copy library to system path..."
+        sudo cp "${LIB_PATH}/librure.so" /usr/lib/
+        sudo ldconfig
+        
+        echo "Attempting CGO build with system library..."
+        if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
+          BUILD_SUCCESS=true
+          echo "CGO build with system library succeeded"
+        else
+          echo "CGO build with system library failed"
+          
+          # Method 2: Try with library path
+          echo "Attempting CGO build with library path..."
+          if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
+            BUILD_SUCCESS=true
+            echo "CGO build with library path succeeded"
+          else
+            echo "CGO build with library path failed"
+            echo "Note: This project requires CGO and librure.so for regex functionality"
+            echo "Static build without CGO is not supported due to rure-go dependency"
+            exit 1
+          fi
+        fi
+        
+        if [ "$BUILD_SUCCESS" = "true" ]; then
+          echo "Build completed successfully"
+          ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
+          echo "Checking binary dependencies:"
+          ldd ../build/${BINARY_NAME}-${{ matrix.arch }} || echo "ldd not available or static binary"
+        else
+          echo "Build failed"
+          exit 1
+        fi
     
     - name: Get version info
       id: version
