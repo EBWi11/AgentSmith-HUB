@@ -75,6 +75,9 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
+	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
+	syncProjectOperationToFollowers(req.ProjectID, "start")
+
 	// Start the project
 	if err := p.Start(); err != nil {
 		// Record failed operation
@@ -96,9 +99,6 @@ func StartProject(c echo.Context) error {
 	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
 		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
 	}
-
-	// Sync operation to follower nodes
-	syncProjectOperationToFollowers(req.ProjectID, "start")
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Project started successfully"})
 }
@@ -136,6 +136,9 @@ func StopProject(c echo.Context) error {
 		})
 	}
 
+	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
+	syncProjectOperationToFollowers(req.ProjectID, "stop")
+
 	// Stop the project
 	if err := p.Stop(); err != nil {
 		// Record failed operation
@@ -163,9 +166,6 @@ func StopProject(c echo.Context) error {
 	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
 		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
 	}
-
-	// Sync operation to follower nodes
-	syncProjectOperationToFollowers(req.ProjectID, "stop")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",
@@ -213,6 +213,9 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
+	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
+	syncProjectOperationToFollowers(req.ProjectID, "restart")
+
 	// Use RestartProjectsSafely to avoid duplicate operation history records
 	restartedCount, err := project.RestartProjectsSafely([]string{req.ProjectID}, "user_action")
 	if err != nil {
@@ -236,9 +239,6 @@ func RestartProject(c echo.Context) error {
 	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
 		logger.Warn("Failed to persist project restart time to Redis", "project", req.ProjectID, "error", err)
 	}
-
-	// Sync operation to follower nodes
-	syncProjectOperationToFollowers(req.ProjectID, "restart")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",

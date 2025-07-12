@@ -84,16 +84,9 @@ func (qc *QPSCollector) collectAndReport() {
 		}
 	}
 
-	// Collect system metrics using the provided system provider function
-	var systemMetrics *SystemMetrics
-	if qc.systemProvider != nil {
-		systemMetrics = qc.systemProvider()
-	}
-
-	// Process system metrics locally
-	if systemMetrics != nil && GlobalClusterSystemManager != nil {
-		GlobalClusterSystemManager.AddSystemMetrics(systemMetrics)
-	}
+	// Note: System metrics are now handled by the heartbeat mechanism
+	// Follower nodes send system metrics via heartbeat
+	// Leader nodes handle their own system metrics in HeartbeatManager.updateLeaderSystemMetrics()
 }
 
 // Global QPS collector instance (only on followers)

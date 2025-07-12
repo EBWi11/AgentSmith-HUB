@@ -58,6 +58,64 @@ func RecordProjectOperation(operationType OperationType, projectID, status, erro
 	logger.Info("Operation recorded to Redis", "type", record.Type, "project", record.ProjectID, "status", record.Status)
 }
 
+// RecordClusterInstruction records a cluster instruction operation to Redis
+func RecordClusterInstruction(operationType OperationType, instructionType, componentID, componentType string, status, errorMsg, content string, details map[string]interface{}) {
+	// Ensure details map exists and contains execution node information
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+
+	// Always record the actual execution node (don't override if already set)
+	if _, exists := details["node_id"]; !exists {
+		details["node_id"] = Config.LocalIP
+	}
+	if _, exists := details["node_address"]; !exists {
+		details["node_address"] = Config.LocalIP
+	}
+	if _, exists := details["executed_by"]; !exists {
+		details["executed_by"] = Config.LocalIP
+	}
+
+	// Add instruction-specific details
+	if instructionType != "" {
+		details["instruction_type"] = instructionType
+	}
+	if content != "" {
+		details["instruction_content"] = content
+	}
+
+	record := OperationRecord{
+		Type:          operationType,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		Status:        status,
+		Error:         errorMsg,
+		NewContent:    content, // Store instruction content
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal cluster instruction record", "operation", operationType, "instruction_type", instructionType, "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record cluster instruction to Redis", "operation", operationType, "instruction_type", instructionType, "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days (31 * 24 * 60 * 60 = 2,678,400 seconds)
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Cluster instruction recorded to Redis", "type", record.Type, "instruction_type", instructionType, "component", record.ComponentID, "status", record.Status)
+}
+
 // InitComponentUpdateManager initializes the global component update manager
 func InitComponentUpdateManager() {
 	GlobalComponentUpdateManager = &ComponentUpdateManager{

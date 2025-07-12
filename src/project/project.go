@@ -940,6 +940,14 @@ func (p *Project) Start() error {
 		}
 	}
 
+	// Check if project was in error state - if so, force full reload
+	wasErrorState := p.Status == ProjectStatusError
+	if wasErrorState && !isTestMode {
+		logger.Info("Project was in error state, will force full component reload", "project", p.Id, "previous_error", p.Err)
+		// Clear the error state and force reload
+		p.Err = nil
+	}
+
 	// In test mode, bypass status checks but in production mode, enforce them
 	if !isTestMode {
 		if p.Status == ProjectStatusRunning {
@@ -951,9 +959,10 @@ func (p *Project) Start() error {
 		if p.Status == ProjectStatusStopping {
 			return fmt.Errorf("project is currently stopping, please wait %s", p.Id)
 		}
-		if p.Status == ProjectStatusError {
-			return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
-		}
+		// Remove the error state check - allow error projects to restart with full reload
+		// if p.Status == ProjectStatusError {
+		//     return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
+		// }
 	} else {
 		// Force set status to stopped to allow starting in test mode
 		// In test mode, only update memory status without Redis
@@ -976,8 +985,8 @@ func (p *Project) Start() error {
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
-	// Load components from global registry
-	err = p.loadComponentsFromGlobal(flowGraph)
+	// Load components from global registry - force reload if was in error state
+	err = p.loadComponentsFromGlobal(flowGraph, wasErrorState)
 	if err != nil {
 		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to load components: %v", err)
@@ -1806,8 +1815,8 @@ func (p *Project) waitForDataDrain() {
 }
 
 // loadComponentsFromGlobal loads component references from global registry based on flow graph
-func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error {
-	logger.Info("Loading components from global registry", "project", p.Id)
+func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceReload bool) error {
+	logger.Info("Loading components from global registry", "project", p.Id, "force_reload", forceReload)
 
 	// Build ProjectNodeSequence mapping first
 	componentSequences := make(map[string]string)
@@ -1923,6 +1932,12 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 
+	// If force reload is enabled, clear owner references from old components
+	if forceReload {
+		logger.Info("Force reload enabled - clearing all component owner references", "project", p.Id)
+		// This will force creation of new instances instead of reusing existing ones
+	}
+
 	// Load input components from global registry (inputs can be shared safely)
 	for _, name := range inputNames {
 		componentKey := "INPUT." + name
@@ -1967,17 +1982,20 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 		}
 
 		// Check if there's already an output instance with this exact ProjectNodeSequence
+		// Skip this check if force reload is enabled
 		var foundOutput *output.Output
-		for _, existingProject := range GlobalProject.Projects {
-			if existingOutput, exists := existingProject.Outputs[name]; exists {
-				if existingOutput.ProjectNodeSequence == expectedSequence {
-					foundOutput = existingOutput
-					break
+		if !forceReload {
+			for _, existingProject := range GlobalProject.Projects {
+				if existingOutput, exists := existingProject.Outputs[name]; exists {
+					if existingOutput.ProjectNodeSequence == expectedSequence {
+						foundOutput = existingOutput
+						break
+					}
 				}
 			}
 		}
 
-		if foundOutput != nil {
+		if foundOutput != nil && !forceReload {
 			// Found existing instance with same ProjectNodeSequence, can share
 			p.Outputs[name] = foundOutput
 			logger.Info("Reusing existing output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
@@ -2022,17 +2040,20 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error 
 		}
 
 		// Check if there's already a ruleset instance with this exact ProjectNodeSequence
+		// Skip this check if force reload is enabled
 		var foundRuleset *rules_engine.Ruleset
-		for _, existingProject := range GlobalProject.Projects {
-			if existingRuleset, exists := existingProject.Rulesets[name]; exists {
-				if existingRuleset.ProjectNodeSequence == expectedSequence {
-					foundRuleset = existingRuleset
-					break
+		if !forceReload {
+			for _, existingProject := range GlobalProject.Projects {
+				if existingRuleset, exists := existingProject.Rulesets[name]; exists {
+					if existingRuleset.ProjectNodeSequence == expectedSequence {
+						foundRuleset = existingRuleset
+						break
+					}
 				}
 			}
 		}
 
-		if foundRuleset != nil {
+		if foundRuleset != nil && !forceReload {
 			// Found existing instance with same ProjectNodeSequence, can share
 			p.Rulesets[name] = foundRuleset
 			logger.Info("Reusing existing ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
@@ -2212,41 +2233,66 @@ func RestartProjectsSafely(projectIDs []string, trigger string) (int, error) {
 			continue
 		}
 
-		if proj.Status == ProjectStatusRunning {
-			logger.Info("Restarting project", "id", projectID)
+		if proj.Status == ProjectStatusRunning || proj.Status == ProjectStatusError {
+			logger.Info("Restarting project", "id", projectID, "status", proj.Status)
 			startTime := time.Now()
 
-			// Stop the project (respects shared components)
-			if err := proj.Stop(); err != nil {
-				logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
-				// Record failed restart operation to Operations History
-				// Note: All nodes record to Redis with TTL
-				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
-					"trigger": trigger,
-					"phase":   "stop",
-				})
-				continue // Skip starting if stop failed
-			}
-			logger.Info("Stopped project during restart", "id", projectID)
-
-			// Start the project (respects shared components)
-			if err := proj.Start(); err != nil {
-				logger.Error("Failed to start project during restart", "id", projectID, "error", err)
-				// Record failed restart operation to Operations History
-				// Note: All nodes record to Redis with TTL
-				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
-					"trigger": trigger,
-					"phase":   "start",
-				})
+			// If project is in error state, just try to start directly (no need to stop)
+			if proj.Status == ProjectStatusError {
+				logger.Info("Project in error state, attempting direct start with full reload", "id", projectID)
+				// Start the project (will force reload all components)
+				if err := proj.Start(); err != nil {
+					logger.Error("Failed to start error project during restart", "id", projectID, "error", err)
+					// Record failed restart operation to Operations History
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start from error state: %v", err), map[string]interface{}{
+						"trigger":   trigger,
+						"phase":     "start_from_error",
+						"was_error": true,
+					})
+				} else {
+					restartedCount++
+					logger.Info("Successfully restarted project from error state", "id", projectID, "duration", time.Since(startTime))
+					// Record successful restart operation to Operations History
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
+						"duration_ms": time.Since(startTime).Milliseconds(),
+						"trigger":     trigger,
+						"was_error":   true,
+					})
+				}
 			} else {
-				restartedCount++
-				logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
-				// Record successful restart operation to Operations History
-				// Note: All nodes record to Redis with TTL
-				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
-					"duration_ms": time.Since(startTime).Milliseconds(),
-					"trigger":     trigger,
-				})
+				// Running project - stop then start
+				// Stop the project (respects shared components)
+				if err := proj.Stop(); err != nil {
+					logger.Error("Failed to stop project during restart", "id", projectID, "error", err)
+					// Record failed restart operation to Operations History
+					// Note: All nodes record to Redis with TTL
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
+						"trigger": trigger,
+						"phase":   "stop",
+					})
+					continue // Skip starting if stop failed
+				}
+				logger.Info("Stopped project during restart", "id", projectID)
+
+				// Start the project (respects shared components)
+				if err := proj.Start(); err != nil {
+					logger.Error("Failed to start project during restart", "id", projectID, "error", err)
+					// Record failed restart operation to Operations History
+					// Note: All nodes record to Redis with TTL
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+						"trigger": trigger,
+						"phase":   "start",
+					})
+				} else {
+					restartedCount++
+					logger.Info("Successfully restarted project", "id", projectID, "duration", time.Since(startTime))
+					// Record successful restart operation to Operations History
+					// Note: All nodes record to Redis with TTL
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
+						"duration_ms": time.Since(startTime).Milliseconds(),
+						"trigger":     trigger,
+					})
+				}
 			}
 		} else if proj.Status == ProjectStatusStarting {
 			logger.Info("Skipping project restart (currently starting)", "id", projectID, "status", proj.Status)

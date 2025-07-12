@@ -402,10 +402,30 @@ func (im *InstructionManager) PublishInstruction(componentName, componentType, c
 		im.mu.Lock()
 		im.currentVersion--
 		im.mu.Unlock()
+
 		return fmt.Errorf("failed to store instruction: %w", err)
 	}
 
 	logger.Debug("Published instruction", "version", version, "component", componentName, "operation", operation, "requires_restart", requiresRestart)
+
+	// Record instruction publish operation to history
+	common.RecordClusterInstruction(
+		common.OpTypeInstructionPublish,
+		operation,     // instruction type
+		componentName, // component ID
+		componentType, // component type
+		"success",     // status
+		"",            // no error
+		content,       // instruction content
+		map[string]interface{}{ // details
+			"version":          version,
+			"requires_restart": requiresRestart,
+			"dependencies":     dependencies,
+			"metadata":         metadata,
+			"role":             "leader",
+		},
+	)
+
 	return nil
 }
 
@@ -764,6 +784,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		"to", toVersion,
 		"count", len(syncedInstructions),
 		"instructions", strings.Join(syncedInstructions, "; "))
+
 	return nil
 }
 

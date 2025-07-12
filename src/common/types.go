@@ -30,6 +30,8 @@ const (
 	OpTypeProjectStart    OperationType = "project_start"
 	OpTypeProjectStop     OperationType = "project_stop"
 	OpTypeProjectRestart  OperationType = "project_restart"
+	// Cluster instruction operations
+	OpTypeInstructionPublish OperationType = "instruction_publish" // Leader发布指令
 )
 
 // OperationRecord represents a single operation record

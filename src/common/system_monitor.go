@@ -433,6 +433,9 @@ func NewClusterSystemManager() *ClusterSystemManager {
 	csm.cleanupWg.Add(1)
 	go csm.cleanupLoop()
 
+	// Note: System metrics are now received via heartbeat mechanism
+	// See HeartbeatManager.listenHeartbeats() for follower metrics handling
+
 	return csm
 }
 

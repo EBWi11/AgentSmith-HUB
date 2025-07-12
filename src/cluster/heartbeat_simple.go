@@ -13,9 +13,13 @@ import (
 
 // HeartbeatData represents heartbeat information
 type HeartbeatData struct {
-	NodeID    string `json:"node_id"`
-	Version   string `json:"version"`
-	Timestamp int64  `json:"timestamp"`
+	NodeID         string  `json:"node_id"`
+	Version        string  `json:"version"`
+	Timestamp      int64   `json:"timestamp"`
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryUsedMB   float64 `json:"memory_used_mb"`
+	MemoryPercent  float64 `json:"memory_percent"`
+	GoroutineCount int     `json:"goroutine_count"`
 }
 
 // HeartbeatManager manages heartbeat and version sync
@@ -55,6 +59,33 @@ func (hm *HeartbeatManager) startLeaderHeartbeat() {
 
 	// Clean up offline nodes
 	go hm.cleanupOfflineNodes()
+
+	// Update leader's own system metrics
+	go hm.updateLeaderSystemMetrics()
+}
+
+// updateLeaderSystemMetrics periodically updates leader's own system metrics
+func (hm *HeartbeatManager) updateLeaderSystemMetrics() {
+	if !common.IsCurrentNodeLeader() {
+		return
+	}
+
+	ticker := time.NewTicker(5 * time.Second) // Same frequency as follower heartbeat
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Get current system metrics for leader
+			if common.GlobalSystemMonitor != nil && common.GlobalClusterSystemManager != nil {
+				if metrics := common.GlobalSystemMonitor.GetCurrentMetrics(); metrics != nil {
+					common.GlobalClusterSystemManager.AddSystemMetrics(metrics)
+				}
+			}
+		case <-hm.stopChan:
+			return
+		}
+	}
 }
 
 // startFollowerHeartbeat starts follower heartbeat services
@@ -72,7 +103,7 @@ func (hm *HeartbeatManager) startFollowerHeartbeat() {
 	}
 }
 
-// sendHeartbeat sends heartbeat with current version (follower only)
+// sendHeartbeat sends heartbeat with current version and system metrics (follower only)
 func (hm *HeartbeatManager) sendHeartbeat() {
 	if common.IsCurrentNodeLeader() {
 		return
@@ -83,10 +114,26 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 		currentVersion = GlobalInstructionManager.GetCurrentVersion()
 	}
 
+	// Get current system metrics
+	var cpuPercent, memoryUsedMB, memoryPercent float64
+	var goroutineCount int
+	if common.GlobalSystemMonitor != nil {
+		if metrics := common.GlobalSystemMonitor.GetCurrentMetrics(); metrics != nil {
+			cpuPercent = metrics.CPUPercent
+			memoryUsedMB = metrics.MemoryUsedMB
+			memoryPercent = metrics.MemoryPercent
+			goroutineCount = metrics.GoroutineCount
+		}
+	}
+
 	heartbeat := HeartbeatData{
-		NodeID:    hm.nodeID,
-		Version:   currentVersion,
-		Timestamp: time.Now().Unix(),
+		NodeID:         hm.nodeID,
+		Version:        currentVersion,
+		Timestamp:      time.Now().Unix(),
+		CPUPercent:     cpuPercent,
+		MemoryUsedMB:   memoryUsedMB,
+		MemoryPercent:  memoryPercent,
+		GoroutineCount: goroutineCount,
 	}
 
 	data, err := json.Marshal(heartbeat)
@@ -135,6 +182,19 @@ func (hm *HeartbeatManager) listenHeartbeats() {
 			hm.mu.Lock()
 			hm.nodes[heartbeat.NodeID] = heartbeat
 			hm.mu.Unlock()
+
+			// Store system metrics in cluster system manager
+			if common.GlobalClusterSystemManager != nil {
+				systemMetrics := &common.SystemMetrics{
+					NodeID:         heartbeat.NodeID,
+					CPUPercent:     heartbeat.CPUPercent,
+					MemoryUsedMB:   heartbeat.MemoryUsedMB,
+					MemoryPercent:  heartbeat.MemoryPercent,
+					GoroutineCount: heartbeat.GoroutineCount,
+					Timestamp:      time.Unix(heartbeat.Timestamp, 0),
+				}
+				common.GlobalClusterSystemManager.AddSystemMetrics(systemMetrics)
+			}
 
 			// Check version and send sync command if needed
 			hm.checkVersionSync(heartbeat)
