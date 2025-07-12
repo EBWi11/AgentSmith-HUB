@@ -138,7 +138,7 @@ const store = createStore({
       // Use unified event manager for Vuex-specific caches only
       const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
         const { action, type, id } = data
-        console.log(`[VuexStore] Component ${action}: ${type}/${id}`)
+        // console.log(`[VuexStore] Component ${action}: ${type}/${id}`)
         
         // Only handle Vuex-specific caches (avoid overlap with dataCache)
         if (type === 'rulesets') {
@@ -154,7 +154,7 @@ const store = createStore({
       
       const pendingChangesCleanup = eventManager.on('pendingChangesApplied', (data) => {
         const { types } = data
-        console.log(`[VuexStore] Pending changes applied for types:`, types)
+        // console.log(`[VuexStore] Pending changes applied for types:`, types)
         
         if (Array.isArray(types)) {
           types.forEach(type => {
@@ -169,7 +169,7 @@ const store = createStore({
       
       const localChangesCleanup = eventManager.on('localChangesLoaded', (data) => {
         const { types } = data
-        console.log(`[VuexStore] Local changes loaded for types:`, types)
+        // console.log(`[VuexStore] Local changes loaded for types:`, types)
         
         if (Array.isArray(types)) {
           types.forEach(type => {
@@ -189,20 +189,20 @@ const store = createStore({
         localChangesCleanup
       ])
       
-      console.log('[VuexStore] Event listeners initialized via EventManager')
+      // console.log('[VuexStore] Event listeners initialized via EventManager')
     },
     
     // Cleanup event listeners
     cleanupEventListeners({ commit, state }) {
       state._eventCleanupFunctions.forEach(cleanup => cleanup())
       commit('setEventCleanupFunctions', [])
-      console.log('[VuexStore] Event listeners cleaned up')
+      // console.log('[VuexStore] Event listeners cleaned up')
     },
 
     // Note: fetchComponents is deprecated in favor of dataCache.fetchComponents
     // Keep for backward compatibility but add deprecation warning
     async fetchComponents({ commit, dispatch, state }, type) {
-      console.warn(`[VuexStore] fetchComponents is deprecated. Use dataCache.fetchComponents('${type}') instead.`)
+      // console.warn(`[VuexStore] fetchComponents is deprecated. Use dataCache.fetchComponents('${type}') instead.`)
       
       // Initialize event listeners if needed
       if (state._eventCleanupFunctions.length === 0) {
@@ -240,7 +240,7 @@ const store = createStore({
       }
     },
     async fetchAllComponents({ dispatch }) {
-      console.warn('[VuexStore] fetchAllComponents is deprecated. Use dataCache for component fetching.')
+      // console.warn('[VuexStore] fetchAllComponents is deprecated. Use dataCache for component fetching.')
       await Promise.all([
         dispatch('fetchComponents', 'inputs'),
         dispatch('fetchComponents', 'outputs'),
@@ -285,7 +285,7 @@ const store = createStore({
         commit('setRulesetFields', { rulesetId, fieldData })
         return fieldData
       } catch (error) {
-        console.warn(`Failed to fetch fields for ruleset ${rulesetId}:`, error)
+        // console.warn(`Failed to fetch fields for ruleset ${rulesetId}:`, error)
         const fallbackData = { fieldKeys: [], sampleCount: 0 }
         commit('setRulesetFields', { rulesetId, fieldData: fallbackData })
         return fallbackData

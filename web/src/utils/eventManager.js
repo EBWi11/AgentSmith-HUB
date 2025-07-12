@@ -21,7 +21,7 @@ class EventManager {
     window.addEventListener('localChangesLoaded', this.handleLocalChangesLoaded.bind(this))
     
     this.initialized = true
-    console.log('[EventManager] Global event listeners initialized')
+    // console.log('[EventManager] Global event listeners initialized')
   }
 
   /**
@@ -88,7 +88,7 @@ class EventManager {
    */
   handleComponentChanged(event) {
     const { action, type, id, timestamp } = event.detail
-    console.log(`[EventManager] Component ${action}: ${type}/${id}`)
+    // console.log(`[EventManager] Component ${action}: ${type}/${id}`)
     
     this.emit('componentChanged', { action, type, id, timestamp })
   }
@@ -98,7 +98,7 @@ class EventManager {
    */
   handlePendingChangesApplied(event) {
     const { types } = event.detail
-    console.log(`[EventManager] Pending changes applied for types:`, types)
+    // console.log(`[EventManager] Pending changes applied for types:`, types)
     
     this.emit('pendingChangesApplied', { types })
   }
@@ -108,7 +108,7 @@ class EventManager {
    */
   handleLocalChangesLoaded(event) {
     const { types, type } = event.detail
-    console.log(`[EventManager] Local changes loaded for types:`, types || [type])
+    // console.log(`[EventManager] Local changes loaded for types:`, types || [type])
     
     const affectedTypes = types || [type]
     this.emit('localChangesLoaded', { types: affectedTypes })
@@ -125,7 +125,7 @@ class EventManager {
       
       this.listeners.clear()
       this.initialized = false
-      console.log('[EventManager] Event listeners cleaned up')
+      // console.log('[EventManager] Event listeners cleaned up')
     }
   }
 }

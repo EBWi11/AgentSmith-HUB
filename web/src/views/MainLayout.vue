@@ -144,10 +144,8 @@ watch(
     if (oldId && oldComponentType) {
       if (oldComponentType === 'rulesets' && oldId !== id) {
         RulesetTestCache.clear(oldId)
-        console.log(`[MainLayout] Cleared ruleset test cache for: ${oldId}`)
       } else if (oldComponentType === 'projects' && oldId !== id) {
         ProjectTestCache.clear(oldId)
-        console.log(`[MainLayout] Cleared project test cache for: ${oldId}`)
       }
     }
     
@@ -336,7 +334,6 @@ onBeforeUnmount(() => {
   // Clear all test caches when component unmounts
   RulesetTestCache.clearAll();
   ProjectTestCache.clearAll();
-  console.log('[MainLayout] Cleared all test caches on unmount');
 });
 
 // Open the ruleset test modal

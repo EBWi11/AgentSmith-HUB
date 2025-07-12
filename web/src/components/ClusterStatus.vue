@@ -363,12 +363,9 @@ async function fetchAllData() {
       // Response shape: { data: { nodeId: {...} }, ... }
       nodeMessageData.value = (nodeMessagesResponse?.data) || {}
     } catch (messageError) {
-      console.warn('Failed to fetch node message data:', messageError)
-      // If we get 403 (forbidden), it means this node is not leader
-      if (messageError.response?.status === 403) {
-        console.info('Node message data is only available from leader node')
-      }
-      nodeMessageData.value = {}
+      // console.warn('Failed to fetch node message data:', messageError)
+      // Node message data is only available from leader node
+      // console.info('Node message data is only available from leader node')
     }
     
     // Fetch system metrics for all nodes (leader returns full data, follower may get 400)
@@ -379,10 +376,7 @@ async function fetchAllData() {
         systemMetrics.value = systemResponse.metrics
       }
     } catch (systemError) {
-      // Followers receive 400 (non-leader); ignore, continue with self metrics fallback
-      if (systemError?.response?.status !== 400) {
-        console.warn('Failed to fetch cluster system metrics:', systemError)
-      }
+      // console.warn('Failed to fetch cluster system metrics:', systemError)
     }
     
     // Always fetch current node's system metrics as fallback
@@ -393,13 +387,7 @@ async function fetchAllData() {
         systemMetrics.value[cluster.self_id] = metrics.current
       }
     } catch (metricsError) {
-      console.warn(`Failed to fetch system metrics for current node:`, metricsError)
-      systemMetrics.value[cluster.self_id] = {
-        cpu_percent: 0,
-        memory_used_mb: 0,
-        memory_percent: 0,
-        goroutine_count: 0
-      }
+      // console.warn(`Failed to fetch system metrics for current node:`, metricsError)
     }
     
   } catch (err) {

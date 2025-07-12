@@ -18,7 +18,7 @@ window.router = router
 
 // Global message component
 app.config.globalProperties.$message = {
-  success: (message) => console.log('Success:', message),
+  success: (message) => {}, // console.log('Success:', message),
   error: (message) => console.error('Error:', message),
   warning: (message) => console.warn('Warning:', message)
 }

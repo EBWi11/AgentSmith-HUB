@@ -30,7 +30,7 @@ export async function safeCacheFetch(fetcher, fallback = null, options = {}) {
       // Validate result
       if (result === null || result === undefined) {
         if (!silent) {
-          console.warn('[CacheUtils] Received null/undefined data, using fallback')
+          // console.warn('[CacheUtils] Received null/undefined data, using fallback')
         }
         return fallback
       }
@@ -42,7 +42,7 @@ export async function safeCacheFetch(fetcher, fallback = null, options = {}) {
       if (attempt < retries) {
         const delay = Math.min(1000 * Math.pow(2, attempt), 5000) // Exponential backoff, max 5 seconds
         if (!silent) {
-          console.warn(`[CacheUtils] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message)
+          // console.warn(`[CacheUtils] Attempt ${attempt + 1} failed, retrying in ${delay}ms:`, error.message)
         }
         await new Promise(resolve => setTimeout(resolve, delay))
       }
@@ -75,7 +75,7 @@ export function normalizeComponentData(data, type) {
     // Component must have ID or name
     const id = item.id || item.name
     if (!id) {
-      console.warn(`[CacheUtils] ${type} item missing id/name:`, item)
+      // console.warn(`[CacheUtils] ${type} item missing id/name:`, item)
       return false
     }
 
@@ -126,7 +126,7 @@ export function safeJsonParse(json, fallback = null) {
   try {
     return JSON.parse(json)
   } catch (error) {
-    console.warn('[CacheUtils] JSON parse failed:', error.message)
+    // console.warn('[CacheUtils] JSON parse failed:', error.message)
     return fallback
   }
 }
@@ -156,7 +156,7 @@ export function cleanupCache(cache, maxSize = 100) {
       const deleteCount = cache.size - maxSize
       const keys = Array.from(cache.keys()).slice(0, deleteCount)
       keys.forEach(key => cache.delete(key))
-      console.log(`[CacheUtils] Cleaned up ${deleteCount} cache entries`)
+      // console.log(`[CacheUtils] Cleaned up ${deleteCount} cache entries`)
     }
   } else if (typeof cache === 'object' && cache !== null) {
     // Cleanup for Object type cache
@@ -165,7 +165,7 @@ export function cleanupCache(cache, maxSize = 100) {
       const deleteCount = keys.length - maxSize
       const deleteKeys = keys.slice(0, deleteCount)
       deleteKeys.forEach(key => delete cache[key])
-      console.log(`[CacheUtils] Cleaned up ${deleteCount} cache entries`)
+      // console.log(`[CacheUtils] Cleaned up ${deleteCount} cache entries`)
     }
   }
 }

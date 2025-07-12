@@ -207,12 +207,10 @@ async function refreshChanges() {
       .filter(change => {
         // Filter out invalid changes
         if (!change || typeof change !== 'object') {
-          console.warn('Skipping invalid change:', change)
-          return false
+          continue
         }
         if (!change.type || !change.id) {
-          console.warn('Skipping change with missing type or id:', change)
-          return false
+          continue
         }
         return true
       })
@@ -387,7 +385,6 @@ async function applyChanges() {
   
   // Check if any changes are in applying state
   if (applying.value) {
-    console.warn('Apply operation already in progress')
     return
   }
   
@@ -397,8 +394,7 @@ async function applyChanges() {
     // Validate changes before applying
     const validChanges = changes.value.filter(change => {
       if (!change || !change.type || !change.id) {
-        console.warn('Skipping invalid change:', change)
-        return false
+        continue
       }
       return true
     })

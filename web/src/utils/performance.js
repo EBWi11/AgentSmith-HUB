@@ -192,16 +192,16 @@ export function performanceMonitor(name) {
     
     descriptor.value = async function (...args) {
       const startTime = performance.now()
-      console.log(`🚀 ${name} started`)
+      // console.log(`🚀 ${name} started`)
       
       try {
         const result = await originalMethod.apply(this, args)
         const endTime = performance.now()
-        console.log(`✅ ${name} completed in ${(endTime - startTime).toFixed(2)}ms`)
+        // console.log(`✅ ${name} completed in ${(endTime - startTime).toFixed(2)}ms`)
         return result
       } catch (error) {
         const endTime = performance.now()
-        console.error(`❌ ${name} failed in ${(endTime - startTime).toFixed(2)}ms:`, error)
+        // console.error(`❌ ${name} failed in ${(endTime - startTime).toFixed(2)}ms:`, error)
         throw error
       }
     }

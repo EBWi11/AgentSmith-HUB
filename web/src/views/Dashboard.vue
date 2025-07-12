@@ -777,7 +777,7 @@ function getProjectMessageStats(projectId) {
   
   // Log debug info for troubleshooting (only in development)
   if (process.env.NODE_ENV === 'development' && debugInfo.sequences.length > 0) {
-    console.log(`[MSG/D Debug] Project ${projectId}:`, debugInfo)
+            // console.log(`[MSG/D Debug] Project ${projectId}:`, debugInfo)
   }
   
   return { input, output, ruleset }
@@ -1167,7 +1167,7 @@ const smartRefresh = useDashboardSmartRefresh(refreshStats, {
 // Global project operation event listener
 function handleGlobalProjectOperation(event) {
   if (event.detail && event.detail.timestamp) {
-    console.log('Dashboard received project operation event:', event.detail)
+    // console.log('Dashboard received project operation event:', event.detail)
     // Trigger immediate refresh
     smartRefresh.forceRefresh()
   }
@@ -1263,7 +1263,7 @@ function handleRefreshError(error) {
 function resetErrorCount() {
   if (errorCount > 0) {
     errorCount = 0
-    console.log('Dashboard refresh recovered, error count reset')
+          // console.log('Dashboard refresh recovered, error count reset')
   }
 }
 

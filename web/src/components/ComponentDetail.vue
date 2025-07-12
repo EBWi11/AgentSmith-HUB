@@ -678,7 +678,7 @@ async function fetchDetail(item, forEdit = false) {
     
     // Ensure we have content
     if (!data || (!data.raw && data.raw !== '')) {
-      console.warn(`No content received for ${item.type} ${item.id}:`, data);
+      // console.warn(`No content received for ${item.type} ${item.id}:`, data);
       // Try to fetch again without temporary file logic
       if (forEdit && tempInfo && tempInfo.hasTemp) {
         return await fetchDetail(item, false);
@@ -697,7 +697,7 @@ async function fetchDetail(item, forEdit = false) {
       try {
         await validateRealtime(item.type, item.id, data.raw);
       } catch (verifyError) {
-        console.warn('Initial ruleset verification failed:', verifyError);
+        // console.warn('Initial ruleset verification failed:', verifyError);
         // Don't show errors on initial load, just clear validation
         clearValidation();
       }
@@ -1245,7 +1245,7 @@ function setupStatusRefresh() {
                 clearInterval(statusRefreshInterval.value);
                 currentStatusInterval.value = newInterval;
                 statusRefreshInterval.value = setInterval(refreshStatus, newInterval);
-                console.log(`ComponentDetail refresh interval adjusted to ${newInterval}ms for project ${props.item.id}`);
+                // console.log(`ComponentDetail refresh interval adjusted to ${newInterval}ms for project ${props.item.id}`);
               }
             }
           }
@@ -1259,7 +1259,7 @@ function setupStatusRefresh() {
     const initialInterval = getRefreshInterval();
     currentStatusInterval.value = initialInterval;
     statusRefreshInterval.value = setInterval(refreshStatus, initialInterval);
-    console.log(`ComponentDetail refresh started with ${initialInterval}ms for project ${props.item?.id}`);
+    // console.log(`ComponentDetail refresh started with ${initialInterval}ms for project ${props.item?.id}`);
     
     // 立即执行一次刷新
     refreshStatus();
@@ -1295,10 +1295,10 @@ watch(() => props.item?.id, (newVal, oldVal) => {
     if (oldVal && oldVal !== newVal) {
       if (props.item?.type === 'rulesets') {
         RulesetTestCache.clear(oldVal);
-        console.log(`[ComponentDetail] Cleared test cache for previous ruleset: ${oldVal}`);
+        // console.log(`[ComponentDetail] Cleared test cache for previous ruleset: ${oldVal}`);
       } else if (props.item?.type === 'projects') {
         ProjectTestCache.clear(oldVal);
-        console.log(`[ComponentDetail] Cleared test cache for previous project: ${oldVal}`);
+        // console.log(`[ComponentDetail] Cleared test cache for previous project: ${oldVal}`);
       }
     }
     
@@ -1348,10 +1348,10 @@ onBeforeUnmount(() => {
   if (props.item?.id) {
     if (isRuleset.value) {
       RulesetTestCache.clear(props.item.id);
-      console.log(`[ComponentDetail] Cleared test cache for ruleset: ${props.item.id}`);
+      // console.log(`[ComponentDetail] Cleared test cache for ruleset: ${props.item.id}`);
     } else if (isProject.value) {
       ProjectTestCache.clear(props.item.id);
-      console.log(`[ComponentDetail] Cleared test cache for project: ${props.item.id}`);
+      // console.log(`[ComponentDetail] Cleared test cache for project: ${props.item.id}`);
     }
   }
 });

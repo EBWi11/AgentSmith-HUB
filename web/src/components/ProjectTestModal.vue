@@ -230,7 +230,6 @@ function resetState() {
     if (cachedData) {
       inputData.value = cachedData.inputData || inputData.value;
       selectedInputNode.value = cachedData.selectedInputNode || '';
-      console.log(`[ProjectTestModal] Restored cached test data for project: ${props.projectId}`);
     }
   }
 }

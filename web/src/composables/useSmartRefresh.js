@@ -30,7 +30,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
   // Log function
   const log = (message, ...args) => {
     if (debug) {
-      console.log(`[SmartRefresh] ${message}`, ...args)
+      // console.log(`[SmartRefresh] ${message}`, ...args)
     }
   }
 

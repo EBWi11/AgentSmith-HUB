@@ -2524,7 +2524,7 @@ function openTestProject(item) {
 
 // Open cluster status modal
 function openClusterStatusModal(item) {
-  console.log('Opening cluster status modal for project:', item.id || item.name);
+      // console.log('Opening cluster status modal for project:', item.id || item.name);
   
   // Ensure all menus are closed first
   closeAllMenus();
@@ -2546,7 +2546,7 @@ function openClusterStatusModal(item) {
 
 // Open plugin stats modal
 function openPluginStatsModal(item) {
-  console.log('Opening plugin stats modal for plugin:', item.id || item.name);
+      // console.log('Opening plugin stats modal for plugin:', item.id || item.name);
   
   // Ensure all menus are closed first
   closeAllMenus();
@@ -2713,7 +2713,7 @@ function setupProjectStatusRefresh() {
         clearInterval(projectStatusRefreshInterval.value)
         currentSidebarInterval.value = newInterval
         projectStatusRefreshInterval.value = setInterval(refreshProjects, newInterval)
-        console.log(`Sidebar refresh interval adjusted to ${newInterval}ms`)
+                  // console.log(`Sidebar refresh interval adjusted to ${newInterval}ms`)
       }
     } catch (error) {
       console.error('Failed to refresh project status:', error)
@@ -2724,7 +2724,7 @@ function setupProjectStatusRefresh() {
   const initialInterval = getRefreshInterval()
   currentSidebarInterval.value = initialInterval
   projectStatusRefreshInterval.value = setInterval(refreshProjects, initialInterval)
-  console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
+      // console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
   
   // 立即执行一次刷新
   refreshProjects()
@@ -2794,7 +2794,7 @@ async function startProject(item) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'starting'
-      console.log(`UI state set to 'starting' for project ${item.id}`)
+      // console.log(`UI state set to 'starting' for project ${item.id}`)
     }
   }
   
@@ -2852,7 +2852,7 @@ async function stopProject(item) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'stopping'
-      console.log(`UI state set to 'stopping' for project ${item.id}`)
+      // console.log(`UI state set to 'stopping' for project ${item.id}`)
     }
   }
   
@@ -2892,7 +2892,7 @@ async function restartProject(item) {
     const projectItem = items.projects.find(p => p.id === item.id)
     if (projectItem) {
       projectItem.status = 'stopping'
-      console.log(`UI state set to 'stopping' for project restart ${item.id}`)
+      // console.log(`UI state set to 'stopping' for project restart ${item.id}`)
     }
   }
   
@@ -2947,7 +2947,7 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
   const pollInterval = 2000 // Poll every 2 seconds
   let attempts = 0
   
-  console.log(`Starting status polling for project ${projectId}, expecting transition from '${expectedTransitionState}'`)
+      // console.log(`Starting status polling for project ${projectId}, expecting transition from '${expectedTransitionState}'`)
   
   const poll = async () => {
     attempts++
@@ -2962,7 +2962,7 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
         
         if (project) {
           const currentStatus = project.status
-          console.log(`Poll attempt ${attempts}: Project ${projectId} status is '${currentStatus}'`)
+          // console.log(`Poll attempt ${attempts}: Project ${projectId} status is '${currentStatus}'`)
           
           // Update UI with real status from backend
           if (items.projects) {
@@ -2978,7 +2978,7 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
           const isStableState = !['starting', 'stopping'].includes(currentStatus)
           
           if (isStableState) {
-            console.log(`Project ${projectId} reached stable state: '${currentStatus}'`)
+                          // console.log(`Project ${projectId} reached stable state: '${currentStatus}'`)
             
             // Show final result message
             if (currentStatus === 'running') {
@@ -3053,13 +3053,13 @@ async function continueProjectOperation() {
     if (projectItem) {
       if (operationType === 'start') {
         projectItem.status = 'starting'
-        console.log(`UI state set to 'starting' for project ${item.id} (continue operation)`)
+        // console.log(`UI state set to 'starting' for project ${item.id} (continue operation)`)
       } else if (operationType === 'stop') {
         projectItem.status = 'stopping'
-        console.log(`UI state set to 'stopping' for project ${item.id} (continue operation)`)
+                  // console.log(`UI state set to 'stopping' for project ${item.id} (continue operation)`)
       } else if (operationType === 'restart') {
         projectItem.status = 'stopping' // Restart starts with stop
-        console.log(`UI state set to 'stopping' for project restart ${item.id} (continue operation)`)
+                  // console.log(`UI state set to 'stopping' for project restart ${item.id} (continue operation)`)
       }
     }
   }
@@ -3492,7 +3492,7 @@ async function handlePendingChangesApplied(event) {
     return
   }
   
-  console.log('Pending changes applied, refreshing affected types:', types)
+      // console.log('Pending changes applied, refreshing affected types:', types)
   
   // Clear cache and refresh each affected component type
   for (const type of types) {

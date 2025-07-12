@@ -52,7 +52,7 @@ const initializeParametersCache = () => {
   const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
     const { action, type, id } = data;
     if (type === 'plugins') {
-      console.log(`[Monaco] Plugin ${action}: clearing parameters cache for ${id}`);
+      // console.log(`[Monaco] Plugin ${action}: clearing parameters cache for ${id}`);
       // Clear specific plugin's parameters cache
       if (id && globalPluginParametersCache.value[id]) {
         delete globalPluginParametersCache.value[id];
@@ -69,7 +69,7 @@ const initializeParametersCache = () => {
   const pendingChangesCleanup = eventManager.on('pendingChangesApplied', (data) => {
     const { types } = data;
     if (Array.isArray(types) && types.includes('plugins')) {
-      console.log('[Monaco] Clearing all plugin parameters cache due to pending changes');
+      // console.log('[Monaco] Clearing all plugin parameters cache due to pending changes');
       globalPluginParametersCache.value = {};
       globalPluginSuggestionsCache.clear();
       lastPluginDataHash = '';
@@ -79,7 +79,7 @@ const initializeParametersCache = () => {
   const localChangesCleanup = eventManager.on('localChangesLoaded', (data) => {
     const { types } = data;
     if (Array.isArray(types) && types.includes('plugins')) {
-      console.log('[Monaco] Clearing all plugin parameters cache due to local changes');
+      // console.log('[Monaco] Clearing all plugin parameters cache due to local changes');
       globalPluginParametersCache.value = {};
       globalPluginSuggestionsCache.clear();
       lastPluginDataHash = '';
@@ -93,14 +93,14 @@ const initializeParametersCache = () => {
     localChangesCleanup
   );
   
-  console.log('[Monaco] Plugin parameters cache event listeners initialized via EventManager');
+      // console.log('[Monaco] Plugin parameters cache event listeners initialized via EventManager');
 };
 
 // Cleanup event listeners
 const cleanupParametersCache = () => {
   eventCleanupFunctions.forEach(cleanup => cleanup());
   eventCleanupFunctions = [];
-  console.log('[Monaco] Plugin parameters cache event listeners cleaned up');
+      // console.log('[Monaco] Plugin parameters cache event listeners cleaned up');
 };
 
 // Smart plugin parameters fetching (with cache)
@@ -116,7 +116,7 @@ const getPluginParameters = async (pluginId) => {
   }
   
   try {
-    console.log(`[Monaco] Fetching parameters for plugin: ${pluginId}`);
+          // console.log(`[Monaco] Fetching parameters for plugin: ${pluginId}`);
     const parameters = await hubApi.getPluginParameters(pluginId);
     const result = parameters || [];
     
@@ -167,9 +167,9 @@ watch(
         if (isEditorValid(editor)) {
           try {
             editor.trigger('dynamic-fields', 'editor.action.triggerSuggest', {});
-          } catch (error) {
-            console.warn('Failed to trigger dynamic field suggestions:', error);
-          }
+              } catch (error) {
+      // console.warn('Failed to trigger dynamic field suggestions:', error);
+    }
         }
       });
     }
@@ -186,9 +186,9 @@ onMounted(async () => {
       dataCache.fetchComponents('rulesets'),
       dataCache.fetchComponents('plugins')
     ]);
-  } catch (error) {
-    console.warn('Failed to preload component data for Monaco:', error);
-  }
+      } catch (error) {
+      // console.warn('Failed to preload component data for Monaco:', error);
+    }
   
   // Fetch dynamic field keys for rulesets
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
@@ -214,9 +214,9 @@ onMounted(async () => {
         }
       });
     }
-  } catch (e) {
-    console.warn('Failed to disable built-in YAML support:', e);
-  }
+      } catch (e) {
+      // console.warn('Failed to disable built-in YAML support:', e);
+    }
   
   // Register language providers
   registerLanguageProviders();
@@ -234,7 +234,49 @@ onMounted(async () => {
   setTimeout(() => {
     handleResize();
   }, 200);
-});
+
+  // Plugin parameters cache management
+  const pluginParametersCache = new Map()
+  
+  // Plugin cache event handlers
+  const handlePluginCacheEvent = (event) => {
+    const { action, id } = event.detail
+    if (action === 'clear') {
+      pluginParametersCache.delete(id)
+      // console.log(`[Monaco] Plugin ${action}: clearing parameters cache for ${id}`);
+    }
+  }
+
+  // Pending changes event handler
+  const handlePendingChangesEvent = (event) => {
+    const { types } = event.detail
+    if (types.includes('plugins')) {
+      pluginParametersCache.clear()
+      // console.log('[Monaco] Clearing all plugin parameters cache due to pending changes');
+    }
+  }
+
+  // Local changes event handler
+  const handleLocalChangesEvent = (event) => {
+    const { types } = event.detail
+    if (types && types.includes('plugins')) {
+      pluginParametersCache.clear()
+      // console.log('[Monaco] Clearing all plugin parameters cache due to local changes');
+    }
+  }
+
+  // console.log('[Monaco] Plugin parameters cache event listeners initialized via EventManager');
+  EventManager.on('pluginCacheEvent', handlePluginCacheEvent)
+  EventManager.on('pendingChangesApplied', handlePendingChangesEvent)
+  EventManager.on('localChangesLoaded', handleLocalChangesEvent)
+})
+
+onUnmounted(() => {
+  // console.log('[Monaco] Plugin parameters cache event listeners cleaned up');
+  EventManager.off('pluginCacheEvent', handlePluginCacheEvent)
+  EventManager.off('pendingChangesApplied', handlePendingChangesEvent)
+  EventManager.off('localChangesLoaded', handleLocalChangesEvent)
+})
 
 // Setup Monaco theme
 function setupMonacoTheme() {
@@ -3643,6 +3685,23 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   
   return suggestions;
 };
+
+// Fetch plugin parameters with caching
+const fetchPluginParameters = async (pluginId) => {
+  if (pluginParametersCache.has(pluginId)) {
+    return pluginParametersCache.get(pluginId)
+  }
+
+  try {
+    // console.log(`[Monaco] Fetching parameters for plugin: ${pluginId}`);
+    const parameters = await hubApi.getPluginParameters(pluginId)
+    pluginParametersCache.set(pluginId, parameters)
+    return parameters
+  } catch (error) {
+    // console.warn(`Failed to fetch plugin parameters for ${pluginId}:`, error);
+    return []
+  }
+}
 </script>
 
 <style>
