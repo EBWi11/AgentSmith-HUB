@@ -217,20 +217,23 @@ func (qm *QPSManager) GetComponentQPS(nodeID, projectNodeSequence string) *Compo
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	key := qm.generateKey(nodeID, "", projectNodeSequence)
-	if data, exists := qm.data[key]; exists {
-		// Create a copy to avoid race conditions
-		result := &ComponentQPSData{
-			NodeID:              data.NodeID,
-			ProjectID:           data.ProjectID,
-			ComponentID:         data.ComponentID,
-			ComponentType:       data.ComponentType,
-			ProjectNodeSequence: data.ProjectNodeSequence,
-			LastUpdate:          data.LastUpdate,
-			DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
+	// Search for matching component data since we don't have projectID in this call
+	// This is needed because the key format includes projectID: nodeID_projectID_projectNodeSequence
+	for _, data := range qm.data {
+		if data.NodeID == nodeID && data.ProjectNodeSequence == projectNodeSequence {
+			// Create a copy to avoid race conditions
+			result := &ComponentQPSData{
+				NodeID:              data.NodeID,
+				ProjectID:           data.ProjectID,
+				ComponentID:         data.ComponentID,
+				ComponentType:       data.ComponentType,
+				ProjectNodeSequence: data.ProjectNodeSequence,
+				LastUpdate:          data.LastUpdate,
+				DataPoints:          make([]QPSDataPoint, len(data.DataPoints)),
+			}
+			copy(result.DataPoints, data.DataPoints)
+			return result
 		}
-		copy(result.DataPoints, data.DataPoints)
-		return result
 	}
 	return nil
 }
@@ -443,10 +446,10 @@ func (qm *QPSManager) cacheUpdateLoop() {
 
 // updateMessageCache updates the cached message counts
 func (qm *QPSManager) updateMessageCache() {
-	// Calculate message counts for all projects
-	allMessages := qm.calculateHourlyMessageCounts("")
-	aggregatedMessages := qm.calculateAggregatedHourlyMessages()
-	nodeMessages := qm.calculateNodeHourlyMessages()
+	// Calculate message counts for all projects - simple and clear
+	allMessages := qm.calculateDailyMessageCounts("")
+	aggregatedMessages := qm.calculateAggregatedDailyMessages()
+	nodeMessages := qm.calculateNodeDailyMessages()
 
 	// Update cache with write lock
 	qm.cacheMutex.Lock()
@@ -468,171 +471,104 @@ func (qm *QPSManager) Stop() {
 	}
 }
 
-// calculateHourlyMessageCounts calculates the real message counts for the past hour (internal method)
-func (qm *QPSManager) calculateHourlyMessageCounts(projectID string) map[string]interface{} {
+// calculateDailyMessageCounts calculates daily message counts (simplified)
+func (qm *QPSManager) calculateDailyMessageCounts(projectID string) map[string]interface{} {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	// Group by ProjectNodeSequence
+	// Group by ProjectNodeSequence + NodeID to avoid data loss from multiple nodes
+	// Key format: "projectNodeSequence_nodeID" to distinguish same sequence on different nodes
 	sequenceGroups := make(map[string]*ComponentQPSData)
 	sequenceTypes := make(map[string]string)
 
 	for _, data := range qm.data {
 		if projectID == "" || data.ProjectID == projectID {
-			sequenceKey := data.ProjectNodeSequence
-			sequenceTypes[sequenceKey] = data.ComponentType
-
-			// Use the latest component data for each sequence
-			if existing, exists := sequenceGroups[sequenceKey]; !exists || data.LastUpdate.After(existing.LastUpdate) {
-				sequenceGroups[sequenceKey] = data
-			}
+			// Include nodeID in the grouping key to avoid overwriting data from different nodes
+			groupKey := fmt.Sprintf("%s_%s", data.ProjectNodeSequence, data.NodeID)
+			sequenceTypes[groupKey] = data.ComponentType
+			sequenceGroups[groupKey] = data
 		}
 	}
 
-	result := make(map[string]interface{})
+	// Now aggregate results by ProjectNodeSequence (combine all nodes for same sequence)
+	sequenceAggregated := make(map[string]map[string]interface{})
 
-	for sequenceKey, componentData := range sequenceGroups {
+	for groupKey, componentData := range sequenceGroups {
+		// Extract ProjectNodeSequence from groupKey (remove the nodeID suffix)
+		parts := strings.Split(groupKey, "_")
+		sequenceKey := strings.Join(parts[:len(parts)-1], "_") // Everything before the last underscore
+
 		// Use real current total messages - this is the actual cumulative count
 		totalMessages := componentData.CurrentTotal
 
-		// Calculate hourly message rate based on recent data points (for rate calculation)
-		var hourlyRate uint64 = 0
+		// Simple approach: use the real total messages for today (MSG/D)
+		dailyMessages := totalMessages
 
-		if len(componentData.DataPoints) >= 2 {
-			// Find the oldest and newest data points within the hour
-			// DataPoints should now be sorted by timestamp due to AddQPSData fix
-			oldestPoint := componentData.DataPoints[0]
-			newestPoint := componentData.DataPoints[len(componentData.DataPoints)-1]
-
-			// Calculate time difference in hours
-			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-
-			// Only calculate rate if we have sufficient time span (at least 5 minutes)
-			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
-				// Safe calculation: check for underflow before subtraction
-				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
-					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-					hourlyRate = uint64(float64(messageDiff) / timeDiff)
-				} else {
-					// Handle restart case: use current total as rate indicator
-					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
-				}
-			}
-		} else if len(componentData.DataPoints) == 1 {
-			// Single data point: estimate rate based on component runtime
-			// Assume component has been running for at least 1 minute if we have data
-			dataPoint := componentData.DataPoints[0]
-			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
-			if runtimeHours > 0 {
-				// Use a minimum runtime of 1 minute to avoid extreme rates
-				if runtimeHours < 1.0/60.0 {
-					runtimeHours = 1.0 / 60.0
-				}
-				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
+		// Aggregate by sequence (sum across all nodes for the same sequence)
+		if _, exists := sequenceAggregated[sequenceKey]; !exists {
+			sequenceAggregated[sequenceKey] = map[string]interface{}{
+				"component_type":        sequenceTypes[groupKey],
+				"project_node_sequence": sequenceKey,
+				"daily_messages":        uint64(0), // Real MSG/D - simple and clear
+				"node_count":            0,
 			}
 		}
 
-		result[sequenceKey] = map[string]interface{}{
-			"component_type":        sequenceTypes[sequenceKey],
-			"project_node_sequence": sequenceKey,
-			"total_messages":        totalMessages, // Real cumulative total
-			"hourly_rate":           hourlyRate,    // Messages per hour rate
-			"data_points_count":     len(componentData.DataPoints),
-		}
+		agg := sequenceAggregated[sequenceKey]
+		agg["daily_messages"] = agg["daily_messages"].(uint64) + dailyMessages // Sum daily messages across nodes
+		agg["node_count"] = agg["node_count"].(int) + 1
+	}
+
+	result := make(map[string]interface{})
+	for sequenceKey, aggregatedData := range sequenceAggregated {
+		result[sequenceKey] = aggregatedData
 	}
 
 	return result
 }
 
-// calculateAggregatedHourlyMessages calculates aggregated message counts across all nodes (internal method)
-func (qm *QPSManager) calculateAggregatedHourlyMessages() map[string]interface{} {
+// calculateAggregatedDailyMessages calculates aggregated message counts across all nodes (simplified)
+func (qm *QPSManager) calculateAggregatedDailyMessages() map[string]interface{} {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	// Group by project and component type for individual component statistics
-	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> hourlyRate
-	totalInputMessages := uint64(0)                    // Total hourly input messages across all projects
-	totalOutputMessages := uint64(0)                   // Total hourly output messages across all projects
-	totalRulesetMessages := uint64(0)                  // Total hourly ruleset processed messages
+	// Simple aggregation by project and component type
+	projectStats := make(map[string]map[string]uint64) // projectID -> componentType -> dailyMessages
+	totalInputMessages := uint64(0)
+	totalOutputMessages := uint64(0)
+	totalRulesetMessages := uint64(0)
 
 	for _, data := range qm.data {
 		if _, exists := projectStats[data.ProjectID]; !exists {
 			projectStats[data.ProjectID] = make(map[string]uint64)
 		}
 
-		// Calculate hourly message rate based on recent data points
-		var hourlyRate uint64 = 0
+		// Simple: use current total as daily message count
+		dailyMessages := data.CurrentTotal
+		projectStats[data.ProjectID][data.ComponentType] += dailyMessages
 
-		if len(data.DataPoints) >= 2 {
-			// Find the oldest and newest data points within the hour
-			// DataPoints should now be sorted by timestamp due to AddQPSData fix
-			oldestPoint := data.DataPoints[0]
-			newestPoint := data.DataPoints[len(data.DataPoints)-1]
-
-			// Calculate time difference in hours
-			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-
-			// Only calculate rate if we have sufficient time span (at least 5 minutes)
-			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
-				// Safe calculation: check for underflow before subtraction
-				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
-					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-					hourlyRate = uint64(float64(messageDiff) / timeDiff)
-				} else {
-					// Handle restart case: use current total as rate indicator
-					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
-				}
-			}
-		} else if len(data.DataPoints) == 1 {
-			// Single data point: estimate rate based on component runtime
-			// Assume component has been running for at least 1 minute if we have data
-			dataPoint := data.DataPoints[0]
-			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
-			if runtimeHours > 0 {
-				// Use a minimum runtime of 1 minute to avoid extreme rates
-				if runtimeHours < 1.0/60.0 {
-					runtimeHours = 1.0 / 60.0
-				}
-				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
-			}
-		}
-
-		// Count hourly rates for individual statistics
-		projectStats[data.ProjectID][data.ComponentType] += hourlyRate
-
-		// For global totals, count hourly rates by component type
-		parts := strings.Split(data.ProjectNodeSequence, ".")
-
+		// Global totals by component type
 		switch data.ComponentType {
 		case "input":
-			// Only count input if this ProjectNodeSequence represents the actual input component
-			// Fix: Use uppercase "INPUT" to match actual ProjectNodeSequence format
-			if len(parts) == 2 && strings.ToUpper(parts[0]) == "INPUT" && parts[1] == data.ComponentID {
-				totalInputMessages += hourlyRate
-			}
+			totalInputMessages += dailyMessages
 		case "output":
-			// Only count output if this ProjectNodeSequence represents the final output component
-			// Fix: Use uppercase "OUTPUT" to match actual ProjectNodeSequence format
-			if len(parts) >= 2 && strings.ToUpper(parts[len(parts)-2]) == "OUTPUT" && parts[len(parts)-1] == data.ComponentID {
-				totalOutputMessages += hourlyRate
-			}
+			totalOutputMessages += dailyMessages
 		case "ruleset":
-			// Now count ruleset processing - this shows hourly processing rate
-			totalRulesetMessages += hourlyRate
+			totalRulesetMessages += dailyMessages
 		}
 	}
 
 	return map[string]interface{}{
-		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages, // All hourly messages
-		"total_input_messages":   totalInputMessages,                                              // Hourly input messages
-		"total_output_messages":  totalOutputMessages,                                             // Hourly output messages
-		"total_ruleset_messages": totalRulesetMessages,                                            // Hourly ruleset processed messages
-		"project_breakdown":      projectStats,                                                    // Includes all component hourly rates
+		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages,
+		"total_input_messages":   totalInputMessages,
+		"total_output_messages":  totalOutputMessages,
+		"total_ruleset_messages": totalRulesetMessages,
+		"project_breakdown":      projectStats,
 	}
 }
 
-// GetHourlyMessageCounts returns cached message counts for the past hour
-func (qm *QPSManager) GetHourlyMessageCounts(projectID string) map[string]interface{} {
+// GetDailyMessageCounts returns cached daily message counts
+func (qm *QPSManager) GetDailyMessageCounts(projectID string) map[string]interface{} {
 	qm.cacheMutex.RLock()
 	defer qm.cacheMutex.RUnlock()
 
@@ -661,8 +597,8 @@ func (qm *QPSManager) GetHourlyMessageCounts(projectID string) map[string]interf
 	return result
 }
 
-// GetAggregatedHourlyMessages returns cached aggregated message counts across all nodes
-func (qm *QPSManager) GetAggregatedHourlyMessages() map[string]interface{} {
+// GetAggregatedDailyMessages returns cached aggregated message counts across all nodes
+func (qm *QPSManager) GetAggregatedDailyMessages() map[string]interface{} {
 	qm.cacheMutex.RLock()
 	defer qm.cacheMutex.RUnlock()
 
@@ -677,57 +613,21 @@ func (qm *QPSManager) GetCacheUpdateTime() time.Time {
 	return qm.cacheUpdateTime
 }
 
-// calculateNodeHourlyMessages calculates message counts by node (internal method)
-func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
+// calculateNodeDailyMessages calculates message counts by node (simplified)
+func (qm *QPSManager) calculateNodeDailyMessages() map[string]interface{} {
 	qm.mutex.RLock()
 	defer qm.mutex.RUnlock()
 
-	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> hourlyRate
+	nodeStats := make(map[string]map[string]uint64) // nodeID -> componentType -> dailyMessages
 
 	for _, data := range qm.data {
 		if _, exists := nodeStats[data.NodeID]; !exists {
 			nodeStats[data.NodeID] = make(map[string]uint64)
 		}
 
-		// Calculate hourly message rate based on recent data points
-		var hourlyRate uint64 = 0
-
-		if len(data.DataPoints) >= 2 {
-			// Find the oldest and newest data points within the hour
-			// DataPoints should now be sorted by timestamp due to AddQPSData fix
-			oldestPoint := data.DataPoints[0]
-			newestPoint := data.DataPoints[len(data.DataPoints)-1]
-
-			// Calculate time difference in hours
-			timeDiff := newestPoint.Timestamp.Sub(oldestPoint.Timestamp).Hours()
-
-			// Only calculate rate if we have sufficient time span (at least 5 minutes)
-			if timeDiff >= 5.0/60.0 { // 5 minutes minimum
-				// Safe calculation: check for underflow before subtraction
-				if newestPoint.TotalMessages >= oldestPoint.TotalMessages {
-					messageDiff := newestPoint.TotalMessages - oldestPoint.TotalMessages
-					hourlyRate = uint64(float64(messageDiff) / timeDiff)
-				} else {
-					// Handle restart case: use current total as rate indicator
-					hourlyRate = uint64(float64(newestPoint.TotalMessages) / timeDiff)
-				}
-			}
-		} else if len(data.DataPoints) == 1 {
-			// Single data point: estimate rate based on component runtime
-			// Assume component has been running for at least 1 minute if we have data
-			dataPoint := data.DataPoints[0]
-			runtimeHours := time.Since(dataPoint.Timestamp).Hours()
-			if runtimeHours > 0 {
-				// Use a minimum runtime of 1 minute to avoid extreme rates
-				if runtimeHours < 1.0/60.0 {
-					runtimeHours = 1.0 / 60.0
-				}
-				hourlyRate = uint64(float64(dataPoint.TotalMessages) / runtimeHours)
-			}
-		}
-
-		// Count hourly rates for node statistics - shows actual message processing rate
-		nodeStats[data.NodeID][data.ComponentType] += hourlyRate
+		// Simple: use current total as daily message count
+		dailyMessages := data.CurrentTotal
+		nodeStats[data.NodeID][data.ComponentType] += dailyMessages
 	}
 
 	// Convert to final format
@@ -735,21 +635,21 @@ func (qm *QPSManager) calculateNodeHourlyMessages() map[string]interface{} {
 	for nodeID, stats := range nodeStats {
 		inputMessages := stats["input"]
 		outputMessages := stats["output"]
-		rulesetMessages := stats["ruleset"] // Hourly ruleset processing rate
+		rulesetMessages := stats["ruleset"]
 
 		result[nodeID] = map[string]interface{}{
 			"input_messages":   inputMessages,
 			"output_messages":  outputMessages,
-			"ruleset_messages": rulesetMessages,                                  // Hourly ruleset processing rate
-			"total_messages":   inputMessages + outputMessages + rulesetMessages, // Total hourly message processing rate
+			"ruleset_messages": rulesetMessages,
+			"total_messages":   inputMessages + outputMessages + rulesetMessages,
 		}
 	}
 
 	return result
 }
 
-// GetNodeHourlyMessages returns cached message counts for a specific node
-func (qm *QPSManager) GetNodeHourlyMessages(nodeID string) map[string]interface{} {
+// GetNodeDailyMessages returns cached message counts for a specific node
+func (qm *QPSManager) GetNodeDailyMessages(nodeID string) map[string]interface{} {
 	qm.cacheMutex.RLock()
 	defer qm.cacheMutex.RUnlock()
 
@@ -766,8 +666,8 @@ func (qm *QPSManager) GetNodeHourlyMessages(nodeID string) map[string]interface{
 	}
 }
 
-// GetAllNodeHourlyMessages returns cached message counts for all nodes
-func (qm *QPSManager) GetAllNodeHourlyMessages() map[string]interface{} {
+// GetAllNodeDailyMessages returns cached message counts for all nodes
+func (qm *QPSManager) GetAllNodeDailyMessages() map[string]interface{} {
 	qm.cacheMutex.RLock()
 	defer qm.cacheMutex.RUnlock()
 
