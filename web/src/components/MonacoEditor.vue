@@ -235,47 +235,15 @@ onMounted(async () => {
     handleResize();
   }, 200);
 
-  // Plugin parameters cache management
-  const pluginParametersCache = new Map()
-  
-  // Plugin cache event handlers
-  const handlePluginCacheEvent = (event) => {
-    const { action, id } = event.detail
-    if (action === 'clear') {
-      pluginParametersCache.delete(id)
-      // console.log(`[Monaco] Plugin ${action}: clearing parameters cache for ${id}`);
-    }
-  }
-
-  // Pending changes event handler
-  const handlePendingChangesEvent = (event) => {
-    const { types } = event.detail
-    if (types.includes('plugins')) {
-      pluginParametersCache.clear()
-      // console.log('[Monaco] Clearing all plugin parameters cache due to pending changes');
-    }
-  }
-
-  // Local changes event handler
-  const handleLocalChangesEvent = (event) => {
-    const { types } = event.detail
-    if (types && types.includes('plugins')) {
-      pluginParametersCache.clear()
-      // console.log('[Monaco] Clearing all plugin parameters cache due to local changes');
-    }
-  }
-
-  // console.log('[Monaco] Plugin parameters cache event listeners initialized via EventManager');
-  EventManager.on('pluginCacheEvent', handlePluginCacheEvent)
-  EventManager.on('pendingChangesApplied', handlePendingChangesEvent)
-  EventManager.on('localChangesLoaded', handleLocalChangesEvent)
+  // Plugin parameters cache management is now handled by the global eventManager system above
 })
 
 onUnmounted(() => {
-  // console.log('[Monaco] Plugin parameters cache event listeners cleaned up');
-  EventManager.off('pluginCacheEvent', handlePluginCacheEvent)
-  EventManager.off('pendingChangesApplied', handlePendingChangesEvent)
-  EventManager.off('localChangesLoaded', handleLocalChangesEvent)
+  // Remove window size change monitoring
+  window.removeEventListener('resize', handleResize);
+  // Clean up event listeners
+  cleanupParametersCache();
+  disposeEditors();
 })
 
 // Setup Monaco theme
