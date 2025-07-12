@@ -3,6 +3,8 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"AgentSmith-HUB/logger"
@@ -172,4 +174,145 @@ func (cum *ComponentUpdateManager) CleanupStaleUpdates(maxAge time.Duration) {
 			delete(cum.activeUpdates, key)
 		}
 	}
+}
+
+// OperationHistoryFilter represents filter parameters for operations history
+type OperationHistoryFilter struct {
+	StartTime     time.Time     `json:"start_time"`
+	EndTime       time.Time     `json:"end_time"`
+	OperationType OperationType `json:"operation_type"`
+	ComponentType string        `json:"component_type"`
+	ComponentID   string        `json:"component_id"`
+	ProjectID     string        `json:"project_id"`
+	Status        string        `json:"status"`
+	Keyword       string        `json:"keyword"`
+	NodeID        string        `json:"node_id"`
+	Limit         int           `json:"limit"`
+	Offset        int           `json:"offset"`
+}
+
+// GetOperationsFromRedisWithFilter retrieves operations from Redis with server-side filtering and pagination
+func GetOperationsFromRedisWithFilter(filter OperationHistoryFilter) ([]OperationRecord, int, error) {
+	// Read all operations from Redis
+	redisLines, err := RedisLRange("cluster:ops_history", 0, -1)
+	if err != nil {
+		logger.Error("Failed to read operations from Redis", "error", err)
+		return []OperationRecord{}, 0, err
+	}
+
+	var filteredOperations []OperationRecord
+
+	// Parse and filter operations
+	for _, line := range redisLines {
+		var op OperationRecord
+		if err := json.Unmarshal([]byte(line), &op); err != nil {
+			logger.Warn("Failed to unmarshal operation record", "error", err)
+			continue
+		}
+
+		// Apply filters
+		if !matchesOperationFilter(op, filter) {
+			continue
+		}
+
+		filteredOperations = append(filteredOperations, op)
+	}
+
+	// Sort by timestamp (newest first) - use efficient sort
+	sort.Slice(filteredOperations, func(i, j int) bool {
+		return filteredOperations[i].Timestamp.After(filteredOperations[j].Timestamp)
+	})
+
+	totalCount := len(filteredOperations)
+
+	// Apply pagination
+	start := filter.Offset
+	end := start + filter.Limit
+
+	if start > totalCount {
+		start = totalCount
+	}
+	if end > totalCount {
+		end = totalCount
+	}
+
+	paginatedOperations := filteredOperations[start:end]
+
+	return paginatedOperations, totalCount, nil
+}
+
+// matchesOperationFilter checks if an operation record matches the filter criteria
+func matchesOperationFilter(record OperationRecord, filter OperationHistoryFilter) bool {
+	// Time range filter
+	if !filter.StartTime.IsZero() && record.Timestamp.Before(filter.StartTime) {
+		return false
+	}
+	if !filter.EndTime.IsZero() && record.Timestamp.After(filter.EndTime) {
+		return false
+	}
+
+	// Operation type filter
+	if filter.OperationType != "" && record.Type != filter.OperationType {
+		return false
+	}
+
+	// Component type filter
+	if filter.ComponentType != "" && record.ComponentType != filter.ComponentType {
+		return false
+	}
+
+	// Component ID filter
+	if filter.ComponentID != "" && record.ComponentID != filter.ComponentID {
+		return false
+	}
+
+	// Project ID filter
+	if filter.ProjectID != "" && record.ProjectID != filter.ProjectID {
+		return false
+	}
+
+	// Status filter
+	if filter.Status != "" && record.Status != filter.Status {
+		return false
+	}
+
+	// Node ID filter
+	if filter.NodeID != "" && filter.NodeID != "all" {
+		nodeID := ""
+		if record.Details != nil {
+			if nodeIDValue, exists := record.Details["node_id"]; exists {
+				if nodeIDStr, ok := nodeIDValue.(string); ok {
+					nodeID = nodeIDStr
+				}
+			}
+		}
+		if nodeID != filter.NodeID {
+			return false
+		}
+	}
+
+	// Keyword filter
+	if filter.Keyword != "" {
+		keyword := strings.ToLower(filter.Keyword)
+
+		// Check node ID from details
+		nodeID := ""
+		if record.Details != nil {
+			if nodeIDValue, exists := record.Details["node_id"]; exists {
+				if nodeIDStr, ok := nodeIDValue.(string); ok {
+					nodeID = nodeIDStr
+				}
+			}
+		}
+
+		if !strings.Contains(strings.ToLower(record.ComponentID), keyword) &&
+			!strings.Contains(strings.ToLower(record.ProjectID), keyword) &&
+			!strings.Contains(strings.ToLower(record.Error), keyword) &&
+			!strings.Contains(strings.ToLower(record.Diff), keyword) &&
+			!strings.Contains(strings.ToLower(nodeID), keyword) {
+			return false
+		}
+	}
+
+	return true
 }

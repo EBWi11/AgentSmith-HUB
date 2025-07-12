@@ -3,12 +3,14 @@ package logger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -72,6 +74,17 @@ func detectLocalIP() string {
 }
 
 func InitLogger() *slog.Logger {
+	return initLoggerWithRedis(nil)
+}
+
+// InitLoggerWithRedis initializes logger with Redis error log writing capability
+func InitLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	return initLoggerWithRedis(redisWriter)
+}
+
+func initLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	nodeID := detectLocalIP()
+
 	// Ensure log directory exists
 	if err := ensureLogDir(); err != nil {
 		// Fallback to current directory if unable to create system log directory
@@ -97,12 +110,17 @@ func InitLogger() *slog.Logger {
 			}
 		}
 
-		handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+		fileHandler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
 			Level: slog.LevelInfo,
 		})
-		base := slog.New(handler)
 
-		logger := base.With("node_ip", detectLocalIP())
+		var handler slog.Handler = fileHandler
+		if redisWriter != nil {
+			handler = NewRedisErrorLogHandler(fileHandler, "hub", nodeID, redisWriter)
+		}
+
+		base := slog.New(handler)
+		logger := base.With("node_ip", nodeID)
 
 		slog.SetDefault(logger)
 		return logger
@@ -116,12 +134,17 @@ func InitLogger() *slog.Logger {
 		Compress:   false, // Disable compression to allow error log reading
 	}
 
-	handler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+	fileHandler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})
-	base := slog.New(handler)
 
-	logger := base.With("node_ip", detectLocalIP())
+	var handler slog.Handler = fileHandler
+	if redisWriter != nil {
+		handler = NewRedisErrorLogHandler(fileHandler, "hub", nodeID, redisWriter)
+	}
+
+	base := slog.New(handler)
+	logger := base.With("node_ip", nodeID)
 
 	slog.SetDefault(logger)
 
@@ -130,6 +153,17 @@ func InitLogger() *slog.Logger {
 
 // InitPluginLogger initializes the plugin-specific logger for plugin failures
 func InitPluginLogger() *slog.Logger {
+	return initPluginLoggerWithRedis(nil)
+}
+
+// InitPluginLoggerWithRedis initializes plugin logger with Redis error log writing capability
+func InitPluginLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	return initPluginLoggerWithRedis(redisWriter)
+}
+
+func initPluginLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	nodeID := detectLocalIP()
+
 	// Get current working directory for debugging
 	pwd, _ := os.Getwd()
 	logDir := getLogDir()
@@ -148,9 +182,15 @@ func InitPluginLogger() *slog.Logger {
 		if _, err := os.Stat("./logs"); os.IsNotExist(err) {
 			if err := os.MkdirAll("./logs", 0755); err != nil {
 				// Return a logger that writes to stderr as fallback
-				handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+				fileHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 					Level: slog.LevelInfo,
 				})
+
+				var handler slog.Handler = fileHandler
+				if redisWriter != nil {
+					handler = NewRedisErrorLogHandler(fileHandler, "plugin", nodeID, redisWriter)
+				}
+
 				return slog.New(handler)
 			}
 		}
@@ -165,9 +205,14 @@ func InitPluginLogger() *slog.Logger {
 		Compress:   false, // Disable compression to allow error log reading
 	}
 
-	handler := slog.NewJSONHandler(pluginLogFile, &slog.HandlerOptions{
+	fileHandler := slog.NewJSONHandler(pluginLogFile, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})
+
+	var handler slog.Handler = fileHandler
+	if redisWriter != nil {
+		handler = NewRedisErrorLogHandler(fileHandler, "plugin", nodeID, redisWriter)
+	}
 
 	logger := slog.New(handler)
 
@@ -347,6 +392,137 @@ func logWithCallerContext(logFunc func(context.Context, string, ...any), ctx con
 		))
 	}
 	logFunc(ctx, msg, args...)
+}
+
+// RedisErrorLogEntry represents an error log entry for Redis storage
+type RedisErrorLogEntry struct {
+	Timestamp time.Time              `json:"timestamp"`
+	Level     string                 `json:"level"`
+	Message   string                 `json:"message"`
+	Source    string                 `json:"source"` // "hub" or "plugin"
+	NodeID    string                 `json:"node_id"`
+	Function  string                 `json:"function,omitempty"`
+	File      string                 `json:"file,omitempty"`
+	Line      int                    `json:"line,omitempty"`
+	Error     string                 `json:"error,omitempty"`
+	Details   map[string]interface{} `json:"details,omitempty"`
+}
+
+// RedisErrorLogHandler is a custom slog handler that writes to both file and Redis
+type RedisErrorLogHandler struct {
+	fileHandler slog.Handler
+	source      string // "hub" or "plugin"
+	nodeID      string
+	redisWriter func(entry RedisErrorLogEntry) error
+}
+
+// NewRedisErrorLogHandler creates a new Redis error log handler
+func NewRedisErrorLogHandler(fileHandler slog.Handler, source string, nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *RedisErrorLogHandler {
+	return &RedisErrorLogHandler{
+		fileHandler: fileHandler,
+		source:      source,
+		nodeID:      nodeID,
+		redisWriter: redisWriter,
+	}
+}
+
+// Enabled implements slog.Handler
+func (h *RedisErrorLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.fileHandler.Enabled(ctx, level)
+}
+
+// Handle implements slog.Handler
+func (h *RedisErrorLogHandler) Handle(ctx context.Context, record slog.Record) error {
+	// Always write to file first
+	if err := h.fileHandler.Handle(ctx, record); err != nil {
+		return err
+	}
+
+	// Only write ERROR and FATAL levels to Redis
+	if record.Level >= slog.LevelError && h.redisWriter != nil {
+		entry := RedisErrorLogEntry{
+			Timestamp: record.Time,
+			Level:     record.Level.String(),
+			Message:   record.Message,
+			Source:    h.source,
+			NodeID:    h.nodeID,
+			Details:   make(map[string]interface{}),
+		}
+
+		// Extract attributes
+		record.Attrs(func(attr slog.Attr) bool {
+			switch attr.Key {
+			case "source":
+				// Extract source information if available
+				if attr.Value.Kind() == slog.KindGroup {
+					attrs := attr.Value.Group()
+					for _, groupAttr := range attrs {
+						switch groupAttr.Key {
+						case "function":
+							entry.Function = groupAttr.Value.String()
+						case "file":
+							entry.File = groupAttr.Value.String()
+						case "line":
+							if line, ok := groupAttr.Value.Any().(int); ok {
+								entry.Line = line
+							}
+						}
+					}
+				}
+			case "error":
+				entry.Error = attr.Value.String()
+			default:
+				entry.Details[attr.Key] = attr.Value.Any()
+			}
+			return true
+		})
+
+		// Write to Redis asynchronously to avoid blocking
+		go func() {
+			if err := h.redisWriter(entry); err != nil {
+				// If Redis write fails, we don't want to crash the application
+				// Just log to stderr as fallback
+				fmt.Fprintf(os.Stderr, "Failed to write error log to Redis: %v\n", err)
+			}
+		}()
+	}
+
+	return nil
+}
+
+// WithAttrs implements slog.Handler
+func (h *RedisErrorLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &RedisErrorLogHandler{
+		fileHandler: h.fileHandler.WithAttrs(attrs),
+		source:      h.source,
+		nodeID:      h.nodeID,
+		redisWriter: h.redisWriter,
+	}
+}
+
+// WithGroup implements slog.Handler
+func (h *RedisErrorLogHandler) WithGroup(name string) slog.Handler {
+	return &RedisErrorLogHandler{
+		fileHandler: h.fileHandler.WithGroup(name),
+		source:      h.source,
+		nodeID:      h.nodeID,
+		redisWriter: h.redisWriter,
+	}
+}
+
+// writeErrorLogToRedis writes an error log entry to Redis
+func writeErrorLogToRedis(entry RedisErrorLogEntry) error {
+	// Import the Redis functions (we'll need to import from common package)
+	// For now, we'll use a simple approach - this will be imported properly
+	return writeToRedisErrorLog(entry)
+}
+
+// writeToRedisErrorLog writes error log to Redis using common package functions
+func writeToRedisErrorLog(entry RedisErrorLogEntry) error {
+	// This function is called by the Redis handler callback from main.go
+	// The actual Redis writing is handled by the callback function passed from main.go
+	// This avoids circular import issues
+	return fmt.Errorf("Redis writer not configured - this should not be called directly")
 }
 
 func init() {

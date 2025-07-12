@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"bufio"
@@ -339,64 +338,68 @@ func getLocalErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, error) {
 	return allLogs, nil
 }
 
-// storeLocalLogsToRedis caches latest logs for leader aggregation
+// storeLocalLogsToRedis caches latest logs for leader aggregation - DEPRECATED
 func storeLocalLogsToRedis(nodeID string, logs []ErrorLogEntry) {
-	if len(logs) == 0 {
-		return
-	}
-	data, err := json.Marshal(logs)
-	if err != nil {
-		return
-	}
-	// Keep for 31 days; refreshed on each upload
-	_, _ = common.RedisSet("cluster:error_logs:"+nodeID, string(data), 31*24*60*60)
+	// This function is no longer needed as all nodes write to Redis in real-time
+	logger.Debug("storeLocalLogsToRedis called but no longer needed - all nodes write to Redis in real-time")
 }
 
-// StartErrorLogUploader starts periodic error log upload for follower nodes
-func StartErrorLogUploader() {
-	if cluster.IsLeader {
-		return // Leader doesn't need to upload logs
+// getUnifiedErrorLogs gets error logs from Redis for all nodes (leader only)
+func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
+	// Use the new common package function with server-side filtering
+	logs, totalCount, err := common.GetErrorLogsFromRedisWithFilter(
+		filter.NodeID,
+		filter.Source,
+		filter.StartTime,
+		filter.EndTime,
+		filter.Keyword,
+		filter.Limit,
+		filter.Offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get error logs from Redis: %w", err)
 	}
 
-	go func() {
-		ticker := time.NewTicker(60 * time.Second) // Upload every 60 seconds
-		defer ticker.Stop()
+	// Convert common.ErrorLogEntry to api.ErrorLogEntry
+	var apiLogs []ErrorLogEntry
+	for _, log := range logs {
+		apiLog := ErrorLogEntry{
+			Timestamp:   log.Timestamp,
+			Level:       log.Level,
+			Message:     log.Message,
+			Source:      log.Source,
+			NodeID:      log.NodeID,
+			NodeAddress: log.NodeID, // Use NodeID as address for now
+			Line:        log.Line,
+		}
 
-		for {
-			select {
-			case <-ticker.C:
-				uploadErrorLogsToRedis()
+		// Convert details to context string if available
+		if len(log.Details) > 0 {
+			if contextBytes, err := json.Marshal(log.Details); err == nil {
+				apiLog.Context = string(contextBytes)
 			}
 		}
-	}()
 
-	logger.Info("Error log uploader started for follower node")
+		apiLogs = append(apiLogs, apiLog)
+	}
+
+	return apiLogs, totalCount, nil
 }
 
-// uploadErrorLogsToRedis uploads recent error logs to Redis
+// StartErrorLogUploader - DEPRECATED: No longer needed as all nodes write to Redis in real-time
+// This function is kept for backward compatibility but does nothing
+func StartErrorLogUploader() {
+	logger.Info("StartErrorLogUploader called but no longer needed - all nodes write to Redis in real-time")
+}
+
+// uploadErrorLogsToRedis - DEPRECATED: No longer needed as all nodes write to Redis in real-time
 func uploadErrorLogsToRedis() {
-	filter := ErrorLogFilter{
-		Source:    "all",
-		StartTime: time.Now().Add(-24 * time.Hour), // Last 24 hours
-		EndTime:   time.Now(),
-		Limit:     1000,
-	}
-
-	logs, err := getLocalErrorLogs(filter)
-	if err != nil {
-		logger.Error("Failed to get local error logs for upload", "error", err)
-		return
-	}
-
-	if len(logs) > 0 {
-		storeLocalLogsToRedis(common.Config.LocalIP, logs)
-		logger.Debug("Uploaded error logs to Redis", "count", len(logs))
-	}
+	logger.Debug("uploadErrorLogsToRedis called but no longer needed - all nodes write to Redis in real-time")
 }
 
 // API Handlers
 
-// getErrorLogs handles GET /error-logs
+// getErrorLogs handles GET /error-logs - unified endpoint for all nodes
 func getErrorLogs(c echo.Context) error {
 	var filter ErrorLogFilter
 
@@ -434,172 +437,44 @@ func getErrorLogs(c echo.Context) error {
 		}
 	}
 
-	// Get local logs
-	logs, err := getLocalErrorLogs(filter)
+	// All nodes can access unified logs from Redis
+	logs, totalCount, err := getUnifiedErrorLogs(filter)
 	if err != nil {
-		logger.Error("Failed to get local error logs", "error", err)
+		logger.Error("Failed to get unified error logs", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to read error logs: " + err.Error(),
 		})
 	}
 
-	// Cache to Redis for leader aggregation
-	storeLocalLogsToRedis(common.Config.LocalIP, logs)
-
-	// Apply pagination
-	totalCount := len(logs)
-	start := filter.Offset
-	end := start + filter.Limit
-
-	if start >= totalCount {
-		logs = []ErrorLogEntry{}
-	} else {
-		if end > totalCount {
-			end = totalCount
-		}
-		logs = logs[start:end]
-	}
-
 	response := ErrorLogResponse{
 		Logs:       logs,
 		TotalCount: totalCount,
-		HasMore:    end < totalCount,
+		HasMore:    filter.Offset+filter.Limit < totalCount,
 	}
 
 	return c.JSON(http.StatusOK, response)
 }
 
-// getClusterErrorLogs handles GET /cluster-error-logs (leader only)
+// getClusterErrorLogs - DEPRECATED: Use getErrorLogs instead
+// This endpoint is kept for backward compatibility but redirects to the unified endpoint
 func getClusterErrorLogs(c echo.Context) error {
-	// Only allow on leader node
-	if !cluster.IsLeader {
-		return c.JSON(http.StatusForbidden, map[string]string{
-			"error": "This endpoint is only available on the leader node",
-		})
-	}
-
-	var filter ErrorLogFilter
-
-	// Parse query parameters (same as getErrorLogs)
-	filter.Source = c.QueryParam("source")
-	filter.NodeID = c.QueryParam("node_id")
-	filter.Keyword = c.QueryParam("keyword")
-
-	if startTime := c.QueryParam("start_time"); startTime != "" {
-		if parsed, err := time.Parse(time.RFC3339, startTime); err == nil {
-			filter.StartTime = parsed
-		}
-	}
-	if endTime := c.QueryParam("end_time"); endTime != "" {
-		if parsed, err := time.Parse(time.RFC3339, endTime); err == nil {
-			filter.EndTime = parsed
-		}
-	}
-
-	if limit := c.QueryParam("limit"); limit != "" {
-		if parsed, err := strconv.Atoi(limit); err == nil && parsed > 0 {
-			filter.Limit = parsed
-		} else {
-			filter.Limit = 100
-		}
-	} else {
-		filter.Limit = 100
-	}
-
-	if offset := c.QueryParam("offset"); offset != "" {
-		if parsed, err := strconv.Atoi(offset); err == nil && parsed >= 0 {
-			filter.Offset = parsed
-		}
-	}
-
-	// Collect logs from all cluster nodes
-	allLogs, nodeStats, totalCount, err := aggregateClusterErrorLogs(filter)
-	if err != nil {
-		logger.Error("Failed to aggregate cluster error logs", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "Failed to aggregate cluster error logs: " + err.Error(),
-		})
-	}
-
-	response := ClusterErrorLogResponse{
-		Logs:       allLogs,
-		NodeStats:  nodeStats,
-		TotalCount: totalCount,
-	}
-
-	return c.JSON(http.StatusOK, response)
+	logger.Info("getClusterErrorLogs called - redirecting to unified getErrorLogs endpoint")
+	return getErrorLogs(c)
 }
 
-// aggregateClusterErrorLogs collects error logs from all cluster nodes
+// aggregateClusterErrorLogs - DEPRECATED: No longer needed with unified Redis-based approach
 func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[string]NodeStat, int, error) {
-	var allLogs []ErrorLogEntry
+	logger.Debug("aggregateClusterErrorLogs called but deprecated - using unified Redis-based approach")
+
+	// Redirect to unified approach
+	logs, totalCount, err := getUnifiedErrorLogs(filter)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	// Calculate simple node stats
 	nodeStats := make(map[string]NodeStat)
-	totalCount := 0
-
-	// Get leader's own logs first
-	leaderLogs, err := getLocalErrorLogs(filter)
-	if err != nil {
-		logger.Error("Failed to get leader error logs", "error", err)
-	} else {
-		allLogs = append(allLogs, leaderLogs...)
-		totalCount += len(leaderLogs)
-
-		// Calculate leader stats
-		leaderStat := NodeStat{
-			NodeID: common.Config.LocalIP,
-		}
-		for _, log := range leaderLogs {
-			if log.Source == "hub" {
-				leaderStat.HubErrors++
-			} else if log.Source == "plugin" {
-				leaderStat.PluginErrors++
-			}
-			leaderStat.TotalErrors++
-		}
-		nodeStats[common.Config.LocalIP] = leaderStat
-	}
-
-	// Get all logs from Redis cache (from all nodes)
-	pattern := "cluster:error_logs:*"
-	keys, err := common.RedisKeys(pattern)
-	if err != nil {
-		logger.Error("Failed to get error log keys from Redis", "error", err)
-	} else {
-		for _, key := range keys {
-			// Extract node ID from key
-			nodeID := strings.TrimPrefix(key, "cluster:error_logs:")
-
-			// Skip leader's own logs (already processed above)
-			if nodeID == common.Config.LocalIP {
-				continue
-			}
-
-			// Get logs from Redis cache
-			var cachedLogs []ErrorLogEntry
-			if cached, err := common.RedisGet(key); err == nil && cached != "" {
-				if err := json.Unmarshal([]byte(cached), &cachedLogs); err != nil {
-					logger.Error("Failed to unmarshal error logs from Redis", "node", nodeID, "error", err)
-					continue
-				}
-			} else {
-				continue
-			}
-
-			// Process each log and apply filters
-			for i := range cachedLogs {
-				cachedLogs[i].NodeID = nodeID
-				cachedLogs[i].NodeAddress = nodeID // Use nodeID as address for now
-
-				// Apply filters
-				if matchesFilter(cachedLogs[i], filter) {
-					allLogs = append(allLogs, cachedLogs[i])
-				}
-			}
-		}
-	}
-
-	// Calculate node statistics from all collected logs
-	for _, log := range allLogs {
+	for _, log := range logs {
 		if log.NodeID == "" {
 			continue
 		}
@@ -618,38 +493,5 @@ func aggregateClusterErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, map[stri
 		nodeStats[log.NodeID] = stat
 	}
 
-	// Update total count
-	totalCount = len(allLogs)
-
-	// Sort all logs by timestamp (newest first)
-	sort.Slice(allLogs, func(i, j int) bool {
-		return allLogs[i].Timestamp.After(allLogs[j].Timestamp)
-	})
-
-	// Apply node filter if specified
-	if filter.NodeID != "" && filter.NodeID != "all" {
-		var filteredLogs []ErrorLogEntry
-		for _, log := range allLogs {
-			if log.NodeID == filter.NodeID {
-				filteredLogs = append(filteredLogs, log)
-			}
-		}
-		allLogs = filteredLogs
-		// Update total count after filtering
-		totalCount = len(allLogs)
-	}
-
-	// Apply pagination
-	start := filter.Offset
-	end := start + filter.Limit
-	if start >= len(allLogs) {
-		allLogs = []ErrorLogEntry{}
-	} else {
-		if end > len(allLogs) {
-			end = len(allLogs)
-		}
-		allLogs = allLogs[start:end]
-	}
-
-	return allLogs, nodeStats, totalCount, nil
+	return logs, nodeStats, totalCount, nil
 }
