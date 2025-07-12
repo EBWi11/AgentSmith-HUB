@@ -615,3 +615,141 @@ func (dl *DistributedLock) TryAcquire(timeout time.Duration) error {
 
 	return fmt.Errorf("failed to acquire lock within timeout")
 }
+
+// ===================== Project State Management (New Design) =====================
+
+// SetProjectDesiredState sets the desired state for a project (user intention)
+// Only "running" is stored; "stopped" projects have their keys removed
+func SetProjectDesiredState(nodeID, projectID string, desired bool) error {
+	key := ProjectDesiredStateKeyPrefix + nodeID
+
+	if desired {
+		// User wants project to be running
+		return RedisHSet(key, projectID, "running")
+	} else {
+		// User wants project to be stopped - remove the key
+		return RedisHDel(key, projectID)
+	}
+}
+
+// GetProjectDesiredState gets the desired state for a project
+// Returns true if user wants it running, false if stopped/not found
+func GetProjectDesiredState(nodeID, projectID string) (bool, error) {
+	key := ProjectDesiredStateKeyPrefix + nodeID
+	value, err := RedisHGet(key, projectID)
+	if err != nil {
+		// Key not found means user wants it stopped
+		return false, nil
+	}
+	return value == "running", nil
+}
+
+// GetAllProjectDesiredStates gets all desired states for a node
+// Returns map of projectID -> bool (true=running, false=stopped)
+func GetAllProjectDesiredStates(nodeID string) (map[string]bool, error) {
+	key := ProjectDesiredStateKeyPrefix + nodeID
+	values, err := RedisHGetAll(key)
+	if err != nil {
+		return make(map[string]bool), nil
+	}
+
+	result := make(map[string]bool)
+	for projectID, state := range values {
+		result[projectID] = (state == "running")
+	}
+	return result, nil
+}
+
+// SetProjectActualState sets the actual runtime state for a project
+// Stores the real current status: running, stopped, error, starting, stopping
+func SetProjectActualState(nodeID, projectID, actualState string) error {
+	key := ProjectActualStateKeyPrefix + nodeID
+	return RedisHSet(key, projectID, actualState)
+}
+
+// GetProjectActualState gets the actual runtime state for a project
+// Returns the actual state string or empty string if not found
+func GetProjectActualState(nodeID, projectID string) (string, error) {
+	key := ProjectActualStateKeyPrefix + nodeID
+	return RedisHGet(key, projectID)
+}
+
+// GetAllProjectActualStates gets all actual states for a node
+// Returns map of projectID -> actualState
+func GetAllProjectActualStates(nodeID string) (map[string]string, error) {
+	key := ProjectActualStateKeyPrefix + nodeID
+	values, err := RedisHGetAll(key)
+	if err != nil {
+		return make(map[string]string), nil
+	}
+	return values, nil
+}
+
+// RemoveProjectActualState removes actual state for a project (when project is deleted)
+func RemoveProjectActualState(nodeID, projectID string) error {
+	key := ProjectActualStateKeyPrefix + nodeID
+	return RedisHDel(key, projectID)
+}
+
+// SetProjectStateTimestamp sets the timestamp for a project state change
+func SetProjectStateTimestamp(nodeID, projectID string, timestamp time.Time) error {
+	key := ProjectStateTimestampKeyPrefix + nodeID
+	return RedisHSet(key, projectID, timestamp.Format(time.RFC3339))
+}
+
+// GetProjectStateTimestamp gets the timestamp for a project state change
+func GetProjectStateTimestamp(nodeID, projectID string) (time.Time, error) {
+	key := ProjectStateTimestampKeyPrefix + nodeID
+	value, err := RedisHGet(key, projectID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse(time.RFC3339, value)
+}
+
+// GetAllProjectStateTimestamps gets all state change timestamps for a node
+func GetAllProjectStateTimestamps(nodeID string) (map[string]time.Time, error) {
+	key := ProjectStateTimestampKeyPrefix + nodeID
+	values, err := RedisHGetAll(key)
+	if err != nil {
+		return make(map[string]time.Time), nil
+	}
+
+	result := make(map[string]time.Time)
+	for projectID, timestampStr := range values {
+		if timestamp, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+			result[projectID] = timestamp
+		}
+	}
+	return result, nil
+}
+
+// ===================== Legacy Project State Support (Backward Compatibility) =====================
+
+// These functions support the old proj_states key for backward compatibility
+// They should be gradually phased out as the new design is adopted
+
+// GetLegacyProjectStates gets project states from the legacy key
+// This function is for backward compatibility only
+func GetLegacyProjectStates(nodeID string) (map[string]string, error) {
+	key := ProjectLegacyStateKeyPrefix + nodeID
+	return RedisHGetAll(key)
+}
+
+// RemoveProjectState removes all state information for a project (used when project is deleted)
+func RemoveProjectState(nodeID, projectID string) error {
+	desiredKey := ProjectDesiredStateKeyPrefix + nodeID
+	actualKey := ProjectActualStateKeyPrefix + nodeID
+	timestampKey := ProjectStateTimestampKeyPrefix + nodeID
+	legacyKey := ProjectLegacyStateKeyPrefix + nodeID
+
+	// Remove from all keys (ignore errors for non-existent keys)
+	RedisHDel(desiredKey, projectID)
+	RedisHDel(actualKey, projectID)
+	RedisHDel(timestampKey, projectID)
+	RedisHDel(legacyKey, projectID)
+
+	return nil
+}
+
+// ===================== Legacy Project State Support =====================

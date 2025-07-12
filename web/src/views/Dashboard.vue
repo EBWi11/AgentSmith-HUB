@@ -212,12 +212,12 @@
             <div class="flex items-center">
               <span class="w-3 h-3 rounded-full mr-3 transition-colors duration-300" 
                     :class="{
-                      'bg-yellow-500 animate-pulse': project.mismatch,
+                      'bg-red-500': project.status === 'error',
+                      'bg-yellow-500': project.mismatch && project.status !== 'error',
                       'bg-green-500': !project.mismatch && project.status === 'running',
                       'bg-gray-400': !project.mismatch && project.status === 'stopped',
                       'bg-blue-500': !project.mismatch && project.status === 'starting',
-                      'bg-orange-500': !project.mismatch && project.status === 'stopping',
-                      'bg-red-500': !project.mismatch && project.status === 'error'
+                      'bg-orange-500': !project.mismatch && project.status === 'stopping'
                     }"></span>
               <div>
                 <p class="font-medium text-gray-900">{{ project.id }}</p>

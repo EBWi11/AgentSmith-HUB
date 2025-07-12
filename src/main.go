@@ -68,8 +68,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Reinitialize logger with Redis error log writing capability
-	logger.InitLoggerWithRedis(func(entry logger.RedisErrorLogEntry) error {
+	// Detect local IP & init cluster manager
+	ip, _ := common.GetLocalIP()
+	common.Config.LocalIP = ip
+
+	// Reinitialize logger with Redis error log writing capability and correct NodeID
+	logger.InitLoggerWithRedisAndNodeID(ip, func(entry logger.RedisErrorLogEntry) error {
 		// Convert logger entry to common entry format
 		commonEntry := common.ErrorLogEntry{
 			Timestamp: entry.Timestamp,
@@ -86,8 +90,8 @@ func main() {
 		return common.WriteErrorLogToRedis(commonEntry)
 	})
 
-	// Reinitialize plugin logger with Redis error log writing capability
-	logger.InitPluginLoggerWithRedis(func(entry logger.RedisErrorLogEntry) error {
+	// Reinitialize plugin logger with Redis error log writing capability and correct NodeID
+	logger.InitPluginLoggerWithRedisAndNodeID(ip, func(entry logger.RedisErrorLogEntry) error {
 		// Convert logger entry to common entry format
 		commonEntry := common.ErrorLogEntry{
 			Timestamp: entry.Timestamp,
@@ -108,10 +112,6 @@ func main() {
 
 	// Initialize daily statistics manager (tracks real message counts)
 	common.InitDailyStatsManager()
-
-	// Detect local IP & init cluster manager
-	ip, _ := common.GetLocalIP()
-	common.Config.LocalIP = ip
 
 	// Initialize new cluster system
 	cluster.InitCluster(ip, *isLeader)
@@ -316,7 +316,8 @@ func main() {
 				if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
 					logger.Warn("Force stopping project", "id", id)
 					// Don't wait for graceful stop, just mark as stopped
-					p.Status = project.ProjectStatusStopped
+					// Use SetProjectStatus for consistent state management
+					p.SetProjectStatus(project.ProjectStatusStopped, nil)
 				}
 			}
 		}
@@ -485,7 +486,6 @@ func loadLocalProjects() {
 				logger.Info("Restoring project to running state", "id", p.Id)
 				if err := p.Start(); err != nil {
 					logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
-					p.Status = project.ProjectStatusStopped
 					// Record failed restore operation
 					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
 						"triggered_by": "system_restore",
@@ -500,9 +500,10 @@ func loadLocalProjects() {
 					})
 				}
 			} else {
-				// No saved status or not running, default to stopped
+				// User doesn't want it running or no desired state, default to stopped
+				// For initial loading, just set memory status without Redis update
 				p.Status = project.ProjectStatusStopped
-				logger.Info("Project not marked as running in Redis, defaulting to stopped", "id", p.Id)
+				logger.Info("Project not desired to be running, defaulting to stopped", "id", p.Id)
 			}
 		} else {
 			logger.Error("Failed to create project", "id", id, "error", err)

@@ -576,15 +576,31 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 	common.GlobalMu.RUnlock()
 
-	// 6. Start running projects (只有leader当前运行的项目才发送启动指令)
-	if runningProjects, err := common.RedisHGetAll("cluster:proj_states:" + common.Config.LocalIP); err == nil {
-		for projectID, status := range runningProjects {
-			if status == "running" {
+	// 6. Start running projects (读取Redis中的期望状态)
+	logger.Info("Reading project desired states from Redis to send start instructions...")
+
+	// 读取Redis中用户期望运行的项目（期望状态）
+	if desiredStates, err := common.GetAllProjectDesiredStates(common.Config.LocalIP); err == nil {
+		startInstructionCount := 0
+		for projectID, desiredRunning := range desiredStates {
+			if desiredRunning {
 				if err := publishInstructionDirectly(projectID, "project", "", "start", nil, nil); err != nil {
 					logger.Error("Failed to publish project start instruction", "project", projectID, "error", err)
+				} else {
+					logger.Info("Published project start instruction", "project", projectID)
+					startInstructionCount++
 				}
 			}
 		}
+
+		if startInstructionCount > 0 {
+			logger.Info("Published start instructions for desired running projects", "count", startInstructionCount)
+		} else {
+			logger.Info("No projects desired to be running, no start instructions published")
+		}
+	} else {
+		logger.Warn("Failed to read project desired states from Redis", "error", err)
+		logger.Info("No start instructions published due to Redis read failure")
 	}
 
 	// Update the final version count - this will be handled by the defer function

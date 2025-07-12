@@ -236,6 +236,15 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 // If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,
 // but the original output type will still be used so that real external side-effects can be observed.
 func (out *Output) Start() error {
+	// Perform connectivity check first before starting (skip for print type as it doesn't need external connectivity)
+	if out.Type != OutputTypePrint {
+		connectivityResult := out.CheckConnectivity()
+		if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+			return fmt.Errorf("output connectivity check failed: %v", connectivityResult["message"])
+		}
+		logger.Info("Output connectivity verified", "output", out.Id, "type", out.Type)
+	}
+
 	// Load today's accumulated message count from Redis to resume counting from correct value
 	// This ensures that component restarts don't reset daily message count to 0
 	if common.GlobalDailyStatsManager != nil {

@@ -34,14 +34,12 @@ func getClusterProjectStates(c echo.Context) error {
 	// Always try to get current node's project states first
 	currentNodeID := common.Config.LocalIP
 	if currentNodeID != "" {
-		redisKey := "cluster:proj_states:" + currentNodeID
-		timestampKey := "cluster:proj_status_ts:" + currentNodeID
-
-		if nodeStates, err := common.RedisHGetAll(redisKey); err == nil {
+		// Get actual project states (real runtime status)
+		if nodeStates, err := common.GetAllProjectActualStates(currentNodeID); err == nil {
 			// Get timestamps for this node
-			nodeTimestamps, _ := common.RedisHGetAll(timestampKey)
+			nodeTimestamps, _ := common.GetAllProjectStateTimestamps(currentNodeID)
 
-			// Convert Redis hash to array of project state objects
+			// Convert to array of project state objects
 			var projectList []map[string]interface{}
 			for projectID, status := range nodeStates {
 				projectData := map[string]interface{}{
@@ -50,8 +48,8 @@ func getClusterProjectStates(c echo.Context) error {
 				}
 
 				// Add timestamp if available
-				if timestamp, exists := nodeTimestamps[projectID]; exists && timestamp != "" {
-					projectData["status_changed_at"] = timestamp
+				if timestamp, exists := nodeTimestamps[projectID]; exists {
+					projectData["status_changed_at"] = timestamp.Format(time.RFC3339)
 				}
 
 				projectList = append(projectList, projectData)
@@ -72,15 +70,12 @@ func getClusterProjectStates(c echo.Context) error {
 					continue
 				}
 
-				// Get project states for this node from Redis
-				redisKey := "cluster:proj_states:" + nodeID
-				timestampKey := "cluster:proj_status_ts:" + nodeID
-
-				if nodeStates, err := common.RedisHGetAll(redisKey); err == nil {
+				// Get actual project states for this node (real runtime status)
+				if nodeStates, err := common.GetAllProjectActualStates(nodeID); err == nil {
 					// Get timestamps for this node
-					nodeTimestamps, _ := common.RedisHGetAll(timestampKey)
+					nodeTimestamps, _ := common.GetAllProjectStateTimestamps(nodeID)
 
-					// Convert Redis hash to array of project state objects
+					// Convert to array of project state objects
 					var projectList []map[string]interface{}
 					for projectID, status := range nodeStates {
 						projectData := map[string]interface{}{
@@ -89,8 +84,8 @@ func getClusterProjectStates(c echo.Context) error {
 						}
 
 						// Add timestamp if available
-						if timestamp, exists := nodeTimestamps[projectID]; exists && timestamp != "" {
-							projectData["status_changed_at"] = timestamp
+						if timestamp, exists := nodeTimestamps[projectID]; exists {
+							projectData["status_changed_at"] = timestamp.Format(time.RFC3339)
 						}
 
 						projectList = append(projectList, projectData)

@@ -12,30 +12,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// SIMPLIFIED PROJECT STATUS PERSISTENCE DESIGN
-//
-// Status persistence is managed ONLY in API endpoints, not in project methods:
-//
-// 1. START PROJECT (API):
-//    - Call p.Start() to start the project
-//    - Save "running" status to Redis
-//    - Hub restart will find "running" in Redis and start the project
-//
-// 2. STOP PROJECT (API):
-//    - Call p.Stop() to stop the project
-//    - Remove project from Redis (delete the key)
-//    - Hub restart will NOT find the project in Redis, so it won't start
-//
-// 3. DELETE PROJECT (API):
-//    - Remove project from Redis (delete the key)
-//    - Hub restart will NOT find the project in Redis, so it won't start
-//
-// 4. NEW PROJECT:
-//    - Redis has no entry by default
-//    - Hub restart will NOT find the project in Redis, so it won't start
-//
-// This design is much simpler: only 3 cases to handle, all in API endpoints.
-
 // ProjectStatusSyncRequest represents a project status sync request to followers
 type ProjectStatusSyncRequest struct {
 	ProjectID string `json:"project_id"`
@@ -111,6 +87,11 @@ func StartProject(c echo.Context) error {
 	// Record successful operation
 	RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "success", "", nil)
 
+	// Save project last updated time separately
+	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
+		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
+	}
+
 	// Sync operation to follower nodes
 	syncProjectOperationToFollowers(req.ProjectID, "start")
 
@@ -167,6 +148,11 @@ func StopProject(c echo.Context) error {
 
 	// Record successful operation
 	RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "success", "", nil)
+
+	// Save project last updated time (stop time)
+	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
+		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
+	}
 
 	// Sync operation to follower nodes
 	syncProjectOperationToFollowers(req.ProjectID, "stop")
@@ -235,6 +221,11 @@ func RestartProject(c echo.Context) error {
 
 	// Note: Operation history is already recorded in RestartProjectsSafely
 	// So we don't need to record it again here
+
+	// Save project last updated time (restart time) - only update timestamp, not desired state
+	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
+		logger.Warn("Failed to persist project restart time to Redis", "project", req.ProjectID, "error", err)
+	}
 
 	// Sync operation to follower nodes
 	syncProjectOperationToFollowers(req.ProjectID, "restart")

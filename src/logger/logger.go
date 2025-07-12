@@ -77,13 +77,17 @@ func InitLogger() *slog.Logger {
 	return initLoggerWithRedis(nil)
 }
 
-// InitLoggerWithRedis initializes logger with Redis error log writing capability
-func InitLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
-	return initLoggerWithRedis(redisWriter)
+// InitLoggerWithRedisAndNodeID initializes logger with Redis error log writing capability and specific NodeID
+func InitLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	return initLoggerWithRedisAndNodeID(nodeID, redisWriter)
 }
 
 func initLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
 	nodeID := detectLocalIP()
+	return initLoggerWithRedisAndNodeID(nodeID, redisWriter)
+}
+
+func initLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
 
 	// Ensure log directory exists
 	if err := ensureLogDir(); err != nil {
@@ -105,6 +109,7 @@ func initLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog
 				})
 				logger := slog.New(handler)
 				slog.SetDefault(logger)
+				l = logger // Update global logger variable
 				logger.Warn("Failed to create any log directory, logging to stderr", "local_dir_error", err.Error())
 				return logger
 			}
@@ -123,6 +128,7 @@ func initLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog
 		logger := base.With("node_ip", nodeID)
 
 		slog.SetDefault(logger)
+		l = logger // Update global logger variable
 		return logger
 	}
 
@@ -147,6 +153,7 @@ func initLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog
 	logger := base.With("node_ip", nodeID)
 
 	slog.SetDefault(logger)
+	l = logger // Update global logger variable
 
 	return logger
 }
@@ -156,13 +163,17 @@ func InitPluginLogger() *slog.Logger {
 	return initPluginLoggerWithRedis(nil)
 }
 
-// InitPluginLoggerWithRedis initializes plugin logger with Redis error log writing capability
-func InitPluginLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
-	return initPluginLoggerWithRedis(redisWriter)
+// InitPluginLoggerWithRedisAndNodeID initializes plugin logger with Redis error log writing capability and specific NodeID
+func InitPluginLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	return initPluginLoggerWithRedisAndNodeID(nodeID, redisWriter)
 }
 
 func initPluginLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
 	nodeID := detectLocalIP()
+	return initPluginLoggerWithRedisAndNodeID(nodeID, redisWriter)
+}
+
+func initPluginLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
 
 	// Get current working directory for debugging
 	pwd, _ := os.Getwd()
@@ -317,41 +328,20 @@ func PluginWarn(msg string, args ...any) {
 	pluginLog.Warn(msg, args...)
 }
 
-func PluginInfo(msg string, args ...any) {
-	pluginLog := GetPluginLogger()
-	pluginLog.Info(msg, args...)
-}
-
 func Debug(msg string, args ...any) {
 	logWithCaller(l.Debug, msg, args...)
-}
-
-func DebugContext(ctx context.Context, msg string, args ...any) {
-	logWithCallerContext(l.DebugContext, ctx, msg, args...)
 }
 
 func Info(msg string, args ...any) {
 	logWithCaller(l.Info, msg, args...)
 }
 
-func InfoContext(ctx context.Context, msg string, args ...any) {
-	logWithCallerContext(l.InfoContext, ctx, msg, args...)
-}
-
 func Warn(msg string, args ...any) {
 	logWithCaller(l.Warn, msg, args...)
 }
 
-func WarnContext(ctx context.Context, msg string, args ...any) {
-	logWithCallerContext(l.WarnContext, ctx, msg, args...)
-}
-
 func Error(msg string, args ...any) {
 	logWithCaller(l.Error, msg, args...)
-}
-
-func ErrorContext(ctx context.Context, msg string, args ...any) {
-	logWithCallerContext(l.ErrorContext, ctx, msg, args...)
 }
 
 // logWithCaller adds caller information to log entries
@@ -374,27 +364,6 @@ func logWithCaller(logFunc func(string, ...any), msg string, args ...any) {
 	logFunc(msg, args...)
 }
 
-// logWithCallerContext adds caller information to log entries with context
-func logWithCallerContext(logFunc func(context.Context, string, ...any), ctx context.Context, msg string, args ...any) {
-	// Get caller information (skip 2 frames: logWithCallerContext + the wrapper function)
-	if pc, file, line, ok := runtime.Caller(2); ok {
-		// Get function name
-		funcName := "unknown"
-		if fn := runtime.FuncForPC(pc); fn != nil {
-			funcName = fn.Name()
-		}
-
-		// Add source information in slog's expected format
-		args = append(args, slog.Group("source",
-			"function", funcName,
-			"file", file,
-			"line", line,
-		))
-	}
-	logFunc(ctx, msg, args...)
-}
-
-// RedisErrorLogEntry represents an error log entry for Redis storage
 type RedisErrorLogEntry struct {
 	Timestamp time.Time              `json:"timestamp"`
 	Level     string                 `json:"level"`
@@ -508,21 +477,6 @@ func (h *RedisErrorLogHandler) WithGroup(name string) slog.Handler {
 		nodeID:      h.nodeID,
 		redisWriter: h.redisWriter,
 	}
-}
-
-// writeErrorLogToRedis writes an error log entry to Redis
-func writeErrorLogToRedis(entry RedisErrorLogEntry) error {
-	// Import the Redis functions (we'll need to import from common package)
-	// For now, we'll use a simple approach - this will be imported properly
-	return writeToRedisErrorLog(entry)
-}
-
-// writeToRedisErrorLog writes error log to Redis using common package functions
-func writeToRedisErrorLog(entry RedisErrorLogEntry) error {
-	// This function is called by the Redis handler callback from main.go
-	// The actual Redis writing is handled by the callback function passed from main.go
-	// This avoids circular import issues
-	return fmt.Errorf("Redis writer not configured - this should not be called directly")
 }
 
 func init() {

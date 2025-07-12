@@ -255,9 +255,14 @@ func Verify(path string, raw string) error {
 		Config: &cfg,
 	}
 
-	_, err = p.parseContent()
+	flowGraph, err := p.parseContent()
 	if err != nil {
 		return fmt.Errorf("failed to parse project content: %v", err)
+	}
+
+	// Check for duplicate project content by comparing projectNodeSequences
+	if err := checkProjectContentDuplication(cfg.Id, flowGraph); err != nil {
+		return err
 	}
 
 	return nil
@@ -306,11 +311,7 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 
 	// Initialize components
 	if err := p.initComponents(); err != nil {
-		now := time.Now()
-		p.Status = ProjectStatusError
-		p.StatusChangedAt = &now
-		p.Err = err
-
+		p.setProjectStatus(ProjectStatusError, err)
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
@@ -379,10 +380,7 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 
 	// Initialize components with independent instances for testing
 	if err := p.initComponentsForTesting(); err != nil {
-		now := time.Now()
-		p.Status = ProjectStatusError
-		p.StatusChangedAt = &now
-		p.Err = err
+		p.setProjectStatus(ProjectStatusError, err)
 		return p, fmt.Errorf("failed to initialize test project components: %w", err)
 	}
 
@@ -958,16 +956,14 @@ func (p *Project) Start() error {
 		}
 	} else {
 		// Force set status to stopped to allow starting in test mode
+		// In test mode, only update memory status without Redis
 		p.Status = ProjectStatusStopped
 		logger.Info("Starting project in test mode (bypassing status checks)", "id", p.Id)
 	}
 
 	// Set status to starting immediately to prevent duplicate operations
 	if !isTestMode {
-		now := time.Now()
-		p.Status = ProjectStatusStarting
-		p.StatusChangedAt = &now
-		logger.Info("Project status set to starting", "id", p.Id)
+		p.setProjectStatus(ProjectStatusStarting, nil)
 	}
 
 	// Initialize project control channels
@@ -976,30 +972,21 @@ func (p *Project) Start() error {
 	// Parse project content to get component flow
 	flowGraph, err := p.parseContent()
 	if err != nil {
-		now := time.Now()
-		p.Status = ProjectStatusError
-		p.StatusChangedAt = &now
-		p.Err = err
+		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
 	// Load components from global registry
 	err = p.loadComponentsFromGlobal(flowGraph)
 	if err != nil {
-		now := time.Now()
-		p.Status = ProjectStatusError
-		p.StatusChangedAt = &now
-		p.Err = err
+		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to load components: %v", err)
 	}
 
 	// Create fresh channel connections
 	err = p.createChannelConnections(flowGraph)
 	if err != nil {
-		now := time.Now()
-		p.Status = ProjectStatusError
-		p.StatusChangedAt = &now
-		p.Err = err
+		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
 
@@ -1012,10 +999,7 @@ func (p *Project) Start() error {
 				errorMsg := fmt.Errorf("failed to start input %s: %v", in.Id, err)
 				logger.Error("Input component startup failed", "project", p.Id, "input", in.Id, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-				now := time.Now()
-				p.Status = ProjectStatusError
-				p.StatusChangedAt = &now
-				p.Err = errorMsg
+				p.setProjectStatus(ProjectStatusError, errorMsg)
 				return errorMsg
 			}
 		} else {
@@ -1026,12 +1010,21 @@ func (p *Project) Start() error {
 					errorMsg := fmt.Errorf("failed to start shared input %s: %v", in.Id, err)
 					logger.Error("Shared input component startup failed", "project", p.Id, "input", in.Id, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-					now := time.Now()
-					p.Status = ProjectStatusError
-					p.StatusChangedAt = &now
-					p.Err = errorMsg
+					p.setProjectStatus(ProjectStatusError, errorMsg)
 					return errorMsg
 				}
+			} else {
+				// Input is shared with other projects, verify connectivity using CheckConnectivity
+				logger.Info("Input component shared with other projects, verifying connectivity", "project", p.Id, "input", in.Id, "other_projects_using", runningCount)
+				connectivityResult := in.CheckConnectivity()
+				if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+					errorMsg := fmt.Errorf("shared input %s connectivity check failed: %v", in.Id, connectivityResult["message"])
+					logger.Error("Shared input component connectivity failed", "project", p.Id, "input", in.Id, "error", errorMsg)
+					p.cleanupComponentsOnStartupFailure()
+					p.setProjectStatus(ProjectStatusError, errorMsg)
+					return errorMsg
+				}
+				logger.Info("Shared input component connectivity verified", "project", p.Id, "input", in.Id)
 			}
 		}
 	}
@@ -1045,10 +1038,7 @@ func (p *Project) Start() error {
 				errorMsg := fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 				logger.Error("Ruleset component startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-				now := time.Now()
-				p.Status = ProjectStatusError
-				p.StatusChangedAt = &now
-				p.Err = errorMsg
+				p.setProjectStatus(ProjectStatusError, errorMsg)
 				return errorMsg
 			}
 		} else {
@@ -1059,10 +1049,7 @@ func (p *Project) Start() error {
 					errorMsg := fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
 					logger.Error("Ruleset instance startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-					now := time.Now()
-					p.Status = ProjectStatusError
-					p.StatusChangedAt = &now
-					p.Err = errorMsg
+					p.setProjectStatus(ProjectStatusError, errorMsg)
 					return errorMsg
 				}
 			}
@@ -1078,10 +1065,7 @@ func (p *Project) Start() error {
 				errorMsg := fmt.Errorf("failed to start output %s: %v", out.Id, err)
 				logger.Error("Output component startup failed", "project", p.Id, "output", out.Id, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-				now := time.Now()
-				p.Status = ProjectStatusError
-				p.StatusChangedAt = &now
-				p.Err = errorMsg
+				p.setProjectStatus(ProjectStatusError, errorMsg)
 				return errorMsg
 			}
 		} else {
@@ -1092,12 +1076,21 @@ func (p *Project) Start() error {
 					errorMsg := fmt.Errorf("failed to start output %s: %v", out.Id, err)
 					logger.Error("Output instance startup failed", "project", p.Id, "output", out.Id, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-					now := time.Now()
-					p.Status = ProjectStatusError
-					p.StatusChangedAt = &now
-					p.Err = errorMsg
+					p.setProjectStatus(ProjectStatusError, errorMsg)
 					return errorMsg
 				}
+			} else {
+				// Output is shared with other projects, verify connectivity using CheckConnectivity
+				logger.Info("Output component shared with other projects, verifying connectivity", "project", p.Id, "output", out.Id, "other_projects_using", runningCount)
+				connectivityResult := out.CheckConnectivity()
+				if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+					errorMsg := fmt.Errorf("shared output %s connectivity check failed: %v", out.Id, connectivityResult["message"])
+					logger.Error("Shared output component connectivity failed", "project", p.Id, "output", out.Id, "error", errorMsg)
+					p.cleanupComponentsOnStartupFailure()
+					p.setProjectStatus(ProjectStatusError, errorMsg)
+					return errorMsg
+				}
+				logger.Info("Shared output component connectivity verified", "project", p.Id, "output", out.Id)
 			}
 		}
 	}
@@ -1110,14 +1103,15 @@ func (p *Project) Start() error {
 		p.collectMetrics()
 	}()
 
-	now := time.Now()
-	p.Status = ProjectStatusRunning
-	p.StatusChangedAt = &now
-
 	if isTestMode {
+		// In test mode, don't update Redis
+		now := time.Now()
+		p.Status = ProjectStatusRunning
+		p.StatusChangedAt = &now
 		logger.Info("Project started successfully in test mode", "project", p.Id)
 	} else {
-		logger.Info("Project started successfully", "project", p.Id)
+		// In production mode, use unified status update
+		p.setProjectStatus(ProjectStatusRunning, nil)
 	}
 
 	// After the project is successfully started, recalculate dependencies synchronously
@@ -1136,10 +1130,7 @@ func (p *Project) Stop() error {
 	}
 
 	// Set status to stopping immediately to prevent duplicate operations
-	now := time.Now()
-	p.Status = ProjectStatusStopping
-	p.StatusChangedAt = &now
-	logger.Info("Project status set to stopping", "id", p.Id)
+	p.setProjectStatus(ProjectStatusStopping, nil)
 
 	// Check if project is in error state
 	if p.Err != nil {
@@ -1179,9 +1170,7 @@ func (p *Project) Stop() error {
 			logger.Error("Force cleanup failed", "project", p.Id, "error", err)
 		}
 
-		now := time.Now()
-		p.Status = ProjectStatusStopped
-		p.StatusChangedAt = &now
+		p.setProjectStatus(ProjectStatusStopped, nil)
 
 		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
 	}
@@ -1317,18 +1306,14 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	}
 
 	// Set status to stopped and save
-	now := time.Now()
-	p.Status = ProjectStatusStopped
-	p.StatusChangedAt = &now
-
-	// Save project status to Redis only if requested
 	if saveStatusToRedis {
-		err := p.SaveProjectStatus()
-		if err != nil {
-			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
-		}
+		p.setProjectStatus(ProjectStatusStopped, nil)
 		logger.Info("Finished stopping project components", "project", p.Id)
 	} else {
+		// Only update memory status, don't save to Redis
+		now := time.Now()
+		p.Status = ProjectStatusStopped
+		p.StatusChangedAt = &now
 		logger.Info("Finished stopping project components (Redis status preserved)", "project", p.Id)
 	}
 	return nil
@@ -1685,6 +1670,7 @@ func (p *Project) StopForTesting() error {
 	// Complete cleanup: destroy all test instances to prevent any memory leaks
 	p.destroyTestInstances()
 
+	// For test projects, only update memory status without Redis
 	p.Status = ProjectStatusStopped
 	logger.Info("Test project completely destroyed", "project", p.Id)
 	return nil
@@ -2429,27 +2415,40 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, st
 		return
 	}
 
-	// Only sync stable states (running, stopped). Skip transient states (starting, stopping, error).
-	if status != ProjectStatusRunning && status != ProjectStatusStopped {
-		logger.Debug("Skipping Redis sync for transient project status", "node_id", nodeID, "project_id", projectID, "status", status)
-		return
-	}
-
 	// Ensure we use the correct node ID for consistency
 	actualNodeID := nodeID
 	if actualNodeID == "" {
 		actualNodeID = common.Config.LocalIP
 	}
 
-	// Update project status in Redis hash with improved retry mechanism
-	hashKey := "cluster:proj_states:" + actualNodeID
-	if err := common.RedisHSetWithRetry(hashKey, projectID, string(status)); err != nil {
-		logger.Error("Failed to update project status in Redis after retries", "node_id", actualNodeID, "project_id", projectID, "error", err)
+	// Set actual state (real runtime status)
+	if err := common.SetProjectActualState(actualNodeID, projectID, string(status)); err != nil {
+		logger.Error("Failed to update project actual state in Redis", "node_id", actualNodeID, "project_id", projectID, "status", status, "error", err)
 		return
 	}
 
-	// Store timestamp in separate hash for cluster coordination
-	// Use the actual project status change time if available, otherwise use current time
+	// Set timestamp
+	var ts time.Time
+	if statusChangedAt != nil {
+		ts = *statusChangedAt
+	} else {
+		ts = time.Now()
+	}
+
+	if err := common.SetProjectStateTimestamp(actualNodeID, projectID, ts); err != nil {
+		logger.Error("Failed to update project state timestamp in Redis", "node_id", actualNodeID, "project_id", projectID, "error", err)
+	}
+
+	// For backward compatibility, also update legacy key for stable states only
+	if status == ProjectStatusRunning || status == ProjectStatusStopped {
+		legacyKey := "cluster:proj_states:" + actualNodeID
+		if err := common.RedisHSetWithRetry(legacyKey, projectID, string(status)); err != nil {
+			logger.Warn("Failed to update legacy project status key", "node_id", actualNodeID, "project_id", projectID, "error", err)
+			// Don't return error - legacy key is not critical
+		}
+	}
+
+	// Publish project status event with improved retry mechanism
 	var timestamp time.Time
 	if statusChangedAt != nil {
 		timestamp = *statusChangedAt
@@ -2457,13 +2456,6 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, st
 		timestamp = time.Now()
 	}
 
-	timestampKey := "cluster:proj_status_ts:" + actualNodeID
-	if err := common.RedisHSetWithRetry(timestampKey, projectID, timestamp.Format(time.RFC3339)); err != nil {
-		logger.Error("Failed to update project status timestamp in Redis", "node_id", actualNodeID, "project_id", projectID, "error", err)
-		// Continue with event publishing even if timestamp storage fails
-	}
-
-	// Publish project status event with improved retry mechanism
 	evt := map[string]interface{}{
 		"node_id":           actualNodeID,
 		"project_id":        projectID,
@@ -2541,4 +2533,147 @@ func (p *Project) cleanupComponentsOnStartupFailure() {
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 	p.MsgChannels = []string{}
+}
+
+// checkProjectContentDuplication checks if the project content is identical to any existing project
+// by comparing all projectNodeSequences. Two projects are considered identical if they have
+// exactly the same set of projectNodeSequences, regardless of the order in the flow definition.
+func checkProjectContentDuplication(newProjectID string, flowGraph map[string][]string) error {
+	// Calculate projectNodeSequences for the new project
+	newProjectSequences := calculateProjectNodeSequences(newProjectID, flowGraph)
+	if len(newProjectSequences) == 0 {
+		// Empty project, no need to check duplication
+		return nil
+	}
+
+	// Compare with existing projects
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for existingProjectID, existingProject := range GlobalProject.Projects {
+		if existingProjectID == newProjectID {
+			// Skip self when updating existing project
+			continue
+		}
+
+		// Parse existing project's content to get its flow graph
+		existingFlowGraph, err := existingProject.parseContent()
+		if err != nil {
+			// Skip projects with parse errors
+			continue
+		}
+
+		// Calculate projectNodeSequences for the existing project
+		existingProjectSequences := calculateProjectNodeSequences(existingProjectID, existingFlowGraph)
+
+		// Compare the two sets of projectNodeSequences
+		if areProjectSequencesIdentical(newProjectSequences, existingProjectSequences) {
+			return fmt.Errorf("project content is identical to existing project '%s': both projects have the same component flow structure", existingProjectID)
+		}
+	}
+
+	return nil
+}
+
+// calculateProjectNodeSequences calculates all projectNodeSequences for a given project
+func calculateProjectNodeSequences(projectID string, flowGraph map[string][]string) []string {
+	var sequences []string
+	componentSet := make(map[string]bool)
+
+	// Collect all unique components from the flow graph
+	for from, tos := range flowGraph {
+		componentSet[from] = true
+		for _, to := range tos {
+			componentSet[to] = true
+		}
+	}
+
+	// Generate projectNodeSequence for each component
+	for component := range componentSet {
+		sequence := fmt.Sprintf("%s.%s", projectID, component)
+		sequences = append(sequences, sequence)
+	}
+
+	// Sort for consistent comparison
+	sort.Strings(sequences)
+	return sequences
+}
+
+// areProjectSequencesIdentical checks if two sets of projectNodeSequences are identical
+func areProjectSequencesIdentical(sequences1, sequences2 []string) bool {
+	if len(sequences1) != len(sequences2) {
+		return false
+	}
+
+	// Both slices are already sorted, so we can compare directly
+	for i, seq1 := range sequences1 {
+		if seq1 != sequences2[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// SetProjectStatus sets the project status and updates both memory and Redis state (public method)
+// This is a unified function that ensures consistent status management across the system
+func (p *Project) SetProjectStatus(status ProjectStatus, err error) {
+	p.setProjectStatus(status, err)
+}
+
+// setProjectStatus sets the project status and updates both memory and Redis state
+// This is the unified function for all project status changes
+func (p *Project) setProjectStatus(status ProjectStatus, err error) {
+	now := time.Now()
+	p.Status = status
+	p.StatusChangedAt = &now
+	p.Err = err
+
+	// Save to Redis for cluster visibility (skip for test mode)
+	isTestMode := false
+	for _, out := range p.Outputs {
+		if out.TestCollectionChan != nil {
+			isTestMode = true
+			break
+		}
+	}
+
+	if !isTestMode {
+		// Update actual state
+		if updateErr := common.SetProjectActualState(common.Config.LocalIP, p.Id, string(status)); updateErr != nil {
+			logger.Error("Failed to update project actual state in Redis", "project", p.Id, "status", status, "error", updateErr)
+		}
+
+		// Update timestamp (for frontend "Last Updated")
+		if timestampErr := common.SetProjectStateTimestamp(common.Config.LocalIP, p.Id, now); timestampErr != nil {
+			logger.Error("Failed to update project state timestamp in Redis", "project", p.Id, "error", timestampErr)
+		}
+
+		// Also update legacy key for backward compatibility
+		if status == ProjectStatusRunning || status == ProjectStatusStopped {
+			legacyKey := "cluster:proj_states:" + common.Config.LocalIP
+			if legacyErr := common.RedisHSetWithRetry(legacyKey, p.Id, string(status)); legacyErr != nil {
+				logger.Warn("Failed to update legacy project status key", "project", p.Id, "error", legacyErr)
+			}
+		}
+
+		// Publish project status event
+		evt := map[string]interface{}{
+			"node_id":           common.Config.LocalIP,
+			"project_id":        p.Id,
+			"status":            string(status),
+			"status_changed_at": now.Format(time.RFC3339),
+		}
+		if data, marshalErr := json.Marshal(evt); marshalErr == nil {
+			if publishErr := common.RedisPublishWithRetry("cluster:proj_status", string(data)); publishErr != nil {
+				logger.Error("Failed to publish project status event", "project", p.Id, "error", publishErr)
+			}
+		}
+	}
+
+	if err != nil {
+		logger.Error("Project status changed to error", "project", p.Id, "status", status, "error", err)
+	} else {
+		logger.Info("Project status changed", "project", p.Id, "status", status)
+	}
 }

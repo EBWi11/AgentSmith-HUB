@@ -198,6 +198,13 @@ func (in *Input) Start() error {
 	// Initialize stop channel
 	in.stopChan = make(chan struct{})
 
+	// Perform connectivity check first before starting
+	connectivityResult := in.CheckConnectivity()
+	if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+		return fmt.Errorf("input connectivity check failed: %v", connectivityResult["message"])
+	}
+	logger.Info("Input connectivity verified", "input", in.Id, "type", in.Type)
+
 	// Load today's accumulated message count from Redis to resume counting from correct value
 	// This ensures that component restarts don't reset daily message count to 0
 	if common.GlobalDailyStatsManager != nil {
