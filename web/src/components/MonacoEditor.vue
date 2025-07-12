@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, onUnmounted, computed, nextTick } from 'vue';
 import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
 import { hubApi } from '@/api';
