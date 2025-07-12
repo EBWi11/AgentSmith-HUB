@@ -28,6 +28,7 @@ type ErrorLogEntry struct {
 	NodeID      string    `json:"node_id"`      // cluster node identifier
 	NodeAddress string    `json:"node_address"` // cluster node address
 	Context     string    `json:"context"`      // additional context from log
+	Error       string    `json:"error"`        // error details
 	Line        int       `json:"line"`         // line number in log file
 }
 
@@ -370,6 +371,7 @@ func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
 			Source:      log.Source,
 			NodeID:      log.NodeID,
 			NodeAddress: log.NodeID, // Use NodeID as address for now
+			Error:       log.Error,  // Include error details
 			Line:        log.Line,
 		}
 

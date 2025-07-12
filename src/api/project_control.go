@@ -50,6 +50,12 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
+	// API-side persistence: Save project states in Redis
+	// proj_states: User intention (what user wants the project to be)
+	if err := common.SetProjectUserIntention(common.Config.LocalIP, req.ProjectID, true); err != nil {
+		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
+	}
+
 	// Check if project is already running, starting, or stopping
 	if p.Status == project.ProjectStatusRunning {
 		return c.JSON(http.StatusConflict, map[string]string{
@@ -78,10 +84,9 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// API-side persistence: Save project as "running" in Redis
-	hashKey := "cluster:proj_states:" + common.Config.LocalIP
-	if err := common.RedisHSet(hashKey, req.ProjectID, "running"); err != nil {
-		logger.Warn("Failed to persist project start state to Redis", "project", req.ProjectID, "error", err)
+	// proj_real: Actual runtime state (what the project actually is)
+	if err := common.SetProjectRealState(common.Config.LocalIP, req.ProjectID, string(p.Status)); err != nil {
+		logger.Warn("Failed to persist project actual state to Redis (proj_real)", "project", req.ProjectID, "error", err)
 	}
 
 	// Record successful operation
@@ -140,10 +145,15 @@ func StopProject(c echo.Context) error {
 		})
 	}
 
-	// API-side persistence: Remove project from Redis (user wants it stopped)
-	hashKey := "cluster:proj_states:" + common.Config.LocalIP
-	if err := common.RedisHDel(hashKey, req.ProjectID); err != nil {
-		logger.Warn("Failed to remove project state from Redis", "project", req.ProjectID, "error", err)
+	// API-side persistence: Update project states in Redis
+	// proj_states: User intention (user wants project to be stopped)
+	if err := common.SetProjectUserIntention(common.Config.LocalIP, req.ProjectID, false); err != nil {
+		logger.Warn("Failed to update project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
+	}
+
+	// proj_real: Actual runtime state (what the project actually is)
+	if err := common.SetProjectRealState(common.Config.LocalIP, req.ProjectID, string(p.Status)); err != nil {
+		logger.Warn("Failed to update project actual state to Redis (proj_real)", "project", req.ProjectID, "error", err)
 	}
 
 	// Record successful operation

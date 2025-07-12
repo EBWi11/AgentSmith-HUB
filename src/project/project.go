@@ -2421,9 +2421,9 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, st
 		actualNodeID = common.Config.LocalIP
 	}
 
-	// Set actual state (real runtime status)
-	if err := common.SetProjectActualState(actualNodeID, projectID, string(status)); err != nil {
-		logger.Error("Failed to update project actual state in Redis", "node_id", actualNodeID, "project_id", projectID, "status", status, "error", err)
+	// Set real state (actual runtime status)
+	if err := common.SetProjectRealState(actualNodeID, projectID, string(status)); err != nil {
+		logger.Error("Failed to update project real state in Redis", "node_id", actualNodeID, "project_id", projectID, "status", status, "error", err)
 		return
 	}
 
@@ -2439,14 +2439,11 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, st
 		logger.Error("Failed to update project state timestamp in Redis", "node_id", actualNodeID, "project_id", projectID, "error", err)
 	}
 
-	// For backward compatibility, also update legacy key for stable states only
-	if status == ProjectStatusRunning || status == ProjectStatusStopped {
-		legacyKey := "cluster:proj_states:" + actualNodeID
-		if err := common.RedisHSetWithRetry(legacyKey, projectID, string(status)); err != nil {
-			logger.Warn("Failed to update legacy project status key", "node_id", actualNodeID, "project_id", projectID, "error", err)
-			// Don't return error - legacy key is not critical
-		}
-	}
+	// Note: proj_states should ONLY be modified in 3 scenarios:
+	// 1. When user starts a project (API call)
+	// 2. When user stops a project (API call)
+	// 3. When user deletes a project
+	// Any other modification is a BUG - proj_states represents user intention, not runtime state
 
 	// Publish project status event with improved retry mechanism
 	var timestamp time.Time
@@ -2639,22 +2636,14 @@ func (p *Project) setProjectStatus(status ProjectStatus, err error) {
 	}
 
 	if !isTestMode {
-		// Update actual state
-		if updateErr := common.SetProjectActualState(common.Config.LocalIP, p.Id, string(status)); updateErr != nil {
-			logger.Error("Failed to update project actual state in Redis", "project", p.Id, "status", status, "error", updateErr)
+		// Update real state (actual runtime state)
+		if updateErr := common.SetProjectRealState(common.Config.LocalIP, p.Id, string(status)); updateErr != nil {
+			logger.Error("Failed to update project real state in Redis", "project", p.Id, "status", status, "error", updateErr)
 		}
 
 		// Update timestamp (for frontend "Last Updated")
 		if timestampErr := common.SetProjectStateTimestamp(common.Config.LocalIP, p.Id, now); timestampErr != nil {
 			logger.Error("Failed to update project state timestamp in Redis", "project", p.Id, "error", timestampErr)
-		}
-
-		// Also update legacy key for backward compatibility
-		if status == ProjectStatusRunning || status == ProjectStatusStopped {
-			legacyKey := "cluster:proj_states:" + common.Config.LocalIP
-			if legacyErr := common.RedisHSetWithRetry(legacyKey, p.Id, string(status)); legacyErr != nil {
-				logger.Warn("Failed to update legacy project status key", "project", p.Id, "error", legacyErr)
-			}
 		}
 
 		// Publish project status event

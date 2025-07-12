@@ -81,7 +81,7 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 	logger.Debug("Received sync command", "leader_version", leaderVersion)
 
 	// Get current version
-	currentVersion := "v0.0" // Default to v0.0 for new followers
+	currentVersion := "v0.0" // Default to v0.0 for new followers (will be reset to session.0 when syncing)
 	if GlobalInstructionManager != nil {
 		currentVersion = GlobalInstructionManager.GetCurrentVersion()
 	}

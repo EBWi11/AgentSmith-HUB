@@ -134,14 +134,13 @@ func main() {
 		}
 
 		logger.Info("Leader mode initialized")
+
+		loadLocalComponents()
+		loadLocalProjects()
 	} else {
 		// Follower mode - token will be read by follower API server when it starts
 		logger.Info("Follower mode initialized")
 	}
-
-	// Load components & projects (this will use the synced configurations)
-	loadLocalComponents()
-	loadLocalProjects()
 
 	// Init monitors
 	common.InitSystemMonitor(ip)
@@ -149,14 +148,10 @@ func main() {
 	// Initialize QPS Manager on all nodes (not just leader)
 	common.InitQPSManager()
 
-	// Start cluster background processes (heartbeat, cleanup, etc.)
-	if cluster.GlobalClusterManager != nil {
-		cluster.GlobalClusterManager.Start()
-	}
-
 	if *isLeader {
 		// Leader extra services
 		common.InitClusterSystemManager()
+		cluster.GlobalClusterManager.Start()
 
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port
@@ -166,6 +161,7 @@ func main() {
 		// Note: Operation history uploader removed - all nodes write directly to Redis
 
 		// Token will be read by follower API server at startup
+		cluster.GlobalClusterManager.Start()
 
 		// Start follower API server (read-only endpoints)
 		followerAddr := fmt.Sprintf("0.0.0.0:%d", *port)
@@ -343,12 +339,6 @@ func traverseComponents(dir, suffix string) []string {
 }
 
 func loadLocalComponents() {
-	// Followers don't read local component files, they receive components via cluster sync
-	if !common.IsCurrentNodeLeader() {
-		logger.Info("Follower node: skipping local component loading, will receive components via cluster sync")
-		return
-	}
-
 	// Only leader loads local components
 	root := common.Config.ConfigRoot
 
@@ -457,12 +447,6 @@ func loadLocalComponents() {
 }
 
 func loadLocalProjects() {
-	// Followers don't have local project files, only leaders do
-	if !common.IsCurrentNodeLeader() {
-		logger.Info("Follower node: skipping local project loading, will receive projects via cluster sync")
-		return
-	}
-
 	root := common.Config.ConfigRoot
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
@@ -479,13 +463,12 @@ func loadLocalProjects() {
 		if p, err := project.NewProject(f, "", id); err == nil {
 			project.GlobalProject.Projects[id] = p
 
-			// Try to restore project status from Redis and actually start if needed
-			hashKey := "cluster:proj_states:" + common.Config.LocalIP
-			if savedStatus, err := common.RedisHGet(hashKey, id); err == nil && savedStatus == "running" {
-				// Project should be running, start it
-				logger.Info("Restoring project to running state", "id", p.Id)
+			// Try to restore project status from Redis based on user intention
+			if userWantsRunning, err := common.GetProjectUserIntention(common.Config.LocalIP, id); err == nil && userWantsRunning {
+				// User wants project to be running, start it
+				logger.Info("Restoring project to running state based on user intention", "id", p.Id)
 				if err := p.Start(); err != nil {
-					logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
+					logger.Error("Failed to start project during restore", "project", p.Id, "error", err)
 					// Record failed restore operation
 					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
 						"triggered_by": "system_restore",
@@ -500,13 +483,13 @@ func loadLocalProjects() {
 					})
 				}
 			} else {
-				// User doesn't want it running or no desired state, default to stopped
+				// User doesn't want it running or no user intention found, default to stopped
 				// For initial loading, just set memory status without Redis update
 				p.Status = project.ProjectStatusStopped
-				logger.Info("Project not desired to be running, defaulting to stopped", "id", p.Id)
+				logger.Info("Project not intended to be running by user, defaulting to stopped", "id", p.Id)
 			}
 		} else {
-			logger.Error("Failed to create project", "id", id, "error", err)
+			logger.Error("Failed to create project", "project", id, "error", err)
 		}
 	}
 

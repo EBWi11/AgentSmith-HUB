@@ -125,7 +125,7 @@
       <div v-else class="space-y-2 p-4">
         <div
           v-for="(log, index) in logs"
-          :key="`${log.node_id}-${log.source}-${log.line}-${index}`"
+          :key="`${log.node_id}-${log.source}-${log.timestamp}-${index}`"
           class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
         >
           <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
@@ -145,7 +145,6 @@
                     <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       {{ log.node_id }}
                     </span>
-                    <span class="text-xs">Line: {{ log.line }}</span>
                   </div>
                 </div>
               </div>
@@ -168,6 +167,14 @@
           
           <!-- Log Details (expanded) -->
           <div v-if="expandedLogs.has(index)" class="p-4 bg-white">
+            <!-- Error Details (if any) -->
+            <div v-if="log.error" class="mb-4">
+              <h4 class="text-sm font-medium text-red-900 mb-2">Error Details</h4>
+              <div class="bg-red-50 border border-red-200 rounded-md p-3">
+                <pre class="text-sm text-red-700 whitespace-pre-wrap break-words">{{ log.error }}</pre>
+              </div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <!-- Basic Info -->
               <div>
@@ -188,10 +195,6 @@
                   <div v-if="log.node_id" class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Node:</dt>
                     <dd class="col-span-2 text-gray-900">{{ log.node_id }}</dd>
-                  </div>
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Line:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ log.line }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Timestamp:</dt>
@@ -269,7 +272,7 @@ const expandedLogs = ref(new Set())
 const filters = reactive({
   source: 'all',
   nodeId: 'all',
-  timeRange: '24h',
+  timeRange: '1h',
   keyword: '',
   startDate: '',
   endDate: ''
@@ -284,15 +287,27 @@ const totalPages = computed(() => Math.ceil(totalCount.value / pageSize.value))
 
 // Helper functions
 const formatTimestamp = (timestamp) => {
-  return new Date(timestamp).toLocaleString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diff = now - date
+  
+  if (diff < 60000) { // Less than 1 minute
+    return 'just now'
+  } else if (diff < 3600000) { // Less than 1 hour
+    return `${Math.floor(diff / 60000)} minutes ago`
+  } else if (diff < 86400000) { // Less than 1 day
+    return `${Math.floor(diff / 3600000)} hours ago`
+  } else {
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  }
 }
 
 const formatFullTimestamp = (timestamp) => {
@@ -316,9 +331,9 @@ function toLocalISOString(date) {
 
 function setDefaultTimeRange() {
   const now = new Date()
-  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
   
-  filters.startDate = toLocalISOString(oneDayAgo)
+  filters.startDate = toLocalISOString(oneHourAgo)
   filters.endDate = toLocalISOString(now)
 }
 
@@ -491,13 +506,14 @@ const exportLogs = () => {
   if (logs.value.length === 0) return
 
   const csvContent = [
-    ['Timestamp', 'Source', 'Level', 'Node', 'Message', 'Context'].join(','),
+    ['Timestamp', 'Source', 'Level', 'Node', 'Message', 'Error', 'Context'].join(','),
     ...logs.value.map(log => [
       log.timestamp,
       log.source,
       log.level,
       log.node_id || '',
       `"${log.message.replace(/"/g, '""')}"`,
+      `"${(log.error || '').replace(/"/g, '""')}"`,
       `"${(log.context || '').replace(/"/g, '""')}"`
     ].join(','))
   ].join('\n')

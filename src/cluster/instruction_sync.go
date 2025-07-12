@@ -3,6 +3,7 @@ package cluster
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -53,11 +54,30 @@ type InstructionManager struct {
 
 var GlobalInstructionManager *InstructionManager
 
+// generateSessionID generates an 8-character random session identifier
+func generateSessionID() string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 8)
+
+	// Generate random bytes
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		// Fallback to time-based generation if crypto/rand fails
+		return fmt.Sprintf("t%07d", time.Now().Unix()%10000000)
+	}
+
+	// Convert random bytes to charset characters
+	for i := range b {
+		b[i] = charset[randomBytes[i]%byte(len(charset))]
+	}
+	return string(b)
+}
+
 // InitInstructionManager initializes the instruction manager
 func InitInstructionManager() {
 	GlobalInstructionManager = &InstructionManager{
-		currentVersion:      0,
-		baseVersion:         fmt.Sprintf("v%d", time.Now().Unix()),
+		currentVersion:      0,                   // Start with version 0 (temporary state)
+		baseVersion:         generateSessionID(), // Session identifier (6-char random string)
 		compactionEnabled:   true,
 		maxInstructions:     1000, // compact when > 1000 instructions
 		compactionThreshold: 100,  // don't compact if < 100 instructions
@@ -124,6 +144,7 @@ func (im *InstructionManager) CompactInstructions() error {
 	// Step 4: Clear old instructions from Redis
 	if err := im.clearOldInstructions(originalVersion); err != nil {
 		logger.Warn("Failed to clear old instructions", "error", err)
+		// Continue anyway, old instructions will just take up space
 	}
 
 	// Step 5: Store compacted instructions with new version numbers (starting from 1)
@@ -576,14 +597,14 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 	common.GlobalMu.RUnlock()
 
-	// 6. Start running projects (读取Redis中的期望状态)
-	logger.Info("Reading project desired states from Redis to send start instructions...")
+	// 6. Start running projects (读取Redis中的用户期望状态)
+	logger.Info("Reading project user intentions from Redis to send start instructions...")
 
-	// 读取Redis中用户期望运行的项目（期望状态）
-	if desiredStates, err := common.GetAllProjectDesiredStates(common.Config.LocalIP); err == nil {
+	// 读取Redis中用户期望运行的项目（用户期望状态）
+	if userIntentions, err := common.GetAllProjectUserIntentions(common.Config.LocalIP); err == nil {
 		startInstructionCount := 0
-		for projectID, desiredRunning := range desiredStates {
-			if desiredRunning {
+		for projectID, wantRunning := range userIntentions {
+			if wantRunning {
 				if err := publishInstructionDirectly(projectID, "project", "", "start", nil, nil); err != nil {
 					logger.Error("Failed to publish project start instruction", "project", projectID, "error", err)
 				} else {
@@ -594,17 +615,16 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		}
 
 		if startInstructionCount > 0 {
-			logger.Info("Published start instructions for desired running projects", "count", startInstructionCount)
+			logger.Info("Published start instructions for user intended running projects", "count", startInstructionCount)
 		} else {
-			logger.Info("No projects desired to be running, no start instructions published")
+			logger.Info("No projects intended to be running by user, no start instructions published")
 		}
 	} else {
-		logger.Warn("Failed to read project desired states from Redis", "error", err)
+		logger.Warn("Failed to read project user intentions from Redis", "error", err)
 		logger.Info("No start instructions published due to Redis read failure")
 	}
 
 	// Update the final version count - this will be handled by the defer function
-
 	return nil
 }
 
@@ -626,7 +646,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		}
 	}()
 
-	// Parse version
+	// Parse follower version
 	parts := strings.Split(fromVersion, ".")
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid version format: %s", fromVersion)
@@ -648,11 +668,17 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		return fmt.Errorf("invalid target version number: %s", leaderParts[1])
 	}
 
-	// Check if version prefix has changed (leader restart detected)
-	if parts[0] != leaderParts[0] {
-		logger.Info("Version prefix mismatch detected - leader has restarted",
-			"follower_prefix", parts[0],
-			"leader_prefix", leaderParts[0])
+	// Check if session has changed (leader restart) or if this is a new follower
+	if parts[0] != leaderParts[0] || fromVersion == "v0.0" {
+		logger.Info("Follower needs full sync",
+			"reason", func() string {
+				if fromVersion == "v0.0" {
+					return "new follower"
+				}
+				return "leader session changed"
+			}(),
+			"from", fromVersion,
+			"to", toVersion)
 
 		// Clear all local components and projects
 		if err := im.clearAllLocalComponents(); err != nil {
@@ -660,34 +686,30 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 			return fmt.Errorf("failed to clear local components: %w", err)
 		}
 
-		// Reset to start from version 1
+		// Start from version 0, so we'll sync from version 1 to endVersion
 		startVersion = 0
-		logger.Info("Reset follower to start from version 1 due to leader restart")
 	}
 
 	// Track successfully applied instructions
 	var lastSuccessfulVersion int64 = startVersion
 	var syncedInstructions []string // Track synced instruction details
 
-	// Sync instructions one by one
+	// Sync instructions from startVersion+1 to endVersion
+	// Instructions are numbered from 1 onwards (version 0 is temporary state)
 	for version := startVersion + 1; version <= endVersion; version++ {
-		// Skip version 0 (compaction in progress signal - followers should ignore)
-		if version == 0 {
-			logger.Info("Skipping version 0 (compaction in progress)")
-			continue
-		}
 
 		// Refresh execution flag during long operations
 		if err := im.RefreshFollowerExecutionFlag(common.GetNodeID()); err != nil {
 			logger.Warn("Failed to refresh execution flag", "error", err)
 		}
 
-		// Get instruction details for logging
+		// Get instruction from Redis
 		key := fmt.Sprintf("cluster:instruction:%d", version)
 		data, err := common.RedisGet(key)
 		if err != nil {
-			logger.Error("Failed to get instruction for logging", "version", version, "error", err)
-			return fmt.Errorf("failed to get instruction %d: %w", version, err)
+			// Instruction not found - likely deleted due to compaction, skip it
+			logger.Debug("Instruction not found (likely compacted), skipping", "version", version)
+			continue
 		}
 
 		var instruction Instruction
@@ -918,8 +940,7 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 		}
 	case "restart":
 		if instruction.ComponentType == "project" {
-			// Check if this project is currently running before restarting
-			// This ensures we only restart projects that were actually running
+			// Check if this project exists
 			common.GlobalMu.RLock()
 			proj, exists := project.GlobalProject.Projects[instruction.ComponentName]
 			common.GlobalMu.RUnlock()
@@ -929,13 +950,9 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 				return fmt.Errorf("project %s not found", instruction.ComponentName)
 			}
 
-			// Only restart if the project is currently running
-			if proj.Status != project.ProjectStatusRunning {
-				logger.Debug("Skipping restart for non-running project", "project", instruction.ComponentName, "status", proj.Status)
-				return nil
-			}
-
-			logger.Debug("Restarting running project", "project", instruction.ComponentName)
+			// Restart project regardless of current status
+			// This ensures restart instruction works consistently
+			logger.Debug("Restarting project", "project", instruction.ComponentName, "current_status", proj.Status)
 
 			if globalProjectCmdHandler != nil {
 				// Follower nodes should not record operations when executing cluster instructions
@@ -1030,17 +1047,55 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 	return fmt.Errorf("timeout waiting for followers to become idle, still active: %v", activeFollowers)
 }
 
-// clearAllLocalComponents clears all local components and projects when leader restarts
+// clearAllLocalComponents clears all local components and projects when leader session changes
 func (im *InstructionManager) clearAllLocalComponents() error {
-	logger.Info("Clearing all local components and projects due to leader restart")
+	logger.Info("Clearing all local components and projects due to leader session change")
 
-	// Stop all running projects first
+	// Stop and close all running projects first
 	common.GlobalMu.RLock()
 	if project.GlobalProject.Projects != nil {
 		for projectName, proj := range project.GlobalProject.Projects {
-			if proj.Status == project.ProjectStatusRunning {
-				logger.Info("Stopping project due to leader restart", "project", projectName)
-				proj.Stop()
+			if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
+				logger.Info("Stopping project due to session change", "project", projectName)
+				if err := proj.Stop(); err != nil {
+					logger.Warn("Failed to stop project during session change", "project", projectName, "error", err)
+				}
+			}
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	// Stop and release all input instances
+	common.GlobalMu.RLock()
+	if project.GlobalProject.Inputs != nil {
+		for inputName, inp := range project.GlobalProject.Inputs {
+			logger.Debug("Stopping input instance", "name", inputName)
+			if err := inp.Stop(); err != nil {
+				logger.Warn("Failed to stop input instance", "name", inputName, "error", err)
+			}
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	// Stop and release all output instances
+	common.GlobalMu.RLock()
+	if project.GlobalProject.Outputs != nil {
+		for outputName, out := range project.GlobalProject.Outputs {
+			logger.Debug("Stopping output instance", "name", outputName)
+			if err := out.Stop(); err != nil {
+				logger.Warn("Failed to stop output instance", "name", outputName, "error", err)
+			}
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	// Stop and release all ruleset instances
+	common.GlobalMu.RLock()
+	if project.GlobalProject.Rulesets != nil {
+		for rulesetName, rs := range project.GlobalProject.Rulesets {
+			logger.Debug("Stopping ruleset instance", "name", rulesetName)
+			if err := rs.Stop(); err != nil {
+				logger.Warn("Failed to stop ruleset instance", "name", rulesetName, "error", err)
 			}
 		}
 	}
@@ -1112,6 +1167,6 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 		}
 	}
 
-	logger.Info("Successfully cleared all local components and projects")
+	logger.Info("Successfully cleared and released all local components and projects")
 	return nil
 }

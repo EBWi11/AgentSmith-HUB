@@ -49,28 +49,23 @@ type OperationRecord struct {
 
 // Cluster startup coordination constants
 const (
-	ClusterLeaderReadyKey    = "cluster:leader:ready"
-	ClusterStartupTimeoutSec = 60 // Wait up to 60 seconds for leader to be ready
+	ClusterLeaderReadyKey = "cluster:leader:ready"
 )
 
-// Project state Redis keys - IMPORTANT: Separate desired vs actual states
+// Project state Redis keys - IMPORTANT: Separate expected vs actual states
 const (
-	// Project desired state (user intention) - only stores "running" or removes key for "stopped"
-	// This represents what the user wants the project to be (from .project_status file or API calls)
-	// Format: cluster:proj_desired:{nodeID} -> {projectID: "running"}
-	ProjectDesiredStateKeyPrefix = "cluster:proj_desired:" // + nodeID
-
-	// Project actual runtime state - stores the real current status
+	// Project real state (actual runtime status) - stores the real current status
 	// This represents what the project actually is (running, stopped, error, starting, stopping)
-	// Format: cluster:proj_actual:{nodeID} -> {projectID: "running|stopped|error|starting|stopping"}
-	ProjectActualStateKeyPrefix = "cluster:proj_actual:" // + nodeID
+	// Format: cluster:proj_real:{nodeID} -> {projectID: "running|stopped|error|starting|stopping"}
+	ProjectRealStateKeyPrefix = "cluster:proj_real:" // + nodeID
 
 	// Project state change timestamps
 	// Format: cluster:proj_ts:{nodeID} -> {projectID: "2023-12-01T10:00:00Z"}
 	ProjectStateTimestampKeyPrefix = "cluster:proj_ts:" // + nodeID
 
-	// Legacy key for backward compatibility (will be phased out)
-	// DO NOT USE - This key mixed desired and actual states causing confusion
+	// Legacy key for user intention (what user wants the project to be)
+	// This represents user's expected state (from .project_status file or API calls)
+	// Format: cluster:proj_states:{nodeID} -> {projectID: "running"} (only "running" is stored, "stopped" projects have their keys removed)
 	ProjectLegacyStateKeyPrefix = "cluster:proj_states:" // + nodeID
 )
 

@@ -618,12 +618,13 @@ func (dl *DistributedLock) TryAcquire(timeout time.Duration) error {
 
 // ===================== Project State Management (New Design) =====================
 
-// SetProjectDesiredState sets the desired state for a project (user intention)
+// SetProjectUserIntention sets the user intention for a project (what user wants)
 // Only "running" is stored; "stopped" projects have their keys removed
-func SetProjectDesiredState(nodeID, projectID string, desired bool) error {
-	key := ProjectDesiredStateKeyPrefix + nodeID
+// Uses proj_states key for user intention
+func SetProjectUserIntention(nodeID, projectID string, wantRunning bool) error {
+	key := ProjectLegacyStateKeyPrefix + nodeID
 
-	if desired {
+	if wantRunning {
 		// User wants project to be running
 		return RedisHSet(key, projectID, "running")
 	} else {
@@ -632,10 +633,11 @@ func SetProjectDesiredState(nodeID, projectID string, desired bool) error {
 	}
 }
 
-// GetProjectDesiredState gets the desired state for a project
+// GetProjectUserIntention gets the user intention for a project
 // Returns true if user wants it running, false if stopped/not found
-func GetProjectDesiredState(nodeID, projectID string) (bool, error) {
-	key := ProjectDesiredStateKeyPrefix + nodeID
+// Uses proj_states key for user intention
+func GetProjectUserIntention(nodeID, projectID string) (bool, error) {
+	key := ProjectLegacyStateKeyPrefix + nodeID
 	value, err := RedisHGet(key, projectID)
 	if err != nil {
 		// Key not found means user wants it stopped
@@ -644,10 +646,11 @@ func GetProjectDesiredState(nodeID, projectID string) (bool, error) {
 	return value == "running", nil
 }
 
-// GetAllProjectDesiredStates gets all desired states for a node
+// GetAllProjectUserIntentions gets all user intentions for a node
 // Returns map of projectID -> bool (true=running, false=stopped)
-func GetAllProjectDesiredStates(nodeID string) (map[string]bool, error) {
-	key := ProjectDesiredStateKeyPrefix + nodeID
+// Uses proj_states key for user intention
+func GetAllProjectUserIntentions(nodeID string) (map[string]bool, error) {
+	key := ProjectLegacyStateKeyPrefix + nodeID
 	values, err := RedisHGetAll(key)
 	if err != nil {
 		return make(map[string]bool), nil
@@ -660,35 +663,32 @@ func GetAllProjectDesiredStates(nodeID string) (map[string]bool, error) {
 	return result, nil
 }
 
-// SetProjectActualState sets the actual runtime state for a project
+// SetProjectRealState sets the actual runtime state for a project
 // Stores the real current status: running, stopped, error, starting, stopping
-func SetProjectActualState(nodeID, projectID, actualState string) error {
-	key := ProjectActualStateKeyPrefix + nodeID
+// Uses proj_real key for actual state
+func SetProjectRealState(nodeID, projectID string, actualState string) error {
+	key := ProjectRealStateKeyPrefix + nodeID
 	return RedisHSet(key, projectID, actualState)
 }
 
-// GetProjectActualState gets the actual runtime state for a project
+// GetProjectRealState gets the actual runtime state for a project
 // Returns the actual state string or empty string if not found
-func GetProjectActualState(nodeID, projectID string) (string, error) {
-	key := ProjectActualStateKeyPrefix + nodeID
+// Uses proj_real key for actual state
+func GetProjectRealState(nodeID, projectID string) (string, error) {
+	key := ProjectRealStateKeyPrefix + nodeID
 	return RedisHGet(key, projectID)
 }
 
-// GetAllProjectActualStates gets all actual states for a node
+// GetAllProjectRealStates gets all actual states for a node
 // Returns map of projectID -> actualState
-func GetAllProjectActualStates(nodeID string) (map[string]string, error) {
-	key := ProjectActualStateKeyPrefix + nodeID
+// Uses proj_real key for actual state
+func GetAllProjectRealStates(nodeID string) (map[string]string, error) {
+	key := ProjectRealStateKeyPrefix + nodeID
 	values, err := RedisHGetAll(key)
 	if err != nil {
 		return make(map[string]string), nil
 	}
 	return values, nil
-}
-
-// RemoveProjectActualState removes actual state for a project (when project is deleted)
-func RemoveProjectActualState(nodeID, projectID string) error {
-	key := ProjectActualStateKeyPrefix + nodeID
-	return RedisHDel(key, projectID)
 }
 
 // SetProjectStateTimestamp sets the timestamp for a project state change
@@ -738,14 +738,12 @@ func GetLegacyProjectStates(nodeID string) (map[string]string, error) {
 
 // RemoveProjectState removes all state information for a project (used when project is deleted)
 func RemoveProjectState(nodeID, projectID string) error {
-	desiredKey := ProjectDesiredStateKeyPrefix + nodeID
-	actualKey := ProjectActualStateKeyPrefix + nodeID
+	realKey := ProjectRealStateKeyPrefix + nodeID
 	timestampKey := ProjectStateTimestampKeyPrefix + nodeID
 	legacyKey := ProjectLegacyStateKeyPrefix + nodeID
 
 	// Remove from all keys (ignore errors for non-existent keys)
-	RedisHDel(desiredKey, projectID)
-	RedisHDel(actualKey, projectID)
+	RedisHDel(realKey, projectID)
 	RedisHDel(timestampKey, projectID)
 	RedisHDel(legacyKey, projectID)
 

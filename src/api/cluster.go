@@ -34,8 +34,8 @@ func getClusterProjectStates(c echo.Context) error {
 	// Always try to get current node's project states first
 	currentNodeID := common.Config.LocalIP
 	if currentNodeID != "" {
-		// Get actual project states (real runtime status)
-		if nodeStates, err := common.GetAllProjectActualStates(currentNodeID); err == nil {
+		// Get real project states (actual runtime status)
+		if nodeStates, err := common.GetAllProjectRealStates(currentNodeID); err == nil {
 			// Get timestamps for this node
 			nodeTimestamps, _ := common.GetAllProjectStateTimestamps(currentNodeID)
 
@@ -70,8 +70,8 @@ func getClusterProjectStates(c echo.Context) error {
 					continue
 				}
 
-				// Get actual project states for this node (real runtime status)
-				if nodeStates, err := common.GetAllProjectActualStates(nodeID); err == nil {
+				// Get real project states for this node (actual runtime status)
+				if nodeStates, err := common.GetAllProjectRealStates(nodeID); err == nil {
 					// Get timestamps for this node
 					nodeTimestamps, _ := common.GetAllProjectStateTimestamps(nodeID)
 
