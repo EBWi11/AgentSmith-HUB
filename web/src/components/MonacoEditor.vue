@@ -8,7 +8,6 @@
 import { ref, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
 import { useStore } from 'vuex';
 import * as monaco from 'monaco-editor';
-import { onBeforeUpdate } from 'vue';
 import { hubApi } from '@/api';
 import { useDataCacheStore } from '@/stores/dataCache';
 import eventManager from '@/utils/eventManager';

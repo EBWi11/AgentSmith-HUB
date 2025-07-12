@@ -1493,7 +1493,7 @@ import JsonViewer from '@/components/JsonViewer.vue'
 import { useComponentOperations } from '../../composables/useApi'
 import { useDeleteConfirmModal } from '../../composables/useModal'
 import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
-import { debounce, createOptimizedApiCall } from '../../utils/performance'
+import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
 import { useListSmartRefresh } from '../../composables/useSmartRefresh'
 

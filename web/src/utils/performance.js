@@ -183,16 +183,7 @@ export function requestDeduplication() {
   }
 }
 
-// Combined usage: debounce + request deduplication
-export function createOptimizedApiCall(apiFunc, delay = 300) {
-  const debouncedFunc = debouncePromise(apiFunc, delay)
-  const deduplicatedFunc = requestDeduplication()
-  
-  return function (...args) {
-    const key = JSON.stringify(args)
-    return deduplicatedFunc(key, () => debouncedFunc.apply(this, args))
-  }
-}
+
 
 // Performance monitoring decorator
 export function performanceMonitor(name) {

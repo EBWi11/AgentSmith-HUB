@@ -43,6 +43,7 @@
             <option value="">All Types</option>
             <option value="change_push">Change Push</option>
             <option value="local_push">Local Push</option>
+            <option value="component_delete">Component Delete</option>
             <option value="project_start">Project Start</option>
             <option value="project_stop">Project Stop</option>
             <option value="project_restart">Project Restart</option>
@@ -325,7 +326,7 @@ import axios from 'axios'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
 import MonacoEditor from './MonacoEditor.vue'
-import { debounce, createOptimizedApiCall } from '../utils/performance'
+import { debounce } from '../utils/performance'
 
 // State
 const operations = ref([])
@@ -375,11 +376,7 @@ onMounted(() => {
   loadClusterInfo().then(fetchOperationsHistory)
 })
 
-// Create optimized API call
-const optimizedFetchHistory = createOptimizedApiCall(
-  (params) => hubApi.getOperationsHistory(params),
-  500 // 500ms debounce
-)
+
 
 // Methods
 function toLocalISOString(date) {
@@ -484,10 +481,10 @@ async function fetchOperationsHistory() {
       }
     }
 
-    // if response still undefined fall back to local history
+    // if response still undefined, show error (follower nodes don't have local history API)
     if (!response) {
-      response = await optimizedFetchHistory(params.toString())
-      nodeStats.value = {}
+      error.value = 'Operations history is only available on the leader node'
+      return
     }
     
     // Ensure each operation has node_id; default to self if missing
@@ -656,6 +653,7 @@ function getOperationTypeLabel(type) {
   const labels = {
     'change_push': 'Change Push',
     'local_push': 'Local Push',
+    'component_delete': 'Component Delete',
     'project_start': 'Project Start',
     'project_stop': 'Project Stop',
     'project_restart': 'Project Restart'
@@ -667,6 +665,7 @@ function getOperationTypeClass(type) {
   const classes = {
     'change_push': 'bg-blue-500',
     'local_push': 'bg-purple-500',
+    'component_delete': 'bg-red-600',
     'project_start': 'bg-green-500',
     'project_stop': 'bg-red-500',
     'project_restart': 'bg-orange-500'
@@ -678,6 +677,7 @@ function getOperationTypeIcon(type) {
   const icons = {
     'change_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l2 2 4-4"/>',
     'local_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M13 13l3-3-3-3m-4 6L6 10l3-3"/>',
+    'component_delete': '<path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>',
     'project_start': '<path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2z"/>',
     'project_stop': '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>',
     'project_restart': '<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>'
