@@ -7,8 +7,34 @@ import (
 	"fmt"
 	"net/http"
 
+	"AgentSmith-HUB/common"
+
 	"github.com/labstack/echo/v4"
 )
+
+// SIMPLIFIED PROJECT STATUS PERSISTENCE DESIGN
+//
+// Status persistence is managed ONLY in API endpoints, not in project methods:
+//
+// 1. START PROJECT (API):
+//    - Call p.Start() to start the project
+//    - Save "running" status to Redis
+//    - Hub restart will find "running" in Redis and start the project
+//
+// 2. STOP PROJECT (API):
+//    - Call p.Stop() to stop the project
+//    - Remove project from Redis (delete the key)
+//    - Hub restart will NOT find the project in Redis, so it won't start
+//
+// 3. DELETE PROJECT (API):
+//    - Remove project from Redis (delete the key)
+//    - Hub restart will NOT find the project in Redis, so it won't start
+//
+// 4. NEW PROJECT:
+//    - Redis has no entry by default
+//    - Hub restart will NOT find the project in Redis, so it won't start
+//
+// This design is much simpler: only 3 cases to handle, all in API endpoints.
 
 // ProjectStatusSyncRequest represents a project status sync request to followers
 type ProjectStatusSyncRequest struct {
@@ -76,6 +102,12 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
+	// API-side persistence: Save project as "running" in Redis
+	hashKey := "cluster:proj_states:" + common.Config.LocalIP
+	if err := common.RedisHSet(hashKey, req.ProjectID, "running"); err != nil {
+		logger.Warn("Failed to persist project start state to Redis", "project", req.ProjectID, "error", err)
+	}
+
 	// Record successful operation
 	RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "success", "", nil)
 
@@ -125,6 +157,12 @@ func StopProject(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to stop project: %v", err),
 		})
+	}
+
+	// API-side persistence: Remove project from Redis (user wants it stopped)
+	hashKey := "cluster:proj_states:" + common.Config.LocalIP
+	if err := common.RedisHDel(hashKey, req.ProjectID); err != nil {
+		logger.Warn("Failed to remove project state from Redis", "project", req.ProjectID, "error", err)
 	}
 
 	// Record successful operation

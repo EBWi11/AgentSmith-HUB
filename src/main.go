@@ -480,47 +480,29 @@ func loadLocalProjects() {
 
 			// Try to restore project status from Redis and actually start if needed
 			hashKey := "cluster:proj_states:" + common.Config.LocalIP
-			if savedStatus, err := common.RedisHGet(hashKey, id); err == nil && savedStatus != "" {
-				// Restore status from Redis
-				switch savedStatus {
-				case "running":
-					// Actually start the project, don't just set status
-					logger.Info("Restoring project to running state", "id", p.Id)
-					if err := p.Start(); err != nil {
-						logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
-						p.Status = project.ProjectStatusStopped
-						// Record failed restore operation
-						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
-							"triggered_by": "system_restore",
-							"node_id":      common.Config.LocalIP,
-						})
-					} else {
-						logger.Info("Successfully restored project to running state", "id", p.Id)
-						// Record successful restore operation
-						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
-							"triggered_by": "system_restore",
-							"node_id":      common.Config.LocalIP,
-						})
-					}
-				case "stopped":
+			if savedStatus, err := common.RedisHGet(hashKey, id); err == nil && savedStatus == "running" {
+				// Project should be running, start it
+				logger.Info("Restoring project to running state", "id", p.Id)
+				if err := p.Start(); err != nil {
+					logger.Error("Failed to start project during restore", "id", p.Id, "error", err)
 					p.Status = project.ProjectStatusStopped
-					logger.Info("Restored project status from Redis", "id", p.Id, "status", "stopped")
-				default:
-					// For other statuses (starting, stopping, error), default to stopped
-					p.Status = project.ProjectStatusStopped
-					logger.Info("Restored project status from Redis with fallback", "id", p.Id, "saved_status", savedStatus, "final_status", "stopped")
+					// Record failed restore operation
+					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{
+						"triggered_by": "system_restore",
+						"node_id":      common.Config.LocalIP,
+					})
+				} else {
+					logger.Info("Successfully restored project to running state", "id", p.Id)
+					// Record successful restore operation
+					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
+						"triggered_by": "system_restore",
+						"node_id":      common.Config.LocalIP,
+					})
 				}
 			} else {
-				// No saved status or Redis error, default to stopped
+				// No saved status or not running, default to stopped
 				p.Status = project.ProjectStatusStopped
-				logger.Info("No saved status in Redis, defaulting to stopped", "id", p.Id)
-			}
-
-			// Sync current status to Redis for cluster visibility
-			if err := p.SaveProjectStatus(); err != nil {
-				logger.Warn("Failed to sync project status to Redis", "id", p.Id, "error", err)
-			} else {
-				logger.Debug("Synced project status to Redis", "id", p.Id, "status", p.Status)
+				logger.Info("Project not marked as running in Redis, defaulting to stopped", "id", p.Id)
 			}
 		} else {
 			logger.Error("Failed to create project", "id", id, "error", err)

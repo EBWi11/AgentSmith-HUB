@@ -3448,17 +3448,17 @@ function hasClusterInconsistency(projectId) {
     return false; // Need at least 2 nodes to have inconsistency
   }
 
-  // Collect all statuses from all nodes
+  // Collect all statuses from all nodes, treating "No Data" as "stopped"
   let allStatuses = new Set();
   
   for (const nodeId of nodeIds) {
     const projects = projectStates[nodeId];
     if (projects && Array.isArray(projects)) {
       const project = projects.find(p => p.id === projectId);
-      allStatuses.add(project ? project.status : 'missing');
+      allStatuses.add(project ? project.status : 'stopped'); // missing project = stopped
     } else {
-      // Node has no project data
-      allStatuses.add('no_data');
+      // Node has no project data - treat as "stopped"
+      allStatuses.add('stopped');
     }
   }
 

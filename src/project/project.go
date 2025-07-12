@@ -931,12 +931,8 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 	return nil
 }
 
-// Start starts the project and manages shared components safely
+// Start starts the project and all its components
 func (p *Project) Start() error {
-	// CRITICAL FIX: Only update config maps once to avoid redundant Redis operations
-	// The config will be updated again in SaveProjectStatus(), so we skip it here
-	// This reduces Redis load and prevents race conditions
-
 	// Check if this is test mode (any output has TestCollectionChan set)
 	isTestMode := false
 	for _, out := range p.Outputs {
@@ -972,8 +968,6 @@ func (p *Project) Start() error {
 		p.Status = ProjectStatusStarting
 		p.StatusChangedAt = &now
 		logger.Info("Project status set to starting", "id", p.Id)
-
-		// No persistence for transient 'starting' state
 	}
 
 	// Initialize project control channels
@@ -1009,20 +1003,15 @@ func (p *Project) Start() error {
 		return fmt.Errorf("failed to create channel connections: %v", err)
 	}
 
-	// Use centralized component usage counter for better performance and code maintainability
-
 	// Start inputs first
 	for _, in := range p.Inputs {
 		if isTestMode {
 			// In test mode, directly start all inputs
 			logger.Info("Starting input in test mode", "project", p.Id, "input", in.Id)
 			if err := in.Start(); err != nil {
-				errorMsg := fmt.Errorf("failed to start input %s at %s: %v", in.Id, time.Now().Format("2006-01-02 15:04:05"), err)
-				logger.Error("Input component startup failed", "project", p.Id, "input", in.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-				// Clean up already started components
+				errorMsg := fmt.Errorf("failed to start input %s: %v", in.Id, err)
+				logger.Error("Input component startup failed", "project", p.Id, "input", in.Id, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-
 				now := time.Now()
 				p.Status = ProjectStatusError
 				p.StatusChangedAt = &now
@@ -1033,15 +1022,10 @@ func (p *Project) Start() error {
 			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 			if runningCount == 0 {
-				// No other project is using this input - start it
-				// Reduce log verbosity: only log first input start or errors
 				if err := in.Start(); err != nil {
-					errorMsg := fmt.Errorf("failed to start shared input %s at %s: %v", in.Id, time.Now().Format("2006-01-02 15:04:05"), err)
-					logger.Error("Shared input component startup failed", "project", p.Id, "input", in.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-					// Clean up already started components
+					errorMsg := fmt.Errorf("failed to start shared input %s: %v", in.Id, err)
+					logger.Error("Shared input component startup failed", "project", p.Id, "input", in.Id, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-
 					now := time.Now()
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
@@ -1049,8 +1033,6 @@ func (p *Project) Start() error {
 					return errorMsg
 				}
 			}
-			// Remove verbose reuse log to reduce log volume
-			// logger.Info("Reusing already running input component", "project", p.Id, "input", in.Id, "running_projects", runningCount)
 		}
 	}
 
@@ -1060,12 +1042,9 @@ func (p *Project) Start() error {
 			// In test mode, directly start all rulesets
 			logger.Info("Starting ruleset in test mode", "project", p.Id, "ruleset", rs.RulesetID)
 			if err := rs.Start(); err != nil {
-				errorMsg := fmt.Errorf("failed to start ruleset %s at %s: %v", rs.RulesetID, time.Now().Format("2006-01-02 15:04:05"), err)
-				logger.Error("Ruleset component startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-				// Clean up already started components
+				errorMsg := fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+				logger.Error("Ruleset component startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-
 				now := time.Now()
 				p.Status = ProjectStatusError
 				p.StatusChangedAt = &now
@@ -1076,15 +1055,10 @@ func (p *Project) Start() error {
 			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 			if runningCount == 0 {
-				// No other project is using this ruleset instance - start it
-				// Reduce log verbosity: only log errors
 				if err := rs.Start(); err != nil {
-					errorMsg := fmt.Errorf("failed to start ruleset %s at %s: %v", rs.RulesetID, time.Now().Format("2006-01-02 15:04:05"), err)
-					logger.Error("Ruleset instance startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-					// Clean up already started components
+					errorMsg := fmt.Errorf("failed to start ruleset %s: %v", rs.RulesetID, err)
+					logger.Error("Ruleset instance startup failed", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-
 					now := time.Now()
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
@@ -1095,18 +1069,15 @@ func (p *Project) Start() error {
 		}
 	}
 
-	// Start outputs last (will automatically use test mode if TestCollectionChan is set)
+	// Start outputs last
 	for _, out := range p.Outputs {
 		if isTestMode {
-			// In test mode, directly start all outputs (they will automatically detect test mode)
+			// In test mode, directly start all outputs
 			logger.Info("Starting output in test mode", "project", p.Id, "output", out.Id)
 			if err := out.Start(); err != nil {
-				errorMsg := fmt.Errorf("failed to start output %s at %s: %v", out.Id, time.Now().Format("2006-01-02 15:04:05"), err)
-				logger.Error("Output component startup failed", "project", p.Id, "output", out.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-				// Clean up already started components
+				errorMsg := fmt.Errorf("failed to start output %s: %v", out.Id, err)
+				logger.Error("Output component startup failed", "project", p.Id, "output", out.Id, "error", err)
 				p.cleanupComponentsOnStartupFailure()
-
 				now := time.Now()
 				p.Status = ProjectStatusError
 				p.StatusChangedAt = &now
@@ -1117,15 +1088,10 @@ func (p *Project) Start() error {
 			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
 			if runningCount == 0 {
-				// No other project is using this output instance - start it
-				// Reduce log verbosity: only log errors
 				if err := out.Start(); err != nil {
-					errorMsg := fmt.Errorf("failed to start output %s at %s: %v", out.Id, time.Now().Format("2006-01-02 15:04:05"), err)
-					logger.Error("Output instance startup failed", "project", p.Id, "output", out.Id, "error", err, "time", time.Now().Format("2006-01-02 15:04:05"))
-
-					// Clean up already started components
+					errorMsg := fmt.Errorf("failed to start output %s: %v", out.Id, err)
+					logger.Error("Output instance startup failed", "project", p.Id, "output", out.Id, "error", err)
 					p.cleanupComponentsOnStartupFailure()
-
 					now := time.Now()
 					p.Status = ProjectStatusError
 					p.StatusChangedAt = &now
@@ -1133,8 +1099,6 @@ func (p *Project) Start() error {
 					return errorMsg
 				}
 			}
-			// Remove verbose reuse log to reduce log volume
-			// logger.Info("Reusing already running output instance", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence, "running_projects", runningCount)
 		}
 	}
 
@@ -1150,18 +1114,10 @@ func (p *Project) Start() error {
 	p.Status = ProjectStatusRunning
 	p.StatusChangedAt = &now
 
-	// Save the running status to file (skip in test mode)
-	if !isTestMode {
-		err = p.SaveProjectStatus()
-		if err != nil {
-			logger.Warn("Failed to save project status", "id", p.Id, "error", err)
-		}
-	}
-
 	if isTestMode {
 		logger.Info("Project started successfully in test mode", "project", p.Id)
 	} else {
-		logger.Info("Project started successfully with shared components", "project", p.Id)
+		logger.Info("Project started successfully", "project", p.Id)
 	}
 
 	// After the project is successfully started, recalculate dependencies synchronously
@@ -1170,67 +1126,70 @@ func (p *Project) Start() error {
 	return nil
 }
 
-// cleanupComponentsOnStartupFailure cleans up components when project startup fails
-// This does NOT change the project status - that should be handled by the caller
-func (p *Project) cleanupComponentsOnStartupFailure() {
-	// Stop outputs that were started
-	for _, out := range p.Outputs {
-		// Check if this output instance is used by other projects
-		otherProjectsUsing := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
-		if otherProjectsUsing == 0 {
-			logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
-			_ = out.Stop()
+// Stop stops the project and all its components in proper order
+func (p *Project) Stop() error {
+	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStarting {
+		if p.Status == ProjectStatusStopping {
+			return fmt.Errorf("project is already stopping %s", p.Id)
 		}
+		return fmt.Errorf("project is not running %s", p.Id)
 	}
 
-	// Stop rulesets that were started
-	for _, rs := range p.Rulesets {
-		// Check if this ruleset instance is used by other projects
-		otherProjectsUsing := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
-		if otherProjectsUsing == 0 {
-			logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
-			_ = rs.Stop()
-		}
+	// Set status to stopping immediately to prevent duplicate operations
+	now := time.Now()
+	p.Status = ProjectStatusStopping
+	p.StatusChangedAt = &now
+	logger.Info("Project status set to stopping", "id", p.Id)
+
+	// Check if project is in error state
+	if p.Err != nil {
+		logger.Warn("Stopping project with errors", "id", p.Id, "error", p.Err)
 	}
 
-	// Stop inputs that were started
-	for _, in := range p.Inputs {
-		// Check if this input is used by other projects
-		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
-		if otherProjectsUsing == 0 {
-			_ = in.Stop()
-		}
-	}
+	// Overall timeout for the entire stop process
+	overallTimeout := time.After(2 * time.Minute)
+	stopCompleted := make(chan error, 1)
 
-	// Clean up channels
-	for _, channelId := range p.MsgChannels {
-		newCnt := decrementChannelRef(channelId)
-		if newCnt == 0 {
-			GlobalProject.EdgeMapMu.RLock()
-			ch, exists := GlobalProject.msgChans[channelId]
-			GlobalProject.EdgeMapMu.RUnlock()
-			if exists {
-				closedCh := ch
-				// Remove from maps under write lock
-				GlobalProject.EdgeMapMu.Lock()
-				delete(GlobalProject.msgChans, channelId)
-				delete(GlobalProject.msgChansCounter, channelId)
-				GlobalProject.EdgeMapMu.Unlock()
-
-				removeEdgeChanId(channelId, closedCh)
-				close(closedCh)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic during project stop", "project", p.Id, "panic", r)
+				stopCompleted <- fmt.Errorf("panic during stop: %v", r)
 			}
+		}()
+
+		// Use the internal stopComponents function
+		err := p.stopComponentsInternal(false) // Don't save status to Redis, project methods don't handle persistence
+		stopCompleted <- err
+	}()
+
+	select {
+	case err := <-stopCompleted:
+		if err != nil {
+			logger.Error("Project stop completed with error", "project", p.Id, "error", err)
+			return err
 		}
+		logger.Info("Project stopped successfully", "project", p.Id)
+		return nil
+	case <-overallTimeout:
+		logger.Error("Project stop timeout exceeded, forcing cleanup", "project", p.Id)
+
+		// Force cleanup
+		if err := p.forceCleanup(); err != nil {
+			logger.Error("Force cleanup failed", "project", p.Id, "error", err)
+		}
+
+		now := time.Now()
+		p.Status = ProjectStatusStopped
+		p.StatusChangedAt = &now
+
+		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
 	}
+}
 
-	// Clear component references
-	p.Inputs = make(map[string]*input.Input)
-	p.Outputs = make(map[string]*output.Output)
-	p.Rulesets = make(map[string]*rules_engine.Ruleset)
-	p.MsgChannels = []string{}
-
-	// Reduce log verbosity: only log critical cleanup completion
-	// logger.Info("Finished cleaning up components due to startup failure", "project", p.Id)
+// StopForShutdown stops the project during system shutdown
+func (p *Project) StopForShutdown() error {
+	return p.Stop() // Use the same logic as normal stop
 }
 
 // stopComponents is an internal function that performs the actual component stopping
@@ -1373,130 +1332,6 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		logger.Info("Finished stopping project components (Redis status preserved)", "project", p.Id)
 	}
 	return nil
-}
-
-// Stop stops the project and all its components in proper order
-func (p *Project) Stop() error {
-	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStarting {
-		if p.Status == ProjectStatusStopping {
-			return fmt.Errorf("project is already stopping %s", p.Id)
-		}
-		return fmt.Errorf("project is not running %s", p.Id)
-	}
-
-	// Set status to stopping immediately to prevent duplicate operations
-	now := time.Now()
-	p.Status = ProjectStatusStopping
-	p.StatusChangedAt = &now
-	logger.Info("Project status set to stopping", "id", p.Id)
-
-	// No persistence for transient 'stopping' state
-
-	// Check if project is in error state
-	if p.Err != nil {
-		logger.Warn("Stopping project with errors", "id", p.Id, "error", p.Err)
-	}
-
-	// Overall timeout for the entire stop process
-	overallTimeout := time.After(2 * time.Minute) // 2 minute overall timeout
-	stopCompleted := make(chan error, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("Panic during project stop", "project", p.Id, "panic", r)
-				stopCompleted <- fmt.Errorf("panic during stop: %v", r)
-			}
-		}()
-
-		// Use the internal stopComponents function
-		err := p.stopComponentsInternal(true) // Normal stop: save status to Redis
-		stopCompleted <- err
-	}()
-
-	select {
-	case err := <-stopCompleted:
-		if err != nil {
-			logger.Error("Project stop completed with error", "project", p.Id, "error", err)
-			return err
-		}
-		logger.Info("Project stopped successfully", "project", p.Id)
-		return nil
-	case <-overallTimeout:
-		logger.Error("Project stop timeout exceeded, forcing cleanup", "project", p.Id)
-
-		// Force cleanup
-		if err := p.forceCleanup(); err != nil {
-			logger.Error("Force cleanup failed", "project", p.Id, "error", err)
-		}
-
-		now := time.Now()
-		p.Status = ProjectStatusStopped // Mark as stopped even if cleanup failed
-		p.StatusChangedAt = &now
-
-		// Save status to Redis
-		if err := p.SaveProjectStatus(); err != nil {
-			logger.Warn("Failed to save project status after force cleanup", "id", p.Id, "error", err)
-		}
-
-		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
-	}
-}
-
-// StopForShutdown stops the project during system shutdown without updating Redis status
-// This preserves the user's intended project state for next startup
-func (p *Project) StopForShutdown() error {
-	if p.Status != ProjectStatusRunning && p.Status != ProjectStatusStarting {
-		if p.Status == ProjectStatusStopping {
-			return fmt.Errorf("project is already stopping %s", p.Id)
-		}
-		return fmt.Errorf("project is not running %s", p.Id)
-	}
-
-	// Set status to stopping immediately to prevent duplicate operations
-	now := time.Now()
-	p.Status = ProjectStatusStopping
-	p.StatusChangedAt = &now
-	logger.Info("Project status set to stopping for shutdown", "id", p.Id)
-
-	// Overall timeout for the entire stop process
-	overallTimeout := time.After(2 * time.Minute) // 2 minute overall timeout
-	stopCompleted := make(chan error, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("Panic during project shutdown stop", "project", p.Id, "panic", r)
-				stopCompleted <- fmt.Errorf("panic during shutdown stop: %v", r)
-			}
-		}()
-
-		// Use the internal stopComponents function but don't save status to Redis
-		err := p.stopComponentsInternal(false) // Shutdown: don't save status to Redis
-		stopCompleted <- err
-	}()
-
-	select {
-	case err := <-stopCompleted:
-		if err != nil {
-			logger.Error("Project shutdown stop completed with error", "project", p.Id, "error", err)
-			return err
-		}
-		logger.Info("Project stopped successfully for shutdown", "project", p.Id)
-		return nil
-	case <-overallTimeout:
-		logger.Error("Project shutdown stop timeout exceeded, forcing cleanup", "project", p.Id)
-
-		// Force cleanup
-		if err := p.forceCleanup(); err != nil {
-			logger.Error("Force cleanup failed during shutdown", "project", p.Id, "error", err)
-		}
-
-		// Don't update Redis status during shutdown - preserve original state
-		logger.Info("Shutdown stop timeout completed, original status preserved", "project", p.Id)
-
-		return fmt.Errorf("project shutdown stop timeout exceeded, forced cleanup completed for %s", p.Id)
-	}
 }
 
 // forceCleanup performs aggressive cleanup when normal stop fails
@@ -2647,4 +2482,63 @@ func updateProjectStatusRedis(nodeID, projectID string, status ProjectStatus, st
 	}
 
 	logger.Debug("Project status updated successfully", "node_id", actualNodeID, "project_id", projectID, "status", status, "timestamp", timestamp.Format(time.RFC3339))
+}
+
+// cleanupComponentsOnStartupFailure cleans up components when project startup fails
+func (p *Project) cleanupComponentsOnStartupFailure() {
+	// Stop outputs that were started
+	for _, out := range p.Outputs {
+		// Check if this output instance is used by other projects
+		otherProjectsUsing := UsageCounter.CountProjectsUsingOutputInstance(out.Id, out.ProjectNodeSequence, p.Id)
+		if otherProjectsUsing == 0 {
+			logger.Info("Stopping output instance during startup failure cleanup", "project", p.Id, "output", out.Id)
+			_ = out.Stop()
+		}
+	}
+
+	// Stop rulesets that were started
+	for _, rs := range p.Rulesets {
+		// Check if this ruleset instance is used by other projects
+		otherProjectsUsing := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
+		if otherProjectsUsing == 0 {
+			logger.Info("Stopping ruleset instance during startup failure cleanup", "project", p.Id, "ruleset", rs.RulesetID)
+			_ = rs.Stop()
+		}
+	}
+
+	// Stop inputs that were started
+	for _, in := range p.Inputs {
+		// Check if this input is used by other projects
+		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
+		if otherProjectsUsing == 0 {
+			_ = in.Stop()
+		}
+	}
+
+	// Clean up channels
+	for _, channelId := range p.MsgChannels {
+		newCnt := decrementChannelRef(channelId)
+		if newCnt == 0 {
+			GlobalProject.EdgeMapMu.RLock()
+			ch, exists := GlobalProject.msgChans[channelId]
+			GlobalProject.EdgeMapMu.RUnlock()
+			if exists {
+				closedCh := ch
+				// Remove from maps under write lock
+				GlobalProject.EdgeMapMu.Lock()
+				delete(GlobalProject.msgChans, channelId)
+				delete(GlobalProject.msgChansCounter, channelId)
+				GlobalProject.EdgeMapMu.Unlock()
+
+				removeEdgeChanId(channelId, closedCh)
+				close(closedCh)
+			}
+		}
+	}
+
+	// Clear component references
+	p.Inputs = make(map[string]*input.Input)
+	p.Outputs = make(map[string]*output.Output)
+	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.MsgChannels = []string{}
 }
