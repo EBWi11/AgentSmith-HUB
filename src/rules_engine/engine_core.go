@@ -32,17 +32,21 @@ func (r *Ruleset) Start() error {
 	// This ensures that component restarts don't reset daily message count to 0
 	if common.GlobalDailyStatsManager != nil {
 		today := time.Now().Format("2006-01-02")
-		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", "")
+		// Fix: Only load data for current node, not all nodes
+		currentNodeID := common.GetNodeID()
+		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", currentNodeID)
 
 		for _, statsData := range dailyStats {
-			// Find matching component data
+			// Find matching component data for current node only
 			if statsData.ComponentID == r.RulesetID &&
 				statsData.ComponentType == "ruleset" &&
-				statsData.ProjectNodeSequence == r.ProjectNodeSequence {
-				// Set the starting count to today's accumulated total
+				statsData.ProjectNodeSequence == r.ProjectNodeSequence &&
+				statsData.NodeID == currentNodeID {
+				// Set the starting count to today's accumulated total for this node
 				atomic.StoreUint64(&r.processTotal, statsData.TotalMessages)
 				logger.Info("Loaded historical message count for ruleset",
 					"ruleset", r.RulesetID,
+					"node_id", currentNodeID,
 					"historical_total", statsData.TotalMessages,
 					"date", today)
 				break
