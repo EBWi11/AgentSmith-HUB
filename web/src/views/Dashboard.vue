@@ -281,15 +281,28 @@
                   <p class="text-sm text-blue-600">{{ leaderNode.role }} - {{ leaderNode.status }}</p>
                 </div>
               </div>
-              <div class="text-right">
-                <p class="text-sm font-medium text-blue-900 transition-all duration-300" 
-                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                  <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.cpu_usage || 0) }}</span>% CPU
-                </p>
-                <p class="text-xs text-blue-600 transition-all duration-300" 
-                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                  <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.memory_usage || 0) }}</span>% Memory
-                </p>
+              <div class="flex items-center space-x-4">
+                <!-- Version -->
+                <div class="text-center">
+                  <p class="text-xs text-purple-600 font-medium mb-1">Version</p>
+                  <div 
+                    class="text-xs font-mono px-2 py-1 rounded bg-green-100 text-green-800"
+                    :title="getVersionTooltip(leaderNode)"
+                  >
+                    {{ formatVersion(leaderNode.version) }}
+                  </div>
+                </div>
+                <!-- System Stats -->
+                <div class="text-right">
+                  <p class="text-sm font-medium text-blue-900 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                    <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.cpu_usage || 0) }}</span>% CPU
+                  </p>
+                  <p class="text-xs text-blue-600 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                    <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.memory_usage || 0) }}</span>% Memory
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -316,15 +329,29 @@
                   <p class="text-sm text-gray-500">{{ node.role }} - {{ node.status }}</p>
                 </div>
               </div>
-              <div class="text-right">
-                <p class="text-sm font-medium text-gray-900 transition-all duration-300" 
-                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                  <span class="inline-block min-w-[3ch]">{{ formatPercent(node.cpu_usage || 0) }}</span>% CPU
-                </p>
-                <p class="text-xs text-gray-500 transition-all duration-300" 
-                   :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                  <span class="inline-block min-w-[3ch]">{{ formatPercent(node.memory_usage || 0) }}</span>% Memory
-                </p>
+              <div class="flex items-center space-x-4">
+                <!-- Version -->
+                <div class="text-center">
+                  <p class="text-xs text-purple-600 font-medium mb-1">Version</p>
+                  <div 
+                    class="text-xs font-mono px-2 py-1 rounded"
+                    :class="getVersionDisplayClass(node)"
+                    :title="getVersionTooltip(node)"
+                  >
+                    {{ formatVersion(node.version) }}
+                  </div>
+                </div>
+                <!-- System Stats -->
+                <div class="text-right">
+                  <p class="text-sm font-medium text-gray-900 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                    <span class="inline-block min-w-[3ch]">{{ formatPercent(node.cpu_usage || 0) }}</span>% CPU
+                  </p>
+                  <p class="text-xs text-gray-500 transition-all duration-300" 
+                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
+                    <span class="inline-block min-w-[3ch]">{{ formatPercent(node.memory_usage || 0) }}</span>% Memory
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -506,6 +533,7 @@ const clusterNodes = computed(() => {
       address: clusterInfo.value.self_address,
       role: clusterInfo.value.status === 'leader' ? 'leader' : 'follower',
       status: 'active',
+      version: clusterInfo.value.version || 'unknown',
       cpu_usage: getNodeSystemMetrics(clusterInfo.value.self_id).cpu_percent,
       memory_usage: getNodeSystemMetrics(clusterInfo.value.self_id).memory_percent,
       isLeader: clusterInfo.value.status === 'leader',
@@ -525,6 +553,7 @@ const clusterNodes = computed(() => {
           address: node.address,
           role: node.status === 'leader' ? 'leader' : 'follower',
           status: node.is_healthy ? 'active' : 'inactive',
+          version: node.version || 'unknown',
           cpu_usage: getNodeSystemMetrics(node.id).cpu_percent,
           memory_usage: getNodeSystemMetrics(node.id).memory_percent,
           isLeader: node.status === 'leader',
@@ -954,6 +983,63 @@ function navigateToPendingChanges() {
 
 function navigateToLocalChanges() {
   router.push('/app/load-local-components')
+}
+
+// Version-related helper functions (same as ClusterStatus.vue)
+function formatVersion(version) {
+  if (!version || version === 'unknown') {
+    return 'N/A'
+  }
+  
+  // Return full version string
+  return version
+}
+
+function getVersionDisplayClass(node) {
+  if (!node.version || node.version === 'unknown') {
+    return 'bg-gray-100 text-gray-600'
+  }
+  
+  // Get leader version for comparison
+  const leaderVersion = getLeaderVersion()
+  if (!leaderVersion) {
+    return 'bg-gray-100 text-gray-700'
+  }
+  
+  // If this is the leader node or versions match, show normal style
+  if (node.isLeader || node.version === leaderVersion) {
+    return 'bg-green-100 text-green-800'
+  }
+  
+  // Version mismatch - show red background
+  return 'bg-red-100 text-red-800'
+}
+
+function getVersionTooltip(node) {
+  if (!node.version || node.version === 'unknown') {
+    return 'Version information not available'
+  }
+  
+  const leaderVersion = getLeaderVersion()
+  if (node.isLeader) {
+    return `Leader version: ${node.version}`
+  }
+  
+  if (!leaderVersion) {
+    return `Node version: ${node.version}`
+  }
+  
+  if (node.version === leaderVersion) {
+    return `Version: ${node.version} (up to date)`
+  }
+  
+  return `Version: ${node.version}\nLeader version: ${leaderVersion}\n⚠️ Configuration out of sync`
+}
+
+function getLeaderVersion() {
+  // Find leader node and return its version
+  const leaderNode = clusterNodes.value.find(node => node.isLeader)
+  return leaderNode?.version || clusterInfo.value.version
 }
 
 // Fast refresh for stats and numbers only - now uses caching

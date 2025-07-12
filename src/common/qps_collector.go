@@ -1,8 +1,6 @@
 package common
 
 import (
-	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -71,12 +69,19 @@ func (qc *QPSCollector) collectAndReportLoop() {
 	}
 }
 
-// collectAndReport collects current QPS data and system metrics, then sends to leader
+// collectAndReport collects current QPS data and system metrics, then processes locally
 func (qc *QPSCollector) collectAndReport() {
 	// Collect QPS data using the provided data provider function
 	var qpsData []QPSMetrics
 	if qc.dataProvider != nil {
 		qpsData = qc.dataProvider()
+	}
+
+	// Process QPS data locally instead of sending to Redis
+	if GlobalQPSManager != nil {
+		for _, q := range qpsData {
+			GlobalQPSManager.AddQPSData(&q)
+		}
 	}
 
 	// Collect system metrics using the provided system provider function
@@ -85,30 +90,10 @@ func (qc *QPSCollector) collectAndReport() {
 		systemMetrics = qc.systemProvider()
 	}
 
-	// Prepare combined data payload
-	payload := map[string]interface{}{
-		"qps_data": qpsData,
+	// Process system metrics locally
+	if systemMetrics != nil && GlobalClusterSystemManager != nil {
+		GlobalClusterSystemManager.AddSystemMetrics(systemMetrics)
 	}
-
-	if systemMetrics != nil {
-		payload["system_metrics"] = systemMetrics
-	}
-
-	if err := qc.sendDataToRedis(payload); err != nil {
-		logger.Error("Failed to publish QPS data", "error", err, "node_id", qc.nodeID)
-	}
-}
-
-// sendDataToRedis sends combined QPS and system data to the leader node
-func (qc *QPSCollector) sendDataToRedis(payload map[string]interface{}) error {
-	if rdb == nil {
-		return fmt.Errorf("redis not initialized")
-	}
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return RedisPublish("cluster:qps", string(jsonData))
 }
 
 // Global QPS collector instance (only on followers)

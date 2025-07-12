@@ -146,6 +146,9 @@ func main() {
 	// Init monitors
 	common.InitSystemMonitor(ip)
 
+	// Initialize QPS Manager on all nodes (not just leader)
+	common.InitQPSManager()
+
 	// Start cluster background processes (heartbeat, cleanup, etc.)
 	if cluster.GlobalClusterManager != nil {
 		cluster.GlobalClusterManager.Start()
@@ -153,7 +156,6 @@ func main() {
 
 	if *isLeader {
 		// Leader extra services
-		common.InitQPSManager()
 		common.InitClusterSystemManager()
 
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)

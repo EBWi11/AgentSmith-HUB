@@ -2,7 +2,6 @@ package common
 
 import (
 	"AgentSmith-HUB/logger"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -780,10 +779,10 @@ func (qm *QPSManager) GetStats() map[string]interface{} {
 	return qm.GetQPSStats()
 }
 
-// Global QPS manager instance (only on leader)
+// Global QPS manager instance (used by all nodes)
 var GlobalQPSManager *QPSManager
 
-// InitQPSManager initializes the global QPS manager (only call on leader)
+// InitQPSManager initializes the global QPS manager (call on all nodes)
 func InitQPSManager() {
 	if GlobalQPSManager == nil {
 		GlobalQPSManager = NewQPSManager()
@@ -862,37 +861,7 @@ func (qm *QPSManager) GetQPSStats() map[string]interface{} {
 }
 
 func (qm *QPSManager) startRedisSubscriber() {
-	if rdb == nil {
-		return
-	}
-	qm.pubsub = rdb.Subscribe(ctx, "cluster:qps")
-
-	go func() {
-		ch := qm.pubsub.Channel()
-		for {
-			select {
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				var payload struct {
-					QPSData       []QPSMetrics   `json:"qps_data"`
-					SystemMetrics *SystemMetrics `json:"system_metrics"`
-				}
-				if err := json.Unmarshal([]byte(msg.Payload), &payload); err == nil {
-					// Ingest QPS data
-					for _, q := range payload.QPSData {
-						qm.AddQPSData(&q)
-					}
-					// Ingest system metrics
-					if payload.SystemMetrics != nil && GlobalClusterSystemManager != nil {
-						GlobalClusterSystemManager.AddSystemMetrics(payload.SystemMetrics)
-					}
-				}
-			case <-qm.stopSub:
-				_ = qm.pubsub.Close()
-				return
-			}
-		}
-	}()
+	// Remove complex Redis pub/sub logic
+	// Each node only manages its own data now
+	return
 }

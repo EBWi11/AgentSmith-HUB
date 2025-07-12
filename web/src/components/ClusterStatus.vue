@@ -103,7 +103,7 @@
             <div class="flex items-center space-x-6 mx-8 flex-shrink-0">
               <!-- Input Messages -->
               <div class="text-center">
-                                  <div class="text-xs text-blue-600 font-medium mb-1">Input/d</div>
+                <div class="text-xs text-blue-600 font-medium mb-1">Input/d</div>
                 <div class="text-xl font-bold text-blue-800">
                   {{ formatMessagesPerDay(node.metrics.inputMessages) }}
                 </div>
@@ -111,9 +111,21 @@
               
               <!-- Output Messages -->
               <div class="text-center">
-                                  <div class="text-xs text-green-600 font-medium mb-1">Output/d</div>
+                <div class="text-xs text-green-600 font-medium mb-1">Output/d</div>
                 <div class="text-xl font-bold text-green-800">
                   {{ formatMessagesPerDay(node.metrics.outputMessages) }}
+                </div>
+              </div>
+              
+              <!-- Version -->
+              <div class="text-center">
+                <div class="text-xs text-purple-600 font-medium mb-1">Version</div>
+                <div 
+                  class="text-xs font-mono px-2 py-1 rounded text-center min-w-0"
+                  :class="getVersionDisplayClass(node)"
+                  :title="getVersionTooltip(node)"
+                >
+                  {{ formatVersion(node.version) }}
                 </div>
               </div>
             </div>
@@ -236,6 +248,7 @@ const processedNodes = computed(() => {
       isLeader: clusterInfo.value.status === 'leader',
       isHealthy: true,
       lastSeen: new Date(),
+      version: clusterInfo.value.version || 'unknown',
       metrics: getNodeMetrics(clusterInfo.value.self_id),
       hasStatusIssue: false,
       hasPerformanceIssue: false
@@ -257,6 +270,7 @@ const processedNodes = computed(() => {
           isLeader: node.status === 'leader',
           isHealthy: node.is_healthy,
           lastSeen: new Date(node.last_seen * 1000), // Convert Unix timestamp (seconds) to milliseconds
+          version: node.version || 'unknown',
           metrics: getNodeMetrics(node.id),
           hasStatusIssue: checkStatusConsistency(node),
           hasPerformanceIssue: false
@@ -297,6 +311,7 @@ function getNodeMetrics(nodeId) {
   }
   
   // Get system metrics from cluster system metrics API
+  // Only show system metrics if we have data for this specific node
   const nodeSystemMetrics = systemMetrics.value[nodeId]
   if (nodeSystemMetrics) {
     defaultMetrics.cpuPercent = nodeSystemMetrics.cpu_percent || 0
@@ -304,6 +319,8 @@ function getNodeMetrics(nodeId) {
     defaultMetrics.memoryPercent = nodeSystemMetrics.memory_percent || 0
     defaultMetrics.goroutineCount = nodeSystemMetrics.goroutine_count || 0
   }
+  // If we don't have system metrics for this node, keep default values (0)
+  // This happens when accessing from follower nodes for other nodes
   
   return defaultMetrics
 }
@@ -345,6 +362,63 @@ function getIssueDescription(node) {
   return issues.join(', ')
 }
 
+// Version-related helper functions
+function formatVersion(version) {
+  if (!version || version === 'unknown') {
+    return 'N/A'
+  }
+  
+  // Return full version string
+  return version
+}
+
+function getVersionDisplayClass(node) {
+  if (!node.version || node.version === 'unknown') {
+    return 'bg-gray-100 text-gray-600'
+  }
+  
+  // Get leader version for comparison
+  const leaderVersion = getLeaderVersion()
+  if (!leaderVersion) {
+    return 'bg-gray-100 text-gray-700'
+  }
+  
+  // If this is the leader node or versions match, show normal style
+  if (node.isLeader || node.version === leaderVersion) {
+    return 'bg-green-100 text-green-800'
+  }
+  
+  // Version mismatch - show red background
+  return 'bg-red-100 text-red-800'
+}
+
+function getVersionTooltip(node) {
+  if (!node.version || node.version === 'unknown') {
+    return 'Version information not available'
+  }
+  
+  const leaderVersion = getLeaderVersion()
+  if (node.isLeader) {
+    return `Leader version: ${node.version}`
+  }
+  
+  if (!leaderVersion) {
+    return `Node version: ${node.version}`
+  }
+  
+  if (node.version === leaderVersion) {
+    return `Version: ${node.version} (up to date)`
+  }
+  
+  return `Version: ${node.version}\nLeader version: ${leaderVersion}\n⚠️ Configuration out of sync`
+}
+
+function getLeaderVersion() {
+  // Find leader node and return its version
+  const leaderNode = processedNodes.value.find(node => node.isLeader)
+  return leaderNode?.version || clusterInfo.value.version
+}
+
 // 这些函数现在从 utils/common.js 导入
 // formatLastSeen 使用 formatTimeAgo 替代
 
@@ -368,22 +442,26 @@ async function fetchAllData() {
       // console.info('Node message data is only available from leader node')
     }
     
+    // Initialize system metrics object
+    systemMetrics.value = {}
+    
     // Fetch system metrics for all nodes (leader returns full data, follower may get 400)
     try {
       const systemResponse = await dataCache.fetchSystemMetrics(true) // Force refresh
       if (systemResponse && systemResponse.metrics) {
-        // Leader path: aggregated metrics
+        // Leader path: aggregated metrics for all nodes
         systemMetrics.value = systemResponse.metrics
       }
     } catch (systemError) {
       // console.warn('Failed to fetch cluster system metrics:', systemError)
+      // This is expected for follower nodes - they can't access cluster system metrics
     }
     
     // Always fetch current node's system metrics as fallback
     try {
       const metrics = await hubApi.getCurrentSystemMetrics()
       // Extract current metrics from API response
-      if (metrics && metrics.current) {
+      if (metrics && metrics.current && cluster.self_id) {
         systemMetrics.value[cluster.self_id] = metrics.current
       }
     } catch (metricsError) {
