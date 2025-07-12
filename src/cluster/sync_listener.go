@@ -96,9 +96,8 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 	if GlobalInstructionManager != nil {
 		if err := GlobalInstructionManager.SyncInstructions(currentVersion, leaderVersion); err != nil {
 			logger.Error("Failed to sync instructions", "error", err)
-		} else {
-			logger.Info("Instructions synced successfully", "from", currentVersion, "to", leaderVersion)
 		}
+		// Note: Success logging is handled inside SyncInstructions method with detailed instruction info
 	}
 }
 

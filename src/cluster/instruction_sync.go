@@ -651,6 +651,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 
 	// Track successfully applied instructions
 	var lastSuccessfulVersion int64 = startVersion
+	var syncedInstructions []string // Track synced instruction details
 
 	// Sync instructions one by one
 	for version := startVersion + 1; version <= endVersion; version++ {
@@ -663,6 +664,20 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		// Refresh execution flag during long operations
 		if err := im.RefreshFollowerExecutionFlag(common.GetNodeID()); err != nil {
 			logger.Warn("Failed to refresh execution flag", "error", err)
+		}
+
+		// Get instruction details for logging
+		key := fmt.Sprintf("cluster:instruction:%d", version)
+		data, err := common.RedisGet(key)
+		if err != nil {
+			logger.Error("Failed to get instruction for logging", "version", version, "error", err)
+			return fmt.Errorf("failed to get instruction %d: %w", version, err)
+		}
+
+		var instruction Instruction
+		if err := json.Unmarshal([]byte(data), &instruction); err != nil {
+			logger.Error("Failed to unmarshal instruction for logging", "version", version, "error", err)
+			return fmt.Errorf("failed to unmarshal instruction %d: %w", version, err)
 		}
 
 		// Apply instruction and track success
@@ -686,6 +701,15 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 			return fmt.Errorf("instruction sync failed at version %d: %w", version, err)
 		}
 
+		// Record successfully applied instruction details
+		instructionDesc := fmt.Sprintf("v%d: %s %s %s", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName)
+		if instruction.Content != "" && len(instruction.Content) > 100 {
+			instructionDesc += fmt.Sprintf(" (content: %d chars)", len(instruction.Content))
+		} else if instruction.Content != "" {
+			instructionDesc += fmt.Sprintf(" (content: %s)", instruction.Content)
+		}
+		syncedInstructions = append(syncedInstructions, instructionDesc)
+
 		// Mark this version as successfully applied
 		lastSuccessfulVersion = version
 	}
@@ -696,7 +720,12 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 	im.baseVersion = leaderParts[0]
 	im.mu.Unlock()
 
-	logger.Info("Instructions synced successfully", "from", fromVersion, "to", toVersion)
+	// Log success with detailed instruction information
+	logger.Info("Instructions synced successfully",
+		"from", fromVersion,
+		"to", toVersion,
+		"count", len(syncedInstructions),
+		"instructions", strings.Join(syncedInstructions, "; "))
 	return nil
 }
 
