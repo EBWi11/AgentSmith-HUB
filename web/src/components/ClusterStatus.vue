@@ -51,7 +51,7 @@
             <div class="flex items-center space-x-4 min-w-0 flex-1">
               <!-- Role Badge -->
               <span 
-                class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium flex-shrink-0"
+                class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 w-24 justify-center"
                 :class="{
                   'bg-blue-100 text-blue-800': node.isLeader,
                   'bg-gray-100 text-gray-800': !node.isLeader
@@ -100,9 +100,9 @@
             </div>
 
             <!-- Center: Message Metrics -->
-            <div class="flex items-center space-x-6 mx-8 flex-shrink-0">
+            <div class="flex items-center space-x-4 mx-8 flex-shrink-0">
               <!-- Input Messages -->
-              <div class="text-center">
+              <div class="text-center w-20">
                 <div class="text-xs text-blue-600 font-medium mb-1">Input/d</div>
                 <div class="text-xl font-bold text-blue-800">
                   {{ formatMessagesPerDay(node.metrics.inputMessages) }}
@@ -110,7 +110,7 @@
               </div>
               
               <!-- Output Messages -->
-              <div class="text-center">
+              <div class="text-center w-20">
                 <div class="text-xs text-green-600 font-medium mb-1">Output/d</div>
                 <div class="text-xl font-bold text-green-800">
                   {{ formatMessagesPerDay(node.metrics.outputMessages) }}
@@ -118,10 +118,10 @@
               </div>
               
               <!-- Version -->
-              <div class="text-center">
+              <div class="text-center w-24">
                 <div class="text-xs text-purple-600 font-medium mb-1">Version</div>
                 <div 
-                  class="text-xs font-mono px-2 py-1 rounded text-center min-w-0"
+                  class="text-xs font-mono px-2 py-1 rounded text-center truncate max-w-full"
                   :class="getVersionDisplayClass(node)"
                   :title="getVersionTooltip(node)"
                 >

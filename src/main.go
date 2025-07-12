@@ -119,6 +119,9 @@ func main() {
 	// IMPORTANT: Set centralized cluster state
 	common.SetClusterState(*isLeader, ip)
 
+	// IMPORTANT: Also set the legacy global IsLeader variable for component compatibility
+	common.SetLeaderState(*isLeader, ip)
+
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
 

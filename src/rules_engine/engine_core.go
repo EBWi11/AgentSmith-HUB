@@ -690,7 +690,31 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
 	var checkListFlag = false
 
-	needCheckData, _ := common.GetCheckData(data, checkNode.FieldList)
+	needCheckData, exist := common.GetCheckData(data, checkNode.FieldList)
+
+	// CRITICAL FIX: Handle field existence properly for ISNULL and NOTNULL checks
+	if checkNode.Type == "ISNULL" {
+		// For ISNULL: field doesn't exist OR field exists but is empty
+		if !exist || strings.TrimSpace(needCheckData) == "" {
+			return true
+		} else {
+			return false
+		}
+	}
+
+	if checkNode.Type == "NOTNULL" {
+		// For NOTNULL: field must exist AND not be empty
+		if !exist || strings.TrimSpace(needCheckData) == "" {
+			return false
+		} else {
+			return true
+		}
+	}
+
+	// For other check types, if field doesn't exist, the check should fail
+	if !exist {
+		return false
+	}
 
 	switch checkNode.Type {
 	case "REGEX":

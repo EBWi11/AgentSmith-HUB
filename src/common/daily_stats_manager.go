@@ -75,19 +75,44 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 
 	var statsData *DailyStatsData
 	if existing, exists := dsm.data[key]; exists {
-		// Preserve cumulative count even if component restarts and counter resets.
-		if totalMessages >= existing.TotalMessages {
+		// Fix: Always use the maximum value to avoid duplicate counting
+		// When component restarts, the component's counter is set to the previous total
+		// So we should always take the maximum value, not add them together
+		if totalMessages > existing.TotalMessages {
 			// Normal monotonic increase – just overwrite
 			existing.TotalMessages = totalMessages
+			logger.Debug("Daily stats updated (normal increase)",
+				"component", componentID,
+				"sequence", projectNodeSequence,
+				"old_total", existing.TotalMessages,
+				"new_total", totalMessages)
+		} else if totalMessages == existing.TotalMessages {
+			// No change in total messages, just update timestamp
+			logger.Debug("Daily stats updated (no change)",
+				"component", componentID,
+				"sequence", projectNodeSequence,
+				"total", totalMessages)
 		} else {
-			// Detected counter reset (e.g., component restart). Add fresh count on top of existing.
-			existing.TotalMessages += totalMessages
+			// totalMessages < existing.TotalMessages
+			// This could happen if:
+			// 1. Component counter overflow (very unlikely with uint64)
+			// 2. Component was forcibly restarted and counter reset to 0
+			// 3. Time synchronization issues
+			// 4. Data corruption
+
+			// For safety, we keep the existing higher value to avoid data loss
+			// But log a warning for investigation
+			logger.Warn("Daily stats counter decreased - possible component restart or data issue",
+				"component", componentID,
+				"sequence", projectNodeSequence,
+				"previous_total", existing.TotalMessages,
+				"current_total", totalMessages,
+				"keeping_previous", true)
+
+			// Keep the existing value unchanged
+			// existing.TotalMessages remains unchanged
 		}
 		existing.LastUpdate = now
-		logger.Debug("Daily stats updated",
-			"component", componentID,
-			"sequence", projectNodeSequence,
-			"total", totalMessages)
 		statsData = existing
 	} else {
 		// Create new data
