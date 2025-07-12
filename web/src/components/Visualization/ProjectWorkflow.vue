@@ -528,7 +528,7 @@ async function fetchMessageData() {
     ]);
     
     messageData.value = messageResponse || {};
-    componentSequences.value = sequenceResponse.data.data || {};
+    componentSequences.value = sequenceResponse.data || {};
     
     // Update nodes with message data (including 0 values)
     updateNodesWithMessages();

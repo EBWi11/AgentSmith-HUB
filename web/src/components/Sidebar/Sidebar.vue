@@ -2049,10 +2049,12 @@ async function fetchItems(type) {
             return null;
           }
           return {
+            id: item.id,
             name: item.name,
             type: item.type,
             status: item.status,
-            hasTemp: item.hasTemp
+            hasTemp: item.hasTemp,
+            returnType: item.returnType
           }
         } else {
           // Other components must have an id field

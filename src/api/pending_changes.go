@@ -548,6 +548,11 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 		} else {
 			logger.Info("Successfully restarted projects", "count", restartedCount)
 		}
+
+		// Publish project restart instructions to followers
+		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(result.ProjectsToRestart, "component_change"); err != nil {
+			logger.Error("Failed to publish project restart instructions", "affected_projects", result.ProjectsToRestart, "error", err)
+		}
 	}
 
 	logger.Info("Enhanced apply process completed",
@@ -876,11 +881,8 @@ func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
 		logger.Error("Failed to publish plugin push change instruction", "plugin", change.ID, "error", err)
 	}
 
-	// Phase 4: Restart projects with new plugin
-	logger.Info("Restarting affected projects with new plugin", "plugin", pluginID, "projects", affectedProjects)
-	if err := restartAffectedProjectsSafely(affectedProjects, pluginID); err != nil {
-		logger.Error("Failed to restart some projects after plugin update", "plugin", pluginID, "error", err)
-	}
+	// Phase 4: Projects will be restarted by the main flow
+	logger.Info("Plugin update completed, projects will be restarted by main flow", "plugin", pluginID, "affected_projects", len(affectedProjects))
 
 	logger.Info("Safe plugin update completed successfully", "plugin", pluginID, "affected_projects", len(affectedProjects))
 
@@ -1500,6 +1502,11 @@ func ApplyPendingChanges(c echo.Context) error {
 		if err != nil {
 			logger.Error("Error during batch project restart", "error", err)
 		}
+
+		// Publish project restart instructions to followers
+		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(projectIDs, "component_change"); err != nil {
+			logger.Error("Failed to publish project restart instructions", "affected_projects", projectIDs, "error", err)
+		}
 	}
 
 	if len(verifyFailures) > 0 {
@@ -1853,6 +1860,11 @@ func ApplySingleChange(c echo.Context) error {
 			logger.Error("Error during affected project restart", "error", err)
 		}
 
+		// Publish project restart instructions to followers
+		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(affectedProjects, "component_change"); err != nil {
+			logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+		}
+
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message":            "Change applied successfully",
 			"restarted_projects": restartedCount,
@@ -1902,6 +1914,13 @@ func RestartAllProjects(c echo.Context) error {
 	startedCount, err := project.RestartProjectsSafely(projectIDs, "user_action")
 	if err != nil {
 		logger.Error("Error during all projects restart", "error", err)
+	}
+
+	// Publish project restart instructions to followers
+	if len(projectIDs) > 0 {
+		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(projectIDs, "user_action"); err != nil {
+			logger.Error("Failed to publish project restart instructions for restart all", "affected_projects", projectIDs, "error", err)
+		}
 	}
 
 	logger.Info("Restart completed", "total", len(projectList), "started", startedCount)
