@@ -207,10 +207,10 @@ async function refreshChanges() {
       .filter(change => {
         // Filter out invalid changes
         if (!change || typeof change !== 'object') {
-          continue
+          return false
         }
         if (!change.type || !change.id) {
-          continue
+          return false
         }
         return true
       })
@@ -394,7 +394,7 @@ async function applyChanges() {
     // Validate changes before applying
     const validChanges = changes.value.filter(change => {
       if (!change || !change.type || !change.id) {
-        continue
+        return false
       }
       return true
     })
