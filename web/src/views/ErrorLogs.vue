@@ -32,7 +32,7 @@
 
     <!-- Filters -->
     <div class="p-4 border-b border-gray-200 bg-gray-50">
-      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <!-- Source Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Source</label>
@@ -54,15 +54,7 @@
           </select>
         </div>
 
-        <!-- Level Filter -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Level</label>
-          <select v-model="filters.level" @change="applyFilters" class="filter-select">
-            <option value="">All Levels</option>
-            <option value="ERROR">Error</option>
-            <option value="FATAL">Fatal</option>
-          </select>
-        </div>
+
 
         <!-- Time Range Filter -->
         <div>
@@ -277,7 +269,6 @@ const filters = reactive({
   source: 'all',
   nodeId: 'all',
   timeRange: '24h',
-  level: '',
   keyword: '',
   startDate: '',
   endDate: ''
@@ -389,7 +380,6 @@ const buildApiParams = () => {
 
   if (filters.source !== 'all') params.source = filters.source
   if (filters.nodeId !== 'all') params.node_id = filters.nodeId
-  if (filters.level) params.level = filters.level
   if (filters.keyword) params.keyword = filters.keyword
 
   Object.assign(params, getTimeRangeParams())
