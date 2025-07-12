@@ -415,14 +415,6 @@ func (im *InstructionManager) PublishComponentDelete(componentType, componentNam
 	return im.PublishInstruction(componentName, componentType, "", "delete", affectedProjects, metadata)
 }
 
-// PublishComponentUpdate publishes component update instruction
-func (im *InstructionManager) PublishComponentUpdate(componentType, componentName, content string, affectedProjects []string) error {
-	metadata := map[string]interface{}{
-		"affected_projects": affectedProjects,
-	}
-	return im.PublishInstruction(componentName, componentType, content, "update", affectedProjects, metadata)
-}
-
 // PublishComponentLocalPush publishes local push instruction
 func (im *InstructionManager) PublishComponentLocalPush(componentType, componentName, content string, affectedProjects []string) error {
 	metadata := map[string]interface{}{
@@ -638,6 +630,23 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 	endVersion, err := strconv.ParseInt(leaderParts[1], 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid target version number: %s", leaderParts[1])
+	}
+
+	// Check if version prefix has changed (leader restart detected)
+	if parts[0] != leaderParts[0] {
+		logger.Info("Version prefix mismatch detected - leader has restarted",
+			"follower_prefix", parts[0],
+			"leader_prefix", leaderParts[0])
+
+		// Clear all local components and projects
+		if err := im.clearAllLocalComponents(); err != nil {
+			logger.Error("Failed to clear local components", "error", err)
+			return fmt.Errorf("failed to clear local components: %w", err)
+		}
+
+		// Reset to start from version 1
+		startVersion = 0
+		logger.Info("Reset follower to start from version 1 due to leader restart")
 	}
 
 	// Track successfully applied instructions
@@ -974,4 +983,90 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 
 	activeFollowers, _ := im.GetActiveFollowers()
 	return fmt.Errorf("timeout waiting for followers to become idle, still active: %v", activeFollowers)
+}
+
+// clearAllLocalComponents clears all local components and projects when leader restarts
+func (im *InstructionManager) clearAllLocalComponents() error {
+	logger.Info("Clearing all local components and projects due to leader restart")
+
+	// Stop all running projects first
+	common.GlobalMu.RLock()
+	if project.GlobalProject.Projects != nil {
+		for projectName, proj := range project.GlobalProject.Projects {
+			if proj.Status == project.ProjectStatusRunning {
+				logger.Info("Stopping project due to leader restart", "project", projectName)
+				proj.Stop()
+			}
+		}
+	}
+	common.GlobalMu.RUnlock()
+
+	// Clear all component instances
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Clear project instances
+	if project.GlobalProject.Projects != nil {
+		for projectName := range project.GlobalProject.Projects {
+			delete(project.GlobalProject.Projects, projectName)
+		}
+	}
+
+	// Clear input instances
+	if project.GlobalProject.Inputs != nil {
+		for inputName := range project.GlobalProject.Inputs {
+			delete(project.GlobalProject.Inputs, inputName)
+		}
+	}
+
+	// Clear output instances
+	if project.GlobalProject.Outputs != nil {
+		for outputName := range project.GlobalProject.Outputs {
+			delete(project.GlobalProject.Outputs, outputName)
+		}
+	}
+
+	// Clear ruleset instances
+	if project.GlobalProject.Rulesets != nil {
+		for rulesetName := range project.GlobalProject.Rulesets {
+			delete(project.GlobalProject.Rulesets, rulesetName)
+		}
+	}
+
+	// Clear plugin instances (plugins are handled differently, but we clear the reference)
+	// Plugin cleanup is handled by the plugin system itself
+
+	// Clear global component config maps
+	if common.AllInputsRawConfig != nil {
+		for inputName := range common.AllInputsRawConfig {
+			delete(common.AllInputsRawConfig, inputName)
+		}
+	}
+
+	if common.AllOutputsRawConfig != nil {
+		for outputName := range common.AllOutputsRawConfig {
+			delete(common.AllOutputsRawConfig, outputName)
+		}
+	}
+
+	if common.AllRulesetsRawConfig != nil {
+		for rulesetName := range common.AllRulesetsRawConfig {
+			delete(common.AllRulesetsRawConfig, rulesetName)
+		}
+	}
+
+	if common.AllProjectRawConfig != nil {
+		for projectName := range common.AllProjectRawConfig {
+			delete(common.AllProjectRawConfig, projectName)
+		}
+	}
+
+	if common.AllPluginsRawConfig != nil {
+		for pluginName := range common.AllPluginsRawConfig {
+			delete(common.AllPluginsRawConfig, pluginName)
+		}
+	}
+
+	logger.Info("Successfully cleared all local components and projects")
+	return nil
 }
