@@ -42,6 +42,10 @@ type projectCommandHandler struct{}
 
 // ExecuteCommand implements the ProjectCommandHandler interface
 func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
+	return h.ExecuteCommandWithOptions(projectID, action, true) // Default: record operations
+}
+
+func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action string, recordOperation bool) error {
 	proj, exists := GlobalProject.Projects[projectID]
 	if !exists {
 		// Try to create project from global config if it doesn't exist
@@ -85,18 +89,22 @@ func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
 		}
 		err := proj.Start()
 		if err != nil {
-			// Record operation failure
-			common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "failed", err.Error(), map[string]interface{}{
+			// Record operation failure only if requested
+			if recordOperation {
+				common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "failed", err.Error(), map[string]interface{}{
+					"triggered_by": "cluster_command",
+					"node_id":      nodeID,
+				})
+			}
+			return fmt.Errorf("failed to start project: %w", err)
+		}
+		// Record operation success only if requested
+		if recordOperation {
+			common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "success", "", map[string]interface{}{
 				"triggered_by": "cluster_command",
 				"node_id":      nodeID,
 			})
-			return fmt.Errorf("failed to start project: %w", err)
 		}
-		// Record operation success
-		common.RecordProjectOperation(common.OpTypeProjectStart, projectID, "success", "", map[string]interface{}{
-			"triggered_by": "cluster_command",
-			"node_id":      nodeID,
-		})
 		logger.Info("Project started successfully via cluster command", "project_id", projectID)
 		return nil
 
@@ -107,18 +115,22 @@ func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
 		}
 		err := proj.Stop()
 		if err != nil {
-			// Record operation failure
-			common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "failed", err.Error(), map[string]interface{}{
+			// Record operation failure only if requested
+			if recordOperation {
+				common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "failed", err.Error(), map[string]interface{}{
+					"triggered_by": "cluster_command",
+					"node_id":      nodeID,
+				})
+			}
+			return fmt.Errorf("failed to stop project: %w", err)
+		}
+		// Record operation success only if requested
+		if recordOperation {
+			common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "success", "", map[string]interface{}{
 				"triggered_by": "cluster_command",
 				"node_id":      nodeID,
 			})
-			return fmt.Errorf("failed to stop project: %w", err)
 		}
-		// Record operation success
-		common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "success", "", map[string]interface{}{
-			"triggered_by": "cluster_command",
-			"node_id":      nodeID,
-		})
 		logger.Info("Project stopped successfully via cluster command", "project_id", projectID)
 		return nil
 
@@ -127,10 +139,12 @@ func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
 		if proj.Status == ProjectStatusRunning {
 			err := proj.Stop()
 			if err != nil {
-				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
-					"triggered_by": "cluster_command",
-					"node_id":      nodeID,
-				})
+				if recordOperation {
+					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
+						"triggered_by": "cluster_command",
+						"node_id":      nodeID,
+					})
+				}
 				return fmt.Errorf("failed to stop project for restart: %w", err)
 			}
 		}
@@ -138,17 +152,21 @@ func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
 		// Then start
 		err := proj.Start()
 		if err != nil {
-			common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+			if recordOperation {
+				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
+					"triggered_by": "cluster_command",
+					"node_id":      nodeID,
+				})
+			}
+			return fmt.Errorf("failed to start project for restart: %w", err)
+		}
+		// Record operation success only if requested
+		if recordOperation {
+			common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
 				"triggered_by": "cluster_command",
 				"node_id":      nodeID,
 			})
-			return fmt.Errorf("failed to start project for restart: %w", err)
 		}
-		// Record operation success
-		common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
-			"triggered_by": "cluster_command",
-			"node_id":      nodeID,
-		})
 		logger.Info("Project restarted successfully via cluster command", "project_id", projectID)
 		return nil
 

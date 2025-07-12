@@ -10,6 +10,22 @@ import (
 
 // RecordProjectOperation records a project operation to Redis only
 func RecordProjectOperation(operationType OperationType, projectID, status, errorMsg string, details map[string]interface{}) {
+	// Ensure details map exists and contains execution node information
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+
+	// Always record the actual execution node (don't override if already set)
+	if _, exists := details["node_id"]; !exists {
+		details["node_id"] = Config.LocalIP
+	}
+	if _, exists := details["node_address"]; !exists {
+		details["node_address"] = Config.LocalIP
+	}
+	if _, exists := details["executed_by"]; !exists {
+		details["executed_by"] = Config.LocalIP
+	}
+
 	record := OperationRecord{
 		Type:      operationType,
 		Timestamp: time.Now(),

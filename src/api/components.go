@@ -1192,6 +1192,8 @@ func deleteComponent(componentType string, c echo.Context) error {
 				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
 					logger.Info("Stopping running project before deletion", "project_id", id)
 					if err := proj.Stop(); err != nil {
+						// Record failed deletion operation
+						RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("Failed to stop project before deletion: %v", err), []string{})
 						return c.JSON(http.StatusConflict, map[string]string{
 							"error": fmt.Sprintf("Failed to stop project before deletion: %v", err),
 						})
@@ -1205,6 +1207,8 @@ func deleteComponent(componentType string, c echo.Context) error {
 					for {
 						select {
 						case <-timeout:
+							// Record failed deletion operation
+							RecordComponentDelete(componentType, id, "failed", "Timeout waiting for project to stop", []string{})
 							return c.JSON(http.StatusConflict, map[string]string{
 								"error": "Timeout waiting for project to stop",
 							})
@@ -1232,6 +1236,8 @@ func deleteComponent(componentType string, c echo.Context) error {
 					_, inUse = p.Outputs[id]
 				}
 				if inUse {
+					// Record failed deletion operation
+					RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("%s is currently in use by project %s", id, p.Id), []string{})
 					return c.JSON(http.StatusConflict, map[string]string{
 						"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
 					})
@@ -1319,6 +1325,9 @@ func deleteComponent(componentType string, c echo.Context) error {
 				}
 			}
 		}
+
+		// Record successful deletion operation
+		RecordComponentDelete(componentType, id, "success", "", affectedProjects)
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{

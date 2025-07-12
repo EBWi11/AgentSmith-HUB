@@ -182,6 +182,7 @@ func GetClusterStatus() map[string]interface{} {
 // ProjectCommandHandler interface for project operations
 type ProjectCommandHandler interface {
 	ExecuteCommand(projectID, action string) error
+	ExecuteCommandWithOptions(projectID, action string, recordOperation bool) error
 }
 
 // Global project command handler

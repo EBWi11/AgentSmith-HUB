@@ -125,8 +125,7 @@ func main() {
 		// Start error log uploader for follower nodes
 		api.StartErrorLogUploader()
 
-		// Start operation history uploader for follower nodes
-		api.StartOperationHistoryUploader()
+		// Note: Operation history uploader removed - all nodes write directly to Redis
 
 		// Token will be read by follower API server at startup
 

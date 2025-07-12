@@ -24,11 +24,12 @@ type HubConfig struct {
 type OperationType string
 
 const (
-	OpTypeChangePush     OperationType = "change_push"
-	OpTypeLocalPush      OperationType = "local_push"
-	OpTypeProjectStart   OperationType = "project_start"
-	OpTypeProjectStop    OperationType = "project_stop"
-	OpTypeProjectRestart OperationType = "project_restart"
+	OpTypeChangePush      OperationType = "change_push"
+	OpTypeLocalPush       OperationType = "local_push"
+	OpTypeComponentDelete OperationType = "component_delete"
+	OpTypeProjectStart    OperationType = "project_start"
+	OpTypeProjectStop     OperationType = "project_stop"
+	OpTypeProjectRestart  OperationType = "project_restart"
 )
 
 // OperationRecord represents a single operation record

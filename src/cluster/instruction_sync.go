@@ -716,14 +716,18 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 	case "start":
 		if instruction.ComponentType == "project" {
 			if globalProjectCmdHandler != nil {
-				return globalProjectCmdHandler.ExecuteCommand(instruction.ComponentName, "start")
+				// Follower nodes should not record operations when executing cluster instructions
+				// as the leader has already recorded these operations
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "start", false)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}
 	case "stop":
 		if instruction.ComponentType == "project" {
 			if globalProjectCmdHandler != nil {
-				return globalProjectCmdHandler.ExecuteCommand(instruction.ComponentName, "stop")
+				// Follower nodes should not record operations when executing cluster instructions
+				// as the leader has already recorded these operations
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "stop", false)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}
@@ -749,7 +753,9 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 			logger.Debug("Restarting running project", "project", instruction.ComponentName)
 
 			if globalProjectCmdHandler != nil {
-				return globalProjectCmdHandler.ExecuteCommand(instruction.ComponentName, "restart")
+				// Follower nodes should not record operations when executing cluster instructions
+				// as the leader has already recorded these operations
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "restart", false)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}

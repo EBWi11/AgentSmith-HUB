@@ -40,6 +40,7 @@ type OperationHistoryFilter struct {
 	ProjectID     string               `json:"project_id"`
 	Status        string               `json:"status"`
 	Keyword       string               `json:"keyword"`
+	NodeID        string               `json:"node_id"`
 	Limit         int                  `json:"limit"`
 	Offset        int                  `json:"offset"`
 }
@@ -61,15 +62,16 @@ type ClusterOperationHistoryResponse struct {
 
 // NodeOpStat represents operation statistics for a node
 type NodeOpStat struct {
-	NodeID            string `json:"node_id"`
-	ChangePushOps     int    `json:"change_push_ops"`
-	LocalPushOps      int    `json:"local_push_ops"`
-	ProjectStartOps   int    `json:"project_start_ops"`
-	ProjectStopOps    int    `json:"project_stop_ops"`
-	ProjectRestartOps int    `json:"project_restart_ops"`
-	TotalOps          int    `json:"total_ops"`
-	SuccessOps        int    `json:"success_ops"`
-	FailedOps         int    `json:"failed_ops"`
+	NodeID             string `json:"node_id"`
+	ChangePushOps      int    `json:"change_push_ops"`
+	LocalPushOps       int    `json:"local_push_ops"`
+	ComponentDeleteOps int    `json:"component_delete_ops"`
+	ProjectStartOps    int    `json:"project_start_ops"`
+	ProjectStopOps     int    `json:"project_stop_ops"`
+	ProjectRestartOps  int    `json:"project_restart_ops"`
+	TotalOps           int    `json:"total_ops"`
+	SuccessOps         int    `json:"success_ops"`
+	FailedOps          int    `json:"failed_ops"`
 }
 
 // matchesOperationFilter checks if a record matches the filter criteria
@@ -105,6 +107,21 @@ func matchesOperationFilter(record common.OperationRecord, filter OperationHisto
 	// Status filter
 	if filter.Status != "" && record.Status != filter.Status {
 		return false
+	}
+
+	// Node ID filter
+	if filter.NodeID != "" && filter.NodeID != "all" {
+		nodeID := ""
+		if record.Details != nil {
+			if nodeIDValue, exists := record.Details["node_id"]; exists {
+				if nodeIDStr, ok := nodeIDValue.(string); ok {
+					nodeID = nodeIDStr
+				}
+			}
+		}
+		if nodeID != filter.NodeID {
+			return false
+		}
 	}
 
 	// Keyword filter
@@ -148,12 +165,6 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 		var op common.OperationRecord
 		if err := json.Unmarshal([]byte(line), &op); err == nil {
 			if matchesOperationFilter(op, filter) {
-				// Set node information for local operations
-				if op.Details == nil {
-					op.Details = make(map[string]interface{})
-				}
-				op.Details["node_id"] = common.Config.LocalIP
-				op.Details["node_address"] = common.Config.LocalIP
 				allOperations = append(allOperations, op)
 			}
 		}
@@ -167,89 +178,16 @@ func getOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecor
 	return allOperations, nil
 }
 
-// aggregateClusterOperationHistory collects operation history from all cluster nodes
+// aggregateClusterOperationHistory collects operation history from Redis (all nodes write to same key)
 func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.OperationRecord, map[string]NodeOpStat, error) {
-	var allOperations []common.OperationRecord
+	// Simply read from the shared Redis key - all nodes write to cluster:ops_history
+	allOperations, err := getOperationHistory(filter)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Calculate node statistics from all operations
 	nodeStats := make(map[string]NodeOpStat)
-
-	// Get leader's own operations first
-	leaderOps, err := getOperationHistory(filter)
-	if err != nil {
-		logger.Error("Failed to get leader operation history", "error", err)
-	} else {
-		allOperations = append(allOperations, leaderOps...)
-
-		// Calculate leader stats
-		leaderStat := NodeOpStat{
-			NodeID: common.Config.LocalIP,
-		}
-		for _, op := range leaderOps {
-			switch op.Type {
-			case common.OpTypeChangePush:
-				leaderStat.ChangePushOps++
-			case common.OpTypeLocalPush:
-				leaderStat.LocalPushOps++
-			case common.OpTypeProjectStart:
-				leaderStat.ProjectStartOps++
-			case common.OpTypeProjectStop:
-				leaderStat.ProjectStopOps++
-			case common.OpTypeProjectRestart:
-				leaderStat.ProjectRestartOps++
-			}
-			leaderStat.TotalOps++
-			if op.Status == "success" {
-				leaderStat.SuccessOps++
-			} else {
-				leaderStat.FailedOps++
-			}
-		}
-		nodeStats[common.Config.LocalIP] = leaderStat
-	}
-
-	// Get all operations from Redis cache (from all nodes)
-	pattern := "cluster:operations:*"
-	keys, err := common.RedisKeys(pattern)
-	if err != nil {
-		logger.Error("Failed to get operation keys from Redis", "error", err)
-	} else {
-		for _, key := range keys {
-			// Extract node ID from key
-			nodeID := strings.TrimPrefix(key, "cluster:operations:")
-
-			// Skip leader's own operations (already processed above)
-			if nodeID == common.Config.LocalIP {
-				continue
-			}
-
-			// Get operations from Redis cache
-			var cachedOps []common.OperationRecord
-			if cached, err := common.RedisGet(key); err == nil && cached != "" {
-				if err := json.Unmarshal([]byte(cached), &cachedOps); err != nil {
-					logger.Error("Failed to unmarshal operations from Redis", "node", nodeID, "error", err)
-					continue
-				}
-			} else {
-				continue
-			}
-
-			// Process each operation and apply filters
-			for i := range cachedOps {
-				// Set node info
-				if cachedOps[i].Details == nil {
-					cachedOps[i].Details = make(map[string]interface{})
-				}
-				cachedOps[i].Details["node_id"] = nodeID
-				cachedOps[i].Details["node_address"] = nodeID // Use nodeID as address for now
-
-				// Apply filters
-				if matchesOperationFilter(cachedOps[i], filter) {
-					allOperations = append(allOperations, cachedOps[i])
-				}
-			}
-		}
-	}
-
-	// Calculate node statistics from all collected operations
 	for _, op := range allOperations {
 		nodeID := ""
 		if op.Details != nil {
@@ -260,6 +198,7 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 			}
 		}
 
+		// Skip operations without node_id
 		if nodeID == "" {
 			continue
 		}
@@ -274,6 +213,8 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 			stat.ChangePushOps++
 		case common.OpTypeLocalPush:
 			stat.LocalPushOps++
+		case common.OpTypeComponentDelete:
+			stat.ComponentDeleteOps++
 		case common.OpTypeProjectStart:
 			stat.ProjectStartOps++
 		case common.OpTypeProjectStop:
@@ -290,70 +231,18 @@ func aggregateClusterOperationHistory(filter OperationHistoryFilter) ([]common.O
 		nodeStats[nodeID] = stat
 	}
 
-	// Sort all operations by timestamp (newest first)
-	sort.Slice(allOperations, func(i, j int) bool {
-		return allOperations[i].Timestamp.After(allOperations[j].Timestamp)
-	})
-
 	return allOperations, nodeStats, nil
-}
-
-// storeLocalOperationsToRedis caches latest operations for leader aggregation
-func storeLocalOperationsToRedis(nodeID string, operations []common.OperationRecord) {
-	if len(operations) == 0 {
-		return
-	}
-	data, err := json.Marshal(operations)
-	if err != nil {
-		return
-	}
-	// Keep for 31 days; refreshed on each upload
-	_, _ = common.RedisSet("cluster:operations:"+nodeID, string(data), 31*24*60*60)
-}
-
-// StartOperationHistoryUploader starts periodic operation history upload for follower nodes
-func StartOperationHistoryUploader() {
-	if cluster.IsLeader {
-		return // Leader doesn't need to upload operations
-	}
-
-	go func() {
-		ticker := time.NewTicker(60 * time.Second) // Upload every 60 seconds
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				uploadOperationHistoryToRedis()
-			}
-		}
-	}()
-
-	logger.Info("Operation history uploader started for follower node")
-}
-
-// uploadOperationHistoryToRedis uploads recent operation history to Redis
-func uploadOperationHistoryToRedis() {
-	filter := OperationHistoryFilter{
-		StartTime: time.Now().Add(-5 * time.Minute), // Last 5 minutes
-		EndTime:   time.Now(),
-		Limit:     100,
-	}
-
-	operations, err := getOperationHistory(filter)
-	if err != nil {
-		logger.Error("Failed to get local operation history for upload", "error", err)
-		return
-	}
-
-	if len(operations) > 0 {
-		storeLocalOperationsToRedis(common.Config.LocalIP, operations)
-		logger.Debug("Uploaded operation history to Redis", "count", len(operations))
-	}
 }
 
 // RecordChangePush records a change push operation to Redis
 func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
+	// Create details map with execution node information
+	details := map[string]interface{}{
+		"node_id":      common.Config.LocalIP,
+		"node_address": common.Config.LocalIP,
+		"executed_by":  common.Config.LocalIP,
+	}
+
 	record := common.OperationRecord{
 		Type:          common.OpTypeChangePush,
 		Timestamp:     time.Now(),
@@ -364,6 +253,7 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 		Diff:          diff,
 		Status:        status,
 		Error:         errorMsg,
+		Details:       details,
 	}
 
 	// Serialize record to JSON and store to Redis
@@ -384,6 +274,13 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 
 // RecordLocalPush records a local push operation to Redis
 func RecordLocalPush(componentType, componentID, content, status, errorMsg string) {
+	// Create details map with execution node information
+	details := map[string]interface{}{
+		"node_id":      common.Config.LocalIP,
+		"node_address": common.Config.LocalIP,
+		"executed_by":  common.Config.LocalIP,
+	}
+
 	record := common.OperationRecord{
 		Type:          common.OpTypeLocalPush,
 		Timestamp:     time.Now(),
@@ -392,6 +289,7 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 		NewContent:    content,
 		Status:        status,
 		Error:         errorMsg,
+		Details:       details,
 	}
 
 	// Serialize record to JSON and store to Redis
@@ -407,6 +305,42 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 		}
 	} else {
 		logger.Error("Failed to marshal local push operation", "error", err)
+	}
+}
+
+// RecordComponentDelete records a component deletion operation to Redis
+func RecordComponentDelete(componentType, componentID, status, errorMsg string, affectedProjects []string) {
+	// Create details map with execution node information
+	details := map[string]interface{}{
+		"node_id":           common.Config.LocalIP,
+		"node_address":      common.Config.LocalIP,
+		"executed_by":       common.Config.LocalIP,
+		"affected_projects": affectedProjects,
+	}
+
+	record := common.OperationRecord{
+		Type:          common.OpTypeComponentDelete,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON and store to Redis
+	if jsonData, err := json.Marshal(record); err == nil {
+		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+			logger.Error("Failed to record component delete operation to Redis", "error", err)
+		} else {
+			// Set TTL for the entire list to 31 days
+			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+				logger.Warn("Failed to set TTL for operations history", "error", err)
+			}
+			logger.Info("Component delete operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
+		}
+	} else {
+		logger.Error("Failed to marshal component delete operation", "error", err)
 	}
 }
 
@@ -445,6 +379,7 @@ func GetOperationsHistory(c echo.Context) error {
 	filter.ProjectID = c.QueryParam("project_id")
 	filter.Status = c.QueryParam("status")
 	filter.Keyword = c.QueryParam("keyword")
+	filter.NodeID = c.QueryParam("node_id")
 
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
@@ -468,9 +403,6 @@ func GetOperationsHistory(c echo.Context) error {
 			"error": fmt.Sprintf("Failed to retrieve operations history: %v", err),
 		})
 	}
-
-	// Cache to Redis for leader aggregation
-	storeLocalOperationsToRedis(common.Config.LocalIP, operations)
 
 	totalCount := len(operations)
 
@@ -531,6 +463,7 @@ func GetClusterOperationsHistory(c echo.Context) error {
 	filter.ProjectID = c.QueryParam("project_id")
 	filter.Status = c.QueryParam("status")
 	filter.Keyword = c.QueryParam("keyword")
+	filter.NodeID = c.QueryParam("node_id")
 
 	if limitStr := c.QueryParam("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
@@ -547,9 +480,6 @@ func GetClusterOperationsHistory(c echo.Context) error {
 		}
 	}
 
-	// Node ID filter for cluster operations
-	nodeID := c.QueryParam("node_id")
-
 	// Collect operations from all cluster nodes
 	allOperations, nodeStats, err := aggregateClusterOperationHistory(filter)
 	if err != nil {
@@ -557,19 +487,6 @@ func GetClusterOperationsHistory(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Failed to aggregate cluster operation history: " + err.Error(),
 		})
-	}
-
-	// Apply node filter if specified
-	if nodeID != "" && nodeID != "all" {
-		var filteredOps []common.OperationRecord
-		for _, op := range allOperations {
-			if op.Details != nil {
-				if opNodeID, ok := op.Details["node_id"].(string); ok && opNodeID == nodeID {
-					filteredOps = append(filteredOps, op)
-				}
-			}
-		}
-		allOperations = filteredOps
 	}
 
 	totalCount := len(allOperations)

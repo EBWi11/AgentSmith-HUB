@@ -120,10 +120,10 @@ func ServerStartFollower(listenAddr string) error {
 	auth.GET("/component-usage/:type/:id", GetComponentUsage)
 	auth.GET("/search-components", searchComponentsConfig)
 
-	// Read-only logs and history
-	auth.GET("/error-logs", getErrorLogs)
-	auth.GET("/operations-history", GetOperationsHistory)
-	auth.GET("/operations-stats", GetOperationsStats)
+	// 移除错误日志和操作历史接口 - 只有leader节点才能提供这些接口
+	// auth.GET("/error-logs", getErrorLogs)
+	// auth.GET("/operations-history", GetOperationsHistory)
+	// auth.GET("/operations-stats", GetOperationsStats)
 
 	// Block all write operations with helpful error messages
 	blockWriteOperation := func(c echo.Context) error {
