@@ -132,16 +132,16 @@ func tokenCheck(c echo.Context) error {
 }
 
 func leaderConfig(c echo.Context) error {
-	if cluster.IsLeader {
-		return c.JSON(http.StatusOK, map[string]string{
-			"redis":          common.Config.Redis,
-			"redis_password": common.Config.RedisPassword,
-		})
-	} else {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusUnauthorized, map[string]string{
 			"error": "no leader",
 		})
 	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"redis":          common.Config.Redis,
+		"redis_password": common.Config.RedisPassword,
+	})
 }
 
 func downloadConfig(c echo.Context) error {
@@ -481,7 +481,7 @@ func getClusterSystemMetrics(c echo.Context) error {
 // getClusterSystemStats returns cluster system manager statistics
 func getClusterSystemStats(c echo.Context) error {
 	// Only provide cluster system stats from leader nodes
-	if !cluster.IsLeader {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Cluster system statistics are only available from leader nodes",
 		})
@@ -499,7 +499,7 @@ func getClusterSystemStats(c echo.Context) error {
 
 // getClusterHealth returns comprehensive cluster health information
 func getClusterHealth(c echo.Context) error {
-	if !cluster.IsLeader {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "Cluster health is only available on leader node",
 		})
@@ -576,7 +576,7 @@ func getClusterHealth(c echo.Context) error {
 
 // compactInstructions manually triggers instruction compaction (leader only)
 func compactInstructions(c echo.Context) error {
-	if !cluster.IsLeader {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "Instruction compaction is only available on leader node",
 		})
@@ -611,7 +611,7 @@ func compactInstructions(c echo.Context) error {
 
 // getInstructionStats returns instruction statistics
 func getInstructionStats(c echo.Context) error {
-	if !cluster.IsLeader {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "Instruction statistics are only available on leader node",
 		})
@@ -659,7 +659,7 @@ func getInstructionStats(c echo.Context) error {
 
 // getFollowerExecutionStatus returns the execution status of all followers
 func getFollowerExecutionStatus(c echo.Context) error {
-	if !cluster.IsLeader {
+	if err := common.RequireLeader(); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "Follower execution status is only available on leader node",
 		})

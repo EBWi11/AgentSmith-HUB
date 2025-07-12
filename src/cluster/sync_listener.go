@@ -25,7 +25,7 @@ func InitSyncListener(nodeID string) {
 
 // Start starts the sync listener (follower only)
 func (sl *SyncListener) Start() {
-	if IsLeader {
+	if common.IsCurrentNodeLeader() {
 		return
 	}
 

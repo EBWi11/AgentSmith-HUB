@@ -1,14 +1,15 @@
 package cluster
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"time"
 )
 
-// Global cluster state
+// Global cluster state - deprecated, use common.IsCurrentNodeLeader() instead
 var (
-	IsLeader bool
-	NodeID   string
+	IsLeader bool   // Deprecated: use common.IsCurrentNodeLeader()
+	NodeID   string // Deprecated: use common.GetNodeID()
 )
 
 // ClusterManager represents the simplified cluster manager
@@ -22,6 +23,7 @@ var GlobalClusterManager *ClusterManager
 
 // InitCluster initializes the cluster system
 func InitCluster(nodeID string, isLeader bool) {
+	// Keep deprecated variables for backward compatibility
 	IsLeader = isLeader
 	NodeID = nodeID
 
@@ -43,7 +45,7 @@ func InitCluster(nodeID string, isLeader bool) {
 // Start starts the cluster system
 func (cm *ClusterManager) Start() {
 	if cm.instructionManager != nil {
-		if IsLeader {
+		if common.IsCurrentNodeLeader() {
 			// Leader: Initialize instructions for existing components
 			if err := cm.instructionManager.InitializeLeaderInstructions(); err != nil {
 				logger.Error("Failed to initialize leader instructions", "error", err)
@@ -73,8 +75,8 @@ func (cm *ClusterManager) Stop() {
 	}
 
 	// Clear execution flag when shutting down (important for followers)
-	if cm.instructionManager != nil && !IsLeader {
-		if err := cm.instructionManager.ClearFollowerExecutionFlag(NodeID); err != nil {
+	if cm.instructionManager != nil && !common.IsCurrentNodeLeader() {
+		if err := cm.instructionManager.ClearFollowerExecutionFlag(common.GetNodeID()); err != nil {
 			logger.Warn("Failed to clear execution flag during shutdown", "error", err)
 		} else {
 			logger.Info("Cleared execution flag during shutdown")
@@ -89,30 +91,30 @@ func (cm *ClusterManager) Stop() {
 func GetClusterStatus() map[string]interface{} {
 	status := map[string]interface{}{
 		// Legacy fields - keep for backward compatibility
-		"is_leader": IsLeader,
-		"node_id":   NodeID,
+		"is_leader": common.IsCurrentNodeLeader(),
+		"node_id":   common.GetNodeID(),
 		// New fields - required by frontend ClusterStatus.vue
-		"self_id":      NodeID,
-		"self_address": NodeID,
+		"self_id":      common.GetNodeID(),
+		"self_address": common.GetNodeID(),
 		"status":       "follower", // Default to follower
 		"nodes":        make(map[string]interface{}),
 	}
 
 	// Set current node status based on leader flag
-	if IsLeader {
+	if common.IsCurrentNodeLeader() {
 		status["status"] = "leader"
 	}
 
 	nodeList := make(map[string]interface{})
 
 	// Always include current node in the list
-	if IsLeader {
+	if common.IsCurrentNodeLeader() {
 		// Leader node - always show, regardless of GlobalInstructionManager state
 		version := "unknown"
 		if GlobalInstructionManager != nil {
 			version = GlobalInstructionManager.GetCurrentVersion()
 		}
-		nodeList[NodeID] = map[string]interface{}{
+		nodeList[common.GetNodeID()] = map[string]interface{}{
 			"version":   version,
 			"timestamp": time.Now().Unix(),
 			"online":    true,
@@ -120,7 +122,7 @@ func GetClusterStatus() map[string]interface{} {
 		}
 	} else {
 		// Follower node
-		nodeList[NodeID] = map[string]interface{}{
+		nodeList[common.GetNodeID()] = map[string]interface{}{
 			"version":   "follower", // Followers don't track version
 			"timestamp": time.Now().Unix(),
 			"online":    true,
@@ -129,7 +131,7 @@ func GetClusterStatus() map[string]interface{} {
 	}
 
 	// Add other follower nodes (only for leader)
-	if IsLeader && GlobalHeartbeatManager != nil {
+	if common.IsCurrentNodeLeader() && GlobalHeartbeatManager != nil {
 		nodes := GlobalHeartbeatManager.GetNodes()
 		for nodeID, heartbeat := range nodes {
 			nodeList[nodeID] = map[string]interface{}{

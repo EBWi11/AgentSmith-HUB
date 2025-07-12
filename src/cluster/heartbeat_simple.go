@@ -73,7 +73,7 @@ func (hm *HeartbeatManager) startFollowerHeartbeat() {
 
 // sendHeartbeat sends heartbeat with current version (follower only)
 func (hm *HeartbeatManager) sendHeartbeat() {
-	if hm.isLeader {
+	if common.IsCurrentNodeLeader() {
 		return
 	}
 
@@ -102,7 +102,7 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 
 // listenHeartbeats listens for heartbeats and handles version sync (leader only)
 func (hm *HeartbeatManager) listenHeartbeats() {
-	if !hm.isLeader {
+	if !common.IsCurrentNodeLeader() {
 		return
 	}
 
@@ -181,7 +181,7 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 
 // cleanupOfflineNodes removes offline nodes
 func (hm *HeartbeatManager) cleanupOfflineNodes() {
-	if !hm.isLeader {
+	if !common.IsCurrentNodeLeader() {
 		return
 	}
 

@@ -31,7 +31,7 @@ func main() {
 	var (
 		cfgRoot   = flag.String("config_root", "", "directory containing config.yaml and component sub dirs (required)")
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
-		port      = flag.Int("port", 8080, "HTTP listen port (leader only)")
+		port      = flag.Int("port", 8080, "HTTP listen port")
 		showVer   = flag.Bool("version", false, "show version")
 		buildVers = "v0.1.5"
 	)
@@ -78,8 +78,8 @@ func main() {
 	// Initialize new cluster system
 	cluster.InitCluster(ip, *isLeader)
 
-	// IMPORTANT: Set common.IsLeader for component sampler creation
-	common.SetLeaderState(*isLeader, ip)
+	// IMPORTANT: Set centralized cluster state
+	common.SetClusterState(*isLeader, ip)
 
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
@@ -89,11 +89,15 @@ func main() {
 		common.Config.Leader = ip
 		token, _ := readToken(true)
 		common.Config.Token = token
+
+		// Store leader token in Redis for followers to use (no TTL)
+		if err := api.WriteTokenToRedis(token); err != nil {
+			logger.Warn("Failed to store leader token in Redis", "error", err)
+		}
+
 		logger.Info("Leader mode initialized")
 	} else {
-		// Follower mode
-		// Followers don't need token since they don't expose HTTP API
-		common.Config.Token = ""
+		// Follower mode - token will be read by follower API server when it starts
 		logger.Info("Follower mode initialized")
 	}
 
@@ -117,11 +121,19 @@ func main() {
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port
 	} else {
+		// Follower services
 		// Start error log uploader for follower nodes
 		api.StartErrorLogUploader()
 
 		// Start operation history uploader for follower nodes
 		api.StartOperationHistoryUploader()
+
+		// Token will be read by follower API server at startup
+
+		// Start follower API server (read-only endpoints)
+		followerAddr := fmt.Sprintf("0.0.0.0:%d", *port)
+		go api.ServerStartFollower(followerAddr) // start follower API server
+		logger.Info("Follower API server starting", "address", followerAddr)
 	}
 
 	// Start QPS collector on all nodes (leader and followers)
@@ -293,6 +305,13 @@ func traverseComponents(dir, suffix string) []string {
 }
 
 func loadLocalComponents() {
+	// Followers don't read local component files, they receive components via cluster sync
+	if !common.IsCurrentNodeLeader() {
+		logger.Info("Follower node: skipping local component loading, will receive components via cluster sync")
+		return
+	}
+
+	// Only leader loads local components
 	root := common.Config.ConfigRoot
 
 	// plugins
@@ -352,11 +371,13 @@ func loadLocalComponents() {
 			project.GlobalProject.RulesetsNew[id] = string(content)
 		}
 	}
+
+	logger.Info("Leader finished loading local components")
 }
 
 func loadLocalProjects() {
 	// Followers don't have local project files, only leaders do
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		logger.Info("Follower node: skipping local project loading, will receive projects via cluster sync")
 		return
 	}

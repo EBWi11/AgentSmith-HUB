@@ -75,7 +75,7 @@ func (im *InstructionManager) GetCurrentVersion() string {
 // 3. Analyze and remove redundant instructions
 // 4. Increment version properly
 func (im *InstructionManager) CompactInstructions() error {
-	if !IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return fmt.Errorf("only leader can compact instructions")
 	}
 
@@ -192,8 +192,12 @@ func (im *InstructionManager) loadAllInstructions(maxVersion int64) ([]*Instruct
 }
 
 // analyzeAndCompact performs the core compaction logic
+// Since leader has verify mechanism, runtime operations are already safe to group by component
+// Only leader initialization needs special ordering (handled in InitializeLeaderInstructions)
 func (im *InstructionManager) analyzeAndCompact(instructions []*Instruction) []*Instruction {
-	// Group instructions by component
+	// Group instructions by component - safe because:
+	// 1. Leader initialization already handles proper dependency order
+	// 2. Runtime operations are verified before submission, ensuring safety
 	componentGroups := make(map[string][]*Instruction)
 
 	for _, instruction := range instructions {
@@ -217,7 +221,8 @@ func (im *InstructionManager) analyzeAndCompact(instructions []*Instruction) []*
 	return compactedInstructions
 }
 
-// compactComponentInstructions compacts instructions for a single component
+// compactComponentInstructions compacts instructions for a single component to keep only the final state
+// The goal is to eliminate all intermediate states and keep only what's needed to reach the final state
 func (im *InstructionManager) compactComponentInstructions(instructions []*Instruction) []*Instruction {
 	if len(instructions) <= 1 {
 		return instructions
@@ -228,60 +233,59 @@ func (im *InstructionManager) compactComponentInstructions(instructions []*Instr
 		return instructions[i].Version < instructions[j].Version
 	})
 
+	// Analyze the final state by scanning all instructions
 	var result []*Instruction
-	lastInstruction := instructions[len(instructions)-1]
 
-	// Compaction rules based on operation types
-	switch lastInstruction.Operation {
-	case "add":
-		// If the last operation is "add", we only need the final add
-		// All previous add/update/delete operations can be ignored
-		result = append(result, lastInstruction)
+	// Find the final state for each aspect of the component
+	var finalDefinition *Instruction   // Final content/configuration
+	var finalControlState *Instruction // Final start/stop/restart state
+	var hasDelete bool
 
-	case "delete":
-		// If the last operation is "delete", we only need the delete
-		// All previous operations are irrelevant
-		result = append(result, lastInstruction)
+	// Scan through all instructions to determine final state
+	for _, inst := range instructions {
+		switch inst.Operation {
+		case "add", "update", "local_push", "push_change":
+			// These operations define the component content/configuration
+			finalDefinition = inst
+			hasDelete = false // Reset delete flag if component is redefined
 
-	case "update", "local_push", "push_change":
-		// For update operations, we need:
-		// 1. The initial "add" (if exists)
-		// 2. The final update
-		var initialAdd *Instruction
+		case "delete":
+			// Delete operation makes component non-existent
+			hasDelete = true
+			finalDefinition = nil
+			finalControlState = nil
+
+		case "start", "stop", "restart":
+			// These operations control the component state (only for projects)
+			if !hasDelete {
+				finalControlState = inst
+			}
+		}
+	}
+
+	// Build result based on final state
+	if hasDelete {
+		// If component is deleted, only keep the delete instruction
 		for _, inst := range instructions {
-			if inst.Operation == "add" {
-				initialAdd = inst
+			if inst.Operation == "delete" {
+				result = append(result, inst)
 				break
 			}
 		}
-
-		if initialAdd != nil && initialAdd.Version != lastInstruction.Version {
-			result = append(result, initialAdd)
-		}
-		result = append(result, lastInstruction)
-
-	case "start", "stop", "restart":
-		// For project control operations, we need:
-		// 1. The component definition (add/update)
-		// 2. The final state operation
-		var latestDefinition *Instruction
-		for _, inst := range instructions {
-			if inst.Operation == "add" || inst.Operation == "update" ||
-				inst.Operation == "local_push" || inst.Operation == "push_change" {
-				latestDefinition = inst
-			}
+	} else {
+		// Component exists, keep final definition and final control state
+		if finalDefinition != nil {
+			result = append(result, finalDefinition)
 		}
 
-		if latestDefinition != nil {
-			result = append(result, latestDefinition)
+		if finalControlState != nil {
+			result = append(result, finalControlState)
 		}
+	}
 
-		// Only keep the final control operation
-		result = append(result, lastInstruction)
-
-	default:
-		// For unknown operations, keep all instructions to be safe
-		result = instructions
+	// If no meaningful operations found, return the last instruction to be safe
+	if len(result) == 0 {
+		result = append(result, instructions[len(instructions)-1])
 	}
 
 	return result
@@ -306,20 +310,20 @@ func (im *InstructionManager) clearOldInstructions(maxVersion int64) error {
 }
 
 // shouldTriggerCompaction checks if compaction should be triggered
-// Now triggers on every new instruction to maintain optimal state
+// Only trigger compaction when instruction count exceeds threshold
 func (im *InstructionManager) shouldTriggerCompaction() bool {
 	if !im.compactionEnabled {
 		return false
 	}
 
-	// Always trigger compaction for every new instruction to avoid meaningless intermediate states
-	// This ensures the final state is always optimal and prevents state corruption
-	return im.currentVersion > 0
+	// Only trigger compaction when we have accumulated enough instructions
+	// This avoids excessive compaction overhead while maintaining system efficiency
+	return im.currentVersion >= im.compactionThreshold
 }
 
 // PublishInstruction publishes a new instruction (leader only)
 func (im *InstructionManager) PublishInstruction(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
-	if !IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return fmt.Errorf("only leader can publish instructions")
 	}
 
@@ -465,7 +469,7 @@ func (im *InstructionManager) PublishProjectsRestart(projectNames []string, reas
 
 // InitializeLeaderInstructions creates initial instructions for all components (leader only)
 func (im *InstructionManager) InitializeLeaderInstructions() error {
-	if !IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return fmt.Errorf("only leader can initialize instructions")
 	}
 
@@ -594,18 +598,18 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 
 // SyncInstructions syncs instructions from a specific version to target version (follower only)
 func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) error {
-	if IsLeader {
+	if common.IsCurrentNodeLeader() {
 		return fmt.Errorf("leader doesn't need to sync instructions")
 	}
 
 	// Set execution flag to indicate this follower is executing instructions
-	if err := im.SetFollowerExecutionFlag(NodeID); err != nil {
+	if err := im.SetFollowerExecutionFlag(common.GetNodeID()); err != nil {
 		logger.Warn("Failed to set execution flag", "error", err)
 	}
 
 	// Ensure flag is cleared when done (with defer for safety)
 	defer func() {
-		if err := im.ClearFollowerExecutionFlag(NodeID); err != nil {
+		if err := im.ClearFollowerExecutionFlag(common.GetNodeID()); err != nil {
 			logger.Warn("Failed to clear execution flag", "error", err)
 		}
 	}()
@@ -644,7 +648,7 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		}
 
 		// Refresh execution flag during long operations
-		if err := im.RefreshFollowerExecutionFlag(NodeID); err != nil {
+		if err := im.RefreshFollowerExecutionFlag(common.GetNodeID()); err != nil {
 			logger.Warn("Failed to refresh execution flag", "error", err)
 		}
 
@@ -794,7 +798,7 @@ func (im *InstructionManager) GetActiveFollowers() ([]string, error) {
 		if len(parts) >= 3 {
 			nodeID := parts[2]
 			// Skip leader node
-			if nodeID != NodeID {
+			if nodeID != common.GetNodeID() {
 				activeFollowers = append(activeFollowers, nodeID)
 			}
 		}
@@ -805,7 +809,7 @@ func (im *InstructionManager) GetActiveFollowers() ([]string, error) {
 
 // WaitForAllFollowersIdle waits for all followers to finish executing instructions
 func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) error {
-	if !IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return fmt.Errorf("only leader can wait for followers")
 	}
 
