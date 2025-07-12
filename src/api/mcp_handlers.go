@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/mcp"
@@ -205,7 +204,7 @@ func GetMCPImplementationStatus() map[string]interface{} {
 
 // checkLeaderMode checks if current node is leader, returns error response if not
 func checkLeaderMode(c echo.Context) error {
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusForbidden, map[string]interface{}{
 			"error":           "MCP service is only available on leader nodes",
 			"message":         "This node is not the cluster leader. MCP operations are restricted to the leader node.",
@@ -642,8 +641,8 @@ func getMCPInfo(c echo.Context) error {
 		"transport": "http",
 		"endpoint":  "/mcp",
 		"node_info": map[string]interface{}{
-			"is_leader": cluster.IsLeader,
-			"node_id":   cluster.NodeID,
+			"is_leader": common.IsCurrentNodeLeader(),
+			"node_id":   common.GetNodeID(),
 		},
 	}
 
@@ -713,7 +712,7 @@ func mcpHealthCheck(c echo.Context) error {
 	httpStatus := http.StatusOK
 
 	// Include leader status in health check but don't block it
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		status = "unavailable"
 		httpStatus = http.StatusServiceUnavailable
 	}
@@ -723,10 +722,10 @@ func mcpHealthCheck(c echo.Context) error {
 		"service":   "AgentSmith-HUB MCP Server",
 		"version":   "v0.1.5",
 		"uptime":    "running",
-		"is_leader": cluster.IsLeader,
-		"node_id":   cluster.NodeID,
+		"is_leader": common.IsCurrentNodeLeader(),
+		"node_id":   common.GetNodeID(),
 		"message": func() string {
-			if cluster.IsLeader {
+			if common.IsCurrentNodeLeader() {
 				return "MCP service available"
 			}
 			return "MCP service only available on leader nodes"
@@ -784,8 +783,8 @@ func getMCPStats(c echo.Context) error {
 			"version":     common.MCPVersion,
 		},
 		"cluster": map[string]interface{}{
-			"is_leader": cluster.IsLeader,
-			"node_id":   cluster.NodeID,
+			"is_leader": common.IsCurrentNodeLeader(),
+			"node_id":   common.GetNodeID(),
 		},
 		"resources": map[string]interface{}{
 			"total_projects": len(project.GlobalProject.Projects),
@@ -809,7 +808,7 @@ func getMCPStats(c echo.Context) error {
 
 // getMCPInstallConfig provides MCP client installation configuration
 func getMCPInstallConfig(c echo.Context) error {
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusForbidden, map[string]string{
 			"error": "MCP services are only available on the leader node",
 		})

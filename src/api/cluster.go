@@ -435,7 +435,7 @@ func getSystemStats(c echo.Context) error {
 // getClusterSystemMetrics returns system metrics for all cluster nodes
 func getClusterSystemMetrics(c echo.Context) error {
 	// Only provide cluster system metrics from leader nodes
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Cluster system metrics are only available from leader nodes",
 		})

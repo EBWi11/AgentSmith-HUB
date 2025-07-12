@@ -1052,7 +1052,7 @@ func createComponent(componentType string, c echo.Context) error {
 	common.GlobalMu.Unlock()
 
 	// Publish instruction for component creation (NEW - this was missing!)
-	if cluster.IsLeader && cluster.GlobalInstructionManager != nil {
+	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
 		if err := cluster.GlobalInstructionManager.PublishComponentAdd(componentType, request.ID, request.Raw); err != nil {
 			logger.Error("Failed to publish component creation instruction", "type", componentType, "id", request.ID, "error", err)
 			// Don't fail the request, but log the error
@@ -1278,7 +1278,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 	delete(globalMapToUpdate, id)
 
 	// If it's leader node, delete files and notify followers
-	if cluster.IsLeader {
+	if common.IsCurrentNodeLeader() {
 		// Get affected projects before deletion
 		affectedProjects := []string{}
 		if componentType != "project" {
@@ -1447,7 +1447,7 @@ func updateComponent(componentType string, c echo.Context) error {
 	}
 
 	// Publish instruction for component update (NEW - this was missing!)
-	if cluster.IsLeader && cluster.GlobalInstructionManager != nil {
+	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
 		if err := cluster.GlobalInstructionManager.PublishComponentUpdate(componentType, id, req.Raw, nil); err != nil {
 			logger.Error("Failed to publish component update instruction", "type", componentType, "id", id, "error", err)
 			// Don't fail the request, but log the error
@@ -1706,7 +1706,7 @@ func cancelPluginUpgrade(c echo.Context) error {
 // GetSamplerData retrieves sample data from project components
 func GetSamplerData(c echo.Context) error {
 	// Only leader nodes collect sample data for performance reasons
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message": "Sample data collection is only available on leader node",
 			"data":    map[string]interface{}{},
@@ -1911,7 +1911,7 @@ func GetSamplerData(c echo.Context) error {
 // GetRulesetFields extracts field keys from sample data for intelligent completion in ruleset editing
 func GetRulesetFields(c echo.Context) error {
 	// Only leader nodes collect sample data for performance reasons
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"componentId": c.Param("id"),
 			"fieldKeys":   []string{},

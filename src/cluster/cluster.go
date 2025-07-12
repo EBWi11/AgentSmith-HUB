@@ -6,11 +6,8 @@ import (
 	"time"
 )
 
-// Global cluster state - deprecated, use common.IsCurrentNodeLeader() instead
-var (
-	IsLeader bool   // Deprecated: use common.IsCurrentNodeLeader()
-	NodeID   string // Deprecated: use common.GetNodeID()
-)
+// Global cluster state variables have been removed
+// Use common.IsCurrentNodeLeader() and common.GetNodeID() instead
 
 // ClusterManager represents the simplified cluster manager
 type ClusterManager struct {
@@ -23,10 +20,6 @@ var GlobalClusterManager *ClusterManager
 
 // InitCluster initializes the cluster system
 func InitCluster(nodeID string, isLeader bool) {
-	// Keep deprecated variables for backward compatibility
-	IsLeader = isLeader
-	NodeID = nodeID
-
 	// Initialize all components
 	InitInstructionManager()
 	InitHeartbeatManager(nodeID, isLeader)

@@ -863,7 +863,7 @@ func loadComponentDirectly(componentType, id, content string) error {
 	}
 
 	// Update global component config maps for follower access (if leader)
-	if cluster.IsLeader {
+	if common.IsCurrentNodeLeader() {
 		updateGlobalComponentConfigMapForLocalLoad(componentType, id, content)
 
 		// Sync to followers - components loaded directly should be synchronized immediately

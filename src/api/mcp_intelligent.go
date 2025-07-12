@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
@@ -96,7 +95,7 @@ type ProjectProfile struct {
 
 // GetSamplersDataIntelligent - Enhanced version with context awareness
 func GetSamplersDataIntelligent(c echo.Context) error {
-	if !cluster.IsLeader {
+	if !common.IsCurrentNodeLeader() {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message": "Sample data collection is only available on leader node",
 			"data":    map[string]interface{}{},

@@ -11,7 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/output"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 )
 
 // Instruction represents a single operation
@@ -687,6 +691,108 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 	return nil
 }
 
+// createComponentInstance creates actual component instances from configuration
+func (im *InstructionManager) createComponentInstance(componentType, componentName, content string) error {
+	switch componentType {
+	case "input":
+		// Import the input package at the top if not already imported
+		inp, err := input.NewInput("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create input instance %s: %w", componentName, err)
+		}
+		project.GlobalProject.Inputs[componentName] = inp
+		logger.Debug("Created input instance", "name", componentName)
+
+	case "output":
+		// Import the output package at the top if not already imported
+		out, err := output.NewOutput("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create output instance %s: %w", componentName, err)
+		}
+		project.GlobalProject.Outputs[componentName] = out
+		logger.Debug("Created output instance", "name", componentName)
+
+	case "ruleset":
+		// Import the rules_engine package at the top if not already imported
+		rs, err := rules_engine.NewRuleset("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create ruleset instance %s: %w", componentName, err)
+		}
+		project.GlobalProject.Rulesets[componentName] = rs
+		logger.Debug("Created ruleset instance", "name", componentName)
+
+	case "project":
+		// For projects, we create the project instance
+		proj, err := project.NewProject("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create project instance %s: %w", componentName, err)
+		}
+		project.GlobalProject.Projects[componentName] = proj
+		logger.Debug("Created project instance", "name", componentName)
+
+	case "plugin":
+		// For plugins, we just store the content as plugins are handled differently
+		// Import the plugin package at the top if not already imported
+		err := plugin.NewPlugin("", content, componentName, plugin.YAEGI_PLUGIN)
+		if err != nil {
+			return fmt.Errorf("failed to create plugin instance %s: %w", componentName, err)
+		}
+		logger.Debug("Created plugin instance", "name", componentName)
+
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	return nil
+}
+
+// deleteComponentInstance deletes actual component instances
+func (im *InstructionManager) deleteComponentInstance(componentType, componentName string) error {
+	switch componentType {
+	case "input":
+		delete(project.GlobalProject.Inputs, componentName)
+		logger.Debug("Deleted input instance", "name", componentName)
+
+	case "output":
+		delete(project.GlobalProject.Outputs, componentName)
+		logger.Debug("Deleted output instance", "name", componentName)
+
+	case "ruleset":
+		delete(project.GlobalProject.Rulesets, componentName)
+		logger.Debug("Deleted ruleset instance", "name", componentName)
+
+	case "project":
+		if proj, exists := project.GlobalProject.Projects[componentName]; exists {
+			// Stop the project first if it's running
+			if proj.Status == project.ProjectStatusRunning {
+				proj.Stop()
+			}
+		}
+		delete(project.GlobalProject.Projects, componentName)
+		logger.Debug("Deleted project instance", "name", componentName)
+
+	case "plugin":
+		// For plugins, we need to handle differently based on the plugin system
+		// This might need specific plugin cleanup logic
+		logger.Debug("Deleted plugin instance", "name", componentName)
+
+	default:
+		return fmt.Errorf("unsupported component type: %s", componentType)
+	}
+
+	return nil
+}
+
+// updateComponentInstance updates existing component instances with new configuration
+func (im *InstructionManager) updateComponentInstance(componentType, componentName, content string) error {
+	// For updates, we delete the old instance and create a new one
+	if err := im.deleteComponentInstance(componentType, componentName); err != nil {
+		logger.Warn("Failed to delete old component instance during update", "type", componentType, "name", componentName, "error", err)
+	}
+
+	return im.createComponentInstance(componentType, componentName, content)
+}
+
 // applyInstruction applies a single instruction
 func (im *InstructionManager) applyInstruction(version int64) error {
 	key := fmt.Sprintf("cluster:instruction:%d", version)
@@ -704,15 +810,40 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 
 	switch instruction.Operation {
 	case "add":
-		return common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		// First store config in memory
+		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			return err
+		}
+		// Then create actual component instances for follower
+		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
 	case "delete":
+		// First delete component instance
+		if err := im.deleteComponentInstance(instruction.ComponentType, instruction.ComponentName); err != nil {
+			logger.Warn("Failed to delete component instance", "type", instruction.ComponentType, "name", instruction.ComponentName, "error", err)
+		}
+		// Then remove from memory
 		return common.GlobalComponentOperations.DeleteComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName)
 	case "update":
-		return common.GlobalComponentOperations.UpdateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		// First update config in memory
+		if err := common.GlobalComponentOperations.UpdateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			return err
+		}
+		// Then update component instance
+		return im.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
 	case "local_push":
-		return common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		// First store config in memory
+		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			return err
+		}
+		// Then create actual component instances for follower
+		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
 	case "push_change":
-		return common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		// First store config in memory
+		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			return err
+		}
+		// Then create actual component instances for follower
+		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
 	case "start":
 		if instruction.ComponentType == "project" {
 			if globalProjectCmdHandler != nil {

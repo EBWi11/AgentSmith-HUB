@@ -349,9 +349,34 @@ func loadLocalComponents() {
 	// Only leader loads local components
 	root := common.Config.ConfigRoot
 
+	// Initialize global config maps
+	common.GlobalMu.Lock()
+	if common.AllInputsRawConfig == nil {
+		common.AllInputsRawConfig = make(map[string]string)
+	}
+	if common.AllOutputsRawConfig == nil {
+		common.AllOutputsRawConfig = make(map[string]string)
+	}
+	if common.AllRulesetsRawConfig == nil {
+		common.AllRulesetsRawConfig = make(map[string]string)
+	}
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	if common.AllPluginsRawConfig == nil {
+		common.AllPluginsRawConfig = make(map[string]string)
+	}
+	common.GlobalMu.Unlock()
+
 	// plugins
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go") {
 		name := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			// Update global config map
+			common.GlobalMu.Lock()
+			common.AllPluginsRawConfig[name] = string(content)
+			common.GlobalMu.Unlock()
+		}
 		_ = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
 	}
 	// Load plugin .new files
@@ -365,6 +390,12 @@ func loadLocalComponents() {
 	// inputs
 	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			// Update global config map
+			common.GlobalMu.Lock()
+			common.AllInputsRawConfig[id] = string(content)
+			common.GlobalMu.Unlock()
+		}
 		if inp, err := input.NewInput(f, "", id); err == nil {
 			project.GlobalProject.Inputs[id] = inp
 		}
@@ -380,6 +411,12 @@ func loadLocalComponents() {
 	// outputs
 	for _, f := range traverseComponents(path.Join(root, "output"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			// Update global config map
+			common.GlobalMu.Lock()
+			common.AllOutputsRawConfig[id] = string(content)
+			common.GlobalMu.Unlock()
+		}
 		if out, err := output.NewOutput(f, "", id); err == nil {
 			project.GlobalProject.Outputs[id] = out
 		}
@@ -395,6 +432,12 @@ func loadLocalComponents() {
 	// rulesets
 	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml") {
 		id := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			// Update global config map
+			common.GlobalMu.Lock()
+			common.AllRulesetsRawConfig[id] = string(content)
+			common.GlobalMu.Unlock()
+		}
 		if rs, err := rules_engine.NewRuleset(f, "", id); err == nil {
 			project.GlobalProject.Rulesets[id] = rs
 		}
@@ -420,6 +463,16 @@ func loadLocalProjects() {
 	root := common.Config.ConfigRoot
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
+		// Read project content for global config map (NewProject will also update it, but we do it here for consistency)
+		if content, err := os.ReadFile(f); err == nil {
+			// Update global config map
+			common.GlobalMu.Lock()
+			if common.AllProjectRawConfig == nil {
+				common.AllProjectRawConfig = make(map[string]string)
+			}
+			common.AllProjectRawConfig[id] = string(content)
+			common.GlobalMu.Unlock()
+		}
 		if p, err := project.NewProject(f, "", id); err == nil {
 			project.GlobalProject.Projects[id] = p
 
