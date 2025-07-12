@@ -1629,6 +1629,8 @@ const projectOperationLoading = ref(false)
 const showProjectWarningModal = ref(false)
 const projectWarningMessage = ref('')
 const projectOperationItem = ref(null)
+
+
 const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
 // Sample Data Modal states
@@ -1833,6 +1835,8 @@ onBeforeUnmount(() => {
     clearInterval(projectRefreshInterval.value)
   }
   
+
+  
   // Remove ESC key listener
   removeEscKeyListener()
   
@@ -2030,35 +2034,25 @@ async function fetchAllItems() {
 }
 
 async function fetchItems(type) {
-  // For projects type, prioritize lazy refresh
-  if (type === 'projects') {
-    return await refreshProjectStatus()
-  }
-  
   loading[type] = true
   error[type] = null
+  
   try {
-    let response
-    // Use cached data with smart refresh
-    response = await dataCache.fetchComponents(type)
-
-    // Transform response data to match expected format
+    const response = await dataCache.fetchComponents(type)
+    
     if (Array.isArray(response)) {
       items[type] = response.map(item => {
-        // Only process components that belong to the current type
         if (type === 'plugins') {
-          // Plugins must have a name field
+          // Plugin items use name field
           if (!item.name) {
-            console.warn(`Skipping invalid plugin item:`, item);
+            console.warn(`Skipping invalid ${type} item:`, item);
             return null;
           }
-
           return {
-            id: item.name,
+            name: item.name,
             type: item.type,
-            hasTemp: item.hasTemp,
-            returnType: item.returnType, // Add returnType field
-            parameters: item.parameters // Add parameters field
+            status: item.status,
+            hasTemp: item.hasTemp
           }
         } else {
           // Other components must have an id field
@@ -2067,24 +2061,7 @@ async function fetchItems(type) {
             return null;
           }
           
-          // If it's a project with error status, get error information
-          if (type === 'projects' && item.status === 'error') {
-            // Asynchronously get error information without waiting
-            (async () => {
-              try {
-                const projectDetails = await hubApi.getProject(item.id);
-                if (projectDetails && projectDetails.errorMessage) {
-                  // Update project error information
-                  const index = items[type].findIndex(p => p.id === item.id);
-                  if (index !== -1) {
-                    items[type][index].errorMessage = projectDetails.errorMessage;
-                  }
-                }
-              } catch (err) {
-                console.error(`Failed to fetch error details for project ${item.id}:`, err);
-              }
-            })();
-          }
+
           
           return {
             id: item.id,
@@ -2157,19 +2134,7 @@ async function refreshProjectStatus() {
         }
       })
       
-      // Asynchronously get detailed error information for error projects
-      items.projects.forEach(async (project) => {
-        if (project.status === 'error' && !project.errorMessage) {
-          try {
-            const projectDetails = await hubApi.getProject(project.id)
-            if (projectDetails && projectDetails.errorMessage) {
-              project.errorMessage = projectDetails.errorMessage
-            }
-          } catch (err) {
-            console.error(`Failed to fetch error details for project ${project.id}:`, err)
-          }
-        }
-      })
+
     }
   } catch (err) {
     console.error('Failed to refresh project status:', err)
@@ -2193,22 +2158,7 @@ async function fetchProjectsComplete() {
           return null
         }
         
-        // If it's a project with error status, asynchronously get error information
-        if (item.status === 'error') {
-          (async () => {
-            try {
-              const projectDetails = await hubApi.getProject(item.id)
-              if (projectDetails && projectDetails.errorMessage) {
-                const index = items[type].findIndex(p => p.id === item.id)
-                if (index !== -1) {
-                  items[type][index].errorMessage = projectDetails.errorMessage
-                }
-              }
-            } catch (err) {
-              console.error(`Failed to fetch error details for project ${item.id}:`, err)
-            }
-          })()
-        }
+
         
         return {
           id: item.id,

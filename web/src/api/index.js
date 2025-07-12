@@ -193,20 +193,8 @@ export const hubApi = {
   async getProject(id) {
     try {
       const response = await api.get(`/projects/${id}`);
-      // If project status is error, try to get error information
-      if (response.data && response.data.status === 'error') {
-        try {
-          // Try to get project error information
-          const errorResponse = await api.get(`/project-error/${id}`);
-          if (errorResponse.data && errorResponse.data.error) {
-            response.data.errorMessage = errorResponse.data.error;
-          }
-        } catch (errorFetchError) {
-          // console.warn(`Failed to fetch error details for project ${id}:`, errorFetchError);
-          // Set a default error message
-          response.data.errorMessage = "Unknown error occurred";
-        }
-      }
+      // Don't automatically fetch error details to prevent spamming the backend
+      // Error details should be fetched explicitly when needed
       return response.data;
     } catch (error) {
       console.error(`Error fetching project ${id}:`, error);
