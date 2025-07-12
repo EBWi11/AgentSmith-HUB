@@ -126,12 +126,21 @@ func GetClusterStatus() map[string]interface{} {
 	// Add other follower nodes (only for leader)
 	if common.IsCurrentNodeLeader() && GlobalHeartbeatManager != nil {
 		nodes := GlobalHeartbeatManager.GetNodes()
+		now := time.Now().Unix()
 		for nodeID, heartbeat := range nodes {
+			// Calculate health status based on heartbeat timing
+			// Healthy: last heartbeat within 10 seconds (missed < 2 heartbeats)
+			// Unhealthy: last heartbeat between 10-120 seconds (missed 2-24 heartbeats)
+			// Offline: > 120 seconds (will be removed by cleanup, won't appear here)
+			timeSinceLastHeartbeat := now - heartbeat.Timestamp
+			isHealthy := timeSinceLastHeartbeat <= 10
+
 			nodeList[nodeID] = map[string]interface{}{
 				"version":   heartbeat.Version,
 				"timestamp": heartbeat.Timestamp,
 				"online":    true,
 				"role":      "follower",
+				"healthy":   isHealthy, // Add health status
 			}
 		}
 	}
@@ -151,7 +160,12 @@ func GetClusterStatus() map[string]interface{} {
 			}
 
 			// Add health status field
-			nodeMap["is_healthy"] = nodeMap["online"] // Frontend expects 'is_healthy' field
+			// For follower nodes, use the calculated health status; for leader, always healthy
+			if healthy, exists := nodeMap["healthy"]; exists {
+				nodeMap["is_healthy"] = healthy // Use calculated health status for followers
+			} else {
+				nodeMap["is_healthy"] = nodeMap["online"] // Leader is always healthy if online
+			}
 
 			// Convert timestamp to proper format
 			if timestamp, exists := nodeMap["timestamp"]; exists {

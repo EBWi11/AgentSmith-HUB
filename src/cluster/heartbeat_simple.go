@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/logger"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,10 +152,22 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 	}
 
 	leaderVersion := GlobalInstructionManager.GetCurrentVersion()
-	// Skip sync if leader is in compaction mode (version 0)
-	if strings.HasSuffix(leaderVersion, ".0") {
-		logger.Debug("Leader in compaction mode, skipping sync", "leader_version", leaderVersion)
-		return
+	// Skip sync only if leader is actually in compaction mode (currentVersion == 0)
+	// Don't skip just because version ends with .0, as that could be a valid final state
+	if leaderVersion != "" && strings.Contains(leaderVersion, ".") {
+		parts := strings.Split(leaderVersion, ".")
+		if len(parts) == 2 {
+			if versionNum, err := strconv.ParseInt(parts[1], 10, 64); err == nil && versionNum == 0 {
+				// Check if this is actually compaction mode by getting the raw version
+				if GlobalInstructionManager != nil {
+					rawVersion := GlobalInstructionManager.currentVersion
+					if rawVersion == 0 {
+						logger.Debug("Leader in compaction mode, skipping sync", "leader_version", leaderVersion)
+						return
+					}
+				}
+			}
+		}
 	}
 
 	if heartbeat.Version != leaderVersion {
@@ -194,7 +207,10 @@ func (hm *HeartbeatManager) cleanupOfflineNodes() {
 			hm.mu.Lock()
 			now := time.Now().Unix()
 			for nodeID, heartbeat := range hm.nodes {
-				if now-heartbeat.Timestamp > 20 {
+				// Remove nodes that haven't sent heartbeat for more than 2 minutes (120 seconds)
+				// With heartbeat every 5 seconds, missing 2 heartbeats means unhealthy (10s),
+				// and missing 24 heartbeats means offline and should be removed (120s)
+				if now-heartbeat.Timestamp > 120 {
 					delete(hm.nodes, nodeID)
 					logger.Debug("Removed offline node", "node_id", nodeID)
 				}

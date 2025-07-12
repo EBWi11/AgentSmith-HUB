@@ -332,7 +332,7 @@ func getDailyMessages(c echo.Context) error {
 		// Return message counts for a specific project or all projects from Redis
 		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(date, projectID, "")
 
-		// Group by ProjectNodeSequence
+		// Group by ProjectNodeSequence and aggregate across all nodes
 		sequenceGroups := make(map[string]map[string]interface{})
 
 		for _, statsData := range dailyStats {
@@ -347,8 +347,9 @@ func getDailyMessages(c echo.Context) error {
 				}
 			}
 
-			sequenceGroups[sequenceKey]["total_messages"] = statsData.TotalMessages
-			sequenceGroups[sequenceKey]["daily_messages"] = statsData.TotalMessages // For daily stats, these are the same
+			// ✅ 修复：使用累加而不是覆盖，正确聚合多个节点的数据
+			sequenceGroups[sequenceKey]["total_messages"] = sequenceGroups[sequenceKey]["total_messages"].(uint64) + statsData.TotalMessages
+			sequenceGroups[sequenceKey]["daily_messages"] = sequenceGroups[sequenceKey]["daily_messages"].(uint64) + statsData.TotalMessages // For daily stats, these are the same
 		}
 
 		result = sequenceGroups

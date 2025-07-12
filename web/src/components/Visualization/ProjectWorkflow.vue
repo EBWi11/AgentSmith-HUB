@@ -478,9 +478,11 @@ function updateNodesWithMessages() {
     
     // Calculate total messages using the project node sequences from backend
     let totalMessages = 0;
+    // Check both data field and root level for compatibility
+    const sourceData = messageData.value.data || messageData.value;
     for (const sequence of projectNodeSequences) {
-      if (messageData.value[sequence] && typeof messageData.value[sequence] === 'object') {
-        totalMessages += messageData.value[sequence].daily_messages || 0;
+      if (sourceData[sequence] && typeof sourceData[sequence] === 'object') {
+        totalMessages += sourceData[sequence].daily_messages || 0;
       }
     }
     
@@ -525,8 +527,8 @@ async function fetchMessageData() {
       hubApi.getProjectComponentSequences(props.projectId)
     ]);
     
-    messageData.value = messageResponse.data || {};
-    componentSequences.value = sequenceResponse.data || {};
+    messageData.value = messageResponse || {};
+    componentSequences.value = sequenceResponse.data.data || {};
     
     // Update nodes with message data (including 0 values)
     updateNodesWithMessages();

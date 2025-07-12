@@ -641,7 +641,16 @@ const sortedProjects = computed(() => {
 // Hub total statistics (all projects, not just running) - uses aggregated cluster data
 // Focus on Hub's input and output throughput
 const hubTotalStats = computed(() => {
-  // 如果后端已提供汇总字段，直接使用
+  // 检查 data 字段中的汇总数据（后端返回格式）
+  if (messageData.value.data && messageData.value.data.total_input_messages !== undefined) {
+    return {
+      input: messageData.value.data.total_input_messages || 0,
+      output: messageData.value.data.total_output_messages || 0,
+      total: (messageData.value.data.total_input_messages || 0) + (messageData.value.data.total_output_messages || 0)
+    }
+  }
+
+  // 兼容旧格式：直接从根级别访问汇总字段
   if (messageData.value.total_input_messages !== undefined) {
     return {
       input: messageData.value.total_input_messages || 0,
@@ -653,12 +662,21 @@ const hubTotalStats = computed(() => {
   // 兼容旧格式：从 project_breakdown 汇总
   let input = 0
   let output = 0
-  if (messageData.value.project_breakdown) {
+  
+  // 检查 data 字段中的 project_breakdown
+  if (messageData.value.data && messageData.value.data.project_breakdown) {
+    Object.values(messageData.value.data.project_breakdown).forEach(projectData => {
+      input += projectData.input || 0
+      output += projectData.output || 0
+    })
+  } else if (messageData.value.project_breakdown) {
+    // 兼容直接在根级别的 project_breakdown
     Object.values(messageData.value.project_breakdown).forEach(projectData => {
       input += projectData.input || 0
       output += projectData.output || 0
     })
   }
+  
   return {
     input,
     output,
@@ -722,7 +740,17 @@ async function loadClusterConsistencyData() {
 
 // Get message statistics for a specific project from aggregated cluster data
 function getProjectMessageStats(projectId) {
-  // First try to get data from aggregated project breakdown (this is the most reliable)
+  // 首先尝试从 data 字段中获取项目分解数据（后端返回格式）
+  if (messageData.value.data && messageData.value.data.project_breakdown && messageData.value.data.project_breakdown[projectId]) {
+    const projectData = messageData.value.data.project_breakdown[projectId]
+    return {
+      input: projectData.input || 0,
+      output: projectData.output || 0,
+      ruleset: projectData.ruleset || 0 // Now include ruleset processing statistics
+    }
+  }
+  
+  // 兼容旧格式：直接从根级别访问项目分解数据
   if (messageData.value.project_breakdown && messageData.value.project_breakdown[projectId]) {
     const projectData = messageData.value.project_breakdown[projectId]
     return {
@@ -745,9 +773,10 @@ function getProjectMessageStats(projectId) {
     breakdown: { input: [], output: [], ruleset: [] }
   }
   
-  // Check if messageData.value contains ProjectNodeSequence keys directly
-  if (messageData.value && typeof messageData.value === 'object') {
-    for (const [key, componentData] of Object.entries(messageData.value)) {
+  // Check if messageData.value.data contains ProjectNodeSequence keys directly
+  let sourceData = messageData.value.data || messageData.value
+  if (sourceData && typeof sourceData === 'object') {
+    for (const [key, componentData] of Object.entries(sourceData)) {
       if (componentData && typeof componentData === 'object' && componentData.component_type) {
         // Use daily_messages for MSG/D display instead of cumulative totals
         const dailyMessages = componentData.daily_messages || 0
@@ -1054,7 +1083,7 @@ async function refreshStats() {
       dataCache.fetchPluginStats(new Date().toISOString().split('T')[0])
     ])
 
-    messageData.value = messageResponse.data || messageResponse || {}
+    messageData.value = messageResponse || {}
     systemData.value = systemResponse || {}
     pluginStatsData.value = pluginStatsResponse || {}
 
