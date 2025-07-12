@@ -47,6 +47,7 @@
             <option value="project_start">Project Start</option>
             <option value="project_stop">Project Stop</option>
             <option value="project_restart">Project Restart</option>
+            <option value="instruction_publish">Instruction Publish</option>
           </select>
         </div>
 
@@ -617,7 +618,8 @@ function getOperationTypeLabel(type) {
     'component_delete': 'Component Delete',
     'project_start': 'Project Start',
     'project_stop': 'Project Stop',
-    'project_restart': 'Project Restart'
+    'project_restart': 'Project Restart',
+    'instruction_publish': 'Instruction Publish'
   }
   return labels[type] || type
 }
@@ -629,7 +631,8 @@ function getOperationTypeClass(type) {
     'component_delete': 'bg-red-600',
     'project_start': 'bg-green-500',
     'project_stop': 'bg-red-500',
-    'project_restart': 'bg-orange-500'
+    'project_restart': 'bg-orange-500',
+    'instruction_publish': 'bg-indigo-500'
   }
   return classes[type] || 'bg-gray-500'
 }
@@ -641,7 +644,8 @@ function getOperationTypeIcon(type) {
     'component_delete': '<path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>',
     'project_start': '<path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2z"/>',
     'project_stop': '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>',
-    'project_restart': '<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>'
+    'project_restart': '<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>',
+    'instruction_publish': '<path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
   }
   return icons[type] || '<path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
 }

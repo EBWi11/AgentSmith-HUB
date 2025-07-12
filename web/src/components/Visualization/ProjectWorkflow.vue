@@ -278,8 +278,26 @@ async function viewSampleData() {
           });
           
           if (response && response[nodeType]) {
-            // Merge sample data from all project node sequences
-            Object.assign(allSampleData, response[nodeType]);
+            // Filter and merge sample data from all project node sequences
+            Object.keys(response[nodeType]).forEach(seqKey => {
+              // Split the sequence and get the component parts (after the project prefix)
+              const parts = seqKey.split(':')
+              if (parts.length >= 2) {
+                const sequencePart = parts[1] // The part after "projectId:"
+                const sequenceComponents = sequencePart.split('.')
+                
+                // Check if this sequence ends with our target component
+                if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
+                  const lastComponentType = sequenceComponents[sequenceComponents.length - 2]
+                  const lastComponentId = sequenceComponents[sequenceComponents.length - 1]
+                  
+                  // Only include sequences that end with our component
+                  if (lastComponentType === nodeType && lastComponentId === componentId) {
+                    allSampleData[seqKey] = response[nodeType][seqKey]
+                  }
+                }
+              }
+            })
           }
         } catch (error) {
           console.warn(`Failed to fetch sample data for ${projectNodeSequence}:`, error);
@@ -291,10 +309,33 @@ async function viewSampleData() {
       const response = await hubApi.getSamplerData({
         name: nodeType,
         projectNodeSequence: `${nodeType.toUpperCase()}.${componentId}`
-      });
+      })
       
       if (response && response[nodeType]) {
-        allSampleData = response[nodeType];
+        // Filter the sample data to only show sequences that belong to this component
+        const filteredData = {}
+        
+        Object.keys(response[nodeType]).forEach(projectNodeSequence => {
+          // Split the sequence and get the component parts (after the project prefix)
+          const parts = projectNodeSequence.split(':')
+          if (parts.length >= 2) {
+            const sequencePart = parts[1] // The part after "projectId:"
+            const sequenceComponents = sequencePart.split('.')
+            
+            // Check if this sequence ends with our target component
+            if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
+              const lastComponentType = sequenceComponents[sequenceComponents.length - 2]
+              const lastComponentId = sequenceComponents[sequenceComponents.length - 1]
+              
+              // Only include sequences that end with our component
+              if (lastComponentType === nodeType && lastComponentId === componentId) {
+                filteredData[projectNodeSequence] = response[nodeType][projectNodeSequence]
+              }
+            }
+          }
+        })
+        
+        allSampleData = filteredData
       }
     }
     

@@ -3288,8 +3288,34 @@ async function fetchSampleData(componentType, id) {
     })
     
     if (response && response[componentType]) {
-      // The response structure is: { [componentType]: { [projectNodeSequence]: [samples] } }
-      sampleData.value = response[componentType]
+      // Filter the sample data to only show sequences that belong to this component
+      // For a component, we should only show sequences that END with this component,
+      // not sequences that pass through this component and continue to other components
+      const filteredData = {}
+      
+      Object.keys(response[componentType]).forEach(projectNodeSequence => {
+        // Split the sequence and get the component parts (after the project prefix)
+        const parts = projectNodeSequence.split(':')
+        if (parts.length >= 2) {
+          const sequencePart = parts[1] // The part after "projectId:"
+          const sequenceComponents = sequencePart.split('.')
+          
+          // Check if this sequence ends with our target component
+          // Sequence format: component1.id1.component2.id2.component3.id3...
+          // We need to check if the last component pair matches our component
+          if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
+            const lastComponentType = sequenceComponents[sequenceComponents.length - 2]
+            const lastComponentId = sequenceComponents[sequenceComponents.length - 1]
+            
+            // Only include sequences that end with our component
+            if (lastComponentType === componentType && lastComponentId === id) {
+              filteredData[projectNodeSequence] = response[componentType][projectNodeSequence]
+            }
+          }
+        }
+      })
+      
+      sampleData.value = filteredData
     } else {
       sampleData.value = {}
     }

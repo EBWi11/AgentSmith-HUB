@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-gray-50 min-h-full max-h-screen overflow-y-auto">
+  <div class="bg-gray-50 h-full overflow-y-auto">
     <!-- Header -->
     <div class="px-6 pt-6 pb-2">
       <h1 class="text-3xl font-bold text-gray-900">AgentSmith Hub Dashboard</h1>
@@ -7,7 +7,7 @@
     </div>
 
     <!-- Main Content with consistent padding -->
-    <div class="px-6 pb-6 space-y-4">
+    <div class="px-6 pb-8 space-y-4">
 
     <!-- Quick Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -471,7 +471,7 @@
     </div>
 
     <!-- Last Updated -->
-    <div class="text-center text-sm text-gray-500 flex items-center justify-center space-x-2">
+    <div class="text-center text-sm text-gray-500 flex items-center justify-center space-x-2 mt-6 mb-4">
       <span>Last updated: {{ lastUpdated }}</span>
       <div v-if="loading.stats" class="flex items-center">
         <div class="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
