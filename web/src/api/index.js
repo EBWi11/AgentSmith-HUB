@@ -147,10 +147,10 @@ export const hubApi = {
         response = response.filter(item => {
           // For plugins, check if has name field; for other components, check if has id field
           if (type === 'plugins' && !item.name && item.id) {
-            console.warn(`Filtered out invalid plugin item:`, item);
+            // console.warn(`Filtered out invalid plugin item:`, item);
             return false;
           } else if (type !== 'plugins' && !item.id) {
-            console.warn(`Filtered out invalid ${type} item:`, item);
+            // console.warn(`Filtered out invalid ${type} item:`, item);
             return false;
           }
           return true;
@@ -202,7 +202,7 @@ export const hubApi = {
             response.data.errorMessage = errorResponse.data.error;
           }
         } catch (errorFetchError) {
-          console.warn(`Failed to fetch error details for project ${id}:`, errorFetchError);
+          // console.warn(`Failed to fetch error details for project ${id}:`, errorFetchError);
           // Set a default error message
           response.data.errorMessage = "Unknown error occurred";
         }
@@ -1154,7 +1154,7 @@ export const hubApi = {
       } catch (error) {
         // If the API returns 404, it means that the component does not exist
         if (error.response && error.response.status === 404) {
-          console.debug(`${type} ${id} not found`);
+          // console.debug(`${type} ${id} not found`);
         } else {
           console.error(`Error fetching ${type} ${id}:`, error);
         }
@@ -1244,7 +1244,7 @@ export const hubApi = {
       const response = await api.get(`/ruleset-fields/${id}`);
       return response.data;
     } catch (error) {
-      console.warn(`Failed to fetch ruleset fields for ${id}:`, error);
+              // console.warn(`Failed to fetch ruleset fields for ${id}:`, error);
       return { fieldKeys: [], sampleCount: 0 };
     }
   },
@@ -1469,14 +1469,11 @@ export const hubApi = {
     }
   },
 
+  // getClusterErrorLogs - DEPRECATED: Use getErrorLogs instead
+  // This function is kept for backward compatibility but redirects to the unified endpoint
   async getClusterErrorLogs(params = {}) {
-    try {
-      const response = await api.get('/cluster-error-logs', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching cluster error logs:', error);
-      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch cluster error logs');
-    }
+    // console.warn('getClusterErrorLogs is deprecated - use getErrorLogs instead');
+    return this.getErrorLogs(params);
   },
 
   // Search components configuration
@@ -1504,15 +1501,11 @@ export const hubApi = {
     }
   },
 
+  // getClusterOperationsHistory - DEPRECATED: Use getOperationsHistory instead
+  // This function is kept for backward compatibility but redirects to the unified endpoint
   async getClusterOperationsHistory(params = '') {
-    try {
-      const url = '/cluster-operations-history' + (params ? '?' + params : '');
-      const response = await api.get(url);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching cluster operations history:', error);
-      throw error;
-    }
+    // console.warn('getClusterOperationsHistory is deprecated - use getOperationsHistory instead');
+    return this.getOperationsHistory(params);
   },
 
   async getOperationsStats() {

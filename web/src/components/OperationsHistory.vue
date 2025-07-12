@@ -460,35 +460,11 @@ async function fetchOperationsHistory() {
     params.append('limit', pageSize.value.toString())
     params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
 
-    let response
-    const needCluster = filters.value.nodeId === 'all'
-    const isLeaderNode = clusterInfo.value.status === 'leader'
-
-    if (needCluster) {
-      if (isLeaderNode) {
-        // call local leader endpoint
-        response = await hubApi.getClusterOperationsHistory(params.toString())
-        // Node statistics feature removed – ignore response.node_stats
-      } else if (clusterInfo.value.leader_address) {
-        // call remote leader address directly
-        const leaderBase = `http://${clusterInfo.value.leader_address}`
-        const token = localStorage.getItem('auth_token') || ''
-        const instance = axios.create({ baseURL: leaderBase, timeout: 15000, headers: { token } })
-        const url = '/cluster-operations-history' + (params ? '?' + params.toString() : '')
-        const res = await instance.get(url)
-        response = res.data
-        // ignore node stats
-      }
-    }
-
-    // if response still undefined, show error (follower nodes don't have local history API)
-    if (!response) {
-      error.value = 'Operations history is only available on the leader node'
-      return
-    }
+    // Use unified operations history endpoint - works for both leader and follower nodes
+    const response = await hubApi.getOperationsHistory(params.toString())
     
     // Ensure each operation has node_id; default to self if missing
-    const selfId = clusterInfo.value.self_id || 'leader'
+    const selfId = clusterInfo.value.self_id || 'unknown'
     const ops = (response.operations || []).map(op => {
       if (!op.node_id && !(op.details && op.details.node_id)) {
         if (!op.details) op.details = {}
@@ -500,35 +476,20 @@ async function fetchOperationsHistory() {
 
     totalCount.value = response.total_count || ops.length
     
-    // Update available nodes information
-    if (response.available_nodes) {
-      availableNodes.value = response.available_nodes
-    } else if (response.node_stats) {
-      availableNodes.value = Object.keys(response.node_stats)
-    } else {
-      const nodesSet = new Set()
-      ops.forEach(op => {
-        if (op.details?.node_id) nodesSet.add(op.details.node_id)
-      })
-      availableNodes.value = Array.from(nodesSet)
-
-      // Ensure current selected nodeId exists in list (except 'all')
-      if (filters.value.nodeId !== 'all' && !availableNodes.value.includes(filters.value.nodeId)) {
-        availableNodes.value.push(filters.value.nodeId)
+    // Update available nodes information from operations
+    const nodeIds = new Set()
+    ops.forEach(op => {
+      if (op.details && op.details.node_id) {
+        nodeIds.add(op.details.node_id)
       }
-    }
-
-    // Fallback: ensure self node appears at least once
-    if (availableNodes.value.length === 0 && selfId) {
-      availableNodes.value = [selfId]
-    }
+    })
+    availableNodes.value = Array.from(nodeIds)
     
-    // Wait for DOM update then refresh editor layout
-    await nextTick()
-    refreshEditorsLayout()
   } catch (e) {
-    error.value = 'Failed to fetch operations history: ' + (e?.message || 'Unknown error')
-    $message?.error?.('Failed to fetch operations history')
+    console.error('Error fetching operations history:', e)
+    error.value = e.message || 'Failed to fetch operations history'
+    operations.value = []
+    totalCount.value = 0
   } finally {
     loading.value = false
   }

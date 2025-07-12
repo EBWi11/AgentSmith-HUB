@@ -246,6 +246,7 @@ import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/common'
 import { useDataCacheStore } from '../stores/dataCache'
+import axios from 'axios'
 
 // Inject global message service
 const $message = inject('$message')
@@ -395,58 +396,39 @@ const fetchErrorLogs = async () => {
   try {
     const params = buildApiParams()
     
-    // Use cluster API if available and not filtering by specific node
-    let response
-    if (isClusterMode.value && filters.nodeId === 'all') {
-      response = await hubApi.getClusterErrorLogs(params)
-      // Handle cluster response format (ClusterErrorLogResponse)
-      logs.value = response.logs || []
-      totalCount.value = response.total_count || 0
-      
-      // Extract available nodes from node_stats
-      if (response.node_stats) {
-        availableNodes.value = Object.keys(response.node_stats).map(nodeId => ({
-          id: nodeId,
-          name: nodeId
-        }))
+    // Use unified error logs endpoint - always call /error-logs
+    // The backend will handle cluster aggregation automatically
+    const response = await hubApi.getErrorLogs(params)
+    
+    logs.value = response.logs || []
+    totalCount.value = response.total_count || 0
+    
+    // Extract available nodes from logs
+    const nodes = new Set()
+    logs.value.forEach(log => {
+      if (log.node_id) {
+        nodes.add(log.node_id)
       }
-      
-      // Store node stats for potential future use
-      nodeStats.value = response.node_stats || {}
-    } else {
-      response = await hubApi.getErrorLogs(params)
-      // Handle regular response format (ErrorLogResponse)
-      logs.value = response.logs || []
-      totalCount.value = response.total_count || 0
-      nodeStats.value = {}
-    }
+    })
+    
+    availableNodes.value = Array.from(nodes).map(nodeId => ({
+      id: nodeId,
+      name: nodeId
+    }))
 
-    // Fallback: extract available nodes from logs if not already set
-    if (availableNodes.value.length === 0) {
-      const nodes = new Set()
-      logs.value.forEach(log => {
-        if (log.node_id) {
-          nodes.add(log.node_id)
-        }
-      })
-      
-      availableNodes.value = Array.from(nodes).map(nodeId => ({
-        id: nodeId,
-        name: nodeId
-      }))
-
-      if (filters.nodeId !== 'all' && !availableNodes.value.some(n => n.id === filters.nodeId)) {
-        availableNodes.value.push({ id: filters.nodeId, name: filters.nodeId })
-      }
-    }
-
-    // Ensure self node present
+    // Ensure current node is in the list if no logs found
     if (availableNodes.value.length === 0 && clusterInfo.value.self_id) {
       availableNodes.value = [{ id: clusterInfo.value.self_id, name: clusterInfo.value.self_id }]
     }
 
   } catch (err) {
     error.value = err.message
+    
+    // Check if this is a follower node access error
+    if (err.message.includes('only available on the leader node')) {
+      error.value = 'Error logs are only available on the leader node. Please access the leader node to view error logs from all cluster nodes.'
+    }
+    
     $message?.error?.('Failed to fetch error logs: ' + err.message)
   } finally {
     loading.value = false
