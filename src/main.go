@@ -68,6 +68,44 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Reinitialize logger with Redis error log writing capability
+	logger.InitLoggerWithRedis(func(entry logger.RedisErrorLogEntry) error {
+		// Convert logger entry to common entry format
+		commonEntry := common.ErrorLogEntry{
+			Timestamp: entry.Timestamp,
+			Level:     entry.Level,
+			Message:   entry.Message,
+			Source:    entry.Source,
+			NodeID:    entry.NodeID,
+			Function:  entry.Function,
+			File:      entry.File,
+			Line:      entry.Line,
+			Error:     entry.Error,
+			Details:   entry.Details,
+		}
+		return common.WriteErrorLogToRedis(commonEntry)
+	})
+
+	// Reinitialize plugin logger with Redis error log writing capability
+	logger.InitPluginLoggerWithRedis(func(entry logger.RedisErrorLogEntry) error {
+		// Convert logger entry to common entry format
+		commonEntry := common.ErrorLogEntry{
+			Timestamp: entry.Timestamp,
+			Level:     entry.Level,
+			Message:   entry.Message,
+			Source:    entry.Source,
+			NodeID:    entry.NodeID,
+			Function:  entry.Function,
+			File:      entry.File,
+			Line:      entry.Line,
+			Error:     entry.Error,
+			Details:   entry.Details,
+		}
+		return common.WriteErrorLogToRedis(commonEntry)
+	})
+
+	logger.Info("Redis-enabled error logging initialized")
+
 	// Initialize daily statistics manager (tracks real message counts)
 	common.InitDailyStatsManager()
 
@@ -122,9 +160,7 @@ func main() {
 		go api.ServerStart(listenAddr) // start Echo API on specified port
 	} else {
 		// Follower services
-		// Start error log uploader for follower nodes
-		api.StartErrorLogUploader()
-
+		// Note: Error log uploader removed - all nodes write directly to Redis in real-time
 		// Note: Operation history uploader removed - all nodes write directly to Redis
 
 		// Token will be read by follower API server at startup
