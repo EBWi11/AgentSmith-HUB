@@ -1446,14 +1446,6 @@ func updateComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
 	}
 
-	// Publish instruction for component update (NEW - this was missing!)
-	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
-		if err := cluster.GlobalInstructionManager.PublishComponentUpdate(componentType, id, req.Raw, nil); err != nil {
-			logger.Error("Failed to publish component update instruction", "type", componentType, "id", id, "error", err)
-			// Don't fail the request, but log the error
-		}
-	}
-
 	// Create enhanced response with deployment guidance
 	componentTypeName := strings.ToTitle(componentType)
 

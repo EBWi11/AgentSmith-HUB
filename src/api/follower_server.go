@@ -81,8 +81,6 @@ func ServerStartFollower(listenAddr string) error {
 		})
 	})
 
-	e.GET("/cluster-status", getClusterStatus)
-
 	// Protected endpoints (require authentication)
 	auth := e.Group("", authMiddleware)
 
@@ -119,11 +117,6 @@ func ServerStartFollower(listenAddr string) error {
 	// Read-only analysis endpoints
 	auth.GET("/component-usage/:type/:id", GetComponentUsage)
 	auth.GET("/search-components", searchComponentsConfig)
-
-	// 移除错误日志和操作历史接口 - 只有leader节点才能提供这些接口
-	// auth.GET("/error-logs", getErrorLogs)
-	// auth.GET("/operations-history", GetOperationsHistory)
-	// auth.GET("/operations-stats", GetOperationsStats)
 
 	// Block all write operations with helpful error messages
 	blockWriteOperation := func(c echo.Context) error {
