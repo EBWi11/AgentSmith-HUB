@@ -1019,12 +1019,19 @@ func (p *Project) Start() error {
 		}
 	}
 
-	// Check if project was in error state - if so, force full reload
+	// Check if project was in error state or stopped state - both need force full reload
 	wasErrorState := p.Status == ProjectStatusError
-	if wasErrorState && !isTestMode {
-		logger.Info("Project was in error state, will force full component reload", "project", p.Id, "previous_error", p.Err)
-		// Clear the error state and force reload
-		p.Err = nil
+	wasStoppedState := p.Status == ProjectStatusStopped
+	needsForceReload := wasErrorState || wasStoppedState
+
+	if needsForceReload && !isTestMode {
+		if wasErrorState {
+			logger.Info("Project was in error state, will force full component reload", "project", p.Id, "previous_error", p.Err)
+			// Clear the error state and force reload
+			p.Err = nil
+		} else if wasStoppedState {
+			logger.Info("Project was stopped, will force full component reload to restore all references", "project", p.Id)
+		}
 	}
 
 	// In test mode, bypass status checks but in production mode, enforce them
@@ -1064,8 +1071,8 @@ func (p *Project) Start() error {
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
-	// Load components from global registry - force reload if was in error state
-	err = p.loadComponentsFromGlobal(flowGraph, wasErrorState)
+	// Load components from global registry - force reload if was in error or stopped state
+	err = p.loadComponentsFromGlobal(flowGraph, needsForceReload)
 	if err != nil {
 		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to load components: %v", err)
@@ -1240,6 +1247,9 @@ func (p *Project) Stop() error {
 			logger.Error("Project stop completed with error", "project", p.Id, "error", err)
 			return err
 		}
+		// Ensure the final 'stopped' status is synced to Redis
+		// This is important for cluster visibility, especially for followers
+		p.setProjectStatus(ProjectStatusStopped, nil)
 		logger.Info("Project stopped successfully", "project", p.Id)
 		return nil
 	case <-overallTimeout:
