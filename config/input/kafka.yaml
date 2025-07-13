@@ -1,0 +1,6 @@
+type: kafka
+kafka:
+  brokers:
+    - 192.168.124.9:9092
+  topic: test-topic-2
+  group: test

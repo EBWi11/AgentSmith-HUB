@@ -1,0 +1,5 @@
+<root author="name">
+    <rule id="rule_id">
+        <check type="INCL" field="name">John</check>
+    </rule>
+</root>
