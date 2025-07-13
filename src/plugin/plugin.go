@@ -47,6 +47,10 @@ type Plugin struct {
 	// Plugin statistics (atomic counters)
 	successTotal uint64 // Total successful invocations
 	failureTotal uint64 // Total failed invocations
+
+	// Statistics difference counters for increment calculation (like other components)
+	lastReportedSuccessTotal uint64 // Last reported success total for increment calculation
+	lastReportedFailureTotal uint64 // Last reported failure total for increment calculation
 }
 
 // PluginParameter represents a function parameter
@@ -729,16 +733,6 @@ func isStandardLibraryPackage(pkg string) bool {
 	return stdLibPackages[pkg]
 }
 
-// GetSuccessTotal returns the total number of successful plugin invocations
-func (p *Plugin) GetSuccessTotal() uint64 {
-	return atomic.LoadUint64(&p.successTotal)
-}
-
-// GetFailureTotal returns the total number of failed plugin invocations
-func (p *Plugin) GetFailureTotal() uint64 {
-	return atomic.LoadUint64(&p.failureTotal)
-}
-
 // RecordInvocation increments the appropriate counter based on success/failure
 func (p *Plugin) RecordInvocation(success bool) {
 	if success {
@@ -746,4 +740,36 @@ func (p *Plugin) RecordInvocation(success bool) {
 	} else {
 		atomic.AddUint64(&p.failureTotal, 1)
 	}
+}
+
+// GetSuccessIncrementAndUpdate returns the increment in success count since last call and updates the baseline
+func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
+	currentTotal := atomic.LoadUint64(&p.successTotal)
+	lastReported := atomic.SwapUint64(&p.lastReportedSuccessTotal, currentTotal)
+	return currentTotal - lastReported
+}
+
+// GetFailureIncrementAndUpdate returns the increment in failure count since last call and updates the baseline
+func (p *Plugin) GetFailureIncrementAndUpdate() uint64 {
+	currentTotal := atomic.LoadUint64(&p.failureTotal)
+	lastReported := atomic.SwapUint64(&p.lastReportedFailureTotal, currentTotal)
+	return currentTotal - lastReported
+}
+
+// ResetSuccessTotal resets the success counter and baseline (for restart scenarios)
+func (p *Plugin) ResetSuccessTotal() {
+	atomic.StoreUint64(&p.successTotal, 0)
+	atomic.StoreUint64(&p.lastReportedSuccessTotal, 0)
+}
+
+// ResetFailureTotal resets the failure counter and baseline (for restart scenarios)
+func (p *Plugin) ResetFailureTotal() {
+	atomic.StoreUint64(&p.failureTotal, 0)
+	atomic.StoreUint64(&p.lastReportedFailureTotal, 0)
+}
+
+// ResetAllStats resets all statistics counters (for restart scenarios)
+func (p *Plugin) ResetAllStats() {
+	p.ResetSuccessTotal()
+	p.ResetFailureTotal()
 }

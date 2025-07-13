@@ -97,8 +97,11 @@ func (r *Ruleset) Start() error {
 						// Test mode is identified by ProjectNodeSequence starting with "TEST."
 						isTestMode := strings.HasPrefix(r.ProjectNodeSequence, "TEST.")
 						if !isTestMode {
-							// Optimization: only increment total count, QPS is calculated by metricLoop
-							atomic.AddUint64(&r.processTotal, 1)
+							// IMPORTANT: Move counting AFTER successful task execution
+							// This ensures we only count messages that are actually processed
+							defer func() {
+								atomic.AddUint64(&r.processTotal, 1)
+							}()
 
 							// IMPORTANT: Sample the input data BEFORE rule checking starts
 							// This ensures we capture the raw data entering the ruleset for analysis
@@ -113,14 +116,55 @@ func (r *Ruleset) Start() error {
 
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
-						// Send results to downstream channels
+						// Send results to downstream channels with blocking writes to ensure no data loss
 						for _, res := range results {
-							for _, downCh := range r.DownStream {
+							for i, downCh := range r.DownStream {
+								// Check if downstream channel is getting full
+								chLen := len(*downCh)
+								chCap := cap(*downCh)
+								if chLen > chCap*3/4 {
+									logger.Debug("Downstream channel getting full, but waiting to ensure no data loss",
+										"ruleset", r.RulesetID,
+										"channel_index", i,
+										"channel_length", chLen,
+										"channel_capacity", chCap)
+								}
+
+								// Blocking write to ensure data is never lost
+								// If downstream is slow, we wait - data integrity is more important than speed
 								*downCh <- res
 							}
 						}
 					}
-					_ = r.antsPool.Submit(task)
+
+					// Handle task submission with retry mechanism to ensure no data loss
+					for {
+						err := r.antsPool.Submit(task)
+						if err == nil {
+							// Successfully submitted
+							break
+						}
+
+						// If submission failed, log and retry after a short delay
+						logger.Debug("Thread pool submit failed, retrying",
+							"ruleset", r.RulesetID,
+							"error", err,
+							"pool_running", r.antsPool.Running(),
+							"pool_capacity", r.antsPool.Cap())
+
+						// Check if we should stop retrying (ruleset is shutting down)
+						select {
+						case <-r.stopChan:
+							// Ruleset is stopping, execute synchronously to not lose the message
+							logger.Info("Ruleset stopping, executing final task synchronously",
+								"ruleset", r.RulesetID)
+							task()
+							return
+						default:
+							// Wait a bit and retry - prioritize data integrity over latency
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
 				}
 			}
 		}(upID, upCh)
@@ -224,9 +268,35 @@ func (r *Ruleset) Stop() error {
 		logger.Warn("Ruleset stop timeout exceeded, forcing shutdown", "ruleset", r.RulesetID)
 	}
 
+	// Wait for all tasks in thread pool to complete before releasing
 	if r.antsPool != nil {
+		logger.Info("Waiting for thread pool tasks to complete", "ruleset", r.RulesetID)
+
+		// Wait for all running tasks to complete with timeout
+		poolWaitTimeout := time.After(15 * time.Second)
+		for {
+			select {
+			case <-poolWaitTimeout:
+				logger.Warn("Timeout waiting for thread pool tasks, forcing release",
+					"ruleset", r.RulesetID,
+					"running_tasks", r.antsPool.Running())
+				goto releasePool
+			default:
+				if r.antsPool.Running() == 0 {
+					logger.Info("All thread pool tasks completed", "ruleset", r.RulesetID)
+					goto releasePool
+				}
+				logger.Debug("Still waiting for thread pool tasks",
+					"ruleset", r.RulesetID,
+					"running_tasks", r.antsPool.Running())
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+	releasePool:
 		r.antsPool.Release()
 		r.antsPool = nil
+		logger.Info("Thread pool released", "ruleset", r.RulesetID)
 	}
 	r.stopChan = nil
 
@@ -240,6 +310,13 @@ func (r *Ruleset) Stop() error {
 	if r.CacheForClassify != nil {
 		r.CacheForClassify.Close()
 	}
+
+	// Reset atomic counter for restart
+	previousTotal := atomic.LoadUint64(&r.processTotal)
+	atomic.StoreUint64(&r.processTotal, 0)
+	logger.Debug("Reset atomic counter for ruleset component", "ruleset", r.RulesetID, "previous_total", previousTotal)
+
+	// Note: ResetDiffCounter no longer needed - component manages its own increments
 
 	return nil
 }
@@ -270,6 +347,12 @@ func (r *Ruleset) StopForTesting() error {
 	if r.CacheForClassify != nil {
 		r.CacheForClassify.Close()
 	}
+
+	// Reset atomic counter for testing cleanup
+	previousTotal := atomic.LoadUint64(&r.processTotal)
+	atomic.StoreUint64(&r.processTotal, 0)
+	atomic.StoreUint64(&r.lastReportedTotal, 0)
+	logger.Debug("Reset atomic counter for test ruleset component", "ruleset", r.RulesetID, "previous_total", previousTotal)
 
 	logger.Info("Test ruleset stopped", "ruleset", r.RulesetID)
 	return nil
@@ -723,4 +806,26 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 // GetProcessTotal returns the total processed message count.
 func (r *Ruleset) GetProcessTotal() uint64 {
 	return atomic.LoadUint64(&r.processTotal)
+}
+
+// ResetProcessTotal resets the total processed count to zero.
+// This should only be called during component cleanup or forced restart.
+func (r *Ruleset) ResetProcessTotal() uint64 {
+	atomic.StoreUint64(&r.lastReportedTotal, 0)
+	return atomic.SwapUint64(&r.processTotal, 0)
+}
+
+// GetIncrementAndUpdate returns the increment since last call and updates the baseline.
+// This method is thread-safe and designed for 10-second statistics collection.
+func (r *Ruleset) GetIncrementAndUpdate() uint64 {
+	current := atomic.LoadUint64(&r.processTotal)
+	last := atomic.SwapUint64(&r.lastReportedTotal, current)
+
+	// Handle potential overflow (though practically impossible with uint64)
+	if current >= last {
+		return current - last
+	} else {
+		// Overflow case: component restarted, return current value as increment
+		return current
+	}
 }

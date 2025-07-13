@@ -203,8 +203,55 @@ func main() {
 				}
 			}
 
-			// Phase 2: Stop all running projects gracefully
-			logger.Info("Phase 2: Stopping all running projects...")
+			// Phase 2: Collect final statistics BEFORE stopping projects to prevent data loss
+			logger.Info("Phase 2: Collecting final statistics to prevent data loss...")
+			if common.GlobalDailyStatsManager != nil {
+				// Manually trigger final collection before projects stop
+				// This ensures any increments from the last 10-second period are saved
+				logger.Info("Performing final statistics collection before stopping projects")
+				// Use a timeout to prevent hanging
+				finalCollectionDone := make(chan struct{})
+				go func() {
+					defer close(finalCollectionDone)
+					// Directly call the collection method which handles everything internally
+					if statsCollector := common.GetStatsCollector(); statsCollector != nil {
+						// Get current component statistics
+						components := statsCollector()
+						logger.Info("Collected final component statistics", "components", len(components))
+
+						if len(components) > 0 {
+							// Filter components with meaningful increments
+							validComponents := make([]common.ComponentStatsData, 0)
+							for _, component := range components {
+								if component.TotalMessages > 0 {
+									validComponents = append(validComponents, component)
+								}
+							}
+
+							logger.Info("Final statistics collection found increments",
+								"valid_components", len(validComponents))
+
+							// Force write final statistics to Redis to prevent data loss
+							if len(validComponents) > 0 {
+								nodeID := common.GetNodeID()
+								// Use force write to ensure data is immediately written to Redis
+								common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(nodeID, validComponents)
+								logger.Info("Force wrote final statistics to Redis to prevent data loss")
+							}
+						}
+					}
+				}()
+
+				select {
+				case <-finalCollectionDone:
+					logger.Info("Final statistics collection completed successfully")
+				case <-time.After(5 * time.Second):
+					logger.Warn("Final statistics collection timeout, proceeding with shutdown")
+				}
+			}
+
+			// Phase 3: Stop all running projects gracefully
+			logger.Info("Phase 3: Stopping all running projects...")
 			projectStopTimeout := 30 * time.Second
 			projectStopCtx, projectStopCancel := context.WithTimeout(context.Background(), projectStopTimeout)
 			defer projectStopCancel()
@@ -270,22 +317,29 @@ func main() {
 
 			logger.Info("Project shutdown phase completed", "stopped", stoppedCount, "failed", failedCount)
 
-			// Phase 3: Stop cluster services
-			logger.Info("Phase 3: Stopping cluster services...")
+			// Phase 4: Stop cluster services
+			logger.Info("Phase 4: Stopping cluster services...")
 			if cluster.GlobalClusterManager != nil {
 				cluster.GlobalClusterManager.Stop()
 			}
 
-			// Phase 4: Stop background services
-			logger.Info("Phase 4: Stopping background services...")
+			// Phase 5: Stop background services
+			logger.Info("Phase 5: Stopping background services...")
 			common.StopClusterSystemManager()
 			common.StopDailyStatsManager()
 			if rsm := common.GetRedisSampleManager(); rsm != nil {
 				rsm.Close()
 			}
 
-			// Phase 5: Final cleanup
-			logger.Info("Phase 5: Final cleanup...")
+			// Phase 5: Reset plugin statistics before shutdown
+			logger.Info("Phase 5: Resetting plugin statistics before shutdown...")
+			for pluginName, pluginInstance := range plugin.Plugins {
+				pluginInstance.ResetAllStats()
+				logger.Debug("Reset plugin statistics for shutdown", "plugin", pluginName)
+			}
+
+			// Phase 6: Final cleanup
+			logger.Info("Phase 6: Final cleanup...")
 			// Force garbage collection to clean up any remaining resources
 			runtime.GC()
 			time.Sleep(100 * time.Millisecond)

@@ -34,9 +34,7 @@ type DailyStatsManager struct {
 	saveInterval   time.Duration
 	retentionDays  int
 
-	// Component restart detection
-	lastSeenCounters map[string]uint64 // Key: "nodeID_projectNodeSequence" -> last seen counter
-	restartDetection bool              // Enable restart detection
+	// Note: diffCounters removed - components now manage their own increments
 
 	// Async Redis write channel
 	redisWriteChan chan *DailyStatsData
@@ -46,15 +44,14 @@ type DailyStatsManager struct {
 // NewDailyStatsManager creates a new daily statistics manager instance
 func NewDailyStatsManager() *DailyStatsManager {
 	dsm := &DailyStatsManager{
-		data:             make(map[string]*DailyStatsData),
-		stopChan:         make(chan struct{}),
-		redisEnabled:     true,               // Default: enabled
-		redisKeyPrefix:   "hub:daily_stats:", // Redis key prefix
-		saveInterval:     10 * time.Second,   // Save every 10 seconds
-		retentionDays:    30,                 // Keep 30 days of data
-		lastSeenCounters: make(map[string]uint64),
-		restartDetection: true,                             // Enable restart detection
-		redisWriteChan:   make(chan *DailyStatsData, 1000), // Buffered channel for async writes
+		data:           make(map[string]*DailyStatsData),
+		stopChan:       make(chan struct{}),
+		redisEnabled:   true,               // Default: enabled
+		redisKeyPrefix: "hub:daily_stats:", // Redis key prefix
+		saveInterval:   10 * time.Second,   // Save every 10 seconds
+		retentionDays:  30,                 // Keep 30 days of data
+
+		redisWriteChan: make(chan *DailyStatsData, 1000), // Buffered channel for async writes
 	}
 
 	// Load existing data from Redis
@@ -115,96 +112,67 @@ func (dsm *DailyStatsManager) writeToRedis(statsData *DailyStatsData, expiration
 	}
 }
 
+// writeToRedisWithIncrement performs atomic increment in Redis and updates metadata
+func (dsm *DailyStatsManager) writeToRedisWithIncrement(statsData *DailyStatsData, increment uint64, expiration int) error {
+	key := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+
+	// Use separate Redis keys for counter and metadata
+	counterKey := dsm.redisKeyPrefix + key + ":counter"
+	metadataKey := dsm.redisKeyPrefix + key + ":metadata"
+
+	// Atomically increment the counter in Redis
+	newTotal, err := RedisIncrby(counterKey, int64(increment))
+	if err != nil {
+		logger.Error("Failed to increment counter in Redis", "key", counterKey, "increment", increment, "error", err)
+		return err
+	}
+
+	// Set expiration for counter key
+	if err := RedisExpire(counterKey, expiration); err != nil {
+		logger.Warn("Failed to set expiration for counter key", "key", counterKey, "error", err)
+	}
+
+	// Update metadata with the new total
+	metadataStatsData := &DailyStatsData{
+		NodeID:              statsData.NodeID,
+		ProjectID:           statsData.ProjectID,
+		ComponentID:         statsData.ComponentID,
+		ComponentType:       statsData.ComponentType,
+		ProjectNodeSequence: statsData.ProjectNodeSequence,
+		Date:                statsData.Date,
+		TotalMessages:       uint64(newTotal), // Use the Redis-returned total
+		LastUpdate:          statsData.LastUpdate,
+	}
+
+	// Store metadata as JSON
+	jsonData, err := json.Marshal(metadataStatsData)
+	if err != nil {
+		logger.Error("Failed to marshal metadata for Redis write", "key", key, "error", err)
+		return err
+	}
+
+	if _, err := RedisSet(metadataKey, string(jsonData), expiration); err != nil {
+		logger.Error("Failed to write metadata to Redis", "key", metadataKey, "error", err)
+		return err
+	}
+
+	logger.Debug("Successfully incremented Redis counter and updated metadata",
+		"counter_key", counterKey,
+		"increment", increment,
+		"new_total", newTotal,
+		"metadata_key", metadataKey)
+
+	return nil
+}
+
 // generateKey creates a unique key for daily statistics. We must include projectID so that
 // multiple projects共享同一个 ProjectNodeSequence 时不会互相覆盖。
 func (dsm *DailyStatsManager) generateKey(date, nodeID, projectID, projectNodeSequence string) string {
 	return fmt.Sprintf("%s_%s_%s_%s", date, nodeID, projectID, projectNodeSequence)
 }
 
-// UpdateDailyStats updates daily statistics for a component
-func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, componentType, projectNodeSequence string, totalMessages uint64) {
-	now := time.Now()
-	date := now.Format("2006-01-02")
-	key := dsm.generateKey(date, nodeID, projectID, projectNodeSequence)
-
-	dsm.mutex.Lock()
-	defer dsm.mutex.Unlock()
-
-	var statsData *DailyStatsData
-	if existing, exists := dsm.data[key]; exists {
-		// Fix: Always use the maximum value to avoid duplicate counting
-		// When component restarts, the component's counter is set to the previous total
-		// So we should always take the maximum value, not add them together
-		if totalMessages > existing.TotalMessages {
-			// Normal monotonic increase – just overwrite
-			existing.TotalMessages = totalMessages
-			logger.Debug("Daily stats updated (normal increase)",
-				"component", componentID,
-				"sequence", projectNodeSequence,
-				"old_total", existing.TotalMessages,
-				"new_total", totalMessages)
-		} else if totalMessages == existing.TotalMessages {
-			// No change in total messages, just update timestamp
-			logger.Debug("Daily stats updated (no change)",
-				"component", componentID,
-				"sequence", projectNodeSequence,
-				"total", totalMessages)
-		} else {
-			// totalMessages < existing.TotalMessages
-			// This could happen if:
-			// 1. Component counter overflow (very unlikely with uint64)
-			// 2. Component was forcibly restarted and counter reset to 0
-			// 3. Time synchronization issues
-			// 4. Data corruption
-
-			// Update to new value but skip Redis write to avoid negative diff calculation
-			// This allows recovery on next update cycle
-			previousTotal := existing.TotalMessages
-			existing.TotalMessages = totalMessages
-			logger.Warn("Daily stats counter decreased - possible overflow or restart, updating value but skipping Redis write",
-				"component", componentID,
-				"sequence", projectNodeSequence,
-				"previous_total", previousTotal,
-				"current_total", totalMessages,
-				"action", "skip_redis_write")
-
-			// Skip Redis write by returning early
-			existing.LastUpdate = now
-			return
-		}
-		existing.LastUpdate = now
-		statsData = existing
-	} else {
-		// Create new data
-		statsData = &DailyStatsData{
-			NodeID:              nodeID,
-			ProjectID:           projectID,
-			ComponentID:         componentID,
-			ComponentType:       componentType,
-			ProjectNodeSequence: projectNodeSequence,
-			Date:                date,
-			TotalMessages:       totalMessages,
-			LastUpdate:          now,
-		}
-		dsm.data[key] = statsData
-		logger.Debug("Created new daily stats entry",
-			"component", componentID,
-			"sequence", projectNodeSequence,
-			"total", totalMessages)
-	}
-
-	// Async Redis write: send data to Redis writer (no lock held during Redis IO)
-	// No copy needed since statsData points to stable memory and Redis writer only reads
-	if dsm.redisEnabled {
-		select {
-		case dsm.redisWriteChan <- statsData:
-			// Successfully queued for async write
-		default:
-			// Channel full, skip this write (will be saved in next periodic save)
-			logger.Warn("Redis write channel full, skipping immediate write", "component", componentID)
-		}
-	}
-}
+// Note: UpdateDailyStats has been removed as it was not being used.
+// All statistics collection is now handled through applyBatchUpdates called from persistenceLoop.
 
 // GetDailyStats returns daily statistics directly from Redis (as user suggested)
 func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[string]*DailyStatsData {
@@ -239,43 +207,87 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 	}
 
 	for _, key := range keys {
-		jsonData, err := RedisGet(key)
-		if err != nil {
-			logger.Error("Failed to get daily stats from Redis", "key", key, "error", err)
-			continue
-		}
+		// Check if this is a metadata key (new format) or legacy key (old format)
+		if strings.HasSuffix(key, ":metadata") {
+			// New format: read from metadata key
+			jsonData, err := RedisGet(key)
+			if err != nil {
+				logger.Error("Failed to get daily stats metadata from Redis", "key", key, "error", err)
+				continue
+			}
 
-		var statsData DailyStatsData
-		if err := json.Unmarshal([]byte(jsonData), &statsData); err != nil {
-			logger.Error("Failed to unmarshal daily stats from Redis", "key", key, "error", err)
-			continue
-		}
+			var statsData DailyStatsData
+			if err := json.Unmarshal([]byte(jsonData), &statsData); err != nil {
+				logger.Error("Failed to unmarshal daily stats metadata from Redis", "key", key, "error", err)
+				continue
+			}
 
-		// Apply additional filters
-		if date != "" && statsData.Date != date {
-			continue
-		}
-		if projectID != "" && statsData.ProjectID != projectID {
-			continue
-		}
-		if nodeID != "" && statsData.NodeID != nodeID {
-			continue
-		}
+			// Apply additional filters
+			if date != "" && statsData.Date != date {
+				continue
+			}
+			if projectID != "" && statsData.ProjectID != projectID {
+				continue
+			}
+			if nodeID != "" && statsData.NodeID != nodeID {
+				continue
+			}
 
-		// Generate internal key for result map
-		internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+			// Generate internal key for result map
+			internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
 
-		// Create a copy to prevent external modification
-		result[internalKey] = &DailyStatsData{
-			NodeID:              statsData.NodeID,
-			ProjectID:           statsData.ProjectID,
-			ComponentID:         statsData.ComponentID,
-			ComponentType:       statsData.ComponentType,
-			ProjectNodeSequence: statsData.ProjectNodeSequence,
-			Date:                statsData.Date,
-			TotalMessages:       statsData.TotalMessages,
-			LastUpdate:          statsData.LastUpdate,
+			// Create a copy to prevent external modification
+			result[internalKey] = &DailyStatsData{
+				NodeID:              statsData.NodeID,
+				ProjectID:           statsData.ProjectID,
+				ComponentID:         statsData.ComponentID,
+				ComponentType:       statsData.ComponentType,
+				ProjectNodeSequence: statsData.ProjectNodeSequence,
+				Date:                statsData.Date,
+				TotalMessages:       statsData.TotalMessages,
+				LastUpdate:          statsData.LastUpdate,
+			}
+		} else if !strings.HasSuffix(key, ":counter") {
+			// Legacy format: read from old JSON key
+			jsonData, err := RedisGet(key)
+			if err != nil {
+				logger.Error("Failed to get daily stats from Redis", "key", key, "error", err)
+				continue
+			}
+
+			var statsData DailyStatsData
+			if err := json.Unmarshal([]byte(jsonData), &statsData); err != nil {
+				logger.Error("Failed to unmarshal daily stats from Redis", "key", key, "error", err)
+				continue
+			}
+
+			// Apply additional filters
+			if date != "" && statsData.Date != date {
+				continue
+			}
+			if projectID != "" && statsData.ProjectID != projectID {
+				continue
+			}
+			if nodeID != "" && statsData.NodeID != nodeID {
+				continue
+			}
+
+			// Generate internal key for result map
+			internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+
+			// Create a copy to prevent external modification
+			result[internalKey] = &DailyStatsData{
+				NodeID:              statsData.NodeID,
+				ProjectID:           statsData.ProjectID,
+				ComponentID:         statsData.ComponentID,
+				ComponentType:       statsData.ComponentType,
+				ProjectNodeSequence: statsData.ProjectNodeSequence,
+				Date:                statsData.Date,
+				TotalMessages:       statsData.TotalMessages,
+				LastUpdate:          statsData.LastUpdate,
+			}
 		}
+		// Skip counter keys as they are handled via metadata keys
 	}
 
 	return result
@@ -382,6 +394,10 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 	ticker := time.NewTicker(dsm.saveInterval)
 	defer ticker.Stop()
 
+	// Cleanup ticker for removing old difference counters (once per hour)
+	cleanupTicker := time.NewTicker(1 * time.Hour)
+	defer cleanupTicker.Stop()
+
 	for {
 		select {
 		case <-dsm.stopChan:
@@ -394,6 +410,8 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 			// Collect latest data from all components, then save to Redis
 			dsm.collectAllComponentsData()
 			dsm.saveToRedis()
+		case <-cleanupTicker.C:
+			// Note: cleanupOldDiffCounters removed - no longer needed
 		}
 	}
 }
@@ -414,7 +432,45 @@ func (dsm *DailyStatsManager) collectAllComponentsData() {
 	dsm.applyBatchUpdates(nodeID, components)
 }
 
-// applyBatchUpdates applies component statistics updates in batch to improve performance
+// CollectAllComponentsData is a public wrapper for collectAllComponentsData
+func (dsm *DailyStatsManager) CollectAllComponentsData() {
+	dsm.collectAllComponentsData()
+}
+
+// CollectFinalStatsBeforeComponentStop collects final statistics for a specific component before it stops
+func (dsm *DailyStatsManager) CollectFinalStatsBeforeComponentStop(componentType, componentID string) {
+	if statsCollector == nil {
+		return
+	}
+
+	logger.Info("Collecting final statistics before component stop", "type", componentType, "id", componentID)
+
+	// Get current component statistics
+	components := statsCollector()
+
+	// Filter for the specific component with meaningful increments
+	componentStats := make([]ComponentStatsData, 0)
+	for _, component := range components {
+		if component.ComponentID == componentID &&
+			strings.Contains(strings.ToLower(component.ComponentType), strings.ToLower(componentType)) &&
+			component.TotalMessages > 0 {
+			componentStats = append(componentStats, component)
+		}
+	}
+
+	if len(componentStats) > 0 {
+		logger.Info("Saving final component statistics before stop",
+			"type", componentType,
+			"id", componentID,
+			"stats_count", len(componentStats))
+
+		// Apply batch updates for these specific component stats
+		nodeID := GetNodeID()
+		dsm.ApplyBatchUpdatesWithForceWrite(nodeID, componentStats)
+	}
+}
+
+// applyBatchUpdates applies component statistics updates in batch using increments from components
 func (dsm *DailyStatsManager) applyBatchUpdates(nodeID string, components []ComponentStatsData) {
 	if len(components) == 0 {
 		return
@@ -423,89 +479,41 @@ func (dsm *DailyStatsManager) applyBatchUpdates(nodeID string, components []Comp
 	now := time.Now()
 	date := now.Format("2006-01-02")
 
-	// Step 1: Process updates while holding lock (fast, in-memory operations only)
+	// Filter components with meaningful increments
+	var validComponents []ComponentStatsData
+	for _, component := range components {
+		// TotalMessages field now contains the increment (from component's GetIncrementAndUpdate)
+		if component.TotalMessages > 0 {
+			validComponents = append(validComponents, component)
+		}
+	}
+
+	if len(validComponents) == 0 {
+		return
+	}
+
+	// Update Redis daily counters (Layer 3) with increments from components
 	dsm.mutex.Lock()
 	var updatesToWrite []*DailyStatsData
 
-	for _, component := range components {
+	for _, component := range validComponents {
 		key := dsm.generateKey(date, nodeID, component.ProjectID, component.ProjectNodeSequence)
-		counterKey := fmt.Sprintf("%s_%s", nodeID, component.ProjectNodeSequence)
+		increment := component.TotalMessages // This is actually the increment now
 
 		var statsData *DailyStatsData
-		var shouldWriteToRedis bool
-
 		if existing, exists := dsm.data[key]; exists {
-			// Check if this is a component restart
-			if dsm.restartDetection {
-				lastCounter, hasLastCounter := dsm.lastSeenCounters[counterKey]
+			// Add increment to existing daily total
+			existing.TotalMessages += increment
+			existing.LastUpdate = now
+			statsData = existing
 
-				if component.TotalMessages < existing.TotalMessages {
-					// Possible restart detected
-					if hasLastCounter && component.TotalMessages < lastCounter {
-						// Confirmed restart: counter went backwards
-						increment := component.TotalMessages // Messages processed since restart
-						existing.TotalMessages = existing.TotalMessages + increment
-
-						logger.Info("Component restart detected, adding increment",
-							"component", component.ComponentID,
-							"sequence", component.ProjectNodeSequence,
-							"previous_total", existing.TotalMessages-increment,
-							"restart_increment", increment,
-							"new_total", existing.TotalMessages)
-						shouldWriteToRedis = true
-					} else {
-						// Possible overflow or restart - update value but skip Redis write
-						previousTotal := existing.TotalMessages
-						existing.TotalMessages = component.TotalMessages
-						logger.Warn("Counter decreased without confirmed restart - possible overflow, updating value but skipping Redis write",
-							"component", component.ComponentID,
-							"sequence", component.ProjectNodeSequence,
-							"previous_total", previousTotal,
-							"current_counter", component.TotalMessages,
-							"action", "skip_redis_write")
-						shouldWriteToRedis = false // Skip Redis write
-					}
-					existing.LastUpdate = now
-					statsData = existing
-				} else if component.TotalMessages > existing.TotalMessages {
-					// Normal increase - data changed, need to write to Redis
-					existing.TotalMessages = component.TotalMessages
-					existing.LastUpdate = now
-					statsData = existing
-					shouldWriteToRedis = true
-				} else {
-					// No change in count, just update timestamp
-					existing.LastUpdate = now
-					statsData = existing
-					// No need to write to Redis for timestamp-only updates
-				}
-
-				// Update last seen counter
-				dsm.lastSeenCounters[counterKey] = component.TotalMessages
-			} else {
-				// Restart detection disabled, use simple logic
-				if component.TotalMessages >= existing.TotalMessages {
-					if component.TotalMessages > existing.TotalMessages {
-						shouldWriteToRedis = true
-					}
-					existing.TotalMessages = component.TotalMessages
-				} else {
-					// Counter decreased - possible overflow, update value but skip Redis write
-					previousTotal := existing.TotalMessages
-					existing.TotalMessages = component.TotalMessages
-					logger.Warn("Counter decreased with restart detection disabled - possible overflow, updating value but skipping Redis write",
-						"component", component.ComponentID,
-						"sequence", component.ProjectNodeSequence,
-						"previous_total", previousTotal,
-						"current_counter", component.TotalMessages,
-						"action", "skip_redis_write")
-					shouldWriteToRedis = false // Skip Redis write
-				}
-				existing.LastUpdate = now
-				statsData = existing
-			}
+			logger.Debug("Updated daily total with increment",
+				"component", component.ComponentID,
+				"sequence", component.ProjectNodeSequence,
+				"increment", increment,
+				"new_total", existing.TotalMessages)
 		} else {
-			// Create new entry
+			// Create new daily stats entry
 			statsData = &DailyStatsData{
 				NodeID:              nodeID,
 				ProjectID:           component.ProjectID,
@@ -513,29 +521,23 @@ func (dsm *DailyStatsManager) applyBatchUpdates(nodeID string, components []Comp
 				ComponentType:       component.ComponentType,
 				ProjectNodeSequence: component.ProjectNodeSequence,
 				Date:                date,
-				TotalMessages:       component.TotalMessages,
+				TotalMessages:       increment,
 				LastUpdate:          now,
 			}
 			dsm.data[key] = statsData
-			shouldWriteToRedis = true // New entry always needs to be written
 
-			// Initialize counter tracking
-			if dsm.restartDetection {
-				dsm.lastSeenCounters[counterKey] = component.TotalMessages
-			}
+			logger.Debug("Created new daily stats entry",
+				"component", component.ComponentID,
+				"sequence", component.ProjectNodeSequence,
+				"initial_total", increment)
 		}
 
-		// Only queue for Redis write if data actually changed
-		if shouldWriteToRedis {
-			updatesToWrite = append(updatesToWrite, statsData)
-		}
+		updatesToWrite = append(updatesToWrite, statsData)
 	}
 
 	dsm.mutex.Unlock()
 
-	// Step 2: Queue for async Redis writes (no lock held during network IO)
-	// No copy needed - statsData points to stable memory that won't be modified
-	// until the next update cycle, and Redis writer only reads the data
+	// Queue for async Redis writes (Layer 3 persistence)
 	if dsm.redisEnabled && len(updatesToWrite) > 0 {
 		for _, statsData := range updatesToWrite {
 			select {
@@ -543,10 +545,98 @@ func (dsm *DailyStatsManager) applyBatchUpdates(nodeID string, components []Comp
 				// Successfully queued
 			default:
 				// Channel full, skip (will be saved in next periodic save)
-				logger.Warn("Redis write channel full, skipping write for component",
-					"component", statsData.ComponentID)
+				logger.Warn("Redis write channel full, skipping write", "component", statsData.ComponentID)
 			}
 		}
+	}
+}
+
+// ApplyBatchUpdatesWithForceWrite applies component statistics updates with forced synchronous Redis writes
+// This is used for final statistics collection before component stops to ensure data is not lost
+func (dsm *DailyStatsManager) ApplyBatchUpdatesWithForceWrite(nodeID string, components []ComponentStatsData) {
+	if len(components) == 0 {
+		return
+	}
+
+	now := time.Now()
+	date := now.Format("2006-01-02")
+	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
+
+	// Filter components with meaningful increments
+	var validComponents []ComponentStatsData
+	for _, component := range components {
+		// TotalMessages field now contains the increment (from component's GetIncrementAndUpdate)
+		if component.TotalMessages > 0 {
+			validComponents = append(validComponents, component)
+		}
+	}
+
+	if len(validComponents) == 0 {
+		return
+	}
+
+	// Update Redis daily counters (Layer 3) with increments from components
+	dsm.mutex.Lock()
+	var updatesToWrite []*DailyStatsData
+
+	for _, component := range validComponents {
+		key := dsm.generateKey(date, nodeID, component.ProjectID, component.ProjectNodeSequence)
+		increment := component.TotalMessages // This is actually the increment now
+
+		var statsData *DailyStatsData
+		if existing, exists := dsm.data[key]; exists {
+			// Add increment to existing daily total
+			existing.TotalMessages += increment
+			existing.LastUpdate = now
+			statsData = existing
+
+			logger.Debug("Updated daily total with increment (force write)",
+				"component", component.ComponentID,
+				"sequence", component.ProjectNodeSequence,
+				"increment", increment,
+				"new_total", existing.TotalMessages)
+		} else {
+			// Create new daily stats entry
+			statsData = &DailyStatsData{
+				NodeID:              nodeID,
+				ProjectID:           component.ProjectID,
+				ComponentID:         component.ComponentID,
+				ComponentType:       component.ComponentType,
+				ProjectNodeSequence: component.ProjectNodeSequence,
+				Date:                date,
+				TotalMessages:       increment,
+				LastUpdate:          now,
+			}
+			dsm.data[key] = statsData
+
+			logger.Debug("Created new daily stats entry (force write)",
+				"component", component.ComponentID,
+				"sequence", component.ProjectNodeSequence,
+				"initial_total", increment)
+		}
+
+		updatesToWrite = append(updatesToWrite, statsData)
+	}
+
+	dsm.mutex.Unlock()
+
+	// Force synchronous Redis writes for final statistics using atomic increments
+	if dsm.redisEnabled && len(updatesToWrite) > 0 {
+		logger.Info("Force writing final statistics to Redis using atomic increments",
+			"count", len(updatesToWrite))
+
+		for i, statsData := range updatesToWrite {
+			// Use the corresponding increment value from validComponents
+			increment := validComponents[i].TotalMessages
+			if err := dsm.writeToRedisWithIncrement(statsData, increment, expiration); err != nil {
+				logger.Error("Failed to write final statistics with increment",
+					"component", statsData.ComponentID,
+					"increment", increment,
+					"error", err)
+			}
+		}
+
+		logger.Info("Final statistics atomic increment write completed")
 	}
 }
 
@@ -556,7 +646,7 @@ type ComponentStatsData struct {
 	ComponentID         string
 	ComponentType       string
 	ProjectNodeSequence string
-	TotalMessages       uint64
+	TotalMessages       uint64 // This is now the increment, not total (should be renamed in future)
 }
 
 // StatsCollectorFunc is a function type for collecting component statistics
@@ -568,6 +658,11 @@ var statsCollector StatsCollectorFunc
 // SetStatsCollector sets the callback function for collecting component statistics
 func SetStatsCollector(collector StatsCollectorFunc) {
 	statsCollector = collector
+}
+
+// GetStatsCollector returns the current stats collector function
+func GetStatsCollector() StatsCollectorFunc {
+	return statsCollector
 }
 
 // Stop stops the daily statistics manager
@@ -653,7 +748,6 @@ func (dsm *DailyStatsManager) GetStats() map[string]interface{} {
 	defer dsm.mutex.RUnlock()
 
 	totalEntries := len(dsm.data)
-	totalCounters := len(dsm.lastSeenCounters)
 
 	// Group by date
 	dateGroups := make(map[string]int)
@@ -662,14 +756,16 @@ func (dsm *DailyStatsManager) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_entries":       totalEntries,
-		"total_counters":      totalCounters,
-		"retention_days":      dsm.retentionDays,
-		"save_interval":       dsm.saveInterval.String(),
-		"restart_detection":   dsm.restartDetection,
-		"redis_enabled":       dsm.redisEnabled,
-		"entries_by_date":     dateGroups,
-		"redis_key_prefix":    dsm.redisKeyPrefix,
-		"redis_write_pending": len(dsm.redisWriteChan),
+		"total_entries":             totalEntries,
+		"retention_days":            dsm.retentionDays,
+		"save_interval":             dsm.saveInterval.String(),
+		"component_managed_counter": true, // Indicates components manage their own increments
+		"redis_enabled":             dsm.redisEnabled,
+		"entries_by_date":           dateGroups,
+		"redis_key_prefix":          dsm.redisKeyPrefix,
+		"redis_write_pending":       len(dsm.redisWriteChan),
 	}
 }
+
+// Note: ResetDiffCounter, ResetDiffCounters, and cleanupOldDiffCounters methods removed
+// Components now manage their own increments via GetIncrementAndUpdate()

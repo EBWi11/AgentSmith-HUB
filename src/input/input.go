@@ -73,7 +73,8 @@ type Input struct {
 	kafkaCfg     *KafkaInputConfig
 	aliyunSLSCfg *AliyunSLSInputConfig
 
-	consumeTotal uint64
+	consumeTotal      uint64
+	lastReportedTotal uint64 // For calculating increments in 10-second intervals
 
 	// sampler
 	sampler *common.Sampler
@@ -399,6 +400,13 @@ func (in *Input) Stop() error {
 	// Reset stop channel for potential restart
 	in.stopChan = nil
 
+	// Reset atomic counter for restart
+	previousTotal := atomic.LoadUint64(&in.consumeTotal)
+	atomic.StoreUint64(&in.consumeTotal, 0)
+	logger.Debug("Reset atomic counter for input component", "input", in.Id, "previous_total", previousTotal)
+
+	// Note: ResetDiffCounter no longer needed - component manages its own increments
+
 	return nil
 }
 
@@ -408,6 +416,28 @@ func (in *Input) Stop() error {
 // GetConsumeTotal returns the total consumed count.
 func (in *Input) GetConsumeTotal() uint64 {
 	return atomic.LoadUint64(&in.consumeTotal)
+}
+
+// ResetConsumeTotal resets the total consumed count to zero.
+// This should only be called during component cleanup or forced restart.
+func (in *Input) ResetConsumeTotal() uint64 {
+	atomic.StoreUint64(&in.lastReportedTotal, 0)
+	return atomic.SwapUint64(&in.consumeTotal, 0)
+}
+
+// GetIncrementAndUpdate returns the increment since last call and updates the baseline.
+// This method is thread-safe and designed for 10-second statistics collection.
+func (in *Input) GetIncrementAndUpdate() uint64 {
+	current := atomic.LoadUint64(&in.consumeTotal)
+	last := atomic.SwapUint64(&in.lastReportedTotal, current)
+
+	// Handle potential overflow (though practically impossible with uint64)
+	if current >= last {
+		return current - last
+	} else {
+		// Overflow case: component restarted, return current value as increment
+		return current
+	}
 }
 
 // CheckConnectivity performs a real connectivity test for the input component

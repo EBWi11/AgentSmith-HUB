@@ -1193,6 +1193,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 			if proj, exists := project.GlobalProject.Projects[id]; exists {
 				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
 					logger.Info("Stopping running project before deletion", "project_id", id)
+					// Note: Project.Stop() already includes final statistics collection
 					if err := proj.Stop(); err != nil {
 						// Record failed deletion operation
 						RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("Failed to stop project before deletion: %v", err), []string{})
@@ -1258,6 +1259,11 @@ func deleteComponent(componentType string, c echo.Context) error {
 		case "project":
 			delete(project.GlobalProject.Projects, id)
 		case "plugin":
+			// Reset statistics before deleting plugin
+			if pluginInstance, exists := plugin.Plugins[id]; exists {
+				pluginInstance.ResetAllStats()
+				logger.Debug("Reset plugin statistics during deletion", "plugin", id)
+			}
 			delete(plugin.Plugins, id)
 		}
 	}

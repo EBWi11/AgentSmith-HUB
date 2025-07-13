@@ -925,6 +925,10 @@ func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
 		oldInput, exists := project.GlobalProject.Inputs[change.ID]
 		common.GlobalMu.RUnlock()
 		if exists {
+			// Collect final statistics before stopping
+			if common.GlobalDailyStatsManager != nil {
+				common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("input", change.ID)
+			}
 			oldInput.Stop()
 		}
 
@@ -947,6 +951,10 @@ func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
 		oldOutput, exists := project.GlobalProject.Outputs[change.ID]
 		common.GlobalMu.RUnlock()
 		if exists {
+			// Collect final statistics before stopping
+			if common.GlobalDailyStatsManager != nil {
+				common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("output", change.ID)
+			}
 			oldOutput.Stop()
 		}
 
@@ -1103,8 +1111,12 @@ func ApplyPendingChanges(c echo.Context) error {
 
 	// Apply plugin changes
 	for name, content := range pluginsToProcess {
-		// Remove existing plugin from memory before verification to avoid name conflict
+		// Reset statistics and remove existing plugin from memory before verification to avoid name conflict
 		common.GlobalMu.Lock()
+		if oldPlugin, exists := plugin.Plugins[name]; exists {
+			oldPlugin.ResetAllStats()
+			logger.Debug("Reset plugin statistics during pending changes application", "plugin", name)
+		}
 		delete(plugin.Plugins, name)
 		common.GlobalMu.Unlock()
 
@@ -1199,6 +1211,10 @@ func ApplyPendingChanges(c echo.Context) error {
 			// Only stop old component if no running projects are using it
 			if exists && projectsUsingInput == 0 {
 				logger.Info("Stopping old input component for reload", "id", id, "projects_using", projectsUsingInput)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("input", id)
+				}
 				stopErr := oldInput.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old input", "id", id, "error", stopErr)
@@ -1277,6 +1293,10 @@ func ApplyPendingChanges(c echo.Context) error {
 			// Only stop old component if no running projects are using it
 			if exists && projectsUsingOutput == 0 {
 				logger.Info("Stopping old output component for reload", "id", id, "projects_using", projectsUsingOutput)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("output", id)
+				}
 				stopErr := oldOutput.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old output", "id", id, "error", stopErr)
@@ -1355,6 +1375,10 @@ func ApplyPendingChanges(c echo.Context) error {
 			// Only stop old component if no running projects are using it
 			if exists && projectsUsingRuleset == 0 {
 				logger.Info("Stopping old ruleset component for reload", "id", id, "projects_using", projectsUsingRuleset)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("ruleset", id)
+				}
 				stopErr := oldRuleset.Stop()
 				if stopErr != nil {
 					logger.Error("Failed to stop old ruleset", "id", id, "error", stopErr)
@@ -1604,6 +1628,14 @@ func ApplySingleChange(c echo.Context) error {
 	var err error
 	switch req.Type {
 	case "plugin":
+		// Reset statistics before merging plugin file
+		common.GlobalMu.Lock()
+		if oldPlugin, exists := plugin.Plugins[req.ID]; exists {
+			oldPlugin.ResetAllStats()
+			logger.Debug("Reset plugin statistics during single change push", "plugin", req.ID)
+		}
+		common.GlobalMu.Unlock()
+
 		err = mergePluginFile(req.ID)
 		if err == nil {
 			// Clear the memory map entry after successful merge
@@ -1656,6 +1688,10 @@ func ApplySingleChange(c echo.Context) error {
 				// Only stop old component if no running projects are using it
 				if exists && projectsUsingInput == 0 {
 					logger.Info("Stopping old input component for reload", "id", req.ID, "projects_using", projectsUsingInput)
+					// Collect final statistics before stopping
+					if common.GlobalDailyStatsManager != nil {
+						common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("input", req.ID)
+					}
 					err := oldInput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old input", "id", req.ID, "error", err)
@@ -1705,6 +1741,10 @@ func ApplySingleChange(c echo.Context) error {
 				// Only stop old component if no running projects are using it
 				if exists && projectsUsingOutput == 0 {
 					logger.Info("Stopping old output component for reload", "id", req.ID, "projects_using", projectsUsingOutput)
+					// Collect final statistics before stopping
+					if common.GlobalDailyStatsManager != nil {
+						common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("output", req.ID)
+					}
 					err := oldOutput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old output", "id", req.ID, "error", err)
@@ -1754,6 +1794,10 @@ func ApplySingleChange(c echo.Context) error {
 				// Only stop old component if no running projects are using it
 				if exists && projectsUsingRuleset == 0 {
 					logger.Info("Stopping old ruleset component for reload", "id", req.ID, "projects_using", projectsUsingRuleset)
+					// Collect final statistics before stopping
+					if common.GlobalDailyStatsManager != nil {
+						common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("ruleset", req.ID)
+					}
 					err := oldRuleset.Stop()
 					if err != nil {
 						logger.Error("Failed to stop old ruleset", "id", req.ID, "error", err)
@@ -2288,6 +2332,10 @@ func updatePluginInstanceSafely(pluginID, newContent string) error {
 	common.GlobalMu.Lock()
 	oldPlugin, exists := plugin.Plugins[pluginID]
 	if exists {
+		// Reset statistics before removing the old plugin instance
+		oldPlugin.ResetAllStats()
+		logger.Debug("Reset plugin statistics during update", "plugin", pluginID)
+
 		// Clear Yaegi interpreter instance to prevent memory leaks
 		if oldPlugin.Type == plugin.YAEGI_PLUGIN && oldPlugin != nil {
 			// The yaegi interpreter will be garbage collected

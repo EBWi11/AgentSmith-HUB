@@ -84,7 +84,8 @@ type Output struct {
 	aliyunSLSCfg     *AliyunSLSOutputConfig
 
 	// metrics - only total count is needed now
-	produceTotal uint64 // cumulative production total
+	produceTotal      uint64 // cumulative production total
+	lastReportedTotal uint64 // For calculating increments in 10-second intervals
 
 	// sampler
 	sampler *common.Sampler
@@ -645,6 +646,13 @@ func (out *Output) Stop() error {
 		logger.Warn("Timeout waiting for output goroutines", "id", out.Id)
 	}
 
+	// Reset atomic counter for restart
+	previousTotal := atomic.LoadUint64(&out.produceTotal)
+	atomic.StoreUint64(&out.produceTotal, 0)
+	logger.Debug("Reset atomic counter for output component", "output", out.Id, "previous_total", previousTotal)
+
+	// Note: ResetDiffCounter no longer needed - component manages its own increments
+
 	return nil
 }
 
@@ -654,6 +662,28 @@ func (out *Output) Stop() error {
 // GetProduceTotal returns the total produced count.
 func (out *Output) GetProduceTotal() uint64 {
 	return atomic.LoadUint64(&out.produceTotal)
+}
+
+// ResetProduceTotal resets the total produced count to zero.
+// This should only be called during component cleanup or forced restart.
+func (out *Output) ResetProduceTotal() uint64 {
+	atomic.StoreUint64(&out.lastReportedTotal, 0)
+	return atomic.SwapUint64(&out.produceTotal, 0)
+}
+
+// GetIncrementAndUpdate returns the increment since last call and updates the baseline.
+// This method is thread-safe and designed for 10-second statistics collection.
+func (out *Output) GetIncrementAndUpdate() uint64 {
+	current := atomic.LoadUint64(&out.produceTotal)
+	last := atomic.SwapUint64(&out.lastReportedTotal, current)
+
+	// Handle potential overflow (though practically impossible with uint64)
+	if current >= last {
+		return current - last
+	} else {
+		// Overflow case: component restarted, return current value as increment
+		return current
+	}
 }
 
 // StopForTesting stops the output quickly for testing purposes without waiting for channel drainage
@@ -699,6 +729,12 @@ func (out *Output) StopForTesting() error {
 	case <-time.After(1 * time.Second): // Very short timeout for testing
 		logger.Warn("Timeout waiting for test output goroutines, proceeding anyway", "id", out.Id)
 	}
+
+	// Reset atomic counter for testing cleanup
+	previousTotal := atomic.LoadUint64(&out.produceTotal)
+	atomic.StoreUint64(&out.produceTotal, 0)
+	atomic.StoreUint64(&out.lastReportedTotal, 0)
+	logger.Debug("Reset atomic counter for test output component", "output", out.Id, "previous_total", previousTotal)
 
 	return nil
 }

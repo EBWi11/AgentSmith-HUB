@@ -39,6 +39,7 @@ func IsSystemShuttingDown() bool {
 }
 
 // collectAllComponentStats collects current statistics from all running components
+// All increments are collected atomically at the same moment to ensure consistency
 func collectAllComponentStats() []common.ComponentStatsData {
 	var components []common.ComponentStatsData
 
@@ -52,61 +53,73 @@ func collectAllComponentStats() []common.ComponentStatsData {
 	}
 	GlobalProject.ProjectMu.RUnlock()
 
-	// Process projects without holding the global lock
+	// Collect all component statistics in a tight loop to minimize time differences
+	// This helps reduce the time window between collecting input vs output statistics
 	for _, proj := range runningProjects {
 		// Collect input statistics
 		for _, input := range proj.Inputs {
-			components = append(components, common.ComponentStatsData{
-				ProjectID:           proj.Id,
-				ComponentID:         input.Id,
-				ComponentType:       "input",
-				ProjectNodeSequence: input.ProjectNodeSequence,
-				TotalMessages:       input.GetConsumeTotal(),
-			})
+			increment := input.GetIncrementAndUpdate()
+			if increment > 0 {
+				components = append(components, common.ComponentStatsData{
+					ProjectID:           proj.Id,
+					ComponentID:         input.Id,
+					ComponentType:       "input",
+					ProjectNodeSequence: input.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+			}
 		}
 
-		// Collect output statistics
+		// Collect output statistics immediately after input for same project
 		for _, output := range proj.Outputs {
-			components = append(components, common.ComponentStatsData{
-				ProjectID:           proj.Id,
-				ComponentID:         output.Id,
-				ComponentType:       "output",
-				ProjectNodeSequence: output.ProjectNodeSequence,
-				TotalMessages:       output.GetProduceTotal(),
-			})
+			increment := output.GetIncrementAndUpdate()
+			if increment > 0 {
+				components = append(components, common.ComponentStatsData{
+					ProjectID:           proj.Id,
+					ComponentID:         output.Id,
+					ComponentType:       "output",
+					ProjectNodeSequence: output.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+			}
 		}
 
 		// Collect ruleset statistics
 		for _, ruleset := range proj.Rulesets {
-			components = append(components, common.ComponentStatsData{
-				ProjectID:           proj.Id,
-				ComponentID:         ruleset.RulesetID,
-				ComponentType:       "ruleset",
-				ProjectNodeSequence: ruleset.ProjectNodeSequence,
-				TotalMessages:       ruleset.GetProcessTotal(),
-			})
+			increment := ruleset.GetIncrementAndUpdate()
+			if increment > 0 {
+				components = append(components, common.ComponentStatsData{
+					ProjectID:           proj.Id,
+					ComponentID:         ruleset.RulesetID,
+					ComponentType:       "ruleset",
+					ProjectNodeSequence: ruleset.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+			}
 		}
 	}
 
 	// Collect plugin statistics (plugins are global, not per-project)
 	// Import plugin package to access global Plugins map
 	for pluginName, plugin := range plugin.Plugins {
-		// Plugin success statistics
+		// Plugin success statistics - use increment method
+		successIncrement := plugin.GetSuccessIncrementAndUpdate()
 		components = append(components, common.ComponentStatsData{
 			ProjectID:           "global", // Plugins are global across all projects
 			ComponentID:         pluginName,
 			ComponentType:       "plugin_success",
 			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.success", pluginName),
-			TotalMessages:       plugin.GetSuccessTotal(),
+			TotalMessages:       successIncrement, // Now this is the increment, not total
 		})
 
-		// Plugin failure statistics
+		// Plugin failure statistics - use increment method
+		failureIncrement := plugin.GetFailureIncrementAndUpdate()
 		components = append(components, common.ComponentStatsData{
 			ProjectID:           "global", // Plugins are global across all projects
 			ComponentID:         pluginName,
 			ComponentType:       "plugin_failure",
 			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.failure", pluginName),
-			TotalMessages:       plugin.GetFailureTotal(),
+			TotalMessages:       failureIncrement, // Now this is the increment, not total
 		})
 	}
 
@@ -1216,6 +1229,31 @@ func (p *Project) Stop() error {
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
 
+	// Collect final statistics BEFORE stopping components to prevent data loss
+	if !IsSystemShuttingDown() { // Only collect if not system shutdown (to avoid duplicate collection)
+		logger.Info("Collecting final statistics before stopping project", "project", p.Id)
+		if common.GlobalDailyStatsManager != nil && common.GetStatsCollector() != nil {
+			// Trigger final collection for this project's components
+			statsCollector := common.GetStatsCollector()
+			components := statsCollector()
+
+			// Filter components for this project and with meaningful increments
+			projectComponents := make([]common.ComponentStatsData, 0)
+			for _, component := range components {
+				if component.ProjectID == p.Id && component.TotalMessages > 0 {
+					projectComponents = append(projectComponents, component)
+				}
+			}
+
+			if len(projectComponents) > 0 {
+				logger.Info("Saving final project statistics before stop",
+					"project", p.Id,
+					"components_with_data", len(projectComponents))
+				common.GlobalDailyStatsManager.CollectAllComponentsData()
+			}
+		}
+	}
+
 	// Set status to stopping immediately to prevent duplicate operations
 	p.setProjectStatus(ProjectStatusStopping, nil)
 
@@ -1377,13 +1415,16 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	}
 	p.MsgChannels = []string{}
 
-	// Step 8: Clear component references
-	logger.Info("Step 8: Clearing component references", "project", p.Id)
+	// Step 8: Note - difference counter reset no longer needed
+	logger.Info("Step 8: Component counter management now handled by components themselves", "project", p.Id)
+
+	// Step 9: Clear component references
+	logger.Info("Step 9: Clearing component references", "project", p.Id)
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 
-	// Step 9: Close project channels after all goroutines are done
+	// Step 10: Close project channels after all goroutines are done
 	if p.stopChan != nil {
 		close(p.stopChan)
 		p.stopChan = nil
@@ -1444,6 +1485,29 @@ func (p *Project) forceCleanup() error {
 			close(p.stopChan)
 		}
 		p.stopChan = nil
+	}
+
+	// Reset atomic counters for all components before clearing references
+	logger.Warn("Force resetting component counters during cleanup", "project", p.Id)
+
+	// Reset atomic counters for all components
+	for _, in := range p.Inputs {
+		if in.ProjectNodeSequence != "" {
+			previousTotal := in.ResetConsumeTotal()
+			logger.Warn("Force reset input counter", "input", in.Id, "previous_total", previousTotal)
+		}
+	}
+	for _, out := range p.Outputs {
+		if out.ProjectNodeSequence != "" {
+			previousTotal := out.ResetProduceTotal()
+			logger.Warn("Force reset output counter", "output", out.Id, "previous_total", previousTotal)
+		}
+	}
+	for _, rs := range p.Rulesets {
+		if rs.ProjectNodeSequence != "" {
+			previousTotal := rs.ResetProcessTotal()
+			logger.Warn("Force reset ruleset counter", "ruleset", rs.RulesetID, "previous_total", previousTotal)
+		}
 	}
 
 	// Clear component references immediately
@@ -1688,7 +1752,9 @@ func (p *Project) StopForTesting() error {
 	for _, in := range p.Inputs {
 		// Test inputs are virtual, just clear their downstream connections
 		in.DownStream = []*chan map[string]interface{}{}
-		logger.Debug("Cleared test input", "project", p.Id, "input", in.Id)
+		// Reset atomic counter for test cleanup
+		previousTotal := in.ResetConsumeTotal()
+		logger.Debug("Cleared test input and reset counter", "project", p.Id, "input", in.Id, "previous_total", previousTotal)
 	}
 
 	for _, rs := range p.Rulesets {
@@ -1977,10 +2043,33 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 
-	// If force reload is enabled, clear owner references from old components
+	// If force reload is enabled, clear owner references from old components and reset counters
 	if forceReload {
-		logger.Info("Force reload enabled - clearing all component owner references", "project", p.Id)
-		// This will force creation of new instances instead of reusing existing ones
+		logger.Info("Force reload enabled - clearing all component owner references and resetting counters", "project", p.Id)
+
+		// Reset counters for all components that will be force-reloaded
+		for _, name := range inputNames {
+			if globalInput, ok := GlobalProject.Inputs[name]; ok {
+				previousTotal := globalInput.ResetConsumeTotal()
+				logger.Info("Force reset input counter during reload", "input", name, "previous_total", previousTotal)
+			}
+		}
+
+		for _, name := range outputNames {
+			if globalOutput, ok := GlobalProject.Outputs[name]; ok {
+				previousTotal := globalOutput.ResetProduceTotal()
+				logger.Info("Force reset output counter during reload", "output", name, "previous_total", previousTotal)
+			}
+		}
+
+		for _, name := range rulesetNames {
+			if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
+				previousTotal := globalRuleset.ResetProcessTotal()
+				logger.Info("Force reset ruleset counter during reload", "ruleset", name, "previous_total", previousTotal)
+			}
+		}
+
+		logger.Info("Force reload counter reset completed", "project", p.Id)
 	}
 
 	// Load input components from global registry (inputs can be shared safely)

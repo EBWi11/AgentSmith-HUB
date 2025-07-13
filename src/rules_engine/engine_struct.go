@@ -109,8 +109,9 @@ type Ruleset struct {
 	sampler   *common.Sampler
 
 	// metrics - only total count is needed now
-	processTotal uint64         // cumulative message processing total
-	wg           sync.WaitGroup // WaitGroup for goroutine management
+	processTotal      uint64         // cumulative message processing total
+	lastReportedTotal uint64         // For calculating increments in 10-second intervals
+	wg                sync.WaitGroup // WaitGroup for goroutine management
 
 	OwnerProjects []string `json:"-"`
 }

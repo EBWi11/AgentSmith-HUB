@@ -685,6 +685,10 @@ func loadComponentDirectly(componentType, id, content string) error {
 			// Only stop old component if no running projects are using it
 			if projectsUsingInput == 0 {
 				logger.Info("Stopping old input component for direct load", "id", id, "projects_using", projectsUsingInput)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("input", id)
+				}
 				oldInput.Stop()
 			} else {
 				logger.Info("Input component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingInput)
@@ -731,6 +735,10 @@ func loadComponentDirectly(componentType, id, content string) error {
 			// Only stop old component if no running projects are using it
 			if projectsUsingOutput == 0 {
 				logger.Info("Stopping old output component for direct load", "id", id, "projects_using", projectsUsingOutput)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("output", id)
+				}
 				oldOutput.Stop()
 			} else {
 				logger.Info("Output component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingOutput)
@@ -777,6 +785,10 @@ func loadComponentDirectly(componentType, id, content string) error {
 			// Only stop old component if no running projects are using it
 			if projectsUsingRuleset == 0 {
 				logger.Info("Stopping old ruleset component for direct load", "id", id, "projects_using", projectsUsingRuleset)
+				// Collect final statistics before stopping
+				if common.GlobalDailyStatsManager != nil {
+					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("ruleset", id)
+				}
 				oldRuleset.Stop()
 			} else {
 				logger.Info("Ruleset component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingRuleset)
@@ -839,8 +851,12 @@ func loadComponentDirectly(componentType, id, content string) error {
 		common.GlobalMu.Unlock()
 
 	case "plugin":
-		// Remove existing plugin from memory before loading new one
+		// Reset statistics and remove existing plugin from memory before loading new one
 		common.GlobalMu.Lock()
+		if oldPlugin, exists := plugin.Plugins[id]; exists {
+			oldPlugin.ResetAllStats()
+			logger.Debug("Reset plugin statistics during direct load", "plugin", id)
+		}
 		delete(plugin.Plugins, id)
 		common.GlobalMu.Unlock()
 
