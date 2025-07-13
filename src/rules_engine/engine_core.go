@@ -829,3 +829,12 @@ func (r *Ruleset) GetIncrementAndUpdate() uint64 {
 		return current
 	}
 }
+
+// GetRunningTaskCount returns the number of currently running tasks in the thread pool
+// Returns 0 if the thread pool is not initialized
+func (r *Ruleset) GetRunningTaskCount() int {
+	if r.antsPool != nil {
+		return r.antsPool.Running()
+	}
+	return 0
+}

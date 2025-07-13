@@ -1031,3 +1031,30 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 func (out *Output) SetTestMode() {
 	out.sampler = nil // Disable sampling for test instances
 }
+
+// GetPendingMessageCount returns the total number of pending messages in all channels
+// This includes upstream channels and internal producer channels
+func (out *Output) GetPendingMessageCount() int {
+	pendingCount := 0
+
+	// Check upstream channels
+	for _, upCh := range out.UpStream {
+		if upCh != nil {
+			pendingCount += len(*upCh)
+		}
+	}
+
+	// Check internal producer channels based on output type
+	switch out.Type {
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
+		if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
+			pendingCount += len(out.kafkaProducer.MsgChan)
+		}
+	case OutputTypeElasticsearch:
+		if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
+			pendingCount += len(out.elasticsearchProducer.MsgChan)
+		}
+	}
+
+	return pendingCount
+}

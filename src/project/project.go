@@ -1320,28 +1320,41 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 
 	// Use centralized component usage counter for better performance and code maintainability
 
-	// Step 1: Stop inputs first to prevent new data (only if not used by other projects)
-	// This is critical for fast shutdown - we want to stop data sources immediately
-	logger.Info("Step 1: Rapidly stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
-	for _, in := range p.Inputs {
+	// Step 1: Stop inputs first to prevent new data
+	// NEW: Handle channel disconnection for shared inputs
+	logger.Info("Step 1: Stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
+	for inputId, in := range p.Inputs {
 		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
 		if otherProjectsUsing == 0 {
-			logger.Info("Rapidly stopping input component", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
+			// No other projects using this input, stop the entire input
+			logger.Info("Stopping input component completely", "project", p.Id, "input", in.Id)
 			startTime := time.Now()
 			if err := in.Stop(); err != nil {
 				logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
 				// Continue with other inputs instead of failing immediately
 			} else {
-				logger.Info("Rapidly stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
+				logger.Info("Stopped input", "project", p.Id, "input", in.Id, "duration", time.Since(startTime))
 			}
 		} else {
-			logger.Info("Input component still used by other projects, skipping stop", "project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
+			// Other projects are using this input, only disconnect channels
+			logger.Info("Input shared with other projects, disconnecting channels only",
+				"project", p.Id, "input", in.Id, "other_projects_using", otherProjectsUsing)
+
+			// Find and remove channels that belong to this project's flow
+			// We need to identify which downstream channels belong to this project
+			channelsToRemove := p.findInputDownstreamChannelsForProject(inputId)
+
+			// Remove these channels from the input's downstream
+			p.disconnectInputChannels(in, channelsToRemove)
+
+			logger.Info("Disconnected input channels", "project", p.Id, "input", in.Id,
+				"channels_removed", len(channelsToRemove))
 		}
 	}
 
-	// Step 2: Wait for data to drain through the pipeline
-	logger.Info("Step 2: Waiting for data to drain through pipeline", "project", p.Id)
-	p.waitForDataDrain()
+	// Step 2: Wait for all data to be processed through the entire pipeline
+	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
+	p.waitForCompleteDataProcessing()
 
 	// Step 3: Stop rulesets (only if not used by other projects)
 	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
@@ -1378,7 +1391,7 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		}
 	}
 
-	// Step 6: Wait for all project goroutines to finish
+	// Step 5: Wait for all project goroutines to finish
 	waitDone := make(chan struct{})
 	go func() {
 		p.wg.Wait()
@@ -1392,8 +1405,8 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		logger.Warn("Timeout waiting for project goroutines to finish", "project", p.Id)
 	}
 
-	// Step 7: Clean up channels
-	logger.Info("Step 7: Cleaning up channels", "project", p.Id, "channel_count", len(p.MsgChannels))
+	// Step 6: Clean up channels
+	logger.Info("Step 6: Cleaning up channels", "project", p.Id, "channel_count", len(p.MsgChannels))
 	for _, channelId := range p.MsgChannels {
 		newCnt := decrementChannelRef(channelId)
 		if newCnt == 0 {
@@ -1415,16 +1428,13 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	}
 	p.MsgChannels = []string{}
 
-	// Step 8: Note - difference counter reset no longer needed
-	logger.Info("Step 8: Component counter management now handled by components themselves", "project", p.Id)
-
-	// Step 9: Clear component references
-	logger.Info("Step 9: Clearing component references", "project", p.Id)
+	// Step 7: Clear component references
+	logger.Info("Step 7: Clearing component references", "project", p.Id)
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 
-	// Step 10: Close project channels after all goroutines are done
+	// Step 8: Close project channels after all goroutines are done
 	if p.stopChan != nil {
 		close(p.stopChan)
 		p.stopChan = nil
@@ -1883,46 +1893,184 @@ func (p *Project) ParseContentForVisualization() (map[string][]string, error) {
 	return p.parseContent()
 }
 
-// waitForDataDrain waits for data to drain through the pipeline after inputs are stopped
-func (p *Project) waitForDataDrain() {
-	logger.Info("Waiting for data to drain through pipeline", "project", p.Id)
+// waitForCompleteDataProcessing waits for all data to be fully processed through the pipeline
+// This includes waiting for channels to empty AND thread pools to complete all tasks
+func (p *Project) waitForCompleteDataProcessing() {
+	logger.Info("Waiting for complete data processing through pipeline", "project", p.Id)
 
-	drainTimeout := time.After(30 * time.Second) // 30 second timeout for data drain
+	overallTimeout := time.After(60 * time.Second) // 60 second overall timeout
 	checkInterval := 100 * time.Millisecond
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
+	logCounter := 0
 	for {
 		select {
-		case <-drainTimeout:
-			logger.Warn("Data drain timeout reached, proceeding with shutdown", "project", p.Id)
+		case <-overallTimeout:
+			logger.Warn("Data processing timeout reached, proceeding with shutdown", "project", p.Id)
 			return
 		case <-ticker.C:
-			allEmpty := true
-			totalMessages := 0
+			allProcessed := true
+			totalChannelMessages := 0
+			totalRunningTasks := 0
 
 			// Check all channels for remaining messages
 			for _, channelId := range p.MsgChannels {
+				GlobalProject.EdgeMapMu.RLock()
 				if ch, exists := GlobalProject.msgChans[channelId]; exists {
 					chLen := len(ch)
 					if chLen > 0 {
-						allEmpty = false
-						totalMessages += chLen
+						allProcessed = false
+						totalChannelMessages += chLen
+					}
+				}
+				GlobalProject.EdgeMapMu.RUnlock()
+			}
+
+			// Check all rulesets for running tasks and pending messages
+			for rulesetId, rs := range p.Rulesets {
+				// Check running tasks in thread pool
+				runningTasks := rs.GetRunningTaskCount()
+				if runningTasks > 0 {
+					allProcessed = false
+					totalRunningTasks += runningTasks
+					if logCounter%50 == 0 { // Log every 5 seconds
+						logger.Debug("Ruleset has running tasks",
+							"project", p.Id,
+							"ruleset", rulesetId,
+							"running_tasks", runningTasks)
+					}
+				}
+
+				// Check upstream channels for pending messages
+				for _, upCh := range rs.UpStream {
+					if upCh != nil {
+						pendingInUpstream := len(*upCh)
+						if pendingInUpstream > 0 {
+							allProcessed = false
+							totalChannelMessages += pendingInUpstream
+							if logCounter%50 == 0 { // Log every 5 seconds
+								logger.Debug("Ruleset has pending upstream messages",
+									"project", p.Id,
+									"ruleset", rulesetId,
+									"pending_messages", pendingInUpstream)
+							}
+						}
+					}
+				}
+
+				// Check downstream channels
+				for _, downCh := range rs.DownStream {
+					if downCh != nil {
+						pendingInDownstream := len(*downCh)
+						if pendingInDownstream > 0 {
+							allProcessed = false
+							totalChannelMessages += pendingInDownstream
+							if logCounter%50 == 0 { // Log every 5 seconds
+								logger.Debug("Ruleset has pending downstream messages",
+									"project", p.Id,
+									"ruleset", rulesetId,
+									"pending_messages", pendingInDownstream)
+							}
+						}
 					}
 				}
 			}
 
-			if allEmpty {
-				logger.Info("All channels drained, proceeding with shutdown", "project", p.Id)
+			// Check all outputs for pending data (including internal channels)
+			for outputId, out := range p.Outputs {
+				pendingCount := out.GetPendingMessageCount()
+
+				if pendingCount > 0 {
+					allProcessed = false
+					totalChannelMessages += pendingCount
+					if logCounter%50 == 0 { // Log every 5 seconds
+						logger.Debug("Output has pending messages",
+							"project", p.Id,
+							"output", outputId,
+							"pending_messages", pendingCount)
+					}
+				}
+			}
+
+			if allProcessed {
+				logger.Info("All data processing completed", "project", p.Id)
 				return
 			}
 
 			// Log progress every 5 seconds
-			if time.Now().UnixNano()%(5*int64(time.Second)) < int64(checkInterval) {
-				logger.Info("Waiting for channels to drain", "project", p.Id, "remaining_messages", totalMessages)
+			logCounter++
+			if logCounter%50 == 0 {
+				logger.Info("Still waiting for data processing",
+					"project", p.Id,
+					"channel_messages", totalChannelMessages,
+					"running_tasks", totalRunningTasks)
 			}
 		}
 	}
+}
+
+// findInputDownstreamChannelsForProject finds which downstream channels belong to this project
+func (p *Project) findInputDownstreamChannelsForProject(inputId string) []chan map[string]interface{} {
+	var channelsToRemove []chan map[string]interface{}
+
+	// Get the flow graph to understand the connections
+	flowGraph, err := p.parseContent()
+	if err != nil {
+		logger.Error("Failed to parse project content for channel identification", "error", err)
+		return channelsToRemove
+	}
+
+	// Find all edges starting from this input
+	inputNode := fmt.Sprintf("INPUT.%s", inputId)
+	if downstreams, exists := flowGraph[inputNode]; exists {
+		for _, downstream := range downstreams {
+			// Find the corresponding channel
+			edgeKey := fmt.Sprintf("%s->%s", inputNode, downstream)
+
+			GlobalProject.EdgeMapMu.RLock()
+			if channelId, exists := GlobalProject.edgeChanIds[edgeKey]; exists {
+				if ch, exists := GlobalProject.msgChans[channelId]; exists {
+					channelsToRemove = append(channelsToRemove, ch)
+				}
+			}
+			GlobalProject.EdgeMapMu.RUnlock()
+		}
+	}
+
+	return channelsToRemove
+}
+
+// disconnectInputChannels removes specific channels from input's downstream
+func (p *Project) disconnectInputChannels(in *input.Input, channelsToRemove []chan map[string]interface{}) {
+	if len(channelsToRemove) == 0 {
+		return
+	}
+
+	// Create a new downstream slice without the channels to remove
+	newDownstream := make([]*chan map[string]interface{}, 0, len(in.DownStream))
+
+	for _, downCh := range in.DownStream {
+		shouldRemove := false
+		for _, removeCh := range channelsToRemove {
+			if downCh != nil && *downCh == removeCh {
+				shouldRemove = true
+				break
+			}
+		}
+		if !shouldRemove {
+			newDownstream = append(newDownstream, downCh)
+		}
+	}
+
+	// Update the input's downstream
+	in.DownStream = newDownstream
+
+	logger.Info("Updated input downstream channels",
+		"input", in.Id,
+		"original_count", len(in.DownStream)+len(channelsToRemove),
+		"new_count", len(newDownstream),
+		"removed_count", len(channelsToRemove))
 }
 
 // loadComponentsFromGlobal loads component references from global registry based on flow graph
