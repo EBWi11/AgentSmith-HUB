@@ -1065,6 +1065,10 @@ func (p *Project) Start() error {
 		} else if wasStoppedState {
 			logger.Info("Project was stopped, will force full component reload to restore all references", "project", p.Id)
 		}
+
+		// Defensive cleanup: stop and destroy any existing components before reload
+		logger.Info("Performing defensive cleanup before force reload", "project", p.Id)
+		p.defensiveCleanupBeforeReload()
 	}
 
 	// In test mode, bypass status checks but in production mode, enforce them
@@ -2971,43 +2975,96 @@ func (p *Project) setProjectStatus(status ProjectStatus, err error) {
 	p.StatusChangedAt = &now
 	p.Err = err
 
-	// Save to Redis for cluster visibility (skip for test mode)
-	isTestMode := false
-	for _, out := range p.Outputs {
-		if out.TestCollectionChan != nil {
-			isTestMode = true
-			break
+	// Always update Redis status
+	// This ensures cluster-wide visibility of status changes
+	updateProjectStatusRedis(common.Config.LocalIP, p.Id, status, &now)
+}
+
+// defensiveCleanupBeforeReload performs defensive cleanup of components before force reload
+// This is called when starting a project from error or stopped state
+func (p *Project) defensiveCleanupBeforeReload() {
+	logger.Info("Starting defensive cleanup before reload", "project", p.Id)
+
+	// Step 1: Stop all outputs (may have running goroutines)
+	for outputId, out := range p.Outputs {
+		if out == nil {
+			continue
+		}
+		logger.Debug("Defensively stopping output before reload", "project", p.Id, "output", outputId)
+		_ = out.Stop() // Ignore errors during defensive cleanup
+	}
+
+	// Step 2: Stop all rulesets (may have thread pools running)
+	for rulesetId, rs := range p.Rulesets {
+		if rs == nil {
+			continue
+		}
+		logger.Debug("Defensively stopping ruleset before reload", "project", p.Id, "ruleset", rulesetId)
+		_ = rs.Stop() // Ignore errors during defensive cleanup
+	}
+
+	// Step 3: Stop all inputs (may have consumers running)
+	for inputId, in := range p.Inputs {
+		if in == nil {
+			continue
+		}
+		// Only stop if no other projects are using it
+		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
+		if otherProjectsUsing == 0 {
+			logger.Debug("Defensively stopping input before reload", "project", p.Id, "input", inputId)
+			_ = in.Stop() // Ignore errors during defensive cleanup
+		} else {
+			logger.Debug("Input shared with other projects, only disconnecting channels",
+				"project", p.Id, "input", inputId, "other_projects_using", otherProjectsUsing)
+			// Clear downstream connections
+			in.DownStream = make([]*chan map[string]interface{}, 0)
 		}
 	}
 
-	if !isTestMode {
-		// Update real state (actual runtime state)
-		if updateErr := common.SetProjectRealState(common.Config.LocalIP, p.Id, string(status)); updateErr != nil {
-			logger.Error("Failed to update project real state in Redis", "project", p.Id, "status", status, "error", updateErr)
-		}
-
-		// Update timestamp (for frontend "Last Updated")
-		if timestampErr := common.SetProjectStateTimestamp(common.Config.LocalIP, p.Id, now); timestampErr != nil {
-			logger.Error("Failed to update project state timestamp in Redis", "project", p.Id, "error", timestampErr)
-		}
-
-		// Publish project status event
-		evt := map[string]interface{}{
-			"node_id":           common.Config.LocalIP,
-			"project_id":        p.Id,
-			"status":            string(status),
-			"status_changed_at": now.Format(time.RFC3339),
-		}
-		if data, marshalErr := json.Marshal(evt); marshalErr == nil {
-			if publishErr := common.RedisPublishWithRetry("cluster:proj_status", string(data)); publishErr != nil {
-				logger.Error("Failed to publish project status event", "project", p.Id, "error", publishErr)
+	// Step 4: Close any existing channels
+	for _, channelId := range p.MsgChannels {
+		GlobalProject.EdgeMapMu.Lock()
+		if ch, exists := GlobalProject.msgChans[channelId]; exists {
+			// Safely close channel
+			select {
+			case <-ch:
+				// Already closed
+			default:
+				close(ch)
 			}
+			delete(GlobalProject.msgChans, channelId)
+			delete(GlobalProject.msgChansCounter, channelId)
 		}
+		GlobalProject.EdgeMapMu.Unlock()
 	}
 
-	if err != nil {
-		logger.Error("Project status changed to error", "project", p.Id, "status", status, "error", err)
-	} else {
-		logger.Info("Project status changed", "project", p.Id, "status", status)
+	// Step 5: Clear metrics channels
+	if p.metricsStop != nil {
+		select {
+		case <-p.metricsStop:
+			// Already closed
+		default:
+			close(p.metricsStop)
+		}
+		p.metricsStop = nil
 	}
+
+	// Step 6: Clear stop channel
+	if p.stopChan != nil {
+		select {
+		case <-p.stopChan:
+			// Already closed
+		default:
+			close(p.stopChan)
+		}
+		p.stopChan = nil
+	}
+
+	// Step 7: Clear all references (will be reloaded)
+	p.Inputs = make(map[string]*input.Input)
+	p.Outputs = make(map[string]*output.Output)
+	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.MsgChannels = []string{}
+
+	logger.Info("Defensive cleanup completed", "project", p.Id)
 }
