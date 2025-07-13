@@ -4,13 +4,7 @@ import eventManager from '../utils/eventManager'
 
 const store = createStore({
   state: {
-    components: {
-      inputs: [],
-      outputs: [],
-      rulesets: [],
-      projects: [],
-      plugins: []
-    },
+    // components moved to dataCache for unified management
     availablePlugins: [],
     nodeTypes: [
       { value: 'INCL', detail: 'String contains check' },
@@ -58,16 +52,12 @@ const store = createStore({
       { value: 'sport', detail: 'Source port field' },
       { value: 'pid', detail: 'Process ID field' }
     ],
-    pendingChanges: [],
-    clusterStatus: {},
-    clusterInfo: {},
+    // pendingChanges moved to dataCache for unified management
     rulesetFields: {}, // Cache for ruleset field keys: { rulesetId: { fieldKeys: [...], sampleCount: 0 } }
     _eventCleanupFunctions: []
   },
   getters: {
-    getComponents: (state) => (type) => {
-      return state.components[type] || []
-    },
+    // getComponents moved to dataCache
     getAvailablePlugins: (state) => {
       return state.availablePlugins
     },
@@ -86,35 +76,17 @@ const store = createStore({
     getCommonFields: (state) => {
       return state.commonFields
     },
-    getPendingChanges: (state) => {
-      return state.pendingChanges
-    },
-    getClusterStatus: (state) => {
-      return state.clusterStatus
-    },
-    getClusterInfo: (state) => {
-      return state.clusterInfo
-    },
+    // getPendingChanges moved to dataCache
     getRulesetFields: (state) => (rulesetId) => {
       return state.rulesetFields[rulesetId] || { fieldKeys: [], sampleCount: 0 }
     }
   },
   mutations: {
-    setComponents(state, { type, components }) {
-      state.components[type] = components
-    },
+    // setComponents moved to dataCache
     setAvailablePlugins(state, plugins) {
       state.availablePlugins = plugins
     },
-    setPendingChanges(state, changes) {
-      state.pendingChanges = changes
-    },
-    setClusterStatus(state, status) {
-      state.clusterStatus = status
-    },
-    setClusterInfo(state, info) {
-      state.clusterInfo = info
-    },
+    // setPendingChanges moved to dataCache
     setRulesetFields(state, { rulesetId, fieldData }) {
       state.rulesetFields[rulesetId] = fieldData
     },
@@ -199,33 +171,7 @@ const store = createStore({
       // console.log('[VuexStore] Event listeners cleaned up')
     },
 
-    // Note: fetchComponents is deprecated in favor of dataCache.fetchComponents
-    // Keep for backward compatibility but add deprecation warning
-    async fetchComponents({ commit, dispatch, state }, type) {
-      // console.warn(`[VuexStore] fetchComponents is deprecated. Use dataCache.fetchComponents('${type}') instead.`)
-      
-      // Initialize event listeners if needed
-      if (state._eventCleanupFunctions.length === 0) {
-        dispatch('initializeEventListeners')
-      }
-      
-      try {
-        // Use unified interface instead of deprecated individual fetch methods
-        let components = await hubApi.fetchComponentsWithTempInfo(type)
-        
-        // Sort component list by ID
-        if (Array.isArray(components)) {
-          components.sort((a, b) => {
-            const idA = a.id || a.name || ''
-            const idB = b.id || b.name || ''
-            return idA.localeCompare(idB)
-          })
-        }
-        commit('setComponents', { type, components })
-      } catch (error) {
-        console.error(`Error fetching ${type}:`, error)
-      }
-    },
+    // fetchComponents removed - use dataCache.fetchComponents() instead
     async fetchAvailablePlugins({ commit, dispatch, state }) {
       // Initialize event listeners if needed
       if (state._eventCleanupFunctions.length === 0) {
@@ -239,41 +185,9 @@ const store = createStore({
         commit('setAvailablePlugins', [])
       }
     },
-    async fetchAllComponents({ dispatch }) {
-      // console.warn('[VuexStore] fetchAllComponents is deprecated. Use dataCache for component fetching.')
-      await Promise.all([
-        dispatch('fetchComponents', 'inputs'),
-        dispatch('fetchComponents', 'outputs'),
-        dispatch('fetchComponents', 'rulesets'),
-        dispatch('fetchComponents', 'projects'),
-        dispatch('fetchComponents', 'plugins'),
-        dispatch('fetchAvailablePlugins')
-      ])
-    },
-    async fetchPendingChanges({ commit }) {
-      try {
-        const changes = await hubApi.fetchPendingChanges()
-        commit('setPendingChanges', changes)
-      } catch (error) {
-        commit('setPendingChanges', [])
-      }
-    },
-    async fetchClusterStatus({ commit }) {
-      try {
-        const status = await hubApi.fetchClusterStatus()
-        commit('setClusterStatus', status)
-      } catch (error) {
-        commit('setClusterStatus', {})
-      }
-    },
-    async fetchClusterInfo({ commit }) {
-      try {
-        const info = await hubApi.fetchClusterStatus()
-        commit('setClusterInfo', info)
-      } catch (error) {
-        commit('setClusterInfo', {})
-      }
-    },
+    // fetchAllComponents removed - use dataCache for component fetching
+    // fetchPendingChanges moved to dataCache.fetchPendingChanges()
+    // fetchClusterStatus moved to dataCache.fetchClusterInfo()
     async fetchRulesetFields({ commit, dispatch, state }, rulesetId) {
       // Initialize event listeners if needed
       if (state._eventCleanupFunctions.length === 0) {

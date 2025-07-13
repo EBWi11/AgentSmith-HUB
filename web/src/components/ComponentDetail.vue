@@ -889,7 +889,8 @@ onMounted(async () => {
   
   // If component type is project, fetch all components list
   if (props.item && props.item.type === 'projects') {
-    store.dispatch('fetchAllComponents')
+    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+    await Promise.all(componentTypes.map(type => dataCache.fetchComponents(type)))
   }
   
   // Set up periodic validation for projects (every 3 seconds)
@@ -1019,8 +1020,12 @@ function getLanguage(type) {
 }
 
 function getTemplateForComponent(type, id) {
-  // 传递store参数，特别是对于项目类型
-  return getDefaultTemplate(type, id, store);
+  // 传递包含dataCache的store对象，特别是对于项目类型
+  const storeWithDataCache = {
+    ...store,
+    $dataCache: dataCache
+  };
+  return getDefaultTemplate(type, id, storeWithDataCache);
 }
 
 // 发送全局项目操作事件

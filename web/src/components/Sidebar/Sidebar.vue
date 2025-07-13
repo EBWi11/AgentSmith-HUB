@@ -1495,7 +1495,7 @@ import { useDeleteConfirmModal } from '../../composables/useModal'
 import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
-import { useListSmartRefresh } from '../../composables/useSmartRefresh'
+// useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
 
 // Get router instance
 const router = useRouter()
@@ -1601,7 +1601,7 @@ const addType = ref('')
 const addName = ref('')
 const addRaw = ref('')
 const addError = ref('')
-const projectRefreshInterval = ref(null)
+// projectRefreshInterval removed - using unified projectStatusRefreshInterval
 
 // Connection check related reactive variables
 const showConnectionModal = ref(false)
@@ -1667,23 +1667,14 @@ const search = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
 
-// Create smart refresh for sidebar components
-const sidebarSmartRefresh = useListSmartRefresh(async () => {
-  // Refresh all expanded sections (only real component types)
-  const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
-  const promises = []
-  componentTypes.forEach(type => {
-    if (!collapsed[type]) {
-      promises.push(fetchItems(type))
-    }
-  })
-  await Promise.all(promises)
-}, {
-  baseInterval: 300000,   // 5min base interval
-  fastInterval: 1000,     // 1s fast interval
-  slowInterval: 300000,   // 5min slow interval
-  debug: false
-})
+// Refresh configuration
+const REFRESH_INTERVALS = {
+  TRANSITION_STATE: 2000,    // 2s - 项目过渡状态时的快速刷新
+  RECENT_OPERATION: 30000,   // 30s - 最近操作后的中等频率刷新
+  STABLE_STATE: 120000,      // 2min - 稳定状态的正常刷新
+  POLLING_INTERVAL: 2000,    // 2s - 状态轮询间隔
+  RECENT_OPERATION_WINDOW: 60000 // 60s - 被认为是"最近操作"的时间窗口
+}
 
 // Debounced search function
 const debouncedSearch = debounce(async (query) => {
@@ -1827,15 +1818,14 @@ onMounted(async () => {
   
   // Listen for pending changes applied event to refresh affected components
   window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
+  
+  // Listen for local changes loaded event to refresh affected components
+  window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
 })
 
 onBeforeUnmount(() => {
-  // Clear polling timer
-  if (projectRefreshInterval.value) {
-    clearInterval(projectRefreshInterval.value)
-  }
-  
-
+  // Clear project status refresh timer (handled by clearProjectStatusRefresh)
+  clearProjectStatusRefresh()
   
   // Remove ESC key listener
   removeEscKeyListener()
@@ -1845,6 +1835,9 @@ onBeforeUnmount(() => {
   
   // Remove pending changes applied event listener
   window.removeEventListener('pendingChangesApplied', handlePendingChangesApplied)
+  
+  // Remove local changes loaded event listener
+  window.removeEventListener('localChangesLoaded', handleLocalChangesLoaded)
 })
 
 // Watch for search input changes
@@ -1857,13 +1850,8 @@ watch(search, (newVal) => {
 
 // Methods
 function startProjectPolling() {
-  // Smart refresh will handle project polling automatically
-  // Keep a simple interval for project-specific status updates
-  projectRefreshInterval.value = setInterval(async () => {
-    if (!collapsed.projects) {
-      await refreshProjectStatus()
-    }
-  }, 300000)
+  // Project polling is now handled by setupProjectStatusRefresh for better coordination
+  // This function is kept for compatibility but doesn't create additional intervals
 }
 
 function openAddModal(type) {
@@ -2091,58 +2079,7 @@ async function fetchItems(type) {
   }
 }
 
-// Lazy refresh project status, only update status of existing projects, don't rebuild list
-async function refreshProjectStatus() {
-  // If project list is empty or loading, perform complete refresh
-  if (!items.projects || items.projects.length === 0 || loading.projects) {
-    return await fetchProjectsComplete()
-  }
-  
-  try {
-    // Get latest project data using cache
-    const response = await dataCache.fetchComponents('projects')
-    
-    if (Array.isArray(response)) {
-      const newProjects = response.map(item => {
-        if (!item.id) return null
-        return {
-          id: item.id,
-          type: item.type,
-          status: item.status,
-          hasTemp: item.hasTemp,
-          errorMessage: item.errorMessage || ''
-        }
-      }).filter(Boolean)
-      
-      // Check if there are project additions or deletions
-      const currentIds = new Set(items.projects.map(p => p.id))
-      const newIds = new Set(newProjects.map(p => p.id))
-      
-      // If project count changed or there are new/deleted projects, perform complete refresh
-      if (currentIds.size !== newIds.size || 
-          !Array.from(currentIds).every(id => newIds.has(id)) ||
-          !Array.from(newIds).every(id => currentIds.has(id))) {
-        return await fetchProjectsComplete()
-      }
-      
-      // Only update status of existing projects, don't rebuild list
-      items.projects.forEach(currentProject => {
-        const updatedProject = newProjects.find(p => p.id === currentProject.id)
-        if (updatedProject) {
-          // Only update status-related fields to keep DOM stable
-          currentProject.status = updatedProject.status
-          currentProject.hasTemp = updatedProject.hasTemp
-          currentProject.errorMessage = updatedProject.errorMessage
-        }
-      })
-      
-
-    }
-  } catch (err) {
-    console.error('Failed to refresh project status:', err)
-    // If status refresh fails, don't show error, handle silently
-  }
-}
+// Note: refreshProjectStatus moved to end of file with polling conflict optimization
 
 // Complete refresh of project list (for initial load and project additions/deletions)
 async function fetchProjectsComplete() {
@@ -2634,28 +2571,46 @@ function setupProjectStatusRefresh() {
     clearInterval(projectStatusRefreshInterval.value)
   }
   
-  // 动态调整刷新频率：过渡状态1秒，稳定状态60秒
+  // 优化的刷新频率：动态调整基于项目状态和用户操作
   const getRefreshInterval = () => {
     // 检查是否有项目处于过渡状态
     const hasTransitionProjects = items.projects && items.projects.some(project => 
       project.status === 'starting' || project.status === 'stopping'
     )
     
-    // 检查是否在最近操作后的30秒内
-    const recentOperation = Date.now() - lastSidebarOperation.value < 30000
+    // 检查是否在最近操作的时间窗口内
+    const recentOperation = Date.now() - lastSidebarOperation.value < REFRESH_INTERVALS.RECENT_OPERATION_WINDOW
     
-    if (hasTransitionProjects || recentOperation) {
-      return 1000 // 1秒 - 快速刷新过渡状态或最近操作后
+    if (hasTransitionProjects) {
+      return REFRESH_INTERVALS.TRANSITION_STATE
+    } else if (recentOperation) {
+      return REFRESH_INTERVALS.RECENT_OPERATION
     }
-    return 300000 // 5分钟 - 正常刷新稳定状态
+    return REFRESH_INTERVALS.STABLE_STATE
   }
   
-  const refreshProjects = async () => {
+  const refreshSidebar = async () => {
     try {
-      await refreshProjectStatus()
+      // 刷新展开的组件类型（包含项目状态）
+      const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+      const promises = []
       
-      // Also update cluster consistency data
-      await loadClusterConsistencyData()
+      componentTypes.forEach(type => {
+        if (!collapsed[type]) {
+          if (type === 'projects') {
+            promises.push(refreshProjectStatus())
+          } else {
+            promises.push(fetchItems(type))
+          }
+        }
+      })
+      
+      // 并行执行组件刷新和集群数据更新
+      await Promise.all([
+        ...promises,
+        loadClusterConsistencyData(),
+        showClusterStatusModal.value ? loadClusterProjectStates() : Promise.resolve()
+      ])
       
       // 状态刷新后，检查是否需要调整刷新间隔
       const newInterval = getRefreshInterval()
@@ -2664,22 +2619,22 @@ function setupProjectStatusRefresh() {
       if (newInterval !== currentSidebarInterval.value) {
         clearInterval(projectStatusRefreshInterval.value)
         currentSidebarInterval.value = newInterval
-        projectStatusRefreshInterval.value = setInterval(refreshProjects, newInterval)
+        projectStatusRefreshInterval.value = setInterval(refreshSidebar, newInterval)
                   // console.log(`Sidebar refresh interval adjusted to ${newInterval}ms`)
       }
     } catch (error) {
-      console.error('Failed to refresh project status:', error)
+      console.error('Failed to refresh sidebar:', error)
     }
   }
   
   // 初始设置
   const initialInterval = getRefreshInterval()
   currentSidebarInterval.value = initialInterval
-  projectStatusRefreshInterval.value = setInterval(refreshProjects, initialInterval)
+  projectStatusRefreshInterval.value = setInterval(refreshSidebar, initialInterval)
       // console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
   
   // 立即执行一次刷新
-  refreshProjects()
+  refreshSidebar()
 }
 
 // 清除项目状态刷新
@@ -2895,8 +2850,15 @@ async function restartProject(item) {
 
 // New function: Poll project status until it reaches a stable state
 async function pollProjectStatusUntilStable(projectId, expectedTransitionState) {
-  const maxAttempts = 60 // Maximum 60 attempts (2 minutes with 2s intervals)
-  const pollInterval = 2000 // Poll every 2 seconds
+  // 避免重复轮询
+  if (isPollingProject.value) {
+    return
+  }
+  
+  isPollingProject.value = true
+  
+  const maxAttempts = 60 // Maximum 60 attempts (2 minutes)
+  const pollInterval = REFRESH_INTERVALS.POLLING_INTERVAL
   let attempts = 0
   
       // console.log(`Starting status polling for project ${projectId}, expecting transition from '${expectedTransitionState}'`)
@@ -2905,73 +2867,58 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
     attempts++
     
     try {
-      // Force refresh to get latest status
-      await dataCache.fetchComponents('projects', true)
+      // Get latest status without forcing cache refresh to avoid conflicts
       const response = await dataCache.fetchComponents('projects')
       
       if (Array.isArray(response)) {
         const project = response.find(p => p.id === projectId)
         
         if (project) {
-          const currentStatus = project.status
-          // console.log(`Poll attempt ${attempts}: Project ${projectId} status is '${currentStatus}'`)
-          
-          // Update UI with real status from backend
+          // Update the project in sidebar immediately
           if (items.projects) {
-            const projectItem = items.projects.find(p => p.id === projectId)
-            if (projectItem) {
-              projectItem.status = currentStatus
-              projectItem.hasTemp = project.hasTemp
-              projectItem.errorMessage = project.errorMessage || ''
+            const sidebarProject = items.projects.find(p => p.id === projectId)
+            if (sidebarProject) {
+              sidebarProject.status = project.status
+              sidebarProject.hasTemp = project.hasTemp
+              sidebarProject.errorMessage = project.errorMessage || ''
             }
           }
           
-          // Check if we've reached a stable state
-          const isStableState = !['starting', 'stopping'].includes(currentStatus)
-          
-          if (isStableState) {
-                          // console.log(`Project ${projectId} reached stable state: '${currentStatus}'`)
-            
-            // Show final result message
-            if (currentStatus === 'running') {
-              $message?.success?.(`Project ${projectId} is now running`)
-            } else if (currentStatus === 'stopped') {
-              $message?.success?.(`Project ${projectId} is now stopped`)
-            } else if (currentStatus === 'error') {
-              $message?.error?.(`Project ${projectId} encountered an error`)
-            }
-            
-            return // Stop polling
+          // Check if reached stable state
+          const stableStates = ['running', 'stopped', 'error', 'failed']
+          if (stableStates.includes(project.status)) {
+                  // console.log(`Project ${projectId} reached stable state: ${project.status}`)
+            isPollingProject.value = false
+            return
           }
           
-          // Continue polling if still in transition state
+          // Continue polling if still in transition
           if (attempts < maxAttempts) {
             setTimeout(poll, pollInterval)
           } else {
-            console.warn(`Polling timeout for project ${projectId} after ${maxAttempts} attempts`)
-            $message?.warning?.(`Status polling timeout for project ${projectId}`)
+            console.warn(`Project ${projectId} polling timeout after ${maxAttempts} attempts`)
+            isPollingProject.value = false
           }
         } else {
-          console.error(`Project ${projectId} not found in response`)
-          if (attempts < maxAttempts) {
-            setTimeout(poll, pollInterval)
-          }
+          console.warn(`Project ${projectId} not found in response`)
+          isPollingProject.value = false
         }
+      } else {
+        console.warn('Invalid response format for project list')
+        isPollingProject.value = false
       }
     } catch (error) {
-      console.error(`Error polling status for project ${projectId}:`, error)
-      
-      // Retry on error, but don't spam
+      console.error(`Error polling project ${projectId} status:`, error)
       if (attempts < maxAttempts) {
-        setTimeout(poll, pollInterval * 2) // Double interval on error
+        setTimeout(poll, pollInterval)
       } else {
-        $message?.error?.(`Failed to get final status for project ${projectId}`)
+        isPollingProject.value = false
       }
     }
   }
   
-  // Start polling after a short delay to allow backend to process
-  setTimeout(poll, 1000)
+  // Start polling
+  poll()
 }
 
 // Close project operation warning modal
@@ -3472,25 +3419,104 @@ async function handlePendingChangesApplied(event) {
   
       // console.log('Pending changes applied, refreshing affected types:', types)
   
-  // Clear cache and refresh each affected component type
-  for (const type of types) {
-    // Clear component cache to ensure fresh data
-    dataCache.clearComponentCache(type)
-    
-    // Convert singular type to plural for items object (e.g., 'input' -> 'inputs')
-    const pluralType = type.endsWith('s') ? type : type + 's'
-    
-    // Refresh the component list if it exists
-    if (items[pluralType] !== undefined) {
-      await fetchItems(pluralType)
-    }
+  // 移除立即刷新，依赖dataCache的事件处理
+  // 只在500ms后进行一次全量刷新以确保最终一致性
+  debouncedFullRefresh()
+}
+
+// Handle local changes loaded event
+async function handleLocalChangesLoaded(event) {
+  const { types, timestamp } = event.detail || {}
+  
+  if (!types || !Array.isArray(types)) {
+    return
   }
   
-  // If projects were affected, also trigger a project status refresh
-  if (types.includes('project') || types.includes('projects')) {
+      // console.log('Local changes loaded, refreshing affected types:', types)
+  
+  // 移除立即刷新，依赖dataCache的事件处理
+  // 只在500ms后进行一次全量刷新以确保最终一致性
+  debouncedFullRefresh()
+}
+
+// 防抖的全量刷新函数
+const debouncedFullRefresh = debounce(async () => {
+  try {
+    // 全量刷新所有组件列表
+    await fetchAllItems()
+    
+    // 刷新项目状态和集群数据
     await refreshProjectStatus()
+    await loadClusterConsistencyData()
+    if (showClusterStatusModal.value) {
+      await loadClusterProjectStates()
+    }
+  } catch (error) {
+    console.error('Failed to refresh after changes:', error)
+  }
+}, 500)
+
+// 优化项目状态刷新，避免与轮询冲突
+async function refreshProjectStatus() {
+  // 如果正在轮询中，跳过此次刷新
+  if (isPollingProject.value) {
+    return
+  }
+  
+  // If project list is empty or loading, perform complete refresh
+  if (!items.projects || items.projects.length === 0 || loading.projects) {
+    return await fetchProjectsComplete()
+  }
+  
+  try {
+    // Get latest project data using cache
+    const response = await dataCache.fetchComponents('projects')
+    
+    if (Array.isArray(response)) {
+      const newProjects = response.map(item => {
+        if (!item.id) return null
+        return {
+          id: item.id,
+          type: item.type,
+          status: item.status,
+          hasTemp: item.hasTemp,
+          errorMessage: item.errorMessage || ''
+        }
+      }).filter(Boolean)
+      
+      // Check if there are project additions or deletions
+      const currentIds = new Set(items.projects.map(p => p.id))
+      const newIds = new Set(newProjects.map(p => p.id))
+      
+      // If project count changed or there are new/deleted projects, perform complete refresh
+      if (currentIds.size !== newIds.size || 
+          !Array.from(currentIds).every(id => newIds.has(id)) ||
+          !Array.from(newIds).every(id => currentIds.has(id))) {
+        return await fetchProjectsComplete()
+      }
+      
+      // Only update status of existing projects, don't rebuild list
+      items.projects.forEach(currentProject => {
+        const updatedProject = newProjects.find(p => p.id === currentProject.id)
+        if (updatedProject) {
+          // Only update status-related fields to keep DOM stable
+          currentProject.status = updatedProject.status
+          currentProject.hasTemp = updatedProject.hasTemp
+          currentProject.errorMessage = updatedProject.errorMessage
+        }
+      })
+      
+
+    }
+  } catch (err) {
+    console.error('Failed to refresh project status:', err)
+    // If status refresh fails, don't show error, handle silently
   }
 }
+
+// 添加轮询状态标识
+const isPollingProject = ref(false)
+
 </script>
 
 <style>

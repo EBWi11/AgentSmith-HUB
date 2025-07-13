@@ -239,8 +239,11 @@ export const useDataCacheStore = defineStore('dataCache', {
         throw new Error(`Component type '${type}' not found`)
       }
       
+      // Dynamic TTL based on component type
+      const componentTTL = type === 'projects' ? 30000 : 60000 // Projects: 30s, Others: 60s
+      
       // If data not expired and not forcing refresh, return cached data
-      if (!forceRefresh && !this.isComponentExpired(type, 60000)) {
+      if (!forceRefresh && !this.isComponentExpired(type, componentTTL)) {
         return cache.data
       }
       
@@ -360,7 +363,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       return this.fetchWithCache(
         'clusterProjectStates',
         () => hubApi.getClusterProjectStates(),
-        10000, // 10s TTL – project state can change quickly
+        30000, // 30s TTL - optimized for sidebar refresh intervals
         forceRefresh
       )
     },

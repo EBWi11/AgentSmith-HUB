@@ -108,11 +108,11 @@ export function generateProjectTemplate(id, store) {
   let rulesetExample = 'example_ruleset';
   let outputExample = 'example_output';
   
-  // If store is provided, try to get actual components
-  if (store) {
-    const inputs = store.getters.getComponents('inputs');
-    const rulesets = store.getters.getComponents('rulesets');
-    const outputs = store.getters.getComponents('outputs');
+  // If store is provided, try to get actual components from dataCache
+  if (store && store.$dataCache) {
+    const inputs = store.$dataCache.getComponentData('inputs');
+    const rulesets = store.$dataCache.getComponentData('rulesets');
+    const outputs = store.$dataCache.getComponentData('outputs');
     
     if (inputs && inputs.length > 0) {
       inputExample = inputs[0].id;
