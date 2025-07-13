@@ -257,7 +257,7 @@ func main() {
 						if len(components) > 0 {
 							validComponents := make([]common.ComponentStatsData, 0)
 							for _, component := range components {
-								if component.Increment > 0 {
+								if component.TotalMessages > 0 {
 									validComponents = append(validComponents, component)
 								}
 							}
