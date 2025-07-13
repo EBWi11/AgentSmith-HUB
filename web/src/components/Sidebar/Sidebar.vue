@@ -2850,31 +2850,27 @@ async function restartProject(item) {
 
 // New function: Poll project status until it reaches a stable state
 async function pollProjectStatusUntilStable(projectId, expectedTransitionState) {
-  // 避免重复轮询
-  if (isPollingProject.value) {
+  // Avoid duplicate polling for this project
+  if (activeProjectPollers.has(projectId)) {
     return
   }
-  
+  activeProjectPollers.set(projectId, true)
   isPollingProject.value = true
-  
-  const maxAttempts = 60 // Maximum 60 attempts (2 minutes)
+
+  const maxAttempts = 60 // 2 minutes
   const pollInterval = REFRESH_INTERVALS.POLLING_INTERVAL
   let attempts = 0
-  
-      // console.log(`Starting status polling for project ${projectId}, expecting transition from '${expectedTransitionState}'`)
-  
+
   const poll = async () => {
     attempts++
-    
+
     try {
-      // Get latest status without forcing cache refresh to avoid conflicts
-      const response = await dataCache.fetchComponents('projects')
-      
+      // Force refresh to bypass cache each time
+      const response = await dataCache.fetchComponents('projects', true)
       if (Array.isArray(response)) {
         const project = response.find(p => p.id === projectId)
-        
         if (project) {
-          // Update the project in sidebar immediately
+          // Update sidebar immediately
           if (items.projects) {
             const sidebarProject = items.projects.find(p => p.id === projectId)
             if (sidebarProject) {
@@ -2883,41 +2879,45 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
               sidebarProject.errorMessage = project.errorMessage || ''
             }
           }
-          
-          // Check if reached stable state
+
+          // Stable states we wait for
           const stableStates = ['running', 'stopped', 'error', 'failed']
           if (stableStates.includes(project.status)) {
-                  // console.log(`Project ${projectId} reached stable state: ${project.status}`)
-            isPollingProject.value = false
+            activeProjectPollers.delete(projectId)
+            isPollingProject.value = activeProjectPollers.size > 0
             return
           }
-          
+
           // Continue polling if still in transition
           if (attempts < maxAttempts) {
             setTimeout(poll, pollInterval)
           } else {
             console.warn(`Project ${projectId} polling timeout after ${maxAttempts} attempts`)
-            isPollingProject.value = false
+            activeProjectPollers.delete(projectId)
+            isPollingProject.value = activeProjectPollers.size > 0
           }
         } else {
           console.warn(`Project ${projectId} not found in response`)
-          isPollingProject.value = false
+          activeProjectPollers.delete(projectId)
+          isPollingProject.value = activeProjectPollers.size > 0
         }
       } else {
         console.warn('Invalid response format for project list')
-        isPollingProject.value = false
+        activeProjectPollers.delete(projectId)
+        isPollingProject.value = activeProjectPollers.size > 0
       }
     } catch (error) {
       console.error(`Error polling project ${projectId} status:`, error)
       if (attempts < maxAttempts) {
         setTimeout(poll, pollInterval)
       } else {
-        isPollingProject.value = false
+        activeProjectPollers.delete(projectId)
+        isPollingProject.value = activeProjectPollers.size > 0
       }
     }
   }
-  
-  // Start polling
+
+  // Start polling loop
   poll()
 }
 
@@ -3516,6 +3516,9 @@ async function refreshProjectStatus() {
 
 // 添加轮询状态标识
 const isPollingProject = ref(false)
+
+// Add a Map to track polling projects (projectId -> true)
+const activeProjectPollers = new Map()
 
 </script>
 

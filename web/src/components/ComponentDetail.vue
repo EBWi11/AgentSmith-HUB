@@ -1050,6 +1050,14 @@ async function startProject() {
   // 记录操作时间并通知其他组件
   emitProjectOperation('start')
   
+  // Immediately update UI to transition state
+  if (detail.value) {
+    detail.value.status = 'starting'
+  }
+  if (props.item) {
+    props.item.status = 'starting'
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -1082,6 +1090,14 @@ async function stopProject() {
   // 记录操作时间并通知其他组件
   emitProjectOperation('stop')
   
+  // Immediately update UI to transition state
+  if (detail.value) {
+    detail.value.status = 'stopping'
+  }
+  if (props.item) {
+    props.item.status = 'stopping'
+  }
+  
   projectOperationLoading.value = true
   
   try {
@@ -1113,6 +1129,14 @@ async function restartProject() {
   
   // 记录操作时间并通知其他组件
   emitProjectOperation('restart')
+  
+  // Immediately update UI to transition state (restart begins with stop)
+  if (detail.value) {
+    detail.value.status = 'stopping'
+  }
+  if (props.item) {
+    props.item.status = 'stopping'
+  }
   
   projectOperationLoading.value = true
   
