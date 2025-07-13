@@ -799,26 +799,8 @@ func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart 
 			projectsToRestart[projectID] = struct{}{}
 		}
 		return nil
-	case "input":
-		affectedProjects, err := applyInputChange(change)
-		if err != nil {
-			return err
-		}
-		for _, projectID := range affectedProjects {
-			projectsToRestart[projectID] = struct{}{}
-		}
-		return nil
-	case "output":
-		affectedProjects, err := applyOutputChange(change)
-		if err != nil {
-			return err
-		}
-		for _, projectID := range affectedProjects {
-			projectsToRestart[projectID] = struct{}{}
-		}
-		return nil
-	case "ruleset":
-		affectedProjects, err := applyRulesetChange(change)
+	case "input", "output", "ruleset":
+		affectedProjects, err := applyComponentChange(change)
 		if err != nil {
 			return err
 		}
@@ -835,223 +817,386 @@ func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart 
 
 // Component-specific apply functions
 func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
-	pluginID := change.ID
-	newContent := change.NewContent
-
-	logger.Info("Applying plugin change", "plugin", pluginID)
-
-	// Get affected projects for restart
-	affectedProjects := project.GetAffectedProjects("plugin", pluginID)
-
-	// Update plugin configuration file
-	configRoot := common.Config.ConfigRoot
-	pluginPath := path.Join(configRoot, "plugin", pluginID+".go")
-
-	if err := os.WriteFile(pluginPath, []byte(newContent), 0644); err != nil {
-		logger.Error("Failed to write plugin file", "plugin", pluginID, "error", err)
-		return nil, fmt.Errorf("failed to write plugin file: %w", err)
+	req := &ComponentReloadRequest{
+		Type:        "plugin",
+		ID:          change.ID,
+		NewContent:  change.NewContent,
+		OldContent:  change.OldContent,
+		Source:      SourceChangePush,
+		SkipVerify:  true, // Change push already verified
+		WriteToFile: true, // Change push writes to file
 	}
 
-	// Update plugin in memory
-	if err := plugin.NewPlugin(pluginPath, "", pluginID, plugin.YAEGI_PLUGIN); err != nil {
-		logger.Error("Failed to reload plugin", "plugin", pluginID, "error", err)
-		// Record failed operation
-		RecordChangePush("plugin", pluginID, change.OldContent, newContent, "", "failed", err.Error())
-		return nil, fmt.Errorf("failed to reload plugin: %w", err)
-	}
-
-	// Clear from legacy storage
-	common.GlobalMu.Lock()
-	delete(plugin.PluginsNew, pluginID)
-	common.GlobalMu.Unlock()
-
-	// Sync to followers using instruction system
-	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("plugin", pluginID, newContent, affectedProjects); err != nil {
-		logger.Error("Failed to publish plugin push change instruction", "plugin", pluginID, "error", err)
-	}
-
-	// Record operation history
-	RecordChangePush("plugin", pluginID, change.OldContent, newContent, "", "success", "")
-
-	logger.Info("Plugin change applied successfully", "plugin", pluginID, "affected_projects", len(affectedProjects))
-
-	return affectedProjects, nil
+	return reloadComponentUnified(req)
 }
 
-// Generic component application with type-specific handling
-func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
-	configRoot := common.Config.ConfigRoot
+// ComponentReloadSource represents the source of component reload
+type ComponentReloadSource string
+
+const (
+	SourceChangePush  ComponentReloadSource = "change_push"
+	SourceLocalFile   ComponentReloadSource = "local_file"
+	SourceClusterSync ComponentReloadSource = "cluster_sync"
+)
+
+// ComponentReloadRequest represents a request to reload a component
+type ComponentReloadRequest struct {
+	Type        string                `json:"type"`
+	ID          string                `json:"id"`
+	NewContent  string                `json:"new_content"`
+	OldContent  string                `json:"old_content,omitempty"`
+	Source      ComponentReloadSource `json:"source"`
+	SkipVerify  bool                  `json:"skip_verify,omitempty"`
+	WriteToFile bool                  `json:"write_to_file,omitempty"`
+}
+
+// reloadComponentUnified provides unified component reload logic for all sources
+func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
+	logger.Info("Starting unified component reload", "type", req.Type, "id", req.ID, "source", req.Source)
+
+	// Phase 1: Validation
+	if req.Type == "" || req.ID == "" {
+		return nil, fmt.Errorf("component type and ID are required")
+	}
+
+	// Phase 2: Verification (optional based on source)
+	if !req.SkipVerify {
+		var verifyErr error
+		switch req.Type {
+		case "plugin":
+			verifyErr = plugin.Verify("", req.NewContent, req.ID)
+		case "input":
+			verifyErr = input.Verify("", req.NewContent)
+		case "output":
+			verifyErr = output.Verify("", req.NewContent)
+		case "ruleset":
+			verifyErr = rules_engine.Verify("", req.NewContent)
+		case "project":
+			verifyErr = project.Verify("", req.NewContent)
+		default:
+			return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+		}
+
+		if verifyErr != nil {
+			logger.Error("Component verification failed", "type", req.Type, "id", req.ID, "error", verifyErr)
+			return nil, fmt.Errorf("verification failed: %w", verifyErr)
+		}
+	}
+
+	// Phase 3: Write to file (optional based on source)
 	var filePath string
+	if req.WriteToFile {
+		configRoot := common.Config.ConfigRoot
+		switch req.Type {
+		case "input":
+			filePath = path.Join(configRoot, "input", req.ID+".yaml")
+		case "output":
+			filePath = path.Join(configRoot, "output", req.ID+".yaml")
+		case "ruleset":
+			filePath = path.Join(configRoot, "ruleset", req.ID+".xml")
+		case "project":
+			filePath = path.Join(configRoot, "project", req.ID+".yaml")
+		case "plugin":
+			filePath = path.Join(configRoot, "plugin", req.ID+".go")
+		default:
+			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
+		}
+
+		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
+		if err != nil {
+			logger.Error("Failed to write component file", "type", req.Type, "id", req.ID, "error", err)
+			return nil, fmt.Errorf("failed to write %s file: %w", req.Type, err)
+		}
+	}
+
+	// Phase 4: Stop old component and create new one
 	var affectedProjects []string
-
-	// Determine file path and extension
-	switch change.Type {
+	switch req.Type {
 	case "input":
-		filePath = path.Join(configRoot, "input", change.ID+".yaml")
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldInput, exists := project.GlobalProject.Inputs[req.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			// Only stop if no running projects are using it
+			projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(req.ID)
+			if projectsUsingInput == 0 {
+				logger.Info("Stopping old input component for reload", "id", req.ID)
+				err := oldInput.Stop()
+				if err != nil {
+					logger.Error("Failed to stop old input", "type", req.Type, "id", req.ID, "error", err)
+				}
+				common.GlobalDailyStatsManager.CollectAllComponentsData()
+			} else {
+				logger.Info("Input component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingInput)
+			}
+		}
+
+		// Create new component instance
+		var newInput *input.Input
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newInput, err = input.NewInput(filePath, "", req.ID)
+		} else {
+			newInput, err = input.NewInput("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create input: %w", err)
+		}
+
+		// Replace in global registry
+		common.GlobalMu.Lock()
+		if project.GlobalProject.Inputs == nil {
+			project.GlobalProject.Inputs = make(map[string]*input.Input)
+		}
+		project.GlobalProject.Inputs[req.ID] = newInput
+		delete(project.GlobalProject.InputsNew, req.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("input", req.ID)
+
 	case "output":
-		filePath = path.Join(configRoot, "output", change.ID+".yaml")
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldOutput, exists := project.GlobalProject.Outputs[req.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			// Only stop if no running projects are using it
+			projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(req.ID)
+			if projectsUsingOutput == 0 {
+				logger.Info("Stopping old output component for reload", "id", req.ID)
+				err := oldOutput.Stop()
+				if err != nil {
+					logger.Error("Failed to stop old output", "type", req.Type, "id", req.ID, "error", err)
+				}
+				common.GlobalDailyStatsManager.CollectAllComponentsData()
+			} else {
+				logger.Info("Output component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingOutput)
+			}
+		}
+
+		// Create new component instance
+		var newOutput *output.Output
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newOutput, err = output.NewOutput(filePath, "", req.ID)
+		} else {
+			newOutput, err = output.NewOutput("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create output: %w", err)
+		}
+
+		// Replace in global registry
+		common.GlobalMu.Lock()
+		if project.GlobalProject.Outputs == nil {
+			project.GlobalProject.Outputs = make(map[string]*output.Output)
+		}
+		project.GlobalProject.Outputs[req.ID] = newOutput
+		delete(project.GlobalProject.OutputsNew, req.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("output", req.ID)
+
 	case "ruleset":
-		filePath = path.Join(configRoot, "ruleset", change.ID+".xml")
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			// Only stop if no running projects are using it
+			projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(req.ID)
+			if projectsUsingRuleset == 0 {
+				logger.Info("Stopping old ruleset component for reload", "id", req.ID)
+				err := oldRuleset.Stop()
+				if err != nil {
+					logger.Error("Failed to stop old ruleset", "type", req.Type, "id", req.ID, "error", err)
+				}
+				common.GlobalDailyStatsManager.CollectAllComponentsData()
+			} else {
+				logger.Info("Ruleset component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingRuleset)
+			}
+		}
+
+		// Create new component instance
+		var newRuleset *rules_engine.Ruleset
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newRuleset, err = rules_engine.NewRuleset(filePath, "", req.ID)
+		} else {
+			newRuleset, err = rules_engine.NewRuleset("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create ruleset: %w", err)
+		}
+
+		// Replace in global registry
+		common.GlobalMu.Lock()
+		if project.GlobalProject.Rulesets == nil {
+			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
+		}
+		project.GlobalProject.Rulesets[req.ID] = newRuleset
+		delete(project.GlobalProject.RulesetsNew, req.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
+
+	case "project":
+		// Stop old component if it exists
+		common.GlobalMu.RLock()
+		oldProject, exists := project.GlobalProject.Projects[req.ID]
+		common.GlobalMu.RUnlock()
+		if exists {
+			logger.Info("Stopping old project component for reload", "id", req.ID)
+			err := oldProject.Stop()
+			if err != nil {
+				logger.Error("Failed to stop old project", "type", req.Type, "id", req.ID, "error", err)
+			}
+		}
+
+		// Create new component instance
+		var newProject *project.Project
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newProject, err = project.NewProject(filePath, "", req.ID)
+		} else {
+			newProject, err = project.NewProject("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create project: %w", err)
+		}
+
+		// Replace in global registry
+		common.GlobalMu.Lock()
+		if project.GlobalProject.Projects == nil {
+			project.GlobalProject.Projects = make(map[string]*project.Project)
+		}
+		project.GlobalProject.Projects[req.ID] = newProject
+		delete(project.GlobalProject.ProjectsNew, req.ID)
+		common.GlobalMu.Unlock()
+
+		// Projects don't have affected projects since they restart themselves
+		affectedProjects = []string{}
+
+	case "plugin":
+		// Stop old component if it exists (plugins don't have explicit stop)
+		common.GlobalMu.Lock()
+		delete(plugin.Plugins, req.ID)
+		common.GlobalMu.Unlock()
+
+		// Create new component instance
+		var err error
+		if req.WriteToFile && filePath != "" {
+			err = plugin.NewPlugin(filePath, "", req.ID, plugin.YAEGI_PLUGIN)
+		} else {
+			err = plugin.NewPlugin("", req.NewContent, req.ID, plugin.YAEGI_PLUGIN)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create plugin: %w", err)
+		}
+
+		// Clear temporary version
+		common.GlobalMu.Lock()
+		delete(plugin.PluginsNew, req.ID)
+		common.GlobalMu.Unlock()
+
+		affectedProjects = project.GetAffectedProjects("plugin", req.ID)
+
 	default:
-		return nil, fmt.Errorf("unsupported component type: %s", change.Type)
+		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
 	}
 
-	// Write directly to file
-	err := os.WriteFile(filePath, []byte(change.NewContent), 0644)
-	if err != nil {
-		logger.Error("Failed to write component file", "type", change.Type, "id", change.ID, "error", err)
-		return nil, fmt.Errorf("failed to write %s file: %w", change.Type, err)
+	// Phase 5: Update global config maps and sync to followers
+	if common.IsCurrentNodeLeader() {
+		updateGlobalComponentConfigMap(req.Type, req.ID, req.NewContent)
+
+		// Sync to followers using instruction system
+		if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, req.NewContent, affectedProjects); err != nil {
+			logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
+		}
 	}
 
-	// Type-specific component handling
-	switch change.Type {
+	// Phase 6: Record operation history
+	switch req.Source {
+	case SourceChangePush:
+		RecordChangePush(req.Type, req.ID, req.OldContent, req.NewContent, "", "success", "")
+	case SourceLocalFile:
+		RecordLocalPush(req.Type, req.ID, req.NewContent, "success", "")
+	case SourceClusterSync:
+		// Cluster sync doesn't need to record history to avoid loops
+	}
+
+	logger.Info("Component reload completed successfully", "type", req.Type, "id", req.ID, "source", req.Source, "affected_projects", len(affectedProjects))
+	return affectedProjects, nil
+}
+
+// updateGlobalComponentConfigMap updates the global component config map
+func updateGlobalComponentConfigMap(componentType, id, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Initialize maps if they are nil
+	if common.AllInputsRawConfig == nil {
+		common.AllInputsRawConfig = make(map[string]string)
+	}
+	if common.AllOutputsRawConfig == nil {
+		common.AllOutputsRawConfig = make(map[string]string)
+	}
+	if common.AllRulesetsRawConfig == nil {
+		common.AllRulesetsRawConfig = make(map[string]string)
+	}
+	if common.AllProjectRawConfig == nil {
+		common.AllProjectRawConfig = make(map[string]string)
+	}
+	if common.AllPluginsRawConfig == nil {
+		common.AllPluginsRawConfig = make(map[string]string)
+	}
+
+	// Update the appropriate global config map
+	switch componentType {
 	case "input":
-		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldInput, exists := project.GlobalProject.Inputs[change.ID]
-		common.GlobalMu.RUnlock()
-		if exists {
-			err := oldInput.Stop()
-			if err != nil {
-				logger.Error("Failed to stop old input", "type", change.Type, "id", change.ID, "error", err)
-			}
-			common.GlobalDailyStatsManager.CollectAllComponentsData()
-		}
-
-		// Reload component
-		newInput, reloadErr := input.NewInput(filePath, "", change.ID)
-		if reloadErr != nil {
-			return nil, fmt.Errorf("failed to reload input: %w", reloadErr)
-		}
-
-		common.GlobalMu.Lock()
-		project.GlobalProject.Inputs[change.ID] = newInput
-		delete(project.GlobalProject.InputsNew, change.ID)
-		common.GlobalMu.Unlock()
-
-		affectedProjects = project.GetAffectedProjects("input", change.ID)
-
+		common.AllInputsRawConfig[id] = content
 	case "output":
-		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldOutput, exists := project.GlobalProject.Outputs[change.ID]
-		common.GlobalMu.RUnlock()
-		if exists {
-			err := oldOutput.Stop()
-			if err != nil {
-				logger.Error("Failed to stop old output", "type", change.Type, "id", change.ID, "error", err)
-			}
-			common.GlobalDailyStatsManager.CollectAllComponentsData()
-		}
-
-		// Reload component
-		newOutput, reloadErr := output.NewOutput(filePath, "", change.ID)
-		if reloadErr != nil {
-			return nil, fmt.Errorf("failed to reload output: %w", reloadErr)
-		}
-
-		common.GlobalMu.Lock()
-		project.GlobalProject.Outputs[change.ID] = newOutput
-		delete(project.GlobalProject.OutputsNew, change.ID)
-		common.GlobalMu.Unlock()
-
-		affectedProjects = project.GetAffectedProjects("output", change.ID)
-
+		common.AllOutputsRawConfig[id] = content
 	case "ruleset":
-		// Reload component
-		newRuleset, reloadErr := rules_engine.NewRuleset(filePath, "", change.ID)
-		if reloadErr != nil {
-			return nil, fmt.Errorf("failed to reload ruleset: %w", reloadErr)
-		}
-
-		common.GlobalMu.Lock()
-		project.GlobalProject.Rulesets[change.ID] = newRuleset
-		delete(project.GlobalProject.RulesetsNew, change.ID)
-		common.GlobalMu.Unlock()
-
-		affectedProjects = project.GetAffectedProjects("ruleset", change.ID)
+		common.AllRulesetsRawConfig[id] = content
+	case "project":
+		common.AllProjectRawConfig[id] = content
+	case "plugin":
+		common.AllPluginsRawConfig[id] = content
 	}
 
-	// Sync to followers using instruction system
-	if err := cluster.GlobalInstructionManager.PublishComponentPushChange(change.Type, change.ID, change.NewContent, affectedProjects); err != nil {
-		logger.Error("Failed to publish component push change instruction", "type", change.Type, "id", change.ID, "error", err)
-	}
-
-	logger.Info("Component change applied successfully", "type", change.Type, "id", change.ID, "affected_projects", len(affectedProjects))
-
-	// 新增：记录操作历史
-	RecordChangePush(change.Type, change.ID, change.OldContent, change.NewContent, "", "success", "")
-
-	return affectedProjects, nil
+	logger.Debug("Updated global component config map", "type", componentType, "id", id)
 }
 
-func applyInputChange(change *EnhancedPendingChange) ([]string, error) {
-	affectedProjects, err := applyComponentChange(change)
-	if err != nil {
-		logger.Error("Failed to apply input change", "id", change.ID, "error", err)
-		return nil, err
+// applyComponentChange applies a single enhanced pending change using unified reload logic
+func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
+	req := &ComponentReloadRequest{
+		Type:        change.Type,
+		ID:          change.ID,
+		NewContent:  change.NewContent,
+		OldContent:  change.OldContent,
+		Source:      SourceChangePush,
+		SkipVerify:  true, // Change push already verified
+		WriteToFile: true, // Change push writes to file
 	}
-	return affectedProjects, nil
-}
 
-func applyOutputChange(change *EnhancedPendingChange) ([]string, error) {
-	affectedProjects, err := applyComponentChange(change)
-	if err != nil {
-		logger.Error("Failed to apply output change", "id", change.ID, "error", err)
-		return nil, err
-	}
-	return affectedProjects, nil
-}
-
-func applyRulesetChange(change *EnhancedPendingChange) ([]string, error) {
-	affectedProjects, err := applyComponentChange(change)
-	if err != nil {
-		logger.Error("Failed to apply ruleset change", "id", change.ID, "error", err)
-		return nil, err
-	}
-	return affectedProjects, nil
+	return reloadComponentUnified(req)
 }
 
 func applyProjectChange(change *EnhancedPendingChange) error {
-	configRoot := common.Config.ConfigRoot
-	projectPath := path.Join(configRoot, "project", change.ID+".yaml")
-
-	// Write directly to file
-	err := os.WriteFile(projectPath, []byte(change.NewContent), 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write project file: %w", err)
+	req := &ComponentReloadRequest{
+		Type:        "project",
+		ID:          change.ID,
+		NewContent:  change.NewContent,
+		OldContent:  change.OldContent,
+		Source:      SourceChangePush,
+		SkipVerify:  true, // Change push already verified
+		WriteToFile: true, // Change push writes to file
 	}
 
-	// Stop old component if it exists
-	common.GlobalMu.RLock()
-	oldProject, exists := project.GlobalProject.Projects[change.ID]
-	common.GlobalMu.RUnlock()
-	if exists {
-		oldProject.Stop()
-	}
-
-	// Reload component
-	newProject, reloadErr := project.NewProject(projectPath, "", change.ID)
-	if reloadErr != nil {
-		return fmt.Errorf("failed to reload project: %w", reloadErr)
-	}
-
-	common.GlobalMu.Lock()
-	project.GlobalProject.Projects[change.ID] = newProject
-	delete(project.GlobalProject.ProjectsNew, change.ID)
-	common.GlobalMu.Unlock()
-
-	// Sync to followers using instruction system
-	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("project", change.ID, change.NewContent, nil); err != nil {
-		logger.Error("Failed to publish project push change instruction", "project", change.ID, "error", err)
-	}
-
-	logger.Info("Project change applied successfully", "id", change.ID)
-
-	// 新增：记录操作历史
-	RecordChangePush("project", change.ID, change.OldContent, change.NewContent, "", "success", "")
-
-	return nil
+	_, err := reloadComponentUnified(req)
+	return err
 }
 
 // ApplySingleChange applies a single pending change

@@ -1,14 +1,10 @@
 package api
 
 import (
-	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
-	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
-	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
-	"AgentSmith-HUB/rules_engine"
 	"crypto/md5"
 	"fmt"
 	"io/fs"
@@ -735,198 +731,18 @@ func loadSingleLocalChange(c echo.Context) error {
 	})
 }
 
-// loadComponentDirectly loads a component directly into official storage
+// loadComponentDirectly loads a component directly into official storage using unified reload logic
 // This bypasses the temporary file system and *New mappings
 func loadComponentDirectly(componentType, id, content string) error {
-	switch componentType {
-	case "input":
-		// Create new input instance
-		inputInstance, err := input.NewInput("", content, id)
-		if err != nil {
-			return fmt.Errorf("failed to create input: %w", err)
-		}
-
-		// Store directly in official storage with proper locking
-		common.GlobalMu.Lock()
-		if project.GlobalProject.Inputs == nil {
-			project.GlobalProject.Inputs = make(map[string]*input.Input)
-		}
-		project.GlobalProject.Inputs[id] = inputInstance
-		delete(project.GlobalProject.InputsNew, id)
-		common.GlobalMu.Unlock()
-
-	case "output":
-		// Create new output instance
-		outputInstance, err := output.NewOutput("", content, id)
-		if err != nil {
-			return fmt.Errorf("failed to create output: %w", err)
-		}
-
-		// Store directly in official storage with proper locking
-		common.GlobalMu.Lock()
-		if project.GlobalProject.Outputs == nil {
-			project.GlobalProject.Outputs = make(map[string]*output.Output)
-		}
-		project.GlobalProject.Outputs[id] = outputInstance
-		delete(project.GlobalProject.OutputsNew, id)
-		common.GlobalMu.Unlock()
-
-	case "ruleset":
-		// Create new ruleset instance
-		rulesetInstance, err := rules_engine.NewRuleset("", content, id)
-		if err != nil {
-			return fmt.Errorf("failed to create ruleset: %w", err)
-		}
-
-		// Store directly in official storage with proper locking
-		common.GlobalMu.Lock()
-		if project.GlobalProject.Rulesets == nil {
-			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
-		}
-		project.GlobalProject.Rulesets[id] = rulesetInstance
-		delete(project.GlobalProject.RulesetsNew, id)
-		common.GlobalMu.Unlock()
-
-	case "project":
-		// Create new project instance
-		projectInstance, err := project.NewProject("", content, id)
-		if err != nil {
-			return fmt.Errorf("failed to create project: %w", err)
-		}
-
-		// Store directly in official storage with proper locking
-		common.GlobalMu.Lock()
-		if project.GlobalProject.Projects == nil {
-			project.GlobalProject.Projects = make(map[string]*project.Project)
-		}
-		project.GlobalProject.Projects[id] = projectInstance
-		delete(project.GlobalProject.ProjectsNew, id)
-		common.GlobalMu.Unlock()
-
-	case "plugin":
-		// Create new plugin instance
-		err := plugin.NewPlugin("", content, id, plugin.YAEGI_PLUGIN)
-		if err != nil {
-			return fmt.Errorf("failed to create plugin: %w", err)
-		}
-
-		// Clear any temporary version
-		common.GlobalMu.Lock()
-		delete(plugin.PluginsNew, id)
-		common.GlobalMu.Unlock()
-
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	// Update global component config maps for follower access (if leader)
-	if common.IsCurrentNodeLeader() {
-		updateGlobalComponentConfigMapForLocalLoad(componentType, id, content)
-
-		// Sync to followers - components loaded directly should be synchronized immediately
-		// since they bypass the temporary file system
-		syncComponentToFollowersForLocalLoad(componentType, id)
-	}
-
-	return nil
-}
-
-// updateGlobalComponentConfigMapForLocalLoad updates the global component config map for local loads
-func updateGlobalComponentConfigMapForLocalLoad(componentType, id, content string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	// Initialize maps if they are nil
-	if common.AllInputsRawConfig == nil {
-		common.AllInputsRawConfig = make(map[string]string)
-	}
-	if common.AllOutputsRawConfig == nil {
-		common.AllOutputsRawConfig = make(map[string]string)
-	}
-	if common.AllRulesetsRawConfig == nil {
-		common.AllRulesetsRawConfig = make(map[string]string)
-	}
-	if common.AllProjectRawConfig == nil {
-		common.AllProjectRawConfig = make(map[string]string)
-	}
-	if common.AllPluginsRawConfig == nil {
-		common.AllPluginsRawConfig = make(map[string]string)
-	}
-
-	// Update the appropriate global config map
-	switch componentType {
-	case "input":
-		common.AllInputsRawConfig[id] = content
-	case "output":
-		common.AllOutputsRawConfig[id] = content
-	case "ruleset":
-		common.AllRulesetsRawConfig[id] = content
-	case "project":
-		common.AllProjectRawConfig[id] = content
-	case "plugin":
-		common.AllPluginsRawConfig[id] = content
-	}
-
-	logger.Debug("Updated global component config map for local load", "type", componentType, "id", id)
-}
-
-// syncComponentToFollowersForLocalLoad syncs a locally loaded component to follower nodes
-func syncComponentToFollowersForLocalLoad(componentType string, id string) {
-	// Prepare sync data using the content from the loaded component
-	var content string
-	var isRunning bool
-
-	common.GlobalMu.RLock()
-	switch componentType {
-	case "input":
-		if input, exists := project.GlobalProject.Inputs[id]; exists {
-			content = input.Config.RawConfig
-		}
-	case "output":
-		if output, exists := project.GlobalProject.Outputs[id]; exists {
-			content = output.Config.RawConfig
-		}
-	case "ruleset":
-		if ruleset, exists := project.GlobalProject.Rulesets[id]; exists {
-			content = ruleset.RawConfig
-		}
-	case "project":
-		if proj, exists := project.GlobalProject.Projects[id]; exists {
-			content = proj.Config.RawConfig
-			isRunning = (proj.Status == project.ProjectStatusRunning)
-		}
-	case "plugin":
-		if plug, exists := plugin.Plugins[id]; exists && plug.Type == plugin.YAEGI_PLUGIN {
-			content = string(plug.Payload)
-		}
-	}
-	common.GlobalMu.RUnlock()
-
-	if content == "" {
-		logger.Error("Failed to get content for local load sync", "type", componentType, "id", id)
-		return
-	}
-
-	// Publish instruction for component update
-	if componentType == "project" {
-		if err := cluster.GlobalInstructionManager.PublishComponentLocalPush("project", id, content, nil); err != nil {
-			logger.Error("Failed to publish project local push instruction", "project", id, "error", err)
-		}
-		if isRunning {
-			if err := cluster.GlobalInstructionManager.PublishProjectStart(id); err != nil {
-				logger.Error("Failed to publish project start instruction", "project", id, "error", err)
-			}
-		}
-	} else {
-		// For other components, publish local push instruction (restart will be handled by main flow)
-		affectedProjects := project.GetAffectedProjects(componentType, id)
-		if err := cluster.GlobalInstructionManager.PublishComponentLocalPush(componentType, id, content, affectedProjects); err != nil {
-			logger.Error("Failed to publish component local push instruction", "type", componentType, "id", id, "error", err)
-		}
-	}
-
-	logger.Info("Published local load component sync event via Redis",
-		"type", componentType,
-		"id", id,
-	)
+	// Use unified reload logic with local file source
+	_, err := reloadComponentUnified(&ComponentReloadRequest{
+		Type:        componentType,
+		ID:          id,
+		NewContent:  content,
+		OldContent:  "", // Local file changes don't track old content
+		Source:      SourceLocalFile,
+		SkipVerify:  false, // Local file changes should be verified
+		WriteToFile: false, // Local file changes read from file, don't write
+	})
+	return err
 }
