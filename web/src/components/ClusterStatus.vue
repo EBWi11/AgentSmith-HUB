@@ -48,7 +48,7 @@
         <div class="px-6 py-4">
           <div class="flex items-center justify-between">
             <!-- Left: Basic Info -->
-            <div class="flex items-center space-x-4 min-w-0 flex-1">
+            <div class="flex items-center space-x-4 min-w-0 w-80 flex-shrink-0">
               <!-- Role Badge -->
               <span 
                 class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 w-24 justify-center"
@@ -65,9 +65,9 @@
               </span>
               
               <!-- Node Address & ID -->
-              <div class="min-w-0 flex-1">
+              <div class="w-40 flex-shrink-0">
                 <div class="text-lg font-semibold text-gray-900 truncate">{{ node.address }}</div>
-                <div class="text-sm text-gray-500">ID: {{ node.id }}</div>
+                <div class="text-sm text-gray-500 truncate">ID: {{ node.id }}</div>
               </div>
               
               <!-- Status Indicators -->
@@ -174,7 +174,7 @@
             </div>
 
             <!-- Far Right: Last Seen -->
-            <div class="text-right flex-shrink-0 ml-6">
+            <div class="text-right flex-shrink-0 ml-6 w-20">
               <span class="text-xs text-gray-500">
                 {{ formatTimeAgo(node.lastSeen) }}
               </span>
