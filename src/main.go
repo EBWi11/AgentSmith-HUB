@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"runtime"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -206,24 +205,59 @@ func main() {
 			// Phase 2: Collect final statistics BEFORE stopping projects to prevent data loss
 			logger.Info("Phase 2: Collecting final statistics to prevent data loss...")
 			if common.GlobalDailyStatsManager != nil {
-				// Manually trigger final collection before projects stop
-				// This ensures any increments from the last 10-second period are saved
-				logger.Info("Performing final statistics collection before stopping projects")
-				// Use a timeout to prevent hanging
+				// Wait for all data to be processed before final collection
+				logger.Info("Waiting for all projects to complete data processing before final collection")
+
+				// First, stop all inputs to prevent new data (respecting shared components)
+				logger.Info("Stopping inputs while respecting shared component usage")
+				project.GlobalProject.ProjectMu.RLock()
+
+				// Collect all unique inputs across all running projects
+				inputsToStop := make(map[string]*input.Input)
+				for _, proj := range project.GlobalProject.Projects {
+					if proj.Status == project.ProjectStatusRunning {
+						for _, input := range proj.Inputs {
+							inputsToStop[input.Id] = input
+						}
+					}
+				}
+				project.GlobalProject.ProjectMu.RUnlock()
+
+				// Stop each unique input only once (system shutdown requires stopping all inputs)
+				for inputId, input := range inputsToStop {
+					logger.Info("Stopping input for system shutdown", "input", inputId)
+					input.Stop()
+				}
+
+				// Stop all running projects (Stop method handles data drain internally)
+				logger.Info("Stopping all running projects")
+				project.GlobalProject.ProjectMu.RLock()
+				for _, proj := range project.GlobalProject.Projects {
+					if proj.Status == project.ProjectStatusRunning {
+						logger.Info("Stopping project during shutdown", "project", proj.Id)
+						err := proj.Stop()
+						if err != nil {
+							logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
+						} else {
+							logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
+						}
+					}
+				}
+				project.GlobalProject.ProjectMu.RUnlock()
+
+				// Now perform final statistics collection
+				logger.Info("Performing final statistics collection after data drain")
 				finalCollectionDone := make(chan struct{})
 				go func() {
 					defer close(finalCollectionDone)
-					// Directly call the collection method which handles everything internally
 					if statsCollector := common.GetStatsCollector(); statsCollector != nil {
-						// Get current component statistics
 						components := statsCollector()
 						logger.Info("Collected final component statistics", "components", len(components))
 
 						if len(components) > 0 {
-							// Filter components with meaningful increments
 							validComponents := make([]common.ComponentStatsData, 0)
 							for _, component := range components {
-								if component.TotalMessages > 0 {
+								if component.Increment > 0 {
 									validComponents = append(validComponents, component)
 								}
 							}
@@ -231,10 +265,8 @@ func main() {
 							logger.Info("Final statistics collection found increments",
 								"valid_components", len(validComponents))
 
-							// Force write final statistics to Redis to prevent data loss
 							if len(validComponents) > 0 {
 								nodeID := common.GetNodeID()
-								// Use force write to ensure data is immediately written to Redis
 								common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(nodeID, validComponents)
 								logger.Info("Force wrote final statistics to Redis to prevent data loss")
 							}
@@ -245,77 +277,25 @@ func main() {
 				select {
 				case <-finalCollectionDone:
 					logger.Info("Final statistics collection completed successfully")
-				case <-time.After(5 * time.Second):
+				case <-time.After(10 * time.Second):
 					logger.Warn("Final statistics collection timeout, proceeding with shutdown")
 				}
 			}
 
-			// Phase 3: Stop all running projects gracefully
-			logger.Info("Phase 3: Stopping all running projects...")
-			projectStopTimeout := 30 * time.Second
-			projectStopCtx, projectStopCancel := context.WithTimeout(context.Background(), projectStopTimeout)
-			defer projectStopCancel()
-
-			var projectWg sync.WaitGroup
-			projectStopResults := make(chan struct {
-				id  string
-				err error
-			}, len(project.GlobalProject.Projects))
-
-			for id, p := range project.GlobalProject.Projects {
-				if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
-					projectWg.Add(1)
-					go func(projectID string, proj *project.Project) {
-						defer projectWg.Done()
-						logger.Info("Stopping project for shutdown", "id", projectID)
-
-						// Create a timeout for individual project stop
-						projectCtx, projectCancel := context.WithTimeout(projectStopCtx, 20*time.Second)
-						defer projectCancel()
-
-						stopComplete := make(chan error, 1)
-						go func() {
-							// Use StopForShutdown to avoid changing project status in Redis
-							stopComplete <- proj.StopForShutdown()
-						}()
-
-						select {
-						case err := <-stopComplete:
-							projectStopResults <- struct {
-								id  string
-								err error
-							}{projectID, err}
-						case <-projectCtx.Done():
-							logger.Warn("Project stop timeout, will force cleanup", "id", projectID)
-							projectStopResults <- struct {
-								id  string
-								err error
-							}{projectID, fmt.Errorf("stop timeout")}
-						}
-					}(id, p)
+			// Phase 3: Final project cleanup (components already stopped in Phase 2)
+			logger.Info("Phase 3: Final project cleanup...")
+			project.GlobalProject.ProjectMu.Lock()
+			for id, proj := range project.GlobalProject.Projects {
+				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
+					logger.Info("Setting project status to stopped after component shutdown", "project", id)
+					// Set status to stopped without additional component operations
+					now := time.Now()
+					proj.Status = project.ProjectStatusStopped
+					proj.StatusChangedAt = &now
 				}
 			}
-
-			// Wait for all projects to stop or timeout
-			go func() {
-				projectWg.Wait()
-				close(projectStopResults)
-			}()
-
-			// Collect results
-			stoppedCount := 0
-			failedCount := 0
-			for result := range projectStopResults {
-				if result.err != nil {
-					logger.Warn("Project stop failed", "id", result.id, "error", result.err)
-					failedCount++
-				} else {
-					logger.Info("Project stopped successfully", "id", result.id)
-					stoppedCount++
-				}
-			}
-
-			logger.Info("Project shutdown phase completed", "stopped", stoppedCount, "failed", failedCount)
+			project.GlobalProject.ProjectMu.Unlock()
+			logger.Info("Project cleanup phase completed")
 
 			// Phase 4: Stop cluster services
 			logger.Info("Phase 4: Stopping cluster services...")
