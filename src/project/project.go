@@ -991,20 +991,6 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 
 // Start starts the project and all its components
 func (p *Project) Start() error {
-	// Check if project was in error state or stopped state - both need force full reload
-	wasErrorState := p.Status == ProjectStatusError
-	wasStoppedState := p.Status == ProjectStatusStopped
-	needsForceReload := wasErrorState || wasStoppedState
-
-	if needsForceReload && !p.Testing {
-		if wasErrorState {
-			logger.Info("Project was in error state, will force full component reload", "project", p.Id, "previous_error", p.Err)
-			p.Err = nil
-		} else if wasStoppedState {
-			logger.Info("Project was stopped, will force full component reload to restore all references", "project", p.Id)
-		}
-	}
-
 	if p.Status == ProjectStatusRunning {
 		return fmt.Errorf("project is already running %s", p.Id)
 	}
@@ -1027,8 +1013,8 @@ func (p *Project) Start() error {
 		return fmt.Errorf("failed to parse project content: %v", err)
 	}
 
-	// Load components from global registry - force reload if was in error or stopped state
-	err = p.loadComponentsFromGlobal(flowGraph, needsForceReload)
+	// Load components from global registry - always use latest components
+	err = p.loadComponentsFromGlobal(flowGraph)
 	if err != nil {
 		p.setProjectStatus(ProjectStatusError, err)
 		return fmt.Errorf("failed to load components: %v", err)
@@ -1044,7 +1030,15 @@ func (p *Project) Start() error {
 	// Start inputs first
 	for _, in := range p.Inputs {
 		if p.Testing {
-			//todo
+			// In test mode, start virtual input nodes with basic infrastructure
+			logger.Info("Starting virtual input node in test mode", "project", p.Id, "input", in.Id)
+			if err := in.StartForTesting(); err != nil {
+				errorMsg := fmt.Errorf("failed to start virtual input %s: %v", in.Id, err)
+				logger.Error("Virtual input startup failed", "project", p.Id, "input", in.Id, "error", err)
+				p.cleanupComponentsOnStartupFailure()
+				p.setProjectStatus(ProjectStatusError, errorMsg)
+				return errorMsg
+			}
 		} else {
 			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
@@ -1602,11 +1596,11 @@ func (p *Project) StopForTesting() error {
 	// Stop components quickly without waiting for channel drainage
 	// Note: Test components are completely isolated, so stopping them won't affect production
 	for _, in := range p.Inputs {
-		// Test inputs are virtual, just clear their downstream connections
-		in.DownStream = []*chan map[string]interface{}{}
-		// Reset atomic counter for test cleanup
-		previousTotal := in.ResetConsumeTotal()
-		logger.Debug("Cleared test input and reset counter", "project", p.Id, "input", in.Id, "previous_total", previousTotal)
+		// Stop virtual input nodes properly
+		if err := in.StopForTesting(); err != nil {
+			logger.Warn("Failed to stop virtual input node", "project", p.Id, "input", in.Id, "error", err)
+		}
+		logger.Debug("Stopped virtual input node", "project", p.Id, "input", in.Id)
 	}
 
 	for _, rs := range p.Rulesets {
@@ -1885,8 +1879,8 @@ func (p *Project) disconnectInputChannels(in *input.Input, channelsToRemove []ch
 }
 
 // loadComponentsFromGlobal loads component references from global registry based on flow graph
-func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceReload bool) error {
-	logger.Info("Loading components from global registry", "project", p.Id, "force_reload", forceReload)
+func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string) error {
+	logger.Info("Loading components from global registry", "project", p.Id)
 
 	// Build ProjectNodeSequence mapping first
 	componentSequences := make(map[string]string)
@@ -2037,7 +2031,7 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 		}
 	}
 
-	// Load output components with proper instance management
+	// Load output components - always create new instances from latest global components
 	for _, name := range outputNames {
 		componentKey := "OUTPUT." + name
 		expectedSequence := componentSequences[componentKey]
@@ -2045,57 +2039,22 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 			expectedSequence = componentKey
 		}
 
-		// Check if there's already an output instance with this exact ProjectNodeSequence
-		// Skip this check if force reload is enabled
-		var foundOutput *output.Output
-		if !forceReload {
-			for _, existingProject := range GlobalProject.Projects {
-				if existingOutput, exists := existingProject.Outputs[name]; exists {
-					if existingOutput.ProjectNodeSequence == expectedSequence {
-						foundOutput = existingOutput
-						break
-					}
-				}
+		// Always create a new instance from the latest global template
+		if globalOutput, ok := GlobalProject.Outputs[name]; ok {
+			// Create a copy of the global output for this project's specific sequence
+			newOutput, err := output.NewFromExisting(globalOutput, expectedSequence)
+			if err != nil {
+				return fmt.Errorf("failed to create output instance for %s: %v", name, err)
 			}
-		}
-
-		if foundOutput != nil && !forceReload {
-			// Found existing instance with same ProjectNodeSequence, can share
-			p.Outputs[name] = foundOutput
-			logger.Info("Reusing existing output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
-			// add owner
-			if foundOutput.OwnerProjects == nil {
-				foundOutput.OwnerProjects = []string{p.Id}
-			} else {
-				found := false
-				for _, pid := range foundOutput.OwnerProjects {
-					if pid == p.Id {
-						found = true
-						break
-					}
-				}
-				if !found {
-					foundOutput.OwnerProjects = append(foundOutput.OwnerProjects, p.Id)
-				}
-			}
+			newOutput.OwnerProjects = []string{p.Id}
+			p.Outputs[name] = newOutput
+			logger.Info("Created new output instance from latest global component", "project", p.Id, "output", name, "sequence", expectedSequence)
 		} else {
-			// Need to create a new instance from global template
-			if globalOutput, ok := GlobalProject.Outputs[name]; ok {
-				// Create a copy of the global output for this project's specific sequence
-				newOutput, err := output.NewFromExisting(globalOutput, expectedSequence)
-				if err != nil {
-					return fmt.Errorf("failed to create output instance for %s: %v", name, err)
-				}
-				newOutput.OwnerProjects = []string{p.Id}
-				p.Outputs[name] = newOutput
-				logger.Info("Created new output instance", "project", p.Id, "output", name, "sequence", expectedSequence)
-			} else {
-				return fmt.Errorf("output component %s not found in global registry", name)
-			}
+			return fmt.Errorf("output component %s not found in global registry", name)
 		}
 	}
 
-	// Load ruleset components with proper instance management
+	// Load ruleset components - always create new instances from latest global components
 	for _, name := range rulesetNames {
 		componentKey := "RULESET." + name
 		expectedSequence := componentSequences[componentKey]
@@ -2103,52 +2062,18 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 			expectedSequence = componentKey
 		}
 
-		// Check if there's already a ruleset instance with this exact ProjectNodeSequence
-		// Skip this check if force reload is enabled
-		var foundRuleset *rules_engine.Ruleset
-		if !forceReload {
-			for _, existingProject := range GlobalProject.Projects {
-				if existingRuleset, exists := existingProject.Rulesets[name]; exists {
-					if existingRuleset.ProjectNodeSequence == expectedSequence {
-						foundRuleset = existingRuleset
-						break
-					}
-				}
+		// Always create a new instance from the latest global template
+		if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
+			// Create a copy of the global ruleset for this project's specific sequence
+			newRuleset, err := rules_engine.NewFromExisting(globalRuleset, expectedSequence)
+			if err != nil {
+				return fmt.Errorf("failed to create ruleset instance for %s: %v", name, err)
 			}
-		}
-
-		if foundRuleset != nil && !forceReload {
-			// Found existing instance with same ProjectNodeSequence, can share
-			p.Rulesets[name] = foundRuleset
-			logger.Info("Reusing existing ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
-			if foundRuleset.OwnerProjects == nil {
-				foundRuleset.OwnerProjects = []string{p.Id}
-			} else {
-				f := false
-				for _, pid := range foundRuleset.OwnerProjects {
-					if pid == p.Id {
-						f = true
-						break
-					}
-				}
-				if !f {
-					foundRuleset.OwnerProjects = append(foundRuleset.OwnerProjects, p.Id)
-				}
-			}
+			newRuleset.OwnerProjects = []string{p.Id}
+			p.Rulesets[name] = newRuleset
+			logger.Info("Created new ruleset instance from latest global component", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
 		} else {
-			// Need to create a new instance from global template
-			if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
-				// Create a copy of the global ruleset for this project's specific sequence
-				newRuleset, err := rules_engine.NewFromExisting(globalRuleset, expectedSequence)
-				if err != nil {
-					return fmt.Errorf("failed to create ruleset instance for %s: %v", name, err)
-				}
-				newRuleset.OwnerProjects = []string{p.Id}
-				p.Rulesets[name] = newRuleset
-				logger.Info("Created new ruleset instance", "project", p.Id, "ruleset", name, "sequence", expectedSequence)
-			} else {
-				return fmt.Errorf("ruleset component %s not found in global registry", name)
-			}
+			return fmt.Errorf("ruleset component %s not found in global registry", name)
 		}
 	}
 

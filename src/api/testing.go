@@ -681,11 +681,11 @@ func testProject(c echo.Context) error {
 	}
 
 	// Send test data to all downstream channels of the input
-	logger.Info("Sending test data to input channels", "input", inputNodeName, "downstream_count", len(inputNode.DownStream))
-	for i, downChan := range inputNode.DownStream {
-		logger.Info("Sending data to downstream channel", "input", inputNodeName, "channel", i)
-		*downChan <- req.Data
-	}
+	logger.Info("Sending test data through input processing", "input", inputNodeName, "downstream_count", len(inputNode.DownStream))
+
+	// Process test data through the input component's normal data flow
+	// This ensures proper counting, sampling, and field addition
+	inputNode.ProcessTestData(req.Data)
 
 	// Wait for data to flow through the system and be collected
 	time.Sleep(500 * time.Millisecond)
@@ -1329,11 +1329,11 @@ func testProjectContent(c echo.Context) error {
 	}
 
 	// Send test data to all downstream channels of the input
-	logger.Info("Sending test data to input channels", "input", inputNode, "downstream_count", len(inputNodeInstance.DownStream))
-	for i, downChan := range inputNodeInstance.DownStream {
-		logger.Info("Sending data to downstream channel", "input", inputNode, "channel", i)
-		*downChan <- req.Data
-	}
+	logger.Info("Sending test data through input processing", "input", inputNode, "downstream_count", len(inputNodeInstance.DownStream))
+
+	// Process test data through the input component's normal data flow
+	// This ensures proper counting, sampling, and field addition
+	inputNodeInstance.ProcessTestData(req.Data)
 
 	// Wait for data to flow through the system and be collected
 	time.Sleep(500 * time.Millisecond)

@@ -363,6 +363,65 @@ func (in *Input) Start() error {
 	return nil
 }
 
+// StartForTesting starts the input component in testing mode
+// This version initializes basic infrastructure but doesn't connect to external data sources
+func (in *Input) StartForTesting() error {
+	// Initialize stop channel
+	in.stopChan = make(chan struct{})
+
+	// Reset consume counter for testing
+	in.ResetConsumeTotal()
+
+	// Skip sampler initialization in testing mode - not needed for test scenarios
+
+	logger.Info("Input component started in testing mode", "input", in.Id)
+	return nil
+}
+
+// ProcessTestData processes test data through the input component's normal data flow
+// This ensures test data goes through the same processing as production data
+func (in *Input) ProcessTestData(data map[string]interface{}) {
+	// Only increment total count - same as production logic
+	atomic.AddUint64(&in.consumeTotal, 1)
+
+	// Skip sampling in testing mode - not needed for test scenarios
+
+	// Add input ID to message data - same as production logic
+	if data == nil {
+		data = make(map[string]interface{})
+	}
+	data["_hub_input"] = in.Id
+
+	// Forward to downstream
+	for _, ch := range in.DownStream {
+		*ch <- data
+	}
+
+	logger.Debug("Test data processed through input", "input", in.Id, "downstream_count", len(in.DownStream))
+}
+
+// StopForTesting stops the input component quickly for testing purposes
+func (in *Input) StopForTesting() error {
+	logger.Info("Stopping virtual input node in testing mode", "input", in.Id)
+
+	// Close stop channel if it exists
+	if in.stopChan != nil {
+		close(in.stopChan)
+		in.stopChan = nil
+	}
+
+	// Clear downstream connections
+	in.DownStream = []*chan map[string]interface{}{}
+
+	// Skip sampler cleanup in testing mode - not initialized for test scenarios
+
+	// Reset counters
+	in.ResetConsumeTotal()
+
+	logger.Info("Virtual input node stopped successfully", "input", in.Id)
+	return nil
+}
+
 // Stop stops the input component and its consumers
 func (in *Input) Stop() error {
 	logger.Info("Stopping input", "id", in.Id, "type", in.Type)
