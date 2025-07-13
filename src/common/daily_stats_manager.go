@@ -165,6 +165,46 @@ func (dsm *DailyStatsManager) writeToRedisWithIncrement(statsData *DailyStatsDat
 	return nil
 }
 
+// 优化方案一：使用复合字段的 counter，减少 metadata 存储
+//
+// 实现思路：
+// 1. 将必要的元数据编码到 counter 键名中
+// 2. 使用 Redis Hash 存储计数器，field 为编码后的键
+// 3. 只在需要时解析键名获取元数据
+//
+// 示例：
+// func (dsm *DailyStatsManager) writeToRedisOptimized(statsData *DailyStatsData, increment uint64, expiration int) error {
+//     // 将元数据编码到键中
+//     // 格式：date:nodeID:projectID:componentType:componentID:sequence
+//     encodedKey := fmt.Sprintf("%s:%s:%s:%s:%s:%s",
+//         statsData.Date,
+//         statsData.NodeID,
+//         statsData.ProjectID,
+//         statsData.ComponentType,
+//         statsData.ComponentID,
+//         statsData.ProjectNodeSequence)
+//
+//     // 使用 Redis Hash，一个 date 一个 hash
+//     hashKey := fmt.Sprintf("%sstats:%s", dsm.redisKeyPrefix, statsData.Date)
+//
+//     // 原子递增
+//     newTotal, err := RedisHIncrBy(hashKey, encodedKey, int64(increment))
+//     if err != nil {
+//         return err
+//     }
+//
+//     // 设置过期时间
+//     RedisExpire(hashKey, expiration)
+//
+//     return nil
+// }
+//
+// 优势：
+// - 减少 50% 的存储空间（无需 metadata）
+// - 保持原子性操作
+// - 读取时可以通过解析键名获取所有信息
+// - 使用 Hash 可以一次获取某天的所有数据
+
 // generateKey creates a unique key for daily statistics. We must include projectID so that
 // multiple projects共享同一个 ProjectNodeSequence 时不会互相覆盖。
 func (dsm *DailyStatsManager) generateKey(date, nodeID, projectID, projectNodeSequence string) string {
