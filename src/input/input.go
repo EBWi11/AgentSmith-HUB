@@ -431,13 +431,9 @@ func (in *Input) GetIncrementAndUpdate() uint64 {
 	current := atomic.LoadUint64(&in.consumeTotal)
 	last := atomic.SwapUint64(&in.lastReportedTotal, current)
 
-	// Handle potential overflow (though practically impossible with uint64)
-	if current >= last {
-		return current - last
-	} else {
-		// Overflow case: component restarted, return current value as increment
-		return current
-	}
+	// Since counters are monotonically increasing and we don't consider overflow
+	// (uint64 is large enough), current should always be >= last
+	return current - last
 }
 
 // CheckConnectivity performs a real connectivity test for the input component
