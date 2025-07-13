@@ -56,8 +56,18 @@ func collectAllComponentStats() []common.ComponentStatsData {
 	// Collect all component statistics in a tight loop to minimize time differences
 	// This helps reduce the time window between collecting input vs output statistics
 	for _, proj := range runningProjects {
-		// Collect input statistics
-		for _, input := range proj.Inputs {
+		// Double-check project is still running (could have changed since snapshot)
+		if proj.Status != ProjectStatusRunning {
+			continue
+		}
+
+		// Collect input statistics with nil check
+		for inputName, input := range proj.Inputs {
+			// Check for nil to handle concurrent project restart
+			if input == nil {
+				logger.Debug("Skipping nil input during stats collection", "project", proj.Id, "input", inputName)
+				continue
+			}
 			increment := input.GetIncrementAndUpdate()
 			if increment > 0 {
 				components = append(components, common.ComponentStatsData{
@@ -71,7 +81,12 @@ func collectAllComponentStats() []common.ComponentStatsData {
 		}
 
 		// Collect output statistics immediately after input for same project
-		for _, output := range proj.Outputs {
+		for outputName, output := range proj.Outputs {
+			// Check for nil to handle concurrent project restart
+			if output == nil {
+				logger.Debug("Skipping nil output during stats collection", "project", proj.Id, "output", outputName)
+				continue
+			}
 			increment := output.GetIncrementAndUpdate()
 			if increment > 0 {
 				components = append(components, common.ComponentStatsData{
@@ -85,7 +100,12 @@ func collectAllComponentStats() []common.ComponentStatsData {
 		}
 
 		// Collect ruleset statistics
-		for _, ruleset := range proj.Rulesets {
+		for rulesetName, ruleset := range proj.Rulesets {
+			// Check for nil to handle concurrent project restart
+			if ruleset == nil {
+				logger.Debug("Skipping nil ruleset during stats collection", "project", proj.Id, "ruleset", rulesetName)
+				continue
+			}
 			increment := ruleset.GetIncrementAndUpdate()
 			if increment > 0 {
 				components = append(components, common.ComponentStatsData{
@@ -2193,9 +2213,73 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 
 	// If force reload is enabled, clear owner references from old components and reset counters
 	if forceReload {
-		logger.Info("Force reload enabled - clearing all component owner references and resetting counters", "project", p.Id)
+		logger.Info("Force reload enabled - collecting final stats before resetting counters", "project", p.Id)
 
-		// Reset counters for all components that will be force-reloaded
+		// IMPORTANT: Collect statistics BEFORE resetting counters to avoid data loss
+		if common.GlobalDailyStatsManager != nil && common.GetStatsCollector() != nil {
+			// Collect statistics for components that will be force-reloaded
+			var componentsToSave []common.ComponentStatsData
+
+			// Collect input statistics before reset
+			for _, name := range inputNames {
+				if globalInput, ok := GlobalProject.Inputs[name]; ok {
+					increment := globalInput.GetIncrementAndUpdate()
+					if increment > 0 {
+						componentsToSave = append(componentsToSave, common.ComponentStatsData{
+							ProjectID:           p.Id,
+							ComponentID:         globalInput.Id,
+							ComponentType:       "input",
+							ProjectNodeSequence: globalInput.ProjectNodeSequence,
+							TotalMessages:       increment,
+						})
+					}
+				}
+			}
+
+			// Collect output statistics before reset
+			for _, name := range outputNames {
+				if globalOutput, ok := GlobalProject.Outputs[name]; ok {
+					increment := globalOutput.GetIncrementAndUpdate()
+					if increment > 0 {
+						componentsToSave = append(componentsToSave, common.ComponentStatsData{
+							ProjectID:           p.Id,
+							ComponentID:         globalOutput.Id,
+							ComponentType:       "output",
+							ProjectNodeSequence: globalOutput.ProjectNodeSequence,
+							TotalMessages:       increment,
+						})
+					}
+				}
+			}
+
+			// Collect ruleset statistics before reset
+			for _, name := range rulesetNames {
+				if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
+					increment := globalRuleset.GetIncrementAndUpdate()
+					if increment > 0 {
+						componentsToSave = append(componentsToSave, common.ComponentStatsData{
+							ProjectID:           p.Id,
+							ComponentID:         globalRuleset.RulesetID,
+							ComponentType:       "ruleset",
+							ProjectNodeSequence: globalRuleset.ProjectNodeSequence,
+							TotalMessages:       increment,
+						})
+					}
+				}
+			}
+
+			// Save collected statistics before resetting
+			if len(componentsToSave) > 0 {
+				logger.Info("Saving component statistics before force reload reset",
+					"project", p.Id,
+					"components_count", len(componentsToSave))
+				common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.Config.LocalIP, componentsToSave)
+			}
+		}
+
+		// Now reset counters after statistics have been saved
+		logger.Info("Resetting component counters after saving statistics", "project", p.Id)
+
 		for _, name := range inputNames {
 			if globalInput, ok := GlobalProject.Inputs[name]; ok {
 				previousTotal := globalInput.ResetConsumeTotal()
