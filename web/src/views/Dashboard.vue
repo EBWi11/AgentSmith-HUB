@@ -791,14 +791,17 @@ function getProjectMessageStats(projectId) {
           parts: keyParts
         })
         
-        if (componentData.component_type === 'input') {
+        // Handle both uppercase and lowercase component types from backend
+        const componentType = componentData.component_type.toLowerCase()
+        
+        if (componentType === 'input') {
           // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
           // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
           if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
             input += dailyMessages
             debugInfo.breakdown.input.push({ sequence: key, messages: dailyMessages })
           }
-        } else if (componentData.component_type === 'output') {
+        } else if (componentType === 'output') {
           // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
           // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
           if (keyParts.length >= 2 && 
@@ -806,7 +809,7 @@ function getProjectMessageStats(projectId) {
             output += dailyMessages
             debugInfo.breakdown.output.push({ sequence: key, messages: dailyMessages })
           }
-        } else if (componentData.component_type === 'ruleset') {
+        } else if (componentType === 'ruleset') {
           // Count ruleset processing load - only count actual ruleset processing (not downstream flow)
           // This represents the actual data volume processed by this specific ruleset
           for (let i = 0; i < keyParts.length - 1; i++) {

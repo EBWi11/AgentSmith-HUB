@@ -235,6 +235,7 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 // If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,
 // but the original output type will still be used so that real external side-effects can be observed.
 func (out *Output) Start() error {
+	out.ResetProduceTotal()
 	// Perform connectivity check first before starting (skip for print type as it doesn't need external connectivity)
 	if out.Type != OutputTypePrint {
 		connectivityResult := out.CheckConnectivity()
@@ -627,7 +628,6 @@ func (out *Output) Stop() error {
 				out.printStop = nil
 			}
 		}
-		// Metrics stop removed
 	}
 
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
@@ -655,9 +655,6 @@ func (out *Output) Stop() error {
 
 	return nil
 }
-
-// QPS calculation and GetProduceQPS method removed
-// Message statistics are now handled by Daily Stats Manager
 
 // GetProduceTotal returns the total produced count.
 func (out *Output) GetProduceTotal() uint64 {

@@ -2,7 +2,6 @@ package common
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -276,10 +275,6 @@ func RedisSetNX(key string, value interface{}, expiration int) (bool, error) {
 	return rdb.SetNX(ctx, key, value, time.Duration(expiration)*time.Second).Result()
 }
 
-func RedisIncr(key string) (int64, error) {
-	return rdb.Incr(ctx, key).Result()
-}
-
 func RedisIncrby(key string, value int64) (int64, error) {
 	return rdb.IncrBy(ctx, key, value).Result()
 }
@@ -317,16 +312,6 @@ func RedisHGetAll(hash string) (map[string]string, error) {
 // RedisHDel deletes a field from a Redis hash
 func RedisHDel(key string, field string) error {
 	return rdb.HDel(ctx, key, field).Err()
-}
-
-// RedisHIncrBy increments a hash field by the given amount
-func RedisHIncrBy(key string, field string, increment int64) (int64, error) {
-	return rdb.HIncrBy(ctx, key, field, increment).Result()
-}
-
-// RedisHExists checks if a field exists in a hash
-func RedisHExists(key string, field string) (bool, error) {
-	return rdb.HExists(ctx, key, field).Result()
 }
 
 // GetRedisClient returns underlying redis client for advanced operations
@@ -372,94 +357,10 @@ func GetProjectConfig(projectID string) (string, error) {
 	return rdb.Get(ctx, key).Result()
 }
 
-// GetAllProjectConfigs retrieves all project configurations from Redis
-func GetAllProjectConfigs() (map[string]string, error) {
-	pattern := "cluster:project_config:*"
-	keys, err := rdb.Keys(ctx, pattern).Result()
-	if err != nil {
-		return nil, err
-	}
-
-	configs := make(map[string]string)
-	for _, key := range keys {
-		// Extract project ID from key
-		projectID := strings.TrimPrefix(key, "cluster:project_config:")
-		config, err := rdb.Get(ctx, key).Result()
-		if err == nil && config != "" {
-			configs[projectID] = config
-		}
-	}
-
-	return configs, nil
-}
-
 // DeleteProjectConfig removes project configuration from Redis
 func DeleteProjectConfig(projectID string) error {
 	key := "cluster:project_config:" + projectID
 	return rdb.Del(ctx, key).Err()
-}
-
-// SetLeaderReady sets the leader ready flag in Redis with TTL
-func SetLeaderReady(nodeID string, ttlSeconds int) error {
-	key := ClusterLeaderReadyKey
-	value := map[string]interface{}{
-		"node_id":   nodeID,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"ready":     true,
-	}
-
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-
-	_, err = RedisSet(key, string(data), ttlSeconds)
-	return err
-}
-
-// IsLeaderReady checks if leader is ready
-func IsLeaderReady() (bool, string, error) {
-	key := ClusterLeaderReadyKey
-	data, err := RedisGet(key)
-	if err != nil {
-		return false, "", err
-	}
-
-	if data == "" {
-		return false, "", nil
-	}
-
-	var value map[string]interface{}
-	if err := json.Unmarshal([]byte(data), &value); err != nil {
-		return false, "", err
-	}
-
-	nodeID, _ := value["node_id"].(string)
-	ready, _ := value["ready"].(bool)
-
-	return ready, nodeID, nil
-}
-
-// WaitForLeaderReady waits for leader to be ready with timeout
-func WaitForLeaderReady(timeoutSeconds int) (bool, string, error) {
-	timeout := time.After(time.Duration(timeoutSeconds) * time.Second)
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			return false, "", fmt.Errorf("timeout waiting for leader to be ready")
-		case <-ticker.C:
-			ready, nodeID, err := IsLeaderReady()
-			if err != nil {
-				continue // Keep trying on Redis errors
-			}
-			if ready {
-				return true, nodeID, nil
-			}
-		}
-	}
 }
 
 // RetryWithExponentialBackoff executes a function with exponential backoff retry
@@ -481,67 +382,6 @@ func RetryWithExponentialBackoff(fn func() error, maxRetries int, baseDelay time
 	}
 
 	return lastErr
-}
-
-// RedisGetWithFallback gets a value from Redis with local cache fallback
-func RedisGetWithFallback(key string) (string, error) {
-	var result string
-	var redisErr error
-
-	// Try Redis with circuit breaker
-	err := redisFailureHandler.circuitBreaker.Call(func() error {
-		val, err := rdb.Get(ctx, key).Result()
-		if err != nil {
-			redisErr = err
-			return err
-		}
-		result = val
-
-		// Cache the value locally
-		redisFailureHandler.cacheMutex.Lock()
-		redisFailureHandler.localCache[key] = CacheEntry{
-			Value:     val,
-			Timestamp: time.Now(),
-			TTL:       5 * time.Minute, // Cache for 5 minutes
-		}
-		redisFailureHandler.cacheMutex.Unlock()
-
-		return nil
-	})
-
-	if err != nil {
-		// Try local cache
-		redisFailureHandler.cacheMutex.RLock()
-		entry, exists := redisFailureHandler.localCache[key]
-		redisFailureHandler.cacheMutex.RUnlock()
-
-		if exists && time.Since(entry.Timestamp) < entry.TTL {
-			return entry.Value, nil
-		}
-
-		return "", redisErr
-	}
-
-	return result, nil
-}
-
-// RedisSetWithRetry sets a value in Redis with exponential backoff retry
-func RedisSetWithRetry(key string, value interface{}, expiration int) error {
-	return RetryWithExponentialBackoff(func() error {
-		return redisFailureHandler.circuitBreaker.Call(func() error {
-			_, err := rdb.Set(ctx, key, value, time.Duration(expiration)*time.Second).Result()
-			return err
-		})
-	}, 3, 100*time.Millisecond)
-}
-
-// RedisHSetWithRetry sets a hash field in Redis with exponential backoff retry
-func RedisHSetWithRetry(key, field string, value interface{}) error {
-	return RetryWithExponentialBackoff(func() error {
-		return redisFailureHandler.circuitBreaker.Call(func() error {
-			return rdb.HSet(ctx, key, field, value).Err()
-		})
-	}, 3, 100*time.Millisecond)
 }
 
 // RedisPublishWithRetry publishes a message with exponential backoff retry
@@ -708,16 +548,6 @@ func SetProjectStateTimestamp(nodeID, projectID string, timestamp time.Time) err
 	return RedisHSet(key, projectID, timestamp.Format(time.RFC3339))
 }
 
-// GetProjectStateTimestamp gets the timestamp for a project state change
-func GetProjectStateTimestamp(nodeID, projectID string) (time.Time, error) {
-	key := ProjectStateTimestampKeyPrefix + nodeID
-	value, err := RedisHGet(key, projectID)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.Parse(time.RFC3339, value)
-}
-
 // GetAllProjectStateTimestamps gets all state change timestamps for a node
 func GetAllProjectStateTimestamps(nodeID string) (map[string]time.Time, error) {
 	key := ProjectStateTimestampKeyPrefix + nodeID
@@ -734,34 +564,6 @@ func GetAllProjectStateTimestamps(nodeID string) (map[string]time.Time, error) {
 	}
 	return result, nil
 }
-
-// ===================== Legacy Project State Support (Backward Compatibility) =====================
-
-// These functions support the old proj_states key for backward compatibility
-// They should be gradually phased out as the new design is adopted
-
-// GetLegacyProjectStates gets project states from the legacy key
-// This function is for backward compatibility only
-func GetLegacyProjectStates(nodeID string) (map[string]string, error) {
-	key := ProjectLegacyStateKeyPrefix + nodeID
-	return RedisHGetAll(key)
-}
-
-// RemoveProjectState removes all state information for a project (used when project is deleted)
-func RemoveProjectState(nodeID, projectID string) error {
-	realKey := ProjectRealStateKeyPrefix + nodeID
-	timestampKey := ProjectStateTimestampKeyPrefix + nodeID
-	legacyKey := ProjectLegacyStateKeyPrefix + nodeID
-
-	// Remove from all keys (ignore errors for non-existent keys)
-	RedisHDel(realKey, projectID)
-	RedisHDel(timestampKey, projectID)
-	RedisHDel(legacyKey, projectID)
-
-	return nil
-}
-
-// ===================== Legacy Project State Support =====================
 
 // GetKnownNodes returns all known nodes that have been tracked by the leader
 func GetKnownNodes() ([]string, error) {

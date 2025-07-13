@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -19,6 +18,15 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/google/uuid"
 )
+
+func GetComponentFromSequenceID(sequence string) (string, string) {
+	parts := strings.Split(sequence, ".")
+	if len(parts) < 2 {
+		return "", ""
+	}
+
+	return parts[len(parts)-2], parts[len(parts)-1]
+}
 
 func GetFileNameWithoutExt(path string) string {
 	base := filepath.Base(path)
@@ -150,17 +158,6 @@ func ParseDurationToSecondsInt(input string) (int, error) {
 	}
 
 	return int(seconds), nil
-}
-
-func DirExists(path string) (bool, error) {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false, nil // does not exist
-	}
-	if err != nil {
-		return false, err // other error
-	}
-	return info.IsDir(), nil
 }
 
 func MapDeepCopy(m map[string]interface{}) map[string]interface{} {
@@ -335,62 +332,6 @@ func GetCheckData(data map[string]interface{}, checkKeyList []string) (res strin
 	return res, exist
 }
 
-// WriteConfigFile writes a configuration file to the config root directory
-func WriteConfigFile(componentType string, id string, content string) error {
-	if Config.ConfigRoot == "" {
-		return fmt.Errorf("config root is not set")
-	}
-
-	var fileExt string
-	switch componentType {
-	case "ruleset":
-		fileExt = ".xml"
-	case "project", "input", "output":
-		fileExt = ".yaml"
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	dirPath := path.Join(Config.ConfigRoot, componentType)
-	if err := os.MkdirAll(dirPath, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
-	}
-
-	filePath := path.Join(dirPath, id+fileExt)
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write file %s: %w", filePath, err)
-	}
-
-	return nil
-}
-
-// DeleteConfigFile deletes a configuration file from the config root directory
-func DeleteConfigFile(componentType string, id string) error {
-	if Config.ConfigRoot == "" {
-		return fmt.Errorf("config root is not set")
-	}
-
-	var fileExt string
-	switch componentType {
-	case "ruleset":
-		fileExt = ".xml"
-	case "project", "input", "output":
-		fileExt = ".yaml"
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	filePath := path.Join(Config.ConfigRoot, componentType, id+fileExt)
-	if err := os.Remove(filePath); err != nil {
-		if os.IsNotExist(err) {
-			return nil // File doesn't exist, which is fine for deletion
-		}
-		return fmt.Errorf("failed to delete file %s: %w", filePath, err)
-	}
-
-	return nil
-}
-
 // ReadContentFromPathOrRaw reads content from file path or returns raw content
 // This is a common utility function used by all component verification functions
 func ReadContentFromPathOrRaw(path string, raw string) ([]byte, error) {
@@ -411,22 +352,6 @@ func GetConfigDir() string {
 		return "." // Current directory for macOS
 	}
 	return "/etc/hub" // /etc/hub for Linux
-}
-
-// ensureConfigDir creates the config directory if it doesn't exist
-func EnsureConfigDir() error {
-	configDir := GetConfigDir()
-	if configDir == "." {
-		// For macOS (current directory), no need to create
-		return nil
-	}
-
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(configDir, 0755); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // GetConfigPath returns the full path for a specific config file
@@ -464,40 +389,4 @@ func GetConfigPath(filename string) string {
 	}
 
 	return filepath.Join(configDir, filename)
-}
-
-// EnsureConfigDirExists explicitly ensures the config directory exists
-// This can be called during initialization to set up directories proactively
-func EnsureConfigDirExists() error {
-	configDir := GetConfigDir()
-
-	// For macOS (current directory), no need to create
-	if configDir == "." {
-		return nil
-	}
-
-	// Check if directory exists
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		// Create directory with proper permissions
-		if err := os.MkdirAll(configDir, 0755); err != nil {
-			return fmt.Errorf("failed to create config directory %s: %w", configDir, err)
-		}
-		fmt.Printf("Successfully created config directory: %s\n", configDir)
-	} else if err != nil {
-		return fmt.Errorf("error accessing config directory %s: %w", configDir, err)
-	}
-
-	return nil
-}
-
-// MapShallowCopy returns a shallow copy of a map[string]interface{}. Only top-level keys are copied.
-func MapShallowCopy(src map[string]interface{}) map[string]interface{} {
-	if src == nil {
-		return nil
-	}
-	dst := make(map[string]interface{}, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
 }

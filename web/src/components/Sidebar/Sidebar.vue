@@ -2481,7 +2481,12 @@ async function loadPluginStats(pluginName) {
     });
     
     if (response && response.stats && response.stats[pluginName]) {
-      pluginStatsData.value = response.stats[pluginName];
+      const stats = response.stats[pluginName];
+      // Handle both uppercase and lowercase formats from backend
+      pluginStatsData.value = {
+        success: stats.success || stats.SUCCESS || 0,
+        failure: stats.failure || stats.FAILURE || 0
+      };
     } else {
       pluginStatsData.value = { success: 0, failure: 0 };
     }

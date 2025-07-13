@@ -21,8 +21,6 @@ import (
 	"syscall"
 	"time"
 
-	"runtime"
-
 	"gopkg.in/yaml.v3"
 )
 
@@ -191,140 +189,31 @@ func main() {
 		go func() {
 			defer close(shutdownComplete)
 
-			// Phase 1: Stop accepting new requests and notify cluster
-			logger.Info("Phase 1: Stopping API server and notifying cluster...")
-
-			// Notify other cluster nodes that this node is shutting down
-			if *isLeader {
-				// Remove leader ready flag
-				if err := common.RedisDel(common.ClusterLeaderReadyKey); err != nil {
-					logger.Warn("Failed to remove leader ready flag", "error", err)
-				}
-			}
-
-			// Phase 2: Collect final statistics BEFORE stopping projects to prevent data loss
-			logger.Info("Phase 2: Collecting final statistics to prevent data loss...")
-			if common.GlobalDailyStatsManager != nil {
-				// Wait for all data to be processed before final collection
-				logger.Info("Waiting for all projects to complete data processing before final collection")
-
-				// First, stop all inputs to prevent new data (respecting shared components)
-				logger.Info("Stopping inputs while respecting shared component usage")
-				project.GlobalProject.ProjectMu.RLock()
-
-				// Collect all unique inputs across all running projects
-				inputsToStop := make(map[string]*input.Input)
-				for _, proj := range project.GlobalProject.Projects {
-					if proj.Status == project.ProjectStatusRunning {
-						for _, input := range proj.Inputs {
-							inputsToStop[input.Id] = input
-						}
-					}
-				}
-				project.GlobalProject.ProjectMu.RUnlock()
-
-				// Stop each unique input only once (system shutdown requires stopping all inputs)
-				for inputId, input := range inputsToStop {
-					logger.Info("Stopping input for system shutdown", "input", inputId)
-					input.Stop()
-				}
-
-				// Stop all running projects (Stop method handles data drain internally)
-				logger.Info("Stopping all running projects")
-				project.GlobalProject.ProjectMu.RLock()
-				for _, proj := range project.GlobalProject.Projects {
-					if proj.Status == project.ProjectStatusRunning {
-						logger.Info("Stopping project during shutdown", "project", proj.Id)
-						err := proj.Stop()
-						if err != nil {
-							logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
-						} else {
-							logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
-						}
-					}
-				}
-				project.GlobalProject.ProjectMu.RUnlock()
-
-				// Now perform final statistics collection
-				logger.Info("Performing final statistics collection after data drain")
-				finalCollectionDone := make(chan struct{})
-				go func() {
-					defer close(finalCollectionDone)
-					if statsCollector := common.GetStatsCollector(); statsCollector != nil {
-						components := statsCollector()
-						logger.Info("Collected final component statistics", "components", len(components))
-
-						if len(components) > 0 {
-							validComponents := make([]common.ComponentStatsData, 0)
-							for _, component := range components {
-								if component.TotalMessages > 0 {
-									validComponents = append(validComponents, component)
-								}
-							}
-
-							logger.Info("Final statistics collection found increments",
-								"valid_components", len(validComponents))
-
-							if len(validComponents) > 0 {
-								nodeID := common.GetNodeID()
-								common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(nodeID, validComponents)
-								logger.Info("Force wrote final statistics to Redis to prevent data loss")
-							}
-						}
-					}
-				}()
-
-				select {
-				case <-finalCollectionDone:
-					logger.Info("Final statistics collection completed successfully")
-				case <-time.After(10 * time.Second):
-					logger.Warn("Final statistics collection timeout, proceeding with shutdown")
-				}
-			}
-
-			// Phase 3: Final project cleanup (components already stopped in Phase 2)
-			logger.Info("Phase 3: Final project cleanup...")
+			// Stop all running projects (Stop method handles data drain internally)
+			logger.Info("Stopping all running projects")
 			project.GlobalProject.ProjectMu.Lock()
-			for id, proj := range project.GlobalProject.Projects {
-				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
-					logger.Info("Setting project status to stopped after component shutdown", "project", id)
-					// Set status to stopped without additional component operations
-					now := time.Now()
-					proj.Status = project.ProjectStatusStopped
-					proj.StatusChangedAt = &now
+			for _, proj := range project.GlobalProject.Projects {
+				if proj.Status == project.ProjectStatusRunning {
+					logger.Info("Stopping project during shutdown", "project", proj.Id)
+					err := proj.Stop()
+					if err != nil {
+						logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
+					} else {
+						logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
+					}
 				}
 			}
 			project.GlobalProject.ProjectMu.Unlock()
-			logger.Info("Project cleanup phase completed")
 
-			// Phase 4: Stop cluster services
-			logger.Info("Phase 4: Stopping cluster services...")
 			if cluster.GlobalClusterManager != nil {
 				cluster.GlobalClusterManager.Stop()
 			}
 
-			// Phase 5: Stop background services
-			logger.Info("Phase 5: Stopping background services...")
 			common.StopClusterSystemManager()
 			common.StopDailyStatsManager()
 			if rsm := common.GetRedisSampleManager(); rsm != nil {
 				rsm.Close()
 			}
-
-			// Phase 5: Reset plugin statistics before shutdown
-			logger.Info("Phase 5: Resetting plugin statistics before shutdown...")
-			for pluginName, pluginInstance := range plugin.Plugins {
-				pluginInstance.ResetAllStats()
-				logger.Debug("Reset plugin statistics for shutdown", "plugin", pluginName)
-			}
-
-			// Phase 6: Final cleanup
-			logger.Info("Phase 6: Final cleanup...")
-			// Force garbage collection to clean up any remaining resources
-			runtime.GC()
-			time.Sleep(100 * time.Millisecond)
-
-			logger.Info("Graceful shutdown completed successfully")
 		}()
 
 		// Wait for shutdown completion or timeout
@@ -344,7 +233,7 @@ func main() {
 			}
 		}
 
-		logger.Info("Hub shutdown complete — bye ❄️")
+		logger.Info("Hub shutdown complete — bye")
 		os.Exit(0)
 	}()
 

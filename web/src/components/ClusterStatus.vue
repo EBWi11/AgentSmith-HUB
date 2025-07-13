@@ -306,8 +306,9 @@ function getNodeMetrics(nodeId) {
   // Get real message data for this node
   if (nodeMessageData.value && nodeMessageData.value[nodeId]) {
     const nodeData = nodeMessageData.value[nodeId]
-    defaultMetrics.inputMessages = nodeData.input_messages || 0
-    defaultMetrics.outputMessages = nodeData.output_messages || 0
+    // Handle both uppercase and lowercase formats from backend
+    defaultMetrics.inputMessages = nodeData.input_messages || nodeData.INPUT_messages || 0
+    defaultMetrics.outputMessages = nodeData.output_messages || nodeData.OUTPUT_messages || 0
   }
   
   // Get system metrics from cluster system metrics API

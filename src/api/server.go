@@ -78,7 +78,6 @@ func ServerStart(listener string) error {
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
 	e.GET("/cluster-system-stats", getClusterSystemStats)
 	e.GET("/cluster-status", getClusterStatus)
-	e.GET("/cluster-health", getClusterHealth)
 	e.GET("/cluster", getCluster)
 
 	// Create authenticated group for management endpoints
@@ -163,8 +162,7 @@ func ServerStart(listener string) error {
 	// Pending changes management (enhanced) - REQUIRE AUTH
 	auth.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
 	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges)  // Enhanced endpoint with status info
-	auth.POST("/apply-changes", ApplyPendingChanges)                  // Legacy endpoint
-	auth.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Enhanced endpoint with transaction support
+	auth.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Keep for backward compatibility
 	auth.POST("/apply-single-change", ApplySingleChange)              // Legacy endpoint
 	auth.POST("/verify-changes", VerifyPendingChanges)                // Verify all changes
 	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange)  // Verify single change

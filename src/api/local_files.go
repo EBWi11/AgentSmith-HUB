@@ -565,6 +565,8 @@ func loadLocalChanges(c echo.Context) error {
 
 	// Load all changes directly into official memory (bypassing temporary storage)
 	results := make([]map[string]interface{}, 0)
+	projectsToRestart := make(map[string]struct{})
+	successfullyLoaded := make([]map[string]string, 0)
 
 	for _, change := range changes {
 		componentType := change["type"].(string)
@@ -584,6 +586,14 @@ func loadLocalChanges(c echo.Context) error {
 		} else {
 			// Record successful operation
 			RecordLocalPush(componentType, id, content, "success", "")
+
+			// Track successfully loaded components for project restart
+			if componentType != "project" {
+				successfullyLoaded = append(successfullyLoaded, map[string]string{
+					"type": componentType,
+					"id":   id,
+				})
+			}
 		}
 
 		results = append(results, map[string]interface{}{
@@ -591,6 +601,38 @@ func loadLocalChanges(c echo.Context) error {
 			"id":      id,
 			"success": success,
 			"message": message,
+		})
+	}
+
+	// Collect all affected projects for successfully loaded components
+	for _, component := range successfullyLoaded {
+		affectedProjects := project.GetAffectedProjects(component["type"], component["id"])
+		for _, projectID := range affectedProjects {
+			projectsToRestart[projectID] = struct{}{}
+		}
+	}
+
+	// Restart affected projects if any
+	var restartedCount int
+	if len(projectsToRestart) > 0 {
+		projectIDs := make([]string, 0, len(projectsToRestart))
+		for projectID := range projectsToRestart {
+			projectIDs = append(projectIDs, projectID)
+		}
+
+		logger.Info("Restarting affected projects after batch local load", "count", len(projectIDs))
+
+		var err error
+		restartedCount, err = project.RestartProjectsSafely(projectIDs, "batch_local_component_load")
+		if err != nil {
+			logger.Error("Error during batch project restart after local load", "error", err)
+		}
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"results":            results,
+			"total":              len(results),
+			"affected_projects":  projectIDs,
+			"restarted_projects": restartedCount,
 		})
 	}
 
@@ -658,6 +700,31 @@ func loadSingleLocalChange(c echo.Context) error {
 	// Record successful operation
 	RecordLocalPush(req.Type, req.ID, content, "success", "")
 
+	// Get affected projects and restart them (except for projects which restart themselves)
+	if req.Type != "project" {
+		affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
+		if len(affectedProjects) > 0 {
+			logger.Info("Restarting affected projects after local component load", "type", req.Type, "id", req.ID, "count", len(affectedProjects))
+
+			// Use unified restart function
+			restartedCount, err := project.RestartProjectsSafely(affectedProjects, "local_component_load")
+			if err != nil {
+				logger.Error("Error during affected project restart after local load", "error", err)
+			}
+
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success":            true,
+				"message":            "loaded successfully and restarted affected projects",
+				"type":               req.Type,
+				"id":                 req.ID,
+				"file_path":          filePath,
+				"file_size":          len(fileContent),
+				"affected_projects":  affectedProjects,
+				"restarted_projects": restartedCount,
+			})
+		}
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success":   true,
 		"message":   "loaded successfully",
@@ -673,29 +740,7 @@ func loadSingleLocalChange(c echo.Context) error {
 func loadComponentDirectly(componentType, id, content string) error {
 	switch componentType {
 	case "input":
-		// Check if old component exists and count projects using it (using centralized counter)
-		common.GlobalMu.RLock()
-		oldInput, exists := project.GlobalProject.Inputs[id]
-		common.GlobalMu.RUnlock()
-
-		var projectsUsingInput int
-		if exists {
-			projectsUsingInput = project.UsageCounter.CountProjectsUsingInput(id)
-
-			// Only stop old component if no running projects are using it
-			if projectsUsingInput == 0 {
-				logger.Info("Stopping old input component for direct load", "id", id, "projects_using", projectsUsingInput)
-				// Collect final statistics before stopping
-				if common.GlobalDailyStatsManager != nil {
-					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("input", id)
-				}
-				oldInput.Stop()
-			} else {
-				logger.Info("Input component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingInput)
-			}
-		}
-
-		// Use the existing NewInput constructor
+		// Create new input instance
 		inputInstance, err := input.NewInput("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create input: %w", err)
@@ -703,49 +748,15 @@ func loadComponentDirectly(componentType, id, content string) error {
 
 		// Store directly in official storage with proper locking
 		common.GlobalMu.Lock()
-		// Ensure global inputs map exists
 		if project.GlobalProject.Inputs == nil {
 			project.GlobalProject.Inputs = make(map[string]*input.Input)
 		}
 		project.GlobalProject.Inputs[id] = inputInstance
-		// Clear any temporary version to avoid confusion
 		delete(project.GlobalProject.InputsNew, id)
 		common.GlobalMu.Unlock()
 
-		// Start the new input component if no projects are currently using it
-		// (running projects will start it when needed)
-		if projectsUsingInput == 0 {
-			logger.Info("Starting new input component after direct load", "id", id)
-			if err := inputInstance.Start(); err != nil {
-				logger.Error("Failed to start new input component after direct load", "id", id, "error", err)
-				return fmt.Errorf("failed to start new input component: %w", err)
-			}
-		}
-
 	case "output":
-		// Check if old component exists and count projects using it (using centralized counter)
-		common.GlobalMu.RLock()
-		oldOutput, exists := project.GlobalProject.Outputs[id]
-		common.GlobalMu.RUnlock()
-
-		var projectsUsingOutput int
-		if exists {
-			projectsUsingOutput = project.UsageCounter.CountProjectsUsingOutput(id)
-
-			// Only stop old component if no running projects are using it
-			if projectsUsingOutput == 0 {
-				logger.Info("Stopping old output component for direct load", "id", id, "projects_using", projectsUsingOutput)
-				// Collect final statistics before stopping
-				if common.GlobalDailyStatsManager != nil {
-					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("output", id)
-				}
-				oldOutput.Stop()
-			} else {
-				logger.Info("Output component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingOutput)
-			}
-		}
-
-		// Use the existing NewOutput constructor
+		// Create new output instance
 		outputInstance, err := output.NewOutput("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create output: %w", err)
@@ -753,49 +764,15 @@ func loadComponentDirectly(componentType, id, content string) error {
 
 		// Store directly in official storage with proper locking
 		common.GlobalMu.Lock()
-		// Ensure global outputs map exists
 		if project.GlobalProject.Outputs == nil {
 			project.GlobalProject.Outputs = make(map[string]*output.Output)
 		}
 		project.GlobalProject.Outputs[id] = outputInstance
-		// Clear any temporary version to avoid confusion
 		delete(project.GlobalProject.OutputsNew, id)
 		common.GlobalMu.Unlock()
 
-		// Start the new output component if no projects are currently using it
-		// (running projects will start it when needed)
-		if projectsUsingOutput == 0 {
-			logger.Info("Starting new output component after direct load", "id", id)
-			if err := outputInstance.Start(); err != nil {
-				logger.Error("Failed to start new output component after direct load", "id", id, "error", err)
-				return fmt.Errorf("failed to start new output component: %w", err)
-			}
-		}
-
 	case "ruleset":
-		// Check if old component exists and count projects using it (using centralized counter)
-		common.GlobalMu.RLock()
-		oldRuleset, exists := project.GlobalProject.Rulesets[id]
-		common.GlobalMu.RUnlock()
-
-		var projectsUsingRuleset int
-		if exists {
-			projectsUsingRuleset = project.UsageCounter.CountProjectsUsingRuleset(id)
-
-			// Only stop old component if no running projects are using it
-			if projectsUsingRuleset == 0 {
-				logger.Info("Stopping old ruleset component for direct load", "id", id, "projects_using", projectsUsingRuleset)
-				// Collect final statistics before stopping
-				if common.GlobalDailyStatsManager != nil {
-					common.GlobalDailyStatsManager.CollectFinalStatsBeforeComponentStop("ruleset", id)
-				}
-				oldRuleset.Stop()
-			} else {
-				logger.Info("Ruleset component still in use, skipping stop during direct load", "id", id, "projects_using", projectsUsingRuleset)
-			}
-		}
-
-		// Use the existing NewRuleset constructor
+		// Create new ruleset instance
 		rulesetInstance, err := rules_engine.NewRuleset("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create ruleset: %w", err)
@@ -803,37 +780,15 @@ func loadComponentDirectly(componentType, id, content string) error {
 
 		// Store directly in official storage with proper locking
 		common.GlobalMu.Lock()
-		// Ensure global rulesets map exists
 		if project.GlobalProject.Rulesets == nil {
 			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
 		}
 		project.GlobalProject.Rulesets[id] = rulesetInstance
-		// Clear any temporary version to avoid confusion
 		delete(project.GlobalProject.RulesetsNew, id)
 		common.GlobalMu.Unlock()
 
-		// Start the new ruleset component if no projects are currently using it
-		// (running projects will start it when needed)
-		if projectsUsingRuleset == 0 {
-			logger.Info("Starting new ruleset component after direct load", "id", id)
-			if err := rulesetInstance.Start(); err != nil {
-				logger.Error("Failed to start new ruleset component after direct load", "id", id, "error", err)
-				return fmt.Errorf("failed to start new ruleset component: %w", err)
-			}
-		}
-
 	case "project":
-		// Stop old project if it exists (projects are not shared between other projects)
-		common.GlobalMu.RLock()
-		oldProject, exists := project.GlobalProject.Projects[id]
-		common.GlobalMu.RUnlock()
-
-		if exists {
-			logger.Info("Stopping old project for direct load", "id", id)
-			oldProject.Stop()
-		}
-
-		// Use the existing NewProject constructor
+		// Create new project instance
 		projectInstance, err := project.NewProject("", content, id)
 		if err != nil {
 			return fmt.Errorf("failed to create project: %w", err)
@@ -841,35 +796,21 @@ func loadComponentDirectly(componentType, id, content string) error {
 
 		// Store directly in official storage with proper locking
 		common.GlobalMu.Lock()
-		// Ensure global projects map exists
 		if project.GlobalProject.Projects == nil {
 			project.GlobalProject.Projects = make(map[string]*project.Project)
 		}
 		project.GlobalProject.Projects[id] = projectInstance
-		// Clear any temporary version to avoid confusion
 		delete(project.GlobalProject.ProjectsNew, id)
 		common.GlobalMu.Unlock()
 
 	case "plugin":
-		// Reset statistics and remove existing plugin from memory before loading new one
-		common.GlobalMu.Lock()
-		if oldPlugin, exists := plugin.Plugins[id]; exists {
-			oldPlugin.ResetAllStats()
-			logger.Debug("Reset plugin statistics during direct load", "plugin", id)
-		}
-		delete(plugin.Plugins, id)
-		common.GlobalMu.Unlock()
-
-		// Use the existing NewPlugin constructor to properly compile and initialize the plugin
+		// Create new plugin instance
 		err := plugin.NewPlugin("", content, id, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			return fmt.Errorf("failed to create plugin: %w", err)
 		}
 
-		// Plugin is automatically added to plugin.Plugins by NewPlugin function
-		// No need to manually add it to the map
-
-		// Clear any temporary version to avoid confusion
+		// Clear any temporary version
 		common.GlobalMu.Lock()
 		delete(plugin.PluginsNew, id)
 		common.GlobalMu.Unlock()
@@ -977,17 +918,10 @@ func syncComponentToFollowersForLocalLoad(componentType string, id string) {
 			}
 		}
 	} else {
-		// For other components, publish local push instruction
+		// For other components, publish local push instruction (restart will be handled by main flow)
 		affectedProjects := project.GetAffectedProjects(componentType, id)
 		if err := cluster.GlobalInstructionManager.PublishComponentLocalPush(componentType, id, content, affectedProjects); err != nil {
 			logger.Error("Failed to publish component local push instruction", "type", componentType, "id", id, "error", err)
-		}
-
-		// Restart affected projects
-		if len(affectedProjects) > 0 {
-			if err := cluster.GlobalInstructionManager.PublishProjectsRestart(affectedProjects, "component_local_push"); err != nil {
-				logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
-			}
 		}
 	}
 

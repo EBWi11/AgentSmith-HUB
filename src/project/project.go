@@ -21,27 +21,10 @@ import (
 
 var GlobalProject *GlobalProjectInfo
 
-// Global flag to track if system is shutting down
-var systemShuttingDown int32 // Use atomic operations for thread safety
-
-// SetSystemShuttingDown sets the global shutdown flag
-func SetSystemShuttingDown(shutting bool) {
-	if shutting {
-		atomic.StoreInt32(&systemShuttingDown, 1)
-	} else {
-		atomic.StoreInt32(&systemShuttingDown, 0)
-	}
-}
-
-// IsSystemShuttingDown checks if system is shutting down
-func IsSystemShuttingDown() bool {
-	return atomic.LoadInt32(&systemShuttingDown) == 1
-}
-
 // collectAllComponentStats collects current statistics from all running components
 // All increments are collected atomically at the same moment to ensure consistency
-func collectAllComponentStats() []common.ComponentStatsData {
-	var components []common.ComponentStatsData
+func collectAllComponentStats() []common.DailyStatsData {
+	var components []common.DailyStatsData
 
 	// Take a snapshot of running projects to minimize lock time
 	var runningProjects []*Project
@@ -53,109 +36,51 @@ func collectAllComponentStats() []common.ComponentStatsData {
 	}
 	GlobalProject.ProjectMu.RUnlock()
 
-	// Collect all component statistics in a tight loop to minimize time differences
-	// This helps reduce the time window between collecting input vs output statistics
 	for _, proj := range runningProjects {
-		// Double-check project is still running (could have changed since snapshot)
-		if proj.Status != ProjectStatusRunning {
-			continue
-		}
-
-		// Build ProjectNodeSequence mapping for this project
-		flowGraph, err := proj.parseContent()
-		if err != nil {
-			logger.Error("Failed to parse project content for stats collection", "project", proj.Id, "error", err)
-			continue
-		}
-
-		// Calculate proper ProjectNodeSequence for each component in this project
-		componentSequences := calculateComponentSequences(flowGraph)
-
-		// Collect input statistics with nil check
-		for inputName, input := range proj.Inputs {
-			// Check for nil to handle concurrent project restart
-			if input == nil {
-				logger.Debug("Skipping nil input during stats collection", "project", proj.Id, "input", inputName)
-				continue
-			}
-			increment := input.GetIncrementAndUpdate()
+		for _, i := range proj.Inputs {
+			increment := i.GetIncrementAndUpdate()
 			if increment > 0 {
-				// Use calculated sequence instead of component's stored sequence
-				componentKey := "INPUT." + inputName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				components = append(components, common.ComponentStatsData{
+				components = append(components, common.DailyStatsData{
 					ProjectID:           proj.Id,
-					ComponentID:         input.Id,
+					ComponentID:         i.Id,
 					ComponentType:       "input",
-					ProjectNodeSequence: sequence,
+					ProjectNodeSequence: i.ProjectNodeSequence,
 					TotalMessages:       increment,
 				})
 			}
 		}
 
-		// Collect output statistics immediately after input for same project
-		for outputName, output := range proj.Outputs {
-			// Check for nil to handle concurrent project restart
-			if output == nil {
-				logger.Debug("Skipping nil output during stats collection", "project", proj.Id, "output", outputName)
-				continue
-			}
-			increment := output.GetIncrementAndUpdate()
+		for _, o := range proj.Outputs {
+			increment := o.GetIncrementAndUpdate()
 			if increment > 0 {
-				// Use calculated sequence instead of component's stored sequence
-				componentKey := "OUTPUT." + outputName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				components = append(components, common.ComponentStatsData{
+				components = append(components, common.DailyStatsData{
 					ProjectID:           proj.Id,
-					ComponentID:         output.Id,
+					ComponentID:         o.Id,
 					ComponentType:       "output",
-					ProjectNodeSequence: sequence,
+					ProjectNodeSequence: o.ProjectNodeSequence,
 					TotalMessages:       increment,
 				})
 			}
 		}
 
-		// Collect ruleset statistics
-		for rulesetName, ruleset := range proj.Rulesets {
-			// Check for nil to handle concurrent project restart
-			if ruleset == nil {
-				logger.Debug("Skipping nil ruleset during stats collection", "project", proj.Id, "ruleset", rulesetName)
-				continue
-			}
-			increment := ruleset.GetIncrementAndUpdate()
+		for _, r := range proj.Rulesets {
+			increment := r.GetIncrementAndUpdate()
 			if increment > 0 {
-				// Use calculated sequence instead of component's stored sequence
-				componentKey := "RULESET." + rulesetName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				components = append(components, common.ComponentStatsData{
+				components = append(components, common.DailyStatsData{
 					ProjectID:           proj.Id,
-					ComponentID:         ruleset.RulesetID,
+					ComponentID:         r.RulesetID,
 					ComponentType:       "ruleset",
-					ProjectNodeSequence: sequence,
+					ProjectNodeSequence: r.ProjectNodeSequence,
 					TotalMessages:       increment,
 				})
 			}
 		}
 	}
 
-	// Collect plugin statistics (plugins are global, not per-project)
-	// Import plugin package to access global Plugins map
-	for pluginName, plugin := range plugin.Plugins {
+	for pluginName, p := range plugin.Plugins {
 		// Plugin success statistics - use increment method
-		successIncrement := plugin.GetSuccessIncrementAndUpdate()
-		components = append(components, common.ComponentStatsData{
+		successIncrement := p.GetSuccessIncrementAndUpdate()
+		components = append(components, common.DailyStatsData{
 			ProjectID:           "global", // Plugins are global across all projects
 			ComponentID:         pluginName,
 			ComponentType:       "plugin_success",
@@ -164,8 +89,8 @@ func collectAllComponentStats() []common.ComponentStatsData {
 		})
 
 		// Plugin failure statistics - use increment method
-		failureIncrement := plugin.GetFailureIncrementAndUpdate()
-		components = append(components, common.ComponentStatsData{
+		failureIncrement := p.GetFailureIncrementAndUpdate()
+		components = append(components, common.DailyStatsData{
 			ProjectID:           "global", // Plugins are global across all projects
 			ComponentID:         pluginName,
 			ComponentType:       "plugin_failure",
@@ -175,59 +100,6 @@ func collectAllComponentStats() []common.ComponentStatsData {
 	}
 
 	return components
-}
-
-// calculateComponentSequences calculates ProjectNodeSequence for all components in a flow graph
-func calculateComponentSequences(flowGraph map[string][]string) map[string]string {
-	componentSequences := make(map[string]string)
-
-	// Build ProjectNodeSequence recursively
-	var buildSequence func(component string, visited map[string]bool) string
-	buildSequence = func(component string, visited map[string]bool) string {
-		if visited[component] {
-			return component // Break cycle
-		}
-		if seq, exists := componentSequences[component]; exists {
-			return seq
-		}
-		visited[component] = true
-		defer delete(visited, component)
-
-		var upstreamComponent string
-		for from, tos := range flowGraph {
-			for _, to := range tos {
-				if to == component {
-					upstreamComponent = from
-					break
-				}
-			}
-			if upstreamComponent != "" {
-				break
-			}
-		}
-
-		var sequence string
-		if upstreamComponent == "" {
-			sequence = component
-		} else {
-			upstreamSequence := buildSequence(upstreamComponent, visited)
-			sequence = upstreamSequence + "." + component
-		}
-		componentSequences[component] = sequence
-		return sequence
-	}
-
-	// Build sequences for all components
-	for from := range flowGraph {
-		buildSequence(from, make(map[string]bool))
-	}
-	for _, tos := range flowGraph {
-		for _, to := range tos {
-			buildSequence(to, make(map[string]bool))
-		}
-	}
-
-	return componentSequences
 }
 
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
@@ -391,7 +263,6 @@ func init() {
 	// Mapping between logical edge ("FROM->TO") and its channelId
 	GlobalProject.edgeChanIds = make(map[string]string)
 
-	// Set up stats collector callback for Daily Stats Manager
 	common.SetStatsCollector(collectAllComponentStats)
 }
 
@@ -499,10 +370,6 @@ func NewProject(path string, raw string, id string) (*Project, error) {
 		Rulesets:        make(map[string]*rules_engine.Ruleset),
 		MsgChannels:     make([]string, 0),
 		stopChan:        make(chan struct{}),
-		metrics: &ProjectMetrics{
-			InputQPS:  make(map[string]uint64),
-			OutputQPS: make(map[string]uint64),
-		},
 	}
 
 	// Initialize components
@@ -559,6 +426,7 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 
 	now := time.Now()
 	p := &Project{
+		Testing:         true,
 		Id:              cfg.Id,
 		Status:          ProjectStatusStopped, // Start as stopped for testing
 		StatusChangedAt: &now,
@@ -568,10 +436,6 @@ func NewProjectForTesting(path string, raw string, id string) (*Project, error) 
 		Rulesets:        make(map[string]*rules_engine.Ruleset),
 		MsgChannels:     make([]string, 0),
 		stopChan:        make(chan struct{}),
-		metrics: &ProjectMetrics{
-			InputQPS:  make(map[string]uint64),
-			OutputQPS: make(map[string]uint64),
-		},
 	}
 
 	// Initialize components with independent instances for testing
@@ -1127,60 +991,31 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 
 // Start starts the project and all its components
 func (p *Project) Start() error {
-	// Check if this is test mode (any output has TestCollectionChan set)
-	isTestMode := false
-	for _, out := range p.Outputs {
-		if out.TestCollectionChan != nil {
-			isTestMode = true
-			break
-		}
-	}
-
 	// Check if project was in error state or stopped state - both need force full reload
 	wasErrorState := p.Status == ProjectStatusError
 	wasStoppedState := p.Status == ProjectStatusStopped
 	needsForceReload := wasErrorState || wasStoppedState
 
-	if needsForceReload && !isTestMode {
+	if needsForceReload && !p.Testing {
 		if wasErrorState {
 			logger.Info("Project was in error state, will force full component reload", "project", p.Id, "previous_error", p.Err)
-			// Clear the error state and force reload
 			p.Err = nil
 		} else if wasStoppedState {
 			logger.Info("Project was stopped, will force full component reload to restore all references", "project", p.Id)
 		}
-
-		// Defensive cleanup: stop and destroy any existing components before reload
-		logger.Info("Performing defensive cleanup before force reload", "project", p.Id)
-		p.defensiveCleanupBeforeReload()
 	}
 
-	// In test mode, bypass status checks but in production mode, enforce them
-	if !isTestMode {
-		if p.Status == ProjectStatusRunning {
-			return fmt.Errorf("project is already running %s", p.Id)
-		}
-		if p.Status == ProjectStatusStarting {
-			return fmt.Errorf("project is currently starting, please wait %s", p.Id)
-		}
-		if p.Status == ProjectStatusStopping {
-			return fmt.Errorf("project is currently stopping, please wait %s", p.Id)
-		}
-		// Remove the error state check - allow error projects to restart with full reload
-		// if p.Status == ProjectStatusError {
-		//     return fmt.Errorf("project is error %s %s", p.Id, p.Err.Error())
-		// }
-	} else {
-		// Force set status to stopped to allow starting in test mode
-		// In test mode, only update memory status without Redis
-		p.Status = ProjectStatusStopped
-		logger.Info("Starting project in test mode (bypassing status checks)", "id", p.Id)
+	if p.Status == ProjectStatusRunning {
+		return fmt.Errorf("project is already running %s", p.Id)
+	}
+	if p.Status == ProjectStatusStarting {
+		return fmt.Errorf("project is currently starting, please wait %s", p.Id)
+	}
+	if p.Status == ProjectStatusStopping {
+		return fmt.Errorf("project is currently stopping, please wait %s", p.Id)
 	}
 
-	// Set status to starting immediately to prevent duplicate operations
-	if !isTestMode {
-		p.setProjectStatus(ProjectStatusStarting, nil)
-	}
+	p.setProjectStatus(ProjectStatusStarting, nil)
 
 	// Initialize project control channels
 	p.stopChan = make(chan struct{})
@@ -1208,16 +1043,8 @@ func (p *Project) Start() error {
 
 	// Start inputs first
 	for _, in := range p.Inputs {
-		if isTestMode {
-			// In test mode, directly start all inputs
-			logger.Info("Starting input in test mode", "project", p.Id, "input", in.Id)
-			if err := in.Start(); err != nil {
-				errorMsg := fmt.Errorf("failed to start input %s: %v", in.Id, err)
-				logger.Error("Input component startup failed", "project", p.Id, "input", in.Id, "error", err)
-				p.cleanupComponentsOnStartupFailure()
-				p.setProjectStatus(ProjectStatusError, errorMsg)
-				return errorMsg
-			}
+		if p.Testing {
+			//todo
 		} else {
 			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
@@ -1247,7 +1074,7 @@ func (p *Project) Start() error {
 
 	// Start rulesets after inputs
 	for _, rs := range p.Rulesets {
-		if isTestMode {
+		if p.Testing {
 			// In test mode, directly start all rulesets
 			logger.Info("Starting ruleset in test mode", "project", p.Id, "ruleset", rs.RulesetID)
 			if err := rs.Start(); err != nil {
@@ -1258,7 +1085,6 @@ func (p *Project) Start() error {
 				return errorMsg
 			}
 		} else {
-			// In production mode, check component sharing
 			runningCount := UsageCounter.CountProjectsUsingRulesetInstance(rs.RulesetID, rs.ProjectNodeSequence, p.Id)
 			if runningCount == 0 {
 				if err := rs.Start(); err != nil {
@@ -1274,8 +1100,7 @@ func (p *Project) Start() error {
 
 	// Start outputs last
 	for _, out := range p.Outputs {
-		if isTestMode {
-			// In test mode, directly start all outputs
+		if p.Testing {
 			logger.Info("Starting output in test mode", "project", p.Id, "output", out.Id)
 			if err := out.Start(); err != nil {
 				errorMsg := fmt.Errorf("failed to start output %s: %v", out.Id, err)
@@ -1311,7 +1136,7 @@ func (p *Project) Start() error {
 		}
 	}
 
-	if isTestMode {
+	if p.Testing {
 		// In test mode, don't update Redis
 		now := time.Now()
 		p.Status = ProjectStatusRunning
@@ -1324,7 +1149,6 @@ func (p *Project) Start() error {
 
 	// After the project is successfully started, recalculate dependencies synchronously
 	AnalyzeProjectDependencies()
-
 	return nil
 }
 
@@ -1335,33 +1159,6 @@ func (p *Project) Stop() error {
 			return fmt.Errorf("project is already stopping %s", p.Id)
 		}
 		return fmt.Errorf("project is not running %s", p.Id)
-	}
-
-	// Collect initial statistics BEFORE stopping components
-	// This captures any data that might be in flight
-	if !IsSystemShuttingDown() { // Only collect if not system shutdown (to avoid duplicate collection)
-		logger.Info("Collecting initial statistics before stopping project", "project", p.Id)
-		if common.GlobalDailyStatsManager != nil && common.GetStatsCollector() != nil {
-			// Trigger initial collection for this project's components
-			statsCollector := common.GetStatsCollector()
-			components := statsCollector()
-
-			// Filter components for this project and with meaningful increments
-			projectComponents := make([]common.ComponentStatsData, 0)
-			for _, component := range components {
-				if component.ProjectID == p.Id && component.TotalMessages > 0 {
-					projectComponents = append(projectComponents, component)
-				}
-			}
-
-			if len(projectComponents) > 0 {
-				logger.Info("Saving initial project statistics before stop",
-					"project", p.Id,
-					"components_with_data", len(projectComponents))
-				// Force write to ensure data is saved immediately
-				common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.GetNodeID(), projectComponents)
-			}
-		}
 	}
 
 	// Set status to stopping immediately to prevent duplicate operations
@@ -1385,7 +1182,7 @@ func (p *Project) Stop() error {
 		}()
 
 		// Use the internal stopComponents function
-		err := p.stopComponentsInternal(false) // Don't save status to Redis, project methods don't handle persistence
+		err := p.stopComponentsInternal() // Don't save status to Redis, project methods don't handle persistence
 		stopCompleted <- err
 	}()
 
@@ -1414,24 +1211,10 @@ func (p *Project) Stop() error {
 	}
 }
 
-// StopForShutdown stops the project during system shutdown
-func (p *Project) StopForShutdown() error {
-	return p.Stop() // Use the same logic as normal stop
-}
-
-// stopComponents is an internal function that performs the actual component stopping
-// This is used by the public Stop() method and sets the status to stopped
-func (p *Project) stopComponents() error {
-	return p.stopComponentsInternal(true) // Default: save status to Redis
-}
-
-func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
-	logger.Info("Stopping project components", "project", p.Id, "save_status_to_redis", saveStatusToRedis)
-
-	// Use centralized component usage counter for better performance and code maintainability
+func (p *Project) stopComponentsInternal() error {
+	logger.Info("Stopping project components", "project", p.Id)
 
 	// Step 1: Stop inputs first to prevent new data
-	// NEW: Handle channel disconnection for shared inputs
 	logger.Info("Step 1: Stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
 	for inputId, in := range p.Inputs {
 		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
@@ -1466,10 +1249,6 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
 	p.waitForCompleteDataProcessing()
 
-	// Step 2.5: Ensure all statistics are collected and saved to Redis
-	logger.Info("Step 2.5: Ensuring all statistics are collected and saved", "project", p.Id)
-	p.ensureStatisticsCollectedAndSaved()
-
 	// Step 3: Stop rulesets (only if not used by other projects)
 	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 	for _, rs := range p.Rulesets {
@@ -1487,6 +1266,8 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		}
 	}
 
+	common.GlobalDailyStatsManager.CollectAllComponentsData()
+
 	// Step 4: Stop outputs last (only if not used by other projects)
 	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 	for _, out := range p.Outputs {
@@ -1496,7 +1277,6 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 			startTime := time.Now()
 			if err := out.Stop(); err != nil {
 				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
-				// Continue with other outputs instead of failing immediately
 			} else {
 				logger.Info("Stopped output", "project", p.Id, "output", out.Id, "duration", time.Since(startTime))
 			}
@@ -1515,7 +1295,7 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	select {
 	case <-waitDone:
 		logger.Info("All project goroutines finished", "project", p.Id)
-	case <-time.After(30 * time.Second):
+	case <-time.After(60 * time.Second):
 		logger.Warn("Timeout waiting for project goroutines to finish", "project", p.Id)
 	}
 
@@ -1554,24 +1334,13 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		p.stopChan = nil
 	}
 
-	// Set status to stopped and save
-	if saveStatusToRedis {
-		p.setProjectStatus(ProjectStatusStopped, nil)
-		logger.Info("Finished stopping project components", "project", p.Id)
-	} else {
-		// Only update memory status, don't save to Redis
-		now := time.Now()
-		p.Status = ProjectStatusStopped
-		p.StatusChangedAt = &now
-		logger.Info("Finished stopping project components (Redis status preserved)", "project", p.Id)
-	}
+	p.setProjectStatus(ProjectStatusStopped, nil)
+	logger.Info("Finished stopping project components", "project", p.Id)
 	return nil
 }
 
 // forceCleanup performs aggressive cleanup when normal stop fails
 func (p *Project) forceCleanup() error {
-	logger.Warn("Performing force cleanup for project", "project", p.Id)
-
 	// Force close all channels without waiting
 	for _, channelId := range p.MsgChannels {
 		GlobalProject.EdgeMapMu.Lock()
@@ -1589,17 +1358,6 @@ func (p *Project) forceCleanup() error {
 		GlobalProject.EdgeMapMu.Unlock()
 	}
 
-	// Force stop metrics collection
-	if p.metricsStop != nil {
-		select {
-		case <-p.metricsStop:
-			// Already closed
-		default:
-			close(p.metricsStop)
-		}
-		p.metricsStop = nil
-	}
-
 	// Force close project stop channel
 	if p.stopChan != nil {
 		select {
@@ -1611,28 +1369,7 @@ func (p *Project) forceCleanup() error {
 		p.stopChan = nil
 	}
 
-	// Reset atomic counters for all components before clearing references
-	logger.Warn("Force resetting component counters during cleanup", "project", p.Id)
-
-	// Reset atomic counters for all components
-	for _, in := range p.Inputs {
-		if in.ProjectNodeSequence != "" {
-			previousTotal := in.ResetConsumeTotal()
-			logger.Warn("Force reset input counter", "input", in.Id, "previous_total", previousTotal)
-		}
-	}
-	for _, out := range p.Outputs {
-		if out.ProjectNodeSequence != "" {
-			previousTotal := out.ResetProduceTotal()
-			logger.Warn("Force reset output counter", "output", out.Id, "previous_total", previousTotal)
-		}
-	}
-	for _, rs := range p.Rulesets {
-		if rs.ProjectNodeSequence != "" {
-			previousTotal := rs.ResetProcessTotal()
-			logger.Warn("Force reset ruleset counter", "ruleset", rs.RulesetID, "previous_total", previousTotal)
-		}
-	}
+	common.GlobalDailyStatsManager.CollectAllComponentsData()
 
 	// Clear component references immediately
 	p.Inputs = make(map[string]*input.Input)
@@ -1643,9 +1380,6 @@ func (p *Project) forceCleanup() error {
 	logger.Warn("Force cleanup completed for project", "project", p.Id)
 	return nil
 }
-
-// collectMetrics and GetMetrics methods removed
-// Project metrics are now handled by Daily Stats Manager
 
 func AnalyzeProjectDependencies() {
 	// Use dedicated project lock to prevent race conditions
@@ -1865,12 +1599,6 @@ func (p *Project) SaveProjectStatus() error {
 func (p *Project) StopForTesting() error {
 	logger.Info("Stopping and destroying test project", "project", p.Id)
 
-	// Stop metrics collection first
-	if p.metricsStop != nil {
-		close(p.metricsStop)
-		p.metricsStop = nil
-	}
-
 	// Stop components quickly without waiting for channel drainage
 	// Note: Test components are completely isolated, so stopping them won't affect production
 	for _, in := range p.Inputs {
@@ -2042,18 +1770,12 @@ func (p *Project) waitForCompleteDataProcessing() {
 			}
 
 			// Check all rulesets for running tasks and pending messages
-			for rulesetId, rs := range p.Rulesets {
+			for _, rs := range p.Rulesets {
 				// Check running tasks in thread pool
 				runningTasks := rs.GetRunningTaskCount()
 				if runningTasks > 0 {
 					allProcessed = false
 					totalRunningTasks += runningTasks
-					if logCounter%50 == 0 { // Log every 5 seconds
-						logger.Debug("Ruleset has running tasks",
-							"project", p.Id,
-							"ruleset", rulesetId,
-							"running_tasks", runningTasks)
-					}
 				}
 
 				// Check upstream channels for pending messages
@@ -2063,12 +1785,6 @@ func (p *Project) waitForCompleteDataProcessing() {
 						if pendingInUpstream > 0 {
 							allProcessed = false
 							totalChannelMessages += pendingInUpstream
-							if logCounter%50 == 0 { // Log every 5 seconds
-								logger.Debug("Ruleset has pending upstream messages",
-									"project", p.Id,
-									"ruleset", rulesetId,
-									"pending_messages", pendingInUpstream)
-							}
 						}
 					}
 				}
@@ -2080,30 +1796,18 @@ func (p *Project) waitForCompleteDataProcessing() {
 						if pendingInDownstream > 0 {
 							allProcessed = false
 							totalChannelMessages += pendingInDownstream
-							if logCounter%50 == 0 { // Log every 5 seconds
-								logger.Debug("Ruleset has pending downstream messages",
-									"project", p.Id,
-									"ruleset", rulesetId,
-									"pending_messages", pendingInDownstream)
-							}
 						}
 					}
 				}
 			}
 
 			// Check all outputs for pending data (including internal channels)
-			for outputId, out := range p.Outputs {
+			for _, out := range p.Outputs {
 				pendingCount := out.GetPendingMessageCount()
 
 				if pendingCount > 0 {
 					allProcessed = false
 					totalChannelMessages += pendingCount
-					if logCounter%50 == 0 { // Log every 5 seconds
-						logger.Debug("Output has pending messages",
-							"project", p.Id,
-							"output", outputId,
-							"pending_messages", pendingCount)
-					}
 				}
 			}
 
@@ -2112,14 +1816,7 @@ func (p *Project) waitForCompleteDataProcessing() {
 				return
 			}
 
-			// Log progress every 5 seconds
 			logCounter++
-			if logCounter%50 == 0 {
-				logger.Info("Still waiting for data processing",
-					"project", p.Id,
-					"channel_messages", totalChannelMessages,
-					"running_tasks", totalRunningTasks)
-			}
 		}
 	}
 }
@@ -2304,123 +2001,6 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
-
-	// If force reload is enabled, clear owner references from old components and reset counters
-	if forceReload {
-		logger.Info("Force reload enabled - collecting final stats before resetting counters", "project", p.Id)
-
-		// IMPORTANT: Collect statistics BEFORE resetting counters to avoid data loss
-		if common.GlobalDailyStatsManager != nil && common.GetStatsCollector() != nil {
-			// Collect statistics for components that will be force-reloaded
-			var componentsToSave []common.ComponentStatsData
-
-			// Calculate proper sequences for this project
-			componentSequences := calculateComponentSequences(flowGraph)
-
-			// Collect input statistics before reset
-			for _, name := range inputNames {
-				if globalInput, ok := GlobalProject.Inputs[name]; ok {
-					increment := globalInput.GetIncrementAndUpdate()
-					if increment > 0 {
-						// Use calculated sequence
-						componentKey := "INPUT." + name
-						sequence := componentSequences[componentKey]
-						if sequence == "" {
-							sequence = componentKey
-						}
-
-						componentsToSave = append(componentsToSave, common.ComponentStatsData{
-							ProjectID:           p.Id,
-							ComponentID:         globalInput.Id,
-							ComponentType:       "input",
-							ProjectNodeSequence: sequence,
-							TotalMessages:       increment,
-						})
-					}
-				}
-			}
-
-			// Collect output statistics before reset
-			for _, name := range outputNames {
-				if globalOutput, ok := GlobalProject.Outputs[name]; ok {
-					increment := globalOutput.GetIncrementAndUpdate()
-					if increment > 0 {
-						// Use calculated sequence
-						componentKey := "OUTPUT." + name
-						sequence := componentSequences[componentKey]
-						if sequence == "" {
-							sequence = componentKey
-						}
-
-						componentsToSave = append(componentsToSave, common.ComponentStatsData{
-							ProjectID:           p.Id,
-							ComponentID:         globalOutput.Id,
-							ComponentType:       "output",
-							ProjectNodeSequence: sequence,
-							TotalMessages:       increment,
-						})
-					}
-				}
-			}
-
-			// Collect ruleset statistics before reset
-			for _, name := range rulesetNames {
-				if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
-					increment := globalRuleset.GetIncrementAndUpdate()
-					if increment > 0 {
-						// Use calculated sequence
-						componentKey := "RULESET." + name
-						sequence := componentSequences[componentKey]
-						if sequence == "" {
-							sequence = componentKey
-						}
-
-						componentsToSave = append(componentsToSave, common.ComponentStatsData{
-							ProjectID:           p.Id,
-							ComponentID:         globalRuleset.RulesetID,
-							ComponentType:       "ruleset",
-							ProjectNodeSequence: sequence,
-							TotalMessages:       increment,
-						})
-					}
-				}
-			}
-
-			// Save collected statistics before resetting
-			if len(componentsToSave) > 0 {
-				logger.Info("Saving component statistics before force reload reset",
-					"project", p.Id,
-					"components_count", len(componentsToSave))
-				common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.Config.LocalIP, componentsToSave)
-			}
-		}
-
-		// Now reset counters after statistics have been saved
-		logger.Info("Resetting component counters after saving statistics", "project", p.Id)
-
-		for _, name := range inputNames {
-			if globalInput, ok := GlobalProject.Inputs[name]; ok {
-				previousTotal := globalInput.ResetConsumeTotal()
-				logger.Info("Force reset input counter during reload", "input", name, "previous_total", previousTotal)
-			}
-		}
-
-		for _, name := range outputNames {
-			if globalOutput, ok := GlobalProject.Outputs[name]; ok {
-				previousTotal := globalOutput.ResetProduceTotal()
-				logger.Info("Force reset output counter during reload", "output", name, "previous_total", previousTotal)
-			}
-		}
-
-		for _, name := range rulesetNames {
-			if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
-				previousTotal := globalRuleset.ResetProcessTotal()
-				logger.Info("Force reset ruleset counter during reload", "ruleset", name, "previous_total", previousTotal)
-			}
-		}
-
-		logger.Info("Force reload counter reset completed", "project", p.Id)
-	}
 
 	// Load input components from global registry (inputs can be shared safely)
 	for _, name := range inputNames {
@@ -2791,9 +2371,6 @@ func RestartProjectsSafely(projectIDs []string, trigger string) (int, error) {
 	return restartedCount, nil
 }
 
-// GetQPSDataForNode removed - QPS collection is no longer used
-// Message statistics are now handled by Daily Stats Manager
-
 // clearChannelReferences iterates all projects and removes pointers to the given channel from
 // every component's UpStream / DownStream slices or maps. It must be called with
 // GlobalProject.ProjectMu write-locked.
@@ -3092,238 +2669,4 @@ func (p *Project) setProjectStatus(status ProjectStatus, err error) {
 	// Always update Redis status
 	// This ensures cluster-wide visibility of status changes
 	updateProjectStatusRedis(common.Config.LocalIP, p.Id, status, &now)
-}
-
-// defensiveCleanupBeforeReload performs defensive cleanup of components before force reload
-// This is called when starting a project from error or stopped state
-func (p *Project) defensiveCleanupBeforeReload() {
-	logger.Info("Starting defensive cleanup before reload", "project", p.Id)
-
-	// Step 1: Stop all outputs (may have running goroutines)
-	for outputId, out := range p.Outputs {
-		if out == nil {
-			continue
-		}
-		logger.Debug("Defensively stopping output before reload", "project", p.Id, "output", outputId)
-		_ = out.Stop() // Ignore errors during defensive cleanup
-	}
-
-	// Step 2: Stop all rulesets (may have thread pools running)
-	for rulesetId, rs := range p.Rulesets {
-		if rs == nil {
-			continue
-		}
-		logger.Debug("Defensively stopping ruleset before reload", "project", p.Id, "ruleset", rulesetId)
-		_ = rs.Stop() // Ignore errors during defensive cleanup
-	}
-
-	// Step 3: Stop all inputs (may have consumers running)
-	for inputId, in := range p.Inputs {
-		if in == nil {
-			continue
-		}
-		// Only stop if no other projects are using it
-		otherProjectsUsing := UsageCounter.CountProjectsUsingInput(in.Id, p.Id)
-		if otherProjectsUsing == 0 {
-			logger.Debug("Defensively stopping input before reload", "project", p.Id, "input", inputId)
-			_ = in.Stop() // Ignore errors during defensive cleanup
-		} else {
-			logger.Debug("Input shared with other projects, only disconnecting channels",
-				"project", p.Id, "input", inputId, "other_projects_using", otherProjectsUsing)
-			// Clear downstream connections
-			in.DownStream = make([]*chan map[string]interface{}, 0)
-		}
-	}
-
-	// Step 4: Close any existing channels
-	for _, channelId := range p.MsgChannels {
-		GlobalProject.EdgeMapMu.Lock()
-		if ch, exists := GlobalProject.msgChans[channelId]; exists {
-			// Safely close channel
-			select {
-			case <-ch:
-				// Already closed
-			default:
-				close(ch)
-			}
-			delete(GlobalProject.msgChans, channelId)
-			delete(GlobalProject.msgChansCounter, channelId)
-		}
-		GlobalProject.EdgeMapMu.Unlock()
-	}
-
-	// Step 5: Clear metrics channels
-	if p.metricsStop != nil {
-		select {
-		case <-p.metricsStop:
-			// Already closed
-		default:
-			close(p.metricsStop)
-		}
-		p.metricsStop = nil
-	}
-
-	// Step 6: Clear stop channel
-	if p.stopChan != nil {
-		select {
-		case <-p.stopChan:
-			// Already closed
-		default:
-			close(p.stopChan)
-		}
-		p.stopChan = nil
-	}
-
-	// Step 7: Clear all references (will be reloaded)
-	p.Inputs = make(map[string]*input.Input)
-	p.Outputs = make(map[string]*output.Output)
-	p.Rulesets = make(map[string]*rules_engine.Ruleset)
-	p.MsgChannels = []string{}
-
-	logger.Info("Defensive cleanup completed", "project", p.Id)
-}
-
-// ensureStatisticsCollectedAndSaved ensures all component statistics are collected and saved to Redis
-// This is called during project stop to prevent any data loss
-func (p *Project) ensureStatisticsCollectedAndSaved() {
-	// Skip if system is shutting down (already handled in main.go)
-	if IsSystemShuttingDown() {
-		return
-	}
-
-	// Skip if no stats manager
-	if common.GlobalDailyStatsManager == nil || common.GetStatsCollector() == nil {
-		return
-	}
-
-	// Parse project content to get proper ProjectNodeSequence
-	flowGraph, err := p.parseContent()
-	if err != nil {
-		logger.Error("Failed to parse project content for final stats collection", "project", p.Id, "error", err)
-		return
-	}
-	componentSequences := calculateComponentSequences(flowGraph)
-
-	maxRetries := 5
-	retryInterval := 500 * time.Millisecond
-	allZero := false
-
-	for i := 0; i < maxRetries && !allZero; i++ {
-		if i > 0 {
-			logger.Info("Retrying statistics collection", "project", p.Id, "attempt", i+1)
-			time.Sleep(retryInterval)
-		}
-
-		// Collect current increments
-		var totalIncrement uint64
-		var componentsWithData []common.ComponentStatsData
-
-		// Check inputs
-		for inputName, in := range p.Inputs {
-			if in == nil {
-				continue
-			}
-			increment := in.GetIncrementAndUpdate()
-			totalIncrement += increment
-			if increment > 0 {
-				// Use calculated sequence
-				componentKey := "INPUT." + inputName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				componentsWithData = append(componentsWithData, common.ComponentStatsData{
-					ProjectID:           p.Id,
-					ComponentID:         in.Id,
-					ComponentType:       "input",
-					ProjectNodeSequence: sequence,
-					TotalMessages:       increment,
-				})
-				logger.Debug("Input still has increment", "project", p.Id, "input", inputName, "increment", increment)
-			}
-		}
-
-		// Check outputs
-		for outputName, out := range p.Outputs {
-			if out == nil {
-				continue
-			}
-			increment := out.GetIncrementAndUpdate()
-			totalIncrement += increment
-			if increment > 0 {
-				// Use calculated sequence
-				componentKey := "OUTPUT." + outputName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				componentsWithData = append(componentsWithData, common.ComponentStatsData{
-					ProjectID:           p.Id,
-					ComponentID:         out.Id,
-					ComponentType:       "output",
-					ProjectNodeSequence: sequence,
-					TotalMessages:       increment,
-				})
-				logger.Debug("Output still has increment", "project", p.Id, "output", outputName, "increment", increment)
-			}
-		}
-
-		// Check rulesets
-		for rulesetName, rs := range p.Rulesets {
-			if rs == nil {
-				continue
-			}
-			increment := rs.GetIncrementAndUpdate()
-			totalIncrement += increment
-			if increment > 0 {
-				// Use calculated sequence
-				componentKey := "RULESET." + rulesetName
-				sequence := componentSequences[componentKey]
-				if sequence == "" {
-					sequence = componentKey
-				}
-
-				componentsWithData = append(componentsWithData, common.ComponentStatsData{
-					ProjectID:           p.Id,
-					ComponentID:         rs.RulesetID,
-					ComponentType:       "ruleset",
-					ProjectNodeSequence: sequence,
-					TotalMessages:       increment,
-				})
-				logger.Debug("Ruleset still has increment", "project", p.Id, "ruleset", rulesetName, "increment", increment)
-			}
-		}
-
-		if totalIncrement == 0 {
-			allZero = true
-			logger.Info("All component increments are zero", "project", p.Id)
-		} else {
-			// Force save any remaining increments
-			logger.Info("Found remaining increments, force saving to Redis",
-				"project", p.Id,
-				"total_increment", totalIncrement,
-				"components_with_data", len(componentsWithData))
-
-			// Use force write to ensure data is saved immediately
-			common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.GetNodeID(), componentsWithData)
-
-			// Give Redis write a moment to complete
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	if !allZero {
-		logger.Warn("Some components still have increments after retries",
-			"project", p.Id,
-			"max_retries", maxRetries)
-	}
-
-	// Final flush: trigger one more collection to catch any edge cases
-	logger.Info("Performing final statistics collection", "project", p.Id)
-	common.GlobalDailyStatsManager.CollectAllComponentsData()
-
-	// Give final write time to complete
-	time.Sleep(200 * time.Millisecond)
 }

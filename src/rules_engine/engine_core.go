@@ -23,6 +23,8 @@ var ruleCachePool = sync.Pool{
 
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
+	r.ResetProcessTotal()
+
 	if r.stopChan != nil {
 		return fmt.Errorf("already started: %v", r.RulesetID)
 	}
@@ -202,30 +204,21 @@ func (r *Ruleset) Stop() error {
 			default:
 				allEmpty := true
 				totalMessages := 0
-				for i, upCh := range r.UpStream {
+				for _, upCh := range r.UpStream {
 					chLen := len(*upCh)
 					if chLen > 0 {
 						allEmpty = false
 						totalMessages += chLen
-						if waitCount%20 == 0 { // Log every second (20 * 50ms)
-							logger.Info("Upstream channel not empty", "ruleset", r.RulesetID, "channel", i, "length", chLen)
-						}
 					}
 				}
 				if allEmpty {
-					logger.Info("All upstream channels empty", "ruleset", r.RulesetID)
 					break waitUpstream
 				}
 				waitCount++
-				if waitCount%20 == 0 { // Log every second (20 * 50ms)
-					logger.Info("Still waiting for upstream channels", "ruleset", r.RulesetID, "total_messages", totalMessages, "wait_cycles", waitCount)
-				}
 				time.Sleep(50 * time.Millisecond)
 			}
 		}
 
-		// Wait for all downstream channels to be consumed.
-		logger.Info("Waiting for downstream channels to empty", "ruleset", r.RulesetID)
 		downstreamTimeout := time.After(10 * time.Second) // 10 second timeout for downstream
 		waitCount = 0
 
@@ -233,29 +226,21 @@ func (r *Ruleset) Stop() error {
 		for {
 			select {
 			case <-downstreamTimeout:
-				logger.Warn("Timeout waiting for downstream channels, forcing shutdown", "ruleset", r.RulesetID)
 				break waitDownstream
 			default:
 				allEmpty := true
 				totalMessages := 0
-				for i, downCh := range r.DownStream {
+				for _, downCh := range r.DownStream {
 					chLen := len(*downCh)
 					if chLen > 0 {
 						allEmpty = false
 						totalMessages += chLen
-						if waitCount%20 == 0 { // Log every second (20 * 50ms)
-							logger.Info("Downstream channel not empty", "ruleset", r.RulesetID, "channel", i, "length", chLen)
-						}
 					}
 				}
 				if allEmpty {
-					logger.Info("All downstream channels empty", "ruleset", r.RulesetID)
 					break waitDownstream
 				}
 				waitCount++
-				if waitCount%20 == 0 { // Log every second (20 * 50ms)
-					logger.Info("Still waiting for downstream channels", "ruleset", r.RulesetID, "total_messages", totalMessages, "wait_cycles", waitCount)
-				}
 				time.Sleep(50 * time.Millisecond)
 			}
 		}
@@ -277,26 +262,18 @@ func (r *Ruleset) Stop() error {
 		for {
 			select {
 			case <-poolWaitTimeout:
-				logger.Warn("Timeout waiting for thread pool tasks, forcing release",
-					"ruleset", r.RulesetID,
-					"running_tasks", r.antsPool.Running())
 				goto releasePool
 			default:
 				if r.antsPool.Running() == 0 {
-					logger.Info("All thread pool tasks completed", "ruleset", r.RulesetID)
 					goto releasePool
 				}
-				logger.Debug("Still waiting for thread pool tasks",
-					"ruleset", r.RulesetID,
-					"running_tasks", r.antsPool.Running())
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			}
 		}
 
 	releasePool:
 		r.antsPool.Release()
 		r.antsPool = nil
-		logger.Info("Thread pool released", "ruleset", r.RulesetID)
 	}
 	r.stopChan = nil
 
@@ -315,8 +292,6 @@ func (r *Ruleset) Stop() error {
 	previousTotal := atomic.LoadUint64(&r.processTotal)
 	atomic.StoreUint64(&r.processTotal, 0)
 	logger.Debug("Reset atomic counter for ruleset component", "ruleset", r.RulesetID, "previous_total", previousTotal)
-
-	// Note: ResetDiffCounter no longer needed - component manages its own increments
 
 	return nil
 }

@@ -523,7 +523,8 @@ function updateNodesWithMessages() {
     const sourceData = messageData.value.data || messageData.value;
     for (const sequence of projectNodeSequences) {
       if (sourceData[sequence] && typeof sourceData[sequence] === 'object') {
-        totalMessages += sourceData[sequence].daily_messages || 0;
+        // Handle both uppercase and lowercase formats from backend
+        totalMessages += sourceData[sequence].daily_messages || sourceData[sequence].DAILY_MESSAGES || 0;
       }
     }
     

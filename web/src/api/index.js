@@ -421,25 +421,6 @@ export const hubApi = {
     }
   },
 
-  // Apply all pending changes - Legacy API
-  async applyPendingChanges() {
-    try {
-      const response = await api.post('/apply-changes');
-      return response.data;
-    } catch (error) {
-      // Special handling for validation failure errors
-      if (error.response && error.response.data && error.response.data.verify_failures) {
-        throw {
-          message: error.response.data.error,
-          verifyFailures: error.response.data.verify_failures,
-          successCount: error.response.data.success_count,
-          failureCount: error.response.data.failure_count
-        };
-      }
-      throw error;
-    }
-  },
-
   // Apply all pending changes with enhanced transaction support
   async applyPendingChangesEnhanced() {
     try {
@@ -462,16 +443,6 @@ export const hubApi = {
     }
   },
 
-  // Verify a single pending change
-  async verifySinglePendingChange(type, id) {
-    try {
-      const response = await api.post(`/verify-change/${type}/${id}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error verifying single pending change:', error);
-      throw error;
-    }
-  },
 
   // Cancel a single pending change
   async cancelPendingChange(type, id) {
@@ -491,17 +462,6 @@ export const hubApi = {
       return response.data;
     } catch (error) {
       console.error('Error cancelling all pending changes:', error);
-      throw error;
-    }
-  },
-
-  // Create temporary file (for editing existing files)
-  async createTempFile(type, id) {
-    try {
-      // Directly call backend API to create temporary file
-      const response = await api.post(`/temp-file/${type}/${id}`);
-      return response.data;
-    } catch (error) {
       throw error;
     }
   },
@@ -1048,18 +1008,6 @@ export const hubApi = {
     }
   },
 
-  // Batch get ruleset fields
-  async getBatchRulesetFields(ids = []) {
-    try {
-      const idsParam = ids.length > 0 ? `?ids=${ids.join(',')}` : '';
-      const response = await api.get(`/ruleset-fields${idsParam}`);
-      return response.data || {};
-    } catch (error) {
-      console.error('Error fetching batch ruleset fields:', error);
-      return {};
-    }
-  },
-
   // Get project components (inputs, outputs, rulesets)
   async getProjectComponents(id) {
     try {
@@ -1165,25 +1113,6 @@ export const hubApi = {
     }
   },
 
-  // Cancel upgrade for a component
-  async cancelUpgrade(type, id) {
-    try {
-      // Ensure type is plural for API call
-      let componentType = type;
-      if (!componentType.endsWith('s')) {
-        componentType = componentType + 's';
-      }
-      
-      const response = await api.post(`/cancel-upgrade/${componentType}/${id}`);
-      return response.data;
-    } catch (error) {
-      if (error.response && error.response.data) {
-        throw new Error(error.response.data.error || 'Failed to cancel upgrade');
-      }
-      throw new Error(error.message || 'Network error or server not responding');
-    }
-  },
-
   // Load Local Components API functions
   async fetchLocalChanges() {
     try {
@@ -1247,53 +1176,6 @@ export const hubApi = {
     }
   },
 
-  // Component Data APIs (backend still uses QPS endpoints for component enumeration)
-  // Use publicApi for statistics - no token required
-  async getQPSData(params = {}) {
-    try {
-      const response = await publicApi.get('/qps-data', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching component data:', error);
-      throw error;
-    }
-  },
-
-
-
-  async getProjectQPS(projectId, aggregated = false) {
-    try {
-      const params = { project_id: projectId };
-      if (aggregated) {
-        params.aggregated = true;
-      }
-      const response = await api.get('/qps-data', { params });
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching component data for project ${projectId}:`, error);
-      throw error;
-    }
-  },
-
-  // Daily Messages APIs (real message counts for today from 00:00)
-  // Use publicApi for statistics - no token required
-  async getDailyMessages(projectId = null, aggregated = false) {
-    try {
-      const params = {};
-      if (projectId) {
-        params.project_id = projectId;
-      }
-      if (aggregated) {
-        params.aggregated = true;
-      }
-      const response = await publicApi.get('/daily-messages', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching daily messages:', error);
-      throw error;
-    }
-  },
-
     async getProjectDailyMessages(projectId) {
     try {
       const response = await publicApi.get('/daily-messages', { 
@@ -1340,18 +1222,6 @@ export const hubApi = {
     }
   },
 
-  async getNodeDailyMessages(nodeId) {
-    try {
-      const response = await publicApi.get('/daily-messages', { 
-        params: { by_node: true, node_id: nodeId } 
-      });
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching daily messages for node ${nodeId}:`, error);
-      throw error;
-    }
-  },
-
   async getAllNodeDailyMessages() {
     try {
       const response = await publicApi.get('/daily-messages', { 
@@ -1364,48 +1234,12 @@ export const hubApi = {
     }
   },
 
-  // System Metrics APIs 
-  // Use publicApi for statistics - no token required
-  async getSystemMetrics(params = {}) {
-    try {
-      const response = await publicApi.get('/system-metrics', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching system metrics:', error);
-      throw error;
-    }
-  },
-
   async getCurrentSystemMetrics() {
     try {
       const response = await publicApi.get('/system-metrics', { params: { current: true } });
       return response.data;
     } catch (error) {
       console.error('Error fetching current system metrics:', error);
-      throw error;
-    }
-  },
-
-  async getSystemStats() {
-    try {
-      const response = await publicApi.get('/system-stats');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching system stats:', error);
-      throw error;
-    }
-  },
-
-  async getHistoricalSystemMetrics(since) {
-    try {
-      const params = {};
-      if (since) {
-        params.since = since;
-      }
-      const response = await publicApi.get('/system-metrics', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching historical system metrics:', error);
       throw error;
     }
   },
@@ -1422,26 +1256,6 @@ export const hubApi = {
       return response.data;
     } catch (error) {
       console.error('Error fetching cluster system metrics:', error);
-      throw error;
-    }
-  },
-
-  async getClusterSystemStats() {
-    try {
-      const response = await publicApi.get('/cluster-system-stats');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching cluster system stats:', error);
-      throw error;
-    }
-  },
-
-  async getAggregatedSystemMetrics() {
-    try {
-      const response = await publicApi.get('/cluster-system-metrics', { params: { aggregated: true } });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching aggregated system metrics:', error);
       throw error;
     }
   },
@@ -1465,13 +1279,6 @@ export const hubApi = {
       console.error('Error fetching known nodes for error logs:', error);
       throw new Error(error.response?.data?.error || error.message || 'Failed to fetch known nodes');
     }
-  },
-
-  // getClusterErrorLogs - DEPRECATED: Use getErrorLogs instead
-  // This function is kept for backward compatibility but redirects to the unified endpoint
-  async getClusterErrorLogs(params = {}) {
-    // console.warn('getClusterErrorLogs is deprecated - use getErrorLogs instead');
-    return this.getErrorLogs(params);
   },
 
   // Search components configuration
@@ -1509,23 +1316,6 @@ export const hubApi = {
     }
   },
 
-  // getClusterOperationsHistory - DEPRECATED: Use getOperationsHistory instead
-  // This function is kept for backward compatibility but redirects to the unified endpoint
-  async getClusterOperationsHistory(params = '') {
-    // console.warn('getClusterOperationsHistory is deprecated - use getOperationsHistory instead');
-    return this.getOperationsHistory(params);
-  },
-
-  async getOperationsStats() {
-    try {
-      const response = await api.get('/operations-stats');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching operations stats:', error);
-      throw error;
-    }
-  },
-
   async getPluginStats(params = {}) {
     try {
       const response = await api.get('/plugin-stats', { params });
@@ -1534,17 +1324,6 @@ export const hubApi = {
       return handleApiError(error, 'Error fetching plugin stats:', true);
     }
   },
-
-  async getBatchPluginParameters(ids = []) {
-    try {
-      const params = ids.length ? { ids: ids.join(',') } : {}
-      const response = await api.get('/plugin-parameters', { params })
-      return response.data // expected format: { [id]: parametersArray }
-    } catch (error) {
-      console.error('Error fetching batch plugin parameters:', error)
-      throw error
-    }
-  }
 };
 
 /**

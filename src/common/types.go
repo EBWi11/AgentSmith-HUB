@@ -51,11 +51,6 @@ type OperationRecord struct {
 	Details       map[string]interface{} `json:"details,omitempty"`
 }
 
-// Cluster startup coordination constants
-const (
-	ClusterLeaderReadyKey = "cluster:leader:ready"
-)
-
 // Project state Redis keys - IMPORTANT: Separate expected vs actual states
 const (
 	// Project real state (actual runtime status) - stores the real current status

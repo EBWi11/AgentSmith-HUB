@@ -60,6 +60,8 @@ type Project struct {
 	StatusChangedAt *time.Time    `json:"status_changed_at,omitempty"`
 	Err             error         `json:"-"`
 
+	Testing bool `json:"testing"`
+
 	Config *ProjectConfig `json:"config"`
 
 	// Components
@@ -69,10 +71,6 @@ type Project struct {
 
 	// Data flow
 	MsgChannels []string `json:"-"`
-
-	// Metrics
-	metrics     *ProjectMetrics `json:"-"`
-	metricsStop chan struct{}   `json:"-"`
 
 	// For graceful shutdown
 	stopChan chan struct{}  `json:"-"`

@@ -197,6 +197,8 @@ func (in *Input) Start() error {
 	// Initialize stop channel
 	in.stopChan = make(chan struct{})
 
+	in.ResetConsumeTotal()
+
 	// Perform connectivity check first before starting
 	connectivityResult := in.CheckConnectivity()
 	if status, ok := connectivityResult["status"].(string); ok && status == "error" {
@@ -430,9 +432,6 @@ func (in *Input) ResetConsumeTotal() uint64 {
 func (in *Input) GetIncrementAndUpdate() uint64 {
 	current := atomic.LoadUint64(&in.consumeTotal)
 	last := atomic.SwapUint64(&in.lastReportedTotal, current)
-
-	// Since counters are monotonically increasing and we don't consider overflow
-	// (uint64 is large enough), current should always be >= last
 	return current - last
 }
 
