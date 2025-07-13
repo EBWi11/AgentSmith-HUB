@@ -61,6 +61,16 @@ func collectAllComponentStats() []common.ComponentStatsData {
 			continue
 		}
 
+		// Build ProjectNodeSequence mapping for this project
+		flowGraph, err := proj.parseContent()
+		if err != nil {
+			logger.Error("Failed to parse project content for stats collection", "project", proj.Id, "error", err)
+			continue
+		}
+
+		// Calculate proper ProjectNodeSequence for each component in this project
+		componentSequences := calculateComponentSequences(flowGraph)
+
 		// Collect input statistics with nil check
 		for inputName, input := range proj.Inputs {
 			// Check for nil to handle concurrent project restart
@@ -70,11 +80,18 @@ func collectAllComponentStats() []common.ComponentStatsData {
 			}
 			increment := input.GetIncrementAndUpdate()
 			if increment > 0 {
+				// Use calculated sequence instead of component's stored sequence
+				componentKey := "INPUT." + inputName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				components = append(components, common.ComponentStatsData{
 					ProjectID:           proj.Id,
 					ComponentID:         input.Id,
 					ComponentType:       "input",
-					ProjectNodeSequence: input.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 			}
@@ -89,11 +106,18 @@ func collectAllComponentStats() []common.ComponentStatsData {
 			}
 			increment := output.GetIncrementAndUpdate()
 			if increment > 0 {
+				// Use calculated sequence instead of component's stored sequence
+				componentKey := "OUTPUT." + outputName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				components = append(components, common.ComponentStatsData{
 					ProjectID:           proj.Id,
 					ComponentID:         output.Id,
 					ComponentType:       "output",
-					ProjectNodeSequence: output.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 			}
@@ -108,11 +132,18 @@ func collectAllComponentStats() []common.ComponentStatsData {
 			}
 			increment := ruleset.GetIncrementAndUpdate()
 			if increment > 0 {
+				// Use calculated sequence instead of component's stored sequence
+				componentKey := "RULESET." + rulesetName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				components = append(components, common.ComponentStatsData{
 					ProjectID:           proj.Id,
 					ComponentID:         ruleset.RulesetID,
 					ComponentType:       "ruleset",
-					ProjectNodeSequence: ruleset.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 			}
@@ -144,6 +175,59 @@ func collectAllComponentStats() []common.ComponentStatsData {
 	}
 
 	return components
+}
+
+// calculateComponentSequences calculates ProjectNodeSequence for all components in a flow graph
+func calculateComponentSequences(flowGraph map[string][]string) map[string]string {
+	componentSequences := make(map[string]string)
+
+	// Build ProjectNodeSequence recursively
+	var buildSequence func(component string, visited map[string]bool) string
+	buildSequence = func(component string, visited map[string]bool) string {
+		if visited[component] {
+			return component // Break cycle
+		}
+		if seq, exists := componentSequences[component]; exists {
+			return seq
+		}
+		visited[component] = true
+		defer delete(visited, component)
+
+		var upstreamComponent string
+		for from, tos := range flowGraph {
+			for _, to := range tos {
+				if to == component {
+					upstreamComponent = from
+					break
+				}
+			}
+			if upstreamComponent != "" {
+				break
+			}
+		}
+
+		var sequence string
+		if upstreamComponent == "" {
+			sequence = component
+		} else {
+			upstreamSequence := buildSequence(upstreamComponent, visited)
+			sequence = upstreamSequence + "." + component
+		}
+		componentSequences[component] = sequence
+		return sequence
+	}
+
+	// Build sequences for all components
+	for from := range flowGraph {
+		buildSequence(from, make(map[string]bool))
+	}
+	for _, tos := range flowGraph {
+		for _, to := range tos {
+			buildSequence(to, make(map[string]bool))
+		}
+	}
+
+	return componentSequences
 }
 
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
@@ -2230,16 +2314,26 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 			// Collect statistics for components that will be force-reloaded
 			var componentsToSave []common.ComponentStatsData
 
+			// Calculate proper sequences for this project
+			componentSequences := calculateComponentSequences(flowGraph)
+
 			// Collect input statistics before reset
 			for _, name := range inputNames {
 				if globalInput, ok := GlobalProject.Inputs[name]; ok {
 					increment := globalInput.GetIncrementAndUpdate()
 					if increment > 0 {
+						// Use calculated sequence
+						componentKey := "INPUT." + name
+						sequence := componentSequences[componentKey]
+						if sequence == "" {
+							sequence = componentKey
+						}
+
 						componentsToSave = append(componentsToSave, common.ComponentStatsData{
 							ProjectID:           p.Id,
 							ComponentID:         globalInput.Id,
 							ComponentType:       "input",
-							ProjectNodeSequence: globalInput.ProjectNodeSequence,
+							ProjectNodeSequence: sequence,
 							TotalMessages:       increment,
 						})
 					}
@@ -2251,11 +2345,18 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 				if globalOutput, ok := GlobalProject.Outputs[name]; ok {
 					increment := globalOutput.GetIncrementAndUpdate()
 					if increment > 0 {
+						// Use calculated sequence
+						componentKey := "OUTPUT." + name
+						sequence := componentSequences[componentKey]
+						if sequence == "" {
+							sequence = componentKey
+						}
+
 						componentsToSave = append(componentsToSave, common.ComponentStatsData{
 							ProjectID:           p.Id,
 							ComponentID:         globalOutput.Id,
 							ComponentType:       "output",
-							ProjectNodeSequence: globalOutput.ProjectNodeSequence,
+							ProjectNodeSequence: sequence,
 							TotalMessages:       increment,
 						})
 					}
@@ -2267,11 +2368,18 @@ func (p *Project) loadComponentsFromGlobal(flowGraph map[string][]string, forceR
 				if globalRuleset, ok := GlobalProject.Rulesets[name]; ok {
 					increment := globalRuleset.GetIncrementAndUpdate()
 					if increment > 0 {
+						// Use calculated sequence
+						componentKey := "RULESET." + name
+						sequence := componentSequences[componentKey]
+						if sequence == "" {
+							sequence = componentKey
+						}
+
 						componentsToSave = append(componentsToSave, common.ComponentStatsData{
 							ProjectID:           p.Id,
 							ComponentID:         globalRuleset.RulesetID,
 							ComponentType:       "ruleset",
-							ProjectNodeSequence: globalRuleset.ProjectNodeSequence,
+							ProjectNodeSequence: sequence,
 							TotalMessages:       increment,
 						})
 					}
@@ -3088,6 +3196,14 @@ func (p *Project) ensureStatisticsCollectedAndSaved() {
 		return
 	}
 
+	// Parse project content to get proper ProjectNodeSequence
+	flowGraph, err := p.parseContent()
+	if err != nil {
+		logger.Error("Failed to parse project content for final stats collection", "project", p.Id, "error", err)
+		return
+	}
+	componentSequences := calculateComponentSequences(flowGraph)
+
 	maxRetries := 5
 	retryInterval := 500 * time.Millisecond
 	allZero := false
@@ -3110,11 +3226,18 @@ func (p *Project) ensureStatisticsCollectedAndSaved() {
 			increment := in.GetIncrementAndUpdate()
 			totalIncrement += increment
 			if increment > 0 {
+				// Use calculated sequence
+				componentKey := "INPUT." + inputName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				componentsWithData = append(componentsWithData, common.ComponentStatsData{
 					ProjectID:           p.Id,
 					ComponentID:         in.Id,
 					ComponentType:       "input",
-					ProjectNodeSequence: in.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 				logger.Debug("Input still has increment", "project", p.Id, "input", inputName, "increment", increment)
@@ -3129,11 +3252,18 @@ func (p *Project) ensureStatisticsCollectedAndSaved() {
 			increment := out.GetIncrementAndUpdate()
 			totalIncrement += increment
 			if increment > 0 {
+				// Use calculated sequence
+				componentKey := "OUTPUT." + outputName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				componentsWithData = append(componentsWithData, common.ComponentStatsData{
 					ProjectID:           p.Id,
 					ComponentID:         out.Id,
 					ComponentType:       "output",
-					ProjectNodeSequence: out.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 				logger.Debug("Output still has increment", "project", p.Id, "output", outputName, "increment", increment)
@@ -3148,11 +3278,18 @@ func (p *Project) ensureStatisticsCollectedAndSaved() {
 			increment := rs.GetIncrementAndUpdate()
 			totalIncrement += increment
 			if increment > 0 {
+				// Use calculated sequence
+				componentKey := "RULESET." + rulesetName
+				sequence := componentSequences[componentKey]
+				if sequence == "" {
+					sequence = componentKey
+				}
+
 				componentsWithData = append(componentsWithData, common.ComponentStatsData{
 					ProjectID:           p.Id,
 					ComponentID:         rs.RulesetID,
 					ComponentType:       "ruleset",
-					ProjectNodeSequence: rs.ProjectNodeSequence,
+					ProjectNodeSequence: sequence,
 					TotalMessages:       increment,
 				})
 				logger.Debug("Ruleset still has increment", "project", p.Id, "ruleset", rulesetName, "increment", increment)
