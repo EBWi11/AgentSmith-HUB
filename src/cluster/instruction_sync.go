@@ -710,11 +710,11 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 		startVersion = 0
 	}
 
-	// Track successfully applied instructions
-	var lastSuccessfulVersion int64 = startVersion
-	var syncedInstructions []string // Track synced instruction details
+	// Track instruction execution details
+	var processedInstructions []string
+	var failedInstructions []string
 
-	// Sync instructions from startVersion+1 to endVersion
+	// Process instructions from startVersion+1 to endVersion
 	// Instructions are numbered from 1 onwards (version 0 is temporary state)
 	for version := startVersion + 1; version <= endVersion; version++ {
 
@@ -734,56 +734,51 @@ func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) er
 
 		var instruction Instruction
 		if err := json.Unmarshal([]byte(data), &instruction); err != nil {
-			logger.Error("Failed to unmarshal instruction for logging", "version", version, "error", err)
-			return fmt.Errorf("failed to unmarshal instruction %d: %w", version, err)
+			logger.Error("Failed to unmarshal instruction", "version", version, "error", err)
+			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: unmarshal error", version))
+			continue // Continue processing other instructions
 		}
 
-		// Apply instruction and track success
+		// Apply instruction - execute once regardless of success/failure
 		if err := im.applyInstruction(version); err != nil {
-			logger.Error("Failed to apply instruction", "version", version, "error", err)
-
-			// Don't update version if instruction failed
-			// Only update to the last successful version
-			if lastSuccessfulVersion > startVersion {
-				im.mu.Lock()
-				im.currentVersion = lastSuccessfulVersion
-				im.baseVersion = leaderParts[0]
-				im.mu.Unlock()
-
-				logger.Info("Updated version to last successful instruction",
-					"from", fromVersion,
-					"to", fmt.Sprintf("%s.%d", leaderParts[0], lastSuccessfulVersion),
-					"failed_at", version)
+			logger.Error("Failed to apply instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation, "error", err)
+			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: %s %s %s (failed: %v)", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName, err))
+		} else {
+			// Record successfully applied instruction details
+			instructionDesc := fmt.Sprintf("v%d: %s %s %s", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName)
+			if instruction.Content != "" && len(instruction.Content) > 100 {
+				instructionDesc += fmt.Sprintf(" (content: %d chars)", len(instruction.Content))
+			} else if instruction.Content != "" {
+				instructionDesc += fmt.Sprintf(" (content: %s)", instruction.Content)
 			}
-
-			return fmt.Errorf("instruction sync failed at version %d: %w", version, err)
+			processedInstructions = append(processedInstructions, instructionDesc)
 		}
 
-		// Record successfully applied instruction details
-		instructionDesc := fmt.Sprintf("v%d: %s %s %s", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName)
-		if instruction.Content != "" && len(instruction.Content) > 100 {
-			instructionDesc += fmt.Sprintf(" (content: %d chars)", len(instruction.Content))
-		} else if instruction.Content != "" {
-			instructionDesc += fmt.Sprintf(" (content: %s)", instruction.Content)
-		}
-		syncedInstructions = append(syncedInstructions, instructionDesc)
-
-		// Mark this version as successfully applied
-		lastSuccessfulVersion = version
+		// Continue to next instruction regardless of success/failure
 	}
 
-	// Update local version only after all instructions are successfully applied
+	// Always update to target version regardless of individual instruction failures
 	im.mu.Lock()
 	im.currentVersion = endVersion
 	im.baseVersion = leaderParts[0]
 	im.mu.Unlock()
 
-	// Log success with detailed instruction information
-	logger.Info("Instructions synced successfully",
-		"from", fromVersion,
-		"to", toVersion,
-		"count", len(syncedInstructions),
-		"instructions", strings.Join(syncedInstructions, "; "))
+	// Log final sync result
+	if len(failedInstructions) > 0 {
+		logger.Warn("Instructions synced with some failures",
+			"from", fromVersion,
+			"to", toVersion,
+			"processed", len(processedInstructions),
+			"failed", len(failedInstructions),
+			"successful_instructions", strings.Join(processedInstructions, "; "),
+			"failed_instructions", strings.Join(failedInstructions, "; "))
+	} else {
+		logger.Info("Instructions synced successfully",
+			"from", fromVersion,
+			"to", toVersion,
+			"count", len(processedInstructions),
+			"instructions", strings.Join(processedInstructions, "; "))
+	}
 
 	return nil
 }
