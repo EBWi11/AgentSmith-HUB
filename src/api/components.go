@@ -1057,6 +1057,8 @@ func createComponent(componentType string, c echo.Context) error {
 			logger.Error("Failed to publish component creation instruction", "type", componentType, "id", request.ID, "error", err)
 			// Don't fail the request, but log the error
 		}
+		// Record component creation operation history (for leader visibility)
+		common.RecordComponentAdd(componentType, request.ID, request.Raw, "success", "")
 	}
 
 	// Create enhanced response with deployment guidance
@@ -1452,6 +1454,27 @@ func updateComponent(componentType string, c echo.Context) error {
 	err = WriteComponentFile(tempPath, req.Raw)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
+	}
+
+	// Update memory with lock protection
+	common.GlobalMu.Lock()
+	switch componentType {
+	case "input":
+		project.GlobalProject.InputsNew[id] = req.Raw
+	case "output":
+		project.GlobalProject.OutputsNew[id] = req.Raw
+	case "ruleset":
+		project.GlobalProject.RulesetsNew[id] = req.Raw
+	case "project":
+		project.GlobalProject.ProjectsNew[id] = req.Raw
+	case "plugin":
+		plugin.PluginsNew[id] = req.Raw
+	}
+	common.GlobalMu.Unlock()
+
+	// Record component update operation history (for leader visibility)
+	if common.IsCurrentNodeLeader() {
+		common.RecordComponentUpdate(componentType, id, req.Raw, "success", "")
 	}
 
 	// Create enhanced response with deployment guidance

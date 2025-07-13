@@ -904,53 +904,112 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 	case "add":
 		// First store config in memory
 		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 		// Then create actual component instances for follower
-		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			return err
+		}
+		// Record successful operation
+		common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		return nil
 	case "delete":
 		// First delete component instance
 		if err := im.deleteComponentInstance(instruction.ComponentType, instruction.ComponentName); err != nil {
 			logger.Warn("Failed to delete component instance", "type", instruction.ComponentType, "name", instruction.ComponentName, "error", err)
 		}
 		// Then remove from memory
-		return common.GlobalComponentOperations.DeleteComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName)
+		err := common.GlobalComponentOperations.DeleteComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName)
+
+		// Get affected projects from instruction metadata for history recording
+		affectedProjects := []string{}
+		if instruction.Metadata != nil {
+			if projects, exists := instruction.Metadata["affected_projects"]; exists {
+				if projectList, ok := projects.([]interface{}); ok {
+					for _, project := range projectList {
+						if projectStr, ok := project.(string); ok {
+							affectedProjects = append(affectedProjects, projectStr)
+						}
+					}
+				}
+			}
+		}
+
+		if err != nil {
+			// Record failed operation
+			common.RecordComponentDelete(instruction.ComponentType, instruction.ComponentName, "failed", err.Error(), affectedProjects)
+			return err
+		}
+		// Record successful operation
+		common.RecordComponentDelete(instruction.ComponentType, instruction.ComponentName, "success", "", affectedProjects)
+		return nil
 	case "update":
 		// First update config in memory
 		if err := common.GlobalComponentOperations.UpdateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 		// Then update component instance
-		return im.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		if err := im.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			return err
+		}
+		// Record successful operation
+		common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		return nil
 	case "local_push":
 		// First store config in memory
 		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 		// Then create actual component instances for follower
-		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			return err
+		}
+		// Record successful operation
+		common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		return nil
 	case "push_change":
 		// First store config in memory
 		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 			return err
 		}
 		// Then create actual component instances for follower
-		return im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content)
+		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+			// Record failed operation
+			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+			return err
+		}
+		// Record successful operation
+		common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
+		return nil
 	case "start":
 		if instruction.ComponentType == "project" {
 			if globalProjectCmdHandler != nil {
-				// Follower nodes should not record operations when executing cluster instructions
-				// as the leader has already recorded these operations
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "start", false)
+				// Follower nodes should record operations when executing cluster instructions
+				// to show actual execution results on each node
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "start", true)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}
 	case "stop":
 		if instruction.ComponentType == "project" {
 			if globalProjectCmdHandler != nil {
-				// Follower nodes should not record operations when executing cluster instructions
-				// as the leader has already recorded these operations
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "stop", false)
+				// Follower nodes should record operations when executing cluster instructions
+				// to show actual execution results on each node
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "stop", true)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}
@@ -971,9 +1030,9 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 			logger.Debug("Restarting project", "project", instruction.ComponentName, "current_status", proj.Status)
 
 			if globalProjectCmdHandler != nil {
-				// Follower nodes should not record operations when executing cluster instructions
-				// as the leader has already recorded these operations
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "restart", false)
+				// Follower nodes should record operations when executing cluster instructions
+				// to show actual execution results on each node
+				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "restart", true)
 			}
 			return fmt.Errorf("project handler not initialized")
 		}

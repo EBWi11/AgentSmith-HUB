@@ -116,6 +116,213 @@ func RecordClusterInstruction(operationType OperationType, instructionType, comp
 	logger.Info("Cluster instruction recorded to Redis", "type", record.Type, "instruction_type", instructionType, "component", record.ComponentID, "status", record.Status)
 }
 
+// RecordComponentAdd records a component addition operation
+func RecordComponentAdd(componentType, componentID, content, status, errorMsg string) {
+	details := map[string]interface{}{
+		"node_id":      Config.LocalIP,
+		"node_address": Config.LocalIP,
+		"executed_by":  Config.LocalIP,
+		"source":       "cluster_instruction",
+	}
+
+	record := OperationRecord{
+		Type:          OpTypeComponentAdd,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		NewContent:    content,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal component add record", "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record component add to Redis", "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Component add operation recorded", "type", componentType, "component", componentID, "status", status)
+}
+
+// RecordComponentUpdate records a component update operation
+func RecordComponentUpdate(componentType, componentID, content, status, errorMsg string) {
+	details := map[string]interface{}{
+		"node_id":      Config.LocalIP,
+		"node_address": Config.LocalIP,
+		"executed_by":  Config.LocalIP,
+		"source":       "cluster_instruction",
+	}
+
+	record := OperationRecord{
+		Type:          OpTypeComponentUpdate,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		NewContent:    content,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal component update record", "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record component update to Redis", "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Component update operation recorded", "type", componentType, "component", componentID, "status", status)
+}
+
+// RecordComponentDelete records a component deletion operation
+func RecordComponentDelete(componentType, componentID, status, errorMsg string, affectedProjects []string) {
+	details := map[string]interface{}{
+		"node_id":           Config.LocalIP,
+		"node_address":      Config.LocalIP,
+		"executed_by":       Config.LocalIP,
+		"source":            "cluster_instruction",
+		"affected_projects": affectedProjects,
+	}
+
+	record := OperationRecord{
+		Type:          OpTypeComponentDelete,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal component delete record", "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record component delete to Redis", "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Component delete operation recorded", "type", componentType, "component", componentID, "status", status)
+}
+
+// RecordChangePush records a change push operation
+func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
+	details := map[string]interface{}{
+		"node_id":      Config.LocalIP,
+		"node_address": Config.LocalIP,
+		"executed_by":  Config.LocalIP,
+		"source":       "cluster_instruction",
+	}
+
+	record := OperationRecord{
+		Type:          OpTypeChangePush,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		OldContent:    oldContent,
+		NewContent:    newContent,
+		Diff:          diff,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal change push record", "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record change push to Redis", "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Change push operation recorded", "type", componentType, "component", componentID, "status", status)
+}
+
+// RecordLocalPush records a local push operation
+func RecordLocalPush(componentType, componentID, content, status, errorMsg string) {
+	details := map[string]interface{}{
+		"node_id":      Config.LocalIP,
+		"node_address": Config.LocalIP,
+		"executed_by":  Config.LocalIP,
+		"source":       "cluster_instruction",
+	}
+
+	record := OperationRecord{
+		Type:          OpTypeLocalPush,
+		Timestamp:     time.Now(),
+		ComponentType: componentType,
+		ComponentID:   componentID,
+		NewContent:    content,
+		Status:        status,
+		Error:         errorMsg,
+		Details:       details,
+	}
+
+	// Serialize record to JSON
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		logger.Error("Failed to marshal local push record", "component", componentID, "error", err)
+		return
+	}
+
+	// Store to Redis list with size limit
+	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
+		logger.Error("Failed to record local push to Redis", "component", componentID, "error", err)
+		return
+	}
+
+	// Set TTL for the entire list to 31 days
+	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
+		logger.Warn("Failed to set TTL for operations history", "error", err)
+	}
+
+	logger.Info("Local push operation recorded", "type", componentType, "component", componentID, "status", status)
+}
+
 // InitComponentUpdateManager initializes the global component update manager
 func InitComponentUpdateManager() {
 	GlobalComponentUpdateManager = &ComponentUpdateManager{

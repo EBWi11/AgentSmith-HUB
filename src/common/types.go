@@ -27,6 +27,8 @@ const (
 	OpTypeChangePush      OperationType = "change_push"
 	OpTypeLocalPush       OperationType = "local_push"
 	OpTypeComponentDelete OperationType = "component_delete"
+	OpTypeComponentAdd    OperationType = "component_add"    // New: for component addition
+	OpTypeComponentUpdate OperationType = "component_update" // New: for component update
 	OpTypeProjectStart    OperationType = "project_start"
 	OpTypeProjectStop     OperationType = "project_stop"
 	OpTypeProjectRestart  OperationType = "project_restart"
