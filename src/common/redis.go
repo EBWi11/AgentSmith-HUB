@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -751,3 +752,34 @@ func RemoveProjectState(nodeID, projectID string) error {
 }
 
 // ===================== Legacy Project State Support =====================
+
+// GetKnownNodes returns all known nodes that have been tracked by the leader
+func GetKnownNodes() ([]string, error) {
+	if rdb == nil {
+		return nil, fmt.Errorf("Redis client not initialized")
+	}
+
+	// Get all known node keys
+	pattern := "cluster:known_nodes:*"
+	keys, err := RedisKeys(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get known node keys: %w", err)
+	}
+
+	// Extract unique node IDs from keys
+	var nodes []string
+	for _, key := range keys {
+		// Extract node ID from key format: cluster:known_nodes:nodeID
+		if strings.HasPrefix(key, "cluster:known_nodes:") {
+			nodeID := key[len("cluster:known_nodes:"):]
+			if nodeID != "" {
+				nodes = append(nodes, nodeID)
+			}
+		}
+	}
+
+	// Sort nodes for consistent ordering
+	sort.Strings(nodes)
+
+	return nodes, nil
+}

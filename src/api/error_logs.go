@@ -457,6 +457,25 @@ func getErrorLogs(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
+// getErrorLogNodes handles GET /error-logs/nodes - returns all nodes that have error logs
+func getErrorLogNodes(c echo.Context) error {
+	// Get all known nodes from Redis (tracked by leader heartbeat)
+	nodes, err := common.GetKnownNodes()
+	if err != nil {
+		logger.Error("Failed to get known nodes", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to retrieve known nodes: " + err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"nodes": nodes,
+		"count": len(nodes),
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
 // getClusterErrorLogs - DEPRECATED: Use getErrorLogs instead
 // This endpoint is kept for backward compatibility but redirects to the unified endpoint
 func getClusterErrorLogs(c echo.Context) error {

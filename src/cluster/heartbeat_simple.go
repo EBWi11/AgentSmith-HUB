@@ -160,6 +160,9 @@ func (hm *HeartbeatManager) listenHeartbeats() {
 		return
 	}
 
+	// Leader should track itself in Redis for node enumeration
+	hm.trackNodeInRedis(hm.nodeID)
+
 	pubsub := client.Subscribe(context.Background(), "cluster:heartbeat")
 	defer pubsub.Close()
 
@@ -178,8 +181,16 @@ func (hm *HeartbeatManager) listenHeartbeats() {
 				continue
 			}
 
-			// Update node info
+			// Check if this is a new node (not in memory)
 			hm.mu.Lock()
+			_, exists := hm.nodes[heartbeat.NodeID]
+			if !exists {
+				// New node detected, track it in Redis for node enumeration
+				hm.trackNodeInRedis(heartbeat.NodeID)
+				logger.Info("New follower node detected and tracked", "node_id", heartbeat.NodeID)
+			}
+
+			// Update node info in memory
 			hm.nodes[heartbeat.NodeID] = heartbeat
 			hm.mu.Unlock()
 
@@ -202,6 +213,23 @@ func (hm *HeartbeatManager) listenHeartbeats() {
 		case <-hm.stopChan:
 			return
 		}
+	}
+}
+
+// trackNodeInRedis tracks a node in Redis for node enumeration (48 hours TTL)
+func (hm *HeartbeatManager) trackNodeInRedis(nodeID string) {
+	if nodeID == "" {
+		return
+	}
+
+	key := "cluster:known_nodes:" + nodeID
+	timestamp := time.Now().Unix()
+
+	// Store node info with 48 hours TTL (48 * 60 * 60 = 172800 seconds)
+	if _, err := common.RedisSet(key, timestamp, 172800); err != nil {
+		logger.Warn("Failed to track node in Redis", "node_id", nodeID, "error", err)
+	} else {
+		logger.Debug("Tracked node in Redis for enumeration", "node_id", nodeID)
 	}
 }
 

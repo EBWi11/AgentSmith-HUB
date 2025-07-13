@@ -356,3 +356,22 @@ func GetOperationsStats(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, stats)
 }
+
+// GetOperationsHistoryNodes handles GET /operations-history/nodes - returns all nodes that have operations history
+func GetOperationsHistoryNodes(c echo.Context) error {
+	// Get all known nodes from Redis (tracked by leader heartbeat)
+	nodes, err := common.GetKnownNodes()
+	if err != nil {
+		logger.Error("Failed to get known nodes", "error", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to retrieve known nodes: " + err.Error(),
+		})
+	}
+
+	response := map[string]interface{}{
+		"nodes": nodes,
+		"count": len(nodes),
+	}
+
+	return c.JSON(http.StatusOK, response)
+}

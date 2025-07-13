@@ -418,23 +418,8 @@ const fetchErrorLogs = async () => {
     logs.value = response.logs || []
     totalCount.value = response.total_count || 0
     
-    // Extract available nodes from logs
-    const nodes = new Set()
-    logs.value.forEach(log => {
-      if (log.node_id) {
-        nodes.add(log.node_id)
-      }
-    })
-    
-    availableNodes.value = Array.from(nodes).map(nodeId => ({
-      id: nodeId,
-      name: nodeId
-    }))
-
-    // Ensure current node is in the list if no logs found
-    if (availableNodes.value.length === 0 && clusterInfo.value.self_id) {
-      availableNodes.value = [{ id: clusterInfo.value.self_id, name: clusterInfo.value.self_id }]
-    }
+    // No longer extract nodes from logs - use cluster info instead
+    // This prevents the dropdown from losing options when filtering
 
   } catch (err) {
     error.value = err.message
@@ -450,6 +435,56 @@ const fetchErrorLogs = async () => {
   }
 }
 
+// New function to fetch available nodes from cluster info
+const fetchAvailableNodes = async () => {
+  try {
+    const response = await hubApi.getErrorLogNodes()
+    
+    // Convert to expected format
+    availableNodes.value = response.nodes.map(nodeId => ({
+      id: nodeId,
+      name: nodeId
+    }))
+    
+  } catch (err) {
+    console.warn('Failed to fetch error log nodes:', err)
+    // Fallback: use cluster info
+    try {
+      const clusterInfo = await dataCache.fetchClusterInfo()
+      
+      // Extract nodes from cluster info
+      const nodes = new Set()
+      
+      // Add current node (leader or follower)
+      if (clusterInfo.self_id) {
+        nodes.add(clusterInfo.self_id)
+      }
+      
+      // Add all other nodes from cluster status
+      if (clusterInfo.nodes && Array.isArray(clusterInfo.nodes)) {
+        clusterInfo.nodes.forEach(node => {
+          if (node.id) {
+            nodes.add(node.id)
+          }
+        })
+      }
+      
+      // Convert to expected format
+      availableNodes.value = Array.from(nodes).map(nodeId => ({
+        id: nodeId,
+        name: nodeId
+      }))
+      
+    } catch (err2) {
+      console.warn('Failed to fetch cluster info as fallback:', err2)
+      // Final fallback: if cluster info fails, ensure current node is available
+      if (clusterInfo.value.self_id) {
+        availableNodes.value = [{ id: clusterInfo.value.self_id, name: clusterInfo.value.self_id }]
+      }
+    }
+  }
+}
+
 const applyFilters = async () => {
   currentPage.value = 1
   expandedLogs.value.clear()
@@ -461,6 +496,12 @@ const debouncedSearch = debounce(() => {
 }, 500)
 
 const refreshLogs = async () => {
+  await fetchErrorLogs()
+}
+
+// Add function to refresh both logs and nodes
+const refreshAll = async () => {
+  await fetchAvailableNodes()
   await fetchErrorLogs()
 }
 
@@ -535,6 +576,7 @@ onMounted(async () => {
   try {
     clusterInfo.value = await dataCache.fetchClusterInfo()
   } catch {}
+  await fetchAvailableNodes()
   await fetchErrorLogs()
 })
 </script>

@@ -1457,6 +1457,16 @@ export const hubApi = {
     }
   },
 
+  async getErrorLogNodes() {
+    try {
+      const response = await api.get('/error-logs/nodes');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching known nodes for error logs:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch known nodes');
+    }
+  },
+
   // getClusterErrorLogs - DEPRECATED: Use getErrorLogs instead
   // This function is kept for backward compatibility but redirects to the unified endpoint
   async getClusterErrorLogs(params = {}) {
@@ -1486,6 +1496,16 @@ export const hubApi = {
     } catch (error) {
       console.error('Error fetching operations history:', error);
       throw error;
+    }
+  },
+
+  async getOperationsHistoryNodes() {
+    try {
+      const response = await api.get('/operations-history/nodes');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching known nodes for operations history:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch known nodes');
     }
   },
 

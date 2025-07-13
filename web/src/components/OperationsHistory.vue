@@ -374,7 +374,11 @@ async function loadClusterInfo() {
 
 onMounted(() => {
   setDefaultTimeRange()
-  loadClusterInfo().then(fetchOperationsHistory)
+  loadClusterInfo().then(() => {
+    fetchAvailableNodes().then(() => {
+      fetchOperationsHistory()
+    })
+  })
 })
 
 
@@ -477,14 +481,8 @@ async function fetchOperationsHistory() {
 
     totalCount.value = response.total_count || ops.length
     
-    // Update available nodes information from operations
-    const nodeIds = new Set()
-    ops.forEach(op => {
-      if (op.details && op.details.node_id) {
-        nodeIds.add(op.details.node_id)
-      }
-    })
-    availableNodes.value = Array.from(nodeIds)
+    // No longer extract nodes from operations - use cluster info instead
+    // This prevents the dropdown from losing options when filtering
     
   } catch (e) {
     console.error('Error fetching operations history:', e)
@@ -493,6 +491,50 @@ async function fetchOperationsHistory() {
     totalCount.value = 0
   } finally {
     loading.value = false
+  }
+}
+
+// New function to fetch available nodes from cluster info
+async function fetchAvailableNodes() {
+  try {
+    const response = await hubApi.getOperationsHistoryNodes()
+    
+    // Convert to expected format (just array of node IDs)
+    availableNodes.value = response.nodes || []
+    
+  } catch (err) {
+    console.warn('Failed to fetch known nodes for operations history:', err)
+    // Fallback: use cluster info (current online nodes only)
+    try {
+      const clusterInfo = await dataCache.fetchClusterInfo()
+      
+      // Extract nodes from cluster info
+      const nodes = new Set()
+      
+      // Add current node (leader or follower)
+      if (clusterInfo.self_id) {
+        nodes.add(clusterInfo.self_id)
+      }
+      
+      // Add all other nodes from cluster status
+      if (clusterInfo.nodes && Array.isArray(clusterInfo.nodes)) {
+        clusterInfo.nodes.forEach(node => {
+          if (node.id) {
+            nodes.add(node.id)
+          }
+        })
+      }
+      
+      // Convert to expected format (just array of node IDs)
+      availableNodes.value = Array.from(nodes)
+      
+    } catch (err2) {
+      console.warn('Failed to fetch cluster info as fallback:', err2)
+      // Final fallback: if cluster info fails, ensure current node is available
+      if (clusterInfo.value.self_id) {
+        availableNodes.value = [clusterInfo.value.self_id]
+      }
+    }
   }
 }
 
@@ -530,7 +572,9 @@ const debouncedSearch = debounce(() => {
 }, 500)
 
 function refreshHistory() {
-  fetchOperationsHistory()
+  fetchAvailableNodes().then(() => {
+    fetchOperationsHistory()
+  })
 }
 
 function exportOperations() {
