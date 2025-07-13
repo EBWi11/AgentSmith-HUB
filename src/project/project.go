@@ -1253,11 +1253,12 @@ func (p *Project) Stop() error {
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
 
-	// Collect final statistics BEFORE stopping components to prevent data loss
+	// Collect initial statistics BEFORE stopping components
+	// This captures any data that might be in flight
 	if !IsSystemShuttingDown() { // Only collect if not system shutdown (to avoid duplicate collection)
-		logger.Info("Collecting final statistics before stopping project", "project", p.Id)
+		logger.Info("Collecting initial statistics before stopping project", "project", p.Id)
 		if common.GlobalDailyStatsManager != nil && common.GetStatsCollector() != nil {
-			// Trigger final collection for this project's components
+			// Trigger initial collection for this project's components
 			statsCollector := common.GetStatsCollector()
 			components := statsCollector()
 
@@ -1270,10 +1271,11 @@ func (p *Project) Stop() error {
 			}
 
 			if len(projectComponents) > 0 {
-				logger.Info("Saving final project statistics before stop",
+				logger.Info("Saving initial project statistics before stop",
 					"project", p.Id,
 					"components_with_data", len(projectComponents))
-				common.GlobalDailyStatsManager.CollectAllComponentsData()
+				// Force write to ensure data is saved immediately
+				common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.GetNodeID(), projectComponents)
 			}
 		}
 	}
@@ -1379,6 +1381,10 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 	// Step 2: Wait for all data to be processed through the entire pipeline
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
 	p.waitForCompleteDataProcessing()
+
+	// Step 2.5: Ensure all statistics are collected and saved to Redis
+	logger.Info("Step 2.5: Ensuring all statistics are collected and saved", "project", p.Id)
+	p.ensureStatisticsCollectedAndSaved()
 
 	// Step 3: Stop rulesets (only if not used by other projects)
 	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
@@ -3067,4 +3073,120 @@ func (p *Project) defensiveCleanupBeforeReload() {
 	p.MsgChannels = []string{}
 
 	logger.Info("Defensive cleanup completed", "project", p.Id)
+}
+
+// ensureStatisticsCollectedAndSaved ensures all component statistics are collected and saved to Redis
+// This is called during project stop to prevent any data loss
+func (p *Project) ensureStatisticsCollectedAndSaved() {
+	// Skip if system is shutting down (already handled in main.go)
+	if IsSystemShuttingDown() {
+		return
+	}
+
+	// Skip if no stats manager
+	if common.GlobalDailyStatsManager == nil || common.GetStatsCollector() == nil {
+		return
+	}
+
+	maxRetries := 5
+	retryInterval := 500 * time.Millisecond
+	allZero := false
+
+	for i := 0; i < maxRetries && !allZero; i++ {
+		if i > 0 {
+			logger.Info("Retrying statistics collection", "project", p.Id, "attempt", i+1)
+			time.Sleep(retryInterval)
+		}
+
+		// Collect current increments
+		var totalIncrement uint64
+		var componentsWithData []common.ComponentStatsData
+
+		// Check inputs
+		for inputName, in := range p.Inputs {
+			if in == nil {
+				continue
+			}
+			increment := in.GetIncrementAndUpdate()
+			totalIncrement += increment
+			if increment > 0 {
+				componentsWithData = append(componentsWithData, common.ComponentStatsData{
+					ProjectID:           p.Id,
+					ComponentID:         in.Id,
+					ComponentType:       "input",
+					ProjectNodeSequence: in.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+				logger.Debug("Input still has increment", "project", p.Id, "input", inputName, "increment", increment)
+			}
+		}
+
+		// Check outputs
+		for outputName, out := range p.Outputs {
+			if out == nil {
+				continue
+			}
+			increment := out.GetIncrementAndUpdate()
+			totalIncrement += increment
+			if increment > 0 {
+				componentsWithData = append(componentsWithData, common.ComponentStatsData{
+					ProjectID:           p.Id,
+					ComponentID:         out.Id,
+					ComponentType:       "output",
+					ProjectNodeSequence: out.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+				logger.Debug("Output still has increment", "project", p.Id, "output", outputName, "increment", increment)
+			}
+		}
+
+		// Check rulesets
+		for rulesetName, rs := range p.Rulesets {
+			if rs == nil {
+				continue
+			}
+			increment := rs.GetIncrementAndUpdate()
+			totalIncrement += increment
+			if increment > 0 {
+				componentsWithData = append(componentsWithData, common.ComponentStatsData{
+					ProjectID:           p.Id,
+					ComponentID:         rs.RulesetID,
+					ComponentType:       "ruleset",
+					ProjectNodeSequence: rs.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+				logger.Debug("Ruleset still has increment", "project", p.Id, "ruleset", rulesetName, "increment", increment)
+			}
+		}
+
+		if totalIncrement == 0 {
+			allZero = true
+			logger.Info("All component increments are zero", "project", p.Id)
+		} else {
+			// Force save any remaining increments
+			logger.Info("Found remaining increments, force saving to Redis",
+				"project", p.Id,
+				"total_increment", totalIncrement,
+				"components_with_data", len(componentsWithData))
+
+			// Use force write to ensure data is saved immediately
+			common.GlobalDailyStatsManager.ApplyBatchUpdatesWithForceWrite(common.GetNodeID(), componentsWithData)
+
+			// Give Redis write a moment to complete
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	if !allZero {
+		logger.Warn("Some components still have increments after retries",
+			"project", p.Id,
+			"max_retries", maxRetries)
+	}
+
+	// Final flush: trigger one more collection to catch any edge cases
+	logger.Info("Performing final statistics collection", "project", p.Id)
+	common.GlobalDailyStatsManager.CollectAllComponentsData()
+
+	// Give final write time to complete
+	time.Sleep(200 * time.Millisecond)
 }
