@@ -4,6 +4,7 @@ import (
 	"AgentSmith-HUB/logger"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,22 +99,59 @@ func (dsm *DailyStatsManager) redisWriterLoop() {
 
 // writeToRedis performs the actual Redis write operation
 func (dsm *DailyStatsManager) writeToRedis(statsData *DailyStatsData, expiration int) {
-	key := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
-	redisKey := dsm.redisKeyPrefix + key
-
-	jsonData, err := json.Marshal(statsData)
-	if err != nil {
-		logger.Error("Failed to marshal daily stats for Redis write", "key", key, "error", err)
-		return
-	}
-
-	if _, err := RedisSet(redisKey, string(jsonData), expiration); err != nil {
-		logger.Error("Failed to write daily stats to Redis", "key", redisKey, "error", err)
+	// 使用优化的 Hash 存储方案
+	// 这里的增量是 statsData.TotalMessages，因为这是从内存中的累积值
+	if err := dsm.writeToRedisOptimized(statsData, statsData.TotalMessages, expiration); err != nil {
+		logger.Error("Failed to write daily stats to Redis", "error", err)
 	}
 }
 
 // writeToRedisWithIncrement performs atomic increment in Redis and updates metadata
 func (dsm *DailyStatsManager) writeToRedisWithIncrement(statsData *DailyStatsData, increment uint64, expiration int) error {
+	// 使用优化的 Hash 存储方案
+	return dsm.writeToRedisOptimized(statsData, increment, expiration)
+}
+
+// writeToRedisOptimized 使用 Redis Hash 优化存储，减少 50% 空间
+func (dsm *DailyStatsManager) writeToRedisOptimized(statsData *DailyStatsData, increment uint64, expiration int) error {
+	// Hash Key: hub:daily_stats:hash:date
+	hashKey := fmt.Sprintf("%shash:%s", dsm.redisKeyPrefix, statsData.Date)
+
+	// Field 编码所有必要的元数据
+	// 格式：nodeID|projectID|componentType|componentID|sequence
+	field := fmt.Sprintf("%s|%s|%s|%s|%s",
+		statsData.NodeID,
+		statsData.ProjectID,
+		statsData.ComponentType,
+		statsData.ComponentID,
+		statsData.ProjectNodeSequence)
+
+	// 原子递增
+	_, err := RedisHIncrBy(hashKey, field, int64(increment))
+	if err != nil {
+		logger.Error("Failed to increment hash counter in Redis",
+			"key", hashKey,
+			"field", field,
+			"increment", increment,
+			"error", err)
+		return err
+	}
+
+	// 设置过期时间（只需要在第一次设置）
+	if err := RedisExpire(hashKey, expiration); err != nil {
+		logger.Warn("Failed to set expiration for hash key", "key", hashKey, "error", err)
+	}
+
+	logger.Debug("Successfully incremented Redis hash counter",
+		"hash_key", hashKey,
+		"field", field,
+		"increment", increment)
+
+	return nil
+}
+
+// writeToRedisLegacy 保留旧的实现用于兼容
+func (dsm *DailyStatsManager) writeToRedisLegacy(statsData *DailyStatsData, increment uint64, expiration int) error {
 	key := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
 
 	// Use separate Redis keys for counter and metadata
@@ -165,46 +203,6 @@ func (dsm *DailyStatsManager) writeToRedisWithIncrement(statsData *DailyStatsDat
 	return nil
 }
 
-// 优化方案一：使用复合字段的 counter，减少 metadata 存储
-//
-// 实现思路：
-// 1. 将必要的元数据编码到 counter 键名中
-// 2. 使用 Redis Hash 存储计数器，field 为编码后的键
-// 3. 只在需要时解析键名获取元数据
-//
-// 示例：
-// func (dsm *DailyStatsManager) writeToRedisOptimized(statsData *DailyStatsData, increment uint64, expiration int) error {
-//     // 将元数据编码到键中
-//     // 格式：date:nodeID:projectID:componentType:componentID:sequence
-//     encodedKey := fmt.Sprintf("%s:%s:%s:%s:%s:%s",
-//         statsData.Date,
-//         statsData.NodeID,
-//         statsData.ProjectID,
-//         statsData.ComponentType,
-//         statsData.ComponentID,
-//         statsData.ProjectNodeSequence)
-//
-//     // 使用 Redis Hash，一个 date 一个 hash
-//     hashKey := fmt.Sprintf("%sstats:%s", dsm.redisKeyPrefix, statsData.Date)
-//
-//     // 原子递增
-//     newTotal, err := RedisHIncrBy(hashKey, encodedKey, int64(increment))
-//     if err != nil {
-//         return err
-//     }
-//
-//     // 设置过期时间
-//     RedisExpire(hashKey, expiration)
-//
-//     return nil
-// }
-//
-// 优势：
-// - 减少 50% 的存储空间（无需 metadata）
-// - 保持原子性操作
-// - 读取时可以通过解析键名获取所有信息
-// - 使用 Hash 可以一次获取某天的所有数据
-
 // generateKey creates a unique key for daily statistics. We must include projectID so that
 // multiple projects共享同一个 ProjectNodeSequence 时不会互相覆盖。
 func (dsm *DailyStatsManager) generateKey(date, nodeID, projectID, projectNodeSequence string) string {
@@ -223,6 +221,90 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
+
+	// 首先尝试读取新的 Hash 格式
+	hashData := dsm.getDailyStatsFromHash(date, projectID, nodeID)
+	for k, v := range hashData {
+		result[k] = v
+	}
+
+	// 然后读取旧格式数据（向后兼容）
+	legacyData := dsm.getDailyStatsLegacy(date, projectID, nodeID)
+	for k, v := range legacyData {
+		// 如果新格式中已经有了，不覆盖（新格式优先）
+		if _, exists := result[k]; !exists {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// getDailyStatsFromHash 从新的 Hash 格式读取数据
+func (dsm *DailyStatsManager) getDailyStatsFromHash(date, projectID, nodeID string) map[string]*DailyStatsData {
+	result := make(map[string]*DailyStatsData)
+
+	// Hash Key
+	hashKey := fmt.Sprintf("%shash:%s", dsm.redisKeyPrefix, date)
+
+	// 获取整个 Hash
+	hashData, err := RedisHGetAll(hashKey)
+	if err != nil {
+		logger.Error("Failed to get hash data from Redis", "key", hashKey, "error", err)
+		return result
+	}
+
+	for field, countStr := range hashData {
+		// 解析 field：nodeID|projectID|componentType|componentID|sequence
+		parts := strings.Split(field, "|")
+		if len(parts) != 5 {
+			logger.Warn("Invalid field format in hash", "field", field)
+			continue
+		}
+
+		fieldNodeID := parts[0]
+		fieldProjectID := parts[1]
+		componentType := parts[2]
+		componentID := parts[3]
+		projectNodeSequence := parts[4]
+
+		// 应用过滤条件
+		if nodeID != "" && fieldNodeID != nodeID {
+			continue
+		}
+		if projectID != "" && fieldProjectID != projectID {
+			continue
+		}
+
+		// 解析计数
+		count, err := strconv.ParseUint(countStr, 10, 64)
+		if err != nil {
+			logger.Warn("Failed to parse count", "field", field, "count", countStr, "error", err)
+			continue
+		}
+
+		// 生成内部键
+		internalKey := dsm.generateKey(date, fieldNodeID, fieldProjectID, projectNodeSequence)
+
+		// 创建 DailyStatsData
+		result[internalKey] = &DailyStatsData{
+			NodeID:              fieldNodeID,
+			ProjectID:           fieldProjectID,
+			ComponentID:         componentID,
+			ComponentType:       componentType,
+			ProjectNodeSequence: projectNodeSequence,
+			Date:                date,
+			TotalMessages:       count,
+			LastUpdate:          time.Now(), // 使用当前时间
+		}
+	}
+
+	return result
+}
+
+// getDailyStatsLegacy 从旧格式读取数据（向后兼容）
+func (dsm *DailyStatsManager) getDailyStatsLegacy(date, projectID, nodeID string) map[string]*DailyStatsData {
+	result := make(map[string]*DailyStatsData)
 
 	// Build Redis key pattern based on filters
 	var pattern string
@@ -287,7 +369,7 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 				TotalMessages:       statsData.TotalMessages,
 				LastUpdate:          statsData.LastUpdate,
 			}
-		} else if !strings.HasSuffix(key, ":counter") {
+		} else if !strings.HasSuffix(key, ":counter") && !strings.Contains(key, ":hash:") {
 			// Legacy format: read from old JSON key
 			jsonData, err := RedisGet(key)
 			if err != nil {
@@ -327,7 +409,7 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 				LastUpdate:          statsData.LastUpdate,
 			}
 		}
-		// Skip counter keys as they are handled via metadata keys
+		// Skip counter keys and hash keys as they are handled separately
 	}
 
 	return result
@@ -340,6 +422,69 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 
 	logger.Info("Loading daily statistics from Redis")
 
+	loadedCount := 0
+	cutoffDate := time.Now().AddDate(0, 0, -dsm.retentionDays).Format("2006-01-02")
+
+	dsm.mutex.Lock()
+	defer dsm.mutex.Unlock()
+
+	// 首先加载新的 Hash 格式数据
+	hashPattern := fmt.Sprintf("%shash:*", dsm.redisKeyPrefix)
+	hashKeys, err := RedisKeys(hashPattern)
+	if err != nil {
+		logger.Error("Failed to get hash keys from Redis", "error", err)
+	} else {
+		for _, hashKey := range hashKeys {
+			// 提取日期
+			parts := strings.Split(hashKey, ":")
+			if len(parts) < 3 {
+				continue
+			}
+			date := parts[len(parts)-1]
+
+			// 跳过过期数据
+			if date < cutoffDate {
+				continue
+			}
+
+			// 获取 Hash 中的所有数据
+			hashData, err := RedisHGetAll(hashKey)
+			if err != nil {
+				logger.Error("Failed to get hash data from Redis", "key", hashKey, "error", err)
+				continue
+			}
+
+			for field, countStr := range hashData {
+				// 解析 field
+				fieldParts := strings.Split(field, "|")
+				if len(fieldParts) != 5 {
+					continue
+				}
+
+				count, err := strconv.ParseUint(countStr, 10, 64)
+				if err != nil {
+					continue
+				}
+
+				statsData := &DailyStatsData{
+					NodeID:              fieldParts[0],
+					ProjectID:           fieldParts[1],
+					ComponentType:       fieldParts[2],
+					ComponentID:         fieldParts[3],
+					ProjectNodeSequence: fieldParts[4],
+					Date:                date,
+					TotalMessages:       count,
+					LastUpdate:          time.Now(),
+				}
+
+				internalKey := dsm.generateKey(date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+				dsm.data[internalKey] = statsData
+				loadedCount++
+			}
+		}
+	}
+
+	// 然后加载旧格式数据（向后兼容）
 	pattern := dsm.redisKeyPrefix + "*"
 	keys, err := RedisKeys(pattern)
 	if err != nil {
@@ -347,13 +492,12 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 		return
 	}
 
-	loadedCount := 0
-	cutoffDate := time.Now().AddDate(0, 0, -dsm.retentionDays).Format("2006-01-02")
-
-	dsm.mutex.Lock()
-	defer dsm.mutex.Unlock()
-
 	for _, key := range keys {
+		// 跳过新格式的键
+		if strings.Contains(key, ":hash:") || strings.HasSuffix(key, ":counter") || strings.HasSuffix(key, ":metadata") {
+			continue
+		}
+
 		jsonData, err := RedisGet(key)
 		if err != nil {
 			logger.Error("Failed to get daily stats from Redis", "key", key, "error", err)
@@ -373,8 +517,11 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 
 		// Generate internal key
 		internalKey := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
-		dsm.data[internalKey] = &statsData
-		loadedCount++
+		// 如果新格式中已经有了，不覆盖
+		if _, exists := dsm.data[internalKey]; !exists {
+			dsm.data[internalKey] = &statsData
+			loadedCount++
+		}
 	}
 
 	logger.Info("Loaded daily statistics from Redis", "count", loadedCount)
@@ -403,25 +550,46 @@ func (dsm *DailyStatsManager) saveToRedis() {
 	}
 	dsm.mutex.RUnlock()
 
-	// Step 2: Release lock and do Redis operations (network IO) without holding lock
+	// Step 2: Group by date for batch update
+	dataByDate := make(map[string]map[string]*DailyStatsData)
+	for _, statsData := range dataCopy {
+		if _, exists := dataByDate[statsData.Date]; !exists {
+			dataByDate[statsData.Date] = make(map[string]*DailyStatsData)
+		}
+		dataByDate[statsData.Date][dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)] = statsData
+	}
+
+	// Step 3: Update Redis using Hash format
 	savedCount := 0
 	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
 
-	for key, statsData := range dataCopy {
-		redisKey := dsm.redisKeyPrefix + key
+	for date, dayData := range dataByDate {
+		hashKey := fmt.Sprintf("%shash:%s", dsm.redisKeyPrefix, date)
 
-		jsonData, err := json.Marshal(statsData)
-		if err != nil {
-			logger.Error("Failed to marshal daily stats for Redis", "key", key, "error", err)
-			continue
+		// Update all fields for this date
+		for _, statsData := range dayData {
+			field := fmt.Sprintf("%s|%s|%s|%s|%s",
+				statsData.NodeID,
+				statsData.ProjectID,
+				statsData.ComponentType,
+				statsData.ComponentID,
+				statsData.ProjectNodeSequence)
+
+			// 使用 HSet 而不是 HIncrBy，因为这是完整保存
+			if err := RedisHSet(hashKey, field, statsData.TotalMessages); err != nil {
+				logger.Error("Failed to save daily stats to Redis hash",
+					"hash_key", hashKey,
+					"field", field,
+					"error", err)
+				continue
+			}
+			savedCount++
 		}
 
-		if _, err := RedisSet(redisKey, string(jsonData), expiration); err != nil {
-			logger.Error("Failed to save daily stats to Redis", "key", redisKey, "error", err)
-			continue
+		// Set expiration for the hash
+		if err := RedisExpire(hashKey, expiration); err != nil {
+			logger.Warn("Failed to set expiration for hash key", "key", hashKey, "error", err)
 		}
-
-		savedCount++
 	}
 
 	logger.Debug("Saved daily statistics to Redis", "count", savedCount)

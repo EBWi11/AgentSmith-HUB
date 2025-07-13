@@ -319,6 +319,16 @@ func RedisHDel(key string, field string) error {
 	return rdb.HDel(ctx, key, field).Err()
 }
 
+// RedisHIncrBy increments a hash field by the given amount
+func RedisHIncrBy(key string, field string, increment int64) (int64, error) {
+	return rdb.HIncrBy(ctx, key, field, increment).Result()
+}
+
+// RedisHExists checks if a field exists in a hash
+func RedisHExists(key string, field string) (bool, error) {
+	return rdb.HExists(ctx, key, field).Result()
+}
+
 // GetRedisClient returns underlying redis client for advanced operations
 func GetRedisClient() *redis.Client {
 	return rdb
