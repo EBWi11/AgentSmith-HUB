@@ -83,10 +83,8 @@ type Output struct {
 	elasticsearchCfg *ElasticsearchOutputConfig
 	aliyunSLSCfg     *AliyunSLSOutputConfig
 
-	// metrics - optimized to only need two variables: total count and calculated QPS
+	// metrics - only total count is needed now
 	produceTotal uint64 // cumulative production total
-	produceQPS   uint64 // QPS calculated by metricLoop
-	metricStop   chan struct{}
 
 	// sampler
 	sampler *common.Sampler
@@ -245,38 +243,13 @@ func (out *Output) Start() error {
 		logger.Info("Output connectivity verified", "output", out.Id, "type", out.Type)
 	}
 
-	// Load today's accumulated message count from Redis to resume counting from correct value
-	// This ensures that component restarts don't reset daily message count to 0
-	if common.GlobalDailyStatsManager != nil {
-		today := time.Now().Format("2006-01-02")
-		// Fix: Only load data for current node, not all nodes
-		currentNodeID := common.GetNodeID()
-		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", currentNodeID)
-
-		for _, statsData := range dailyStats {
-			// Find matching component data for current node only
-			if statsData.ComponentID == out.Id &&
-				statsData.ComponentType == "output" &&
-				statsData.ProjectNodeSequence == out.ProjectNodeSequence &&
-				statsData.NodeID == currentNodeID {
-				// Set the starting count to today's accumulated total for this node
-				atomic.StoreUint64(&out.produceTotal, statsData.TotalMessages)
-				logger.Info("Loaded historical message count for output",
-					"output", out.Id,
-					"node_id", currentNodeID,
-					"historical_total", statsData.TotalMessages,
-					"date", today)
-				break
-			}
-		}
-	}
+	// Component statistics are now handled by Daily Stats Manager
+	// which collects data every 10 seconds from all running components
 
 	// Determine if we need to duplicate data for testing
 	hasTestCollector := out.TestCollectionChan != nil
 
-	// Start metric goroutine
-	out.metricStop = make(chan struct{})
-	go out.metricLoop()
+	// Metric goroutine removed - statistics handled by Daily Stats Manager
 
 	effectiveType := out.Type
 
@@ -625,10 +598,7 @@ func (out *Output) Stop() error {
 			}
 		}
 
-		if out.metricStop != nil {
-			close(out.metricStop)
-			out.metricStop = nil
-		}
+		// Metrics stop removed
 	}()
 
 	select {
@@ -656,10 +626,7 @@ func (out *Output) Stop() error {
 				out.printStop = nil
 			}
 		}
-		if out.metricStop != nil {
-			close(out.metricStop)
-			out.metricStop = nil
-		}
+		// Metrics stop removed
 	}
 
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
@@ -681,44 +648,8 @@ func (out *Output) Stop() error {
 	return nil
 }
 
-// metricLoop calculates QPS and can be extended for more metrics.
-func (out *Output) metricLoop() {
-	var lastTotal uint64
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-out.metricStop:
-			return
-		case <-ticker.C:
-			cur := atomic.LoadUint64(&out.produceTotal)
-
-			var qps uint64
-			// Safe handling: if current value is less than last value, set QPS to 0
-			if cur < lastTotal {
-				logger.Warn("Counter decreased, possibly due to overflow or restart",
-					"output", out.Id,
-					"lastTotal", lastTotal,
-					"currentTotal", cur)
-				qps = 0         // Set QPS to 0 to avoid underflow
-				lastTotal = cur // Reset lastTotal to current value
-			} else {
-				qps = cur - lastTotal
-				lastTotal = cur
-			}
-
-			atomic.StoreUint64(&out.produceQPS, qps)
-
-			// Note: Redis persistence is now handled by QPS Manager via daily_stats system
-			// This eliminates duplicate data writes and TTL conflicts
-		}
-	}
-}
-
-// GetProduceQPS returns the latest QPS.
-func (out *Output) GetProduceQPS() uint64 {
-	return atomic.LoadUint64(&out.produceQPS)
-}
+// QPS calculation and GetProduceQPS method removed
+// Message statistics are now handled by Daily Stats Manager
 
 // GetProduceTotal returns the total produced count.
 func (out *Output) GetProduceTotal() uint64 {
@@ -729,11 +660,7 @@ func (out *Output) GetProduceTotal() uint64 {
 func (out *Output) StopForTesting() error {
 	logger.Info("Quick stopping test output", "id", out.Id, "type", out.Type)
 
-	// Stop metrics first
-	if out.metricStop != nil {
-		close(out.metricStop)
-		out.metricStop = nil
-	}
+	// Metrics stop removed
 
 	// Clear test collection channel
 	out.TestCollectionChan = nil
@@ -846,7 +773,6 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		// Add producer metrics if available
 		if out.kafkaProducer != nil {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-				"produce_qps":     out.GetProduceQPS(),
 				"produce_total":   out.GetProduceTotal(),
 				"producer_active": true,
 			}
@@ -916,7 +842,6 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		// Add producer metrics if available
 		if out.elasticsearchProducer != nil {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-				"produce_qps":     out.GetProduceQPS(),
 				"produce_total":   out.GetProduceTotal(),
 				"producer_active": true,
 				"batch_size":      out.elasticsearchCfg.BatchSize,
@@ -1020,7 +945,6 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 
 		// Add metrics if available (note: AliyunSLS output is not fully implemented yet)
 		result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-			"produce_qps":     out.GetProduceQPS(),
 			"produce_total":   out.GetProduceTotal(),
 			"producer_active": false, // AliyunSLS output producer not implemented yet
 			"note":            "AliyunSLS output producer implementation is pending",
@@ -1056,7 +980,7 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 		TestCollectionChan:  nil, // Reset for new instance
 		// Note: Runtime fields (kafkaProducer, elasticsearchProducer, wg, etc.) are intentionally not copied
 		// as they will be initialized when the output starts
-		// Metrics fields (produceTotal, produceQPS, metricStop) are also not copied as they are instance-specific
+		// Metrics fields (produceTotal) are also not copied as they are instance-specific
 	}
 
 	// Only create sampler on leader node for performance

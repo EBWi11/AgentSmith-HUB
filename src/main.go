@@ -148,8 +148,7 @@ func main() {
 	// Init monitors
 	common.InitSystemMonitor(ip)
 
-	// Initialize QPS Manager on all nodes (not just leader)
-	common.InitQPSManager()
+	// QPS Manager removed - using only Daily Stats Manager now
 
 	if *isLeader {
 		// Leader extra services
@@ -172,15 +171,7 @@ func main() {
 		logger.Info("Follower API server starting", "address", followerAddr)
 	}
 
-	// Start QPS collector on all nodes (leader and followers)
-	common.InitQPSCollector(ip, func() []common.QPSMetrics {
-		return project.GetQPSDataForNode(ip)
-	}, func() *common.SystemMetrics {
-		if common.GlobalSystemMonitor != nil {
-			return common.GlobalSystemMonitor.GetCurrentMetrics()
-		}
-		return nil
-	})
+	// QPS collector removed - statistics are now handled by Daily Stats Manager
 
 	// ========== Graceful shutdown handling ==========
 	shutdownCtx, stopSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -287,8 +278,6 @@ func main() {
 
 			// Phase 4: Stop background services
 			logger.Info("Phase 4: Stopping background services...")
-			common.StopQPSCollector()
-			common.StopQPSManager()
 			common.StopClusterSystemManager()
 			common.StopDailyStatsManager()
 			if rsm := common.GetRedisSampleManager(); rsm != nil {

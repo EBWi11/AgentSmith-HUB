@@ -502,7 +502,6 @@ func testOutput(c echo.Context) error {
 
 	// Get metrics
 	produceTotal := tempOutput.GetProduceTotal()
-	produceQPS := tempOutput.GetProduceQPS()
 
 	// Stop the output
 	err = tempOutput.Stop()
@@ -516,7 +515,6 @@ func testOutput(c echo.Context) error {
 		"isTemp":  isTemp,
 		"metrics": map[string]interface{}{
 			"produceTotal": produceTotal,
-			"produceQPS":   produceQPS,
 		},
 		"outputType": string(tempOutput.Type),
 	})

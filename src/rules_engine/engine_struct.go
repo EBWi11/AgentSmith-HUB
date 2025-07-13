@@ -108,10 +108,8 @@ type Ruleset struct {
 	RawConfig string
 	sampler   *common.Sampler
 
-	// metrics - optimized to only need two variables: total count and calculated QPS
+	// metrics - only total count is needed now
 	processTotal uint64         // cumulative message processing total
-	processQPS   uint64         // QPS calculated by metricLoop
-	metricStop   chan struct{}  // Metric loop stop channel
 	wg           sync.WaitGroup // WaitGroup for goroutine management
 
 	OwnerProjects []string `json:"-"`
@@ -1269,9 +1267,9 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		Cache:            nil,
 		CacheForClassify: nil,
 		RawConfig:        existing.RawConfig,
-		// Note: Runtime fields (stopChan, antsPool, metricStop, wg, etc.) are intentionally not copied
+		// Note: Runtime fields (stopChan, antsPool, wg, etc.) are intentionally not copied
 		// as they will be initialized when the ruleset starts
-		// Metrics fields (processTotal, processQPS) are also not copied as they are instance-specific
+		// Metrics fields (processTotal) are also not copied as they are instance-specific
 		// RulesByFilter field has been removed in the new flexible syntax design
 	}
 

@@ -72,7 +72,6 @@ func ServerStart(listener string) error {
 	e.GET("/token-check", tokenCheck)
 
 	// Statistics and metrics endpoints (public access for monitoring)
-	e.GET("/qps-data", getQPSData)
 	e.GET("/daily-messages", getDailyMessages)
 	e.GET("/system-metrics", getSystemMetrics)
 	e.GET("/system-stats", getSystemStats)

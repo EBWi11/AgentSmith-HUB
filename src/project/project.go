@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
+	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/rules_engine"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,81 @@ func SetSystemShuttingDown(shutting bool) {
 // IsSystemShuttingDown checks if system is shutting down
 func IsSystemShuttingDown() bool {
 	return atomic.LoadInt32(&systemShuttingDown) == 1
+}
+
+// collectAllComponentStats collects current statistics from all running components
+func collectAllComponentStats() []common.ComponentStatsData {
+	var components []common.ComponentStatsData
+
+	// Take a snapshot of running projects to minimize lock time
+	var runningProjects []*Project
+	GlobalProject.ProjectMu.RLock()
+	for _, proj := range GlobalProject.Projects {
+		if proj.Status == ProjectStatusRunning {
+			runningProjects = append(runningProjects, proj)
+		}
+	}
+	GlobalProject.ProjectMu.RUnlock()
+
+	// Process projects without holding the global lock
+	for _, proj := range runningProjects {
+		// Collect input statistics
+		for _, input := range proj.Inputs {
+			components = append(components, common.ComponentStatsData{
+				ProjectID:           proj.Id,
+				ComponentID:         input.Id,
+				ComponentType:       "input",
+				ProjectNodeSequence: input.ProjectNodeSequence,
+				TotalMessages:       input.GetConsumeTotal(),
+			})
+		}
+
+		// Collect output statistics
+		for _, output := range proj.Outputs {
+			components = append(components, common.ComponentStatsData{
+				ProjectID:           proj.Id,
+				ComponentID:         output.Id,
+				ComponentType:       "output",
+				ProjectNodeSequence: output.ProjectNodeSequence,
+				TotalMessages:       output.GetProduceTotal(),
+			})
+		}
+
+		// Collect ruleset statistics
+		for _, ruleset := range proj.Rulesets {
+			components = append(components, common.ComponentStatsData{
+				ProjectID:           proj.Id,
+				ComponentID:         ruleset.RulesetID,
+				ComponentType:       "ruleset",
+				ProjectNodeSequence: ruleset.ProjectNodeSequence,
+				TotalMessages:       ruleset.GetProcessTotal(),
+			})
+		}
+	}
+
+	// Collect plugin statistics (plugins are global, not per-project)
+	// Import plugin package to access global Plugins map
+	for pluginName, plugin := range plugin.Plugins {
+		// Plugin success statistics
+		components = append(components, common.ComponentStatsData{
+			ProjectID:           "global", // Plugins are global across all projects
+			ComponentID:         pluginName,
+			ComponentType:       "plugin_success",
+			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.success", pluginName),
+			TotalMessages:       plugin.GetSuccessTotal(),
+		})
+
+		// Plugin failure statistics
+		components = append(components, common.ComponentStatsData{
+			ProjectID:           "global", // Plugins are global across all projects
+			ComponentID:         pluginName,
+			ComponentType:       "plugin_failure",
+			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.failure", pluginName),
+			TotalMessages:       plugin.GetFailureTotal(),
+		})
+	}
+
+	return components
 }
 
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
@@ -197,6 +273,9 @@ func init() {
 
 	// Mapping between logical edge ("FROM->TO") and its channelId
 	GlobalProject.edgeChanIds = make(map[string]string)
+
+	// Set up stats collector callback for Daily Stats Manager
+	common.SetStatsCollector(collectAllComponentStats)
 }
 
 func Verify(path string, raw string) error {
@@ -1104,14 +1183,6 @@ func (p *Project) Start() error {
 		}
 	}
 
-	// Start metrics collection
-	p.metricsStop = make(chan struct{})
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		p.collectMetrics()
-	}()
-
 	if isTestMode {
 		// In test mode, don't update Redis
 		now := time.Now()
@@ -1259,12 +1330,6 @@ func (p *Project) stopComponentsInternal(saveStatusToRedis bool) error {
 		}
 	}
 
-	// Step 5: Stop metrics collection
-	if p.metricsStop != nil {
-		close(p.metricsStop)
-		p.metricsStop = nil
-	}
-
 	// Step 6: Wait for all project goroutines to finish
 	waitDone := make(chan struct{})
 	go func() {
@@ -1381,38 +1446,8 @@ func (p *Project) forceCleanup() error {
 	return nil
 }
 
-// collectMetrics collects runtime metrics
-func (p *Project) collectMetrics() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-p.metricsStop:
-			return
-		case <-ticker.C:
-			p.metrics.mu.Lock()
-			// Update input metrics
-			for id, in := range p.Inputs {
-				p.metrics.InputQPS[id] = in.GetConsumeQPS()
-			}
-
-			// Update output metrics
-			for id, out := range p.Outputs {
-				p.metrics.OutputQPS[id] = out.GetProduceQPS()
-			}
-
-			p.metrics.mu.Unlock()
-		}
-	}
-}
-
-// GetMetrics returns the current project metrics
-func (p *Project) GetMetrics() *ProjectMetrics {
-	p.metrics.mu.RLock()
-	defer p.metrics.mu.RUnlock()
-	return p.metrics
-}
+// collectMetrics and GetMetrics methods removed
+// Project metrics are now handled by Daily Stats Manager
 
 func AnalyzeProjectDependencies() {
 	// Use dedicated project lock to prevent race conditions
@@ -2307,75 +2342,8 @@ func RestartProjectsSafely(projectIDs []string, trigger string) (int, error) {
 	return restartedCount, nil
 }
 
-// GetQPSDataForNode collects QPS data from all running projects and components for this node
-func GetQPSDataForNode(nodeID string) []common.QPSMetrics {
-	var qpsMetrics []common.QPSMetrics
-	now := time.Now()
-
-	// Lock to read project data safely
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	// Collect data from all projects
-	for projectID, proj := range GlobalProject.Projects {
-		if proj.Status != ProjectStatusRunning {
-			continue // Skip non-running projects
-		}
-
-		// Collect input QPS data
-		for inputID, i := range proj.Inputs {
-			qps := i.GetConsumeQPS()
-			total := i.GetConsumeTotal()
-			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
-			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:              nodeID,
-				ProjectID:           projectID,
-				ComponentID:         inputID,
-				ComponentType:       "input",
-				ProjectNodeSequence: i.ProjectNodeSequence,
-				QPS:                 qps,
-				TotalMessages:       total,
-				Timestamp:           now,
-			})
-		}
-
-		// Collect output QPS data
-		for outputID, o := range proj.Outputs {
-			qps := o.GetProduceQPS()
-			total := o.GetProduceTotal()
-			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
-			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:              nodeID,
-				ProjectID:           projectID,
-				ComponentID:         outputID,
-				ComponentType:       "output",
-				ProjectNodeSequence: o.ProjectNodeSequence,
-				QPS:                 qps,
-				TotalMessages:       total,
-				Timestamp:           now,
-			})
-		}
-
-		// Collect ruleset QPS data - now with real processing statistics
-		for rulesetID, ruleset := range proj.Rulesets {
-			qps := ruleset.GetProcessQPS() // Get real processing QPS
-			total := ruleset.GetProcessTotal()
-			// Note: Using in-memory total directly since daily_stats system handles Redis persistence
-			qpsMetrics = append(qpsMetrics, common.QPSMetrics{
-				NodeID:              nodeID,
-				ProjectID:           projectID,
-				ComponentID:         rulesetID,
-				ComponentType:       "ruleset",
-				ProjectNodeSequence: ruleset.ProjectNodeSequence,
-				QPS:                 qps,   // Real QPS instead of 0
-				TotalMessages:       total, // Real total messages instead of 0
-				Timestamp:           now,
-			})
-		}
-	}
-
-	return qpsMetrics
-}
+// GetQPSDataForNode removed - QPS collection is no longer used
+// Message statistics are now handled by Daily Stats Manager
 
 // clearChannelReferences iterates all projects and removes pointers to the given channel from
 // every component's UpStream / DownStream slices or maps. It must be called with

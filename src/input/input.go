@@ -74,8 +74,6 @@ type Input struct {
 	aliyunSLSCfg *AliyunSLSInputConfig
 
 	consumeTotal uint64
-	consumeQPS   uint64
-	metricStop   chan struct{}
 
 	// sampler
 	sampler *common.Sampler
@@ -205,39 +203,10 @@ func (in *Input) Start() error {
 	}
 	logger.Info("Input connectivity verified", "input", in.Id, "type", in.Type)
 
-	// Load today's accumulated message count from Redis to resume counting from correct value
-	// This ensures that component restarts don't reset daily message count to 0
-	if common.GlobalDailyStatsManager != nil {
-		today := time.Now().Format("2006-01-02")
-		// Fix: Only load data for current node, not all nodes
-		currentNodeID := common.GetNodeID()
-		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", currentNodeID)
+	// Component statistics are now handled by Daily Stats Manager
+	// which collects data every 10 seconds from all running components
 
-		for _, statsData := range dailyStats {
-			// Find matching component data for current node only
-			if statsData.ComponentID == in.Id &&
-				statsData.ComponentType == "input" &&
-				statsData.ProjectNodeSequence == in.ProjectNodeSequence &&
-				statsData.NodeID == currentNodeID {
-				// Set the starting count to today's accumulated total for this node
-				atomic.StoreUint64(&in.consumeTotal, statsData.TotalMessages)
-				logger.Info("Loaded historical message count for input",
-					"input", in.Id,
-					"node_id", currentNodeID,
-					"historical_total", statsData.TotalMessages,
-					"date", today)
-				break
-			}
-		}
-	}
-
-	// Start metric goroutine
-	in.metricStop = make(chan struct{})
-	in.wg.Add(1)
-	go func() {
-		defer in.wg.Done()
-		in.metricLoop()
-	}()
+	// Metric goroutine removed - statistics handled by Daily Stats Manager
 
 	switch in.Type {
 	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
@@ -283,7 +252,7 @@ func (in *Input) Start() error {
 						return
 					}
 
-					// Optimization: only increment total count, QPS is calculated by metricLoop
+					// Only increment total count - QPS calculation removed
 					atomic.AddUint64(&in.consumeTotal, 1)
 
 					// Sample the message
@@ -413,12 +382,6 @@ func (in *Input) Stop() error {
 		in.slsConsumer = nil
 	}
 
-	// Stop metrics collection
-	if in.metricStop != nil {
-		close(in.metricStop)
-		in.metricStop = nil
-	}
-
 	// Wait for all goroutines to finish with timeout
 	waitDone := make(chan struct{})
 	go func() {
@@ -439,44 +402,8 @@ func (in *Input) Stop() error {
 	return nil
 }
 
-// metricLoop calculates QPS and can be extended for more metrics.
-func (in *Input) metricLoop() {
-	var lastTotal uint64
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-in.metricStop:
-			return
-		case <-ticker.C:
-			cur := atomic.LoadUint64(&in.consumeTotal)
-
-			var qps uint64
-			// Safe handling: if current value is less than last value, set QPS to 0
-			if cur < lastTotal {
-				logger.Warn("Counter decreased, possibly due to overflow or restart",
-					"input", in.Id,
-					"lastTotal", lastTotal,
-					"currentTotal", cur)
-				qps = 0         // Set QPS to 0 to avoid underflow
-				lastTotal = cur // Reset lastTotal to current value
-			} else {
-				qps = cur - lastTotal
-				lastTotal = cur
-			}
-
-			atomic.StoreUint64(&in.consumeQPS, qps)
-
-			// Note: Redis persistence is now handled by QPS Manager via daily_stats system
-			// This eliminates duplicate data writes and TTL conflicts
-		}
-	}
-}
-
-// GetConsumeQPS returns the latest QPS.
-func (in *Input) GetConsumeQPS() uint64 {
-	return atomic.LoadUint64(&in.consumeQPS)
-}
+// QPS calculation and GetConsumeQPS method removed
+// Message statistics are now handled by Daily Stats Manager
 
 // GetConsumeTotal returns the total consumed count.
 func (in *Input) GetConsumeTotal() uint64 {
@@ -554,7 +481,6 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		// Add consumer metrics if available
 		if in.kafkaConsumer != nil {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-				"consume_qps":     in.GetConsumeQPS(),
 				"consume_total":   in.GetConsumeTotal(),
 				"consumer_active": true,
 			}
@@ -662,7 +588,6 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		// Add consumer metrics if available
 		if in.slsConsumer != nil {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-				"consume_qps":     in.GetConsumeQPS(),
 				"consume_total":   in.GetConsumeTotal(),
 				"consumer_active": true,
 			}

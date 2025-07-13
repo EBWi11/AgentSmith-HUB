@@ -28,40 +28,6 @@ func (r *Ruleset) Start() error {
 	}
 	r.stopChan = make(chan struct{})
 
-	// Load today's accumulated message count from Redis to resume counting from correct value
-	// This ensures that component restarts don't reset daily message count to 0
-	if common.GlobalDailyStatsManager != nil {
-		today := time.Now().Format("2006-01-02")
-		// Fix: Only load data for current node, not all nodes
-		currentNodeID := common.GetNodeID()
-		dailyStats := common.GlobalDailyStatsManager.GetDailyStats(today, "", currentNodeID)
-
-		for _, statsData := range dailyStats {
-			// Find matching component data for current node only
-			if statsData.ComponentID == r.RulesetID &&
-				statsData.ComponentType == "ruleset" &&
-				statsData.ProjectNodeSequence == r.ProjectNodeSequence &&
-				statsData.NodeID == currentNodeID {
-				// Set the starting count to today's accumulated total for this node
-				atomic.StoreUint64(&r.processTotal, statsData.TotalMessages)
-				logger.Info("Loaded historical message count for ruleset",
-					"ruleset", r.RulesetID,
-					"node_id", currentNodeID,
-					"historical_total", statsData.TotalMessages,
-					"date", today)
-				break
-			}
-		}
-	}
-
-	// Start metric collection goroutine
-	r.metricStop = make(chan struct{})
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.metricLoop()
-	}()
-
 	var err error
 	minPoolSize := getMinPoolSize()
 	r.antsPool, err = ants.NewPool(minPoolSize)
@@ -170,12 +136,6 @@ func (r *Ruleset) Stop() error {
 
 	logger.Info("Stopping ruleset", "ruleset", r.RulesetID, "upstream_count", len(r.UpStream), "downstream_count", len(r.DownStream))
 	close(r.stopChan)
-
-	// Stop metrics collection
-	if r.metricStop != nil {
-		close(r.metricStop)
-		r.metricStop = nil
-	}
 
 	// Overall timeout for ruleset stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
@@ -293,12 +253,6 @@ func (r *Ruleset) StopForTesting() error {
 	logger.Info("Quick stopping test ruleset", "ruleset", r.RulesetID)
 	close(r.stopChan)
 
-	// Stop metrics collection quickly
-	if r.metricStop != nil {
-		close(r.metricStop)
-		r.metricStop = nil
-	}
-
 	// Quick cleanup without waiting
 	if r.antsPool != nil {
 		r.antsPool.Release()
@@ -306,7 +260,7 @@ func (r *Ruleset) StopForTesting() error {
 	}
 	r.stopChan = nil
 
-	// Wait for metric goroutine to finish quickly
+	// Wait for any remaining goroutines to finish
 	r.wg.Wait()
 
 	if r.Cache != nil {
@@ -764,45 +718,6 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 		sb.WriteString(ruleID)
 		data[HitRuleIdFieldName] = sb.String()
 	}
-}
-
-// metricLoop calculates QPS and can be extended for more metrics.
-func (r *Ruleset) metricLoop() {
-	var lastTotal uint64
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-r.metricStop:
-			return
-		case <-ticker.C:
-			cur := atomic.LoadUint64(&r.processTotal)
-
-			var qps uint64
-			// Safe handling: if current value is less than last value, set QPS to 0
-			if cur < lastTotal {
-				logger.Warn("Counter decreased, possibly due to overflow or restart",
-					"ruleset", r.RulesetID,
-					"lastTotal", lastTotal,
-					"currentTotal", cur)
-				qps = 0         // Set QPS to 0 to avoid underflow
-				lastTotal = cur // Reset lastTotal to current value
-			} else {
-				qps = cur - lastTotal
-				lastTotal = cur
-			}
-
-			atomic.StoreUint64(&r.processQPS, qps)
-
-			// Note: Redis persistence is now handled by QPS Manager via daily_stats system
-			// This eliminates duplicate data writes and TTL conflicts
-		}
-	}
-}
-
-// GetProcessQPS returns the latest processing QPS.
-func (r *Ruleset) GetProcessQPS() uint64 {
-	return atomic.LoadUint64(&r.processQPS)
 }
 
 // GetProcessTotal returns the total processed message count.

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	regexpgo "regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
@@ -42,6 +43,10 @@ type Plugin struct {
 
 	// Whether the plugin result should be negated (for ! prefix)
 	IsNegated bool `json:"is_negated"`
+
+	// Plugin statistics (atomic counters)
+	successTotal uint64 // Total successful invocations
+	failureTotal uint64 // Total failed invocations
 }
 
 // PluginParameter represents a function parameter
@@ -367,12 +372,12 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 				}
 			}()
 
-			common.RecordPluginInvoke(p.Name, err == nil)
+			p.RecordInvocation(err == nil)
 			return result, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
-			common.RecordPluginInvoke(p.Name, false)
+			p.RecordInvocation(false)
 			return false, err
 		}
 	case 1: // yaegi plugin
@@ -429,10 +434,10 @@ func (p *Plugin) FuncEvalCheckNode(funcArgs ...interface{}) (bool, error) {
 			err = nil
 		}()
 
-		common.RecordPluginInvoke(p.Name, err == nil)
+		p.RecordInvocation(err == nil)
 		return result, err
 	}
-	common.RecordPluginInvoke(p.Name, false)
+	p.RecordInvocation(false)
 	return false, fmt.Errorf("unknown plugin type")
 }
 
@@ -463,12 +468,12 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 				}
 			}()
 
-			common.RecordPluginInvoke(p.Name, err == nil)
+			p.RecordInvocation(err == nil)
 			return result, success, err
 		} else {
 			err := fmt.Errorf("local plugin not found: %s", p.Name)
 			logger.PluginError("local plugin not found", "plugin", p.Name)
-			common.RecordPluginInvoke(p.Name, false)
+			p.RecordInvocation(false)
 			return nil, false, err
 		}
 	case 1: // yaegi plugin
@@ -531,10 +536,10 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 			err = nil
 		}()
 
-		common.RecordPluginInvoke(p.Name, err == nil)
+		p.RecordInvocation(err == nil)
 		return result, success, err
 	}
-	common.RecordPluginInvoke(p.Name, false)
+	p.RecordInvocation(false)
 	return nil, false, fmt.Errorf("unknown plugin type")
 }
 
@@ -722,4 +727,23 @@ func isStandardLibraryPackage(pkg string) bool {
 	}
 
 	return stdLibPackages[pkg]
+}
+
+// GetSuccessTotal returns the total number of successful plugin invocations
+func (p *Plugin) GetSuccessTotal() uint64 {
+	return atomic.LoadUint64(&p.successTotal)
+}
+
+// GetFailureTotal returns the total number of failed plugin invocations
+func (p *Plugin) GetFailureTotal() uint64 {
+	return atomic.LoadUint64(&p.failureTotal)
+}
+
+// RecordInvocation increments the appropriate counter based on success/failure
+func (p *Plugin) RecordInvocation(success bool) {
+	if success {
+		atomic.AddUint64(&p.successTotal, 1)
+	} else {
+		atomic.AddUint64(&p.failureTotal, 1)
+	}
 }

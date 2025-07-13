@@ -33,21 +33,38 @@ type DailyStatsManager struct {
 	redisKeyPrefix string
 	saveInterval   time.Duration
 	retentionDays  int
+
+	// Component restart detection
+	lastSeenCounters map[string]uint64 // Key: "nodeID_projectNodeSequence" -> last seen counter
+	restartDetection bool              // Enable restart detection
+
+	// Async Redis write channel
+	redisWriteChan chan *DailyStatsData
+	redisWriteWg   sync.WaitGroup
 }
 
 // NewDailyStatsManager creates a new daily statistics manager instance
 func NewDailyStatsManager() *DailyStatsManager {
 	dsm := &DailyStatsManager{
-		data:           make(map[string]*DailyStatsData),
-		stopChan:       make(chan struct{}),
-		redisEnabled:   true,               // Default: enabled
-		redisKeyPrefix: "hub:daily_stats:", // Redis key prefix
-		saveInterval:   5 * time.Minute,    // Save every 5 minutes
-		retentionDays:  30,                 // Keep 30 days of data
+		data:             make(map[string]*DailyStatsData),
+		stopChan:         make(chan struct{}),
+		redisEnabled:     true,               // Default: enabled
+		redisKeyPrefix:   "hub:daily_stats:", // Redis key prefix
+		saveInterval:     10 * time.Second,   // Save every 10 seconds
+		retentionDays:    30,                 // Keep 30 days of data
+		lastSeenCounters: make(map[string]uint64),
+		restartDetection: true,                             // Enable restart detection
+		redisWriteChan:   make(chan *DailyStatsData, 1000), // Buffered channel for async writes
 	}
 
 	// Load existing data from Redis
 	dsm.loadFromRedis()
+
+	// Start Redis writer goroutine
+	if dsm.redisEnabled {
+		dsm.redisWriteWg.Add(1)
+		go dsm.redisWriterLoop()
+	}
 
 	// Start persistence goroutine
 	if dsm.redisEnabled {
@@ -56,6 +73,46 @@ func NewDailyStatsManager() *DailyStatsManager {
 	}
 
 	return dsm
+}
+
+// redisWriterLoop handles async Redis writes to avoid blocking the main operations
+func (dsm *DailyStatsManager) redisWriterLoop() {
+	defer dsm.redisWriteWg.Done()
+
+	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
+
+	for {
+		select {
+		case <-dsm.stopChan:
+			// Drain remaining writes before stopping
+			for {
+				select {
+				case statsData := <-dsm.redisWriteChan:
+					dsm.writeToRedis(statsData, expiration)
+				default:
+					return
+				}
+			}
+		case statsData := <-dsm.redisWriteChan:
+			dsm.writeToRedis(statsData, expiration)
+		}
+	}
+}
+
+// writeToRedis performs the actual Redis write operation
+func (dsm *DailyStatsManager) writeToRedis(statsData *DailyStatsData, expiration int) {
+	key := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
+	redisKey := dsm.redisKeyPrefix + key
+
+	jsonData, err := json.Marshal(statsData)
+	if err != nil {
+		logger.Error("Failed to marshal daily stats for Redis write", "key", key, "error", err)
+		return
+	}
+
+	if _, err := RedisSet(redisKey, string(jsonData), expiration); err != nil {
+		logger.Error("Failed to write daily stats to Redis", "key", redisKey, "error", err)
+	}
 }
 
 // generateKey creates a unique key for daily statistics. We must include projectID so that
@@ -100,17 +157,20 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 			// 3. Time synchronization issues
 			// 4. Data corruption
 
-			// For safety, we keep the existing higher value to avoid data loss
-			// But log a warning for investigation
-			logger.Warn("Daily stats counter decreased - possible component restart or data issue",
+			// Update to new value but skip Redis write to avoid negative diff calculation
+			// This allows recovery on next update cycle
+			previousTotal := existing.TotalMessages
+			existing.TotalMessages = totalMessages
+			logger.Warn("Daily stats counter decreased - possible overflow or restart, updating value but skipping Redis write",
 				"component", componentID,
 				"sequence", projectNodeSequence,
-				"previous_total", existing.TotalMessages,
+				"previous_total", previousTotal,
 				"current_total", totalMessages,
-				"keeping_previous", true)
+				"action", "skip_redis_write")
 
-			// Keep the existing value unchanged
-			// existing.TotalMessages remains unchanged
+			// Skip Redis write by returning early
+			existing.LastUpdate = now
+			return
 		}
 		existing.LastUpdate = now
 		statsData = existing
@@ -133,21 +193,22 @@ func (dsm *DailyStatsManager) UpdateDailyStats(nodeID, projectID, componentID, c
 			"total", totalMessages)
 	}
 
-	// Immediately save this specific record to Redis for real-time data availability
+	// Async Redis write: send data to Redis writer (no lock held during Redis IO)
+	// No copy needed since statsData points to stable memory and Redis writer only reads
 	if dsm.redisEnabled {
-		go dsm.saveToRedisSingle(key, statsData)
+		select {
+		case dsm.redisWriteChan <- statsData:
+			// Successfully queued for async write
+		default:
+			// Channel full, skip this write (will be saved in next periodic save)
+			logger.Warn("Redis write channel full, skipping immediate write", "component", componentID)
+		}
 	}
 }
 
-// GetDailyStats returns daily statistics for a specific date and optional filters
-// This method now reads directly from Redis to get real-time cluster data
+// GetDailyStats returns daily statistics directly from Redis (as user suggested)
 func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[string]*DailyStatsData {
-	if !dsm.redisEnabled {
-		// Fallback to memory data if Redis is disabled
-		return dsm.getMemoryStats(date, projectID, nodeID)
-	}
-
-	// Read directly from Redis to get real-time cluster data
+	// Always read from Redis for real-time cluster data
 	result := make(map[string]*DailyStatsData)
 
 	// Use default date if not specified
@@ -174,8 +235,7 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 	keys, err := RedisKeys(pattern)
 	if err != nil {
 		logger.Error("Failed to get daily stats keys from Redis", "pattern", pattern, "error", err)
-		// Fallback to memory data
-		return dsm.getMemoryStats(date, projectID, nodeID)
+		return result
 	}
 
 	for _, key := range keys {
@@ -221,46 +281,6 @@ func (dsm *DailyStatsManager) GetDailyStats(date, projectID, nodeID string) map[
 	return result
 }
 
-// getMemoryStats returns daily statistics from memory (fallback method)
-func (dsm *DailyStatsManager) getMemoryStats(date, projectID, nodeID string) map[string]*DailyStatsData {
-	dsm.mutex.RLock()
-	defer dsm.mutex.RUnlock()
-
-	result := make(map[string]*DailyStatsData)
-
-	for key, data := range dsm.data {
-		// Filter by date
-		if date != "" && data.Date != date {
-			continue
-		}
-
-		// Filter by project ID
-		if projectID != "" && data.ProjectID != projectID {
-			continue
-		}
-
-		// Filter by node ID
-		if nodeID != "" && data.NodeID != nodeID {
-			continue
-		}
-
-		// Create a copy to prevent external modification
-		result[key] = &DailyStatsData{
-			NodeID:              data.NodeID,
-			ProjectID:           data.ProjectID,
-			ComponentID:         data.ComponentID,
-			ComponentType:       data.ComponentType,
-			ProjectNodeSequence: data.ProjectNodeSequence,
-			Date:                data.Date,
-			TotalMessages:       data.TotalMessages,
-			LastUpdate:          data.LastUpdate,
-		}
-	}
-
-	return result
-}
-
-// loadFromRedis loads existing daily statistics from Redis
 func (dsm *DailyStatsManager) loadFromRedis() {
 	if !dsm.redisEnabled {
 		return
@@ -277,6 +297,9 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 
 	loadedCount := 0
 	cutoffDate := time.Now().AddDate(0, 0, -dsm.retentionDays).Format("2006-01-02")
+
+	dsm.mutex.Lock()
+	defer dsm.mutex.Unlock()
 
 	for _, key := range keys {
 		jsonData, err := RedisGet(key)
@@ -305,36 +328,34 @@ func (dsm *DailyStatsManager) loadFromRedis() {
 	logger.Info("Loaded daily statistics from Redis", "count", loadedCount)
 }
 
-// saveToRedisSingle saves a single statistics record to Redis immediately
-func (dsm *DailyStatsManager) saveToRedisSingle(key string, statsData *DailyStatsData) {
-	redisKey := dsm.redisKeyPrefix + key
-	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
-
-	jsonData, err := json.Marshal(statsData)
-	if err != nil {
-		logger.Error("Failed to marshal daily stats for immediate Redis save", "key", key, "error", err)
-		return
-	}
-
-	if _, err := RedisSet(redisKey, string(jsonData), expiration); err != nil {
-		logger.Error("Failed to immediately save daily stats to Redis", "key", redisKey, "error", err)
-		return
-	}
-}
-
-// saveToRedis saves current daily statistics to Redis
+// saveToRedis saves current daily statistics to Redis (periodic bulk save)
 func (dsm *DailyStatsManager) saveToRedis() {
 	if !dsm.redisEnabled {
 		return
 	}
 
+	// Step 1: Copy data while holding lock (very fast)
 	dsm.mutex.RLock()
-	defer dsm.mutex.RUnlock()
+	dataCopy := make(map[string]*DailyStatsData, len(dsm.data))
+	for k, v := range dsm.data {
+		dataCopy[k] = &DailyStatsData{
+			NodeID:              v.NodeID,
+			ProjectID:           v.ProjectID,
+			ComponentID:         v.ComponentID,
+			ComponentType:       v.ComponentType,
+			ProjectNodeSequence: v.ProjectNodeSequence,
+			Date:                v.Date,
+			TotalMessages:       v.TotalMessages,
+			LastUpdate:          v.LastUpdate,
+		}
+	}
+	dsm.mutex.RUnlock()
 
+	// Step 2: Release lock and do Redis operations (network IO) without holding lock
 	savedCount := 0
 	expiration := int((time.Duration(dsm.retentionDays) * 24 * time.Hour).Seconds())
 
-	for key, statsData := range dsm.data {
+	for key, statsData := range dataCopy {
 		redisKey := dsm.redisKeyPrefix + key
 
 		jsonData, err := json.Marshal(statsData)
@@ -351,11 +372,10 @@ func (dsm *DailyStatsManager) saveToRedis() {
 		savedCount++
 	}
 
-	// Remove debug log to reduce log volume
-	// logger.Debug("Saved daily statistics to Redis", "count", savedCount)
+	logger.Debug("Saved daily statistics to Redis", "count", savedCount)
 }
 
-// persistenceLoop periodically saves data to Redis
+// persistenceLoop periodically collects data from all components and saves to Redis
 func (dsm *DailyStatsManager) persistenceLoop() {
 	defer dsm.saveWg.Done()
 
@@ -365,20 +385,198 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 	for {
 		select {
 		case <-dsm.stopChan:
-			// Final save before shutdown
-			logger.Info("Performing final daily stats save to Redis before shutdown")
+			// Final collection and save before shutdown
+			logger.Info("Performing final daily stats collection and save to Redis before shutdown")
+			dsm.collectAllComponentsData()
 			dsm.saveToRedis()
 			return
 		case <-ticker.C:
+			// Collect latest data from all components, then save to Redis
+			dsm.collectAllComponentsData()
 			dsm.saveToRedis()
 		}
 	}
 }
 
+// collectAllComponentsData collects current statistics from all running components
+func (dsm *DailyStatsManager) collectAllComponentsData() {
+	if statsCollector == nil {
+		return
+	}
+
+	// Get current node ID
+	nodeID := GetNodeID()
+
+	// Collect component data with minimal lock time
+	components := statsCollector()
+
+	// Batch update statistics
+	dsm.applyBatchUpdates(nodeID, components)
+}
+
+// applyBatchUpdates applies component statistics updates in batch to improve performance
+func (dsm *DailyStatsManager) applyBatchUpdates(nodeID string, components []ComponentStatsData) {
+	if len(components) == 0 {
+		return
+	}
+
+	now := time.Now()
+	date := now.Format("2006-01-02")
+
+	// Step 1: Process updates while holding lock (fast, in-memory operations only)
+	dsm.mutex.Lock()
+	var updatesToWrite []*DailyStatsData
+
+	for _, component := range components {
+		key := dsm.generateKey(date, nodeID, component.ProjectID, component.ProjectNodeSequence)
+		counterKey := fmt.Sprintf("%s_%s", nodeID, component.ProjectNodeSequence)
+
+		var statsData *DailyStatsData
+		var shouldWriteToRedis bool
+
+		if existing, exists := dsm.data[key]; exists {
+			// Check if this is a component restart
+			if dsm.restartDetection {
+				lastCounter, hasLastCounter := dsm.lastSeenCounters[counterKey]
+
+				if component.TotalMessages < existing.TotalMessages {
+					// Possible restart detected
+					if hasLastCounter && component.TotalMessages < lastCounter {
+						// Confirmed restart: counter went backwards
+						increment := component.TotalMessages // Messages processed since restart
+						existing.TotalMessages = existing.TotalMessages + increment
+
+						logger.Info("Component restart detected, adding increment",
+							"component", component.ComponentID,
+							"sequence", component.ProjectNodeSequence,
+							"previous_total", existing.TotalMessages-increment,
+							"restart_increment", increment,
+							"new_total", existing.TotalMessages)
+						shouldWriteToRedis = true
+					} else {
+						// Possible overflow or restart - update value but skip Redis write
+						previousTotal := existing.TotalMessages
+						existing.TotalMessages = component.TotalMessages
+						logger.Warn("Counter decreased without confirmed restart - possible overflow, updating value but skipping Redis write",
+							"component", component.ComponentID,
+							"sequence", component.ProjectNodeSequence,
+							"previous_total", previousTotal,
+							"current_counter", component.TotalMessages,
+							"action", "skip_redis_write")
+						shouldWriteToRedis = false // Skip Redis write
+					}
+					existing.LastUpdate = now
+					statsData = existing
+				} else if component.TotalMessages > existing.TotalMessages {
+					// Normal increase - data changed, need to write to Redis
+					existing.TotalMessages = component.TotalMessages
+					existing.LastUpdate = now
+					statsData = existing
+					shouldWriteToRedis = true
+				} else {
+					// No change in count, just update timestamp
+					existing.LastUpdate = now
+					statsData = existing
+					// No need to write to Redis for timestamp-only updates
+				}
+
+				// Update last seen counter
+				dsm.lastSeenCounters[counterKey] = component.TotalMessages
+			} else {
+				// Restart detection disabled, use simple logic
+				if component.TotalMessages >= existing.TotalMessages {
+					if component.TotalMessages > existing.TotalMessages {
+						shouldWriteToRedis = true
+					}
+					existing.TotalMessages = component.TotalMessages
+				} else {
+					// Counter decreased - possible overflow, update value but skip Redis write
+					previousTotal := existing.TotalMessages
+					existing.TotalMessages = component.TotalMessages
+					logger.Warn("Counter decreased with restart detection disabled - possible overflow, updating value but skipping Redis write",
+						"component", component.ComponentID,
+						"sequence", component.ProjectNodeSequence,
+						"previous_total", previousTotal,
+						"current_counter", component.TotalMessages,
+						"action", "skip_redis_write")
+					shouldWriteToRedis = false // Skip Redis write
+				}
+				existing.LastUpdate = now
+				statsData = existing
+			}
+		} else {
+			// Create new entry
+			statsData = &DailyStatsData{
+				NodeID:              nodeID,
+				ProjectID:           component.ProjectID,
+				ComponentID:         component.ComponentID,
+				ComponentType:       component.ComponentType,
+				ProjectNodeSequence: component.ProjectNodeSequence,
+				Date:                date,
+				TotalMessages:       component.TotalMessages,
+				LastUpdate:          now,
+			}
+			dsm.data[key] = statsData
+			shouldWriteToRedis = true // New entry always needs to be written
+
+			// Initialize counter tracking
+			if dsm.restartDetection {
+				dsm.lastSeenCounters[counterKey] = component.TotalMessages
+			}
+		}
+
+		// Only queue for Redis write if data actually changed
+		if shouldWriteToRedis {
+			updatesToWrite = append(updatesToWrite, statsData)
+		}
+	}
+
+	dsm.mutex.Unlock()
+
+	// Step 2: Queue for async Redis writes (no lock held during network IO)
+	// No copy needed - statsData points to stable memory that won't be modified
+	// until the next update cycle, and Redis writer only reads the data
+	if dsm.redisEnabled && len(updatesToWrite) > 0 {
+		for _, statsData := range updatesToWrite {
+			select {
+			case dsm.redisWriteChan <- statsData:
+				// Successfully queued
+			default:
+				// Channel full, skip (will be saved in next periodic save)
+				logger.Warn("Redis write channel full, skipping write for component",
+					"component", statsData.ComponentID)
+			}
+		}
+	}
+}
+
+// ComponentStatsData represents statistics for a single component
+type ComponentStatsData struct {
+	ProjectID           string
+	ComponentID         string
+	ComponentType       string
+	ProjectNodeSequence string
+	TotalMessages       uint64
+}
+
+// StatsCollectorFunc is a function type for collecting component statistics
+type StatsCollectorFunc func() []ComponentStatsData
+
+// statsCollector is a global callback function set by the project package
+var statsCollector StatsCollectorFunc
+
+// SetStatsCollector sets the callback function for collecting component statistics
+func SetStatsCollector(collector StatsCollectorFunc) {
+	statsCollector = collector
+}
+
 // Stop stops the daily statistics manager
 func (dsm *DailyStatsManager) Stop() {
 	close(dsm.stopChan)
+
+	// Wait for Redis writer to finish
 	if dsm.redisEnabled {
+		dsm.redisWriteWg.Wait()
 		dsm.saveWg.Wait()
 	}
 }
@@ -403,8 +601,7 @@ func StopDailyStatsManager() {
 	}
 }
 
-// GetAggregatedDailyStats returns aggregated statistics for a date
-// This method now reads directly from Redis to get real-time cluster data
+// GetAggregatedDailyStats returns aggregated statistics for a date (read from Redis)
 func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]interface{} {
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
@@ -427,72 +624,52 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 
 		// Aggregate by component type
 		parts := strings.Split(data.ProjectNodeSequence, ".")
-		switch data.ComponentType {
-		case "input":
-			if len(parts) == 2 && strings.ToUpper(parts[0]) == "INPUT" && parts[1] == data.ComponentID {
+		if len(parts) >= 2 {
+			componentTypeFromSequence := strings.ToLower(parts[len(parts)-2])
+			switch componentTypeFromSequence {
+			case "input":
 				totalInputMessages += data.TotalMessages
-			}
-		case "output":
-			if len(parts) >= 2 && strings.ToUpper(parts[len(parts)-2]) == "OUTPUT" && parts[len(parts)-1] == data.ComponentID {
+			case "output":
 				totalOutputMessages += data.TotalMessages
-			}
-		case "ruleset":
-			// Only count ruleset's own processing (not downstream flow)
-			// This represents the actual data volume processed by this specific ruleset
-			for i := 0; i < len(parts)-1; i++ {
-				if strings.ToUpper(parts[i]) == "RULESET" {
-					// Only count if this is the RULESET's own ProjectNodeSequence
-					// Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-
-					// Check if there are more components after this RULESET in the sequence
-					hasDownstream := (i + 2) < len(parts)
-
-					if !hasDownstream {
-						// This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
-						totalRulesetMessages += data.TotalMessages
-					}
-					// If hasDownstream is true, this means it's a downstream component's sequence
-					// that happens to contain this RULESET in its path - we don't count it
-
-					break
-				}
+			case "ruleset":
+				totalRulesetMessages += data.TotalMessages
 			}
 		}
 	}
 
 	return map[string]interface{}{
 		"date":                   date,
-		"total_messages":         totalInputMessages + totalOutputMessages + totalRulesetMessages,
 		"total_input_messages":   totalInputMessages,
 		"total_output_messages":  totalOutputMessages,
 		"total_ruleset_messages": totalRulesetMessages,
-		"project_breakdown":      projectStats,
+		"projects":               projectStats,
+		"timestamp":              time.Now(),
 	}
 }
 
-// GetStats returns statistics about the daily stats manager
+// GetStats returns general statistics about the daily stats manager
 func (dsm *DailyStatsManager) GetStats() map[string]interface{} {
 	dsm.mutex.RLock()
 	defer dsm.mutex.RUnlock()
 
-	totalRecords := len(dsm.data)
-	dateCount := make(map[string]bool)
-	nodeCount := make(map[string]bool)
-	projectCount := make(map[string]bool)
+	totalEntries := len(dsm.data)
+	totalCounters := len(dsm.lastSeenCounters)
 
-	for _, data := range dsm.data {
-		dateCount[data.Date] = true
-		nodeCount[data.NodeID] = true
-		projectCount[data.ProjectID] = true
+	// Group by date
+	dateGroups := make(map[string]int)
+	for _, statsData := range dsm.data {
+		dateGroups[statsData.Date]++
 	}
 
 	return map[string]interface{}{
-		"total_records":   totalRecords,
-		"unique_dates":    len(dateCount),
-		"unique_nodes":    len(nodeCount),
-		"unique_projects": len(projectCount),
-		"redis_enabled":   dsm.redisEnabled,
-		"retention_days":  dsm.retentionDays,
-		"save_interval":   dsm.saveInterval.String(),
+		"total_entries":       totalEntries,
+		"total_counters":      totalCounters,
+		"retention_days":      dsm.retentionDays,
+		"save_interval":       dsm.saveInterval.String(),
+		"restart_detection":   dsm.restartDetection,
+		"redis_enabled":       dsm.redisEnabled,
+		"entries_by_date":     dateGroups,
+		"redis_key_prefix":    dsm.redisKeyPrefix,
+		"redis_write_pending": len(dsm.redisWriteChan),
 	}
 }

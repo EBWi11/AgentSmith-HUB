@@ -221,47 +221,8 @@ func getCluster(c echo.Context) error {
 	return c.String(http.StatusOK, string(data))
 }
 
-// getQPSData returns QPS data for query
-// Each node can provide its own data - no leader restriction needed
-func getQPSData(c echo.Context) error {
-	if common.GlobalQPSManager == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "QPS manager not initialized",
-		})
-	}
-
-	projectID := c.QueryParam("project_id")
-	nodeID := c.QueryParam("node_id")
-	componentID := c.QueryParam("component_id")
-	componentType := c.QueryParam("component_type")
-	aggregated := c.QueryParam("aggregated") == "true"
-
-	var result interface{}
-
-	if aggregated && projectID != "" {
-		// Return aggregated QPS data for a project
-		result = common.GlobalQPSManager.GetAggregatedQPS(projectID)
-	} else if projectID != "" && nodeID == "" {
-		// Return all components in a project
-		result = common.GlobalQPSManager.GetProjectQPS(projectID)
-	} else if nodeID != "" && projectID != "" && componentID != "" && componentType != "" {
-		// Return specific component QPS data using legacy method for backward compatibility
-		result = common.GlobalQPSManager.GetComponentQPSLegacy(nodeID, projectID, componentID, componentType)
-	} else if nodeID == "" && projectID == "" {
-		// Return all QPS data
-		result = common.GlobalQPSManager.GetAllQPS()
-	} else {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": "Invalid query parameters. Use 'project_id' for project data, or specify 'node_id', 'project_id', 'component_id', and 'component_type' for specific component data",
-		})
-	}
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"data":      result,
-		"timestamp": time.Now(),
-		"stats":     common.GlobalQPSManager.GetStats(),
-	})
-}
+// getQPSData endpoint removed - QPS data is no longer collected
+// Use getDailyMessages for message statistics instead
 
 // getDailyMessages returns real message counts for today (from 00:00)
 // Modified to read directly from Redis via Daily Stats Manager
@@ -538,14 +499,14 @@ func getClusterHealth(c echo.Context) error {
 	}
 	health["redis_healthy"] = redisHealthy
 
-	// QPS Manager status
-	qpsHealthy := false
-	if common.GlobalQPSManager != nil {
-		qpsStats := common.GlobalQPSManager.GetStats()
-		qpsHealthy = true
-		health["qps_manager"] = qpsStats
+	// Daily Stats Manager status (replaced QPS Manager)
+	dailyStatsHealthy := false
+	if common.GlobalDailyStatsManager != nil {
+		dailyStatsStats := common.GlobalDailyStatsManager.GetStats()
+		dailyStatsHealthy = true
+		health["daily_stats_manager"] = dailyStatsStats
 	}
-	health["qps_manager_healthy"] = qpsHealthy
+	health["daily_stats_manager_healthy"] = dailyStatsHealthy
 
 	// System Monitor status
 	systemHealthy := false
@@ -563,7 +524,7 @@ func getClusterHealth(c echo.Context) error {
 			healthyNodeCount = hc
 		}
 	}
-	overallHealthy := redisHealthy && qpsHealthy && systemHealthy && (healthyNodeCount > 0)
+	overallHealthy := redisHealthy && dailyStatsHealthy && systemHealthy && (healthyNodeCount > 0)
 	health["overall_healthy"] = overallHealthy
 	health["timestamp"] = time.Now()
 
