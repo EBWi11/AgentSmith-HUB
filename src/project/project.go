@@ -623,12 +623,19 @@ func (p *Project) getPNS() {
 		// For FROM component: build sequence independently
 		fromKey := getNodeFromKey(p.FlowNodes[i])
 		fromSequence := buildSequence(fromKey, make(map[string]bool))
-		p.FlowNodes[i].FromPNS = fromSequence
 
 		// For TO component: build sequence based on FROM component in THIS connection
 		toKey := getNodeToKey(p.FlowNodes[i])
 		toSequence := fromSequence + "." + toKey
-		p.FlowNodes[i].ToPNS = toSequence
+
+		// Add project ID isolation for test mode to avoid polluting production environment
+		if p.Testing {
+			p.FlowNodes[i].FromPNS = fmt.Sprintf("TEST_%s_%s", p.Id, fromSequence)
+			p.FlowNodes[i].ToPNS = fmt.Sprintf("TEST_%s_%s", p.Id, toSequence)
+		} else {
+			p.FlowNodes[i].FromPNS = fromSequence
+			p.FlowNodes[i].ToPNS = toSequence
+		}
 	}
 }
 
@@ -989,23 +996,50 @@ func (p *Project) initComponents() error {
 				rs.UpStream[node.ToPNS] = &c
 			}
 		case "OUTPUT":
-			if o, ok := GlobalProject.PNSOutputs[node.ToPNS]; ok {
-				p.Outputs[node.ToPNS] = o
-				createChannel = false
-			} else {
-				o, err := output.NewFromExisting(GlobalProject.Outputs[node.ToID], node.ToPNS)
-				if err != nil {
-					return fmt.Errorf("failed to create output from existing: %s %w", node.ToPNS, err)
+			if p.Testing {
+				// In testing mode, create a test version of the output component
+				// This avoids sending data to real external systems
+				originalOutput, ok := GlobalProject.Outputs[node.ToID]
+				if !ok {
+					return fmt.Errorf("output component not found for testing: %s", node.ToID)
 				}
-				common.GlobalMu.Lock()
-				GlobalProject.PNSOutputs[node.ToPNS] = o
-				common.GlobalMu.Unlock()
-				p.Outputs[node.ToPNS] = o
+
+				// Create a new output instance for testing based on the original config
+				testOutput, err := output.NewFromExisting(originalOutput, node.ToPNS)
+				if err != nil {
+					return fmt.Errorf("failed to create test output component: %s %w", node.ToPNS, err)
+				}
+
+				// Set test-specific properties to avoid pollution
+				testOutput.SetTestMode()                  // Disable sampling and global state interactions
+				testOutput.OwnerProjects = []string{p.Id} // Mark as owned by this test project
+
+				p.Outputs[node.ToPNS] = testOutput
 
 				createChannel = true
 				c := make(chan map[string]interface{}, 1024)
 				p.MsgChannels[node.ToPNS] = &c
-				o.UpStream[node.ToPNS] = &c
+				testOutput.UpStream[node.ToPNS] = &c
+			} else {
+				// Production mode: use shared PNS output or create new one
+				if o, ok := GlobalProject.PNSOutputs[node.ToPNS]; ok {
+					p.Outputs[node.ToPNS] = o
+					createChannel = false
+				} else {
+					o, err := output.NewFromExisting(GlobalProject.Outputs[node.ToID], node.ToPNS)
+					if err != nil {
+						return fmt.Errorf("failed to create output from existing: %s %w", node.ToPNS, err)
+					}
+					common.GlobalMu.Lock()
+					GlobalProject.PNSOutputs[node.ToPNS] = o
+					common.GlobalMu.Unlock()
+					p.Outputs[node.ToPNS] = o
+
+					createChannel = true
+					c := make(chan map[string]interface{}, 1024)
+					p.MsgChannels[node.ToPNS] = &c
+					o.UpStream[node.ToPNS] = &c
+				}
 			}
 		}
 
@@ -1031,10 +1065,32 @@ func (p *Project) initComponents() error {
 				p.Rulesets[node.FromPNS].DownStream[node.ToPNS] = p.MsgChannels[node.ToPNS]
 			}
 		case "INPUT":
-			if in, ok := GlobalProject.Inputs[node.FromID]; !ok {
-				return fmt.Errorf("input component not found: %s", node.FromID)
+			if p.Testing {
+				// In testing mode, create a test version of the input component
+				// This avoids connecting to real external data sources
+				originalInput, ok := GlobalProject.Inputs[node.FromID]
+				if !ok {
+					return fmt.Errorf("input component not found for testing: %s", node.FromID)
+				}
+
+				// Create a new input instance for testing based on the original config
+				testInput, err := input.NewFromExisting(originalInput, node.FromPNS)
+				if err != nil {
+					return fmt.Errorf("failed to create test input component: %s %w", node.FromPNS, err)
+				}
+
+				// Set test-specific properties to avoid pollution
+				testInput.SetTestMode()                  // Disable sampling and global state interactions
+				testInput.OwnerProjects = []string{p.Id} // Mark as owned by this test project
+
+				p.Inputs[node.FromPNS] = testInput
 			} else {
-				p.Inputs[node.FromPNS] = in
+				// Production mode: use the real input component
+				if in, ok := GlobalProject.Inputs[node.FromID]; !ok {
+					return fmt.Errorf("input component not found: %s", node.FromID)
+				} else {
+					p.Inputs[node.FromPNS] = in
+				}
 			}
 
 			if createChannel {
@@ -1050,8 +1106,16 @@ func (p *Project) initComponents() error {
 
 func (p *Project) runComponents() error {
 	for _, in := range p.Inputs {
-		if err := in.Start(); err != nil {
-			return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
+		if p.Testing {
+			// In testing mode, use StartForTesting to avoid connecting to external data sources
+			if err := in.StartForTesting(); err != nil {
+				return fmt.Errorf("failed to start input component in testing mode %s: %w", in.Id, err)
+			}
+		} else {
+			// Production mode: normal start
+			if err := in.Start(); err != nil {
+				return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
+			}
 		}
 	}
 

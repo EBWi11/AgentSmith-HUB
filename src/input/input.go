@@ -699,3 +699,39 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 
 	return result
 }
+
+// NewFromExisting creates a new Input instance from an existing one with a different ProjectNodeSequence
+// This is used when multiple projects use the same input component but with different data flow sequences
+func NewFromExisting(existing *Input, newProjectNodeSequence string) (*Input, error) {
+	if existing == nil {
+		return nil, fmt.Errorf("existing input is nil")
+	}
+
+	// Create a new Input instance with the same configuration but different ProjectNodeSequence
+	newInput := &Input{
+		Id:                  existing.Id,
+		Path:                existing.Path,
+		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
+		Type:                existing.Type,
+		DownStream:          make(map[string]*chan map[string]interface{}, 0),
+		kafkaCfg:            existing.kafkaCfg,
+		aliyunSLSCfg:        existing.aliyunSLSCfg,
+		Config:              existing.Config,
+		Status:              common.StatusStopped,
+		// Note: Runtime fields (kafkaConsumer, slsConsumer, wg, stopChan) are intentionally not copied
+		// as they will be initialized when the input starts
+		// Metrics fields (consumeTotal) are also not copied as they are instance-specific
+	}
+
+	// Only create sampler on leader node for performance
+	if common.IsLeader {
+		newInput.sampler = common.GetSampler("input." + existing.Id)
+	}
+
+	return newInput, nil
+}
+
+// SetTestMode configures the input for test mode by disabling sampling and other global state interactions
+func (in *Input) SetTestMode() {
+	in.sampler = nil // Disable sampling for test instances
+}
