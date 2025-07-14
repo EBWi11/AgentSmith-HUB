@@ -101,7 +101,7 @@ func ServerStartFollower(listenAddr string) error {
 	auth.GET("/outputs/:id", getOutput)
 	auth.GET("/plugins", getPlugins)
 	auth.GET("/plugins/:id", getPlugin)
-	auth.GET("/available-plugins", getAvailablePlugins)
+	auth.GET("/available-plugins", getPlugins) // Use same handler with different default params
 
 	// Read-only testing endpoints
 	auth.GET("/connect-check/:type/:id", connectCheck)

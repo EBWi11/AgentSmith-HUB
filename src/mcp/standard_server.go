@@ -376,8 +376,9 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 
 	// Add ruleset resources
 	common.GlobalMu.RLock()
-	for rsID, rs := range project.GlobalProject.Rulesets {
-		owners := rs.OwnerProjects
+	for rsID, _ := range project.GlobalProject.Rulesets {
+		// Dynamically find projects using this ruleset (replaces static OwnerProjects)
+		owners := findProjectsUsingRuleset(rsID)
 		sampleCnt := 0
 		sampler := common.GetSampler("ruleset." + rsID)
 		if sampler != nil {
@@ -483,7 +484,9 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 
 			switch fragment {
 			case "owners":
-				ownersJSON, _ := json.Marshal(rs.OwnerProjects)
+				// Dynamically find projects using this ruleset (replaces static OwnerProjects)
+				owners := findProjectsUsingRuleset(resID)
+				ownersJSON, _ := json.Marshal(owners)
 				content = string(ownersJSON)
 				mimeType = "application/json"
 			case "samples":
@@ -559,4 +562,43 @@ func (s *StandardMCPServer) createJSONRPCError(id interface{}, code int, message
 		},
 	}
 	return json.Marshal(response)
+}
+
+// findProjectsUsingRuleset dynamically finds projects that use a specific ruleset
+func findProjectsUsingRuleset(rulesetID string) []string {
+	projects := make([]string, 0)
+
+	for projectID, proj := range project.GlobalProject.Projects {
+		if _, exists := proj.Rulesets[rulesetID]; exists {
+			projects = append(projects, projectID)
+		}
+	}
+
+	return projects
+}
+
+// findProjectsUsingInput dynamically finds projects that use a specific input
+func findProjectsUsingInput(inputID string) []string {
+	projects := make([]string, 0)
+
+	for projectID, proj := range project.GlobalProject.Projects {
+		if _, exists := proj.Inputs[inputID]; exists {
+			projects = append(projects, projectID)
+		}
+	}
+
+	return projects
+}
+
+// findProjectsUsingOutput dynamically finds projects that use a specific output
+func findProjectsUsingOutput(outputID string) []string {
+	projects := make([]string, 0)
+
+	for projectID, proj := range project.GlobalProject.Projects {
+		if _, exists := proj.Outputs[outputID]; exists {
+			projects = append(projects, projectID)
+		}
+	}
+
+	return projects
 }

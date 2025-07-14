@@ -19,10 +19,8 @@ type SampleData struct {
 	Data                interface{} `json:"data"`
 	Timestamp           time.Time   `json:"timestamp"`
 	ProjectNodeSequence string      `json:"project_node_sequence"`
-	ProjectID           string      `json:"project_id"`
+	// ProjectID removed as it's redundant with PNS
 }
-
-// Note: ProjectSamples struct has been removed as we now use Redis-only storage
 
 // SamplerStats represents statistics about sampling
 type SamplerStats struct {
@@ -78,7 +76,7 @@ func (s *Sampler) isFirstSampleForProject(projectNodeSequence string) bool {
 }
 
 // Sample attempts to sample the data based on sampling rate
-func (s *Sampler) Sample(data interface{}, projectNodeSequence string, projectID string) bool {
+func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Normalize ProjectNodeSequence to lower-case to avoid case-sensitivity issues downstream
 	projectNodeSequence = strings.ToLower(projectNodeSequence)
 
@@ -113,7 +111,7 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string, projectID
 		Data:                data,
 		Timestamp:           time.Now(),
 		ProjectNodeSequence: projectNodeSequence,
-		ProjectID:           projectID,
+		// ProjectID removed as it's redundant with PNS
 	}
 
 	// If there's a goroutine pool, process asynchronously; otherwise process synchronously
@@ -141,9 +139,8 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string, projectID
 func (s *Sampler) storeSample(sample SampleData, projectNodeSequence string) {
 	redisSampleManager := GetRedisSampleManager()
 	if redisSampleManager != nil {
-		if err := redisSampleManager.StoreSample(s.name, sample.ProjectID, sample); err != nil {
-			// TODO: add logger if needed
-		}
+		// Use simplified storage without projectID
+		_ = redisSampleManager.StoreSample(s.name, sample)
 	}
 }
 
@@ -157,21 +154,6 @@ func (s *Sampler) GetSamples() map[string][]SampleData {
 	samples, err := redisSampleManager.GetSamples(s.name)
 	if err != nil {
 		return make(map[string][]SampleData)
-	}
-
-	return samples
-}
-
-// GetSamplesByProject returns samples for a specific project from Redis
-func (s *Sampler) GetSamplesByProject(projectID string, projectNodeSequence string) []SampleData {
-	redisSampleManager := GetRedisSampleManager()
-	if redisSampleManager == nil {
-		return nil
-	}
-
-	samples, err := redisSampleManager.GetSamplesByProject(s.name, projectID, projectNodeSequence)
-	if err != nil {
-		return nil
 	}
 
 	return samples
@@ -216,15 +198,6 @@ func (s *Sampler) Reset() {
 	}
 }
 
-// ResetProject resets samples for a specific project
-func (s *Sampler) ResetProject(projectID string, projectNodeSequence string) {
-	// Clear Redis samples for specific project
-	redisSampleManager := GetRedisSampleManager()
-	if redisSampleManager != nil {
-		redisSampleManager.ResetProject(s.name, projectID, projectNodeSequence)
-	}
-}
-
 // Close releases resources
 func (s *Sampler) Close() {
 	// Mark as closed
@@ -262,16 +235,4 @@ func GetSampler(name string) *Sampler {
 	sampler := NewSampler(name)
 	samplers[name] = sampler
 	return sampler
-}
-
-// GetAllSamplers returns all sampler instances
-func GetAllSamplers() map[string]*Sampler {
-	mu.RLock()
-	defer mu.RUnlock()
-
-	result := make(map[string]*Sampler)
-	for k, v := range samplers {
-		result[k] = v
-	}
-	return result
 }

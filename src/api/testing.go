@@ -18,16 +18,110 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// testRulesetInternal is the unified internal function for testing rulesets
-func testRulesetInternal(rulesetContent string, testData map[string]interface{}, timeoutSeconds int, isTemp bool) (map[string]interface{}, error) {
+// Helper function to return appropriate error format for ruleset APIs
+func rulesetErrorResponse(isContentMode bool, success bool, errorMsg string) map[string]interface{} {
+	if isContentMode {
+		// /test-ruleset-content format
+		return map[string]interface{}{
+			"success": success,
+			"error":   errorMsg,
+			"results": []interface{}{},
+		}
+	} else {
+		// /test-ruleset format (original)
+		return map[string]interface{}{
+			"success": success,
+			"error":   errorMsg,
+			"result":  nil,
+		}
+	}
+}
+
+func testRuleset(c echo.Context) error {
+	id := c.Param("id") // May be empty for /test-ruleset-content endpoint
+
+	// Parse request body
+	var req struct {
+		Data    map[string]interface{} `json:"data"`
+		Content string                 `json:"content,omitempty"` // Optional content for direct testing
+	}
+
+	if err := c.Bind(&req); err != nil {
+		isContentMode := req.Content != ""
+		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "Invalid request body: "+err.Error()))
+	}
+
+	// Check if input data is provided
+	if req.Data == nil {
+		isContentMode := req.Content != ""
+		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "Input data is required"))
+	}
+
+	var rulesetContent string
+	var isTemp bool
+
+	// If content is provided directly, use it (for /test-ruleset-content endpoint)
+	if req.Content != "" {
+		rulesetContent = req.Content
+		isTemp = false // Direct content is not considered temporary
+	} else if id != "" {
+		// Original logic to find ruleset by ID (for /test-ruleset/:id endpoint)
+		// Check if there's a temporary file first
+		tempPath, tempExists := GetComponentPath("ruleset", id, true)
+		if tempExists {
+			content, err := ReadComponent(tempPath)
+			if err == nil {
+				rulesetContent = content
+				isTemp = true
+			}
+		}
+
+		// If no temp file, check formal file
+		if rulesetContent == "" {
+			formalPath, formalExists := GetComponentPath("ruleset", id, false)
+			if !formalExists {
+				// Check if ruleset exists in memory
+				r := project.GlobalProject.Rulesets[id]
+				if r == nil {
+					// Check if ruleset exists in new rulesets
+					content, ok := project.GlobalProject.RulesetsNew[id]
+					if !ok {
+						return c.JSON(http.StatusNotFound, rulesetErrorResponse(false, false, "Ruleset not found: "+id))
+					}
+					rulesetContent = content
+					isTemp = true
+				} else {
+					rulesetContent = r.RawConfig
+				}
+			} else {
+				content, err := ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+						"success": false,
+						"error":   "Failed to read ruleset: " + err.Error(),
+						"results": []interface{}{},
+					})
+				}
+				rulesetContent = content
+			}
+		}
+	} else {
+		// Neither content nor id provided
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Either ruleset ID or content must be provided",
+			"results": []interface{}{},
+		})
+	}
+
 	// Create a temporary ruleset for testing
 	tempRuleset, err := rules_engine.NewRuleset("", rulesetContent, "temp_test_"+fmt.Sprintf("%d", time.Now().UnixNano()))
 	if err != nil {
-		return map[string]interface{}{
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
 			"error":   "Failed to parse ruleset: " + err.Error(),
 			"results": []interface{}{},
-		}, nil
+		})
 	}
 
 	// Create channels for testing
@@ -45,24 +139,23 @@ func testRulesetInternal(rulesetContent string, testData map[string]interface{},
 	// Start the ruleset
 	err = tempRuleset.Start()
 	if err != nil {
-		return map[string]interface{}{
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
 			"error":   "Failed to start ruleset: " + err.Error(),
 			"results": []interface{}{},
-		}, nil
+		})
 	}
 
 	// Send the test data
-	inputCh <- testData
+	inputCh <- req.Data
 
 	// Collect results with timeout
 	results := make([]map[string]interface{}, 0)
-	timeout := time.After(time.Duration(timeoutSeconds) * time.Second)
+	timeout := time.After(30 * time.Second)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	var timedOut bool
-	lastResultTime := time.Now()
 
 	for {
 		select {
@@ -73,26 +166,16 @@ func testRulesetInternal(rulesetContent string, testData map[string]interface{},
 				goto done
 			}
 			results = append(results, result)
-			lastResultTime = time.Now()
 		case <-ticker.C:
-			// Different timeout conditions based on timeout duration
-			if timeoutSeconds <= 5 {
-				// For short timeouts (like testRulesetContent), check for recent results
-				if len(inputCh) == 0 && time.Since(lastResultTime) > 500*time.Millisecond {
-					timedOut = false
-					goto done
-				}
-			} else {
-				// For longer timeouts (like testRuleset), check task count
-				if len(inputCh) == 0 && tempRuleset.GetRunningTaskCount() == 0 {
-					timedOut = false
-					goto done
-				}
+			// Use task count for timeout detection
+			if len(inputCh) == 0 && tempRuleset.GetRunningTaskCount() == 0 {
+				timedOut = false
+				goto done
 			}
 		case <-timeout:
 			// Timeout occurred
 			timedOut = true
-			logger.Warn("Ruleset test timed out after %d seconds", timeoutSeconds)
+			logger.Warn("Ruleset test timed out after 30 seconds")
 			goto done
 		}
 	}
@@ -121,128 +204,7 @@ done:
 
 	// Add timeout warning if needed
 	if timedOut {
-		response["warning"] = fmt.Sprintf("Test timed out after %d seconds. Results may be incomplete.", timeoutSeconds)
-	}
-
-	return response, nil
-}
-
-func testRuleset(c echo.Context) error {
-	id := c.Param("id")
-
-	// Parse request body
-	var req struct {
-		Data map[string]interface{} `json:"data"`
-	}
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-			"result":  nil,
-		})
-	}
-
-	// Check if input data is provided
-	if req.Data == nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input data is required",
-			"result":  nil,
-		})
-	}
-
-	// Check if ruleset exists in formal or temporary files
-	var rulesetContent string
-	var isTemp bool
-
-	// Check if there's a temporary file first
-	tempPath, tempExists := GetComponentPath("ruleset", id, true)
-	if tempExists {
-		content, err := ReadComponent(tempPath)
-		if err == nil {
-			rulesetContent = content
-			isTemp = true
-		}
-	}
-
-	// If no temp file, check formal file
-	if rulesetContent == "" {
-		formalPath, formalExists := GetComponentPath("ruleset", id, false)
-		if !formalExists {
-			// Check if ruleset exists in memory
-			r := project.GlobalProject.Rulesets[id]
-			if r == nil {
-				// Check if ruleset exists in new rulesets
-				content, ok := project.GlobalProject.RulesetsNew[id]
-				if !ok {
-					return c.JSON(http.StatusNotFound, map[string]interface{}{
-						"success": false,
-						"error":   "Ruleset not found: " + id,
-						"result":  nil,
-					})
-				}
-				rulesetContent = content
-				isTemp = true
-			} else {
-				rulesetContent = r.RawConfig
-			}
-		} else {
-			content, err := ReadComponent(formalPath)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "Failed to read ruleset: " + err.Error(),
-					"result":  nil,
-				})
-			}
-			rulesetContent = content
-		}
-	}
-
-	// Use the unified internal function with 30-second timeout
-	response, err := testRulesetInternal(rulesetContent, req.Data, 30, isTemp)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, response)
-	}
-
-	return c.JSON(http.StatusOK, response)
-}
-
-func testRulesetContent(c echo.Context) error {
-	var req struct {
-		Content string                 `json:"content"`
-		Data    map[string]interface{} `json:"data"`
-	}
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-			"results": []interface{}{},
-		})
-	}
-
-	if req.Content == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Ruleset content is required",
-			"results": []interface{}{},
-		})
-	}
-
-	if req.Data == nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input data is required",
-			"results": []interface{}{},
-		})
-	}
-
-	// Use the unified internal function with 2-second timeout
-	response, err := testRulesetInternal(req.Content, req.Data, 2, false)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, response)
+		response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -258,7 +220,8 @@ func testPlugin(c echo.Context) error {
 
 	// Parse request body
 	var req struct {
-		Data map[string]interface{} `json:"data"`
+		Data    map[string]interface{} `json:"data"`
+		Content string                 `json:"content,omitempty"` // Optional content for direct testing
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -269,47 +232,86 @@ func testPlugin(c echo.Context) error {
 		})
 	}
 
-	// Check if plugin exists in memory
-	p, existsInMemory := plugin.Plugins[id]
-
-	// Check if plugin exists in temporary files
-	tempContent, existsInTemp := plugin.PluginsNew[id]
-
-	if !existsInMemory && !existsInTemp {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Plugin not found: " + id,
-			"result":  nil,
-		})
-	}
-
 	var pluginToTest *plugin.Plugin
 	var isTemporary bool
+	var tempPluginId string
 
-	if existsInMemory {
-		// Use existing plugin
-		pluginToTest = p
-		isTemporary = false
-	} else {
-		// Try to verify the temporary plugin
-		err := plugin.Verify("", tempContent, id+"_test_temp")
+	// If content is provided directly, use it (for /test-plugin-content endpoint)
+	if req.Content != "" {
+		// Create a temporary plugin for testing
+		tempPluginId = fmt.Sprintf("temp_test_content_%d", time.Now().UnixNano())
+		err := plugin.NewPlugin("", req.Content, tempPluginId, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"success": false,
-				"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
+				"error":   "Failed to create plugin: " + err.Error(),
 				"result":  nil,
 			})
 		}
 
-		// Create a temporary plugin instance for testing
-		tempPlugin := &plugin.Plugin{
-			Name:    id,
-			Payload: []byte(tempContent),
-			Type:    plugin.YAEGI_PLUGIN,
+		// Get the created plugin from the global registry
+		tempPlugin, exists := plugin.Plugins[tempPluginId]
+		if !exists {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to retrieve created plugin",
+				"result":  nil,
+			})
 		}
 
 		pluginToTest = tempPlugin
 		isTemporary = true
+
+		// Clean up the temporary plugin on exit
+		defer delete(plugin.Plugins, tempPluginId)
+	} else if id != "" {
+		// Original logic to find plugin by ID (for /test-plugin/:id endpoint)
+		// Check if plugin exists in memory
+		p, existsInMemory := plugin.Plugins[id]
+
+		// Check if plugin exists in temporary files
+		tempContent, existsInTemp := plugin.PluginsNew[id]
+
+		if !existsInMemory && !existsInTemp {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Plugin not found: " + id,
+				"result":  nil,
+			})
+		}
+
+		if existsInMemory {
+			// Use existing plugin
+			pluginToTest = p
+			isTemporary = false
+		} else {
+			// Try to verify the temporary plugin
+			err := plugin.Verify("", tempContent, id+"_test_temp")
+			if err != nil {
+				return c.JSON(http.StatusOK, map[string]interface{}{
+					"success": false,
+					"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
+					"result":  nil,
+				})
+			}
+
+			// Create a temporary plugin instance for testing
+			tempPlugin := &plugin.Plugin{
+				Name:    id,
+				Payload: []byte(tempContent),
+				Type:    plugin.YAEGI_PLUGIN,
+			}
+
+			pluginToTest = tempPlugin
+			isTemporary = true
+		}
+	} else {
+		// Neither content nor id provided
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   "Either plugin ID or content must be provided",
+			"result":  nil,
+		})
 	}
 
 	// Process parameter values, try to convert to appropriate types
@@ -553,96 +555,121 @@ done:
 	return c.JSON(http.StatusOK, response)
 }
 
+// Helper function to return appropriate error format based on call mode
+func projectErrorResponse(isContentMode bool, httpStatus int, success bool, errorMsg string) map[string]interface{} {
+	if isContentMode {
+		// /test-project-content format
+		return map[string]interface{}{
+			"success": success,
+			"error":   errorMsg,
+			"outputs": map[string][]map[string]interface{}{},
+		}
+	} else {
+		// /test-project format
+		return map[string]interface{}{
+			"success": success,
+			"error":   errorMsg,
+			"result":  nil,
+		}
+	}
+}
+
 func testProject(c echo.Context) error {
-	id := c.Param("id")
+	// Smart parameter detection: check both URL parameter positions
+	id := c.Param("id")                      // For /test-project/:id
+	inputNodeFromURL := c.Param("inputNode") // For /test-project-content/:inputNode
 
 	// Parse request body
 	var req struct {
-		InputNode string                 `json:"input_node"` // Format: "input.name"
+		InputNode string                 `json:"input_node,omitempty"` // For /test-project/:id
+		Content   string                 `json:"content,omitempty"`    // For /test-project-content/:inputNode
 		Data      map[string]interface{} `json:"data"`
 	}
 
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-			"result":  nil,
-		})
+		isContentMode := inputNodeFromURL != ""
+		return c.JSON(http.StatusBadRequest, projectErrorResponse(isContentMode, http.StatusBadRequest, false, "Invalid request body: "+err.Error()))
 	}
 
-	// Check if input data and node are provided
+	// Check if input data is provided
 	if req.Data == nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input data is required",
-			"result":  nil,
-		})
+		isContentMode := inputNodeFromURL != ""
+		return c.JSON(http.StatusBadRequest, projectErrorResponse(isContentMode, http.StatusBadRequest, false, "Input data is required"))
 	}
 
-	if req.InputNode == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input node is required",
-			"result":  nil,
-		})
-	}
-
-	// Parse input node
-	nodeParts := strings.Split(req.InputNode, ".")
-	if len(nodeParts) != 2 || strings.ToLower(nodeParts[0]) != "input" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid input node format. Expected 'input.name'",
-			"result":  nil,
-		})
-	}
-	inputNodeName := nodeParts[1]
-
-	// Check if project exists
+	// Determine call mode and extract parameters
+	var inputNodeName string
 	var projectContent string
 	var isTemp bool
+	var isContentMode bool
 
-	// First check if there is a temporary file
-	tempPath, tempExists := GetComponentPath("project", id, true)
-	if tempExists {
-		content, err := ReadComponent(tempPath)
-		if err == nil {
-			projectContent = content
-			isTemp = true
+	if inputNodeFromURL != "" && req.Content != "" {
+		// /test-project-content/:inputNode mode
+		inputNodeName = inputNodeFromURL
+		projectContent = req.Content
+		isTemp = true
+		isContentMode = true
+	} else if id != "" && req.InputNode != "" {
+		// /test-project/:id mode
+		// Parse input node
+		nodeParts := strings.Split(req.InputNode, ".")
+		if len(nodeParts) != 2 || strings.ToLower(nodeParts[0]) != "input" {
+			return c.JSON(http.StatusBadRequest, projectErrorResponse(false, http.StatusBadRequest, false, "Invalid input node format. Expected 'input.name'"))
 		}
-	}
+		inputNodeName = nodeParts[1]
+		isContentMode = false
 
-	// If no temporary file, check formal file
-	if projectContent == "" {
-		formalPath, formalExists := GetComponentPath("project", id, false)
-		if !formalExists {
-			// Check if project exists in memory
-			proj := project.GlobalProject.Projects[id]
-			if proj == nil {
-				// Check if project exists in new projects
-				content, ok := project.GlobalProject.ProjectsNew[id]
-				if !ok {
-					return c.JSON(http.StatusNotFound, map[string]interface{}{
+		// Find project content by ID
+		// First check if there is a temporary file
+		tempPath, tempExists := GetComponentPath("project", id, true)
+		if tempExists {
+			content, err := ReadComponent(tempPath)
+			if err == nil {
+				projectContent = content
+				isTemp = true
+			}
+		}
+
+		// If no temporary file, check formal file
+		if projectContent == "" {
+			formalPath, formalExists := GetComponentPath("project", id, false)
+			if !formalExists {
+				// Check if project exists in memory
+				proj := project.GlobalProject.Projects[id]
+				if proj == nil {
+					// Check if project exists in new projects
+					content, ok := project.GlobalProject.ProjectsNew[id]
+					if !ok {
+						return c.JSON(http.StatusNotFound, map[string]interface{}{
+							"success": false,
+							"error":   "Project not found: " + id,
+							"outputs": map[string][]map[string]interface{}{},
+						})
+					}
+					projectContent = content
+					isTemp = true
+				} else {
+					projectContent = proj.Config.RawConfig
+				}
+			} else {
+				content, err := ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 						"success": false,
-						"error":   "Project not found: " + id,
-						"result":  nil,
+						"error":   "Failed to read project: " + err.Error(),
+						"outputs": map[string][]map[string]interface{}{},
 					})
 				}
 				projectContent = content
-			} else {
-				projectContent = proj.Config.RawConfig
 			}
-		} else {
-			content, err := ReadComponent(formalPath)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "Failed to read project: " + err.Error(),
-					"result":  nil,
-				})
-			}
-			projectContent = content
 		}
+	} else {
+		// Invalid parameters
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Either (project ID + input_node) or (inputNode URL param + content) must be provided",
+			"outputs": map[string][]map[string]interface{}{},
+		})
 	}
 
 	// Create temporary project for testing (based on PNS logic)
@@ -741,11 +768,7 @@ func testProject(c echo.Context) error {
 	logger.Info("Injecting test data through input component", "input", inputNodeName, "pns", inputPNS, "downstream_count", len(testInput.DownStream))
 	testInput.ProcessTestData(req.Data)
 
-	// Wait for processing with timeout
-	timeout := time.After(30 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
+	// Wait for processing with timeout (strategy depends on call mode)
 	var timedOut bool
 	outputResults := make(map[string][]map[string]interface{})
 
@@ -754,64 +777,106 @@ func testProject(c echo.Context) error {
 		outputResults[pns] = []map[string]interface{}{}
 	}
 
-	for {
-		select {
-		case <-ticker.C:
-			// Collect any available results
-			for pns, outputChan := range outputChannels {
-				for {
-					select {
-					case msg := <-outputChan:
-						outputResults[pns] = append(outputResults[pns], msg)
-						logger.Info("Collected message from output", "pns", pns, "message_count", len(outputResults[pns]))
-					default:
-						goto nextOutput
+	if isContentMode {
+		// Simple strategy for content mode (like original testProjectContent)
+		time.Sleep(500 * time.Millisecond)
+
+		// Collect results from output channels with timeout
+		collectTimeout := time.After(1000 * time.Millisecond)
+		for outputName, testChan := range outputChannels {
+			// Collect messages from this output channel
+			for {
+				select {
+				case result, ok := <-testChan:
+					if !ok {
+						// Channel is closed
+						goto nextOutputContent
+					}
+					outputResults[outputName] = append(outputResults[outputName], result)
+				case <-collectTimeout:
+					// Timeout reached
+					goto nextOutputContent
+				case <-time.After(100 * time.Millisecond):
+					// No more messages after 100ms, assume we're done with this output
+					goto nextOutputContent
+				}
+			}
+		nextOutputContent:
+		}
+		timedOut = false
+	} else {
+		// Complex strategy for ID mode (original testProject logic)
+		timeout := time.After(30 * time.Second)
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Collect any available results
+				for pns, outputChan := range outputChannels {
+					for {
+						select {
+						case msg := <-outputChan:
+							outputResults[pns] = append(outputResults[pns], msg)
+							logger.Info("Collected message from output", "pns", pns, "message_count", len(outputResults[pns]))
+						default:
+							goto nextOutputID
+						}
+					}
+				nextOutputID:
+				}
+
+				// Check if all channels are empty and no running tasks
+				allChannelsEmpty := true
+				allTasksComplete := true
+
+				for pns := range tempProject.MsgChannels {
+					if len(*tempProject.MsgChannels[pns]) > 0 {
+						allChannelsEmpty = false
+						break
 					}
 				}
-			nextOutput:
-			}
 
-			// Check if all channels are empty and no running tasks
-			allChannelsEmpty := true
-			allTasksComplete := true
-
-			for pns := range tempProject.MsgChannels {
-				if len(*tempProject.MsgChannels[pns]) > 0 {
-					allChannelsEmpty = false
-					break
+				for _, rs := range tempProject.Rulesets {
+					if rs.GetRunningTaskCount() > 0 {
+						allTasksComplete = false
+						break
+					}
 				}
-			}
 
-			for _, rs := range tempProject.Rulesets {
-				if rs.GetRunningTaskCount() > 0 {
-					allTasksComplete = false
-					break
+				if allChannelsEmpty && allTasksComplete {
+					timedOut = false
+					goto done
 				}
-			}
 
-			if allChannelsEmpty && allTasksComplete {
-				timedOut = false
+			case <-timeout:
+				timedOut = true
 				goto done
 			}
-
-		case <-timeout:
-			timedOut = true
-			goto done
 		}
 	}
 done:
 
-	// Return the results with timeout information
+	// Return the results with appropriate format based on call mode
 	response := map[string]interface{}{
-		"success":   true,
-		"isTemp":    isTemp,
-		"outputs":   outputResults,
-		"inputNode": req.InputNode,
-		"timeout":   timedOut,
+		"success": true,
+		"outputs": outputResults,
 	}
 
-	if timedOut {
-		response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
+	// Add fields based on call mode
+	if isContentMode {
+		// /test-project-content format: minimal response
+		response["isTemp"] = true
+	} else {
+		// /test-project format: full response with legacy fields
+		response["isTemp"] = isTemp
+		response["inputNode"] = req.InputNode
+		response["timeout"] = timedOut
+
+		if timedOut {
+			response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
+		}
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -1041,265 +1106,6 @@ func connectCheck(c echo.Context) error {
 
 	return c.JSON(http.StatusInternalServerError, map[string]string{
 		"error": "Unknown error occurred",
-	})
-}
-
-func testPluginContent(c echo.Context) error {
-	var req struct {
-		Content string                 `json:"content"`
-		Data    map[string]interface{} `json:"data"`
-	}
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-			"result":  nil,
-		})
-	}
-
-	if req.Content == "" {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Plugin content is required",
-			"result":  nil,
-		})
-	}
-
-	// Check if args data is provided
-	if req.Data == nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Args data is required",
-			"result":  nil,
-		})
-	}
-
-	// Create a temporary plugin for testing
-	tempPluginId := "temp_test_content"
-	err := plugin.NewPlugin("", req.Content, tempPluginId, plugin.YAEGI_PLUGIN)
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to create plugin: " + err.Error(),
-			"result":  nil,
-		})
-	}
-
-	// Get the created plugin from the global registry
-	tempPlugin, exists := plugin.Plugins[tempPluginId]
-	if !exists {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to retrieve created plugin",
-			"result":  nil,
-		})
-	}
-
-	// Clean up the temporary plugin on exit
-	defer delete(plugin.Plugins, tempPluginId)
-
-	// Load the plugin
-	err = tempPlugin.YaegiLoad()
-	if err != nil {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to load plugin: " + err.Error(),
-			"result":  nil,
-		})
-	}
-
-	// Process parameter values, try to convert to appropriate types
-	args := make([]interface{}, 0)
-	for _, value := range req.Data {
-		// Convert to appropriate types
-		if str, ok := value.(string); ok {
-			args = append(args, str)
-		} else {
-			// Convert other types to string
-			args = append(args, fmt.Sprintf("%v", value))
-		}
-	}
-
-	// Execute plugin (panic is already handled inside plugin functions)
-	var result interface{}
-	var success bool
-	var errMsg string
-
-	// Execute plugin
-	boolResult, err := tempPlugin.FuncEvalCheckNode(args...)
-	result = boolResult
-	if err != nil {
-		success = false
-		errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
-	} else {
-		success = true
-	}
-
-	// Return the result
-	if errMsg != "" {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"success": false,
-			"error":   errMsg,
-			"result":  result,
-		})
-	}
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success": success,
-		"result":  result,
-	})
-}
-
-func testProjectContent(c echo.Context) error {
-	inputNode := c.Param("inputNode")
-
-	var req struct {
-		Content string                 `json:"content"`
-		Data    map[string]interface{} `json:"data"`
-	}
-
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request body: " + err.Error(),
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	if req.Content == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Project content is required",
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	if req.Data == nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input data is required",
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	if inputNode == "" {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input node is required",
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	// Create a temporary project for testing
-	tempProjectId := fmt.Sprintf("temp_test_content_%d", time.Now().UnixNano())
-	tempProject, err := project.NewProject("", req.Content, tempProjectId, true) // testing=true
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to create project: " + err.Error(),
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	// Ensure cleanup on exit
-	defer func() {
-		if stopErr := tempProject.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop temporary project: %v", stopErr)
-		}
-		// Clean up from global project
-		common.GlobalMu.Lock()
-		delete(project.GlobalProject.Projects, tempProjectId)
-		common.GlobalMu.Unlock()
-	}()
-
-	// Check if the specified input exists in the project
-	if _, exists := tempProject.Inputs[inputNode]; !exists {
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   fmt.Sprintf("Input node '%s' not found in project", inputNode),
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	// Create a map to collect output results
-	outputResults := make(map[string][]map[string]interface{})
-	outputChannels := make(map[string]chan map[string]interface{})
-
-	// For each output component, create a test collection channel
-	for outputName, outputComp := range tempProject.Outputs {
-		// Create a channel for each output to collect test results
-		testChan := make(chan map[string]interface{}, 100)
-		outputChannels[outputName] = testChan
-
-		// Set the test collection channel for output component
-		outputComp.TestCollectionChan = &testChan
-
-		logger.Info("Created test collection channel for output", "output", outputName, "project", tempProjectId)
-	}
-
-	// Start the project (will automatically use test mode since TestCollectionChan is set)
-	err = tempProject.Start()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to start project: " + err.Error(),
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	// Find the input node and verify it has downstream connections
-	inputNodeInstance := tempProject.Inputs[inputNode]
-	if len(inputNodeInstance.DownStream) == 0 {
-		logger.Warn("Input node has no downstream connections", "input", inputNode, "project", tempProjectId)
-
-		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"success": false,
-			"error":   "Input node has no downstream connections. Please check project configuration.",
-			"outputs": map[string][]map[string]interface{}{},
-		})
-	}
-
-	// Send test data to all downstream channels of the input
-	logger.Info("Sending test data through input processing", "input", inputNode, "downstream_count", len(inputNodeInstance.DownStream))
-
-	// Process test data through the input component's normal data flow
-	// This ensures proper counting, sampling, and field addition
-	inputNodeInstance.ProcessTestData(req.Data)
-
-	// Wait for data to flow through the system and be collected
-	time.Sleep(500 * time.Millisecond)
-
-	// Collect results from output channels with timeout
-	collectTimeout := time.After(1000 * time.Millisecond)
-	for outputName, testChan := range outputChannels {
-		outputResults[outputName] = []map[string]interface{}{}
-
-		// Collect messages from this output channel
-		for {
-			select {
-			case result, ok := <-testChan:
-				if !ok {
-					// Channel is closed
-					goto nextOutput
-				}
-				outputResults[outputName] = append(outputResults[outputName], result)
-			case <-collectTimeout:
-				// Timeout reached
-				goto nextOutput
-			case <-time.After(100 * time.Millisecond):
-				// No more messages after 100ms, assume we're done with this output
-				goto nextOutput
-			}
-		}
-	nextOutput:
-	}
-
-	// Return the results
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success": true,
-		"outputs": outputResults,
-		"isTemp":  true,
 	})
 }
 
@@ -1549,6 +1355,7 @@ func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
 }
 
 // getProjectComponentSequences returns project node sequences for each component in the project
+// Optimized: directly extracts PNS from FlowNodes instead of rebuilding sequences
 func getProjectComponentSequences(c echo.Context) error {
 	id := c.Param("id")
 
@@ -1597,7 +1404,7 @@ func getProjectComponentSequences(c echo.Context) error {
 		}
 	}
 
-	// Create temporary project to parse configuration
+	// Create temporary project to parse configuration and generate FlowNodes with PNS
 	testProjectId := fmt.Sprintf("test_sequences_%s_%d", id, time.Now().UnixNano())
 	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true
 	if err != nil {
@@ -1607,150 +1414,73 @@ func getProjectComponentSequences(c echo.Context) error {
 		})
 	}
 
-	// Extract the data flow graph from parsed FlowNodes
-	flowGraph := make(map[string]interface{})
-
-	// Build flow nodes information
-	nodes := make([]map[string]interface{}, 0)
-	edges := make([]map[string]interface{}, 0)
-
-	for _, node := range tempProject.FlowNodes {
-		// Add nodes
-		fromNode := map[string]interface{}{
-			"id":   node.FromPNS,
-			"type": node.FromType,
-			"name": node.FromID,
-		}
-		toNode := map[string]interface{}{
-			"id":   node.ToPNS,
-			"type": node.ToType,
-			"name": node.ToID,
-		}
-
-		// Add edge
-		edge := map[string]interface{}{
-			"from":    node.FromPNS,
-			"to":      node.ToPNS,
-			"content": node.Content,
-		}
-
-		nodes = append(nodes, fromNode, toNode)
-		edges = append(edges, edge)
-	}
-
-	flowGraph["nodes"] = nodes
-	flowGraph["edges"] = edges
-
-	// Build component sequences using the same logic as loadComponentsFromGlobal
-	componentSequences := make(map[string]string)
-	hasUpstream := make(map[string]bool)
-	for _, tos := range flowGraph {
-		for _, to := range tos {
-			hasUpstream[to] = true
-		}
-	}
-
-	// Build ProjectNodeSequence recursively
-	var buildSequence func(component string, visited map[string]bool) string
-	buildSequence = func(component string, visited map[string]bool) string {
-		if visited[component] {
-			return component // Break cycle
-		}
-		if seq, exists := componentSequences[component]; exists {
-			return seq
-		}
-		visited[component] = true
-		defer delete(visited, component)
-
-		var upstreamComponent string
-		for from, tos := range flowGraph {
-			for _, to := range tos {
-				if to == component {
-					upstreamComponent = from
-					break
-				}
-			}
-			if upstreamComponent != "" {
-				break
-			}
-		}
-
-		var sequence string
-		if upstreamComponent == "" {
-			sequence = component
-		} else {
-			upstreamSequence := buildSequence(upstreamComponent, visited)
-			sequence = upstreamSequence + "." + component
-		}
-		componentSequences[component] = sequence
-		return sequence
-	}
-
-	// Build sequences for all components
-	for from := range flowGraph {
-		buildSequence(from, make(map[string]bool))
-	}
-	for _, tos := range flowGraph {
-		for _, to := range tos {
-			buildSequence(to, make(map[string]bool))
-		}
-	}
-
-	// Group components by type and collect their sequences
+	// Initialize result structure
 	result := map[string]map[string][]string{
 		"input":   make(map[string][]string),
 		"output":  make(map[string][]string),
 		"ruleset": make(map[string][]string),
 	}
 
-	// Process each component and its sequence
-	for component, sequence := range componentSequences {
-		parts := strings.Split(component, ".")
-		if len(parts) != 2 {
-			continue
+	// Collect all PNS sequences from FlowNodes (PNS is already calculated during project parsing)
+	allSequences := make(map[string]map[string]map[string]bool) // componentType -> componentId -> set of sequences
+
+	// Process each FlowNode to extract PNS information
+	for _, node := range tempProject.FlowNodes {
+		// Extract FROM component sequences
+		fromType := strings.ToLower(node.FromType)
+		fromId := node.FromID
+		fromPNS := node.FromPNS
+
+		// Remove TEST_ prefix if present (testing mode)
+		if strings.HasPrefix(fromPNS, "TEST_") {
+			fromPNS = strings.TrimPrefix(fromPNS, "TEST_"+tempProject.Id+"_")
 		}
 
-		componentType := strings.ToLower(parts[0])
-		componentId := parts[1]
+		if fromType == "input" || fromType == "output" || fromType == "ruleset" {
+			if allSequences[fromType] == nil {
+				allSequences[fromType] = make(map[string]map[string]bool)
+			}
+			if allSequences[fromType][fromId] == nil {
+				allSequences[fromType][fromId] = make(map[string]bool)
+			}
+			allSequences[fromType][fromId][fromPNS] = true
+		}
 
-		switch componentType {
-		case "input":
-			if result["input"][componentId] == nil {
-				result["input"][componentId] = []string{}
+		// Extract TO component sequences
+		toType := strings.ToLower(node.ToType)
+		toId := node.ToID
+		toPNS := node.ToPNS
+
+		// Remove TEST_ prefix if present (testing mode)
+		if strings.HasPrefix(toPNS, "TEST_") {
+			toPNS = strings.TrimPrefix(toPNS, "TEST_"+tempProject.Id+"_")
+		}
+
+		if toType == "input" || toType == "output" || toType == "ruleset" {
+			if allSequences[toType] == nil {
+				allSequences[toType] = make(map[string]map[string]bool)
 			}
-			result["input"][componentId] = append(result["input"][componentId], sequence)
-		case "output":
-			if result["output"][componentId] == nil {
-				result["output"][componentId] = []string{}
+			if allSequences[toType][toId] == nil {
+				allSequences[toType][toId] = make(map[string]bool)
 			}
-			result["output"][componentId] = append(result["output"][componentId], sequence)
-		case "ruleset":
-			if result["ruleset"][componentId] == nil {
-				result["ruleset"][componentId] = []string{}
-			}
-			result["ruleset"][componentId] = append(result["ruleset"][componentId], sequence)
+			allSequences[toType][toId][toPNS] = true
 		}
 	}
 
-	// Remove duplicates and sort sequences for each component
-	for componentType := range result {
-		for componentId := range result[componentType] {
-			sequences := result[componentType][componentId]
-			// Remove duplicates
-			uniqueSequences := make(map[string]bool)
-			for _, seq := range sequences {
-				uniqueSequences[seq] = true
+	// Convert sets to sorted slices for each component
+	for componentType, components := range allSequences {
+		for componentId, sequences := range components {
+			// Convert set to sorted slice
+			sequenceList := make([]string, 0, len(sequences))
+			for seq := range sequences {
+				sequenceList = append(sequenceList, seq)
 			}
-			// Convert back to slice and sort
-			result[componentType][componentId] = []string{}
-			for seq := range uniqueSequences {
-				result[componentType][componentId] = append(result[componentType][componentId], seq)
-			}
-			sort.Strings(result[componentType][componentId])
+			sort.Strings(sequenceList)
+			result[componentType][componentId] = sequenceList
 		}
 	}
 
-	// Return the result
+	// Return the result with the same format as before
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"success": true,
 		"isTemp":  isTemp,

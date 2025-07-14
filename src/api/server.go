@@ -134,7 +134,7 @@ func ServerStart(listener string) error {
 	auth.POST("/plugins", createPlugin)
 	auth.PUT("/plugins/:id", updatePlugin)
 	auth.DELETE("/plugins/:id", deletePlugin)
-	auth.GET("/available-plugins", getAvailablePlugins)
+	auth.GET("/available-plugins", getPlugins) // Use same handler with different default params
 	auth.GET("/plugin-parameters/:id", GetPluginParameters)
 	auth.GET("/plugin-parameters", GetBatchPluginParameters)
 	auth.GET("/plugins/:id/usage", getPluginUsage)
@@ -144,12 +144,12 @@ func ServerStart(listener string) error {
 	auth.GET("/connect-check/:type/:id", connectCheck)
 	auth.POST("/connect-check/:type/:id", connectCheck)
 	auth.POST("/test-plugin/:id", testPlugin)
-	auth.POST("/test-plugin-content", testPluginContent)
+	auth.POST("/test-plugin-content", testPlugin)
 	auth.POST("/test-ruleset/:id", testRuleset)
-	auth.POST("/test-ruleset-content", testRulesetContent)
+	auth.POST("/test-ruleset-content", testRuleset)
 	auth.POST("/test-output/:id", testOutput)
 	auth.POST("/test-project/:id", testProject)
-	auth.POST("/test-project-content/:inputNode", testProjectContent)
+	auth.POST("/test-project-content/:inputNode", testProject)
 
 	// Cluster management endpoints - REQUIRE AUTH
 	auth.GET("/config_root", leaderConfig)

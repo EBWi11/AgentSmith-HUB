@@ -114,7 +114,7 @@ type Ruleset struct {
 	lastReportedTotal uint64         // For calculating increments in 10-second intervals
 	wg                sync.WaitGroup // WaitGroup for goroutine management
 
-	OwnerProjects []string `json:"-"`
+	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
 // Checklist contains the logical condition and nodes to check.

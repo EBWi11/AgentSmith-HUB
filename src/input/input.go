@@ -87,8 +87,7 @@ type Input struct {
 	wg       sync.WaitGroup
 	stopChan chan struct{}
 
-	// List of project IDs that share this input instance (for per-project metrics)
-	OwnerProjects []string `json:"-"`
+	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
 func Verify(path string, raw string) error {
@@ -266,11 +265,7 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						pid := ""
-						if len(in.OwnerProjects) > 0 {
-							pid = in.OwnerProjects[0]
-						}
-						in.sampler.Sample(msg, in.ProjectNodeSequence, pid)
+						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
 					// Add input ID to message data
@@ -344,11 +339,7 @@ func (in *Input) Start() error {
 
 					// Sample the message
 					if in.sampler != nil {
-						pid := ""
-						if len(in.OwnerProjects) > 0 {
-							pid = in.OwnerProjects[0]
-						}
-						in.sampler.Sample(msg, in.ProjectNodeSequence, pid)
+						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
 					// Add input ID to message data

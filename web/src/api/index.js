@@ -650,10 +650,17 @@ export const hubApi = {
     return response;
   },
 
-  // Function to get all available plugins
+  // Function to get all available plugins (simple format for testing)
   async getAvailablePlugins() {
     try {
-      const response = await api.get('/available-plugins');
+      // Use the unified plugins API with parameters for simple format
+      const response = await api.get('/plugins', {
+        params: {
+          detailed: 'false',
+          include_temp: 'false',
+          type: 'yaegi'
+        }
+      });
       return response.data || [];
     } catch (error) {
       console.error('Error fetching available plugins:', error);

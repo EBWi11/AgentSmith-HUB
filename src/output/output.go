@@ -100,8 +100,7 @@ type Output struct {
 	// raw config
 	Config *OutputConfig
 
-	// Projects sharing this output instance
-	OwnerProjects []string `json:"-"`
+	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
 func Verify(path string, raw string) error {
@@ -285,11 +284,7 @@ func (out *Output) StartForTesting() error {
 
 						// Skip sampling in testing mode (handled by SetTestMode)
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						// Enhance message
@@ -345,11 +340,7 @@ func (out *Output) StartForTesting() error {
 
 						// Skip sampling in testing mode (handled by SetTestMode)
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
@@ -394,11 +385,7 @@ func (out *Output) StartForTesting() error {
 
 							// Skip sampling in testing mode (handled by SetTestMode)
 							if out.sampler != nil {
-								pid := ""
-								if len(out.OwnerProjects) > 0 {
-									pid = out.OwnerProjects[0]
-								}
-								out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
 							}
 
 							if hasTestCollector {
@@ -510,11 +497,7 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -601,11 +584,7 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -658,11 +637,7 @@ func (out *Output) Start() error {
 
 							// Sample the message
 							if out.sampler != nil {
-								pid := ""
-								if len(out.OwnerProjects) > 0 {
-									pid = out.OwnerProjects[0]
-								}
-								out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
 							}
 
 							// Duplicate to TestCollectionChan if present

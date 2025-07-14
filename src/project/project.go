@@ -851,6 +851,7 @@ func (p *Project) getPartner(t string, pns string) []string {
 }
 
 func (p *Project) stopComponentsInternal() error {
+	var err error
 	logger.Info("Step 1: Stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
 	for id, in := range p.Inputs {
 		rightNodes := p.getPartner("right", in.ProjectNodeSequence)
@@ -862,7 +863,11 @@ func (p *Project) stopComponentsInternal() error {
 		}
 
 		if GetRefCount(id) == 1 {
-			err := GlobalProject.Inputs[in.Id].Stop()
+			if p.Testing {
+				err = GlobalProject.Inputs[in.Id].StartForTesting()
+			} else {
+				err = GlobalProject.Inputs[in.Id].Stop()
+			}
 			if err != nil {
 				logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
 			}
@@ -872,12 +877,14 @@ func (p *Project) stopComponentsInternal() error {
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
 	p.waitForCompleteDataProcessing()
 
-	common.GlobalDailyStatsManager.CollectAllComponentsData()
+	if !p.Testing {
+		common.GlobalDailyStatsManager.CollectAllComponentsData()
+	}
 
 	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 	for id, rs := range p.Rulesets {
 		if GetRefCount(id) == 1 {
-			err := rs.Stop()
+			err = rs.Stop()
 			if err != nil {
 				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
 			} else {
@@ -889,7 +896,11 @@ func (p *Project) stopComponentsInternal() error {
 	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 	for id, out := range p.Outputs {
 		if GetRefCount(id) == 1 {
-			err := out.Stop()
+			if p.Testing {
+				err = out.StopForTesting()
+			} else {
+				err = out.Stop()
+			}
 			if err != nil {
 				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
 			} else {
@@ -1011,8 +1022,7 @@ func (p *Project) initComponents() error {
 				}
 
 				// Set test-specific properties to avoid pollution
-				testOutput.SetTestMode()                  // Disable sampling and global state interactions
-				testOutput.OwnerProjects = []string{p.Id} // Mark as owned by this test project
+				testOutput.SetTestMode() // Disable sampling and global state interactions
 
 				p.Outputs[node.ToPNS] = testOutput
 
@@ -1080,8 +1090,7 @@ func (p *Project) initComponents() error {
 				}
 
 				// Set test-specific properties to avoid pollution
-				testInput.SetTestMode()                  // Disable sampling and global state interactions
-				testInput.OwnerProjects = []string{p.Id} // Mark as owned by this test project
+				testInput.SetTestMode() // Disable sampling and global state interactions
 
 				p.Inputs[node.FromPNS] = testInput
 			} else {

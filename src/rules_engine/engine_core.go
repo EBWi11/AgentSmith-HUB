@@ -114,11 +114,7 @@ func (r *Ruleset) Start() error {
 							// IMPORTANT: Sample the input data BEFORE rule checking starts
 							// This ensures we capture the raw data entering the ruleset for analysis
 							if r.sampler != nil {
-								pid := ""
-								if len(r.OwnerProjects) > 0 {
-									pid = r.OwnerProjects[0]
-								}
-								_ = r.sampler.Sample(data, r.ProjectNodeSequence, pid)
+								_ = r.sampler.Sample(data, r.ProjectNodeSequence)
 							}
 						}
 
