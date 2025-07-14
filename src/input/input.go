@@ -410,23 +410,21 @@ func (in *Input) ProcessTestData(data map[string]interface{}) {
 
 // StopForTesting stops the input component quickly for testing purposes
 func (in *Input) StopForTesting() error {
-	logger.Info("Stopping virtual input node in testing mode", "input", in.Id)
+	logger.Info("Stopping test input", "input", in.Id)
 
-	// Close stop channel if it exists
+	// Close stop channel if it exists (created in StartForTesting)
 	if in.stopChan != nil {
 		close(in.stopChan)
 		in.stopChan = nil
 	}
 
-	// Clear downstream connections
-	in.DownStream = map[string]*chan map[string]interface{}{}
+	// Clear downstream connections for testing cleanup
+	in.DownStream = make(map[string]*chan map[string]interface{})
 
-	// Skip sampler cleanup in testing mode - not initialized for test scenarios
-
-	// Reset counters
+	// Reset counters for testing cleanup
 	in.ResetConsumeTotal()
 
-	logger.Info("Virtual input node stopped successfully", "input", in.Id)
+	logger.Info("Test input stopped successfully", "input", in.Id)
 	return nil
 }
 

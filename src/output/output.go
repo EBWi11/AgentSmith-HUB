@@ -892,30 +892,14 @@ func (out *Output) GetIncrementAndUpdate() uint64 {
 func (out *Output) StopForTesting() error {
 	logger.Info("Quick stopping test output", "id", out.Id, "type", out.Type)
 
-	// Metrics stop removed
-
 	// Clear test collection channel
 	out.TestCollectionChan = nil
 
-	// Force close producers without waiting
-	switch out.Type {
-	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
-		if out.kafkaProducer != nil {
-			// Note: msgChan is closed by the UpStream processing goroutine, not here
-			out.kafkaProducer.Close()
-			out.kafkaProducer = nil
-		}
-	case OutputTypeElasticsearch:
-		if out.elasticsearchProducer != nil {
-			// Note: msgChan is closed by the UpStream processing goroutine, not here
-			out.elasticsearchProducer.Close()
-			out.elasticsearchProducer = nil
-		}
-	case OutputTypePrint:
-		if out.printStop != nil {
-			close(out.printStop)
-			out.printStop = nil
-		}
+	// In testing mode, we only need to handle the printStop channel for print output
+	// Other output types use mock processors, no real producers to close
+	if out.Type == OutputTypePrint && out.printStop != nil {
+		close(out.printStop)
+		out.printStop = nil
 	}
 
 	// Wait for goroutines with very short timeout
