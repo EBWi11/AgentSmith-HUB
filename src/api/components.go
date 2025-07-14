@@ -651,14 +651,34 @@ func getInput(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
 
+// getPlugins returns plugin information with configurable detail level
+// Query parameters:
+//   - detailed: "true" for full information, "false" for simple format (default: false)
+//   - include_temp: "true" to include temporary plugins, "false" to exclude (default: true)
+//   - include_usage: "true" to include usage analysis, "false" to exclude (default: true)
+//   - type: filter by plugin type - "local", "yaegi", "all" (default: all)
+//
+// Examples:
+//   - /plugins?detailed=true - Full plugin management interface
+//   - /plugins?detailed=false&include_temp=false&type=yaegi - Simple plugin list for testing
 func getPlugins(c echo.Context) error {
+	// Get query parameters to control response detail
+	detailed := c.QueryParam("detailed") == "true"
+	includeTemp := c.QueryParam("include_temp") != "false"   // Default to true
+	includeUsage := c.QueryParam("include_usage") != "false" // Default to true
+	pluginType := c.QueryParam("type")                       // Filter by plugin type: "local", "yaegi", "all" (default)
+
 	plugins := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed names
 	processedNames := make(map[string]bool)
 
-	// Helper function to find which rulesets use a plugin
+	// Helper function to find which rulesets use a plugin (only if needed)
 	findRulesetsUsingPlugin := func(pluginName string) []string {
+		if !detailed || !includeUsage {
+			return []string{}
+		}
+
 		rulesets := make([]string, 0)
 		p := project.GlobalProject
 		for _, r := range p.Rulesets {
@@ -700,19 +720,51 @@ func getPlugins(c echo.Context) error {
 		return rulesets
 	}
 
+	// Helper function to extract plugin description from code
+	extractPluginDescription := func(code string) string {
+		if !detailed {
+			return ""
+		}
+
+		// Try to find description in comments
+		lines := strings.Split(code, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "//") {
+				desc := strings.TrimSpace(strings.TrimPrefix(line, "//"))
+				if desc != "" && !strings.HasPrefix(desc, "Package") && !strings.HasPrefix(desc, "import") {
+					return desc
+				}
+			}
+		}
+
+		// If no suitable comment is found, return default description
+		return "Plugin function"
+	}
+
 	for _, p := range plugin.Plugins {
-		// Show all types of plugins, including local and Yaegi plugins
-		var pluginType string
+		// Filter by plugin type if specified
+		var currentPluginType string
 		if p.Type == plugin.LOCAL_PLUGIN {
-			pluginType = "local"
+			currentPluginType = "local"
 		} else if p.Type == plugin.YAEGI_PLUGIN {
-			pluginType = "yaegi"
+			currentPluginType = "yaegi"
 		} else {
-			pluginType = "unknown"
+			currentPluginType = "unknown"
+		}
+
+		// Skip if type filter is specified and doesn't match
+		if pluginType != "" && pluginType != "all" && pluginType != currentPluginType {
+			continue
 		}
 
 		// Check if there is a temporary file
 		tempRaw, hasTemp := plugin.PluginsNew[p.Name]
+
+		// Skip temporary plugins if not requested
+		if !includeTemp && hasTemp {
+			continue
+		}
 
 		// Get raw configuration (prioritize temp if exists)
 		rawConfig := string(p.Payload)
@@ -720,59 +772,73 @@ func getPlugins(c echo.Context) error {
 			rawConfig = tempRaw
 		}
 
-		// Find rulesets using this plugin
-		usedByRulesets := findRulesetsUsingPlugin(p.Name)
+		// Create plugin data based on detail level
+		var pluginData map[string]interface{}
 
-		pluginData := map[string]interface{}{
-			"id":               p.Name,     // Use id field for consistency with other components
-			"name":             p.Name,     // Keep name for backward compatibility
-			"type":             pluginType, // Convert to string type for frontend differentiation
-			"hasTemp":          hasTemp,
-			"raw":              rawConfig,
-			"returnType":       p.ReturnType, // Include return type for filtering
-			"parameters":       p.Parameters, // Include parameter information
-			"used_by_rulesets": usedByRulesets,
-			"ruleset_count":    len(usedByRulesets),
+		if detailed {
+			// Find rulesets using this plugin
+			usedByRulesets := findRulesetsUsingPlugin(p.Name)
+
+			pluginData = map[string]interface{}{
+				"id":               p.Name,            // Use id field for consistency with other components
+				"name":             p.Name,            // Keep name for backward compatibility
+				"type":             currentPluginType, // Convert to string type for frontend differentiation
+				"hasTemp":          hasTemp,
+				"raw":              rawConfig,
+				"returnType":       p.ReturnType, // Include return type for filtering
+				"parameters":       p.Parameters, // Include parameter information
+				"used_by_rulesets": usedByRulesets,
+				"ruleset_count":    len(usedByRulesets),
+			}
+		} else {
+			// Simple format for basic usage
+			pluginData = map[string]interface{}{
+				"name":        p.Name,
+				"description": extractPluginDescription(rawConfig),
+			}
 		}
 
 		plugins = append(plugins, pluginData)
 		processedNames[p.Name] = true
 	}
 
-	// Add plugins that only exist in temporary files
-	for name, content := range plugin.PluginsNew {
-		if !processedNames[name] {
-			// Try to determine return type for temporary plugins
-			returnType := "unknown"
-			parameters := []plugin.PluginParameter{}
-			if content != "" {
-				// Create a temporary plugin instance to get return type
-				tempPlugin := &plugin.Plugin{
-					Name:    name,
-					Payload: []byte(content),
-					Type:    plugin.YAEGI_PLUGIN,
+	// Add plugins that only exist in temporary files (only if including temp and detailed)
+	if includeTemp && detailed {
+		for name, content := range plugin.PluginsNew {
+			if !processedNames[name] {
+				// Try to determine return type for temporary plugins
+				returnType := "unknown"
+				parameters := []plugin.PluginParameter{}
+				if content != "" {
+					// Create a temporary plugin instance to get return type
+					tempPlugin := &plugin.Plugin{
+						Name:    name,
+						Payload: []byte(content),
+						Type:    plugin.YAEGI_PLUGIN,
+					}
+					// Try to load temporarily to get return type
+					if err := tempPlugin.YaegiLoad(); err == nil {
+						returnType = tempPlugin.ReturnType
+						parameters = tempPlugin.Parameters
+					}
 				}
-				// Try to load temporarily to get return type
-				if err := tempPlugin.YaegiLoad(); err == nil {
-					returnType = tempPlugin.ReturnType
-					parameters = tempPlugin.Parameters
-				}
-			}
 
-			pluginData := map[string]interface{}{
-				"id":               name,  // Use id field for consistency with other components
-				"name":             name,  // Keep name for backward compatibility
-				"type":             "new", // Mark as new plugin
-				"hasTemp":          true,
-				"raw":              content,
-				"returnType":       returnType, // Include return type for filtering
-				"parameters":       parameters, // Include parameter information
-				"used_by_rulesets": []string{}, // No rulesets use temp plugins
-				"ruleset_count":    0,
+				pluginData := map[string]interface{}{
+					"id":               name,  // Use id field for consistency with other components
+					"name":             name,  // Keep name for backward compatibility
+					"type":             "new", // Mark as new plugin
+					"hasTemp":          true,
+					"raw":              content,
+					"returnType":       returnType, // Include return type for filtering
+					"parameters":       parameters, // Include parameter information
+					"used_by_rulesets": []string{}, // No rulesets use temp plugins
+					"ruleset_count":    0,
+				}
+				plugins = append(plugins, pluginData)
 			}
-			plugins = append(plugins, pluginData)
 		}
 	}
+
 	return c.JSON(http.StatusOK, plugins)
 }
 
@@ -2457,8 +2523,8 @@ func deleteRulesetRule(c echo.Context) error {
 
 	// Clean up the temporary ruleset (it was only for validation)
 	if tempRuleset != nil {
-		// Use StopForTesting for quick cleanup of validation-only rulesets
-		if err := tempRuleset.StopForTesting(); err != nil {
+		// Use normal Stop method - even temporary rulesets should process data gracefully
+		if err := tempRuleset.Stop(); err != nil {
 			logger.Warn("Failed to stop temporary ruleset", "error", err)
 		}
 		tempRuleset = nil
@@ -2601,8 +2667,8 @@ func addRulesetRule(c echo.Context) error {
 
 	// Clean up the temporary ruleset (it was only for validation)
 	if tempRuleset != nil {
-		// Use StopForTesting for quick cleanup of validation-only rulesets
-		if err := tempRuleset.StopForTesting(); err != nil {
+		// Use normal Stop method - even temporary rulesets should process data gracefully
+		if err := tempRuleset.Stop(); err != nil {
 			logger.Warn("Failed to stop temporary ruleset", "error", err)
 		}
 		tempRuleset = nil

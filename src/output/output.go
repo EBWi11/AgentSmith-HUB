@@ -232,6 +232,208 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 	return enhancedMsg
 }
 
+// StartForTesting starts the output component in testing mode
+// This version initializes the component but skips external connectivity checks for faster testing
+func (out *Output) StartForTesting() error {
+	if out.Status != common.StatusStopped {
+		return fmt.Errorf("output %s is not stopped", out.Id)
+	}
+
+	out.ResetProduceTotal()
+	out.Status = common.StatusStarting
+
+	// Skip connectivity check in testing mode for faster startup
+	logger.Info("Output component started in testing mode", "output", out.Id, "type", out.Type)
+
+	// Determine if we need to duplicate data for testing
+	hasTestCollector := out.TestCollectionChan != nil
+
+	effectiveType := out.Type
+
+	switch effectiveType {
+	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
+		if out.kafkaProducer != nil {
+			out.Status = common.StatusStopped
+			return fmt.Errorf("kafka producer already running for output %s", out.Id)
+		}
+		if out.kafkaCfg == nil {
+			out.Status = common.StatusStopped
+			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
+		}
+
+		// In testing mode, create a mock processor instead of real producer
+		msgChan := make(chan map[string]interface{}, 1024)
+
+		// Start goroutine to read from UpStream but don't create real producer
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			defer close(msgChan)
+
+			for {
+				// Non-blocking check for messages from any upstream channel
+				processed := false
+				for _, up := range out.UpStream {
+					select {
+					case msg, ok := <-*up:
+						if !ok {
+							continue
+						}
+
+						// Count for testing metrics
+						atomic.AddUint64(&out.produceTotal, 1)
+
+						// Skip sampling in testing mode (handled by SetTestMode)
+						if out.sampler != nil {
+							pid := ""
+							if len(out.OwnerProjects) > 0 {
+								pid = out.OwnerProjects[0]
+							}
+							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+						}
+
+						// Enhance message
+						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						// Send to test collection channel if present
+						if hasTestCollector {
+							select {
+							case *out.TestCollectionChan <- enhancedMsg:
+							default:
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka_test")
+							}
+						}
+
+						processed = true
+					default:
+					}
+				}
+				if !processed {
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+		}()
+
+	case OutputTypeElasticsearch:
+		if out.elasticsearchProducer != nil {
+			out.Status = common.StatusStopped
+			return fmt.Errorf("elasticsearch producer already running for output %s", out.Id)
+		}
+		if out.elasticsearchCfg == nil {
+			out.Status = common.StatusStopped
+			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
+		}
+
+		// In testing mode, create a mock processor instead of real connection
+		msgChan := make(chan map[string]interface{}, 1024)
+
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			defer close(msgChan)
+
+			for {
+				processed := false
+				for _, up := range out.UpStream {
+					select {
+					case msg, ok := <-*up:
+						if !ok {
+							continue
+						}
+
+						atomic.AddUint64(&out.produceTotal, 1)
+
+						// Skip sampling in testing mode (handled by SetTestMode)
+						if out.sampler != nil {
+							pid := ""
+							if len(out.OwnerProjects) > 0 {
+								pid = out.OwnerProjects[0]
+							}
+							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+						}
+
+						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						if hasTestCollector {
+							select {
+							case *out.TestCollectionChan <- enhancedMsg:
+							default:
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch_test")
+							}
+						}
+
+						processed = true
+					default:
+					}
+				}
+				if !processed {
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+		}()
+
+	case OutputTypePrint:
+		out.printStop = make(chan struct{})
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			for {
+				select {
+				case <-out.printStop:
+					return
+				default:
+					processed := false
+					for _, up := range out.UpStream {
+						select {
+						case msg, ok := <-*up:
+							if !ok {
+								continue
+							}
+
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							// Skip sampling in testing mode (handled by SetTestMode)
+							if out.sampler != nil {
+								pid := ""
+								if len(out.OwnerProjects) > 0 {
+									pid = out.OwnerProjects[0]
+								}
+								out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							}
+
+							if hasTestCollector {
+								msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
+								select {
+								case *out.TestCollectionChan <- msgWithId:
+								default:
+									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "print_test")
+								}
+							}
+
+							// In testing mode, still print to logs for verification
+							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+							data, _ := json.Marshal(enhancedMsg)
+							logger.Debug("[Print Output Test]", "data", string(data))
+							processed = true
+						default:
+						}
+					}
+					if !processed {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+			}
+		}()
+
+	case OutputTypeAliyunSLS:
+		out.Status = common.StatusStopped
+		return fmt.Errorf("aliyun SLS output not implemented yet")
+	}
+
+	out.Status = common.StatusRunning
+	return nil
+}
+
 // Start initializes and starts the output component based on its type
 // Returns an error if the component is already running or if initialization fails
 // If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,

@@ -1126,8 +1126,16 @@ func (p *Project) runComponents() error {
 	}
 
 	for _, out := range p.Outputs {
-		if err := out.Start(); err != nil {
-			return fmt.Errorf("failed to start output component %s: %w", out.Id, err)
+		if p.Testing {
+			// In testing mode, use StartForTesting to avoid external connectivity checks
+			if err := out.StartForTesting(); err != nil {
+				return fmt.Errorf("failed to start output component in testing mode %s: %w", out.Id, err)
+			}
+		} else {
+			// Production mode: normal start
+			if err := out.Start(); err != nil {
+				return fmt.Errorf("failed to start output component %s: %w", out.Id, err)
+			}
 		}
 	}
 	return nil

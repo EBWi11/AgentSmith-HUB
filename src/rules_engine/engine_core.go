@@ -299,43 +299,6 @@ func (r *Ruleset) Stop() error {
 	return nil
 }
 
-// StopForTesting stops the ruleset quickly for testing purposes without waiting for channel drainage
-func (r *Ruleset) StopForTesting() error {
-	if r.stopChan == nil {
-		return fmt.Errorf("not started")
-	}
-
-	logger.Info("Quick stopping test ruleset", "ruleset", r.RulesetID)
-	close(r.stopChan)
-
-	// Quick cleanup without waiting
-	if r.antsPool != nil {
-		r.antsPool.Release()
-		r.antsPool = nil
-	}
-	r.stopChan = nil
-
-	// Wait for any remaining goroutines to finish
-	r.wg.Wait()
-
-	if r.Cache != nil {
-		r.Cache.Close()
-	}
-
-	if r.CacheForClassify != nil {
-		r.CacheForClassify.Close()
-	}
-
-	// Reset atomic counter for testing cleanup
-	previousTotal := atomic.LoadUint64(&r.processTotal)
-	atomic.StoreUint64(&r.processTotal, 0)
-	atomic.StoreUint64(&r.lastReportedTotal, 0)
-	logger.Debug("Reset atomic counter for test ruleset component", "ruleset", r.RulesetID, "previous_total", previousTotal)
-
-	logger.Info("Test ruleset stopped", "ruleset", r.RulesetID)
-	return nil
-}
-
 // EngineCheck executes all rules in the ruleset on the provided data using the new flexible syntax.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
 	finalRes := make([]map[string]interface{}, 0)
