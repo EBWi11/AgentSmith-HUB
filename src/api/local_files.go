@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/plugin"
@@ -561,7 +562,6 @@ func loadLocalChanges(c echo.Context) error {
 
 	// Load all changes directly into official memory (bypassing temporary storage)
 	results := make([]map[string]interface{}, 0)
-	projectsToRestart := make(map[string]struct{})
 	successfullyLoaded := make([]map[string]string, 0)
 
 	for _, change := range changes {
@@ -604,32 +604,20 @@ func loadLocalChanges(c echo.Context) error {
 	for _, component := range successfullyLoaded {
 		affectedProjects := project.GetAffectedProjects(component["type"], component["id"])
 		for _, projectID := range affectedProjects {
-			projectsToRestart[projectID] = struct{}{}
+			common.GlobalMu.RLock()
+			if p, ok := project.GlobalProject.Projects[projectID]; ok {
+				common.GlobalMu.RUnlock()
+				err := p.Restart()
+				if err != nil {
+					logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
+				}
+				if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
+					logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
+				}
+			} else {
+				common.GlobalMu.RUnlock()
+			}
 		}
-	}
-
-	// Restart affected projects if any
-	var restartedCount int
-	if len(projectsToRestart) > 0 {
-		projectIDs := make([]string, 0, len(projectsToRestart))
-		for projectID := range projectsToRestart {
-			projectIDs = append(projectIDs, projectID)
-		}
-
-		logger.Info("Restarting affected projects after batch local load", "count", len(projectIDs))
-
-		var err error
-		restartedCount, err = project.RestartProjectsSafely(projectIDs, "batch_local_component_load")
-		if err != nil {
-			logger.Error("Error during batch project restart after local load", "error", err)
-		}
-
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"results":            results,
-			"total":              len(results),
-			"affected_projects":  projectIDs,
-			"restarted_projects": restartedCount,
-		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -696,28 +684,21 @@ func loadSingleLocalChange(c echo.Context) error {
 	// Record successful operation
 	RecordLocalPush(req.Type, req.ID, content, "success", "")
 
-	// Get affected projects and restart them (except for projects which restart themselves)
-	if req.Type != "project" {
-		affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
-		if len(affectedProjects) > 0 {
-			logger.Info("Restarting affected projects after local component load", "type", req.Type, "id", req.ID, "count", len(affectedProjects))
+	affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
 
-			// Use unified restart function
-			restartedCount, err := project.RestartProjectsSafely(affectedProjects, "local_component_load")
+	for _, projectID := range affectedProjects {
+		common.GlobalMu.RLock()
+		if p, ok := project.GlobalProject.Projects[projectID]; ok {
+			common.GlobalMu.RUnlock()
+			err := p.Restart()
 			if err != nil {
-				logger.Error("Error during affected project restart after local load", "error", err)
+				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
 			}
-
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success":            true,
-				"message":            "loaded successfully and restarted affected projects",
-				"type":               req.Type,
-				"id":                 req.ID,
-				"file_path":          filePath,
-				"file_size":          len(fileContent),
-				"affected_projects":  affectedProjects,
-				"restarted_projects": restartedCount,
-			})
+			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
+				logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
+			}
+		} else {
+			common.GlobalMu.RUnlock()
 		}
 	}
 

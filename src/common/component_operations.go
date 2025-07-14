@@ -192,29 +192,14 @@ func (co *ComponentOperations) UpdateComponentDirect(componentType, id, content 
 
 	switch componentType {
 	case "project":
-		if AllProjectRawConfig == nil {
-			AllProjectRawConfig = make(map[string]string)
-		}
 		AllProjectRawConfig[id] = content
 	case "plugin":
-		if AllPluginsRawConfig == nil {
-			AllPluginsRawConfig = make(map[string]string)
-		}
 		AllPluginsRawConfig[id] = content
 	case "input":
-		if AllInputsRawConfig == nil {
-			AllInputsRawConfig = make(map[string]string)
-		}
 		AllInputsRawConfig[id] = content
 	case "output":
-		if AllOutputsRawConfig == nil {
-			AllOutputsRawConfig = make(map[string]string)
-		}
 		AllOutputsRawConfig[id] = content
 	case "ruleset":
-		if AllRulesetsRawConfig == nil {
-			AllRulesetsRawConfig = make(map[string]string)
-		}
 		AllRulesetsRawConfig[id] = content
 	}
 

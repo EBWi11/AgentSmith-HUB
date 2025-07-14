@@ -193,7 +193,6 @@ var GlobalDailyStatsManager *DailyStatsManager
 func InitDailyStatsManager() {
 	if GlobalDailyStatsManager == nil {
 		GlobalDailyStatsManager = NewDailyStatsManager()
-		logger.Info("Daily statistics manager initialized")
 	}
 }
 

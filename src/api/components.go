@@ -283,7 +283,7 @@ func getProjects(c echo.Context) error {
 		}
 
 		// Include error message if project status is error
-		if proj.Status == project.ProjectStatusError && proj.Err != nil {
+		if proj.Status == common.StatusError && proj.Err != nil {
 			projectData["error"] = proj.Err.Error()
 		}
 
@@ -296,7 +296,7 @@ func getProjects(c echo.Context) error {
 		if !processedIDs[id] {
 			projectData := map[string]interface{}{
 				"id":      id,
-				"status":  project.ProjectStatusStopped,
+				"status":  common.StatusStopped,
 				"hasTemp": true,
 				"raw":     tempRaw,
 				"components": map[string]interface{}{
@@ -327,7 +327,7 @@ func getProject(c echo.Context) error {
 		sampleData, dataSource, err := getSampleDataForProject(id)
 		response := map[string]interface{}{
 			"id":     id,
-			"status": project.ProjectStatusStopped,
+			"status": common.StatusStopped,
 			"raw":    p_raw,
 			"path":   tempPath,
 		}
@@ -1191,7 +1191,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 		// For projects, check if it's running and stop it first
 		if componentType == "project" {
 			if proj, exists := project.GlobalProject.Projects[id]; exists {
-				if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
+				if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
 					logger.Info("Stopping running project before deletion", "project_id", id)
 					// Note: Project.Stop() already includes final statistics collection
 					if err := proj.Stop(); err != nil {
@@ -1216,7 +1216,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 								"error": "Timeout waiting for project to stop",
 							})
 						case <-ticker.C:
-							if proj.Status == project.ProjectStatusStopped {
+							if proj.Status == common.StatusStopped {
 								goto projectStopped
 							}
 						}

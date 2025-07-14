@@ -23,9 +23,14 @@ var ruleCachePool = sync.Pool{
 
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
-	r.ResetProcessTotal()
+	if r.Status != common.StatusStopped {
+		return fmt.Errorf("cannot start ruleset engine, current status: %s", r.Status)
+	}
+	r.Status = common.StatusStarting
 
+	r.ResetProcessTotal()
 	if r.stopChan != nil {
+		r.Status = common.StatusStopped
 		return fmt.Errorf("already started: %v", r.RulesetID)
 	}
 	r.stopChan = make(chan struct{})
@@ -34,6 +39,7 @@ func (r *Ruleset) Start() error {
 	minPoolSize := getMinPoolSize()
 	r.antsPool, err = ants.NewPool(minPoolSize)
 	if err != nil {
+		r.Status = common.StatusStopped
 		return fmt.Errorf("failed to create ants pool: %v", err)
 	}
 
@@ -171,16 +177,17 @@ func (r *Ruleset) Start() error {
 			}
 		}(upID, upCh)
 	}
+
+	r.Status = common.StatusRunning
 	return nil
 }
 
 // Stop the ruleset engine, waiting for all upstream and downstream data to be processed before shutdown.
 func (r *Ruleset) Stop() error {
-	if r.stopChan == nil {
-		return fmt.Errorf("not started")
+	if r.Status != common.StatusRunning {
+		return fmt.Errorf("cannot stop ruleset engine, current status: %s", r.Status)
 	}
-
-	logger.Info("Stopping ruleset", "ruleset", r.RulesetID, "upstream_count", len(r.UpStream), "downstream_count", len(r.DownStream))
+	r.Status = common.StatusStopping
 	close(r.stopChan)
 
 	// Overall timeout for ruleset stop
@@ -288,11 +295,7 @@ func (r *Ruleset) Stop() error {
 		r.CacheForClassify.Close()
 	}
 
-	// Reset atomic counter for restart
-	previousTotal := atomic.LoadUint64(&r.processTotal)
-	atomic.StoreUint64(&r.processTotal, 0)
-	logger.Debug("Reset atomic counter for ruleset component", "ruleset", r.RulesetID, "previous_total", previousTotal)
-
+	r.Status = common.StatusStopped
 	return nil
 }
 

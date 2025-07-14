@@ -92,7 +92,6 @@ func ServerStart(listener string) error {
 	auth.POST("/start-project", StartProject)
 	auth.POST("/stop-project", StopProject)
 	auth.POST("/restart-project", RestartProject)
-	auth.POST("/restart-all-projects", RestartAllProjects)
 	auth.GET("/project-error/:id", getProjectError)
 	auth.GET("/project-inputs/:id", getProjectInputs)
 	auth.GET("/project-components/:id", getProjectComponents)

@@ -26,7 +26,10 @@ func SetLeaderState(isLeader bool, leaderID string) {
 	Leader = leaderID
 }
 
-// GetLeaderState returns the current leader state
-func GetLeaderState() (bool, string) {
-	return IsLeader, Leader
+func init() {
+	AllInputsRawConfig = make(map[string]string, 0)
+	AllOutputsRawConfig = make(map[string]string, 0)
+	AllRulesetsRawConfig = make(map[string]string, 0)
+	AllProjectRawConfig = make(map[string]string, 0)
+	AllPluginsRawConfig = make(map[string]string, 0)
 }

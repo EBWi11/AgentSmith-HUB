@@ -100,9 +100,6 @@ func init() {
 }
 
 func Verify(path string, raw string, name string) error {
-	// Skip name conflict check during verification - this is only for syntax and structure validation
-	// Name conflict will be checked during actual save/create operations
-
 	// Use common file reading function
 	content, err := common.ReadContentFromPathOrRaw(path, raw)
 	if err != nil {

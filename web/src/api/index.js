@@ -483,18 +483,8 @@ export const hubApi = {
     }
   },
   
-  // Restart all projects
-  async restartAllProjects() {
-    const response = await api.post('/restart-all-projects');
-    return response.data;
-  },
-  
   // Restart a specific project
   async restartProject(id) {
-    if (id === 'all') {
-      return this.restartAllProjects();
-    }
-    
     try {
       // First check if the project has temporary files
       const tempInfo = await this.checkTemporaryFile('projects', id);

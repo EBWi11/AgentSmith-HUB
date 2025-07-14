@@ -59,11 +59,12 @@ type AliyunSLSInputConfig struct {
 
 // Input represents an input component that consumes data from external sources
 type Input struct {
+	Status              common.Status
 	Id                  string `json:"Id"`
 	Path                string
 	ProjectNodeSequence string
 	Type                InputType
-	DownStream          []*chan map[string]interface{}
+	DownStream          map[string]*chan map[string]interface{}
 
 	// runtime
 	kafkaConsumer *common.KafkaConsumer
@@ -177,11 +178,12 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 		Id:           id,
 		Path:         path,
 		Type:         cfg.Type,
-		DownStream:   make([]*chan map[string]interface{}, 0),
+		DownStream:   make(map[string]*chan map[string]interface{}, 0),
 		kafkaCfg:     cfg.Kafka,
 		aliyunSLSCfg: cfg.AliyunSLS,
 		Config:       &cfg,
 		sampler:      nil, // Will be set below based on cluster role
+		Status:       common.StatusStopped,
 	}
 
 	// Only create sampler on leader node for performance
@@ -194,29 +196,32 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 // Start initializes and starts the input component based on its type
 // Returns an error if the component is already running or if initialization fails
 func (in *Input) Start() error {
-	// Initialize stop channel
-	in.stopChan = make(chan struct{})
+	if in.Status != common.StatusStopped {
+		return fmt.Errorf("input %s is not stopped", in.Id)
+	}
 
 	in.ResetConsumeTotal()
+	in.Status = common.StatusStarting
+
+	// Initialize stop channel
+	in.stopChan = make(chan struct{})
 
 	// Perform connectivity check first before starting
 	connectivityResult := in.CheckConnectivity()
 	if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+		in.Status = common.StatusStopped
 		return fmt.Errorf("input connectivity check failed: %v", connectivityResult["message"])
 	}
 	logger.Info("Input connectivity verified", "input", in.Id, "type", in.Type)
 
-	// Component statistics are now handled by Daily Stats Manager
-	// which collects data every 10 seconds from all running components
-
-	// Metric goroutine removed - statistics handled by Daily Stats Manager
-
 	switch in.Type {
 	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
 		if in.kafkaConsumer != nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("kafka consumer already running for input %s", in.Id)
 		}
 		if in.kafkaCfg == nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
@@ -230,6 +235,7 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("failed to create kafka consumer for input %s: %v", in.Id, err)
 		}
 		in.kafkaConsumer = cons
@@ -283,9 +289,11 @@ func (in *Input) Start() error {
 
 	case InputTypeAliyunSLS:
 		if in.slsConsumer != nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("sls consumer already running for input %s", in.Id)
 		}
 		if in.aliyunSLSCfg == nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
@@ -304,6 +312,7 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
+			in.Status = common.StatusStopped
 			return fmt.Errorf("failed to create sls consumer for input %s: %v", in.Id, err)
 		}
 		in.slsConsumer = cons
@@ -357,9 +366,11 @@ func (in *Input) Start() error {
 		}()
 
 	default:
+		in.Status = common.StatusStopped
 		return fmt.Errorf("unsupported input type %s", in.Type)
 	}
 
+	in.Status = common.StatusRunning
 	return nil
 }
 
@@ -371,9 +382,6 @@ func (in *Input) StartForTesting() error {
 
 	// Reset consume counter for testing
 	in.ResetConsumeTotal()
-
-	// Skip sampler initialization in testing mode - not needed for test scenarios
-
 	logger.Info("Input component started in testing mode", "input", in.Id)
 	return nil
 }
@@ -411,7 +419,7 @@ func (in *Input) StopForTesting() error {
 	}
 
 	// Clear downstream connections
-	in.DownStream = []*chan map[string]interface{}{}
+	in.DownStream = map[string]*chan map[string]interface{}{}
 
 	// Skip sampler cleanup in testing mode - not initialized for test scenarios
 
@@ -424,7 +432,10 @@ func (in *Input) StopForTesting() error {
 
 // Stop stops the input component and its consumers
 func (in *Input) Stop() error {
-	logger.Info("Stopping input", "id", in.Id, "type", in.Type)
+	if in.Status == common.StatusRunning {
+		return fmt.Errorf("input %s is not running", in.Id)
+	}
+	in.Status = common.StatusStopping
 
 	// Signal all goroutines to stop
 	if in.stopChan != nil {
@@ -466,8 +477,7 @@ func (in *Input) Stop() error {
 	atomic.StoreUint64(&in.consumeTotal, 0)
 	logger.Debug("Reset atomic counter for input component", "input", in.Id, "previous_total", previousTotal)
 
-	// Note: ResetDiffCounter no longer needed - component manages its own increments
-
+	in.Status = common.StatusStopped
 	return nil
 }
 

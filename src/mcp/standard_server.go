@@ -375,7 +375,7 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 	}
 
 	// Add ruleset resources
-	project.GlobalProject.ProjectMu.RLock()
+	common.GlobalMu.RLock()
 	for rsID, rs := range project.GlobalProject.Rulesets {
 		owners := rs.OwnerProjects
 		sampleCnt := 0
@@ -397,7 +397,7 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 			},
 		})
 	}
-	project.GlobalProject.ProjectMu.RUnlock()
+	common.GlobalMu.RUnlock()
 
 	// Apply filtering & pagination
 	filtered := make([]map[string]interface{}, 0)
@@ -473,9 +473,10 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				return s.createJSONRPCError(id, -32602, "Project not found", uri)
 			}
 		case "ruleset":
-			project.GlobalProject.ProjectMu.RLock()
+			common.GlobalMu.RLock()
 			rs, ok := project.GlobalProject.Rulesets[resID]
-			project.GlobalProject.ProjectMu.RUnlock()
+			common.GlobalMu.RUnlock()
+
 			if !ok || rs == nil {
 				return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)
 			}

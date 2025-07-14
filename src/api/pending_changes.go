@@ -532,24 +532,18 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 
 	// Convert projects to restart to slice
 	for projectID := range projectsToRestart {
-		result.ProjectsToRestart = append(result.ProjectsToRestart, projectID)
-	}
-
-	// Actually restart the affected projects
-	if len(result.ProjectsToRestart) > 0 {
-		logger.Info("Restarting affected projects", "count", len(result.ProjectsToRestart))
-
-		// Use unified restart function for better maintainability
-		restartedCount, err := project.RestartProjectsSafely(result.ProjectsToRestart, "component_change")
-		if err != nil {
-			logger.Error("Error during batch project restart", "error", err)
+		common.GlobalMu.RLock()
+		if p, ok := project.GlobalProject.Projects[projectID]; ok {
+			common.GlobalMu.RUnlock()
+			err := p.Restart()
+			if err != nil {
+				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
+			}
+			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
+				logger.Error("Failed to publish project restart instructions", "affected_projects", result.ProjectsToRestart, "error", err)
+			}
 		} else {
-			logger.Info("Successfully restarted projects", "count", restartedCount)
-		}
-
-		// Publish project restart instructions to followers
-		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(result.ProjectsToRestart, "component_change"); err != nil {
-			logger.Error("Failed to publish project restart instructions", "affected_projects", result.ProjectsToRestart, "error", err)
+			common.GlobalMu.RUnlock()
 		}
 	}
 
@@ -557,7 +551,7 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 		"total", result.TotalChanges,
 		"success", result.SuccessCount,
 		"failed", result.FailureCount,
-		"projects_to_restart", len(result.ProjectsToRestart))
+		"projects_to_restart", len(projectsToRestart))
 
 	return c.JSON(http.StatusOK, result)
 }
@@ -1058,9 +1052,9 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		var newProject *project.Project
 		var err error
 		if req.WriteToFile && filePath != "" {
-			newProject, err = project.NewProject(filePath, "", req.ID)
+			newProject, err = project.NewProject(filePath, "", req.ID, false)
 		} else {
-			newProject, err = project.NewProject("", req.NewContent, req.ID)
+			newProject, err = project.NewProject("", req.NewContent, req.ID, false)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to create project: %w", err)
@@ -1247,10 +1241,6 @@ func ApplySingleChange(c echo.Context) error {
 	// Verify configuration (without holding lock)
 	switch req.Type {
 	case "plugin":
-		// Remove existing plugin from memory before verification to avoid name conflict
-		common.GlobalMu.Lock()
-		delete(plugin.Plugins, req.ID)
-		common.GlobalMu.Unlock()
 		verifyErr = plugin.Verify("", content, req.ID)
 	case "input":
 		verifyErr = input.Verify("", content)
@@ -1305,8 +1295,7 @@ func ApplySingleChange(c echo.Context) error {
 			switch req.Type {
 			case "input":
 				// Reload the input component
-				configRoot := common.Config.ConfigRoot
-				inputPath := path.Join(configRoot, "input", req.ID+".yaml")
+				inputPath := path.Join(common.Config.ConfigRoot, "input", req.ID+".yaml")
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
@@ -1331,8 +1320,6 @@ func ApplySingleChange(c echo.Context) error {
 					if err != nil {
 						logger.Error("Failed to stop old input", "id", req.ID, "error", err)
 					}
-				} else if exists {
-					logger.Info("Input component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingInput)
 				}
 
 				newInput, reloadErr := input.NewInput(inputPath, "", req.ID)
@@ -1354,9 +1341,7 @@ func ApplySingleChange(c echo.Context) error {
 				delete(project.GlobalProject.InputsNew, req.ID)
 				common.GlobalMu.Unlock()
 			case "output":
-				// Reload the output component
-				configRoot := common.Config.ConfigRoot
-				outputPath := path.Join(configRoot, "output", req.ID+".yaml")
+				outputPath := path.Join(common.Config.ConfigRoot, "output", req.ID+".yaml")
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
@@ -1382,8 +1367,6 @@ func ApplySingleChange(c echo.Context) error {
 					if err != nil {
 						logger.Error("Failed to stop old output", "id", req.ID, "error", err)
 					}
-				} else if exists {
-					logger.Info("Output component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingOutput)
 				}
 
 				newOutput, reloadErr := output.NewOutput(outputPath, "", req.ID)
@@ -1405,9 +1388,7 @@ func ApplySingleChange(c echo.Context) error {
 				delete(project.GlobalProject.OutputsNew, req.ID)
 				common.GlobalMu.Unlock()
 			case "ruleset":
-				// Reload the ruleset component
-				configRoot := common.Config.ConfigRoot
-				rulesetPath := path.Join(configRoot, "ruleset", req.ID+".xml")
+				rulesetPath := path.Join(common.Config.ConfigRoot, "ruleset", req.ID+".xml")
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
@@ -1432,8 +1413,6 @@ func ApplySingleChange(c echo.Context) error {
 					if err != nil {
 						logger.Error("Failed to stop old ruleset", "id", req.ID, "error", err)
 					}
-				} else if exists {
-					logger.Info("Ruleset component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingRuleset)
 				}
 
 				newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", req.ID)
@@ -1455,9 +1434,7 @@ func ApplySingleChange(c echo.Context) error {
 				delete(project.GlobalProject.RulesetsNew, req.ID)
 				common.GlobalMu.Unlock()
 			case "project":
-				// Reload the project component
-				configRoot := common.Config.ConfigRoot
-				projectPath := path.Join(configRoot, "project", req.ID+".yaml")
+				projectPath := path.Join(common.Config.ConfigRoot, "project", req.ID+".yaml")
 
 				// Handle project lifecycle carefully
 				var wasRunning bool
@@ -1466,7 +1443,7 @@ func ApplySingleChange(c echo.Context) error {
 				oldProject, exists := project.GlobalProject.Projects[req.ID]
 				common.GlobalMu.RUnlock()
 				if exists {
-					wasRunning = (oldProject.Status == project.ProjectStatusRunning)
+					wasRunning = (oldProject.Status == common.StatusRunning)
 					oldContent = oldProject.Config.RawConfig
 					if wasRunning {
 						err := oldProject.Stop()
@@ -1476,7 +1453,7 @@ func ApplySingleChange(c echo.Context) error {
 					}
 				}
 
-				newProject, reloadErr := project.NewProject(projectPath, "", req.ID)
+				newProject, reloadErr := project.NewProject(projectPath, "", req.ID, false)
 				if reloadErr != nil {
 					logger.Error("Failed to reload project after merge", "id", req.ID, "error", reloadErr)
 					// Record failed operation
@@ -1510,96 +1487,39 @@ func ApplySingleChange(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
 	}
 
-	// Note: We don't perform hot reload here as we will restart affected projects instead
-
 	// Get affected projects first
 	affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
 
-	// Sync changes to follower nodes using instruction system
-	if req.Type == "project" {
-		if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, content, nil); err != nil {
-			logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
-		}
-	} else {
-		if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, content, affectedProjects); err != nil {
-			logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
-		}
+	if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, content, affectedProjects); err != nil {
+		logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
 	}
+
 	if len(affectedProjects) > 0 {
 		logger.Info("Restarting affected projects", "count", len(affectedProjects))
 
-		// Use unified restart function for better maintainability
-		restartedCount, err := project.RestartProjectsSafely(affectedProjects, "component_change")
-		if err != nil {
-			logger.Error("Error during affected project restart", "error", err)
-		}
-
-		// Publish project restart instructions to followers
-		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(affectedProjects, "component_change"); err != nil {
-			logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+		for _, id := range affectedProjects {
+			common.GlobalMu.RLock()
+			if p, ok := project.GlobalProject.Projects[id]; ok {
+				common.GlobalMu.RUnlock()
+				err := p.Restart()
+				if err != nil {
+					logger.Error("Failed to restart affected project", "id", id, "error", err)
+					if err := cluster.GlobalInstructionManager.PublishProjectRestart(id); err != nil {
+						logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+					}
+				}
+			} else {
+				common.GlobalMu.RUnlock()
+			}
 		}
 
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message":            "Change applied successfully",
-			"restarted_projects": restartedCount,
+			"restarted_projects": len(affectedProjects),
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Change applied successfully"})
-}
-
-// RestartAllProjects restarts all projects
-func RestartAllProjects(c echo.Context) error {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Panic in RestartAllProjects", "panic", r)
-		}
-	}()
-
-	// Acquire read lock to get project list safely
-	common.GlobalMu.RLock()
-	projectList := make([]*project.Project, 0, len(project.GlobalProject.Projects))
-	projectIDs := make([]string, 0, len(project.GlobalProject.Projects))
-	for id, p := range project.GlobalProject.Projects {
-		projectList = append(projectList, p)
-		projectIDs = append(projectIDs, id)
-	}
-	common.GlobalMu.RUnlock()
-
-	logger.Info("Starting project restart", "count", len(projectList))
-
-	// Log component details before restarting
-	for i, p := range projectList {
-		if p.Status == project.ProjectStatusRunning {
-			logger.Info("Project details", "id", projectIDs[i], "inputs", len(p.Inputs), "rulesets", len(p.Rulesets), "outputs", len(p.Outputs))
-			for inputID := range p.Inputs {
-				logger.Info("Project has input", "project", projectIDs[i], "input", inputID)
-			}
-			for rulesetID := range p.Rulesets {
-				logger.Info("Project has ruleset", "project", projectIDs[i], "ruleset", rulesetID)
-			}
-			for outputID := range p.Outputs {
-				logger.Info("Project has output", "project", projectIDs[i], "output", outputID)
-			}
-		}
-	}
-
-	// Use unified restart function for better maintainability
-	startedCount, err := project.RestartProjectsSafely(projectIDs, "user_action")
-	if err != nil {
-		logger.Error("Error during all projects restart", "error", err)
-	}
-
-	// Publish project restart instructions to followers
-	if len(projectIDs) > 0 {
-		if err := cluster.GlobalInstructionManager.PublishProjectsRestart(projectIDs, "user_action"); err != nil {
-			logger.Error("Failed to publish project restart instructions for restart all", "affected_projects", projectIDs, "error", err)
-		}
-	}
-
-	logger.Info("Restart completed", "total", len(projectList), "started", startedCount)
-
-	return c.JSON(http.StatusOK, map[string]string{"message": "All projects restarted"})
 }
 
 // mergeComponentFile merges a .new file with its original

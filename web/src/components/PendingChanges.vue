@@ -586,17 +586,11 @@ function findAffectedProjects() {
 // Restart the specified projects
 async function restartProjects(projectIds) {
   try {
-    if (projectIds.includes('all')) {
-      // Restart all projects
-      await hubApi.restartAllProjects()
-      $message?.success?.('All projects restarted')
-    } else {
       // Restart specific projects
       for (const id of projectIds) {
         await hubApi.restartProject(id)
       }
       $message?.success?.(`Projects restarted: ${projectIds.join(', ')}`)
-    }
   } catch (e) {
         $message?.error?.('Failed to restart projects: ' + (e?.message || 'Unknown error'))
   }

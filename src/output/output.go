@@ -67,11 +67,12 @@ type AliyunSLSOutputConfig struct {
 
 // Output is the runtime output instance.
 type Output struct {
+	Status              common.Status
 	Id                  string `json:"Id"`
 	Path                string
 	ProjectNodeSequence string
 	Type                OutputType
-	UpStream            []*chan map[string]interface{}
+	UpStream            map[string]*chan map[string]interface{}
 
 	// runtime
 	kafkaProducer         *common.KafkaProducer
@@ -200,12 +201,13 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		Id:               id,
 		Path:             path,
 		Type:             cfg.Type,
-		UpStream:         make([]*chan map[string]interface{}, 0),
+		UpStream:         make(map[string]*chan map[string]interface{}, 0),
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
 		Config:           &cfg,
 		sampler:          nil, // Will be set below based on cluster role
+		Status:           common.StatusStopped,
 	}
 
 	// Only create sampler on leader node for performance
@@ -235,32 +237,35 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 // If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,
 // but the original output type will still be used so that real external side-effects can be observed.
 func (out *Output) Start() error {
+	if out.Status != common.StatusStopped {
+		return fmt.Errorf("output %s is not stopped", out.Id)
+	}
+
 	out.ResetProduceTotal()
+	out.Status = common.StatusStarting
 	// Perform connectivity check first before starting (skip for print type as it doesn't need external connectivity)
 	if out.Type != OutputTypePrint {
 		connectivityResult := out.CheckConnectivity()
 		if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("output connectivity check failed: %v", connectivityResult["message"])
 		}
 		logger.Info("Output connectivity verified", "output", out.Id, "type", out.Type)
 	}
 
-	// Component statistics are now handled by Daily Stats Manager
-	// which collects data every 10 seconds from all running components
-
 	// Determine if we need to duplicate data for testing
 	hasTestCollector := out.TestCollectionChan != nil
-
-	// Metric goroutine removed - statistics handled by Daily Stats Manager
 
 	effectiveType := out.Type
 
 	switch effectiveType {
 	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if out.kafkaProducer != nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("kafka producer already running for output %s", out.Id)
 		}
 		if out.kafkaCfg == nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
 		}
 
@@ -275,6 +280,7 @@ func (out *Output) Start() error {
 			out.kafkaCfg.TLS,
 		)
 		if err != nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err)
 		}
 		out.kafkaProducer = producer
@@ -337,9 +343,11 @@ func (out *Output) Start() error {
 
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("elasticsearch producer already running for output %s", out.Id)
 		}
 		if out.elasticsearchCfg == nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
 		}
 
@@ -363,6 +371,7 @@ func (out *Output) Start() error {
 			out.elasticsearchCfg.Auth,
 		)
 		if err != nil {
+			out.Status = common.StatusStopped
 			return fmt.Errorf("failed to create elasticsearch producer for output %s: %v", out.Id, err)
 		}
 		out.elasticsearchProducer = producer
@@ -482,17 +491,21 @@ func (out *Output) Start() error {
 		}()
 
 	case OutputTypeAliyunSLS:
-		// TODO: Implement Aliyun SLS output
+		out.Status = common.StatusStopped
 		return fmt.Errorf("aliyun SLS output not implemented yet")
 	}
 
+	out.Status = common.StatusRunning
 	return nil
 }
 
 // Stop stops the output producer and waits for all routines to finish.
 // It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
-	logger.Info("Stopping output", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
+	if out.Status != common.StatusRunning {
+		return fmt.Errorf("output %s is not running", out.Id)
+	}
+	out.Status = common.StatusStopping
 
 	// Overall timeout for output stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
@@ -646,13 +659,7 @@ func (out *Output) Stop() error {
 		logger.Warn("Timeout waiting for output goroutines", "id", out.Id)
 	}
 
-	// Reset atomic counter for restart
-	previousTotal := atomic.LoadUint64(&out.produceTotal)
-	atomic.StoreUint64(&out.produceTotal, 0)
-	logger.Debug("Reset atomic counter for output component", "output", out.Id, "previous_total", previousTotal)
-
-	// Note: ResetDiffCounter no longer needed - component manages its own increments
-
+	out.Status = common.StatusStopped
 	return nil
 }
 
@@ -1001,15 +1008,12 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 		Path:                existing.Path,
 		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
 		Type:                existing.Type,
-		UpStream:            make([]*chan map[string]interface{}, 0),
+		UpStream:            make(map[string]*chan map[string]interface{}, 0),
 		kafkaCfg:            existing.kafkaCfg,
 		elasticsearchCfg:    existing.elasticsearchCfg,
 		aliyunSLSCfg:        existing.aliyunSLSCfg,
 		Config:              existing.Config,
 		TestCollectionChan:  nil, // Reset for new instance
-		// Note: Runtime fields (kafkaProducer, elasticsearchProducer, wg, etc.) are intentionally not copied
-		// as they will be initialized when the output starts
-		// Metrics fields (produceTotal) are also not copied as they are instance-specific
 	}
 
 	// Only create sampler on leader node for performance

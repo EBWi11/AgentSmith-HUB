@@ -82,6 +82,7 @@ type Rule struct {
 }
 
 type Ruleset struct {
+	Status              common.Status
 	Path                string
 	XMLName             xml.Name
 	Name                string

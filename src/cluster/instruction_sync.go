@@ -621,7 +621,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	logger.Info("Reading project user intentions from Redis to send start instructions...")
 
 	// 读取Redis中用户期望运行的项目（用户期望状态）
-	if userIntentions, err := common.GetAllProjectUserIntentions(common.Config.LocalIP); err == nil {
+	if userIntentions, err := common.GetAllProjectUserIntentions(); err == nil {
 		startInstructionCount := 0
 		for projectID, wantRunning := range userIntentions {
 			if wantRunning {
@@ -815,7 +815,7 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 
 	case "project":
 		// For projects, we create the project instance
-		proj, err := project.NewProject("", content, componentName)
+		proj, err := project.NewProject("", content, componentName, false)
 		if err != nil {
 			return fmt.Errorf("failed to create project instance %s: %w", componentName, err)
 		}
@@ -856,7 +856,7 @@ func (im *InstructionManager) deleteComponentInstance(componentType, componentNa
 	case "project":
 		if proj, exists := project.GlobalProject.Projects[componentName]; exists {
 			// Stop the project first if it's running
-			if proj.Status == project.ProjectStatusRunning {
+			if proj.Status == common.StatusRunning {
 				proj.Stop()
 			}
 		}
@@ -1130,7 +1130,7 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 	common.GlobalMu.RLock()
 	if project.GlobalProject.Projects != nil {
 		for projectName, proj := range project.GlobalProject.Projects {
-			if proj.Status == project.ProjectStatusRunning || proj.Status == project.ProjectStatusStarting {
+			if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
 				logger.Info("Stopping project due to session change", "project", projectName)
 				if err := proj.Stop(); err != nil {
 					logger.Warn("Failed to stop project during session change", "project", projectName, "error", err)

@@ -817,18 +817,6 @@ func getProjectInputs(c echo.Context) error {
 	})
 }
 
-// createTestProject creates a completely independent project instance for testing
-// All components (except inputs) are created as new instances to avoid affecting the live environment
-func createTestProject(projectContent string, testProjectId string) (*project.Project, error) {
-	// Create the project instance using a special constructor for testing
-	tempProject, err := project.NewProjectForTesting("", projectContent, testProjectId)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse project: %v", err)
-	}
-
-	return tempProject, nil
-}
-
 func connectCheck(c echo.Context) error {
 	componentType := c.Param("type")
 	id := c.Param("id")

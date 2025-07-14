@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+type Status string
+
+const (
+	StatusStopped  Status = "stopped"
+	StatusStarting Status = "starting"
+	StatusRunning  Status = "running"
+	StatusStopping Status = "stopping"
+	StatusError    Status = "error"
+)
+
 // CheckCoreCache for rule engine
 type CheckCoreCache struct {
 	Exist bool

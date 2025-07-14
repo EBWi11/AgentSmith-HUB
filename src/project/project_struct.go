@@ -1,24 +1,25 @@
 package project
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// ProjectStatus represents the current status of a project
-type ProjectStatus string
-
-const (
-	ProjectStatusStopped  ProjectStatus = "stopped"
-	ProjectStatusStarting ProjectStatus = "starting"
-	ProjectStatusRunning  ProjectStatus = "running"
-	ProjectStatusStopping ProjectStatus = "stopping"
-	ProjectStatusError    ProjectStatus = "error"
-)
+type FlowNode struct {
+	FromPNS  string
+	ToPNS    string
+	Content  string
+	FromType string
+	ToType   string
+	FromID   string
+	ToID     string
+	FromInit bool
+	ToInit   bool
+}
 
 type GlobalProjectInfo struct {
 	Projects map[string]*Project
@@ -26,23 +27,33 @@ type GlobalProjectInfo struct {
 	Outputs  map[string]*output.Output
 	Rulesets map[string]*rules_engine.Ruleset
 
+	PNSOutputs  map[string]*output.Output
+	PNSRulesets map[string]*rules_engine.Ruleset
+
 	ProjectsNew map[string]string
 	InputsNew   map[string]string
 	OutputsNew  map[string]string
 	RulesetsNew map[string]string
 
-	msgChans        map[string]chan map[string]interface{}
-	msgChansCounter map[string]*atomic.Int64
+	RefCount map[string]int
+}
 
-	// edgeChanIds keeps a unique mapping between a logical edge ("FROM->TO")
-	// and the channelId stored in msgChans. It is used to ensure that when multiple
-	// projects share the same data-flow edge we reuse the same channel instead of
-	// creating duplicated ones which would lead to data loss or duplication.
-	edgeChanIds map[string]string
-	EdgeMapMu   sync.RWMutex
+func GetRefCount(id string) int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return GlobalProject.RefCount[id]
+}
 
-	// Dedicated lock for project lifecycle management to reduce lock contention
-	ProjectMu sync.RWMutex
+func AddRefCount(id string) {
+	common.GlobalMu.Lock()
+	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] + 1
+	common.GlobalMu.Unlock()
+}
+
+func ReduceRefCount(id string) {
+	common.GlobalMu.Lock()
+	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] - 1
+	common.GlobalMu.Unlock()
 }
 
 // ProjectConfig holds the configuration for a project
@@ -56,7 +67,7 @@ type ProjectConfig struct {
 // Project represents a project
 type Project struct {
 	Id              string        `json:"id"`
-	Status          ProjectStatus `json:"status"`
+	Status          common.Status `json:"status"`
 	StatusChangedAt *time.Time    `json:"status_changed_at,omitempty"`
 	Err             error         `json:"-"`
 
@@ -64,24 +75,15 @@ type Project struct {
 
 	Config *ProjectConfig `json:"config"`
 
+	FlowNodes []FlowNode
+
 	// Components
 	Inputs   map[string]*input.Input          `json:"-"`
 	Outputs  map[string]*output.Output        `json:"-"`
 	Rulesets map[string]*rules_engine.Ruleset `json:"-"`
 
 	// Data flow
-	MsgChannels []string `json:"-"`
-
-	// For graceful shutdown
-	stopChan chan struct{}  `json:"-"`
-	wg       sync.WaitGroup `json:"-"`
-
-	// Dependencies tracking
-	DependsOn      []string `json:"-"` // Projects this project depends on
-	DependedBy     []string `json:"-"` // Projects that depend on this project
-	SharedInputs   []string `json:"-"` // Inputs shared with other projects
-	SharedOutputs  []string `json:"-"` // Outputs shared with other projects
-	SharedRulesets []string `json:"-"` // Rulesets shared with other projects
+	MsgChannels map[string]*chan map[string]interface{} `json:"-"` // Channels for message passing between components
 }
 
 // ProjectMetrics holds runtime metrics for the project
