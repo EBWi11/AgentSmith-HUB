@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"gopkg.in/yaml.v3"
 )
 
 // Helper function to return appropriate error format for ruleset APIs
@@ -902,26 +903,47 @@ done:
 func getProjectInputs(c echo.Context) error {
 	id := c.Param("id")
 
-	// Check if project exists
-	var projectContent string
-	var proj *project.Project
-	var isTemp bool
-	var ok bool
+	// Try to get from existing running project first
+	if existingProj, exists := project.GetProject(id); exists {
+		// Project is already loaded in memory, extract directly
+		inputs := extractInputsFromProject(existingProj)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": true,
+			"isTemp":  false,
+			"inputs":  inputs,
+		})
+	}
 
-	if proj, ok = project.GetProject(id); ok {
-		projectContent = proj.Config.RawConfig
+	// Check if project exists in pending changes or file system
+	var projectContent string
+	var isTemp bool
+
+	if tempContent, hasTemp := project.GetProjectNew(id); hasTemp {
+		projectContent = tempContent
+		isTemp = true
 	} else {
-		if projectContent, ok = project.GetProjectNew(id); !ok {
+		// Try to read from file system
+		formalPath, formalExists := GetComponentPath("project", id, false)
+		if !formalExists {
 			return c.JSON(http.StatusNotFound, map[string]interface{}{
 				"success": false,
 				"error":   "Project not found: " + id,
 			})
 		}
+
+		content, err := ReadComponent(formalPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to read project: " + err.Error(),
+			})
+		}
+		projectContent = content
+		isTemp = false
 	}
 
-	// Create temporary project to parse configuration (isolated from GlobalProject)
-	testProjectId := fmt.Sprintf("test_inputs_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
+	// Parse configuration directly without creating a temporary project
+	inputs, err := parseProjectInputsDirect(projectContent)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -929,19 +951,20 @@ func getProjectInputs(c echo.Context) error {
 		})
 	}
 
-	// Ensure cleanup of temporary project
-	defer func() {
-		if stopErr := tempProject.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop test project for input parsing", "project", testProjectId, "error", stopErr)
-		}
-	}()
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"inputs":  inputs,
+	})
+}
 
-	// Collect input node information from FlowNodes instead of component instances
+// extractInputsFromProject extracts input information from an existing project
+func extractInputsFromProject(proj *project.Project) []map[string]string {
 	inputs := []map[string]string{}
 	inputNames := make(map[string]bool)
 
 	// Extract unique input names from FlowNodes
-	for _, node := range tempProject.FlowNodes {
+	for _, node := range proj.FlowNodes {
 		if node.FromType == "INPUT" {
 			if !inputNames[node.FromID] {
 				inputNames[node.FromID] = true
@@ -959,12 +982,68 @@ func getProjectInputs(c echo.Context) error {
 		return inputs[i]["name"] < inputs[j]["name"]
 	})
 
-	// Return result
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success": true,
-		"isTemp":  isTemp,
-		"inputs":  inputs,
+	return inputs
+}
+
+// parseProjectInputsDirect parses project configuration and extracts input information without creating a project instance
+func parseProjectInputsDirect(projectContent string) ([]map[string]string, error) {
+	// Parse the YAML content directly
+	var cfg project.ProjectConfig
+	if err := yaml.Unmarshal([]byte(projectContent), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	if strings.TrimSpace(cfg.Content) == "" {
+		return nil, fmt.Errorf("project content cannot be empty")
+	}
+
+	// Parse content to extract input information
+	lines := strings.Split(cfg.Content, "\n")
+	inputNames := make(map[string]bool)
+
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse arrow format: ->
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
+		}
+
+		from := strings.TrimSpace(parts[0])
+
+		// Parse from node type
+		fromType, fromID := parseNodeDirect(from)
+
+		if fromType == "" {
+			return nil, fmt.Errorf("invalid node format at line %d: %s", lineNum+1, from)
+		}
+
+		// Collect input names
+		if fromType == "INPUT" {
+			inputNames[fromID] = true
+		}
+	}
+
+	// Convert to result format
+	inputs := []map[string]string{}
+	for name := range inputNames {
+		inputs = append(inputs, map[string]string{
+			"id":   "input." + name,
+			"name": name,
+			"type": "virtual", // Virtual input node for testing
+		})
+	}
+
+	// Sort input node list by name
+	sort.Slice(inputs, func(i, j int) bool {
+		return inputs[i]["name"] < inputs[j]["name"]
 	})
+
+	return inputs, nil
 }
 
 func connectCheck(c echo.Context) error {
@@ -1143,54 +1222,49 @@ func connectCheck(c echo.Context) error {
 func getProjectComponents(c echo.Context) error {
 	id := c.Param("id")
 
-	// Check if project exists
+	// Try to get from existing running project first
+	if existingProj, exists := project.GetProject(id); exists {
+		// Project is already loaded in memory, extract directly
+		result := extractComponentsFromProject(existingProj)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success":         true,
+			"isTemp":          false,
+			"totalComponents": result["totalComponents"],
+			"componentCounts": result["componentCounts"],
+			"components":      result["components"],
+		})
+	}
+
+	// Check if project exists in pending changes
 	var projectContent string
 	var isTemp bool
 
-	// First check if there is a temporary file
-	tempPath, tempExists := GetComponentPath("project", id, true)
-	if tempExists {
-		content, err := ReadComponent(tempPath)
-		if err == nil {
-			projectContent = content
-			isTemp = true
-		}
-	}
-
-	// If no temporary file, check formal file
-	if projectContent == "" {
+	if tempContent, hasTemp := project.GetProjectNew(id); hasTemp {
+		projectContent = tempContent
+		isTemp = true
+	} else {
+		// Try to read from file system
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
-			// Check if project exists in memory
-			proj, exists := project.GetProject(id)
-			if !exists {
-				// Check if project exists in new projects
-				content, ok := project.GetProjectNew(id)
-				if !ok {
-					return c.JSON(http.StatusNotFound, map[string]interface{}{
-						"success": false,
-						"error":   "Project not found: " + id,
-					})
-				}
-				projectContent = content
-			} else {
-				projectContent = proj.Config.RawConfig
-			}
-		} else {
-			content, err := ReadComponent(formalPath)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "Failed to read project: " + err.Error(),
-				})
-			}
-			projectContent = content
+			return c.JSON(http.StatusNotFound, map[string]interface{}{
+				"success": false,
+				"error":   "Project not found: " + id,
+			})
 		}
+
+		content, err := ReadComponent(formalPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to read project: " + err.Error(),
+			})
+		}
+		projectContent = content
+		isTemp = false
 	}
 
-	// Create temporary project to parse configuration (isolated from GlobalProject)
-	testProjectId := fmt.Sprintf("test_components_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
+	// Parse configuration directly without creating a temporary project
+	result, err := parseProjectComponentsDirect(projectContent)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -1198,89 +1272,184 @@ func getProjectComponents(c echo.Context) error {
 		})
 	}
 
-	// Ensure cleanup of temporary project
-	defer func() {
-		if stopErr := tempProject.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop test project for component parsing", "project", testProjectId, "error", stopErr)
-		}
-	}()
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success":         true,
+		"isTemp":          isTemp,
+		"totalComponents": result["totalComponents"],
+		"componentCounts": result["componentCounts"],
+		"components":      result["components"],
+	})
+}
 
-	// Collect component information from FlowNodes instead of component instances
-	inputs := []map[string]string{}
-	outputs := []map[string]string{}
-	rulesets := []map[string]string{}
+// extractComponentsFromProject extracts component information from an existing project
+func extractComponentsFromProject(proj *project.Project) map[string]interface{} {
+	componentCounts := map[string]int{
+		"inputs":   0,
+		"outputs":  0,
+		"rulesets": 0,
+	}
+
+	components := map[string][]string{
+		"inputs":   []string{},
+		"outputs":  []string{},
+		"rulesets": []string{},
+	}
+
+	// Extract unique component names from FlowNodes
+	inputNames := make(map[string]bool)
+	outputNames := make(map[string]bool)
+	rulesetNames := make(map[string]bool)
+
+	for _, node := range proj.FlowNodes {
+		if node.FromType == "INPUT" {
+			inputNames[node.FromID] = true
+		}
+		if node.FromType == "OUTPUT" {
+			outputNames[node.FromID] = true
+		}
+		if node.FromType == "RULESET" {
+			rulesetNames[node.FromID] = true
+		}
+
+		if node.ToType == "INPUT" {
+			inputNames[node.ToID] = true
+		}
+		if node.ToType == "OUTPUT" {
+			outputNames[node.ToID] = true
+		}
+		if node.ToType == "RULESET" {
+			rulesetNames[node.ToID] = true
+		}
+	}
+
+	// Convert to sorted slices
+	for name := range inputNames {
+		components["inputs"] = append(components["inputs"], name)
+	}
+	for name := range outputNames {
+		components["outputs"] = append(components["outputs"], name)
+	}
+	for name := range rulesetNames {
+		components["rulesets"] = append(components["rulesets"], name)
+	}
+
+	// Sort component lists
+	sort.Strings(components["inputs"])
+	sort.Strings(components["outputs"])
+	sort.Strings(components["rulesets"])
+
+	// Update counts
+	componentCounts["inputs"] = len(components["inputs"])
+	componentCounts["outputs"] = len(components["outputs"])
+	componentCounts["rulesets"] = len(components["rulesets"])
+
+	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"]
+
+	return map[string]interface{}{
+		"totalComponents": totalComponents,
+		"componentCounts": componentCounts,
+		"components":      components,
+	}
+}
+
+// parseProjectComponentsDirect parses project configuration and extracts component information without creating a project instance
+func parseProjectComponentsDirect(projectContent string) (map[string]interface{}, error) {
+	// Parse the YAML content directly
+	var cfg project.ProjectConfig
+	if err := yaml.Unmarshal([]byte(projectContent), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	if strings.TrimSpace(cfg.Content) == "" {
+		return nil, fmt.Errorf("project content cannot be empty")
+	}
+
+	// Parse content to extract component information
+	lines := strings.Split(cfg.Content, "\n")
 
 	inputNames := make(map[string]bool)
 	outputNames := make(map[string]bool)
 	rulesetNames := make(map[string]bool)
 
-	// Extract unique component names from FlowNodes
-	for _, node := range tempProject.FlowNodes {
-		// From components
-		if node.FromType == "INPUT" && !inputNames[node.FromID] {
-			inputNames[node.FromID] = true
-			inputs = append(inputs, map[string]string{
-				"id":   node.FromID,
-				"name": node.FromID,
-				"type": "input",
-			})
-		}
-		if node.FromType == "RULESET" && !rulesetNames[node.FromID] {
-			rulesetNames[node.FromID] = true
-			rulesets = append(rulesets, map[string]string{
-				"id":   node.FromID,
-				"name": node.FromID,
-				"type": "ruleset",
-			})
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
 
-		// To components
-		if node.ToType == "OUTPUT" && !outputNames[node.ToID] {
-			outputNames[node.ToID] = true
-			outputs = append(outputs, map[string]string{
-				"id":   node.ToID,
-				"name": node.ToID,
-				"type": "output",
-			})
+		// Parse arrow format: ->
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
 		}
-		if node.ToType == "RULESET" && !rulesetNames[node.ToID] {
-			rulesetNames[node.ToID] = true
-			rulesets = append(rulesets, map[string]string{
-				"id":   node.ToID,
-				"name": node.ToID,
-				"type": "ruleset",
-			})
+
+		from := strings.TrimSpace(parts[0])
+		to := strings.TrimSpace(parts[1])
+
+		// Parse node types
+		fromType, fromID := parseNodeDirect(from)
+		toType, toID := parseNodeDirect(to)
+
+		if fromType == "" || toType == "" {
+			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
+		}
+
+		// Collect component names
+		switch fromType {
+		case "INPUT":
+			inputNames[fromID] = true
+		case "OUTPUT":
+			outputNames[fromID] = true
+		case "RULESET":
+			rulesetNames[fromID] = true
+		}
+
+		switch toType {
+		case "INPUT":
+			inputNames[toID] = true
+		case "OUTPUT":
+			outputNames[toID] = true
+		case "RULESET":
+			rulesetNames[toID] = true
 		}
 	}
 
-	// Calculate total component count
-	totalComponents := len(inputs) + len(outputs) + len(rulesets)
+	// Convert to sorted slices
+	components := map[string][]string{
+		"inputs":   []string{},
+		"outputs":  []string{},
+		"rulesets": []string{},
+	}
 
-	// Sort component lists by name
-	sort.Slice(inputs, func(i, j int) bool {
-		return inputs[i]["name"] < inputs[j]["name"]
-	})
-	sort.Slice(outputs, func(i, j int) bool {
-		return outputs[i]["name"] < outputs[j]["name"]
-	})
-	sort.Slice(rulesets, func(i, j int) bool {
-		return rulesets[i]["name"] < rulesets[j]["name"]
-	})
+	for name := range inputNames {
+		components["inputs"] = append(components["inputs"], name)
+	}
+	for name := range outputNames {
+		components["outputs"] = append(components["outputs"], name)
+	}
+	for name := range rulesetNames {
+		components["rulesets"] = append(components["rulesets"], name)
+	}
 
-	// Return result
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success":         true,
-		"isTemp":          isTemp,
-		"inputs":          inputs,
-		"outputs":         outputs,
-		"rulesets":        rulesets,
+	// Sort component lists
+	sort.Strings(components["inputs"])
+	sort.Strings(components["outputs"])
+	sort.Strings(components["rulesets"])
+
+	// Calculate counts
+	componentCounts := map[string]int{
+		"inputs":   len(components["inputs"]),
+		"outputs":  len(components["outputs"]),
+		"rulesets": len(components["rulesets"]),
+	}
+
+	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"]
+
+	return map[string]interface{}{
 		"totalComponents": totalComponents,
-		"componentCounts": map[string]int{
-			"inputs":   len(inputs),
-			"outputs":  len(outputs),
-			"rulesets": len(rulesets),
-		},
-	})
+		"componentCounts": componentCounts,
+		"components":      components,
+	}, nil
 }
 
 // connectCheckWithConfig performs connectivity check using custom configuration
@@ -1412,58 +1581,51 @@ func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
 }
 
 // getProjectComponentSequences returns project node sequences for each component in the project
-// Optimized: directly extracts PNS from FlowNodes instead of rebuilding sequences
+// Optimized: directly extracts PNS from existing projects or parses configuration without creating temporary projects
 func getProjectComponentSequences(c echo.Context) error {
 	id := c.Param("id")
 
-	// Check if project exists and get project content
+	// Try to get from existing running project first
+	if existingProj, exists := project.GetProject(id); exists {
+		// Project is already loaded in memory, extract directly from FlowNodes
+		result := extractSequencesFromProject(existingProj)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": true,
+			"isTemp":  false,
+			"data":    result,
+		})
+	}
+
+	// Check if project exists in pending changes
 	var projectContent string
 	var isTemp bool
 
-	// First check if there is a temporary file
-	tempPath, tempExists := GetComponentPath("project", id, true)
-	if tempExists {
-		content, err := ReadComponent(tempPath)
-		if err == nil {
-			projectContent = content
-			isTemp = true
-		}
-	}
-
-	// If no temporary file, check formal file
-	if projectContent == "" {
+	if tempContent, hasTemp := project.GetProjectNew(id); hasTemp {
+		projectContent = tempContent
+		isTemp = true
+	} else {
+		// Try to read from file system
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
-			// Check if project exists in memory
-			proj, exists := project.GetProject(id)
-			if !exists {
-				// Check if project exists in new projects
-				content, ok := project.GetProjectNew(id)
-				if !ok {
-					return c.JSON(http.StatusNotFound, map[string]interface{}{
-						"success": false,
-						"error":   "Project not found: " + id,
-					})
-				}
-				projectContent = content
-			} else {
-				projectContent = proj.Config.RawConfig
-			}
-		} else {
-			content, err := ReadComponent(formalPath)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "Failed to read project: " + err.Error(),
-				})
-			}
-			projectContent = content
+			return c.JSON(http.StatusNotFound, map[string]interface{}{
+				"success": false,
+				"error":   "Project not found: " + id,
+			})
 		}
+
+		content, err := ReadComponent(formalPath)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"success": false,
+				"error":   "Failed to read project: " + err.Error(),
+			})
+		}
+		projectContent = content
+		isTemp = false
 	}
 
-	// Create temporary project to parse configuration (isolated from GlobalProject)
-	testProjectId := fmt.Sprintf("test_sequences_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
+	// Parse configuration directly without creating a temporary project
+	result, err := parseProjectSequencesDirect(projectContent)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -1471,25 +1633,26 @@ func getProjectComponentSequences(c echo.Context) error {
 		})
 	}
 
-	// Ensure cleanup of temporary project
-	defer func() {
-		if stopErr := tempProject.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop test project for sequence parsing", "project", testProjectId, "error", stopErr)
-		}
-	}()
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"success": true,
+		"isTemp":  isTemp,
+		"data":    result,
+	})
+}
 
-	// Initialize result structure
+// extractSequencesFromProject extracts sequence information from an existing project
+func extractSequencesFromProject(proj *project.Project) map[string]map[string][]string {
 	result := map[string]map[string][]string{
 		"input":   make(map[string][]string),
 		"output":  make(map[string][]string),
 		"ruleset": make(map[string][]string),
 	}
 
-	// Collect all PNS sequences from FlowNodes (PNS is already calculated during project parsing)
+	// Collect all PNS sequences from FlowNodes
 	allSequences := make(map[string]map[string]map[string]bool) // componentType -> componentId -> set of sequences
 
 	// Process each FlowNode to extract PNS information
-	for _, node := range tempProject.FlowNodes {
+	for _, node := range proj.FlowNodes {
 		// Extract FROM component sequences
 		fromType := strings.ToLower(node.FromType)
 		fromId := node.FromID
@@ -1497,7 +1660,7 @@ func getProjectComponentSequences(c echo.Context) error {
 
 		// Remove TEST_ prefix if present (testing mode)
 		if strings.HasPrefix(fromPNS, "TEST_") {
-			fromPNS = strings.TrimPrefix(fromPNS, "TEST_"+tempProject.Id+"_")
+			fromPNS = strings.TrimPrefix(fromPNS, "TEST_"+proj.Id+"_")
 		}
 
 		if fromType == "input" || fromType == "output" || fromType == "ruleset" {
@@ -1517,7 +1680,7 @@ func getProjectComponentSequences(c echo.Context) error {
 
 		// Remove TEST_ prefix if present (testing mode)
 		if strings.HasPrefix(toPNS, "TEST_") {
-			toPNS = strings.TrimPrefix(toPNS, "TEST_"+tempProject.Id+"_")
+			toPNS = strings.TrimPrefix(toPNS, "TEST_"+proj.Id+"_")
 		}
 
 		if toType == "input" || toType == "output" || toType == "ruleset" {
@@ -1544,10 +1707,182 @@ func getProjectComponentSequences(c echo.Context) error {
 		}
 	}
 
-	// Return the result with the same format as before
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"success": true,
-		"isTemp":  isTemp,
-		"data":    result,
-	})
+	return result
+}
+
+// parseProjectSequencesDirect parses project configuration and extracts sequences without creating a project instance
+func parseProjectSequencesDirect(projectContent string) (map[string]map[string][]string, error) {
+	// Parse the YAML content directly
+	var cfg project.ProjectConfig
+	if err := yaml.Unmarshal([]byte(projectContent), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	if strings.TrimSpace(cfg.Content) == "" {
+		return nil, fmt.Errorf("project content cannot be empty")
+	}
+
+	// Parse content to build flow graph
+	lines := strings.Split(cfg.Content, "\n")
+	var flowNodes []project.FlowNode
+
+	for lineNum, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse arrow format: ->
+		parts := strings.Split(line, "->")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
+		}
+
+		from := strings.TrimSpace(parts[0])
+		to := strings.TrimSpace(parts[1])
+
+		// Parse node types
+		fromType, fromID := parseNodeDirect(from)
+		toType, toID := parseNodeDirect(to)
+
+		if fromType == "" || toType == "" {
+			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
+		}
+
+		// Validate flow rules
+		if toType == "INPUT" {
+			return nil, fmt.Errorf("INPUT node %q cannot be a destination at line %d", to, lineNum+1)
+		}
+
+		if fromType == "OUTPUT" {
+			return nil, fmt.Errorf("OUTPUT node %q cannot be a source at line %d", from, lineNum+1)
+		}
+
+		tmpNode := project.FlowNode{
+			FromType: fromType,
+			FromID:   fromID,
+			ToID:     toID,
+			ToType:   toType,
+			Content:  line,
+		}
+
+		flowNodes = append(flowNodes, tmpNode)
+	}
+
+	// Build PNS for each node
+	buildPNSDirect(flowNodes)
+
+	// Extract sequences using the same logic as extractSequencesFromProject
+	result := map[string]map[string][]string{
+		"input":   make(map[string][]string),
+		"output":  make(map[string][]string),
+		"ruleset": make(map[string][]string),
+	}
+
+	allSequences := make(map[string]map[string]map[string]bool)
+
+	for _, node := range flowNodes {
+		// Process FROM component
+		fromType := strings.ToLower(node.FromType)
+		fromId := node.FromID
+		fromPNS := node.FromPNS
+
+		if fromType == "input" || fromType == "output" || fromType == "ruleset" {
+			if allSequences[fromType] == nil {
+				allSequences[fromType] = make(map[string]map[string]bool)
+			}
+			if allSequences[fromType][fromId] == nil {
+				allSequences[fromType][fromId] = make(map[string]bool)
+			}
+			allSequences[fromType][fromId][fromPNS] = true
+		}
+
+		// Process TO component
+		toType := strings.ToLower(node.ToType)
+		toId := node.ToID
+		toPNS := node.ToPNS
+
+		if toType == "input" || toType == "output" || toType == "ruleset" {
+			if allSequences[toType] == nil {
+				allSequences[toType] = make(map[string]map[string]bool)
+			}
+			if allSequences[toType][toId] == nil {
+				allSequences[toType][toId] = make(map[string]bool)
+			}
+			allSequences[toType][toId][toPNS] = true
+		}
+	}
+
+	// Convert to final format
+	for componentType, components := range allSequences {
+		for componentId, sequences := range components {
+			sequenceList := make([]string, 0, len(sequences))
+			for seq := range sequences {
+				sequenceList = append(sequenceList, seq)
+			}
+			sort.Strings(sequenceList)
+			result[componentType][componentId] = sequenceList
+		}
+	}
+
+	return result, nil
+}
+
+// parseNodeDirect splits "TYPE.name" into ("TYPE", "name")
+func parseNodeDirect(s string) (string, string) {
+	parts := strings.SplitN(s, ".", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.ToUpper(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
+}
+
+// buildPNSDirect builds ProjectNodeSequence for flow nodes
+func buildPNSDirect(flowNodes []project.FlowNode) {
+	// Build ProjectNodeSequence recursively for a specific component
+	var buildSequence func(component string, visited map[string]bool) string
+	buildSequence = func(component string, visited map[string]bool) string {
+		// Break cycle detection
+		if visited[component] {
+			return component
+		}
+		visited[component] = true
+		defer delete(visited, component)
+
+		// Find upstream component for this component using flow nodes
+		var upstreamComponent string
+		for _, conn := range flowNodes {
+			toKey := conn.ToType + "." + conn.ToID
+			if toKey == component {
+				upstreamComponent = conn.FromType + "." + conn.FromID
+				break
+			}
+		}
+
+		var sequence string
+		if upstreamComponent == "" {
+			// This is a source component (no upstream)
+			sequence = component
+		} else {
+			// Build sequence by prepending upstream sequence
+			upstreamSequence := buildSequence(upstreamComponent, visited)
+			sequence = upstreamSequence + "." + component
+		}
+
+		return sequence
+	}
+
+	// Process each connection and set PNS values
+	for i := range flowNodes {
+		// For FROM component: build sequence independently
+		fromKey := flowNodes[i].FromType + "." + flowNodes[i].FromID
+		fromSequence := buildSequence(fromKey, make(map[string]bool))
+
+		// For TO component: build sequence based on FROM component in THIS connection
+		toKey := flowNodes[i].ToType + "." + flowNodes[i].ToID
+		toSequence := fromSequence + "." + toKey
+
+		flowNodes[i].FromPNS = fromSequence
+		flowNodes[i].ToPNS = toSequence
+	}
 }
