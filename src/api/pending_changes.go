@@ -255,31 +255,31 @@ func GetEnhancedPendingChanges(c echo.Context) error {
 
 // syncLegacyToEnhancedManager synchronizes data from legacy storage to the enhanced manager
 func syncLegacyToEnhancedManager() {
-	// Lock for reading all pending changes and existing components
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
+	// Use safe accessors instead of direct locking to avoid deadlock
+	syncPluginsToEnhancedManager()
+	syncInputsToEnhancedManager()
+	syncOutputsToEnhancedManager()
+	syncRulesetsToEnhancedManager()
+	syncProjectsToEnhancedManager()
+	cleanupObsoleteChanges()
+}
 
-	p := project.GlobalProject
+// syncPluginsToEnhancedManager synchronizes plugin changes using safe accessors
+func syncPluginsToEnhancedManager() {
 
-	// First, get all currently managed changes to detect if we need to clean up
-	existingChanges := globalPendingChangeManager.GetAllChanges()
-
-	// Create a map of what should exist based on current legacy storage
-	shouldExist := make(map[string]bool)
+	// Get plugins data using safe accessors
+	pluginsData := plugin.GetAllPluginsNew()
 
 	// Sync plugins with pending changes
-	for name, newContent := range plugin.PluginsNew {
+	for name, newContent := range pluginsData {
 		var oldContent string
 		isNew := true
 
-		// Check if this is a modification to an existing plugin
-		if plugin, ok := plugin.Plugins[name]; ok {
-			oldContent = string(plugin.Payload)
+		// Check if this is a modification to an existing plugin using safe accessor
+		oldContent = getExistingPluginContent(name)
+		if oldContent != "" {
 			isNew = false
 		}
-
-		key := fmt.Sprintf("plugin:%s", name)
-		shouldExist[key] = true
 
 		// Always update or add to ensure current state
 		if existingChange, exists := globalPendingChangeManager.GetChange("plugin", name); exists {
@@ -292,20 +292,23 @@ func syncLegacyToEnhancedManager() {
 			globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
 		}
 	}
+}
+
+// syncInputsToEnhancedManager synchronizes input changes using safe accessors
+func syncInputsToEnhancedManager() {
+	// Get inputs data safely using safe accessors
+	inputsData := project.GetAllInputsNew()
 
 	// Sync inputs with pending changes
-	for id, newContent := range p.InputsNew {
+	for id, newContent := range inputsData {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing input
-		if i, ok := p.Inputs[id]; ok {
+		if i, ok := project.GetInput(id); ok {
 			oldContent = i.Config.RawConfig
 			isNew = false
 		}
-
-		key := fmt.Sprintf("input:%s", id)
-		shouldExist[key] = true
 
 		// Always update or add to ensure current state
 		if existingChange, exists := globalPendingChangeManager.GetChange("input", id); exists {
@@ -318,20 +321,23 @@ func syncLegacyToEnhancedManager() {
 			globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
 		}
 	}
+}
+
+// syncOutputsToEnhancedManager synchronizes output changes using safe accessors
+func syncOutputsToEnhancedManager() {
+	// Get outputs data safely using safe accessors
+	outputsData := project.GetAllOutputsNew()
 
 	// Sync outputs with pending changes
-	for id, newContent := range p.OutputsNew {
+	for id, newContent := range outputsData {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing output
-		if o, ok := p.Outputs[id]; ok {
+		if o, ok := project.GetOutput(id); ok {
 			oldContent = o.Config.RawConfig
 			isNew = false
 		}
-
-		key := fmt.Sprintf("output:%s", id)
-		shouldExist[key] = true
 
 		// Always update or add to ensure current state
 		if existingChange, exists := globalPendingChangeManager.GetChange("output", id); exists {
@@ -344,20 +350,23 @@ func syncLegacyToEnhancedManager() {
 			globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
 		}
 	}
+}
+
+// syncRulesetsToEnhancedManager synchronizes ruleset changes using safe accessors
+func syncRulesetsToEnhancedManager() {
+	// Get rulesets data safely using safe accessors
+	rulesetsData := project.GetAllRulesetsNew()
 
 	// Sync rulesets with pending changes
-	for id, newContent := range p.RulesetsNew {
+	for id, newContent := range rulesetsData {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing ruleset
-		if ruleset, ok := p.Rulesets[id]; ok {
+		if ruleset, ok := project.GetRuleset(id); ok {
 			oldContent = ruleset.RawConfig
 			isNew = false
 		}
-
-		key := fmt.Sprintf("ruleset:%s", id)
-		shouldExist[key] = true
 
 		// Always update or add to ensure current state
 		if existingChange, exists := globalPendingChangeManager.GetChange("ruleset", id); exists {
@@ -370,20 +379,23 @@ func syncLegacyToEnhancedManager() {
 			globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
 		}
 	}
+}
+
+// syncProjectsToEnhancedManager synchronizes project changes using safe accessors
+func syncProjectsToEnhancedManager() {
+	// Get projects data safely using safe accessors
+	projectsData := project.GetAllProjectsNew()
 
 	// Sync projects with pending changes
-	for id, newContent := range p.ProjectsNew {
+	for id, newContent := range projectsData {
 		var oldContent string
 		isNew := true
 
 		// Check if this is a modification to an existing project
-		if proj, ok := p.Projects[id]; ok {
+		if proj, ok := project.GetProject(id); ok {
 			oldContent = proj.Config.RawConfig
 			isNew = false
 		}
-
-		key := fmt.Sprintf("project:%s", id)
-		shouldExist[key] = true
 
 		// Always update or add to ensure current state
 		if existingChange, exists := globalPendingChangeManager.GetChange("project", id); exists {
@@ -395,6 +407,54 @@ func syncLegacyToEnhancedManager() {
 			// Add new change
 			globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
 		}
+	}
+}
+
+// Helper functions for safe access to plugin data
+func getPendingPluginChange(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := plugin.PluginsNew[id]
+	return content, exists
+}
+
+func getExistingPluginContent(id string) string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	if pluginInstance, exists := plugin.Plugins[id]; exists {
+		return string(pluginInstance.Payload)
+	}
+	return ""
+}
+
+// cleanupObsoleteChanges removes changes that no longer exist in legacy storage
+func cleanupObsoleteChanges() {
+	// Get all existing changes
+	existingChanges := globalPendingChangeManager.GetAllChanges()
+
+	// Create a map of what should exist based on current legacy storage
+	shouldExist := make(map[string]bool)
+
+	// Check what should exist from all sources using safe accessors
+	pluginsNewData := plugin.GetAllPluginsNew()
+	for name := range pluginsNewData {
+		shouldExist[fmt.Sprintf("plugin:%s", name)] = true
+	}
+
+	for id := range project.GetAllInputsNew() {
+		shouldExist[fmt.Sprintf("input:%s", id)] = true
+	}
+
+	for id := range project.GetAllOutputsNew() {
+		shouldExist[fmt.Sprintf("output:%s", id)] = true
+	}
+
+	for id := range project.GetAllRulesetsNew() {
+		shouldExist[fmt.Sprintf("ruleset:%s", id)] = true
+	}
+
+	for id := range project.GetAllProjectsNew() {
+		shouldExist[fmt.Sprintf("project:%s", id)] = true
 	}
 
 	// Clean up obsolete changes that no longer exist in legacy storage
@@ -665,11 +725,10 @@ func CancelPendingChange(c echo.Context) error {
 	// Remove from enhanced manager
 	globalPendingChangeManager.RemoveChange(changeType, id)
 
-	// Remove from legacy storage
-	common.GlobalMu.Lock()
+	// Remove from legacy storage using safe accessors
 	switch changeType {
 	case "plugin":
-		delete(plugin.PluginsNew, id)
+		plugin.DeletePluginNew(id)
 	case "input":
 		project.DeleteInputNew(id)
 	case "output":
@@ -679,7 +738,6 @@ func CancelPendingChange(c echo.Context) error {
 	case "project":
 		project.DeleteProjectNew(id)
 	}
-	common.GlobalMu.Unlock()
 
 	// Remove .new file if it exists
 	configRoot := common.Config.ConfigRoot
@@ -727,11 +785,10 @@ func CancelAllPendingChanges(c echo.Context) error {
 		// Remove from enhanced manager
 		globalPendingChangeManager.RemoveChange(change.Type, change.ID)
 
-		// Remove from legacy storage
-		common.GlobalMu.Lock()
+		// Remove from legacy storage using safe accessors
 		switch change.Type {
 		case "plugin":
-			delete(plugin.PluginsNew, change.ID)
+			plugin.DeletePluginNew(change.ID)
 		case "input":
 			project.DeleteInputNew(change.ID)
 		case "output":
@@ -741,7 +798,6 @@ func CancelAllPendingChanges(c echo.Context) error {
 		case "project":
 			project.DeleteProjectNew(change.ID)
 		}
-		common.GlobalMu.Unlock()
 
 		// Remove .new file if it exists
 		configRoot := common.Config.ConfigRoot
@@ -898,6 +954,32 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			logger.Error("Failed to write component file", "type", req.Type, "id", req.ID, "error", err)
 			return nil, fmt.Errorf("failed to write %s file: %w", req.Type, err)
 		}
+
+		// Remove .new file if it exists (after successful write)
+		var tempPath string
+		switch req.Type {
+		case "plugin":
+			tempPath = path.Join(configRoot, "plugin", req.ID+".go.new")
+		case "input":
+			tempPath = path.Join(configRoot, "input", req.ID+".yaml.new")
+		case "output":
+			tempPath = path.Join(configRoot, "output", req.ID+".yaml.new")
+		case "ruleset":
+			tempPath = path.Join(configRoot, "ruleset", req.ID+".xml.new")
+		case "project":
+			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
+		}
+
+		if tempPath != "" {
+			if _, err := os.Stat(tempPath); err == nil {
+				err = os.Remove(tempPath)
+				if err != nil {
+					logger.Warn("Failed to remove temp file after successful apply", "path", tempPath, "error", err)
+				} else {
+					logger.Info("Temp file removed after successful apply", "path", tempPath)
+				}
+			}
+		}
 	}
 
 	// Phase 4: Stop old component and create new one
@@ -933,11 +1015,9 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("failed to create input: %w", err)
 		}
 
-		// Replace in global registry
-		common.GlobalMu.Lock()
+		// Replace in global registry using safe accessors
 		project.SetInput(req.ID, newInput)
 		project.DeleteInputNew(req.ID)
-		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("input", req.ID)
 
@@ -971,11 +1051,9 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("failed to create output: %w", err)
 		}
 
-		// Replace in global registry
-		common.GlobalMu.Lock()
+		// Replace in global registry using safe accessors
 		project.SetOutput(req.ID, newOutput)
 		project.DeleteOutputNew(req.ID)
-		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("output", req.ID)
 
@@ -1009,11 +1087,9 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("failed to create ruleset: %w", err)
 		}
 
-		// Replace in global registry
-		common.GlobalMu.Lock()
+		// Replace in global registry using safe accessors
 		project.SetRuleset(req.ID, newRuleset)
 		project.DeleteRulesetNew(req.ID)
-		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
 
@@ -1040,20 +1116,16 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("failed to create project: %w", err)
 		}
 
-		// Replace in global registry
-		common.GlobalMu.Lock()
+		// Replace in global registry using safe accessors
 		project.SetProject(req.ID, newProject)
 		project.DeleteProjectNew(req.ID)
-		common.GlobalMu.Unlock()
 
 		// Projects don't have affected projects since they restart themselves
 		affectedProjects = []string{}
 
 	case "plugin":
 		// Stop old component if it exists (plugins don't have explicit stop)
-		common.GlobalMu.Lock()
-		delete(plugin.Plugins, req.ID)
-		common.GlobalMu.Unlock()
+		// Use safe deletion via plugin package
 
 		// Create new component instance
 		var err error
@@ -1066,10 +1138,8 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("failed to create plugin: %w", err)
 		}
 
-		// Clear temporary version
-		common.GlobalMu.Lock()
-		delete(plugin.PluginsNew, req.ID)
-		common.GlobalMu.Unlock()
+		// Clear temporary version using safe accessor
+		plugin.DeletePluginNew(req.ID)
 
 		affectedProjects = project.GetAffectedProjects("plugin", req.ID)
 
@@ -1154,286 +1224,71 @@ func ApplySingleChange(c echo.Context) error {
 
 	logger.Info("ApplySingleChange request", "type", req.Type, "id", req.ID)
 
-	// First verify configuration with lock protection
-	var verifyErr error
+	// Get pending change using safe accessors
 	var content string
+	var oldContent string
 	var found bool
 
-	// Lock for reading pending changes
-	common.GlobalMu.RLock()
 	switch req.Type {
 	case "plugin":
-		content, found = plugin.PluginsNew[req.ID]
+		content, found = getPendingPluginChange(req.ID)
+		if found {
+			oldContent = getExistingPluginContent(req.ID)
+		}
 	case "input":
 		content, found = project.GetInputNew(req.ID)
+		if found {
+			if inp, exists := project.GetInput(req.ID); exists {
+				oldContent = inp.Config.RawConfig
+			}
+		}
 	case "output":
 		content, found = project.GetOutputNew(req.ID)
+		if found {
+			if out, exists := project.GetOutput(req.ID); exists {
+				oldContent = out.Config.RawConfig
+			}
+		}
 	case "ruleset":
 		content, found = project.GetRulesetNew(req.ID)
+		if found {
+			if rs, exists := project.GetRuleset(req.ID); exists {
+				oldContent = rs.RawConfig
+			}
+		}
 	case "project":
 		content, found = project.GetProjectNew(req.ID)
+		if found {
+			if proj, exists := project.GetProject(req.ID); exists {
+				oldContent = proj.Config.RawConfig
+			}
+		}
 	default:
-		common.GlobalMu.RUnlock()
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid component type"})
 	}
-	common.GlobalMu.RUnlock()
 
 	if !found {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("No pending changes found for this %s", req.Type)})
 	}
 
-	// Verify configuration (without holding lock)
-	switch req.Type {
-	case "plugin":
-		verifyErr = plugin.Verify("", content, req.ID)
-	case "input":
-		verifyErr = input.Verify("", content)
-	case "output":
-		verifyErr = output.Verify("", content)
-	case "ruleset":
-		verifyErr = rules_engine.Verify("", content)
-	case "project":
-		verifyErr = project.Verify("", content)
+	// Use unified reload logic to avoid scattered lock operations
+	reloadReq := &ComponentReloadRequest{
+		Type:        req.Type,
+		ID:          req.ID,
+		NewContent:  content,
+		OldContent:  oldContent,
+		Source:      SourceChangePush,
+		SkipVerify:  false, // Always verify for single changes
+		WriteToFile: true,  // Always write to file for persistence
 	}
 
-	// If verification fails, return error
-	if verifyErr != nil {
-		logger.Error("Configuration verification failed", "type", req.Type, "id", req.ID, "error", verifyErr)
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("Configuration verification failed: %s", verifyErr.Error()),
-		})
-	}
-
-	var err error
-	switch req.Type {
-	case "plugin":
-		// Write plugin file directly
-		configRoot := common.Config.ConfigRoot
-		pluginPath := path.Join(configRoot, "plugin", req.ID+".go")
-
-		var oldContent string
-		if existingPlugin, exists := plugin.Plugins[req.ID]; exists {
-			oldContent = string(existingPlugin.Payload)
-		}
-
-		err = os.WriteFile(pluginPath, []byte(content), 0644)
-		if err == nil {
-			// Reload the plugin component
-			err = plugin.NewPlugin(pluginPath, "", req.ID, plugin.YAEGI_PLUGIN)
-			if err != nil {
-				logger.Error("Failed to reload plugin after update", "id", req.ID, "error", err)
-				RecordChangePush("plugin", req.ID, oldContent, content, "", "failed", err.Error())
-			} else {
-				// Clear the memory map entry after successful update
-				common.GlobalMu.Lock()
-				delete(plugin.PluginsNew, req.ID)
-				common.GlobalMu.Unlock()
-
-				RecordChangePush("plugin", req.ID, oldContent, content, "", "success", "")
-			}
-		}
-	case "input", "output", "ruleset", "project":
-		err = mergeComponentFile(req.Type, req.ID)
-		if err == nil {
-			// Clear the memory map entry after successful merge and reload components
-			switch req.Type {
-			case "input":
-				// Reload the input component
-				inputPath := path.Join(common.Config.ConfigRoot, "input", req.ID+".yaml")
-
-				// Check if old component exists and count projects using it (using centralized counter)
-				common.GlobalMu.RLock()
-				oldInput, exists := project.GetInput(req.ID)
-				common.GlobalMu.RUnlock()
-
-				var oldContent string
-				if exists {
-					oldContent = oldInput.Config.RawConfig
-				}
-
-				var projectsUsingInput int
-				if exists {
-					projectsUsingInput = project.UsageCounter.CountProjectsUsingInput(req.ID)
-				}
-
-				// Only stop old component if no running projects are using it
-				if exists && projectsUsingInput == 0 {
-					logger.Info("Stopping old input component for reload", "id", req.ID, "projects_using", projectsUsingInput)
-					err := oldInput.Stop()
-					common.GlobalDailyStatsManager.CollectAllComponentsData()
-					if err != nil {
-						logger.Error("Failed to stop old input", "id", req.ID, "error", err)
-					}
-				}
-
-				newInput, reloadErr := input.NewInput(inputPath, "", req.ID)
-				if reloadErr != nil {
-					logger.Error("Failed to reload input after merge", "id", req.ID, "error", reloadErr)
-					// Record failed operation
-					RecordChangePush("input", req.ID, oldContent, content, "", "failed", reloadErr.Error())
-				} else {
-					common.GlobalMu.Lock()
-					project.SetInput(req.ID, newInput)
-					common.GlobalMu.Unlock()
-					logger.Info("Successfully reloaded input component", "id", req.ID)
-					// Record successful operation
-					RecordChangePush("input", req.ID, oldContent, content, "", "success", "")
-				}
-
-				// Only clear the memory map entry after successful recording
-				common.GlobalMu.Lock()
-				project.DeleteInputNew(req.ID)
-				common.GlobalMu.Unlock()
-			case "output":
-				outputPath := path.Join(common.Config.ConfigRoot, "output", req.ID+".yaml")
-
-				// Check if old component exists and count projects using it (using centralized counter)
-				common.GlobalMu.RLock()
-				oldOutput, exists := project.GetOutput(req.ID)
-				common.GlobalMu.RUnlock()
-
-				var oldContent string
-				if exists {
-					oldContent = oldOutput.Config.RawConfig
-				}
-
-				var projectsUsingOutput int
-				if exists {
-					projectsUsingOutput = project.UsageCounter.CountProjectsUsingOutput(req.ID)
-				}
-
-				// Only stop old component if no running projects are using it
-				if exists && projectsUsingOutput == 0 {
-					logger.Info("Stopping old output component for reload", "id", req.ID, "projects_using", projectsUsingOutput)
-					// Collect final statistics before stopping
-					err := oldOutput.Stop()
-					common.GlobalDailyStatsManager.CollectAllComponentsData()
-					if err != nil {
-						logger.Error("Failed to stop old output", "id", req.ID, "error", err)
-					}
-				}
-
-				newOutput, reloadErr := output.NewOutput(outputPath, "", req.ID)
-				if reloadErr != nil {
-					logger.Error("Failed to reload output after merge", "id", req.ID, "error", reloadErr)
-					// Record failed operation
-					RecordChangePush("output", req.ID, oldContent, content, "", "failed", reloadErr.Error())
-				} else {
-					common.GlobalMu.Lock()
-					project.SetOutput(req.ID, newOutput)
-					common.GlobalMu.Unlock()
-					logger.Info("Successfully reloaded output component", "id", req.ID)
-					// Record successful operation
-					RecordChangePush("output", req.ID, oldContent, content, "", "success", "")
-				}
-
-				// Only clear the memory map entry after successful recording
-				common.GlobalMu.Lock()
-				project.DeleteOutputNew(req.ID)
-				common.GlobalMu.Unlock()
-			case "ruleset":
-				rulesetPath := path.Join(common.Config.ConfigRoot, "ruleset", req.ID+".xml")
-
-				// Check if old component exists and count projects using it (using centralized counter)
-				common.GlobalMu.RLock()
-				oldRuleset, exists := project.GetRuleset(req.ID)
-				common.GlobalMu.RUnlock()
-
-				var oldContent string
-				if exists {
-					oldContent = oldRuleset.RawConfig
-				}
-
-				var projectsUsingRuleset int
-				if exists {
-					projectsUsingRuleset = project.UsageCounter.CountProjectsUsingRuleset(req.ID)
-				}
-
-				// Only stop old component if no running projects are using it
-				if exists && projectsUsingRuleset == 0 {
-					logger.Info("Stopping old ruleset component for reload", "id", req.ID, "projects_using", projectsUsingRuleset)
-					err := oldRuleset.Stop()
-					common.GlobalDailyStatsManager.CollectAllComponentsData()
-					if err != nil {
-						logger.Error("Failed to stop old ruleset", "id", req.ID, "error", err)
-					}
-				}
-
-				newRuleset, reloadErr := rules_engine.NewRuleset(rulesetPath, "", req.ID)
-				if reloadErr != nil {
-					logger.Error("Failed to reload ruleset after merge", "id", req.ID, "error", reloadErr)
-					// Record failed operation
-					RecordChangePush("ruleset", req.ID, oldContent, content, "", "failed", reloadErr.Error())
-				} else {
-					common.GlobalMu.Lock()
-					project.SetRuleset(req.ID, newRuleset)
-					common.GlobalMu.Unlock()
-					logger.Info("Successfully reloaded ruleset component", "id", req.ID)
-					// Record successful operation
-					RecordChangePush("ruleset", req.ID, oldContent, content, "", "success", "")
-				}
-
-				// Only clear the memory map entry after successful recording
-				common.GlobalMu.Lock()
-				project.DeleteRulesetNew(req.ID)
-				common.GlobalMu.Unlock()
-			case "project":
-				projectPath := path.Join(common.Config.ConfigRoot, "project", req.ID+".yaml")
-
-				// Handle project lifecycle carefully
-				var wasRunning bool
-				var oldContent string
-				common.GlobalMu.RLock()
-				oldProject, exists := project.GetProject(req.ID)
-				common.GlobalMu.RUnlock()
-				if exists {
-					wasRunning = (oldProject.Status == common.StatusRunning)
-					oldContent = oldProject.Config.RawConfig
-					if wasRunning {
-						err := oldProject.Stop()
-						if err != nil {
-							logger.Error("Failed to stop old project", "id", req.ID, "error", err)
-						}
-					}
-				}
-
-				newProject, reloadErr := project.NewProject(projectPath, "", req.ID, false)
-				if reloadErr != nil {
-					logger.Error("Failed to reload project after merge", "id", req.ID, "error", reloadErr)
-					// Record failed operation
-					RecordChangePush("project", req.ID, oldContent, content, "", "failed", reloadErr.Error())
-				} else {
-					common.GlobalMu.Lock()
-					project.SetProject(req.ID, newProject)
-					common.GlobalMu.Unlock()
-					logger.Info("Successfully reloaded project component", "id", req.ID)
-					// Restart project if it was previously running
-					if wasRunning {
-						startErr := newProject.Start()
-						if startErr != nil {
-							logger.Error("Failed to restart project after reload", "id", req.ID, "error", startErr)
-						}
-					}
-					// Record successful operation
-					RecordChangePush("project", req.ID, oldContent, content, "", "success", "")
-				}
-
-				// Only clear the memory map entry after successful recording
-				common.GlobalMu.Lock()
-				project.DeleteProjectNew(req.ID)
-				common.GlobalMu.Unlock()
-			}
-		}
-	}
-
+	affectedProjects, err := reloadComponentUnified(reloadReq)
 	if err != nil {
-		logger.Error("Failed to apply change", "type", req.Type, "id", req.ID, "error", err)
+		logger.Error("Failed to apply single change", "type", req.Type, "id", req.ID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
 	}
 
-	// Get affected projects first
-	affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
-
+	// Publish cluster instructions and restart affected projects
 	if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, content, affectedProjects); err != nil {
 		logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
 	}
@@ -1532,9 +1387,7 @@ func CreateTempFile(c echo.Context) error {
 	// Strip trailing 's' if present to normalize component type
 	singularType := strings.TrimSuffix(componentType, "s")
 
-	// Lock for reading component data
-	common.GlobalMu.RLock()
-
+	// Use safe accessors for reading component data
 	switch singularType {
 	case "input":
 		originalPath = path.Join(configRoot, "input", id+".yaml")
@@ -1543,7 +1396,6 @@ func CreateTempFile(c echo.Context) error {
 		if i, ok := project.GetInput(id); ok {
 			content = i.Config.RawConfig
 		} else {
-			common.GlobalMu.RUnlock()
 			logger.Error("Input not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 		}
@@ -1555,7 +1407,6 @@ func CreateTempFile(c echo.Context) error {
 		if o, ok := project.GetOutput(id); ok {
 			content = o.Config.RawConfig
 		} else {
-			common.GlobalMu.RUnlock()
 			logger.Error("Output not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "output not found"})
 		}
@@ -1567,7 +1418,6 @@ func CreateTempFile(c echo.Context) error {
 		if ruleset, ok := project.GetRuleset(id); ok {
 			content = ruleset.RawConfig
 		} else {
-			common.GlobalMu.RUnlock()
 			logger.Error("Ruleset not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset not found"})
 		}
@@ -1579,7 +1429,6 @@ func CreateTempFile(c echo.Context) error {
 		if proj, ok := project.GetProject(id); ok {
 			content = proj.Config.RawConfig
 		} else {
-			common.GlobalMu.RUnlock()
 			logger.Error("Project not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 		}
@@ -1588,21 +1437,16 @@ func CreateTempFile(c echo.Context) error {
 		originalPath = path.Join(configRoot, "plugin", id+".go")
 		tempPath = originalPath + ".new"
 
-		if p, ok := plugin.Plugins[id]; ok {
-			content = string(p.Payload)
-		} else {
-			common.GlobalMu.RUnlock()
+		content = getExistingPluginContent(id)
+		if content == "" {
 			logger.PluginError("Plugin not found", "id", id)
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 		}
 
 	default:
-		common.GlobalMu.RUnlock()
 		logger.Error("Unsupported component type", "type", componentType)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
 	}
-
-	common.GlobalMu.RUnlock()
 
 	// Check if temp file already exists
 	if _, err := os.Stat(tempPath); err == nil {
@@ -1641,8 +1485,6 @@ func CreateTempFile(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create temp file: " + err.Error()})
 	}
 
-	// Store the temp file content in memory with lock protection
-	common.GlobalMu.Lock()
 	switch singularType {
 	case "input":
 		project.SetInputNew(id, content)
@@ -1653,9 +1495,8 @@ func CreateTempFile(c echo.Context) error {
 	case "project":
 		project.SetProjectNew(id, content)
 	case "plugin":
-		plugin.PluginsNew[id] = content
+		plugin.SetPluginNew(id, content)
 	}
-	common.GlobalMu.Unlock()
 
 	logger.Info("Temp file created successfully", "path", tempPath)
 	return c.JSON(http.StatusOK, map[string]string{"message": "temp file created successfully"})
@@ -1722,8 +1563,7 @@ func DeleteTempFile(c echo.Context) error {
 		})
 	}
 
-	// Remove temporary file content from memory with lock protection
-	common.GlobalMu.Lock()
+	// Remove temporary file content from memory using safe accessors
 	switch singularType {
 	case "input":
 		project.DeleteInputNew(id)
@@ -1734,9 +1574,8 @@ func DeleteTempFile(c echo.Context) error {
 	case "project":
 		project.DeleteProjectNew(id)
 	case "plugin":
-		delete(plugin.PluginsNew, id)
+		plugin.DeletePluginNew(id)
 	}
-	common.GlobalMu.Unlock()
 
 	logger.Info("Temp file deleted successfully", "path", tempPath)
 	return c.JSON(http.StatusOK, map[string]string{
