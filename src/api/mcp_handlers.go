@@ -198,7 +198,7 @@ func GetMCPImplementationStatus() map[string]interface{} {
 		"using_standard": true,
 		"library":        "mcp-go",
 		"tool_count":     len(tools),
-		"server_info":    "AgentSmith-HUB v0.1.5",
+		"server_info":    "AgentSmith-HUB v0.1.6",
 	}
 }
 
@@ -568,7 +568,7 @@ func handleMCPSSE(c echo.Context) error {
 			"sessionId": session.ID,
 			"serverInfo": map[string]interface{}{
 				"name":    "AgentSmith-HUB",
-				"version": "v0.1.5",
+				"version": "v0.1.6",
 			},
 			"capabilities": map[string]interface{}{
 				"resources": map[string]interface{}{},
@@ -659,7 +659,7 @@ func getMCPManifest(c echo.Context) error {
 	manifest := map[string]interface{}{
 		"mcpVersion":  common.MCPVersion,
 		"name":        "AgentSmith-HUB MCP Server",
-		"version":     "v0.1.5",
+		"version":     "v0.1.6",
 		"description": "Model Context Protocol server for AgentSmith-HUB Security Data Pipe Platform (SDPP) providing access to security project configurations, components, and security management tools (Leader node only)",
 		"author":      "AgentSmith-HUB Team",
 		"license":     "MIT",
@@ -720,7 +720,7 @@ func mcpHealthCheck(c echo.Context) error {
 	return c.JSON(httpStatus, map[string]interface{}{
 		"status":    status,
 		"service":   "AgentSmith-HUB MCP Server",
-		"version":   "v0.1.5",
+		"version":   "v0.1.6",
 		"uptime":    "running",
 		"is_leader": common.IsCurrentNodeLeader(),
 		"node_id":   common.GetNodeID(),
@@ -787,11 +787,11 @@ func getMCPStats(c echo.Context) error {
 			"node_id":   common.GetNodeID(),
 		},
 		"resources": map[string]interface{}{
-			"total_projects": len(project.GlobalProject.Projects),
-			"total_inputs":   len(project.GlobalProject.Inputs),
-			"total_outputs":  len(project.GlobalProject.Outputs),
+			"total_projects": project.GetProjectsCount(),
+			"total_inputs":   project.GetInputsCount(),
+			"total_outputs":  project.GetOutputsCount(),
 			"total_plugins":  len(plugin.Plugins),
-			"total_rulesets": len(project.GlobalProject.Rulesets),
+			"total_rulesets": project.GetRulesetsCount(),
 		},
 		"capabilities": map[string]interface{}{
 			"resources_available": true,
@@ -835,7 +835,7 @@ func getMCPInstallConfig(c echo.Context) error {
 	mcpConfig := map[string]interface{}{
 		"name":        "AgentSmith-HUB",
 		"description": "AgentSmith-HUB MCP Server - Security Data Pipe Platform (SDPP) & Security Rules Engine",
-		"version":     "v0.1.5",
+		"version":     "v0.1.6",
 		"server": map[string]interface{}{
 			"type":    "http",
 			"baseUrl": baseURL,

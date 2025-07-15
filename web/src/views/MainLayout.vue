@@ -23,6 +23,7 @@
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
           @created="handleCreated"
+          ref="componentDetailRef"
         />
         <ClusterStatus v-else-if="selected && selected.type === 'cluster'" />
         <PendingChanges 
@@ -45,6 +46,7 @@
     <RulesetTestModal 
       :show="showTestRulesetModal"
       :rulesetId="testRulesetId"
+      :rulesetContent="testRulesetContent"
       @close="closeTestRulesetModal"
     />
     
@@ -83,9 +85,11 @@ import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
 // State
 const selected = ref(null)
 const sidebarRef = ref(null)
+const componentDetailRef = ref(null)
 const sidebarCollapsed = ref(false)
 const showTestRulesetModal = ref(false)
 const testRulesetId = ref('')
+const testRulesetContent = ref('')
 const showTestOutputModal = ref(false)
 const testOutputId = ref('')
 const showTestProjectModal = ref(false)
@@ -339,8 +343,21 @@ onBeforeUnmount(() => {
 // Open the ruleset test modal
 function onTestRuleset(payload) {
   testRulesetId.value = payload.id;
+  
+  // Try to get editor content if the same ruleset is currently being edited
+  testRulesetContent.value = '';
+  if (selected.value && 
+      selected.value.type === 'rulesets' && 
+      selected.value.id === payload.id && 
+      componentDetailRef.value) {
+    // Get editor content from ComponentDetail
+    const editorContent = componentDetailRef.value.getEditorContent?.();
+    if (editorContent !== undefined) {
+      testRulesetContent.value = editorContent;
+    }
+  }
+  
   showTestRulesetModal.value = true;
-
   document.addEventListener('keydown', handleEscKey);
 }
 

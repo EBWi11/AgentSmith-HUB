@@ -10,6 +10,7 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -28,7 +29,7 @@ func NewStandardMCPServer() *StandardMCPServer {
 	// Create mcp-go server
 	s := server.NewMCPServer(
 		"AgentSmith-HUB",
-		"v0.1.5",
+		"v0.1.6",
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(true, true),
 		server.WithPromptCapabilities(true),
@@ -136,7 +137,7 @@ func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
 		},
 		"serverInfo": map[string]interface{}{
 			"name":         "AgentSmith-HUB",
-			"version":      "v0.1.5",
+			"version":      "v0.1.6",
 			"instructions": instructions,
 		},
 	}
@@ -375,9 +376,10 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 	}
 
 	// Add ruleset resources
-	project.GlobalProject.ProjectMu.RLock()
-	for rsID, rs := range project.GlobalProject.Rulesets {
-		owners := rs.OwnerProjects
+	common.GlobalMu.RLock()
+	project.ForEachRuleset(func(rsID string, _ *rules_engine.Ruleset) bool {
+		// Dynamically find projects using this ruleset (replaces static OwnerProjects)
+		owners := findProjectsUsingRuleset(rsID)
 		sampleCnt := 0
 		sampler := common.GetSampler("ruleset." + rsID)
 		if sampler != nil {
@@ -396,8 +398,9 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 				"sampleCount":   sampleCnt,
 			},
 		})
-	}
-	project.GlobalProject.ProjectMu.RUnlock()
+		return true
+	})
+	common.GlobalMu.RUnlock()
 
 	// Apply filtering & pagination
 	filtered := make([]map[string]interface{}, 0)
@@ -464,7 +467,7 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 		switch resType {
 		case "project":
 			s.ProjectMu.RLock()
-			proj, ok := project.GlobalProject.Projects[resID]
+			proj, ok := project.GetProject(resID)
 			s.ProjectMu.RUnlock()
 			if ok && proj != nil && proj.Config != nil {
 				content = proj.Config.RawConfig
@@ -473,16 +476,19 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				return s.createJSONRPCError(id, -32602, "Project not found", uri)
 			}
 		case "ruleset":
-			project.GlobalProject.ProjectMu.RLock()
-			rs, ok := project.GlobalProject.Rulesets[resID]
-			project.GlobalProject.ProjectMu.RUnlock()
+			common.GlobalMu.RLock()
+			rs, ok := project.GetRuleset(resID)
+			common.GlobalMu.RUnlock()
+
 			if !ok || rs == nil {
 				return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)
 			}
 
 			switch fragment {
 			case "owners":
-				ownersJSON, _ := json.Marshal(rs.OwnerProjects)
+				// Dynamically find projects using this ruleset (replaces static OwnerProjects)
+				owners := findProjectsUsingRuleset(resID)
+				ownersJSON, _ := json.Marshal(owners)
 				content = string(ownersJSON)
 				mimeType = "application/json"
 			case "samples":
@@ -558,4 +564,18 @@ func (s *StandardMCPServer) createJSONRPCError(id interface{}, code int, message
 		},
 	}
 	return json.Marshal(response)
+}
+
+// findProjectsUsingRuleset dynamically finds projects that use a specific ruleset
+func findProjectsUsingRuleset(rulesetID string) []string {
+	projects := make([]string, 0)
+
+	project.ForEachProject(func(projectID string, proj *project.Project) bool {
+		if _, exists := proj.Rulesets[rulesetID]; exists {
+			projects = append(projects, projectID)
+		}
+		return true
+	})
+
+	return projects
 }

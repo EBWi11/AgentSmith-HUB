@@ -67,11 +67,14 @@ type AliyunSLSOutputConfig struct {
 
 // Output is the runtime output instance.
 type Output struct {
-	Id                  string `json:"Id"`
+	Status              common.Status
+	StatusChangedAt     *time.Time `json:"status_changed_at,omitempty"`
+	Err                 error      `json:"-"`
+	Id                  string     `json:"Id"`
 	Path                string
 	ProjectNodeSequence string
 	Type                OutputType
-	UpStream            []*chan map[string]interface{}
+	UpStream            map[string]*chan map[string]interface{}
 
 	// runtime
 	kafkaProducer         *common.KafkaProducer
@@ -99,8 +102,7 @@ type Output struct {
 	// raw config
 	Config *OutputConfig
 
-	// Projects sharing this output instance
-	OwnerProjects []string `json:"-"`
+	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
 func Verify(path string, raw string) error {
@@ -170,7 +172,9 @@ func Verify(path string, raw string) error {
 		if cfg.AliyunSLS == nil {
 			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS output (line: unknown)")
 		}
+		// Add more AliyunSLS specific field validation
 	case OutputTypePrint:
+		// Print output doesn't require external connectivity
 	default:
 		return fmt.Errorf("unsupported output type: %s (line: unknown)", cfg.Type)
 	}
@@ -200,12 +204,13 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		Id:               id,
 		Path:             path,
 		Type:             cfg.Type,
-		UpStream:         make([]*chan map[string]interface{}, 0),
+		UpStream:         make(map[string]*chan map[string]interface{}, 0),
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
 		Config:           &cfg,
 		sampler:          nil, // Will be set below based on cluster role
+		Status:           common.StatusStopped,
 	}
 
 	// Only create sampler on leader node for performance
@@ -213,6 +218,49 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		out.sampler = common.GetSampler("output." + id)
 	}
 	return out, nil
+}
+
+// SetStatus sets the output status and error information
+func (out *Output) SetStatus(status common.Status, err error) {
+	if err != nil {
+		out.Err = err
+		logger.Error("Output status changed with error", "output", out.Id, "status", status, "error", err)
+	}
+	out.Status = status
+	t := time.Now()
+	out.StatusChangedAt = &t
+}
+
+// cleanup performs cleanup when normal stop fails or panic occurs
+func (out *Output) cleanup() {
+	// Close print stop channel if it exists and not already closed
+	if out.printStop != nil {
+		select {
+		case <-out.printStop:
+			// Already closed
+		default:
+			close(out.printStop)
+		}
+		out.printStop = nil
+	}
+
+	// Stop producers
+	if out.kafkaProducer != nil {
+		out.kafkaProducer.Close()
+		out.kafkaProducer = nil
+	}
+
+	if out.elasticsearchProducer != nil {
+		out.elasticsearchProducer.Close()
+		out.elasticsearchProducer = nil
+	}
+
+	// Reset atomic counter
+	atomic.StoreUint64(&out.produceTotal, 0)
+	atomic.StoreUint64(&out.lastReportedTotal, 0)
+
+	// Clear test collection channel
+	out.TestCollectionChan = nil
 }
 
 // enhanceMessageWithProjectNodeSequence adds ProjectNodeSequence and output metadata to the message
@@ -230,37 +278,102 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 	return enhancedMsg
 }
 
+// StartForTesting starts the output component in testing mode
+// In testing mode, completely ignore output type and only send data to TestCollectionChan
+func (out *Output) StartForTesting() error {
+	if out.Status != common.StatusStopped {
+		return fmt.Errorf("output %s is not stopped", out.Id)
+	}
+
+	out.ResetProduceTotal()
+	out.SetStatus(common.StatusStarting, nil)
+
+	// Start single goroutine to read from UpStream and send to TestCollectionChan only
+	out.wg.Add(1)
+	go func() {
+		defer out.wg.Done()
+
+		for {
+			// Non-blocking check for messages from any upstream channel
+			processed := false
+			for _, up := range out.UpStream {
+				select {
+				case msg := <-*up:
+					atomic.AddUint64(&out.produceTotal, 1)
+
+					// Skip sampling in testing mode (handled by SetTestMode)
+					if out.sampler != nil {
+						out.sampler.Sample(msg, out.ProjectNodeSequence)
+					}
+
+					// Enhance message with ProjectNodeSequence information
+					enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+					if out.TestCollectionChan != nil {
+						*out.TestCollectionChan <- enhancedMsg
+					}
+
+					processed = true
+				default:
+				}
+			}
+			if !processed {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
+
+	out.SetStatus(common.StatusRunning, nil)
+	return nil
+}
+
 // Start initializes and starts the output component based on its type
 // Returns an error if the component is already running or if initialization fails
 // If TestCollectionChan is set, messages will be duplicated to that chan for testing purposes,
 // but the original output type will still be used so that real external side-effects can be observed.
 func (out *Output) Start() error {
+	// Add panic recovery for critical state changes
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic during output start", "output", out.Id, "panic", r)
+			// Ensure cleanup and proper status setting on panic
+			out.cleanup()
+			out.SetStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
+		}
+	}()
+
+	// Allow restart from stopped state or from error state
+	if out.Status != common.StatusStopped && out.Status != common.StatusError {
+		return fmt.Errorf("output %s is not stopped (status: %s)", out.Id, out.Status)
+	}
+
+	// Clear error state when restarting
+	out.Err = nil
 	out.ResetProduceTotal()
+	out.SetStatus(common.StatusStarting, nil)
 	// Perform connectivity check first before starting (skip for print type as it doesn't need external connectivity)
 	if out.Type != OutputTypePrint {
 		connectivityResult := out.CheckConnectivity()
 		if status, ok := connectivityResult["status"].(string); ok && status == "error" {
+			out.SetStatus(common.StatusError, fmt.Errorf("output connectivity check failed: %v", connectivityResult["message"]))
 			return fmt.Errorf("output connectivity check failed: %v", connectivityResult["message"])
 		}
 		logger.Info("Output connectivity verified", "output", out.Id, "type", out.Type)
 	}
 
-	// Component statistics are now handled by Daily Stats Manager
-	// which collects data every 10 seconds from all running components
-
 	// Determine if we need to duplicate data for testing
 	hasTestCollector := out.TestCollectionChan != nil
-
-	// Metric goroutine removed - statistics handled by Daily Stats Manager
 
 	effectiveType := out.Type
 
 	switch effectiveType {
 	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
 		if out.kafkaProducer != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("kafka producer already running for output %s", out.Id))
 			return fmt.Errorf("kafka producer already running for output %s", out.Id)
 		}
 		if out.kafkaCfg == nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("kafka configuration missing for output %s", out.Id))
 			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
 		}
 
@@ -275,6 +388,7 @@ func (out *Output) Start() error {
 			out.kafkaCfg.TLS,
 		)
 		if err != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err))
 			return fmt.Errorf("failed to create kafka producer for output %s: %v", out.Id, err)
 		}
 		out.kafkaProducer = producer
@@ -302,11 +416,7 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -337,9 +447,11 @@ func (out *Output) Start() error {
 
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("elasticsearch producer already running for output %s", out.Id))
 			return fmt.Errorf("elasticsearch producer already running for output %s", out.Id)
 		}
 		if out.elasticsearchCfg == nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("elasticsearch configuration missing for output %s", out.Id))
 			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
 		}
 
@@ -363,6 +475,7 @@ func (out *Output) Start() error {
 			out.elasticsearchCfg.Auth,
 		)
 		if err != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("failed to create elasticsearch producer for output %s: %v", out.Id, err))
 			return fmt.Errorf("failed to create elasticsearch producer for output %s: %v", out.Id, err)
 		}
 		out.elasticsearchProducer = producer
@@ -390,11 +503,7 @@ func (out *Output) Start() error {
 
 						// Sample the message
 						if out.sampler != nil {
-							pid := ""
-							if len(out.OwnerProjects) > 0 {
-								pid = out.OwnerProjects[0]
-							}
-							out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
 						}
 
 						// Enhance message with ProjectNodeSequence information before sending
@@ -447,11 +556,7 @@ func (out *Output) Start() error {
 
 							// Sample the message
 							if out.sampler != nil {
-								pid := ""
-								if len(out.OwnerProjects) > 0 {
-									pid = out.OwnerProjects[0]
-								}
-								out.sampler.Sample(msg, out.ProjectNodeSequence, pid)
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
 							}
 
 							// Duplicate to TestCollectionChan if present
@@ -482,17 +587,21 @@ func (out *Output) Start() error {
 		}()
 
 	case OutputTypeAliyunSLS:
-		// TODO: Implement Aliyun SLS output
+		out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS output not implemented yet"))
 		return fmt.Errorf("aliyun SLS output not implemented yet")
 	}
 
+	out.SetStatus(common.StatusRunning, nil)
 	return nil
 }
 
 // Stop stops the output producer and waits for all routines to finish.
 // It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
-	logger.Info("Stopping output", "id", out.Id, "type", out.Type, "upstream_count", len(out.UpStream))
+	if out.Status != common.StatusRunning {
+		return fmt.Errorf("output %s is not running", out.Id)
+	}
+	out.SetStatus(common.StatusStopping, nil)
 
 	// Overall timeout for output stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
@@ -537,68 +646,9 @@ func (out *Output) Stop() error {
 			}
 		}
 
-		// Wait for all internal msgChan to be empty (for each output type)
-		switch out.Type {
-		case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
-			if out.kafkaProducer != nil && out.kafkaProducer.MsgChan != nil {
-				logger.Info("Waiting for kafka internal channel to empty", "output", out.Id)
-				internalTimeout := time.After(5 * time.Second) // 5 second timeout for internal channels
-				waitCount := 0
-
-			waitKafkaMsgChan:
-				for {
-					select {
-					case <-internalTimeout:
-						logger.Warn("Timeout waiting for kafka internal channel, forcing close", "output", out.Id)
-						break waitKafkaMsgChan
-					default:
-						if len(out.kafkaProducer.MsgChan) == 0 {
-							break waitKafkaMsgChan
-						}
-						waitCount++
-						if waitCount%20 == 0 { // Log every second
-							logger.Info("Kafka internal channel not empty", "output", out.Id, "length", len(out.kafkaProducer.MsgChan))
-						}
-						time.Sleep(50 * time.Millisecond)
-					}
-				}
-				// Note: msgChan is closed by the UpStream processing goroutine, not here
-				out.kafkaProducer.Close()
-				out.kafkaProducer = nil
-			}
-		case OutputTypeElasticsearch:
-			if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
-				logger.Info("Waiting for elasticsearch internal channel to empty", "output", out.Id)
-				internalTimeout := time.After(5 * time.Second) // 5 second timeout for internal channels
-				waitCount := 0
-
-			waitESMsgChan:
-				for {
-					select {
-					case <-internalTimeout:
-						logger.Warn("Timeout waiting for elasticsearch internal channel, forcing close", "output", out.Id)
-						break waitESMsgChan
-					default:
-						if len(out.elasticsearchProducer.MsgChan) == 0 {
-							break waitESMsgChan
-						}
-						waitCount++
-						if waitCount%20 == 0 { // Log every second
-							logger.Info("Elasticsearch internal channel not empty", "output", out.Id, "length", len(out.elasticsearchProducer.MsgChan))
-						}
-						time.Sleep(50 * time.Millisecond)
-					}
-				}
-				// Note: msgChan is closed by the UpStream processing goroutine, not here
-				out.elasticsearchProducer.Close()
-				out.elasticsearchProducer = nil
-			}
-		case OutputTypePrint:
-			if out.printStop != nil {
-				close(out.printStop)
-				out.printStop = nil
-			}
-		}
+		// Brief wait for internal channels to drain
+		logger.Info("Waiting for output internal channels to empty", "output", out.Id)
+		time.Sleep(1 * time.Second)
 
 		// Metrics stop removed
 	}()
@@ -607,32 +657,11 @@ func (out *Output) Stop() error {
 	case <-stopCompleted:
 		logger.Info("Output channels drained successfully", "output", out.Id)
 	case <-overallTimeout:
-		logger.Warn("Output stop timeout exceeded, forcing shutdown", "output", out.Id)
-		// Force cleanup even on timeout
-		switch out.Type {
-		case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
-			if out.kafkaProducer != nil {
-				// Note: msgChan is closed by the UpStream processing goroutine, not here
-				out.kafkaProducer.Close()
-				out.kafkaProducer = nil
-			}
-		case OutputTypeElasticsearch:
-			if out.elasticsearchProducer != nil {
-				// Note: msgChan is closed by the UpStream processing goroutine, not here
-				out.elasticsearchProducer.Close()
-				out.elasticsearchProducer = nil
-			}
-		case OutputTypePrint:
-			if out.printStop != nil {
-				close(out.printStop)
-				out.printStop = nil
-			}
-		}
+		logger.Warn("Output stop timeout exceeded, forcing cleanup", "output", out.Id)
 	}
 
+	// Wait for goroutines to finish with timeout
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
-
-	// Wait for goroutines with timeout
 	waitDone := make(chan struct{})
 	go func() {
 		out.wg.Wait()
@@ -641,18 +670,15 @@ func (out *Output) Stop() error {
 
 	select {
 	case <-waitDone:
-		logger.Info("Output stopped successfully", "id", out.Id)
-	case <-time.After(5 * time.Second): // Reduced from 15s to 5s
-		logger.Warn("Timeout waiting for output goroutines", "id", out.Id)
+		logger.Info("Output stopped gracefully", "id", out.Id)
+	case <-time.After(5 * time.Second):
+		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
 	}
 
-	// Reset atomic counter for restart
-	previousTotal := atomic.LoadUint64(&out.produceTotal)
-	atomic.StoreUint64(&out.produceTotal, 0)
-	logger.Debug("Reset atomic counter for output component", "output", out.Id, "previous_total", previousTotal)
+	// Use cleanup to ensure all resources are properly released
+	out.cleanup()
 
-	// Note: ResetDiffCounter no longer needed - component manages its own increments
-
+	out.SetStatus(common.StatusStopped, nil)
 	return nil
 }
 
@@ -683,31 +709,11 @@ func (out *Output) GetIncrementAndUpdate() uint64 {
 func (out *Output) StopForTesting() error {
 	logger.Info("Quick stopping test output", "id", out.Id, "type", out.Type)
 
-	// Metrics stop removed
-
 	// Clear test collection channel
 	out.TestCollectionChan = nil
 
-	// Force close producers without waiting
-	switch out.Type {
-	case OutputTypeKafka, OutputTypeKafkaAzure, OutputTypeKafkaAWS:
-		if out.kafkaProducer != nil {
-			// Note: msgChan is closed by the UpStream processing goroutine, not here
-			out.kafkaProducer.Close()
-			out.kafkaProducer = nil
-		}
-	case OutputTypeElasticsearch:
-		if out.elasticsearchProducer != nil {
-			// Note: msgChan is closed by the UpStream processing goroutine, not here
-			out.elasticsearchProducer.Close()
-			out.elasticsearchProducer = nil
-		}
-	case OutputTypePrint:
-		if out.printStop != nil {
-			close(out.printStop)
-			out.printStop = nil
-		}
-	}
+	// In testing mode, there are no special channels or producers to close
+	// Just wait for the single goroutine to finish
 
 	// Wait for goroutines with very short timeout
 	waitDone := make(chan struct{})
@@ -729,6 +735,7 @@ func (out *Output) StopForTesting() error {
 	atomic.StoreUint64(&out.lastReportedTotal, 0)
 	logger.Debug("Reset atomic counter for test output component", "output", out.Id, "previous_total", previousTotal)
 
+	out.SetStatus(common.StatusStopped, nil)
 	return nil
 }
 
@@ -995,21 +1002,25 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 		return nil, fmt.Errorf("existing output is nil")
 	}
 
+	// Verify the existing configuration before creating new instance
+	err := Verify(existing.Path, existing.Config.RawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("output verify error for existing config: %s %s", existing.Id, err.Error())
+	}
+
 	// Create a new Output instance with the same configuration but different ProjectNodeSequence
 	newOutput := &Output{
 		Id:                  existing.Id,
 		Path:                existing.Path,
 		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
 		Type:                existing.Type,
-		UpStream:            make([]*chan map[string]interface{}, 0),
+		UpStream:            make(map[string]*chan map[string]interface{}, 0),
 		kafkaCfg:            existing.kafkaCfg,
 		elasticsearchCfg:    existing.elasticsearchCfg,
 		aliyunSLSCfg:        existing.aliyunSLSCfg,
 		Config:              existing.Config,
-		TestCollectionChan:  nil, // Reset for new instance
-		// Note: Runtime fields (kafkaProducer, elasticsearchProducer, wg, etc.) are intentionally not copied
-		// as they will be initialized when the output starts
-		// Metrics fields (produceTotal) are also not copied as they are instance-specific
+		Status:              common.StatusStopped, // Initialize status to stopped
+		TestCollectionChan:  nil,                  // Reset for new instance
 	}
 
 	// Only create sampler on leader node for performance

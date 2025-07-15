@@ -183,6 +183,15 @@ async function runTest() {
   jsonError.value = null;
   jsonErrorLine.value = null;
   
+  // Debug: Check parameters
+  console.log('DEBUG: runTest called with:', {
+    rulesetId: props.rulesetId,
+    rulesetContent: props.rulesetContent,
+    rulesetContentType: typeof props.rulesetContent,
+    rulesetContentLength: props.rulesetContent?.length || 0,
+    willUseContentAPI: props.rulesetContent !== undefined
+  });
+  
   try {
     // Parse input data
     let data;
@@ -207,14 +216,15 @@ async function runTest() {
       // Process array of JSON objects
       let allResults = [];
       
-      for (let i = 0; i < data.length; i++) {
-        try {
-          let response;
-          if (props.rulesetContent) {
-            response = await hubApi.testRulesetContent(props.rulesetContent, data[i]);
-          } else {
-            response = await hubApi.testRuleset(props.rulesetId, data[i]);
-          }
+              for (let i = 0; i < data.length; i++) {
+          try {
+            let response;
+            // Use editor content if available and not empty, otherwise fall back to saved file
+            if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
+              response = await hubApi.testRulesetContent(props.rulesetContent, data[i]);
+            } else {
+              response = await hubApi.testRuleset(props.rulesetId, data[i]);
+            }
           
           if (response.success) {
             // Add results from this item
@@ -234,7 +244,8 @@ async function runTest() {
     } else {
       // Process single JSON object (existing logic)
       let response;
-      if (props.rulesetContent) {
+      // Use editor content if available and not empty, otherwise fall back to saved file
+      if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
         response = await hubApi.testRulesetContent(props.rulesetContent, data);
       } else {
         response = await hubApi.testRuleset(props.rulesetId, data);

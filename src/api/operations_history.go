@@ -64,56 +64,6 @@ func getUnifiedOperationHistory(filter common.OperationHistoryFilter) ([]common.
 	return common.GetOperationsFromRedisWithFilter(filter)
 }
 
-// calculateNodeStats calculates node statistics from operations
-func calculateNodeStats(operations []common.OperationRecord) map[string]NodeOpStat {
-	nodeStats := make(map[string]NodeOpStat)
-
-	for _, op := range operations {
-		nodeID := ""
-		if op.Details != nil {
-			if nodeIDValue, exists := op.Details["node_id"]; exists {
-				if nodeIDStr, ok := nodeIDValue.(string); ok {
-					nodeID = nodeIDStr
-				}
-			}
-		}
-
-		// Skip operations without node_id
-		if nodeID == "" {
-			continue
-		}
-
-		stat, exists := nodeStats[nodeID]
-		if !exists {
-			stat = NodeOpStat{NodeID: nodeID}
-		}
-
-		switch op.Type {
-		case common.OpTypeChangePush:
-			stat.ChangePushOps++
-		case common.OpTypeLocalPush:
-			stat.LocalPushOps++
-		case common.OpTypeComponentDelete:
-			stat.ComponentDeleteOps++
-		case common.OpTypeProjectStart:
-			stat.ProjectStartOps++
-		case common.OpTypeProjectStop:
-			stat.ProjectStopOps++
-		case common.OpTypeProjectRestart:
-			stat.ProjectRestartOps++
-		}
-		stat.TotalOps++
-		if op.Status == "success" {
-			stat.SuccessOps++
-		} else {
-			stat.FailedOps++
-		}
-		nodeStats[nodeID] = stat
-	}
-
-	return nodeStats
-}
-
 // RecordChangePush records a change push operation to Redis
 func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
 	// Create details map with execution node information
@@ -229,8 +179,6 @@ func RecordProjectOperation(operationType OperationType, projectID, status, erro
 	// Delegate to common package
 	common.RecordProjectOperation(common.OperationType(operationType), projectID, status, errorMsg, details)
 }
-
-// API Handlers
 
 // GetOperationsHistory handles GET /operations-history - unified endpoint for all nodes
 func GetOperationsHistory(c echo.Context) error {

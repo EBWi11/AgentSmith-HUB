@@ -66,36 +66,7 @@ func (co *ComponentOperations) CreateComponentDirect(componentType, id, content 
 	}
 
 	// Update global configuration
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	switch componentType {
-	case "project":
-		if AllProjectRawConfig == nil {
-			AllProjectRawConfig = make(map[string]string)
-		}
-		AllProjectRawConfig[id] = content
-	case "plugin":
-		if AllPluginsRawConfig == nil {
-			AllPluginsRawConfig = make(map[string]string)
-		}
-		AllPluginsRawConfig[id] = content
-	case "input":
-		if AllInputsRawConfig == nil {
-			AllInputsRawConfig = make(map[string]string)
-		}
-		AllInputsRawConfig[id] = content
-	case "output":
-		if AllOutputsRawConfig == nil {
-			AllOutputsRawConfig = make(map[string]string)
-		}
-		AllOutputsRawConfig[id] = content
-	case "ruleset":
-		if AllRulesetsRawConfig == nil {
-			AllRulesetsRawConfig = make(map[string]string)
-		}
-		AllRulesetsRawConfig[id] = content
-	}
+	SetRawConfig(componentType, id, content)
 
 	return nil
 }
@@ -111,38 +82,7 @@ func (co *ComponentOperations) CreateComponentMemoryOnly(componentType, id, cont
 	id = strings.TrimSpace(id)
 
 	// Update global configuration only (no file operations)
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	switch componentType {
-	case "project":
-		if AllProjectRawConfig == nil {
-			AllProjectRawConfig = make(map[string]string)
-		}
-		AllProjectRawConfig[id] = content
-	case "plugin":
-		if AllPluginsRawConfig == nil {
-			AllPluginsRawConfig = make(map[string]string)
-		}
-		AllPluginsRawConfig[id] = content
-	case "input":
-		if AllInputsRawConfig == nil {
-			AllInputsRawConfig = make(map[string]string)
-		}
-		AllInputsRawConfig[id] = content
-	case "output":
-		if AllOutputsRawConfig == nil {
-			AllOutputsRawConfig = make(map[string]string)
-		}
-		AllOutputsRawConfig[id] = content
-	case "ruleset":
-		if AllRulesetsRawConfig == nil {
-			AllRulesetsRawConfig = make(map[string]string)
-		}
-		AllRulesetsRawConfig[id] = content
-	default:
-		return fmt.Errorf("invalid component type")
-	}
+	SetRawConfig(componentType, id, content)
 
 	return nil
 }
@@ -187,36 +127,7 @@ func (co *ComponentOperations) UpdateComponentDirect(componentType, id, content 
 	}
 
 	// Update global configuration
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	switch componentType {
-	case "project":
-		if AllProjectRawConfig == nil {
-			AllProjectRawConfig = make(map[string]string)
-		}
-		AllProjectRawConfig[id] = content
-	case "plugin":
-		if AllPluginsRawConfig == nil {
-			AllPluginsRawConfig = make(map[string]string)
-		}
-		AllPluginsRawConfig[id] = content
-	case "input":
-		if AllInputsRawConfig == nil {
-			AllInputsRawConfig = make(map[string]string)
-		}
-		AllInputsRawConfig[id] = content
-	case "output":
-		if AllOutputsRawConfig == nil {
-			AllOutputsRawConfig = make(map[string]string)
-		}
-		AllOutputsRawConfig[id] = content
-	case "ruleset":
-		if AllRulesetsRawConfig == nil {
-			AllRulesetsRawConfig = make(map[string]string)
-		}
-		AllRulesetsRawConfig[id] = content
-	}
+	SetRawConfig(componentType, id, content)
 
 	return nil
 }
@@ -224,38 +135,7 @@ func (co *ComponentOperations) UpdateComponentDirect(componentType, id, content 
 // UpdateComponentMemoryOnly updates a component in memory only (for follower)
 func (co *ComponentOperations) UpdateComponentMemoryOnly(componentType, id, content string) error {
 	// Update global configuration only (no file operations)
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	switch componentType {
-	case "project":
-		if AllProjectRawConfig == nil {
-			AllProjectRawConfig = make(map[string]string)
-		}
-		AllProjectRawConfig[id] = content
-	case "plugin":
-		if AllPluginsRawConfig == nil {
-			AllPluginsRawConfig = make(map[string]string)
-		}
-		AllPluginsRawConfig[id] = content
-	case "input":
-		if AllInputsRawConfig == nil {
-			AllInputsRawConfig = make(map[string]string)
-		}
-		AllInputsRawConfig[id] = content
-	case "output":
-		if AllOutputsRawConfig == nil {
-			AllOutputsRawConfig = make(map[string]string)
-		}
-		AllOutputsRawConfig[id] = content
-	case "ruleset":
-		if AllRulesetsRawConfig == nil {
-			AllRulesetsRawConfig = make(map[string]string)
-		}
-		AllRulesetsRawConfig[id] = content
-	default:
-		return fmt.Errorf("invalid component type")
-	}
+	SetRawConfig(componentType, id, content)
 
 	return nil
 }
@@ -265,29 +145,23 @@ func (co *ComponentOperations) DeleteComponentDirect(componentType, id string) e
 	// Determine file path and extension
 	var suffix string
 	var dir string
-	var globalMapToUpdate map[string]string
 
 	switch componentType {
 	case "ruleset":
 		suffix = ".xml"
 		dir = "ruleset"
-		globalMapToUpdate = AllRulesetsRawConfig
 	case "input":
 		suffix = ".yaml"
 		dir = "input"
-		globalMapToUpdate = AllInputsRawConfig
 	case "output":
 		suffix = ".yaml"
 		dir = "output"
-		globalMapToUpdate = AllOutputsRawConfig
 	case "project":
 		suffix = ".yaml"
 		dir = "project"
-		globalMapToUpdate = AllProjectRawConfig
 	case "plugin":
 		suffix = ".go"
 		dir = "plugin"
-		globalMapToUpdate = AllPluginsRawConfig
 	default:
 		return fmt.Errorf("invalid component type")
 	}
@@ -306,10 +180,7 @@ func (co *ComponentOperations) DeleteComponentDirect(componentType, id string) e
 	}
 
 	// Remove from global configuration
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	delete(globalMapToUpdate, id)
+	DeleteRawConfig(componentType, id)
 
 	return nil
 }
@@ -317,23 +188,7 @@ func (co *ComponentOperations) DeleteComponentDirect(componentType, id string) e
 // DeleteComponentMemoryOnly deletes a component from memory only (for follower)
 func (co *ComponentOperations) DeleteComponentMemoryOnly(componentType, id string) error {
 	// Remove from global configuration only (no file operations)
-	GlobalMu.Lock()
-	defer GlobalMu.Unlock()
-
-	switch componentType {
-	case "project":
-		delete(AllProjectRawConfig, id)
-	case "plugin":
-		delete(AllPluginsRawConfig, id)
-	case "input":
-		delete(AllInputsRawConfig, id)
-	case "output":
-		delete(AllOutputsRawConfig, id)
-	case "ruleset":
-		delete(AllRulesetsRawConfig, id)
-	default:
-		return fmt.Errorf("invalid component type")
-	}
+	DeleteRawConfig(componentType, id)
 
 	return nil
 }

@@ -1,6 +1,7 @@
 package rules_engine
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/plugin"
 	"encoding/xml"
 	"fmt"
@@ -268,6 +269,8 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 	}
 
 	ruleset.RulesCount = len(ruleset.Rules)
+	// Initialize ruleset status to stopped
+	ruleset.Status = common.StatusStopped
 	return &ruleset, nil
 }
 

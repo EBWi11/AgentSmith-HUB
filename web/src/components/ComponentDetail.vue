@@ -451,7 +451,7 @@
     v-if="props.item && props.item.type === 'rulesets'" 
     :show="showTestModal" 
     :rulesetId="props.item?.originalId || props.item?.id" 
-    :rulesetContent="props.item?.isEdit ? editorValue : null"
+    :rulesetContent="editorValue"
     @close="showTestModal = false" 
   />
 
@@ -1411,6 +1411,16 @@ onMounted(async () => {
     document.addEventListener('visibilitychange', handleComponentVisibilityChange);
   }
 });
+
+// Expose method to get editor content (for parent component access)
+function getEditorContent() {
+  return editorValue.value
+}
+
+// Expose methods for parent component
+defineExpose({
+  getEditorContent
+})
 </script> 
 
 <style scoped>

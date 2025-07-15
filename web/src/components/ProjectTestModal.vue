@@ -72,22 +72,23 @@
               <p>No results yet. Click "Run Test" to send data to the project.</p>
             </div>
             
-            <div v-else class="space-y-4">
-              <div v-for="(results, outputName) in outputResults" :key="outputName" class="bg-white border border-gray-200 rounded-md p-3">
-                <div class="flex justify-between items-center mb-2">
-                  <h5 class="font-medium text-gray-700">Output: {{ outputName }}</h5>
-                  <span class="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
+            <div v-else class="space-y-6">
+              <div v-for="(results, outputName) in outputResults" :key="outputName">
+                <div class="flex justify-between items-center mb-3">
+                  <h5 class="font-medium text-gray-700 text-base">Output: {{ outputName }}</h5>
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-sm rounded">
                     {{ results.length }} message(s)
                   </span>
                 </div>
                 
-                <div v-if="results.length === 0" class="text-sm text-gray-500 italic">
+                <div v-if="results.length === 0" class="text-sm text-gray-500 italic bg-gray-50 p-3 rounded">
                   No messages received yet. Output components send data to external systems in test mode.
                 </div>
                 
-                <div v-else class="space-y-2">
-                  <div v-for="(result, index) in results" :key="index" class="border border-gray-100 rounded p-2">
-                    <JsonViewer :value="result" height="auto" />
+                <div v-else class="space-y-3">
+                  <div v-for="(result, index) in results" :key="index" class="bg-gray-50 rounded p-3">
+                    <div v-if="results.length > 1" class="text-xs text-gray-500 mb-2">Message {{ index + 1 }}</div>
+                    <JsonViewer :value="cleanResult(result)" height="auto" />
                   </div>
                 </div>
               </div>
@@ -380,6 +381,58 @@ function extractErrorLine(errorMessage, sourceContent = '') {
   }
   
   return null;
+}
+
+// Clean result data for better display
+function cleanResult(result) {
+  if (!result || typeof result !== 'object') {
+    return result;
+  }
+  
+  const cleaned = { ...result };
+  
+  // Remove or simplify internal technical fields
+  delete cleaned._hub_output_timestamp;
+  
+  // Simplify project node sequence to just show the flow path
+  if (cleaned._hub_project_node_sequence) {
+    const pns = cleaned._hub_project_node_sequence;
+    // Extract meaningful parts: INPUT.name -> RULESET.name -> OUTPUT.name
+    const parts = pns.split('.');
+    const meaningfulParts = [];
+    
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === 'INPUT' && i + 1 < parts.length) {
+        meaningfulParts.push(`Input: ${parts[i + 1]}`);
+        i++; // Skip the next part as we already used it
+      } else if (parts[i] === 'RULESET' && i + 1 < parts.length) {
+        meaningfulParts.push(`Ruleset: ${parts[i + 1]}`);
+        i++; // Skip the next part as we already used it
+      } else if (parts[i] === 'OUTPUT' && i + 1 < parts.length) {
+        meaningfulParts.push(`Output: ${parts[i + 1]}`);
+        i++; // Skip the next part as we already used it
+      }
+    }
+    
+    if (meaningfulParts.length > 0) {
+      cleaned._flow_path = meaningfulParts.join(' → ');
+    }
+    delete cleaned._hub_project_node_sequence;
+  }
+  
+  // Clean up rule hit information
+  if (cleaned._hub_hit_rule_id) {
+    cleaned._matched_rule = cleaned._hub_hit_rule_id;
+    delete cleaned._hub_hit_rule_id;
+  }
+  
+  // Clean up input information
+  if (cleaned._hub_input) {
+    cleaned._input_source = cleaned._hub_input;
+    delete cleaned._hub_input;
+  }
+  
+  return cleaned;
 }
 
 // Fetch project input nodes

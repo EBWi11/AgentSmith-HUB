@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+type Status string
+
+const (
+	StatusStopped  Status = "stopped"
+	StatusStarting Status = "starting"
+	StatusRunning  Status = "running"
+	StatusStopping Status = "stopping"
+	StatusError    Status = "error"
+)
+
 // CheckCoreCache for rule engine
 type CheckCoreCache struct {
 	Exist bool
@@ -92,6 +102,9 @@ type ComponentUpdateManager struct {
 	mutex         sync.RWMutex
 }
 
+// Global component update manager
+var GlobalComponentUpdateManager *ComponentUpdateManager
+
 // ComponentUpdateOperation represents an ongoing component update
 type ComponentUpdateOperation struct {
 	ComponentType    string
@@ -103,6 +116,3 @@ type ComponentUpdateOperation struct {
 	Lock             *DistributedLock
 	mutex            sync.RWMutex
 }
-
-// Global component update manager
-var GlobalComponentUpdateManager *ComponentUpdateManager

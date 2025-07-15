@@ -348,21 +348,6 @@ export const hubApi = {
     }
   },
 
-  async fetchClusterStatus() {
-    const response = await publicApi.get('/cluster-status');
-    return response.data;
-  },
-
-  async fetchClusterInfo() {
-    const response = await publicApi.get('/cluster-status');
-    return response.data;
-  },
-
-  async getClusterProjectStates() {
-    const response = await api.get('/cluster-project-states');
-    return response.data;
-  },
-
   async updatePlugin(id, raw) {
     try {
       // Ensure raw is a string
@@ -483,18 +468,8 @@ export const hubApi = {
     }
   },
   
-  // Restart all projects
-  async restartAllProjects() {
-    const response = await api.post('/restart-all-projects');
-    return response.data;
-  },
-  
   // Restart a specific project
   async restartProject(id) {
-    if (id === 'all') {
-      return this.restartAllProjects();
-    }
-    
     try {
       // First check if the project has temporary files
       const tempInfo = await this.checkTemporaryFile('projects', id);
@@ -660,10 +635,17 @@ export const hubApi = {
     return response;
   },
 
-  // Function to get all available plugins
+  // Function to get all available plugins (simple format for testing)
   async getAvailablePlugins() {
     try {
-      const response = await api.get('/available-plugins');
+      // Use the unified plugins API with parameters for simple format
+      const response = await api.get('/plugins', {
+        params: {
+          detailed: 'false',
+          include_temp: 'false',
+          type: 'yaegi'
+        }
+      });
       return response.data || [];
     } catch (error) {
       console.error('Error fetching available plugins:', error);
@@ -1008,6 +990,16 @@ export const hubApi = {
     }
   },
 
+  // Get cluster project states (leader only)
+  async getClusterProjectStates() {
+    try {
+      const response = await api.get('/cluster-project-states');
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'Failed to get cluster project states');
+    }
+  },
+
   // Get project components (inputs, outputs, rulesets)
   async getProjectComponents(id) {
     try {
@@ -1347,7 +1339,7 @@ fetchComponentsByType = async (type, endpoint) => {
         apiEndpoint = '/rulesets';
         break;
       case 'plugins':
-        apiEndpoint = '/plugins';
+        apiEndpoint = '/plugins?detailed=true';
         break;
       case 'projects':
         apiEndpoint = '/projects';

@@ -30,7 +30,7 @@ func main() {
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
 		port      = flag.Int("port", 8080, "HTTP listen port")
 		showVer   = flag.Bool("version", false, "show version")
-		buildVers = "v0.1.5"
+		buildVers = "v0.1.6"
 	)
 	flag.Parse()
 
@@ -105,8 +105,6 @@ func main() {
 		return common.WriteErrorLogToRedis(commonEntry)
 	})
 
-	logger.Info("Redis-enabled error logging initialized")
-
 	// Initialize daily statistics manager (tracks real message counts)
 	common.InitDailyStatsManager()
 
@@ -125,7 +123,11 @@ func main() {
 	if *isLeader {
 		// Leader mode
 		common.Config.Leader = ip
-		token, _ := readToken(true)
+		token, err := readToken(true)
+		if err != nil {
+			logger.Error("Failed to read or create leader token", "error", err)
+			return
+		}
 		common.Config.Token = token
 
 		// Store leader token in Redis for followers to use (no TTL)
@@ -133,32 +135,30 @@ func main() {
 			logger.Warn("Failed to store leader token in Redis", "error", err)
 		}
 
-		logger.Info("Leader mode initialized")
-
 		loadLocalComponents()
 		loadLocalProjects()
 	} else {
-		// Follower mode - token will be read by follower API server when it starts
 		logger.Info("Follower mode initialized")
 	}
 
 	// Init monitors
 	common.InitSystemMonitor(ip)
 
-	// QPS Manager removed - using only Daily Stats Manager now
+	// Initialize component monitor with 30 second interval
+	common.GlobalComponentMonitor = common.NewComponentMonitor(30 * time.Second)
+	if err := common.GlobalComponentMonitor.Start(); err != nil {
+		logger.Error("Failed to start component monitor", "error", err)
+	} else {
+		logger.Info("Component monitor started successfully")
+	}
 
 	if *isLeader {
-		// Leader extra services
 		common.InitClusterSystemManager()
 		cluster.GlobalClusterManager.Start()
 
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port
 	} else {
-		// Follower services
-		// Note: Error log uploader removed - all nodes write directly to Redis in real-time
-		// Note: Operation history uploader removed - all nodes write directly to Redis
-
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
 
@@ -167,8 +167,6 @@ func main() {
 		go api.ServerStartFollower(followerAddr) // start follower API server
 		logger.Info("Follower API server starting", "address", followerAddr)
 	}
-
-	// QPS collector removed - statistics are now handled by Daily Stats Manager
 
 	// ========== Graceful shutdown handling ==========
 	shutdownCtx, stopSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -191,22 +189,38 @@ func main() {
 
 			// Stop all running projects (Stop method handles data drain internally)
 			logger.Info("Stopping all running projects")
-			project.GlobalProject.ProjectMu.Lock()
-			for _, proj := range project.GlobalProject.Projects {
-				if proj.Status == project.ProjectStatusRunning {
-					logger.Info("Stopping project during shutdown", "project", proj.Id)
-					err := proj.Stop()
-					if err != nil {
-						logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
-					} else {
-						logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
-					}
+			// Collect running projects first to avoid deadlock
+			var runningProjects []*project.Project
+			project.ForEachProject(func(id string, proj *project.Project) bool {
+				if proj.Status == common.StatusRunning {
+					runningProjects = append(runningProjects, proj)
+				}
+				return true
+			})
+
+			// Stop projects without holding locks
+			for _, proj := range runningProjects {
+				logger.Info("Stopping project during shutdown", "project", proj.Id)
+				err := proj.Stop()
+				if err != nil {
+					logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
+				} else {
+					logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
 				}
 			}
-			project.GlobalProject.ProjectMu.Unlock()
 
 			if cluster.GlobalClusterManager != nil {
 				cluster.GlobalClusterManager.Stop()
+			}
+
+			// Stop component monitor
+			if common.GlobalComponentMonitor != nil {
+				logger.Info("Stopping component monitor")
+				if err := common.GlobalComponentMonitor.Stop(); err != nil {
+					logger.Error("Failed to stop component monitor", "error", err)
+				} else {
+					logger.Info("Component monitor stopped successfully")
+				}
 			}
 
 			common.StopClusterSystemManager()
@@ -223,14 +237,13 @@ func main() {
 		case <-shutdownCtx.Done():
 			logger.Error("Shutdown timeout exceeded, forcing exit")
 			// Force cleanup of critical resources
-			for id, p := range project.GlobalProject.Projects {
-				if p.Status == project.ProjectStatusRunning || p.Status == project.ProjectStatusStarting {
+			project.ForEachProject(func(id string, p *project.Project) bool {
+				if p.Status == common.StatusRunning || p.Status == common.StatusStarting {
 					logger.Warn("Force stopping project", "id", id)
-					// Don't wait for graceful stop, just mark as stopped
-					// Use SetProjectStatus for consistent state management
-					p.SetProjectStatus(project.ProjectStatusStopped, nil)
+					p.SetProjectStatus(common.StatusStopped, nil)
 				}
-			}
+				return true
+			})
 		}
 
 		logger.Info("Hub shutdown complete — bye")
@@ -239,8 +252,6 @@ func main() {
 
 	select {}
 }
-
-// ===== helpers (copied & simplified) =====
 
 func traverseComponents(dir, suffix string) []string {
 	var files []string
@@ -254,45 +265,32 @@ func traverseComponents(dir, suffix string) []string {
 }
 
 func loadLocalComponents() {
+	var err error
 	// Only leader loads local components
 	root := common.Config.ConfigRoot
-
-	// Initialize global config maps
-	common.GlobalMu.Lock()
-	if common.AllInputsRawConfig == nil {
-		common.AllInputsRawConfig = make(map[string]string)
-	}
-	if common.AllOutputsRawConfig == nil {
-		common.AllOutputsRawConfig = make(map[string]string)
-	}
-	if common.AllRulesetsRawConfig == nil {
-		common.AllRulesetsRawConfig = make(map[string]string)
-	}
-	if common.AllProjectRawConfig == nil {
-		common.AllProjectRawConfig = make(map[string]string)
-	}
-	if common.AllPluginsRawConfig == nil {
-		common.AllPluginsRawConfig = make(map[string]string)
-	}
-	common.GlobalMu.Unlock()
 
 	// plugins
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go") {
 		name := common.GetFileNameWithoutExt(f)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.GlobalMu.Lock()
-			common.AllPluginsRawConfig[name] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("plugin", name, string(content))
 		}
-		_ = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
+		err = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
+		if err != nil {
+			logger.Error("Failed to load plugin", "file", f, "error", err)
+		}
 	}
 	// Load plugin .new files
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go.new") {
+		common.GlobalMu.Lock()
 		name := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".go")
-		if content, err := os.ReadFile(f); err == nil {
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new plugin", "file", f, "error", err)
+		} else {
 			plugin.PluginsNew[name] = string(content)
 		}
+		common.GlobalMu.Unlock()
 	}
 
 	// inputs
@@ -300,19 +298,21 @@ func loadLocalComponents() {
 		id := common.GetFileNameWithoutExt(f)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.GlobalMu.Lock()
-			common.AllInputsRawConfig[id] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("input", id, string(content))
 		}
-		if inp, err := input.NewInput(f, "", id); err == nil {
-			project.GlobalProject.Inputs[id] = inp
+		if inp, err := input.NewInput(f, "", id); err != nil {
+			logger.Error("Failed to load new input", "file", f, "error", err)
+		} else {
+			project.SetInput(id, inp)
 		}
 	}
 	// Load input .new files
 	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
-		if content, err := os.ReadFile(f); err == nil {
-			project.GlobalProject.InputsNew[id] = string(content)
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new input", "file", f, "error", err)
+		} else {
+			project.SetInputNew(id, string(content))
 		}
 	}
 
@@ -321,19 +321,21 @@ func loadLocalComponents() {
 		id := common.GetFileNameWithoutExt(f)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.GlobalMu.Lock()
-			common.AllOutputsRawConfig[id] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("output", id, string(content))
 		}
-		if out, err := output.NewOutput(f, "", id); err == nil {
-			project.GlobalProject.Outputs[id] = out
+		if out, err := output.NewOutput(f, "", id); err != nil {
+			logger.Error("Failed to load output", "file", f, "error", err)
+		} else {
+			project.SetOutput(id, out)
 		}
 	}
 	// Load output .new files
 	for _, f := range traverseComponents(path.Join(root, "output"), ".yaml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
-		if content, err := os.ReadFile(f); err == nil {
-			project.GlobalProject.OutputsNew[id] = string(content)
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new output", "file", f, "error", err)
+		} else {
+			project.SetOutputNew(id, string(content))
 		}
 	}
 
@@ -342,19 +344,21 @@ func loadLocalComponents() {
 		id := common.GetFileNameWithoutExt(f)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.GlobalMu.Lock()
-			common.AllRulesetsRawConfig[id] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("ruleset", id, string(content))
 		}
-		if rs, err := rules_engine.NewRuleset(f, "", id); err == nil {
-			project.GlobalProject.Rulesets[id] = rs
+		if rs, err := rules_engine.NewRuleset(f, "", id); err != nil {
+			logger.Error("Failed to load ruleset", "file", f, "error", err)
+		} else {
+			project.SetRuleset(id, rs)
 		}
 	}
 	// Load ruleset .new files
 	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".xml")
-		if content, err := os.ReadFile(f); err == nil {
-			project.GlobalProject.RulesetsNew[id] = string(content)
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new ruleset", "file", f, "error", err)
+		} else {
+			project.SetRulesetNew(id, string(content))
 		}
 	}
 
@@ -368,18 +372,14 @@ func loadLocalProjects() {
 		// Read project content for global config map (NewProject will also update it, but we do it here for consistency)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.GlobalMu.Lock()
-			if common.AllProjectRawConfig == nil {
-				common.AllProjectRawConfig = make(map[string]string)
-			}
-			common.AllProjectRawConfig[id] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("project", id, string(content))
 		}
-		if p, err := project.NewProject(f, "", id); err == nil {
-			project.GlobalProject.Projects[id] = p
+
+		if p, err := project.NewProject(f, "", id, false); err == nil {
+			project.SetProject(id, p)
 
 			// Try to restore project status from Redis based on user intention
-			if userWantsRunning, err := common.GetProjectUserIntention(common.Config.LocalIP, id); err == nil && userWantsRunning {
+			if userWantsRunning, err := common.GetProjectUserIntention(id); err == nil && userWantsRunning {
 				// User wants project to be running, start it
 				logger.Info("Restoring project to running state based on user intention", "id", p.Id)
 				if err := p.Start(); err != nil {
@@ -398,9 +398,7 @@ func loadLocalProjects() {
 					})
 				}
 			} else {
-				// User doesn't want it running or no user intention found, default to stopped
-				// For initial loading, just set memory status without Redis update
-				p.Status = project.ProjectStatusStopped
+				p.Status = common.StatusStopped
 				logger.Info("Project not intended to be running by user, defaulting to stopped", "id", p.Id)
 			}
 		} else {
@@ -411,12 +409,13 @@ func loadLocalProjects() {
 	// Load project .new files
 	for _, f := range traverseComponents(path.Join(root, "project"), ".yaml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
-		if content, err := os.ReadFile(f); err == nil {
-			project.GlobalProject.ProjectsNew[id] = string(content)
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to read new project", "project", id, "error", err)
+		} else {
+			project.SetProjectNew(id, string(content))
 		}
 	}
-
-	logger.Info("Finished loading and start local projects", "total_projects", len(project.GlobalProject.Projects))
+	logger.Info("Finished loading and start local projects", "total_projects", project.GetProjectsCount())
 }
 
 // readToken reads existing .token or creates one when create==true.

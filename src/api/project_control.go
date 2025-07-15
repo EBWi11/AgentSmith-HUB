@@ -42,37 +42,37 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	p := project.GlobalProject.Projects[req.ProjectID]
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
 	}
 
-	// API-side persistence: Save project states in Redis
-	// proj_states: User intention (what user wants the project to be)
-	if err := common.SetProjectUserIntention(common.Config.LocalIP, req.ProjectID, true); err != nil {
-		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
-	}
-
 	// Check if project is already running, starting, or stopping
-	if p.Status == project.ProjectStatusRunning {
+	if p.Status == common.StatusRunning {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is already running",
 		})
 	}
 
-	if p.Status == project.ProjectStatusStarting {
+	if p.Status == common.StatusStarting {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is currently starting, please wait",
 		})
 	}
 
-	if p.Status == project.ProjectStatusStopping {
+	if p.Status == common.StatusStopping {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is currently stopping, please wait",
 		})
+	}
+
+	// API-side persistence: Save project states in Redis
+	// proj_states: User intention (what user wants the project to be)
+	if err := common.SetProjectUserIntention(req.ProjectID, true); err != nil {
+		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
@@ -111,22 +111,22 @@ func StopProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	p := project.GlobalProject.Projects[req.ProjectID]
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
 	}
 
 	// Check if project is running
-	if p.Status != project.ProjectStatusRunning {
-		if p.Status == project.ProjectStatusStarting {
+	if p.Status != common.StatusRunning {
+		if p.Status == common.StatusStarting {
 			return c.JSON(http.StatusConflict, map[string]string{
 				"error": "Project is currently starting, cannot stop",
 			})
 		}
-		if p.Status == project.ProjectStatusStopping {
+		if p.Status == common.StatusStopping {
 			return c.JSON(http.StatusConflict, map[string]string{
 				"error": "Project is already stopping",
 			})
@@ -150,7 +150,7 @@ func StopProject(c echo.Context) error {
 
 	// API-side persistence: Update project states in Redis
 	// proj_states: User intention (user wants project to be stopped)
-	if err := common.SetProjectUserIntention(common.Config.LocalIP, req.ProjectID, false); err != nil {
+	if err := common.SetProjectUserIntention(req.ProjectID, false); err != nil {
 		logger.Warn("Failed to update project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
@@ -185,55 +185,35 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	p := project.GlobalProject.Projects[req.ProjectID]
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
 	}
 
 	// Error projects cannot be restarted, they must be started instead
-	if p.Status == project.ProjectStatusError {
+	if p.Status != common.StatusRunning {
 		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Error projects cannot be restarted. Please use start instead.",
-		})
-	}
-
-	// Check if project is starting or stopping
-	if p.Status == project.ProjectStatusStarting {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is currently starting, please wait",
-		})
-	}
-
-	if p.Status == project.ProjectStatusStopping {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is currently stopping, please wait",
+			"error": "Project is not running, please wait.",
 		})
 	}
 
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
 	syncProjectOperationToFollowers(req.ProjectID, "restart")
 
-	// Use RestartProjectsSafely to avoid duplicate operation history records
-	restartedCount, err := project.RestartProjectsSafely([]string{req.ProjectID}, "user_action")
+	err := p.Restart()
 	if err != nil {
-		// Note: RestartProjectsSafely already records failed operations, so we don't record again
+		logger.Error("Failed to restart project after component change", "project_id", req.ProjectID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to restart project: %v", err),
 		})
 	}
 
-	if restartedCount == 0 {
-		// Project was not restarted (probably not running)
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is not in a restartable state",
-		})
+	if err := cluster.GlobalInstructionManager.PublishProjectRestart(req.ProjectID); err != nil {
+		logger.Error("Failed to publish project restart instructions", "affected_projects", req.ProjectID, "error", err)
 	}
-
-	// Note: Operation history is already recorded in RestartProjectsSafely
-	// So we don't need to record it again here
 
 	// Save project last updated time (restart time) - only update timestamp, not desired state
 	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
@@ -252,8 +232,8 @@ func RestartProject(c echo.Context) error {
 
 func getProjectError(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GlobalProject.Projects[id]
-	if p == nil {
+	p, exists := project.GetProject(id)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 

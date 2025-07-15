@@ -2,8 +2,11 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"net/http"
 	"sort"
@@ -158,7 +161,7 @@ func analyzeProjectContext(targetProjects []string, rulePurpose string) (Project
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
 
-	allProjects := project.GlobalProject.Projects
+	allProjects := project.GetAllProjects()
 	context.TotalProjects = len(allProjects)
 
 	// Auto-suggest projects if none specified
@@ -227,39 +230,16 @@ func analyzeProjectProfile(proj *project.Project, rulePurpose string) ProjectPro
 func fetchIntelligentSampleData(req IntelligentSampleDataRequest, context ProjectContextInfo) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
-	// For rule creation scenarios, we need to find the target ruleset
-	// and follow the data flow backwards
+	// Simplified approach using PNS: directly get sample data from target component
 	if req.RulePurpose != "" {
-		// Try to find target component from field requirements or context
 		targetComponent := extractTargetComponent(req, context)
 		if targetComponent != "" {
-
-			// Step 1: Try to get sample data from the target component itself
+			// Direct sample data from the target component using PNS
 			componentData := getSampleDataFromComponent(targetComponent)
 			if len(componentData) > 0 {
 				result[targetComponent] = componentData
 				return result, nil
 			}
-
-			// Step 2: If target component has no data, find projects using this component
-			usingProjects := findProjectsUsingComponent(targetComponent)
-
-			// Step 3: For each project, find upstream input components
-			for _, projectID := range usingProjects {
-				upstreamInputs := findUpstreamInputs(projectID, targetComponent)
-
-				// Step 4: Try to get sample data from upstream inputs
-				for _, inputID := range upstreamInputs {
-					inputData := getSampleDataFromComponent("input." + inputID)
-					if len(inputData) > 0 {
-						// Use project.component format for clarity
-						key := fmt.Sprintf("%s.%s->%s", projectID, inputID, targetComponent)
-						result[key] = inputData
-						return result, nil
-					}
-				}
-			}
-
 		}
 	}
 
@@ -377,17 +357,18 @@ func assessPerformanceLoad(proj *project.Project) string {
 func getAllSamplerNames() []string {
 	samplerNames := make([]string, 0)
 
-	common.GlobalMu.RLock()
-	for inputId := range project.GlobalProject.Inputs {
+	project.ForEachInput(func(inputId string, _ *input.Input) bool {
 		samplerNames = append(samplerNames, "input."+inputId)
-	}
-	for rulesetId := range project.GlobalProject.Rulesets {
+		return true
+	})
+	project.ForEachRuleset(func(rulesetId string, _ *rules_engine.Ruleset) bool {
 		samplerNames = append(samplerNames, "ruleset."+rulesetId)
-	}
-	for outputId := range project.GlobalProject.Outputs {
+		return true
+	})
+	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	return samplerNames
 }
@@ -763,10 +744,7 @@ func findProjectsUsingComponent(componentName string) []string {
 	componentType := parts[0]
 	componentID := parts[1]
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range project.GlobalProject.Projects {
+	project.ForEachProject(func(projectID string, proj *project.Project) bool {
 		switch componentType {
 		case "ruleset":
 			if _, exists := proj.Rulesets[componentID]; exists {
@@ -781,77 +759,10 @@ func findProjectsUsingComponent(componentName string) []string {
 				projects = append(projects, projectID)
 			}
 		}
-	}
+		return true
+	})
 
 	return projects
-}
-
-// Find upstream input components for a target component in a specific project
-func findUpstreamInputs(projectID string, targetComponent string) []string {
-	inputs := make([]string, 0)
-
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	proj, exists := project.GlobalProject.Projects[projectID]
-	if !exists {
-		return inputs
-	}
-
-	// Parse the project content to understand data flow
-	// Format: INPUT.id -> RULESET.id -> OUTPUT.id
-	content := ""
-	if proj.Config != nil {
-		content = proj.Config.Content
-	}
-	if content == "" {
-		return inputs
-	}
-
-	// Extract component type and ID from target
-	parts := strings.Split(targetComponent, ".")
-	if len(parts) != 2 {
-		return inputs
-	}
-
-	targetType := strings.ToUpper(parts[0])
-	targetID := parts[1]
-
-	// Find flows that lead to the target component
-	flowParts := strings.Split(content, "->")
-	for i, part := range flowParts {
-		part = strings.TrimSpace(part)
-		if strings.Contains(part, fmt.Sprintf("%s.%s", targetType, targetID)) {
-			// Found target component, look at previous part for upstream
-			if i > 0 {
-				prevPart := strings.TrimSpace(flowParts[i-1])
-				// Extract input components from previous part
-				if strings.Contains(prevPart, "INPUT.") {
-					inputMatches := extractComponentIDs(prevPart, "INPUT")
-					inputs = append(inputs, inputMatches...)
-				}
-			}
-		}
-	}
-
-	return inputs
-}
-
-// Extract component IDs of a specific type from flow content
-func extractComponentIDs(content string, componentType string) []string {
-	ids := make([]string, 0)
-
-	// Split by commas for multiple components
-	parts := strings.Split(content, ",")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, componentType+".") {
-			id := strings.TrimPrefix(part, componentType+".")
-			ids = append(ids, id)
-		}
-	}
-
-	return ids
 }
 
 // Get fallback sample data from any available source
@@ -887,254 +798,96 @@ func extractTargetRulesetFromRequest(req IntelligentSampleDataRequest) string {
 	return ""
 }
 
-// Get sample data for a specific ruleset
-// This implements the correct logic:
-// 1. Find projects using this ruleset
-// 2. Get upstream input components from those projects
-// 3. Return sample data from those inputs to understand data structure
+// Get sample data for a specific ruleset (simplified using PNS)
 func getSampleDataForRuleset(rulesetID string) (map[string]interface{}, string, error) {
-
-	// Step 1: Find projects that use this ruleset
-	usingProjects := findProjectsUsingRuleset(rulesetID)
-	if len(usingProjects) == 0 {
-		return map[string]interface{}{}, "", fmt.Errorf("no projects use ruleset %s", rulesetID)
-	}
-
-	// Step 2: For each project, find upstream input components
-	for _, projectID := range usingProjects {
-		upstreamInputs := findUpstreamInputsForRuleset(projectID, rulesetID)
-
-		// Step 3: Try to get sample data from upstream inputs
-		for _, inputID := range upstreamInputs {
-			inputSamples := getSampleDataFromComponent("input." + inputID)
-			if len(inputSamples) > 0 {
-
-				// Format the result
-				result := map[string]interface{}{
-					fmt.Sprintf("%s.%s->ruleset.%s", projectID, inputID, rulesetID): inputSamples,
-				}
-				dataSource := fmt.Sprintf("input.%s (via project.%s)", inputID, projectID)
-				return result, dataSource, nil
-			}
+	// Direct approach: get sample data for this ruleset using PNS
+	samples := getSampleDataFromComponent("ruleset." + rulesetID)
+	if len(samples) > 0 {
+		result := map[string]interface{}{
+			fmt.Sprintf("ruleset.%s", rulesetID): samples,
 		}
-	}
-
-	// Step 4: If no upstream input data found, return empty but with clear message
-	return map[string]interface{}{}, "", fmt.Errorf("no sample data available from upstream inputs for ruleset %s", rulesetID)
-}
-
-// Find projects that use a specific ruleset
-func findProjectsUsingRuleset(rulesetID string) []string {
-	projects := make([]string, 0)
-
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range project.GlobalProject.Projects {
-		if _, exists := proj.Rulesets[rulesetID]; exists {
-			projects = append(projects, projectID)
-		}
-	}
-
-	return projects
-}
-
-// Get sample data for a specific input component
-func getSampleDataForInput(inputID string) ([]interface{}, string, error) {
-
-	// Direct sample data from the input component
-	inputSamples := getSampleDataFromComponent("input." + inputID)
-	if len(inputSamples) > 0 {
-		dataSource := fmt.Sprintf("input.%s (direct source)", inputID)
-		return inputSamples, dataSource, nil
+		dataSource := fmt.Sprintf("ruleset.%s (direct PNS)", rulesetID)
+		return result, dataSource, nil
 	}
 
 	// If no direct data, return empty but with clear message
-	return []interface{}{}, "", fmt.Errorf("no sample data available for input %s", inputID)
+	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for ruleset %s", rulesetID)
 }
 
-// Get sample data for a specific output component
-func getSampleDataForOutput(outputID string) ([]interface{}, string, error) {
-
-	// Find projects that use this output and get data from their upstream components
-	usingProjects := findProjectsUsingOutput(outputID)
-	if len(usingProjects) == 0 {
-		return []interface{}{}, "", fmt.Errorf("no projects use output %s", outputID)
-	}
-
-	// For each project, find what flows to this output
-	for _, projectID := range usingProjects {
-		upstreamComponents := findUpstreamComponentsForOutput(projectID, outputID)
-
-		// Try to get sample data from upstream components
-		for _, component := range upstreamComponents {
-			samples := getSampleDataFromComponent(component)
-			if len(samples) > 0 {
-				dataSource := fmt.Sprintf("%s (via project.%s)", component, projectID)
-				return samples, dataSource, nil
-			}
+// Get sample data for a specific input component (simplified using PNS)
+func getSampleDataForInput(inputID string) (map[string]interface{}, string, error) {
+	// Direct sample data from the input component using PNS
+	inputSamples := getSampleDataFromComponent("input." + inputID)
+	if len(inputSamples) > 0 {
+		result := map[string]interface{}{
+			fmt.Sprintf("input.%s", inputID): inputSamples,
 		}
+		dataSource := fmt.Sprintf("input.%s (PNS)", inputID)
+		return result, dataSource, nil
 	}
 
-	// If no upstream data found, return empty but with clear message
-	return []interface{}{}, "", fmt.Errorf("no sample data available from upstream components for output %s", outputID)
+	// If no direct data, return empty but with clear message
+	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for input %s", inputID)
 }
 
-// Find projects that use a specific output
-func findProjectsUsingOutput(outputID string) []string {
-	projects := make([]string, 0)
-
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range project.GlobalProject.Projects {
-		if _, exists := proj.Outputs[outputID]; exists {
-			projects = append(projects, projectID)
+// Get sample data for a specific output component (simplified using PNS)
+func getSampleDataForOutput(outputID string) (map[string]interface{}, string, error) {
+	// Direct sample data from the output component using PNS
+	outputSamples := getSampleDataFromComponent("output." + outputID)
+	if len(outputSamples) > 0 {
+		result := map[string]interface{}{
+			fmt.Sprintf("output.%s", outputID): outputSamples,
 		}
+		dataSource := fmt.Sprintf("output.%s (PNS)", outputID)
+		return result, dataSource, nil
 	}
 
-	return projects
+	// If no direct data, return empty but with clear message
+	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for output %s", outputID)
 }
 
-// Find upstream components that flow to a specific output in a project
-func findUpstreamComponentsForOutput(projectID string, outputID string) []string {
-	components := make([]string, 0)
-
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	proj, exists := project.GlobalProject.Projects[projectID]
-	if !exists {
-		return components
-	}
-
-	// Parse the project content to understand data flow
-	// Format: INPUT.id -> RULESET.id -> OUTPUT.id
-	content := ""
-	if proj.Config != nil {
-		content = proj.Config.Content
-	}
-	if content == "" {
-		return components
-	}
-
-	// Find flows that lead to the target output
-	// Example: "INPUT.kafka_logs -> RULESET.test -> OUTPUT.es_alerts"
-	flowParts := strings.Split(content, "->")
-	for i, part := range flowParts {
-		part = strings.TrimSpace(part)
-		outputPattern := fmt.Sprintf("OUTPUT.%s", outputID)
-
-		if strings.Contains(part, outputPattern) {
-			// Found target output, look at all previous parts for upstream components
-			for j := i - 1; j >= 0; j-- {
-				prevPart := strings.TrimSpace(flowParts[j])
-
-				// Extract all components from previous parts
-				if strings.Contains(prevPart, "INPUT.") {
-					inputMatches := extractComponentIDs(prevPart, "INPUT")
-					for _, inputID := range inputMatches {
-						components = append(components, "input."+inputID)
-					}
-				}
-				if strings.Contains(prevPart, "RULESET.") {
-					rulesetMatches := extractComponentIDs(prevPart, "RULESET")
-					for _, rulesetID := range rulesetMatches {
-						components = append(components, "ruleset."+rulesetID)
-					}
-				}
-			}
-		}
-	}
-
-	return components
-}
-
-// Get sample data for a specific project by analyzing its data flow
+// Get sample data for a specific project (simplified using PNS)
 func getSampleDataForProject(projectID string) (map[string]interface{}, string, error) {
-
 	common.GlobalMu.RLock()
-	proj, exists := project.GlobalProject.Projects[projectID]
+	proj, exists := project.GetProject(projectID)
 	common.GlobalMu.RUnlock()
 
 	if !exists {
 		return map[string]interface{}{}, "", fmt.Errorf("project %s not found", projectID)
 	}
 
-	// Parse the project content to understand data flow
-	content := ""
-	if proj.Config != nil {
-		content = proj.Config.Content
-	}
-	if content == "" {
-		return map[string]interface{}{}, "", fmt.Errorf("project %s has no data flow configuration", projectID)
-	}
-
 	result := make(map[string]interface{})
 	dataSources := make([]string, 0)
 
-	// Extract all input components from the project flow
-	if strings.Contains(content, "INPUT.") {
-		inputIDs := extractComponentIDs(content, "INPUT")
-		for _, inputID := range inputIDs {
-			inputSamples := getSampleDataFromComponent("input." + inputID)
-			if len(inputSamples) > 0 {
-				flowKey := fmt.Sprintf("input.%s->project.%s", inputID, projectID)
-				result[flowKey] = inputSamples
-				dataSources = append(dataSources, "input."+inputID)
-			}
+	// Get sample data from all project components using PNS
+	for componentName := range proj.Inputs {
+		samples := getSampleDataFromComponent("input." + componentName)
+		if len(samples) > 0 {
+			result[fmt.Sprintf("input.%s", componentName)] = samples
+			dataSources = append(dataSources, "input."+componentName)
+		}
+	}
+
+	for componentName := range proj.Rulesets {
+		samples := getSampleDataFromComponent("ruleset." + componentName)
+		if len(samples) > 0 {
+			result[fmt.Sprintf("ruleset.%s", componentName)] = samples
+			dataSources = append(dataSources, "ruleset."+componentName)
+		}
+	}
+
+	for componentName := range proj.Outputs {
+		samples := getSampleDataFromComponent("output." + componentName)
+		if len(samples) > 0 {
+			result[fmt.Sprintf("output.%s", componentName)] = samples
+			dataSources = append(dataSources, "output."+componentName)
 		}
 	}
 
 	if len(result) > 0 {
-		dataSource := fmt.Sprintf("project.%s inputs: %s", projectID, strings.Join(dataSources, ", "))
+		dataSource := fmt.Sprintf("project.%s components: %s", projectID, strings.Join(dataSources, ", "))
 		return result, dataSource, nil
 	}
 
 	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for project %s", projectID)
-}
-
-// Find upstream input components that flow to a specific ruleset in a project
-func findUpstreamInputsForRuleset(projectID string, rulesetID string) []string {
-	inputs := make([]string, 0)
-
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	proj, exists := project.GlobalProject.Projects[projectID]
-	if !exists {
-		return inputs
-	}
-
-	// Parse the project content to understand data flow
-	// Format: INPUT.id -> RULESET.id -> OUTPUT.id
-	content := ""
-	if proj.Config != nil {
-		content = proj.Config.Content
-	}
-	if content == "" {
-		return inputs
-	}
-
-	// Find flows that lead to the target ruleset
-	// Example: "INPUT.kafka_logs -> RULESET.test -> OUTPUT.es_alerts"
-	flowParts := strings.Split(content, "->")
-	for i, part := range flowParts {
-		part = strings.TrimSpace(part)
-		rulesetPattern := fmt.Sprintf("RULESET.%s", rulesetID)
-
-		if strings.Contains(part, rulesetPattern) {
-			// Found target ruleset, look at previous part for upstream inputs
-			if i > 0 {
-				prevPart := strings.TrimSpace(flowParts[i-1])
-				// Extract input components from previous part
-				if strings.Contains(prevPart, "INPUT.") {
-					inputMatches := extractComponentIDs(prevPart, "INPUT")
-					inputs = append(inputs, inputMatches...)
-				}
-			}
-		}
-	}
-
-	return inputs
 }

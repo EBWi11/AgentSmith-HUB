@@ -118,9 +118,9 @@
                 <!-- Short vertical line for empty state -->
                 <div class="absolute left-5 top-0 h-3 w-px bg-gray-300"></div>
               </div>
-              <!-- Special handling for plugins with built-in submenu -->
-              <template v-else-if="type === 'plugins'">
-                <div v-if="getOrganizedPlugins().builtinPlugins.length > 0">
+                              <!-- Special handling for plugins with built-in submenu -->
+                <template v-else-if="type === 'plugins'">
+                  <div v-if="getOrganizedPlugins().builtinPlugins.length > 0">
                   <!-- Built-in plugins submenu -->
                   <div class="relative">
                     <div class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
@@ -235,9 +235,9 @@
                 </div>
                 
                 <!-- Custom plugins -->
-                <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id"
+                <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id || item.name"
                      class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
-                     :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
+                     :class="{ 'bg-blue-50': selected && (selected.id === item.id || selected.id === item.name) && selected.type === type }"
                      @click="handleItemClick(type, item)">
                   <!-- Tree lines for custom plugins -->
                   <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < getOrganizedPlugins().customPlugins.length - 1"></div>
@@ -247,7 +247,7 @@
                                      <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
                      <div class="flex-1 min-w-0">
                        <div class="flex items-center">
-                         <span class="text-sm truncate">{{ item.id }}</span>
+                         <span class="text-sm truncate">{{ item.id || item.name }}</span>
                          <!-- Search match indicators -->
                          <div v-if="item.searchMatch" class="ml-1 flex items-center space-x-1">
                            <span v-if="item.searchMatch.nameMatch" 
@@ -1490,9 +1490,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick, watch } fr
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
-import { useComponentOperations } from '../../composables/useApi'
-import { useDeleteConfirmModal } from '../../composables/useModal'
-import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
+import { getStatusLabel, getStatusTitle, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
 // useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
@@ -1808,8 +1806,7 @@ function closeActiveModal() {
 // Lifecycle hooks
 onMounted(async () => {
   await fetchAllItems()
-  startProjectPolling()
-  
+
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
@@ -1847,12 +1844,6 @@ watch(search, (newVal) => {
     searchLoading.value = false
   }
 })
-
-// Methods
-function startProjectPolling() {
-  // Project polling is now handled by setupProjectStatusRefresh for better coordination
-  // This function is kept for compatibility but doesn't create additional intervals
-}
 
 function openAddModal(type) {
   addType.value = type
@@ -1996,7 +1987,7 @@ function getOrganizedPlugins() {
   }
 }
 
-// Determine if a plugin should be displayed as Plugin Node (A badge) based on its usage
+// Determine if a plugin should be displayed as Plugin Node (P badge) based on its usage
 function isPluginNodeType(item) {
   // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
   if (item.id && item.id.startsWith('pushMsgTo')) {
@@ -2121,39 +2112,6 @@ async function fetchProjectsComplete() {
     error[type] = `Failed to load ${type}: ${err.message}`
   } finally {
     loading[type] = false
-  }
-}
-
-function getDefaultConfig(type) {
-  const timestamp = Date.now()
-  const id = addName.value || `new_${type.slice(0, -1)}_${timestamp}`
-  switch (type) {
-    case 'inputs':
-      return { id, raw: addRaw.value || `name: "${id}"
-type: "file"
-file:
-  path: "/path/to/input.json"
-  format: "json"` }
-    case 'outputs':
-      return { id, raw: addRaw.value || `type: kafka
-kafka:
-  brokers:
-    - 127.0.0.1:9092
-  topic: test-topic
-  group: test` }
-    case 'rulesets':
-      return { id, raw: addRaw.value || `<root type="DETECTION" name="${id}">\n    <rule id="${id}_01" name="New Rule">\n        <!-- Add operations in any order -->\n        <check type="EQU" field="status">active</check>\n    </rule>\n</root>` }
-    case 'projects':
-      return { id, raw: addRaw.value || `name: "${id}"
-flow:
-  - from: "input.default"
-    to: "ruleset.default"
-  - from: "ruleset.default"
-    to: "output.default"` }
-    case 'plugins':
-      return { id, raw: addRaw.value || `// New plugin code` }
-    default:
-      return { id: '', raw: '' }
   }
 }
 
@@ -2288,10 +2246,6 @@ async function confirmDelete() {
   } catch (e) {
     deleteError.value = 'Delete failed: ' + (e?.message || 'Unknown error')
   }
-}
-
-function deleteItem(type, item) {
-  openDeleteModal(type, item)
 }
 
 function closeAllMenus() {

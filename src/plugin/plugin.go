@@ -100,9 +100,6 @@ func init() {
 }
 
 func Verify(path string, raw string, name string) error {
-	// Skip name conflict check during verification - this is only for syntax and structure validation
-	// Name conflict will be checked during actual save/create operations
-
 	// Use common file reading function
 	content, err := common.ReadContentFromPathOrRaw(path, raw)
 	if err != nil {
@@ -145,6 +142,33 @@ func NewPlugin(path string, raw string, name string, pluginType int) error {
 
 	Plugins[p.Name] = p
 	return nil
+}
+
+// NewTestPlugin creates a plugin for testing without adding it to the global registry
+func NewTestPlugin(path string, raw string, name string, pluginType int) (*Plugin, error) {
+	var err error
+	var content []byte
+
+	err = Verify(path, raw, name)
+	if err != nil {
+		return nil, fmt.Errorf("plugin verify err %s %s", name, err.Error())
+	}
+
+	if path != "" {
+		content, _ = os.ReadFile(path)
+	} else {
+		content = []byte(raw)
+	}
+
+	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
+
+	err = p.yaegiLoad()
+	if err != nil {
+		return nil, fmt.Errorf("plugin yaegi load err %s: %w", name, err)
+	}
+
+	// For test plugins, do NOT add to global registry
+	return p, nil
 }
 
 func (p *Plugin) yaegiLoad() error {

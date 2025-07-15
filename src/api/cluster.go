@@ -221,9 +221,6 @@ func getCluster(c echo.Context) error {
 	return c.String(http.StatusOK, string(data))
 }
 
-// getQPSData endpoint removed - QPS data is no longer collected
-// Use getDailyMessages for message statistics instead
-
 // getDailyMessages returns real message counts for today (from 00:00)
 // Modified to read directly from Redis via Daily Stats Manager
 func getDailyMessages(c echo.Context) error {

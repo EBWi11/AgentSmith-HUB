@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/plugin"
 	"encoding/xml"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	regexp "github.com/BurntSushi/rure-go"
 	"github.com/dgraph-io/ristretto/v2"
@@ -82,6 +85,9 @@ type Rule struct {
 }
 
 type Ruleset struct {
+	Status              common.Status
+	StatusChangedAt     *time.Time `json:"status_changed_at,omitempty"`
+	Err                 error      `json:"-"`
 	Path                string
 	XMLName             xml.Name
 	Name                string
@@ -113,7 +119,7 @@ type Ruleset struct {
 	lastReportedTotal uint64         // For calculating increments in 10-second intervals
 	wg                sync.WaitGroup // WaitGroup for goroutine management
 
-	OwnerProjects []string `json:"-"`
+	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
 // Checklist contains the logical condition and nodes to check.
@@ -1242,11 +1248,63 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	return ruleset, nil
 }
 
+// SetStatus sets the ruleset status and error information
+func (r *Ruleset) SetStatus(status common.Status, err error) {
+	if err != nil {
+		r.Err = err
+		logger.Error("Ruleset status changed with error", "ruleset", r.RulesetID, "status", status, "error", err)
+	}
+	r.Status = status
+	t := time.Now()
+	r.StatusChangedAt = &t
+}
+
+// cleanup performs cleanup when normal stop fails or panic occurs
+func (r *Ruleset) cleanup() {
+	// Close stop channel if it exists and not already closed
+	if r.stopChan != nil {
+		select {
+		case <-r.stopChan:
+			// Already closed
+		default:
+			close(r.stopChan)
+		}
+		r.stopChan = nil
+	}
+
+	// Release thread pool
+	if r.antsPool != nil {
+		r.antsPool.Release()
+		r.antsPool = nil
+	}
+
+	// Close caches
+	if r.Cache != nil {
+		r.Cache.Close()
+		r.Cache = nil
+	}
+
+	if r.CacheForClassify != nil {
+		r.CacheForClassify.Close()
+		r.CacheForClassify = nil
+	}
+
+	// Reset atomic counter
+	atomic.StoreUint64(&r.processTotal, 0)
+	atomic.StoreUint64(&r.lastReportedTotal, 0)
+}
+
 // NewFromExisting creates a new Ruleset instance from an existing one with a different ProjectNodeSequence
 // This is used when multiple projects use the same ruleset component but with different data flow sequences
 func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset, error) {
 	if existing == nil {
 		return nil, fmt.Errorf("existing ruleset is nil")
+	}
+
+	// Verify the existing configuration before creating new instance
+	err := Verify(existing.Path, existing.RawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("ruleset verify error for existing config: %s %w", existing.RulesetID, err)
 	}
 
 	// Create a new Ruleset instance with the same configuration but different ProjectNodeSequence
@@ -1259,8 +1317,9 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
 		Type:                existing.Type,
 		IsDetection:         existing.IsDetection,
-		Rules:               existing.Rules,      // Share the same rules
-		RulesCount:          existing.RulesCount, // Copy the rules count
+		Rules:               existing.Rules,       // Share the same rules
+		RulesCount:          existing.RulesCount,  // Copy the rules count
+		Status:              common.StatusStopped, // Initialize status to stopped
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
 		// Note: Cache and CacheForClassify are NOT shared to avoid concurrent access issues

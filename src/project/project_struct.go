@@ -1,24 +1,26 @@
 package project
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// ProjectStatus represents the current status of a project
-type ProjectStatus string
-
-const (
-	ProjectStatusStopped  ProjectStatus = "stopped"
-	ProjectStatusStarting ProjectStatus = "starting"
-	ProjectStatusRunning  ProjectStatus = "running"
-	ProjectStatusStopping ProjectStatus = "stopping"
-	ProjectStatusError    ProjectStatus = "error"
-)
+type FlowNode struct {
+	FromPNS  string
+	ToPNS    string
+	Content  string
+	FromType string
+	ToType   string
+	FromID   string
+	ToID     string
+	FromInit bool
+	ToInit   bool
+}
 
 type GlobalProjectInfo struct {
 	Projects map[string]*Project
@@ -26,23 +28,39 @@ type GlobalProjectInfo struct {
 	Outputs  map[string]*output.Output
 	Rulesets map[string]*rules_engine.Ruleset
 
+	PNSOutputs  map[string]*output.Output
+	PNSRulesets map[string]*rules_engine.Ruleset
+
 	ProjectsNew map[string]string
 	InputsNew   map[string]string
 	OutputsNew  map[string]string
 	RulesetsNew map[string]string
 
-	msgChans        map[string]chan map[string]interface{}
-	msgChansCounter map[string]*atomic.Int64
+	RefCount map[string]int
+}
 
-	// edgeChanIds keeps a unique mapping between a logical edge ("FROM->TO")
-	// and the channelId stored in msgChans. It is used to ensure that when multiple
-	// projects share the same data-flow edge we reuse the same channel instead of
-	// creating duplicated ones which would lead to data loss or duplication.
-	edgeChanIds map[string]string
-	EdgeMapMu   sync.RWMutex
+func GetRefCount(id string) int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return GlobalProject.RefCount[id]
+}
 
-	// Dedicated lock for project lifecycle management to reduce lock contention
-	ProjectMu sync.RWMutex
+func AddRefCount(id string) {
+	common.GlobalMu.Lock()
+	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] + 1
+	common.GlobalMu.Unlock()
+}
+
+func ReduceRefCount(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if GlobalProject.RefCount[id] > 0 {
+		GlobalProject.RefCount[id] = GlobalProject.RefCount[id] - 1
+	} else {
+		// Log warning for debugging
+		logger.Warn("Attempting to reduce reference count when count is already 0", "id", id)
+	}
 }
 
 // ProjectConfig holds the configuration for a project
@@ -56,7 +74,7 @@ type ProjectConfig struct {
 // Project represents a project
 type Project struct {
 	Id              string        `json:"id"`
-	Status          ProjectStatus `json:"status"`
+	Status          common.Status `json:"status"`
 	StatusChangedAt *time.Time    `json:"status_changed_at,omitempty"`
 	Err             error         `json:"-"`
 
@@ -64,24 +82,15 @@ type Project struct {
 
 	Config *ProjectConfig `json:"config"`
 
+	FlowNodes []FlowNode
+
 	// Components
 	Inputs   map[string]*input.Input          `json:"-"`
 	Outputs  map[string]*output.Output        `json:"-"`
 	Rulesets map[string]*rules_engine.Ruleset `json:"-"`
 
 	// Data flow
-	MsgChannels []string `json:"-"`
-
-	// For graceful shutdown
-	stopChan chan struct{}  `json:"-"`
-	wg       sync.WaitGroup `json:"-"`
-
-	// Dependencies tracking
-	DependsOn      []string `json:"-"` // Projects this project depends on
-	DependedBy     []string `json:"-"` // Projects that depend on this project
-	SharedInputs   []string `json:"-"` // Inputs shared with other projects
-	SharedOutputs  []string `json:"-"` // Outputs shared with other projects
-	SharedRulesets []string `json:"-"` // Rulesets shared with other projects
+	MsgChannels map[string]*chan map[string]interface{} `json:"-"` // Channels for message passing between components
 }
 
 // ProjectMetrics holds runtime metrics for the project
@@ -95,4 +104,423 @@ type ProjectMetrics struct {
 type ProjectNode interface {
 	Start() error
 	Stop() error
+}
+
+// ===== Thread-safe accessor functions for GlobalProject =====
+
+// Project accessors
+func GetProject(id string) (*Project, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	proj, exists := GlobalProject.Projects[id]
+	return proj, exists
+}
+
+func SetProject(id string, project *Project) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	GlobalProject.Projects[id] = project
+}
+
+func DeleteProject(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Projects, id)
+}
+
+func GetAllProjects() map[string]*Project {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	// Return a copy to avoid external modification
+	projects := make(map[string]*Project)
+	for id, proj := range GlobalProject.Projects {
+		projects[id] = proj
+	}
+	return projects
+}
+
+func GetProjectsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Projects)
+}
+
+// Input accessors
+func GetInput(id string) (*input.Input, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	inp, exists := GlobalProject.Inputs[id]
+	return inp, exists
+}
+
+func SetInput(id string, inp *input.Input) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.Inputs == nil {
+		GlobalProject.Inputs = make(map[string]*input.Input)
+	}
+	GlobalProject.Inputs[id] = inp
+}
+
+func DeleteInput(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Inputs, id)
+}
+
+func GetAllInputs() map[string]*input.Input {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	// Return a copy to avoid external modification
+	inputs := make(map[string]*input.Input)
+	for id, inp := range GlobalProject.Inputs {
+		inputs[id] = inp
+	}
+	return inputs
+}
+
+// Output accessors
+func GetOutput(id string) (*output.Output, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	out, exists := GlobalProject.Outputs[id]
+	return out, exists
+}
+
+func SetOutput(id string, out *output.Output) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.Outputs == nil {
+		GlobalProject.Outputs = make(map[string]*output.Output)
+	}
+	GlobalProject.Outputs[id] = out
+}
+
+func DeleteOutput(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Outputs, id)
+}
+
+func GetAllOutputs() map[string]*output.Output {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	// Return a copy to avoid external modification
+	outputs := make(map[string]*output.Output)
+	for id, out := range GlobalProject.Outputs {
+		outputs[id] = out
+	}
+	return outputs
+}
+
+// Ruleset accessors
+func GetRuleset(id string) (*rules_engine.Ruleset, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	rs, exists := GlobalProject.Rulesets[id]
+	return rs, exists
+}
+
+func SetRuleset(id string, rs *rules_engine.Ruleset) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.Rulesets == nil {
+		GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
+	}
+	GlobalProject.Rulesets[id] = rs
+}
+
+func DeleteRuleset(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Rulesets, id)
+}
+
+func GetAllRulesets() map[string]*rules_engine.Ruleset {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	// Return a copy to avoid external modification
+	rulesets := make(map[string]*rules_engine.Ruleset)
+	for id, rs := range GlobalProject.Rulesets {
+		rulesets[id] = rs
+	}
+	return rulesets
+}
+
+// PNS Output accessors
+func GetPNSOutput(pns string) (*output.Output, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	out, exists := GlobalProject.PNSOutputs[pns]
+	return out, exists
+}
+
+func SetPNSOutput(pns string, out *output.Output) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.PNSOutputs == nil {
+		GlobalProject.PNSOutputs = make(map[string]*output.Output)
+	}
+	GlobalProject.PNSOutputs[pns] = out
+}
+
+func DeletePNSOutput(pns string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.PNSOutputs, pns)
+}
+
+// PNS Ruleset accessors
+func GetPNSRuleset(pns string) (*rules_engine.Ruleset, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	rs, exists := GlobalProject.PNSRulesets[pns]
+	return rs, exists
+}
+
+func SetPNSRuleset(pns string, rs *rules_engine.Ruleset) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.PNSRulesets == nil {
+		GlobalProject.PNSRulesets = make(map[string]*rules_engine.Ruleset)
+	}
+	GlobalProject.PNSRulesets[pns] = rs
+}
+
+func DeletePNSRuleset(pns string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.PNSRulesets, pns)
+}
+
+// New/Temporary content accessors
+func GetProjectNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.ProjectsNew[id]
+	return content, exists
+}
+
+func SetProjectNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.ProjectsNew == nil {
+		GlobalProject.ProjectsNew = make(map[string]string)
+	}
+	GlobalProject.ProjectsNew[id] = content
+}
+
+func DeleteProjectNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.ProjectsNew, id)
+}
+
+func GetInputNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.InputsNew[id]
+	return content, exists
+}
+
+func SetInputNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.InputsNew == nil {
+		GlobalProject.InputsNew = make(map[string]string)
+	}
+	GlobalProject.InputsNew[id] = content
+}
+
+func DeleteInputNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.InputsNew, id)
+}
+
+func GetOutputNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.OutputsNew[id]
+	return content, exists
+}
+
+func SetOutputNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.OutputsNew == nil {
+		GlobalProject.OutputsNew = make(map[string]string)
+	}
+	GlobalProject.OutputsNew[id] = content
+}
+
+func DeleteOutputNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.OutputsNew, id)
+}
+
+func GetRulesetNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.RulesetsNew[id]
+	return content, exists
+}
+
+func SetRulesetNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.RulesetsNew == nil {
+		GlobalProject.RulesetsNew = make(map[string]string)
+	}
+	GlobalProject.RulesetsNew[id] = content
+}
+
+func DeleteRulesetNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.RulesetsNew, id)
+}
+
+// Component validation helpers
+func ValidateComponent(componentType, componentID string) (exists bool, tempExists bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	switch componentType {
+	case "INPUT":
+		_, exists = GlobalProject.Inputs[componentID]
+		_, tempExists = GlobalProject.InputsNew[componentID]
+	case "OUTPUT":
+		_, exists = GlobalProject.Outputs[componentID]
+		_, tempExists = GlobalProject.OutputsNew[componentID]
+	case "RULESET":
+		_, exists = GlobalProject.Rulesets[componentID]
+		_, tempExists = GlobalProject.RulesetsNew[componentID]
+	}
+	return exists, tempExists
+}
+
+// Safe iteration functions
+func ForEachProject(fn func(id string, project *Project) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for id, proj := range GlobalProject.Projects {
+		if !fn(id, proj) {
+			break
+		}
+	}
+}
+
+func ForEachInput(fn func(id string, inp *input.Input) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for id, inp := range GlobalProject.Inputs {
+		if !fn(id, inp) {
+			break
+		}
+	}
+}
+
+func ForEachOutput(fn func(id string, out *output.Output) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for id, out := range GlobalProject.Outputs {
+		if !fn(id, out) {
+			break
+		}
+	}
+}
+
+func ForEachRuleset(fn func(id string, rs *rules_engine.Ruleset) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for id, rs := range GlobalProject.Rulesets {
+		if !fn(id, rs) {
+			break
+		}
+	}
+}
+
+// Helper function to safely access input downstream
+func SafeDeleteInputDownstream(inputID, downstreamID string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if i, exists := GlobalProject.Inputs[inputID]; exists {
+		delete(i.DownStream, downstreamID)
+	}
+}
+
+// GetAllProjectsNew returns a copy of all projects new map
+func GetAllProjectsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	result := make(map[string]string)
+	for id, content := range GlobalProject.ProjectsNew {
+		result[id] = content
+	}
+	return result
+}
+
+// GetAllInputsNew returns a copy of all inputs new map
+func GetAllInputsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	result := make(map[string]string)
+	for id, content := range GlobalProject.InputsNew {
+		result[id] = content
+	}
+	return result
+}
+
+// GetAllOutputsNew returns a copy of all outputs new map
+func GetAllOutputsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	result := make(map[string]string)
+	for id, content := range GlobalProject.OutputsNew {
+		result[id] = content
+	}
+	return result
+}
+
+// GetAllRulesetsNew returns a copy of all rulesets new map
+func GetAllRulesetsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	result := make(map[string]string)
+	for id, content := range GlobalProject.RulesetsNew {
+		result[id] = content
+	}
+	return result
+}
+
+// GetInputsCount returns the count of inputs
+func GetInputsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Inputs)
+}
+
+// GetOutputsCount returns the count of outputs
+func GetOutputsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Outputs)
+}
+
+// GetRulesetsCount returns the count of rulesets
+func GetRulesetsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Rulesets)
 }

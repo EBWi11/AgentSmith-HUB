@@ -179,6 +179,7 @@ const store = createStore({
       }
       
       try {
+        // Use the already updated getAvailablePlugins function
         const plugins = await hubApi.getAvailablePlugins()
         commit('setAvailablePlugins', plugins)
       } catch (error) {

@@ -326,8 +326,6 @@ function getNodeMetrics(nodeId) {
   return defaultMetrics
 }
 
-
-
 function checkStatusConsistency(node) {
   // Check if node's leader status is consistent with cluster state
   const expectedLeaderStatus = node.id === clusterInfo.value.leader_id
@@ -419,9 +417,6 @@ function getLeaderVersion() {
   const leaderNode = processedNodes.value.find(node => node.isLeader)
   return leaderNode?.version || clusterInfo.value.version
 }
-
-// 这些函数现在从 utils/common.js 导入
-// formatLastSeen 使用 formatTimeAgo 替代
 
 async function fetchAllData() {
   try {

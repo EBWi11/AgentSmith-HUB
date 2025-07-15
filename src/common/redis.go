@@ -348,7 +348,7 @@ func RedisExpire(key string, expiration int) error {
 func StoreProjectConfig(projectID string, config string) error {
 	key := "cluster:project_config:" + projectID
 	// Store with 7 days TTL
-	return rdb.Set(ctx, key, config, 7*24*time.Hour).Err()
+	return rdb.Set(ctx, key, config, 0).Err()
 }
 
 // GetProjectConfig retrieves project configuration from Redis
@@ -472,8 +472,8 @@ func (dl *DistributedLock) TryAcquire(timeout time.Duration) error {
 // SetProjectUserIntention sets the user intention for a project (what user wants)
 // Only "running" is stored; "stopped" projects have their keys removed
 // Uses proj_states key for user intention
-func SetProjectUserIntention(nodeID, projectID string, wantRunning bool) error {
-	key := ProjectLegacyStateKeyPrefix + nodeID
+func SetProjectUserIntention(projectID string, wantRunning bool) error {
+	key := ProjectLegacyStateKeyPrefix
 
 	if wantRunning {
 		// User wants project to be running
@@ -487,8 +487,8 @@ func SetProjectUserIntention(nodeID, projectID string, wantRunning bool) error {
 // GetProjectUserIntention gets the user intention for a project
 // Returns true if user wants it running, false if stopped/not found
 // Uses proj_states key for user intention
-func GetProjectUserIntention(nodeID, projectID string) (bool, error) {
-	key := ProjectLegacyStateKeyPrefix + nodeID
+func GetProjectUserIntention(projectID string) (bool, error) {
+	key := ProjectLegacyStateKeyPrefix
 	value, err := RedisHGet(key, projectID)
 	if err != nil {
 		// Key not found means user wants it stopped
@@ -500,8 +500,8 @@ func GetProjectUserIntention(nodeID, projectID string) (bool, error) {
 // GetAllProjectUserIntentions gets all user intentions for a node
 // Returns map of projectID -> bool (true=running, false=stopped)
 // Uses proj_states key for user intention
-func GetAllProjectUserIntentions(nodeID string) (map[string]bool, error) {
-	key := ProjectLegacyStateKeyPrefix + nodeID
+func GetAllProjectUserIntentions() (map[string]bool, error) {
+	key := ProjectLegacyStateKeyPrefix
 	values, err := RedisHGetAll(key)
 	if err != nil {
 		return make(map[string]bool), nil
@@ -520,14 +520,6 @@ func GetAllProjectUserIntentions(nodeID string) (map[string]bool, error) {
 func SetProjectRealState(nodeID, projectID string, actualState string) error {
 	key := ProjectRealStateKeyPrefix + nodeID
 	return RedisHSet(key, projectID, actualState)
-}
-
-// GetProjectRealState gets the actual runtime state for a project
-// Returns the actual state string or empty string if not found
-// Uses proj_real key for actual state
-func GetProjectRealState(nodeID, projectID string) (string, error) {
-	key := ProjectRealStateKeyPrefix + nodeID
-	return RedisHGet(key, projectID)
 }
 
 // GetAllProjectRealStates gets all actual states for a node
