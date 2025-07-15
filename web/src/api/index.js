@@ -1179,10 +1179,10 @@ export const hubApi = {
     }
   },
 
-    async getProjectDailyMessages(projectId) {
+    async getProjectDailyMessages(projectId, extraParams = {}) {
     try {
       const response = await publicApi.get('/daily-messages', { 
-        params: { project_id: projectId } 
+        params: { project_id: projectId, ...extraParams } 
       });
       return response.data;
     } catch (error) {
@@ -1192,9 +1192,11 @@ export const hubApi = {
   },
 
   // Get project component sequences - returns each component's projectNodeSequence list in current project
-  async getProjectComponentSequences(projectId) {
+  async getProjectComponentSequences(projectId, extraParams = {}) {
     try {
-      const response = await api.get(`/project-component-sequences/${projectId}`);
+      const response = await api.get(`/project-component-sequences/${projectId}`, {
+        params: extraParams
+      });
       return response.data;
     } catch (error) {
       console.error(`Error fetching component sequences for project ${projectId}:`, error);

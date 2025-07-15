@@ -238,16 +238,67 @@ onMounted(() => {
   document.addEventListener('click', onGlobalClick);
   document.addEventListener('keydown', handleEscKey);
   
+  // Listen for project operation events to refresh message data
+  const handleProjectOperation = (event) => {
+    const { operation, projectId } = event.detail || {};
+    if (props.projectId === projectId && (operation === 'restart' || operation === 'start' || operation === 'stop')) {
+      console.log(`[ProjectWorkflow] Project operation detected: ${operation} for ${projectId}`);
+      
+      // Immediate refresh to clear old data
+      if (props.enableMessages && props.projectId) {
+        fetchMessageData();
+      }
+      
+      // Additional delayed refresh to ensure backend updates are captured
+      setTimeout(() => {
+        if (props.enableMessages && props.projectId) {
+          console.log(`[ProjectWorkflow] Delayed refresh after ${operation}`);
+          fetchMessageData();
+        }
+      }, 3000); // Increased delay to ensure backend processing completes
+    }
+  };
+  
+  window.addEventListener('projectOperation', handleProjectOperation);
+  
+  // Listen for cache clear events to refresh data immediately
+  const handleCacheCleared = (event) => {
+    const { reason } = event.detail || {};
+    console.log(`[ProjectWorkflow] Cache cleared: ${reason}, refreshing data`);
+    
+    if (props.enableMessages && props.projectId) {
+      fetchMessageData();
+    }
+  };
+  
+  window.addEventListener('cacheCleared', handleCacheCleared);
+  
   // Start message data refresh if enabled and projectId is provided
   if (props.enableMessages && props.projectId) {
     startMessageRefresh();
   }
+  
+  // Store the handlers for cleanup
+  window._projectWorkflowOperationHandler = handleProjectOperation;
+  window._projectWorkflowCacheHandler = handleCacheCleared;
 });
 
 // Remove global click event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick);
   document.removeEventListener('keydown', handleEscKey);
+  
+  // Remove project operation event listener
+  if (window._projectWorkflowOperationHandler) {
+    window.removeEventListener('projectOperation', window._projectWorkflowOperationHandler);
+    delete window._projectWorkflowOperationHandler;
+  }
+  
+  // Remove cache clear event listener
+  if (window._projectWorkflowCacheHandler) {
+    window.removeEventListener('cacheCleared', window._projectWorkflowCacheHandler);
+    delete window._projectWorkflowCacheHandler;
+  }
   
   // Stop message data refresh
   stopMessageRefresh();
@@ -564,13 +615,21 @@ async function fetchMessageData() {
     messageLoading.value = true;
     
     // Fetch both message data and component sequences in parallel
+    // Add timestamp to break any HTTP caching
+    const timestamp = Date.now();
     const [messageResponse, sequenceResponse] = await Promise.all([
-      hubApi.getProjectDailyMessages(props.projectId),
-      hubApi.getProjectComponentSequences(props.projectId)
+      hubApi.getProjectDailyMessages(props.projectId, { _t: timestamp }),
+      hubApi.getProjectComponentSequences(props.projectId, { _t: timestamp })
     ]);
     
     messageData.value = messageResponse || {};
     componentSequences.value = sequenceResponse.data || {};
+    
+    // Debug: Log message data for troubleshooting
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[ProjectWorkflow] Message data for project ${props.projectId}:`, messageResponse);
+      console.log(`[ProjectWorkflow] Component sequences:`, sequenceResponse.data);
+    }
     
     // Update nodes with message data (including 0 values)
     updateNodesWithMessages();
@@ -590,10 +649,10 @@ function startMessageRefresh() {
   // Initial fetch
   fetchMessageData();
   
-  // Set up interval for periodic refresh (every 15 seconds)
+  // Set up interval for periodic refresh (every 5 seconds for faster updates)
   messageRefreshInterval.value = setInterval(() => {
     fetchMessageData();
-  }, 15000);
+  }, 5000);
 }
 
 // Stop message data refresh interval

@@ -1,7 +1,9 @@
 <template>
   <aside class="h-full bg-white shadow-sm flex flex-col font-sans transition-all duration-300"
          :class="props.collapsed ? 'w-16' : 'w-72'"
-         :style="props.collapsed ? 'min-width: 64px' : 'min-width: 288px'">
+         :style="props.collapsed ? 'min-width: 64px' : 'min-width: 288px'"
+         data-component="sidebar"
+         ref="sidebarRef">
     <!-- Header with toggle button -->
     <div class="flex items-center justify-between px-3 pt-5 pb-3">
       <div v-if="!props.collapsed" class="flex items-center flex-1 pl-6">
@@ -1494,6 +1496,7 @@ import { getStatusLabel, getStatusTitle, copyToClipboard, formatNumber, formatPe
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
 import { clearCacheWithDelay } from '../../utils/cacheUtils'
+import { restoreSidebarState } from '../../utils/stateManager'
 // useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
 
 // Get router instance
@@ -1666,6 +1669,9 @@ const search = ref('')
 const searchResults = ref([])
 const searchLoading = ref(false)
 
+// Component refs
+const sidebarRef = ref(null)
+
 // Refresh configuration
 const REFRESH_INTERVALS = {
   TRANSITION_STATE: 2000,    // 2s - 项目过渡状态时的快速刷新
@@ -1819,6 +1825,41 @@ onMounted(async () => {
   
   // Listen for local changes loaded event to refresh affected components
   window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
+  
+  // 监听缓存清理事件，恢复UI状态
+  const handleCacheCleared = (event) => {
+    const { reason, shouldRestoreState } = event.detail || {}
+    console.log(`[Sidebar] Cache cleared: ${reason}, shouldRestore: ${shouldRestoreState}`)
+    
+    if (shouldRestoreState) {
+      // 延迟恢复状态，等待数据重新加载
+      setTimeout(() => {
+        // 创建 exposed 对象供状态管理器使用
+        const exposedObj = {
+          collapsed,
+          selected: props.selected,
+          search,
+          activeModal,
+          sidebarRef: sidebarRef.value
+        }
+        
+        const restoredState = restoreSidebarState(exposedObj)
+        if (restoredState && restoredState.selectedId && restoredState.selectedType) {
+          // 如果恢复了选中状态，通知父组件
+          emit('select-item', { 
+            type: restoredState.selectedType, 
+            id: restoredState.selectedId,
+            _restored: true 
+          })
+        }
+      }, 500) // 给数据刷新一些时间
+    }
+  }
+  
+  window.addEventListener('cacheCleared', handleCacheCleared)
+  
+  // Store event handler for cleanup
+  window._sidebarCacheHandler = handleCacheCleared
 })
 
 onBeforeUnmount(() => {
@@ -1836,6 +1877,12 @@ onBeforeUnmount(() => {
   
   // Remove local changes loaded event listener
   window.removeEventListener('localChangesLoaded', handleLocalChangesLoaded)
+  
+  // Remove cache cleared event listener
+  if (window._sidebarCacheHandler) {
+    window.removeEventListener('cacheCleared', window._sidebarCacheHandler)
+    delete window._sidebarCacheHandler
+  }
 })
 
 // Watch for search input changes
@@ -2636,7 +2683,13 @@ defineExpose({
   refreshProjectStatus,
   fetchProjectsComplete,
   setupProjectStatusRefresh,
-  clearProjectStatusRefresh
+  clearProjectStatusRefresh,
+  // State properties for state manager
+  collapsed,
+  selected: props.selected,
+  search,
+  activeModal,
+  sidebarRef
 })
 
 function handleItemClick(type, item) {

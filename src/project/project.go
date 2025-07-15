@@ -850,6 +850,11 @@ func (p *Project) Start() error {
 	common.ProjectOperationMu.Lock()
 	defer common.ProjectOperationMu.Unlock()
 
+	err := p.parseContent()
+	if err != nil {
+		return fmt.Errorf("project parse error: %s", err.Error())
+	}
+
 	// Add panic recovery for critical state changes
 	defer func() {
 		if r := recover(); r != nil {
@@ -867,7 +872,7 @@ func (p *Project) Start() error {
 	// Set to starting status
 	p.SetProjectStatus(common.StatusStarting, nil)
 
-	err := p.initComponents()
+	err = p.initComponents()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		p.cleanup()
@@ -1099,6 +1104,7 @@ func (p *Project) cleanup() {
 			ReduceRefCount(p.FlowNodes[i].ToPNS)
 		}
 	}
+
 	p.FlowNodes = []FlowNode{}
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
