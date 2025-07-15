@@ -146,6 +146,11 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
 type projectCommandHandler struct{}
 
+func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
+	// Default to recording operations for the simple ExecuteCommand method
+	return h.ExecuteCommandWithOptions(projectID, action, true)
+}
+
 func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action string, recordOperation bool) error {
 	// Use safe accessor to get project
 	proj, exists := GetProject(projectID)
@@ -158,9 +163,7 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 		projectConfig, err := common.GetProjectConfig(projectID)
 		if err != nil || projectConfig == "" {
 			// Fallback to global config map
-			common.GlobalMu.RLock()
-			projectConfig = common.AllProjectRawConfig[projectID]
-			common.GlobalMu.RUnlock()
+			projectConfig, _ = common.GetRawConfig("project", projectID)
 		}
 
 		if projectConfig != "" {
@@ -284,6 +287,91 @@ func GetProjectCommandHandler() interface{} {
 	return &projectCommandHandler{}
 }
 
+// checkAllProjectComponentsImpl implements the actual component checking logic
+func checkAllProjectComponentsImpl() []common.ProjectComponentError {
+	var errors []common.ProjectComponentError
+
+	// Check all running projects
+	ForEachProject(func(projectID string, proj *Project) bool {
+		// Only check running projects
+		if proj.Status != common.StatusRunning {
+			return true // Continue iteration
+		}
+
+		// Check input components
+		for _, inputComp := range proj.Inputs {
+			if inputComp.Err != nil {
+				errors = append(errors, common.ProjectComponentError{
+					ProjectID:   projectID,
+					ComponentID: inputComp.Id,
+					Type:        "input",
+					Status:      inputComp.Status,
+					Error:       inputComp.Err,
+				})
+			}
+		}
+
+		// Check output components
+		for _, outputComp := range proj.Outputs {
+			if outputComp.Err != nil {
+				errors = append(errors, common.ProjectComponentError{
+					ProjectID:   projectID,
+					ComponentID: outputComp.Id,
+					Type:        "output",
+					Status:      outputComp.Status,
+					Error:       outputComp.Err,
+				})
+			}
+		}
+
+		// Check ruleset components
+		for _, rulesetComp := range proj.Rulesets {
+			if rulesetComp.Err != nil {
+				errors = append(errors, common.ProjectComponentError{
+					ProjectID:   projectID,
+					ComponentID: rulesetComp.RulesetID,
+					Type:        "ruleset",
+					Status:      rulesetComp.Status,
+					Error:       rulesetComp.Err,
+				})
+			}
+		}
+
+		return true // Continue iteration
+	})
+
+	return errors
+}
+
+// SetProjectErrorStatus sets a project status to error with detailed error information
+func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectComponentError) {
+	proj, exists := GetProject(projectID)
+	if !exists {
+		logger.Warn("Cannot set error status for non-existent project", "project", projectID)
+		return
+	}
+
+	// Build error message from component errors
+	var errorMsg strings.Builder
+	errorMsg.WriteString("Component errors detected: ")
+
+	for i, compErr := range componentErrors {
+		if i > 0 {
+			errorMsg.WriteString("; ")
+		}
+		errorMsg.WriteString(fmt.Sprintf("%s %s: %v", compErr.Type, compErr.ComponentID, compErr.Error))
+	}
+
+	// Set project to error status
+	err := fmt.Errorf(errorMsg.String())
+	proj.SetProjectStatus(common.StatusStopped, err)
+
+	logger.Error("Project set to error status due to component failures",
+		"project", projectID,
+		"component_count", len(componentErrors),
+		"error", err)
+}
+
 func init() {
 	GlobalProject = &GlobalProjectInfo{}
 	GlobalProject.Projects = make(map[string]*Project)
@@ -300,8 +388,14 @@ func init() {
 	GlobalProject.RulesetsNew = make(map[string]string)
 	GlobalProject.RefCount = make(map[string]int)
 
-	common.AllProjectRawConfig = make(map[string]string)
+	// AllProjectRawConfig is now managed through common.SetRawConfig functions
 	common.SetStatsCollector(collectAllComponentStats)
+
+	// Register the component checker function
+	common.SetProjectComponentChecker(checkAllProjectComponentsImpl)
+
+	// Register the project error setter function
+	common.SetProjectErrorSetter(SetProjectErrorStatus)
 }
 
 func Verify(path string, raw string) error {
@@ -409,20 +503,24 @@ func NewProject(path string, raw string, id string, test bool) (*Project, error)
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
-	// Use safe accessor to set project
-	SetProject(p.Id, p)
+	// For test projects, do NOT add to GlobalProject - keep them completely isolated
+	if !test {
+		// Use safe accessor to set project
+		SetProject(p.Id, p)
 
-	// Update global config map (still needs manual lock as it's not in GlobalProject)
-	common.GlobalMu.Lock()
-	common.AllProjectRawConfig[p.Id] = p.Config.RawConfig
-	common.GlobalMu.Unlock()
+		// Update global config map using the new accessor function
+		common.SetRawConfig("project", p.Id, p.Config.RawConfig)
 
-	// Store project config in Redis for cluster-wide access
-	if err := common.StoreProjectConfig(p.Id, p.Config.RawConfig); err != nil {
-		logger.Error("Failed to store project config in Redis", "project", p.Id, "error", err)
+		// Store project config in Redis for cluster-wide access
+		if err := common.StoreProjectConfig(p.Id, p.Config.RawConfig); err != nil {
+			logger.Error("Failed to store project config in Redis", "project", p.Id, "error", err)
+		}
+
+		logger.Info("Project created successfully", "project", p.Id)
+	} else {
+		logger.Info("Test project created successfully (isolated)", "project", p.Id, "testing", true)
 	}
 
-	logger.Info("Project created successfully", "project", p.Id)
 	return p, nil
 }
 
@@ -750,7 +848,7 @@ func (p *Project) Start() error {
 
 	// Use GlobalMu to ensure atomic status check and change
 	common.GlobalMu.Lock()
-	if p.Status != common.StatusStopped {
+	if p.Status != common.StatusStopped && p.Status != common.StatusError {
 		common.GlobalMu.Unlock()
 		return fmt.Errorf("project is not stopped %s", p.Id)
 	}
@@ -760,14 +858,14 @@ func (p *Project) Start() error {
 
 	err := p.initComponents()
 	if err != nil {
-		p.SetProjectStatus(common.StatusStopped, fmt.Errorf("failed to initialize components: %w", err))
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		p.cleanup()
 		return fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
 	err = p.runComponents()
 	if err != nil {
-		p.SetProjectStatus(common.StatusStopped, fmt.Errorf("failed to run components: %w", err))
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
 		p.cleanup()
 		return fmt.Errorf("failed to run project components: %w", err)
 	}
@@ -821,20 +919,15 @@ func (p *Project) Stop() error {
 	select {
 	case err := <-stopCompleted:
 		if err != nil {
-			logger.Error("Project stop completed with error", "project", p.Id, "error", err)
-			// Ensure proper cleanup and status setting even on error
-			p.cleanup()
-			p.SetProjectStatus(common.StatusStopped, err)
-			return err
+			p.SetProjectStatus(common.StatusStopped, fmt.Errorf("failed to stop components: %w", err))
+			return fmt.Errorf("failed to stop project components: %w", err)
 		}
+		p.SetProjectStatus(common.StatusStopped, nil)
 		logger.Info("Project stopped successfully", "project", p.Id)
 		return nil
 	case <-overallTimeout:
-		logger.Warn("Project stop timeout exceeded, forcing cleanup", "project", p.Id)
-		// Enhanced cleanup on timeout
-		p.cleanup()
-		p.SetProjectStatus(common.StatusStopped, nil)
-		return fmt.Errorf("project stop timeout exceeded, forced cleanup completed for %s", p.Id)
+		p.SetProjectStatus(common.StatusStopped, fmt.Errorf("stop operation timed out"))
+		return fmt.Errorf("project stop operation timed out")
 	}
 }
 
@@ -891,7 +984,7 @@ func (p *Project) getPartner(t string, pns string) []string {
 		}
 
 		if t == "left" && node.ToPNS == pns {
-			res = append(res, node.ToPNS)
+			res = append(res, node.FromPNS)
 		}
 	}
 	return res
@@ -899,26 +992,30 @@ func (p *Project) getPartner(t string, pns string) []string {
 
 func (p *Project) stopComponentsInternal() error {
 	var err error
-	logger.Info("Step 1: Stopping inputs to prevent new data", "project", p.Id, "count", len(p.Inputs))
+	logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
 	for id, in := range p.Inputs {
-		rightNodes := p.getPartner("right", in.ProjectNodeSequence)
+		rightNodes := p.getPartner("right", id)
 
 		for _, id2 := range rightNodes {
 			SafeDeleteInputDownstream(in.Id, id2)
 		}
 
+		// Input components need reference counting to determine if they should be stopped
+		// Only stop when this is the last project using this input
 		if GetRefCount(id) == 1 {
 			// Use safe accessor to get global input
 			globalInput, exists := GetInput(in.Id)
 
 			if exists {
 				if p.Testing {
-					err = globalInput.StartForTesting()
+					err = globalInput.StopForTesting()
 				} else {
 					err = globalInput.Stop()
 				}
 				if err != nil {
 					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+				} else {
+					logger.Info("Stopped input", "project", p.Id, "input", in.Id, "sequence", id)
 				}
 			} else {
 				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
@@ -935,6 +1032,7 @@ func (p *Project) stopComponentsInternal() error {
 
 	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
 	for id, rs := range p.Rulesets {
+		DeletePNSRuleset(id)
 		if GetRefCount(id) == 1 {
 			err = rs.Stop()
 			if err != nil {
@@ -947,6 +1045,7 @@ func (p *Project) stopComponentsInternal() error {
 
 	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
 	for id, out := range p.Outputs {
+		DeletePNSOutput(id)
 		if GetRefCount(id) == 1 {
 			if p.Testing {
 				err = out.StopForTesting()
@@ -968,15 +1067,22 @@ func (p *Project) stopComponentsInternal() error {
 
 // cleanup performs aggressive cleanup when normal stop fails
 func (p *Project) cleanup() {
-	for _, node := range p.FlowNodes {
-		if node.FromInit {
-			node.FromInit = false
-			ReduceRefCount(node.FromPNS)
+	// Close all message channels before clearing them
+	for _, ch := range p.MsgChannels {
+		if ch != nil {
+			close(*ch)
+		}
+	}
+
+	for i := range p.FlowNodes {
+		if p.FlowNodes[i].FromInit {
+			p.FlowNodes[i].FromInit = false
+			ReduceRefCount(p.FlowNodes[i].FromPNS)
 		}
 
-		if node.ToInit {
-			node.ToInit = false
-			ReduceRefCount(node.ToPNS)
+		if p.FlowNodes[i].ToInit {
+			p.FlowNodes[i].ToInit = false
+			ReduceRefCount(p.FlowNodes[i].ToPNS)
 		}
 	}
 	p.FlowNodes = []FlowNode{}
@@ -1034,9 +1140,11 @@ func (p *Project) waitForCompleteDataProcessing() {
 }
 
 func (p *Project) initComponents() error {
-	var createChannel bool
+	// Track which nodes need new channels created
+	nodeChannelStatus := make(map[string]bool) // key: ToPNS, value: whether channel was created
 
-	for _, node := range p.FlowNodes {
+	for i := range p.FlowNodes {
+		node := &p.FlowNodes[i]
 		switch node.ToType {
 		case "RULESET":
 			// Use safe accessor to check PNS rulesets
@@ -1044,7 +1152,7 @@ func (p *Project) initComponents() error {
 
 			if exists {
 				p.Rulesets[node.ToPNS] = rs
-				createChannel = false
+				nodeChannelStatus[node.ToPNS] = false
 			} else {
 				// Get the original ruleset using safe accessor
 				originalRuleset, exists := GetRuleset(node.ToID)
@@ -1063,7 +1171,7 @@ func (p *Project) initComponents() error {
 
 				p.Rulesets[node.ToPNS] = rs
 
-				createChannel = true
+				nodeChannelStatus[node.ToPNS] = true
 				c := make(chan map[string]interface{}, 1024)
 				p.MsgChannels[node.ToPNS] = &c
 				rs.UpStream[node.ToPNS] = &c
@@ -1089,7 +1197,7 @@ func (p *Project) initComponents() error {
 
 				p.Outputs[node.ToPNS] = testOutput
 
-				createChannel = true
+				nodeChannelStatus[node.ToPNS] = true
 				c := make(chan map[string]interface{}, 1024)
 				p.MsgChannels[node.ToPNS] = &c
 				testOutput.UpStream[node.ToPNS] = &c
@@ -1099,7 +1207,7 @@ func (p *Project) initComponents() error {
 
 				if exists {
 					p.Outputs[node.ToPNS] = o
-					createChannel = false
+					nodeChannelStatus[node.ToPNS] = false
 				} else {
 					// Get the original output using safe accessor
 					originalOutput, exists := GetOutput(node.ToID)
@@ -1118,7 +1226,7 @@ func (p *Project) initComponents() error {
 
 					p.Outputs[node.ToPNS] = o
 
-					createChannel = true
+					nodeChannelStatus[node.ToPNS] = true
 					c := make(chan map[string]interface{}, 1024)
 					p.MsgChannels[node.ToPNS] = &c
 					o.UpStream[node.ToPNS] = &c
@@ -1155,7 +1263,8 @@ func (p *Project) initComponents() error {
 				p.Rulesets[node.FromPNS] = rs
 			}
 
-			if createChannel {
+			// Connect downstream only if channel was created for this specific ToPNS
+			if nodeChannelStatus[node.ToPNS] {
 				p.Rulesets[node.FromPNS].DownStream[node.ToPNS] = p.MsgChannels[node.ToPNS]
 			}
 		case "INPUT":
@@ -1189,7 +1298,8 @@ func (p *Project) initComponents() error {
 				p.Inputs[node.FromPNS] = in
 			}
 
-			if createChannel {
+			// Connect downstream only if channel was created for this specific ToPNS
+			if nodeChannelStatus[node.ToPNS] {
 				p.Inputs[node.FromPNS].DownStream[node.ToPNS] = p.MsgChannels[node.ToPNS]
 			}
 		}

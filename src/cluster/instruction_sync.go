@@ -106,7 +106,7 @@ func (im *InstructionManager) CompactInstructions() error {
 	logger.Info("Starting instruction compaction", "current_version", im.currentVersion)
 
 	// Step 1: Wait for all followers to finish executing instructions
-	if err := im.WaitForAllFollowersIdle(30 * time.Second); err != nil {
+	if err := im.WaitForAllFollowersIdle(200 * time.Second); err != nil {
 		logger.Warn("Some followers may still be executing, proceeding with caution", "error", err)
 		// Continue with compaction but log the warning
 	}
@@ -563,59 +563,44 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 	}
 
 	// 1. Add all inputs first (projects depend on inputs)
-	common.GlobalMu.RLock()
-	if common.AllInputsRawConfig != nil {
-		for inputID, config := range common.AllInputsRawConfig {
-			if err := publishInstructionDirectly(inputID, "input", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish input add instruction", "input", inputID, "error", err)
-			}
+	common.ForEachRawConfig("input", func(inputID, config string) bool {
+		if err := publishInstructionDirectly(inputID, "input", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish input add instruction", "input", inputID, "error", err)
 		}
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// 2. Add all outputs (projects depend on outputs)
-	common.GlobalMu.RLock()
-	if common.AllOutputsRawConfig != nil {
-		for outputID, config := range common.AllOutputsRawConfig {
-			if err := publishInstructionDirectly(outputID, "output", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish output add instruction", "output", outputID, "error", err)
-			}
+	common.ForEachRawConfig("output", func(outputID, config string) bool {
+		if err := publishInstructionDirectly(outputID, "output", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish output add instruction", "output", outputID, "error", err)
 		}
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// 3. Add all plugins (rulesets may depend on plugins)
-	common.GlobalMu.RLock()
-	if common.AllPluginsRawConfig != nil {
-		for pluginID, config := range common.AllPluginsRawConfig {
-			if err := publishInstructionDirectly(pluginID, "plugin", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish plugin add instruction", "plugin", pluginID, "error", err)
-			}
+	common.ForEachRawConfig("plugin", func(pluginID, config string) bool {
+		if err := publishInstructionDirectly(pluginID, "plugin", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish plugin add instruction", "plugin", pluginID, "error", err)
 		}
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// 4. Add all rulesets (projects depend on rulesets)
-	common.GlobalMu.RLock()
-	if common.AllRulesetsRawConfig != nil {
-		for rulesetID, config := range common.AllRulesetsRawConfig {
-			if err := publishInstructionDirectly(rulesetID, "ruleset", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish ruleset add instruction", "ruleset", rulesetID, "error", err)
-			}
+	common.ForEachRawConfig("ruleset", func(rulesetID, config string) bool {
+		if err := publishInstructionDirectly(rulesetID, "ruleset", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish ruleset add instruction", "ruleset", rulesetID, "error", err)
 		}
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// 5. Add all projects LAST (projects depend on all above components)
-	common.GlobalMu.RLock()
-	if common.AllProjectRawConfig != nil {
-		for projectID, config := range common.AllProjectRawConfig {
-			if err := publishInstructionDirectly(projectID, "project", config, "add", nil, nil); err != nil {
-				logger.Error("Failed to publish project add instruction", "project", projectID, "error", err)
-			}
+	common.ForEachRawConfig("project", func(projectID, config string) bool {
+		if err := publishInstructionDirectly(projectID, "project", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish project add instruction", "project", projectID, "error", err)
 		}
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// 6. Start running projects (读取Redis中的用户期望状态)
 	logger.Info("Reading project user intentions from Redis to send start instructions...")
@@ -1127,50 +1112,70 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 	logger.Info("Clearing all local components and projects due to leader session change")
 
 	// Stop and close all running projects first
-	common.GlobalMu.RLock()
+	// Collect running projects first to avoid deadlock
+	var runningProjects []*project.Project
 	project.ForEachProject(func(projectName string, proj *project.Project) bool {
 		if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
-			logger.Info("Stopping project due to session change", "project", projectName)
-			if err := proj.Stop(); err != nil {
-				logger.Warn("Failed to stop project during session change", "project", projectName, "error", err)
-			}
+			runningProjects = append(runningProjects, proj)
 		}
 		return true
 	})
-	common.GlobalMu.RUnlock()
+
+	// Stop projects without holding locks
+	for _, proj := range runningProjects {
+		logger.Info("Stopping project due to session change", "project", proj.Id)
+		if err := proj.Stop(); err != nil {
+			logger.Warn("Failed to stop project during session change", "project", proj.Id, "error", err)
+		}
+	}
 
 	// Stop and release all input instances
-	common.GlobalMu.RLock()
+	// Collect inputs first to avoid deadlock
+	var inputs []*input.Input
 	project.ForEachInput(func(inputName string, inp *input.Input) bool {
-		logger.Debug("Stopping input instance", "name", inputName)
-		if err := inp.Stop(); err != nil {
-			logger.Warn("Failed to stop input instance", "name", inputName, "error", err)
-		}
+		inputs = append(inputs, inp)
 		return true
 	})
-	common.GlobalMu.RUnlock()
+
+	// Stop inputs without holding locks
+	for _, inp := range inputs {
+		logger.Debug("Stopping input instance", "name", inp.Id)
+		if err := inp.Stop(); err != nil {
+			logger.Warn("Failed to stop input instance", "name", inp.Id, "error", err)
+		}
+	}
 
 	// Stop and release all output instances
-	common.GlobalMu.RLock()
+	// Collect outputs first to avoid deadlock
+	var outputs []*output.Output
 	project.ForEachOutput(func(outputName string, out *output.Output) bool {
-		logger.Debug("Stopping output instance", "name", outputName)
-		if err := out.Stop(); err != nil {
-			logger.Warn("Failed to stop output instance", "name", outputName, "error", err)
-		}
+		outputs = append(outputs, out)
 		return true
 	})
-	common.GlobalMu.RUnlock()
+
+	// Stop outputs without holding locks
+	for _, out := range outputs {
+		logger.Debug("Stopping output instance", "name", out.Id)
+		if err := out.Stop(); err != nil {
+			logger.Warn("Failed to stop output instance", "name", out.Id, "error", err)
+		}
+	}
 
 	// Stop and release all ruleset instances
-	common.GlobalMu.RLock()
+	// Collect rulesets first to avoid deadlock
+	var rulesets []*rules_engine.Ruleset
 	project.ForEachRuleset(func(rulesetName string, rs *rules_engine.Ruleset) bool {
-		logger.Debug("Stopping ruleset instance", "name", rulesetName)
-		if err := rs.Stop(); err != nil {
-			logger.Warn("Failed to stop ruleset instance", "name", rulesetName, "error", err)
-		}
+		rulesets = append(rulesets, rs)
 		return true
 	})
-	common.GlobalMu.RUnlock()
+
+	// Stop rulesets without holding locks
+	for _, rs := range rulesets {
+		logger.Debug("Stopping ruleset instance", "name", rs.RulesetID)
+		if err := rs.Stop(); err != nil {
+			logger.Warn("Failed to stop ruleset instance", "name", rs.RulesetID, "error", err)
+		}
+	}
 
 	// Clear all component instances
 	common.GlobalMu.Lock()
@@ -1200,39 +1205,8 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 		return true
 	})
 
-	// Clear plugin instances (plugins are handled differently, but we clear the reference)
-	// Plugin cleanup is handled by the plugin system itself
-
 	// Clear global component config maps
-	if common.AllInputsRawConfig != nil {
-		for inputName := range common.AllInputsRawConfig {
-			delete(common.AllInputsRawConfig, inputName)
-		}
-	}
-
-	if common.AllOutputsRawConfig != nil {
-		for outputName := range common.AllOutputsRawConfig {
-			delete(common.AllOutputsRawConfig, outputName)
-		}
-	}
-
-	if common.AllRulesetsRawConfig != nil {
-		for rulesetName := range common.AllRulesetsRawConfig {
-			delete(common.AllRulesetsRawConfig, rulesetName)
-		}
-	}
-
-	if common.AllProjectRawConfig != nil {
-		for projectName := range common.AllProjectRawConfig {
-			delete(common.AllProjectRawConfig, projectName)
-		}
-	}
-
-	if common.AllPluginsRawConfig != nil {
-		for pluginName := range common.AllPluginsRawConfig {
-			delete(common.AllPluginsRawConfig, pluginName)
-		}
-	}
+	common.ClearAllRawConfigsForAllTypes()
 
 	logger.Info("Successfully cleared and released all local components and projects")
 	return nil

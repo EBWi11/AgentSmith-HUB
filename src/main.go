@@ -144,6 +144,14 @@ func main() {
 	// Init monitors
 	common.InitSystemMonitor(ip)
 
+	// Initialize component monitor with 30 second interval
+	common.GlobalComponentMonitor = common.NewComponentMonitor(30 * time.Second)
+	if err := common.GlobalComponentMonitor.Start(); err != nil {
+		logger.Error("Failed to start component monitor", "error", err)
+	} else {
+		logger.Info("Component monitor started successfully")
+	}
+
 	if *isLeader {
 		common.InitClusterSystemManager()
 		cluster.GlobalClusterManager.Start()
@@ -151,10 +159,6 @@ func main() {
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port
 	} else {
-		// Follower services
-		// Note: Error log uploader removed - all nodes write directly to Redis in real-time
-		// Note: Operation history uploader removed - all nodes write directly to Redis
-
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
 
@@ -185,21 +189,38 @@ func main() {
 
 			// Stop all running projects (Stop method handles data drain internally)
 			logger.Info("Stopping all running projects")
+			// Collect running projects first to avoid deadlock
+			var runningProjects []*project.Project
 			project.ForEachProject(func(id string, proj *project.Project) bool {
 				if proj.Status == common.StatusRunning {
-					logger.Info("Stopping project during shutdown", "project", proj.Id)
-					err := proj.Stop()
-					if err != nil {
-						logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
-					} else {
-						logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
-					}
+					runningProjects = append(runningProjects, proj)
 				}
 				return true
 			})
 
+			// Stop projects without holding locks
+			for _, proj := range runningProjects {
+				logger.Info("Stopping project during shutdown", "project", proj.Id)
+				err := proj.Stop()
+				if err != nil {
+					logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
+				} else {
+					logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
+				}
+			}
+
 			if cluster.GlobalClusterManager != nil {
 				cluster.GlobalClusterManager.Stop()
+			}
+
+			// Stop component monitor
+			if common.GlobalComponentMonitor != nil {
+				logger.Info("Stopping component monitor")
+				if err := common.GlobalComponentMonitor.Stop(); err != nil {
+					logger.Error("Failed to stop component monitor", "error", err)
+				} else {
+					logger.Info("Component monitor stopped successfully")
+				}
 			}
 
 			common.StopClusterSystemManager()
@@ -251,16 +272,14 @@ func loadLocalComponents() {
 	// plugins
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go") {
 		name := common.GetFileNameWithoutExt(f)
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.AllPluginsRawConfig[name] = string(content)
+			common.SetRawConfig("plugin", name, string(content))
 		}
 		err = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			logger.Error("Failed to load plugin", "file", f, "error", err)
 		}
-		common.GlobalMu.Unlock()
 	}
 	// Load plugin .new files
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go.new") {
@@ -277,82 +296,70 @@ func loadLocalComponents() {
 	// inputs
 	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.AllInputsRawConfig[id] = string(content)
+			common.SetRawConfig("input", id, string(content))
 		}
 		if inp, err := input.NewInput(f, "", id); err != nil {
 			logger.Error("Failed to load new input", "file", f, "error", err)
 		} else {
 			project.SetInput(id, inp)
 		}
-		common.GlobalMu.Unlock()
 	}
 	// Load input .new files
 	for _, f := range traverseComponents(path.Join(root, "input"), ".yaml.new") {
-		common.GlobalMu.Lock()
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new input", "file", f, "error", err)
 		} else {
 			project.SetInputNew(id, string(content))
 		}
-		common.GlobalMu.Unlock()
 	}
 
 	// outputs
 	for _, f := range traverseComponents(path.Join(root, "output"), ".yaml") {
 		id := common.GetFileNameWithoutExt(f)
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.AllOutputsRawConfig[id] = string(content)
+			common.SetRawConfig("output", id, string(content))
 		}
 		if out, err := output.NewOutput(f, "", id); err != nil {
 			logger.Error("Failed to load output", "file", f, "error", err)
 		} else {
 			project.SetOutput(id, out)
 		}
-		common.GlobalMu.Unlock()
 	}
 	// Load output .new files
 	for _, f := range traverseComponents(path.Join(root, "output"), ".yaml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new output", "file", f, "error", err)
 		} else {
 			project.SetOutputNew(id, string(content))
 		}
-		common.GlobalMu.Unlock()
 	}
 
 	// rulesets
 	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml") {
 		id := common.GetFileNameWithoutExt(f)
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			common.AllRulesetsRawConfig[id] = string(content)
+			common.SetRawConfig("ruleset", id, string(content))
 		}
 		if rs, err := rules_engine.NewRuleset(f, "", id); err != nil {
 			logger.Error("Failed to load ruleset", "file", f, "error", err)
 		} else {
 			project.SetRuleset(id, rs)
 		}
-		common.GlobalMu.Unlock()
 	}
 	// Load ruleset .new files
 	for _, f := range traverseComponents(path.Join(root, "ruleset"), ".xml.new") {
 		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".xml")
-		common.GlobalMu.Lock()
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new ruleset", "file", f, "error", err)
 		} else {
 			project.SetRulesetNew(id, string(content))
 		}
-		common.GlobalMu.Unlock()
 	}
 
 	logger.Info("Leader finished loading local components")
@@ -365,12 +372,7 @@ func loadLocalProjects() {
 		// Read project content for global config map (NewProject will also update it, but we do it here for consistency)
 		if content, err := os.ReadFile(f); err == nil {
 			// Update global config map
-			if common.AllProjectRawConfig == nil {
-				common.AllProjectRawConfig = make(map[string]string)
-			}
-			common.GlobalMu.Lock()
-			common.AllProjectRawConfig[id] = string(content)
-			common.GlobalMu.Unlock()
+			common.SetRawConfig("project", id, string(content))
 		}
 
 		if p, err := project.NewProject(f, "", id, false); err == nil {
@@ -380,7 +382,6 @@ func loadLocalProjects() {
 			if userWantsRunning, err := common.GetProjectUserIntention(id); err == nil && userWantsRunning {
 				// User wants project to be running, start it
 				logger.Info("Restoring project to running state based on user intention", "id", p.Id)
-				common.GlobalMu.Lock()
 				if err := p.Start(); err != nil {
 					logger.Error("Failed to start project during restore", "project", p.Id, "error", err)
 					// Record failed restore operation
@@ -396,7 +397,6 @@ func loadLocalProjects() {
 						"node_id":      common.Config.LocalIP,
 					})
 				}
-				common.GlobalMu.Unlock()
 			} else {
 				p.Status = common.StatusStopped
 				logger.Info("Project not intended to be running by user, defaulting to stopped", "id", p.Id)
@@ -412,9 +412,7 @@ func loadLocalProjects() {
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to read new project", "project", id, "error", err)
 		} else {
-			common.GlobalMu.Lock()
 			project.SetProjectNew(id, string(content))
-			common.GlobalMu.Unlock()
 		}
 	}
 	logger.Info("Finished loading and start local projects", "total_projects", project.GetProjectsCount())

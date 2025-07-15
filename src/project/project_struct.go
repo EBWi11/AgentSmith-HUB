@@ -3,6 +3,7 @@ package project
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
 	"sync"
@@ -52,8 +53,14 @@ func AddRefCount(id string) {
 
 func ReduceRefCount(id string) {
 	common.GlobalMu.Lock()
-	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] - 1
-	common.GlobalMu.Unlock()
+	defer common.GlobalMu.Unlock()
+
+	if GlobalProject.RefCount[id] > 0 {
+		GlobalProject.RefCount[id] = GlobalProject.RefCount[id] - 1
+	} else {
+		// Log warning for debugging
+		logger.Warn("Attempting to reduce reference count when count is already 0", "id", id)
+	}
 }
 
 // ProjectConfig holds the configuration for a project
@@ -394,34 +401,6 @@ func ValidateComponent(componentType, componentID string) (exists bool, tempExis
 	return exists, tempExists
 }
 
-// Batch operations for better performance
-func GetAllComponentsForProject(projectID string) (inputs map[string]*input.Input, outputs map[string]*output.Output, rulesets map[string]*rules_engine.Ruleset, exists bool) {
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	proj, exists := GlobalProject.Projects[projectID]
-	if !exists {
-		return nil, nil, nil, false
-	}
-
-	// Make copies to avoid external modification
-	inputs = make(map[string]*input.Input)
-	outputs = make(map[string]*output.Output)
-	rulesets = make(map[string]*rules_engine.Ruleset)
-
-	for id, inp := range proj.Inputs {
-		inputs[id] = inp
-	}
-	for id, out := range proj.Outputs {
-		outputs[id] = out
-	}
-	for id, rs := range proj.Rulesets {
-		rulesets[id] = rs
-	}
-
-	return inputs, outputs, rulesets, true
-}
-
 // Safe iteration functions
 func ForEachProject(fn func(id string, project *Project) bool) {
 	common.GlobalMu.RLock()
@@ -472,8 +451,8 @@ func SafeDeleteInputDownstream(inputID, downstreamID string) {
 	common.GlobalMu.Lock()
 	defer common.GlobalMu.Unlock()
 
-	if input, exists := GlobalProject.Inputs[inputID]; exists {
-		delete(input.DownStream, downstreamID)
+	if i, exists := GlobalProject.Inputs[inputID]; exists {
+		delete(i.DownStream, downstreamID)
 	}
 }
 

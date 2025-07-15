@@ -118,9 +118,9 @@
                 <!-- Short vertical line for empty state -->
                 <div class="absolute left-5 top-0 h-3 w-px bg-gray-300"></div>
               </div>
-              <!-- Special handling for plugins with built-in submenu -->
-              <template v-else-if="type === 'plugins'">
-                <div v-if="getOrganizedPlugins().builtinPlugins.length > 0">
+                              <!-- Special handling for plugins with built-in submenu -->
+                <template v-else-if="type === 'plugins'">
+                  <div v-if="getOrganizedPlugins().builtinPlugins.length > 0">
                   <!-- Built-in plugins submenu -->
                   <div class="relative">
                     <div class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
@@ -235,9 +235,9 @@
                 </div>
                 
                 <!-- Custom plugins -->
-                <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id"
+                <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id || item.name"
                      class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
-                     :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
+                     :class="{ 'bg-blue-50': selected && (selected.id === item.id || selected.id === item.name) && selected.type === type }"
                      @click="handleItemClick(type, item)">
                   <!-- Tree lines for custom plugins -->
                   <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < getOrganizedPlugins().customPlugins.length - 1"></div>
@@ -247,7 +247,7 @@
                                      <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
                      <div class="flex-1 min-w-0">
                        <div class="flex items-center">
-                         <span class="text-sm truncate">{{ item.id }}</span>
+                         <span class="text-sm truncate">{{ item.id || item.name }}</span>
                          <!-- Search match indicators -->
                          <div v-if="item.searchMatch" class="ml-1 flex items-center space-x-1">
                            <span v-if="item.searchMatch.nameMatch" 
@@ -1987,7 +1987,7 @@ function getOrganizedPlugins() {
   }
 }
 
-// Determine if a plugin should be displayed as Plugin Node (A badge) based on its usage
+// Determine if a plugin should be displayed as Plugin Node (P badge) based on its usage
 function isPluginNodeType(item) {
   // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
   if (item.id && item.id.startsWith('pushMsgTo')) {

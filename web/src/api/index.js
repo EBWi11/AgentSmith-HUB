@@ -990,6 +990,16 @@ export const hubApi = {
     }
   },
 
+  // Get cluster project states (leader only)
+  async getClusterProjectStates() {
+    try {
+      const response = await api.get('/cluster-project-states');
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'Failed to get cluster project states');
+    }
+  },
+
   // Get project components (inputs, outputs, rulesets)
   async getProjectComponents(id) {
     try {
@@ -1329,7 +1339,7 @@ fetchComponentsByType = async (type, endpoint) => {
         apiEndpoint = '/rulesets';
         break;
       case 'plugins':
-        apiEndpoint = '/plugins';
+        apiEndpoint = '/plugins?detailed=true';
         break;
       case 'projects':
         apiEndpoint = '/projects';

@@ -60,7 +60,9 @@ type AliyunSLSInputConfig struct {
 // Input represents an input component that consumes data from external sources
 type Input struct {
 	Status              common.Status
-	Id                  string `json:"Id"`
+	StatusChangedAt     *time.Time `json:"status_changed_at,omitempty"`
+	Err                 error      `json:"-"`
+	Id                  string     `json:"Id"`
 	Path                string
 	ProjectNodeSequence string
 	Type                InputType
@@ -192,15 +194,70 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 	return in, nil
 }
 
+// SetStatus sets the input status and error information
+func (in *Input) SetStatus(status common.Status, err error) {
+	if err != nil {
+		in.Err = err
+		logger.Error("Input status changed with error", "input", in.Id, "status", status, "error", err)
+	}
+	in.Status = status
+	t := time.Now()
+	in.StatusChangedAt = &t
+}
+
+// cleanup performs cleanup when normal stop fails or panic occurs
+func (in *Input) cleanup() {
+	// Close stop channel if it exists and not already closed
+	if in.stopChan != nil {
+		select {
+		case <-in.stopChan:
+			// Already closed
+		default:
+			close(in.stopChan)
+		}
+		in.stopChan = nil
+	}
+
+	// Stop consumers
+	if in.kafkaConsumer != nil {
+		in.kafkaConsumer.Close()
+		in.kafkaConsumer = nil
+	}
+
+	if in.slsConsumer != nil {
+		if err := in.slsConsumer.Close(); err != nil {
+			logger.Warn("Failed to close sls consumer during cleanup", "input", in.Id, "error", err)
+		}
+		in.slsConsumer = nil
+	}
+
+	// Reset atomic counter
+	atomic.StoreUint64(&in.consumeTotal, 0)
+	atomic.StoreUint64(&in.lastReportedTotal, 0)
+}
+
 // Start initializes and starts the input component based on its type
 // Returns an error if the component is already running or if initialization fails
 func (in *Input) Start() error {
-	if in.Status != common.StatusStopped {
-		return fmt.Errorf("input %s is not stopped", in.Id)
+	// Add panic recovery for critical state changes
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic during input start", "input", in.Id, "panic", r)
+			// Ensure cleanup and proper status setting on panic
+			in.cleanup()
+			in.SetStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
+		}
+	}()
+
+	// Allow restart from stopped state or from error state
+	if in.Status != common.StatusStopped && in.Status != common.StatusError {
+		return fmt.Errorf("input %s is not stopped (status: %s)", in.Id, in.Status)
 	}
 
+	// Clear error state when restarting
+	in.Err = nil
 	in.ResetConsumeTotal()
-	in.Status = common.StatusStarting
+	in.SetStatus(common.StatusStarting, nil)
 
 	// Initialize stop channel
 	in.stopChan = make(chan struct{})
@@ -208,7 +265,7 @@ func (in *Input) Start() error {
 	// Perform connectivity check first before starting
 	connectivityResult := in.CheckConnectivity()
 	if status, ok := connectivityResult["status"].(string); ok && status == "error" {
-		in.Status = common.StatusStopped
+		in.SetStatus(common.StatusError, fmt.Errorf("input connectivity check failed: %v", connectivityResult["message"]))
 		return fmt.Errorf("input connectivity check failed: %v", connectivityResult["message"])
 	}
 	logger.Info("Input connectivity verified", "input", in.Id, "type", in.Type)
@@ -216,11 +273,11 @@ func (in *Input) Start() error {
 	switch in.Type {
 	case InputTypeKafka, InputTypeKafkaAzure, InputTypeKafkaAWS:
 		if in.kafkaConsumer != nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("kafka consumer already running for input %s", in.Id))
 			return fmt.Errorf("kafka consumer already running for input %s", in.Id)
 		}
 		if in.kafkaCfg == nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("kafka configuration missing for input %s", in.Id))
 			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
 		msgChan := make(chan map[string]interface{}, 1024)
@@ -234,7 +291,7 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("failed to create kafka consumer for input %s: %v", in.Id, err))
 			return fmt.Errorf("failed to create kafka consumer for input %s: %v", in.Id, err)
 		}
 		in.kafkaConsumer = cons
@@ -246,6 +303,8 @@ func (in *Input) Start() error {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("Panic in kafka consumer goroutine", "input", in.Id, "panic", r)
+					// Set input status to error on panic
+					in.SetStatus(common.StatusError, fmt.Errorf("kafka consumer goroutine panic: %v", r))
 				}
 			}()
 
@@ -284,11 +343,11 @@ func (in *Input) Start() error {
 
 	case InputTypeAliyunSLS:
 		if in.slsConsumer != nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("sls consumer already running for input %s", in.Id))
 			return fmt.Errorf("sls consumer already running for input %s", in.Id)
 		}
 		if in.aliyunSLSCfg == nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("sls configuration missing for input %s", in.Id))
 			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
@@ -307,7 +366,7 @@ func (in *Input) Start() error {
 			msgChan,
 		)
 		if err != nil {
-			in.Status = common.StatusStopped
+			in.SetStatus(common.StatusError, fmt.Errorf("failed to create sls consumer for input %s: %v", in.Id, err))
 			return fmt.Errorf("failed to create sls consumer for input %s: %v", in.Id, err)
 		}
 		in.slsConsumer = cons
@@ -321,6 +380,8 @@ func (in *Input) Start() error {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("Panic in sls consumer goroutine", "input", in.Id, "panic", r)
+					// Set input status to error on panic
+					in.SetStatus(common.StatusError, fmt.Errorf("sls consumer goroutine panic: %v", r))
 				}
 			}()
 
@@ -357,11 +418,11 @@ func (in *Input) Start() error {
 		}()
 
 	default:
-		in.Status = common.StatusStopped
+		in.SetStatus(common.StatusError, fmt.Errorf("unsupported input type %s", in.Type))
 		return fmt.Errorf("unsupported input type %s", in.Type)
 	}
 
-	in.Status = common.StatusRunning
+	in.SetStatus(common.StatusRunning, nil)
 	return nil
 }
 
@@ -421,30 +482,37 @@ func (in *Input) StopForTesting() error {
 
 // Stop stops the input component and its consumers
 func (in *Input) Stop() error {
-	if in.Status == common.StatusRunning {
+	// Add panic recovery for critical state changes
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic during input stop", "input", in.Id, "panic", r)
+			// Ensure cleanup and proper status setting on panic
+			in.cleanup()
+			in.SetStatus(common.StatusError, fmt.Errorf("panic during stop: %v", r))
+		}
+	}()
+
+	if in.Status != common.StatusRunning {
 		return fmt.Errorf("input %s is not running", in.Id)
 	}
-	in.Status = common.StatusStopping
+	in.SetStatus(common.StatusStopping, nil)
 
-	// Signal all goroutines to stop
+	// Try graceful stop first - signal goroutines to stop
 	if in.stopChan != nil {
 		close(in.stopChan)
 	}
 
-	// First, stop the consumers to prevent new messages
+	// Stop consumers to prevent new messages
 	if in.kafkaConsumer != nil {
 		in.kafkaConsumer.Close()
-		in.kafkaConsumer = nil
 	}
-
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
 			logger.Warn("Failed to close sls consumer", "input", in.Id, "error", err)
 		}
-		in.slsConsumer = nil
 	}
 
-	// Wait for all goroutines to finish with timeout
+	// Wait for goroutines to finish with timeout
 	waitDone := make(chan struct{})
 	go func() {
 		in.wg.Wait()
@@ -454,19 +522,14 @@ func (in *Input) Stop() error {
 	select {
 	case <-waitDone:
 		logger.Info("Input stopped gracefully", "id", in.Id)
-	case <-time.After(10 * time.Second): // Reduced timeout for faster shutdown
-		logger.Warn("Input stop timeout, some goroutines may still be running", "id", in.Id)
+	case <-time.After(10 * time.Second):
+		logger.Warn("Input stop timeout, forcing cleanup", "id", in.Id)
 	}
 
-	// Reset stop channel for potential restart
-	in.stopChan = nil
+	// Use cleanup to ensure all resources are properly released
+	in.cleanup()
 
-	// Reset atomic counter for restart
-	previousTotal := atomic.LoadUint64(&in.consumeTotal)
-	atomic.StoreUint64(&in.consumeTotal, 0)
-	logger.Debug("Reset atomic counter for input component", "input", in.Id, "previous_total", previousTotal)
-
-	in.Status = common.StatusStopped
+	in.SetStatus(common.StatusStopped, nil)
 	return nil
 }
 
@@ -694,6 +757,12 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 func NewFromExisting(existing *Input, newProjectNodeSequence string) (*Input, error) {
 	if existing == nil {
 		return nil, fmt.Errorf("existing input is nil")
+	}
+
+	// Verify the existing configuration before creating new instance
+	err := Verify(existing.Path, existing.Config.RawConfig)
+	if err != nil {
+		return nil, fmt.Errorf("input verify error for existing config: %s %s", existing.Id, err.Error())
 	}
 
 	// Create a new Input instance with the same configuration but different ProjectNodeSequence

@@ -214,15 +214,15 @@ type CtrlProjectRequest struct {
 }
 
 func getProjects(c echo.Context) error {
-	p := project.GlobalProject
 	result := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
 
-	for _, proj := range p.Projects {
+	// Use safe accessor to iterate over projects
+	project.ForEachProject(func(projId string, proj *project.Project) bool {
 		// Check if there is a temporary file
-		tempRaw, hasTemp := p.ProjectsNew[proj.Id]
+		tempRaw, hasTemp := project.GetProjectNew(proj.Id)
 
 		// Get component lists
 		inputList := make([]string, 0, len(proj.Inputs))
@@ -277,10 +277,12 @@ func getProjects(c echo.Context) error {
 
 		result = append(result, projectData)
 		processedIDs[proj.Id] = true
-	}
+		return true
+	})
 
 	// Add components that only exist in temporary files
-	for id, tempRaw := range p.ProjectsNew {
+	allProjectsNew := project.GetAllProjectsNew()
+	for id, tempRaw := range allProjectsNew {
 		if !processedIDs[id] {
 			projectData := map[string]interface{}{
 				"id":      id,
@@ -349,7 +351,6 @@ func getProject(c echo.Context) error {
 }
 
 func getRulesets(c echo.Context) error {
-	p := project.GlobalProject
 	rulesets := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed IDs
@@ -358,11 +359,12 @@ func getRulesets(c echo.Context) error {
 	// Helper function to find which projects use a ruleset
 	findProjectsUsingRuleset := func(rulesetId string) []string {
 		projects := make([]string, 0)
-		for _, proj := range p.Projects {
+		project.ForEachProject(func(projId string, proj *project.Project) bool {
 			if _, exists := proj.Rulesets[rulesetId]; exists {
 				projects = append(projects, proj.Id)
 			}
-		}
+			return true
+		})
 		return projects
 	}
 
@@ -399,9 +401,10 @@ func getRulesets(c echo.Context) error {
 		return "detection" // default
 	}
 
-	for _, r := range p.Rulesets {
+	// Use safe accessor to iterate over rulesets
+	project.ForEachRuleset(func(rulesetId string, r *rules_engine.Ruleset) bool {
 		// Check if there is a temporary file
-		tempRaw, hasTemp := p.RulesetsNew[r.RulesetID]
+		tempRaw, hasTemp := project.GetRulesetNew(r.RulesetID)
 
 		// Get raw configuration (prioritize temp if exists)
 		rawConfig := r.RawConfig
@@ -433,10 +436,12 @@ func getRulesets(c echo.Context) error {
 
 		rulesets = append(rulesets, rulesetData)
 		processedIDs[r.RulesetID] = true
-	}
+		return true
+	})
 
 	// Add components that only exist in temporary files
-	for id, tempRaw := range p.RulesetsNew {
+	allRulesetsNew := project.GetAllRulesetsNew()
+	for id, tempRaw := range allRulesetsNew {
 		if !processedIDs[id] {
 			// Count rules and extract type from temp content
 			ruleCount := countRulesInXML(tempRaw)
@@ -498,7 +503,6 @@ func getRuleset(c echo.Context) error {
 }
 
 func getInputs(c echo.Context) error {
-	p := project.GlobalProject
 	inputs := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed IDs
@@ -507,11 +511,12 @@ func getInputs(c echo.Context) error {
 	// Helper function to find which projects use an input
 	findProjectsUsingInput := func(inputId string) []string {
 		projects := make([]string, 0)
-		for _, proj := range p.Projects {
+		project.ForEachProject(func(projId string, proj *project.Project) bool {
 			if _, exists := proj.Inputs[inputId]; exists {
 				projects = append(projects, proj.Id)
 			}
-		}
+			return true
+		})
 		return projects
 	}
 
@@ -533,9 +538,10 @@ func getInputs(c echo.Context) error {
 		return "unknown"
 	}
 
-	for _, in := range p.Inputs {
+	// Use safe accessor to iterate over inputs
+	project.ForEachInput(func(inputId string, in *input.Input) bool {
 		// Check if there is a temporary file
-		tempRaw, hasTemp := p.InputsNew[in.Id]
+		tempRaw, hasTemp := project.GetInputNew(in.Id)
 
 		// Get raw configuration (prioritize temp if exists)
 		rawConfig := in.Config.RawConfig
@@ -565,10 +571,12 @@ func getInputs(c echo.Context) error {
 
 		inputs = append(inputs, inputData)
 		processedIDs[in.Id] = true
-	}
+		return true
+	})
 
 	// Add components that only exist in temporary files
-	for id, tempRaw := range p.InputsNew {
+	allInputsNew := project.GetAllInputsNew()
+	for id, tempRaw := range allInputsNew {
 		if !processedIDs[id] {
 			// Extract type from temp content
 			inputType := extractInputType(tempRaw)
@@ -668,8 +676,7 @@ func getPlugins(c echo.Context) error {
 		}
 
 		rulesets := make([]string, 0)
-		p := project.GlobalProject
-		for _, r := range p.Rulesets {
+		project.ForEachRuleset(func(rulesetId string, r *rules_engine.Ruleset) bool {
 			// Check if plugin is used in any rule within this ruleset
 			for _, rule := range r.Rules {
 				// Check in checklist nodes
@@ -677,7 +684,7 @@ func getPlugins(c echo.Context) error {
 					for _, node := range checklist.CheckNodes {
 						if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
 							rulesets = append(rulesets, r.RulesetID)
-							goto nextRuleset
+							return true // Continue to next ruleset
 						}
 					}
 				}
@@ -685,26 +692,26 @@ func getPlugins(c echo.Context) error {
 				for _, node := range rule.CheckMap {
 					if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
-						goto nextRuleset
+						return true // Continue to next ruleset
 					}
 				}
 				// Check in append elements
 				for _, appendElem := range rule.AppendsMap {
 					if appendElem.Type == "PLUGIN" && strings.Contains(appendElem.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
-						goto nextRuleset
+						return true // Continue to next ruleset
 					}
 				}
 				// Check in plugin elements
 				for _, pluginElem := range rule.PluginMap {
 					if strings.Contains(pluginElem.Value, pluginName+"(") {
 						rulesets = append(rulesets, r.RulesetID)
-						goto nextRuleset
+						return true // Continue to next ruleset
 					}
 				}
 			}
-		nextRuleset:
-		}
+			return true // Continue to next ruleset
+		})
 		return rulesets
 	}
 
@@ -916,7 +923,6 @@ func getPlugin(c echo.Context) error {
 }
 
 func getOutputs(c echo.Context) error {
-	p := project.GlobalProject
 	outputs := make([]map[string]interface{}, 0)
 
 	// Create a map to track processed IDs
@@ -925,17 +931,19 @@ func getOutputs(c echo.Context) error {
 	// Helper function to find which projects use an output
 	findProjectsUsingOutput := func(outputId string) []string {
 		projects := make([]string, 0)
-		for _, proj := range p.Projects {
+		project.ForEachProject(func(projId string, proj *project.Project) bool {
 			if _, exists := proj.Outputs[outputId]; exists {
 				projects = append(projects, proj.Id)
 			}
-		}
+			return true
+		})
 		return projects
 	}
 
-	for _, out := range p.Outputs {
+	// Use safe accessor to iterate over outputs
+	project.ForEachOutput(func(outputId string, out *output.Output) bool {
 		// Check if there is a temporary file
-		tempRaw, hasTemp := p.OutputsNew[out.Id]
+		tempRaw, hasTemp := project.GetOutputNew(out.Id)
 
 		// Get raw configuration (prioritize temp if exists)
 		rawConfig := out.Config.RawConfig
@@ -971,10 +979,12 @@ func getOutputs(c echo.Context) error {
 
 		outputs = append(outputs, outputData)
 		processedIDs[out.Id] = true
-	}
+		return true
+	})
 
 	// Add components that only exist in temporary files
-	for id, rawConfig := range p.OutputsNew {
+	allOutputsNew := project.GetAllOutputsNew()
+	for id, rawConfig := range allOutputsNew {
 		if !processedIDs[id] {
 			// Parse the temporary file to get type information
 			outputType := "unknown"
@@ -1176,29 +1186,23 @@ func deleteComponent(componentType string, c echo.Context) error {
 	// Determine file paths and extensions
 	var suffix string
 	var dir string
-	var globalMapToUpdate map[string]string
 
 	switch componentType {
 	case "ruleset":
 		suffix = ".xml"
 		dir = "ruleset"
-		globalMapToUpdate = common.AllRulesetsRawConfig
 	case "input":
 		suffix = ".yaml"
 		dir = "input"
-		globalMapToUpdate = common.AllInputsRawConfig
 	case "output":
 		suffix = ".yaml"
 		dir = "output"
-		globalMapToUpdate = common.AllOutputsRawConfig
 	case "project":
 		suffix = ".yaml"
 		dir = "project"
-		globalMapToUpdate = common.AllProjectRawConfig
 	case "plugin":
 		suffix = ".go"
 		dir = "plugin"
-		globalMapToUpdate = common.AllPluginsRawConfig
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid component type",
@@ -1222,12 +1226,11 @@ func deleteComponent(componentType string, c echo.Context) error {
 	}
 
 	// Critical section: Check usage and perform deletion atomically
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
+	// First check if component exists and get project reference without holding lock
 	var componentExists bool
+	var projectToStop *project.Project
 
-	// Check if component exists in global mapping and is in use
+	common.GlobalMu.RLock()
 	switch componentType {
 	case "ruleset":
 		_, componentExists = project.GetRuleset(id)
@@ -1236,49 +1239,59 @@ func deleteComponent(componentType string, c echo.Context) error {
 	case "output":
 		_, componentExists = project.GetOutput(id)
 	case "project":
-		_, componentExists = project.GetProject(id)
+		if proj, exists := project.GetProject(id); exists {
+			componentExists = true
+			if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
+				projectToStop = proj
+			}
+		}
 	case "plugin":
 		_, componentExists = plugin.Plugins[id]
 	}
+	common.GlobalMu.RUnlock()
+
+	// Stop project outside of lock to prevent deadlock
+	if projectToStop != nil {
+		logger.Info("Stopping running project before deletion", "project_id", id)
+		// Note: Project.Stop() already includes final statistics collection
+		if err := projectToStop.Stop(); err != nil {
+			// Record failed deletion operation
+			RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("Failed to stop project before deletion: %v", err), []string{})
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("Failed to stop project before deletion: %v", err),
+			})
+		}
+	}
+
+	// Now acquire lock for deletion operations
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
 
 	if componentExists {
-		// For projects, check if it's running and stop it first
-		if componentType == "project" {
-			if proj, exists := project.GetProject(id); exists {
-				if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
-					logger.Info("Stopping running project before deletion", "project_id", id)
-					// Note: Project.Stop() already includes final statistics collection
-					if err := proj.Stop(); err != nil {
-						// Record failed deletion operation
-						RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("Failed to stop project before deletion: %v", err), []string{})
-						return c.JSON(http.StatusConflict, map[string]string{
-							"error": fmt.Sprintf("Failed to stop project before deletion: %v", err),
-						})
-					}
+		// For projects, wait for project to fully stop
+		if componentType == "project" && projectToStop != nil {
+			// Wait for project to fully stop
+			timeout := time.After(30 * time.Second)
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
 
-					// Wait for project to fully stop
-					timeout := time.After(30 * time.Second)
-					ticker := time.NewTicker(500 * time.Millisecond)
-					defer ticker.Stop()
-
-					for {
-						select {
-						case <-timeout:
-							// Record failed deletion operation
-							RecordComponentDelete(componentType, id, "failed", "Timeout waiting for project to stop", []string{})
-							return c.JSON(http.StatusConflict, map[string]string{
-								"error": "Timeout waiting for project to stop",
-							})
-						case <-ticker.C:
-							if proj.Status == common.StatusStopped {
-								goto projectStopped
-							}
-						}
+			for {
+				select {
+				case <-timeout:
+					// Record failed deletion operation
+					RecordComponentDelete(componentType, id, "failed", "Timeout waiting for project to stop", []string{})
+					return c.JSON(http.StatusConflict, map[string]string{
+						"error": "Timeout waiting for project to stop",
+					})
+				case <-ticker.C:
+					// Check project status without additional locking since we already hold the lock
+					if proj, exists := project.GetProject(id); exists && proj.Status == common.StatusStopped {
+						goto projectStopped
 					}
-				projectStopped:
-					logger.Info("Project stopped successfully before deletion", "project_id", id)
 				}
 			}
+		projectStopped:
+			logger.Info("Project stopped successfully before deletion", "project_id", id)
 		} else {
 			// For other components, check if used by any project
 			projects := project.GetAllProjects()
@@ -1337,7 +1350,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 	}
 
 	// Delete from global config maps
-	delete(globalMapToUpdate, id)
+	common.DeleteRawConfig(componentType, id)
 
 	// If it's leader node, delete files and notify followers
 	if common.IsCurrentNodeLeader() {

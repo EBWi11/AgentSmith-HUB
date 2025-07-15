@@ -23,14 +23,28 @@ var ruleCachePool = sync.Pool{
 
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
-	if r.Status != common.StatusStopped {
+	// Add panic recovery for critical state changes
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			logger.Error("Panic during ruleset start", "ruleset", r.RulesetID, "panic", panicErr)
+			// Ensure cleanup and proper status setting on panic
+			r.cleanup()
+			r.SetStatus(common.StatusError, fmt.Errorf("panic during start: %v", panicErr))
+		}
+	}()
+
+	// Allow restart from stopped state or from error state
+	if r.Status != common.StatusStopped && r.Status != common.StatusError {
 		return fmt.Errorf("cannot start ruleset engine, current status: %s", r.Status)
 	}
-	r.Status = common.StatusStarting
+
+	// Clear error state when restarting
+	r.Err = nil
+	r.SetStatus(common.StatusStarting, nil)
 
 	r.ResetProcessTotal()
 	if r.stopChan != nil {
-		r.Status = common.StatusStopped
+		r.SetStatus(common.StatusError, fmt.Errorf("already started: %v", r.RulesetID))
 		return fmt.Errorf("already started: %v", r.RulesetID)
 	}
 	r.stopChan = make(chan struct{})
@@ -39,7 +53,7 @@ func (r *Ruleset) Start() error {
 	minPoolSize := getMinPoolSize()
 	r.antsPool, err = ants.NewPool(minPoolSize)
 	if err != nil {
-		r.Status = common.StatusStopped
+		r.SetStatus(common.StatusError, fmt.Errorf("failed to create ants pool: %v", err))
 		return fmt.Errorf("failed to create ants pool: %v", err)
 	}
 
@@ -91,6 +105,14 @@ func (r *Ruleset) Start() error {
 
 	for upID, upCh := range r.UpStream {
 		go func(id string, ch *chan map[string]interface{}) {
+			defer func() {
+				if panicErr := recover(); panicErr != nil {
+					logger.Error("Panic in ruleset processing goroutine", "ruleset", r.RulesetID, "upstream", id, "panic", panicErr)
+					// Set ruleset status to error on panic
+					r.SetStatus(common.StatusError, fmt.Errorf("processing goroutine panic: %v", panicErr))
+				}
+			}()
+
 			for {
 				select {
 				case <-r.stopChan:
@@ -122,20 +144,7 @@ func (r *Ruleset) Start() error {
 						results := r.EngineCheck(data)
 						// Send results to downstream channels with blocking writes to ensure no data loss
 						for _, res := range results {
-							for i, downCh := range r.DownStream {
-								// Check if downstream channel is getting full
-								chLen := len(*downCh)
-								chCap := cap(*downCh)
-								if chLen > chCap*3/4 {
-									logger.Debug("Downstream channel getting full, but waiting to ensure no data loss",
-										"ruleset", r.RulesetID,
-										"channel_index", i,
-										"channel_length", chLen,
-										"channel_capacity", chCap)
-								}
-
-								// Blocking write to ensure data is never lost
-								// If downstream is slow, we wait - data integrity is more important than speed
+							for _, downCh := range r.DownStream {
 								*downCh <- res
 							}
 						}
@@ -149,14 +158,6 @@ func (r *Ruleset) Start() error {
 							break
 						}
 
-						// If submission failed, log and retry after a short delay
-						logger.Debug("Thread pool submit failed, retrying",
-							"ruleset", r.RulesetID,
-							"error", err,
-							"pool_running", r.antsPool.Running(),
-							"pool_capacity", r.antsPool.Cap())
-
-						// Check if we should stop retrying (ruleset is shutting down)
 						select {
 						case <-r.stopChan:
 							// Ruleset is stopping, execute synchronously to not lose the message
@@ -174,16 +175,26 @@ func (r *Ruleset) Start() error {
 		}(upID, upCh)
 	}
 
-	r.Status = common.StatusRunning
+	r.SetStatus(common.StatusRunning, nil)
 	return nil
 }
 
 // Stop the ruleset engine, waiting for all upstream and downstream data to be processed before shutdown.
 func (r *Ruleset) Stop() error {
+	// Add panic recovery for critical state changes
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			logger.Error("Panic during ruleset stop", "ruleset", r.RulesetID, "panic", panicErr)
+			// Ensure cleanup and proper status setting on panic
+			r.cleanup()
+			r.SetStatus(common.StatusError, fmt.Errorf("panic during stop: %v", panicErr))
+		}
+	}()
+
 	if r.Status != common.StatusRunning {
 		return fmt.Errorf("cannot stop ruleset engine, current status: %s", r.Status)
 	}
-	r.Status = common.StatusStopping
+	r.SetStatus(common.StatusStopping, nil)
 	close(r.stopChan)
 
 	// Overall timeout for ruleset stop
@@ -256,42 +267,44 @@ func (r *Ruleset) Stop() error {
 		logger.Warn("Ruleset stop timeout exceeded, forcing shutdown", "ruleset", r.RulesetID)
 	}
 
-	// Wait for all tasks in thread pool to complete before releasing
+	// Wait for goroutines to finish with timeout
+	logger.Info("Waiting for ruleset goroutines to finish", "ruleset", r.RulesetID)
+	waitDone := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		logger.Info("Ruleset stopped gracefully", "ruleset", r.RulesetID)
+	case <-time.After(10 * time.Second):
+		logger.Warn("Timeout waiting for ruleset goroutines, forcing cleanup", "ruleset", r.RulesetID)
+	}
+
+	// Wait for thread pool to finish with timeout
 	if r.antsPool != nil {
 		logger.Info("Waiting for thread pool tasks to complete", "ruleset", r.RulesetID)
-
-		// Wait for all running tasks to complete with timeout
 		poolWaitTimeout := time.After(15 * time.Second)
+	poolWait:
 		for {
 			select {
 			case <-poolWaitTimeout:
-				goto releasePool
+				logger.Warn("Thread pool timeout, forcing cleanup", "ruleset", r.RulesetID)
+				break poolWait
 			default:
 				if r.antsPool.Running() == 0 {
-					goto releasePool
+					break poolWait
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
 		}
-
-	releasePool:
-		r.antsPool.Release()
-		r.antsPool = nil
-	}
-	r.stopChan = nil
-
-	// Wait for metric goroutine to finish
-	r.wg.Wait()
-
-	if r.Cache != nil {
-		r.Cache.Close()
 	}
 
-	if r.CacheForClassify != nil {
-		r.CacheForClassify.Close()
-	}
+	// Use cleanup to ensure all resources are properly released
+	r.cleanup()
 
-	r.Status = common.StatusStopped
+	r.SetStatus(common.StatusStopped, nil)
 	return nil
 }
 

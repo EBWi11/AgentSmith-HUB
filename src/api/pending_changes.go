@@ -532,9 +532,8 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 
 	// Convert projects to restart to slice
 	for projectID := range projectsToRestart {
-		common.GlobalMu.RLock()
+		// Use safe accessor without additional locking
 		if p, ok := project.GetProject(projectID); ok {
-			common.GlobalMu.RUnlock()
 			err := p.Restart()
 			if err != nil {
 				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
@@ -542,8 +541,6 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
 				logger.Error("Failed to publish project restart instructions", "affected_projects", result.ProjectsToRestart, "error", err)
 			}
-		} else {
-			common.GlobalMu.RUnlock()
 		}
 	}
 
@@ -1106,40 +1103,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 
 // updateGlobalComponentConfigMap updates the global component config map
 func updateGlobalComponentConfigMap(componentType, id, content string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	// Initialize maps if they are nil
-	if common.AllInputsRawConfig == nil {
-		common.AllInputsRawConfig = make(map[string]string)
-	}
-	if common.AllOutputsRawConfig == nil {
-		common.AllOutputsRawConfig = make(map[string]string)
-	}
-	if common.AllRulesetsRawConfig == nil {
-		common.AllRulesetsRawConfig = make(map[string]string)
-	}
-	if common.AllProjectRawConfig == nil {
-		common.AllProjectRawConfig = make(map[string]string)
-	}
-	if common.AllPluginsRawConfig == nil {
-		common.AllPluginsRawConfig = make(map[string]string)
-	}
-
-	// Update the appropriate global config map
-	switch componentType {
-	case "input":
-		common.AllInputsRawConfig[id] = content
-	case "output":
-		common.AllOutputsRawConfig[id] = content
-	case "ruleset":
-		common.AllRulesetsRawConfig[id] = content
-	case "project":
-		common.AllProjectRawConfig[id] = content
-	case "plugin":
-		common.AllPluginsRawConfig[id] = content
-	}
-
+	common.SetRawConfig(componentType, id, content)
 	logger.Debug("Updated global component config map", "type", componentType, "id", id)
 }
 
@@ -1478,9 +1442,8 @@ func ApplySingleChange(c echo.Context) error {
 		logger.Info("Restarting affected projects", "count", len(affectedProjects))
 
 		for _, id := range affectedProjects {
-			common.GlobalMu.RLock()
+			// Use safe accessor without additional locking
 			if p, ok := project.GetProject(id); ok {
-				common.GlobalMu.RUnlock()
 				err := p.Restart()
 				if err != nil {
 					logger.Error("Failed to restart affected project", "id", id, "error", err)
@@ -1488,8 +1451,6 @@ func ApplySingleChange(c echo.Context) error {
 						logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
 					}
 				}
-			} else {
-				common.GlobalMu.RUnlock()
 			}
 		}
 

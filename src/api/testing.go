@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
@@ -128,6 +127,16 @@ func testRuleset(c echo.Context) error {
 	inputCh := make(chan map[string]interface{}, 100)
 	outputCh := make(chan map[string]interface{}, 100)
 
+	// Ensure channels are properly cleaned up on function exit
+	defer func() {
+		// Close input channel safely (we control this channel)
+		select {
+		default:
+			close(inputCh)
+		}
+		// Note: outputCh will be closed by ruleset.Stop(), we don't close it here
+	}()
+
 	// Set up the ruleset
 	tempRuleset.UpStream = map[string]*chan map[string]interface{}{
 		"test": &inputCh,
@@ -145,6 +154,15 @@ func testRuleset(c echo.Context) error {
 			"results": []interface{}{},
 		})
 	}
+
+	// Ensure ruleset cleanup on function exit
+	defer func() {
+		if stopErr := tempRuleset.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop temporary ruleset: %v", stopErr)
+		}
+		// Explicitly set to nil to help GC
+		tempRuleset = nil
+	}()
 
 	// Send the test data
 	inputCh <- req.Data
@@ -180,15 +198,6 @@ func testRuleset(c echo.Context) error {
 		}
 	}
 done:
-
-	// Stop the ruleset
-	err = tempRuleset.Stop()
-	if err != nil {
-		logger.Warn("Failed to stop temporary ruleset: %v", err)
-	}
-
-	// Explicitly set to nil to help GC
-	tempRuleset = nil
 
 	// Build response
 	response := map[string]interface{}{
@@ -238,9 +247,9 @@ func testPlugin(c echo.Context) error {
 
 	// If content is provided directly, use it (for /test-plugin-content endpoint)
 	if req.Content != "" {
-		// Create a temporary plugin for testing
+		// Create a temporary plugin for testing (isolated from global registry)
 		tempPluginId = fmt.Sprintf("temp_test_content_%d", time.Now().UnixNano())
-		err := plugin.NewPlugin("", req.Content, tempPluginId, plugin.YAEGI_PLUGIN)
+		tempPlugin, err := plugin.NewTestPlugin("", req.Content, tempPluginId, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"success": false,
@@ -249,21 +258,10 @@ func testPlugin(c echo.Context) error {
 			})
 		}
 
-		// Get the created plugin from the global registry
-		tempPlugin, exists := plugin.Plugins[tempPluginId]
-		if !exists {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success": false,
-				"error":   "Failed to retrieve created plugin",
-				"result":  nil,
-			})
-		}
-
 		pluginToTest = tempPlugin
 		isTemporary = true
 
-		// Clean up the temporary plugin on exit
-		defer delete(plugin.Plugins, tempPluginId)
+		// No cleanup needed since plugin was never added to global registry
 	} else if id != "" {
 		// Original logic to find plugin by ID (for /test-plugin/:id endpoint)
 		// Check if plugin exists in memory
@@ -285,21 +283,15 @@ func testPlugin(c echo.Context) error {
 			pluginToTest = p
 			isTemporary = false
 		} else {
-			// Try to verify the temporary plugin
-			err := plugin.Verify("", tempContent, id+"_test_temp")
+			// Create a temporary plugin instance for testing (isolated from global registry)
+			tempPluginName := id + "_test_temp"
+			tempPlugin, err := plugin.NewTestPlugin("", tempContent, tempPluginName, plugin.YAEGI_PLUGIN)
 			if err != nil {
 				return c.JSON(http.StatusOK, map[string]interface{}{
 					"success": false,
 					"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
 					"result":  nil,
 				})
-			}
-
-			// Create a temporary plugin instance for testing
-			tempPlugin := &plugin.Plugin{
-				Name:    id,
-				Payload: []byte(tempContent),
-				Type:    plugin.YAEGI_PLUGIN,
 			}
 
 			pluginToTest = tempPlugin
@@ -491,6 +483,15 @@ func testOutput(c echo.Context) error {
 	inputCh := make(chan map[string]interface{}, 100)
 	tempOutput.UpStream["_testing"] = &inputCh
 
+	// Ensure input channel is properly closed on function exit
+	defer func() {
+		// Close input channel safely to prevent leaks
+		select {
+		default:
+			close(inputCh)
+		}
+	}()
+
 	// Start the output
 	err = tempOutput.Start()
 	if err != nil {
@@ -672,9 +673,9 @@ func testProject(c echo.Context) error {
 		})
 	}
 
-	// Create temporary project for testing (based on PNS logic)
+	// Create temporary project for testing (isolated from GlobalProject)
 	testProjectId := fmt.Sprintf("test_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true
+	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -683,17 +684,19 @@ func testProject(c echo.Context) error {
 		})
 	}
 
-	// Ensure cleanup on exit
+	// Ensure cleanup on exit - test projects are isolated so just stop and clean up directly
 	defer func() {
-		// Stop the project (this will handle rulesets and other components)
-		if stopErr := tempProject.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop temporary project: %v", stopErr)
+		// First, clear TestCollectionChan references to prevent access to closed channels
+		for _, outputComp := range tempProject.Outputs {
+			if outputComp.TestCollectionChan != nil {
+				outputComp.TestCollectionChan = nil
+			}
 		}
 
-		// Clean up from global project
-		common.GlobalMu.Lock()
-		project.DeleteProject(testProjectId)
-		common.GlobalMu.Unlock()
+		// Stop the project (this will handle component cleanup)
+		if stopErr := tempProject.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop test project: %v", stopErr)
+		}
 
 		logger.Info("Test project cleanup completed", "project", testProjectId)
 	}()
@@ -729,14 +732,28 @@ func testProject(c echo.Context) error {
 
 	// Create collection channels for outputs in testing mode
 	outputChannels := make(map[string]chan map[string]interface{})
+	outputIdToPNS := make(map[string]string) // Map output ID to PNS for lookup
 	for pns, outputComp := range tempProject.Outputs {
 		testChan := make(chan map[string]interface{}, 100)
-		outputChannels[pns] = testChan
+		outputChannels[outputComp.Id] = testChan // Use output ID as key instead of PNS
+		outputIdToPNS[outputComp.Id] = pns
 
 		// Set TestCollectionChan to collect output data without sending to external systems
 		outputComp.TestCollectionChan = &testChan
 		logger.Info("Set test collection channel for output", "output", outputComp.Id, "pns", pns, "project", testProjectId)
 	}
+
+	// Ensure output channels are properly closed on function exit
+	defer func() {
+		// Close all output test channels to prevent leaks
+		for outputId, testChan := range outputChannels {
+			select {
+			default:
+				close(testChan)
+				logger.Debug("Closed test channel for output", "outputId", outputId, "project", testProjectId)
+			}
+		}
+	}()
 
 	// Find the test input component and inject test data through it
 	var testInput *input.Input
@@ -773,8 +790,8 @@ func testProject(c echo.Context) error {
 	outputResults := make(map[string][]map[string]interface{})
 
 	// Initialize output results
-	for pns := range outputChannels {
-		outputResults[pns] = []map[string]interface{}{}
+	for outputId := range outputChannels {
+		outputResults[outputId] = []map[string]interface{}{}
 	}
 
 	if isContentMode {
@@ -783,7 +800,7 @@ func testProject(c echo.Context) error {
 
 		// Collect results from output channels with timeout
 		collectTimeout := time.After(1000 * time.Millisecond)
-		for outputName, testChan := range outputChannels {
+		for outputId, testChan := range outputChannels {
 			// Collect messages from this output channel
 			for {
 				select {
@@ -792,7 +809,7 @@ func testProject(c echo.Context) error {
 						// Channel is closed
 						goto nextOutputContent
 					}
-					outputResults[outputName] = append(outputResults[outputName], result)
+					outputResults[outputId] = append(outputResults[outputId], result)
 				case <-collectTimeout:
 					// Timeout reached
 					goto nextOutputContent
@@ -814,12 +831,12 @@ func testProject(c echo.Context) error {
 			select {
 			case <-ticker.C:
 				// Collect any available results
-				for pns, outputChan := range outputChannels {
+				for outputId, outputChan := range outputChannels {
 					for {
 						select {
 						case msg := <-outputChan:
-							outputResults[pns] = append(outputResults[pns], msg)
-							logger.Info("Collected message from output", "pns", pns, "message_count", len(outputResults[pns]))
+							outputResults[outputId] = append(outputResults[outputId], msg)
+							logger.Info("Collected message from output", "outputId", outputId, "message_count", len(outputResults[outputId]))
 						default:
 							goto nextOutputID
 						}
@@ -892,7 +909,7 @@ func getProjectInputs(c echo.Context) error {
 	var ok bool
 
 	if proj, ok = project.GetProject(id); ok {
-		projectContent = proj.Config.Content
+		projectContent = proj.Config.RawConfig
 	} else {
 		if projectContent, ok = project.GetProjectNew(id); !ok {
 			return c.JSON(http.StatusNotFound, map[string]interface{}{
@@ -902,10 +919,9 @@ func getProjectInputs(c echo.Context) error {
 		}
 	}
 
-	// Create temporary project to parse configuration (test version, no real component initialization)
-	// Generate unique test project ID to avoid conflicts
+	// Create temporary project to parse configuration (isolated from GlobalProject)
 	testProjectId := fmt.Sprintf("test_inputs_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true
+	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -913,14 +929,29 @@ func getProjectInputs(c echo.Context) error {
 		})
 	}
 
-	// Collect input node information (these are virtual input nodes, only for flow chart validation)
+	// Ensure cleanup of temporary project
+	defer func() {
+		if stopErr := tempProject.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop test project for input parsing", "project", testProjectId, "error", stopErr)
+		}
+	}()
+
+	// Collect input node information from FlowNodes instead of component instances
 	inputs := []map[string]string{}
-	for name := range tempProject.Inputs {
-		inputs = append(inputs, map[string]string{
-			"id":   "input." + name,
-			"name": name,
-			"type": "virtual", // Virtual input node for testing
-		})
+	inputNames := make(map[string]bool)
+
+	// Extract unique input names from FlowNodes
+	for _, node := range tempProject.FlowNodes {
+		if node.FromType == "INPUT" {
+			if !inputNames[node.FromID] {
+				inputNames[node.FromID] = true
+				inputs = append(inputs, map[string]string{
+					"id":   "input." + node.FromID,
+					"name": node.FromID,
+					"type": "virtual", // Virtual input node for testing
+				})
+			}
+		}
 	}
 
 	// Sort input node list by name
@@ -1157,10 +1188,9 @@ func getProjectComponents(c echo.Context) error {
 		}
 	}
 
-	// Create temporary project to parse configuration (test version, no real component initialization)
-	// Generate unique test project ID to avoid conflicts
+	// Create temporary project to parse configuration (isolated from GlobalProject)
 	testProjectId := fmt.Sprintf("test_components_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true
+	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -1168,32 +1198,59 @@ func getProjectComponents(c echo.Context) error {
 		})
 	}
 
-	// Collect component information
+	// Ensure cleanup of temporary project
+	defer func() {
+		if stopErr := tempProject.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop test project for component parsing", "project", testProjectId, "error", stopErr)
+		}
+	}()
+
+	// Collect component information from FlowNodes instead of component instances
 	inputs := []map[string]string{}
-	for name := range tempProject.Inputs {
-		inputs = append(inputs, map[string]string{
-			"id":   name,
-			"name": name,
-			"type": "input",
-		})
-	}
-
 	outputs := []map[string]string{}
-	for name := range tempProject.Outputs {
-		outputs = append(outputs, map[string]string{
-			"id":   name,
-			"name": name,
-			"type": "output",
-		})
-	}
-
 	rulesets := []map[string]string{}
-	for name := range tempProject.Rulesets {
-		rulesets = append(rulesets, map[string]string{
-			"id":   name,
-			"name": name,
-			"type": "ruleset",
-		})
+
+	inputNames := make(map[string]bool)
+	outputNames := make(map[string]bool)
+	rulesetNames := make(map[string]bool)
+
+	// Extract unique component names from FlowNodes
+	for _, node := range tempProject.FlowNodes {
+		// From components
+		if node.FromType == "INPUT" && !inputNames[node.FromID] {
+			inputNames[node.FromID] = true
+			inputs = append(inputs, map[string]string{
+				"id":   node.FromID,
+				"name": node.FromID,
+				"type": "input",
+			})
+		}
+		if node.FromType == "RULESET" && !rulesetNames[node.FromID] {
+			rulesetNames[node.FromID] = true
+			rulesets = append(rulesets, map[string]string{
+				"id":   node.FromID,
+				"name": node.FromID,
+				"type": "ruleset",
+			})
+		}
+
+		// To components
+		if node.ToType == "OUTPUT" && !outputNames[node.ToID] {
+			outputNames[node.ToID] = true
+			outputs = append(outputs, map[string]string{
+				"id":   node.ToID,
+				"name": node.ToID,
+				"type": "output",
+			})
+		}
+		if node.ToType == "RULESET" && !rulesetNames[node.ToID] {
+			rulesetNames[node.ToID] = true
+			rulesets = append(rulesets, map[string]string{
+				"id":   node.ToID,
+				"name": node.ToID,
+				"type": "ruleset",
+			})
+		}
 	}
 
 	// Calculate total component count
@@ -1404,15 +1461,22 @@ func getProjectComponentSequences(c echo.Context) error {
 		}
 	}
 
-	// Create temporary project to parse configuration and generate FlowNodes with PNS
+	// Create temporary project to parse configuration (isolated from GlobalProject)
 	testProjectId := fmt.Sprintf("test_sequences_%s_%d", id, time.Now().UnixNano())
-	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true
+	tempProject, err := project.NewProject("", projectContent, testProjectId, true) // testing=true keeps it isolated
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
 			"error":   "Failed to parse project: " + err.Error(),
 		})
 	}
+
+	// Ensure cleanup of temporary project
+	defer func() {
+		if stopErr := tempProject.Stop(); stopErr != nil {
+			logger.Warn("Failed to stop test project for sequence parsing", "project", testProjectId, "error", stopErr)
+		}
+	}()
 
 	// Initialize result structure
 	result := map[string]map[string][]string{

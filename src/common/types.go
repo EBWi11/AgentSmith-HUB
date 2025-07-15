@@ -102,6 +102,9 @@ type ComponentUpdateManager struct {
 	mutex         sync.RWMutex
 }
 
+// Global component update manager
+var GlobalComponentUpdateManager *ComponentUpdateManager
+
 // ComponentUpdateOperation represents an ongoing component update
 type ComponentUpdateOperation struct {
 	ComponentType    string
