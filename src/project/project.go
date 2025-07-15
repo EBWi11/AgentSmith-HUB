@@ -772,10 +772,20 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 		}
 	}
 
+	// Skip PNS duplication check for testing projects
+	if p.Testing {
+		return nil
+	}
+
 	// Use safe iteration to check existing projects
 	var duplicateProjectID string
 	ForEachProject(func(existingProjectID string, existingProject *Project) bool {
 		if existingProjectID == p.Id {
+			return true
+		}
+
+		// Skip testing projects in PNS duplication check
+		if existingProject.Testing {
 			return true
 		}
 
