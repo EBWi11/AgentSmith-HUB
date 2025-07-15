@@ -176,15 +176,16 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 	}
 
 	in := &Input{
-		Id:           id,
-		Path:         path,
-		Type:         cfg.Type,
-		DownStream:   make(map[string]*chan map[string]interface{}, 0),
-		kafkaCfg:     cfg.Kafka,
-		aliyunSLSCfg: cfg.AliyunSLS,
-		Config:       &cfg,
-		sampler:      nil, // Will be set below based on cluster role
-		Status:       common.StatusStopped,
+		Id:                  id,
+		Path:                path,
+		Type:                cfg.Type,
+		DownStream:          make(map[string]*chan map[string]interface{}, 0),
+		kafkaCfg:            cfg.Kafka,
+		ProjectNodeSequence: "INPUT." + id,
+		aliyunSLSCfg:        cfg.AliyunSLS,
+		Config:              &cfg,
+		sampler:             nil, // Will be set below based on cluster role
+		Status:              common.StatusStopped,
 	}
 
 	// Only create sampler on leader node for performance

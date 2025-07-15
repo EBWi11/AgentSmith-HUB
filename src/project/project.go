@@ -1298,14 +1298,12 @@ func (p *Project) initComponents() error {
 
 				p.Inputs[node.FromPNS] = testInput
 			} else {
-				// Production mode: use the real input component
-				in, exists := GetInput(node.FromID)
-
+				// Production mode: create input instance with correct ProjectNodeSequence
+				originalInput, exists := GetInput(node.FromID)
 				if !exists {
 					return fmt.Errorf("input component not found: %s", node.FromID)
 				}
-
-				p.Inputs[node.FromPNS] = in
+				p.Inputs[node.FromPNS] = originalInput
 			}
 
 			// Connect downstream only if channel was created for this specific ToPNS
