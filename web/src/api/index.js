@@ -1000,6 +1000,17 @@ export const hubApi = {
     }
   },
 
+  // Get cluster information
+  async fetchClusterInfo() {
+    try {
+      const response = await publicApi.get('/cluster-status');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching cluster info:', error);
+      throw new Error(error.response?.data?.error || 'Failed to get cluster info');
+    }
+  },
+
   // Get project components (inputs, outputs, rulesets)
   async getProjectComponents(id) {
     try {

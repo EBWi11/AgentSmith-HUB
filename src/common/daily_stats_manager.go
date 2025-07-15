@@ -217,6 +217,8 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 	totalInputMessages := uint64(0)
 	totalOutputMessages := uint64(0)
 	totalRulesetMessages := uint64(0)
+	totalPluginSuccess := uint64(0)
+	totalPluginFailures := uint64(0)
 
 	for _, data := range allData {
 		if _, exists := projectStats[data.ProjectID]; !exists {
@@ -225,18 +227,19 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 
 		projectStats[data.ProjectID][data.ComponentType] += data.TotalMessages
 
-		// Aggregate by component type
-		parts := strings.Split(data.ProjectNodeSequence, ".")
-		if len(parts) >= 2 {
-			componentTypeFromSequence := strings.ToLower(parts[len(parts)-2])
-			switch componentTypeFromSequence {
-			case "input":
-				totalInputMessages += data.TotalMessages
-			case "output":
-				totalOutputMessages += data.TotalMessages
-			case "ruleset":
-				totalRulesetMessages += data.TotalMessages
-			}
+		// Aggregate by component type based on ProjectNodeSequence prefix
+		sequence := data.ProjectNodeSequence
+		switch {
+		case strings.HasPrefix(sequence, "INPUT."):
+			totalInputMessages += data.TotalMessages
+		case strings.HasPrefix(sequence, "OUTPUT."):
+			totalOutputMessages += data.TotalMessages
+		case strings.HasPrefix(sequence, "RULESET.") || strings.Contains(sequence, ".RULESET."):
+			totalRulesetMessages += data.TotalMessages
+		case strings.HasPrefix(sequence, "PLUGIN.") && strings.HasSuffix(sequence, ".success"):
+			totalPluginSuccess += data.TotalMessages
+		case strings.HasPrefix(sequence, "PLUGIN.") && strings.HasSuffix(sequence, ".failure"):
+			totalPluginFailures += data.TotalMessages
 		}
 	}
 
@@ -245,6 +248,8 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 		"total_input_messages":   totalInputMessages,
 		"total_output_messages":  totalOutputMessages,
 		"total_ruleset_messages": totalRulesetMessages,
+		"total_plugin_success":   totalPluginSuccess,
+		"total_plugin_failures":  totalPluginFailures,
 		"projects":               projectStats,
 		"timestamp":              time.Now(),
 	}
