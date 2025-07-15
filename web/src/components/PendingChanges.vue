@@ -130,6 +130,7 @@ import { useApiOperations } from '../composables/useApi'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
 import { debounce, throttle } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
+import { clearCacheWithDelay } from '../utils/cacheUtils'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -422,6 +423,9 @@ async function applyChanges() {
       if (result.projects_to_restart && result.projects_to_restart.length > 0) {
         $message?.warning?.(`Projects requiring restart: ${result.projects_to_restart.join(', ')}`)
       }
+      
+      // Clear all cache since pending changes can affect multiple data types
+      clearCacheWithDelay(2000, `apply pending changes: ${result.success_count} changes`)
     }
     
     if (result.failure_count > 0) {
@@ -433,13 +437,6 @@ async function applyChanges() {
         console.error('Apply failures:', errorDetails)
       }
     }
-    
-    // Immediately clear pending changes cache to ensure fresh data
-    dataCache.clearCache('pendingChanges')
-    // Also clear affected component type caches for immediate UI update
-    affectedTypes.forEach(type => {
-      dataCache.clearComponentCache(type)
-    })
     
     // Force refresh all component lists to ensure hasTemp is updated
     await Promise.all([
@@ -511,10 +508,8 @@ async function applySingleChange(change) {
     
           $message?.success?.(`Change applied successfully!`)
       
-          // Immediately clear pending changes cache to ensure fresh data
-    dataCache.clearCache('pendingChanges')
-    // Also clear the affected component type cache for immediate UI update
-    dataCache.clearComponentCache(change.type)
+          // Clear all cache since single change can affect multiple data types
+    clearCacheWithDelay(2000, `apply single change: ${change.type}:${change.id}`)
     
     // Force refresh all component lists to ensure hasTemp is updated
     await Promise.all([
@@ -590,6 +585,10 @@ async function restartProjects(projectIds) {
       for (const id of projectIds) {
         await hubApi.restartProject(id)
       }
+      
+      // Clear all cache since project restart affects multiple data types
+      clearCacheWithDelay(2000, `restart projects: ${projectIds.join(', ')}`)
+      
       $message?.success?.(`Projects restarted: ${projectIds.join(', ')}`)
   } catch (e) {
         $message?.error?.('Failed to restart projects: ' + (e?.message || 'Unknown error'))

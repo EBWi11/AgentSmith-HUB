@@ -1493,6 +1493,7 @@ import JsonViewer from '@/components/JsonViewer.vue'
 import { getStatusLabel, getStatusTitle, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
+import { clearCacheWithDelay } from '../../utils/cacheUtils'
 // useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
 
 // Get router instance
@@ -2699,6 +2700,10 @@ async function startProject(item) {
     } else {
       // Step 3: API succeeded, start polling for real status
       $message?.success?.('Project start command sent successfully')
+      
+      // Clear all cache since project start affects multiple data types
+      clearCacheWithDelay(2000, `project start: ${item.id}`)
+      
       pollProjectStatusUntilStable(item.id, 'starting')
     }
   } catch (error) {
@@ -2740,6 +2745,10 @@ async function stopProject(item) {
     
     // Step 3: API succeeded, start polling for real status
     $message?.success?.('Project stop command sent successfully')
+    
+    // Clear all cache since project stop affects multiple data types
+    clearCacheWithDelay(2000, `project stop: ${item.id}`)
+    
     pollProjectStatusUntilStable(item.id, 'stopping')
   } catch (error) {
     // Step 4: API failed, reset UI state and show error
@@ -2797,6 +2806,9 @@ async function restartProject(item) {
     } else {
       // Step 3: API succeeded, start polling for real status
       $message?.success?.('Project restart command sent successfully')
+      
+      // Clear all cache since project restart affects multiple data types
+      clearCacheWithDelay(2000, `project restart: ${item.id}`)
       
       // For restart, we expect: stopping -> starting -> running
       pollProjectStatusUntilStable(item.id, 'stopping')

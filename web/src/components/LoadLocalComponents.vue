@@ -118,6 +118,7 @@ import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
 import { getComponentTypeLabel, getEditorLanguage, getApiComponentType } from '../utils/common'
+import { clearCacheWithDelay } from '../utils/cacheUtils'
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -365,6 +366,10 @@ async function loadAllChanges() {
     await hubApi.loadLocalChanges()
     
     $message?.success?.('All local changes loaded successfully!')
+    
+    // Clear all cache since local changes can affect multiple data types
+    const changeCount = changes.value.length
+    clearCacheWithDelay(2000, `load local changes: ${changeCount} changes`)
     
     // Refresh the list
     await refreshChanges()

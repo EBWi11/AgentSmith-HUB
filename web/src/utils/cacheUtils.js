@@ -3,6 +3,28 @@
  * These are temporary caches used during testing workflows
  */ 
 
+import { useDataCacheStore } from '../stores/dataCache'
+
+// 延迟缓存清理函数 - 用于项目操作和组件变更后的缓存重置
+export function clearCacheWithDelay(delay = 1000, reason = 'operation') {
+  const dataCache = useDataCacheStore()
+  
+  console.log(`[CacheUtils] Scheduling cache clear in ${delay}ms due to: ${reason}`)
+  
+  setTimeout(() => {
+    console.log(`[CacheUtils] Clearing all cache due to: ${reason}`)
+    dataCache.clearAll()
+  }, delay)
+}
+
+// 立即清理缓存函数
+export function clearCacheImmediate(reason = 'operation') {
+  const dataCache = useDataCacheStore()
+  
+  console.log(`[CacheUtils] Clearing all cache immediately due to: ${reason}`)
+  dataCache.clearAll()
+}
+
 // Ruleset test data cache
 const rulesetTestDataCache = new Map();
 

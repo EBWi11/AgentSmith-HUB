@@ -499,6 +499,7 @@
 import { ref, watch, inject, computed, onMounted, onBeforeUnmount, watchEffect } from 'vue'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
+import { clearCacheWithDelay } from '../utils/cacheUtils'
 import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
@@ -1085,6 +1086,10 @@ async function startProject() {
     } else if (result.success) {
       // 成功启动项目
       $message?.success?.('Project started successfully')
+      
+      // Clear all cache since project start affects multiple data types
+      clearCacheWithDelay(2000, `project start: ${props.item.id}`)
+      
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {
@@ -1125,6 +1130,10 @@ async function stopProject() {
     } else if (result.success) {
       // 成功停止项目
       $message?.success?.('Project stopped successfully')
+      
+      // Clear all cache since project stop affects multiple data types
+      clearCacheWithDelay(2000, `project stop: ${props.item.id}`)
+      
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {
@@ -1165,6 +1174,10 @@ async function restartProject() {
     } else if (result.success) {
       // 成功重启项目
       $message?.success?.('Project restarted successfully')
+      
+      // Clear all cache since project restart affects multiple data types
+      clearCacheWithDelay(2000, `project restart: ${props.item.id}`)
+      
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
     } else if (result.error) {

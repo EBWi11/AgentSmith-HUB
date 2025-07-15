@@ -1,5 +1,6 @@
 import { ref, inject } from 'vue'
 import { hubApi } from '../api'
+import { clearCacheWithDelay } from '../utils/cacheUtils'
 
 /**
  * Component save operations composable
@@ -75,6 +76,10 @@ export function useComponentSave() {
         const action = isNewComponent ? 'created' : 'saved'
         await verifyAfterSave(componentType, componentId, action)
       }
+      
+      // Clear all cache since component save can affect multiple data types
+      const action = isNewComponent ? 'create' : 'save'
+      clearCacheWithDelay(1500, `${action} component: ${componentType}:${componentId}`)
       
       // Call success callback if provided
       if (onSuccess) {
