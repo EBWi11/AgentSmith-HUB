@@ -8,6 +8,106 @@ import (
 	"time"
 )
 
+// ComponentInfo represents a component extracted from ProjectNodeSequence
+type ComponentInfo struct {
+	Type string // input, output, ruleset, plugin_success, plugin_failure
+	ID   string // component identifier
+}
+
+// ParseProjectNodeSequence extracts all components from a ProjectNodeSequence
+// Examples:
+//   - "INPUT.kafka1" -> [{Type: "input", ID: "kafka1"}]
+//   - "INPUT.kafka1.RULESET.test.OUTPUT.print" -> [{Type: "input", ID: "kafka1"}, {Type: "ruleset", ID: "test"}, {Type: "output", ID: "print"}]
+//   - "PLUGIN.hash_md5.success" -> [{Type: "plugin_success", ID: "hash_md5"}]
+func ParseProjectNodeSequence(sequence string) []ComponentInfo {
+	if sequence == "" {
+		return nil
+	}
+
+	var components []ComponentInfo
+	parts := strings.Split(sequence, ".")
+
+	for i := 0; i < len(parts)-1; i += 2 {
+		componentType := strings.ToLower(parts[i])
+
+		// Handle special cases
+		switch componentType {
+		case "input", "output", "ruleset":
+			if i+1 < len(parts) {
+				components = append(components, ComponentInfo{
+					Type: componentType,
+					ID:   parts[i+1],
+				})
+			}
+		case "plugin":
+			// Plugin sequences are like "PLUGIN.plugin_name.success" or "PLUGIN.plugin_name.failure"
+			if i+2 < len(parts) {
+				pluginID := parts[i+1]
+				status := strings.ToLower(parts[i+2])
+
+				if status == "success" {
+					components = append(components, ComponentInfo{
+						Type: "plugin_success",
+						ID:   pluginID,
+					})
+				} else if status == "failure" {
+					components = append(components, ComponentInfo{
+						Type: "plugin_failure",
+						ID:   pluginID,
+					})
+				}
+				i++ // Skip the status part
+			}
+		}
+	}
+
+	return components
+}
+
+// GetComponentTypeFromSequence extracts the component type from the LAST part of ProjectNodeSequence
+// Examples:
+//   - "INPUT.kafka1" -> "input" (last component type is INPUT)
+//   - "INPUT.kafka1.RULESET.test.OUTPUT.print" -> "output" (last component type is OUTPUT)
+//   - "PLUGIN.hash_md5.success" -> "plugin_success" (ends with success after PLUGIN)
+func GetComponentTypeFromSequence(sequence, fallbackType string) string {
+	if sequence == "" {
+		return fallbackType
+	}
+
+	// Split by dots and scan backwards to find the last component type
+	parts := strings.Split(sequence, ".")
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.ToUpper(parts[i])
+
+		// Check for component type keywords
+		switch part {
+		case "INPUT":
+			return "input"
+		case "OUTPUT":
+			return "output"
+		case "RULESET":
+			return "ruleset"
+		case "SUCCESS":
+			// Plugin success - need to verify there's a PLUGIN earlier
+			for j := i - 1; j >= 0; j-- {
+				if strings.ToUpper(parts[j]) == "PLUGIN" {
+					return "plugin_success"
+				}
+			}
+		case "FAILURE":
+			// Plugin failure - need to verify there's a PLUGIN earlier
+			for j := i - 1; j >= 0; j-- {
+				if strings.ToUpper(parts[j]) == "PLUGIN" {
+					return "plugin_failure"
+				}
+			}
+		}
+	}
+
+	return fallbackType
+}
+
 // DailyStatsData represents daily statistics for a component
 type DailyStatsData struct {
 	NodeID              string `json:"node_id"`
@@ -227,19 +327,46 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 
 		projectStats[data.ProjectID][data.ComponentType] += data.TotalMessages
 
-		// Aggregate by component type based on ProjectNodeSequence prefix
-		sequence := data.ProjectNodeSequence
-		switch {
-		case strings.HasPrefix(sequence, "INPUT."):
+		// Extract component type from the last part of the sequence
+		// This ensures each record is counted only once for the correct component type
+		actualComponentType := GetComponentTypeFromSequence(data.ProjectNodeSequence, data.ComponentType)
+
+		// Count this record for the determined component type
+		switch actualComponentType {
+		case "input":
 			totalInputMessages += data.TotalMessages
-		case strings.HasPrefix(sequence, "OUTPUT."):
+		case "output":
 			totalOutputMessages += data.TotalMessages
-		case strings.HasPrefix(sequence, "RULESET.") || strings.Contains(sequence, ".RULESET."):
+		case "ruleset":
 			totalRulesetMessages += data.TotalMessages
-		case strings.HasPrefix(sequence, "PLUGIN.") && strings.HasSuffix(sequence, ".success"):
+		case "plugin_success":
 			totalPluginSuccess += data.TotalMessages
-		case strings.HasPrefix(sequence, "PLUGIN.") && strings.HasSuffix(sequence, ".failure"):
+		case "plugin_failure":
 			totalPluginFailures += data.TotalMessages
+		}
+	}
+
+	// Build project breakdown using the same component type classification as totals
+	projectBreakdown := make(map[string]map[string]uint64) // projectID -> {input, output, ruleset}
+	for _, data := range allData {
+		if _, exists := projectBreakdown[data.ProjectID]; !exists {
+			projectBreakdown[data.ProjectID] = map[string]uint64{
+				"input":   0,
+				"output":  0,
+				"ruleset": 0,
+			}
+		}
+
+		// Use the same component type classification logic as totals
+		actualComponentType := GetComponentTypeFromSequence(data.ProjectNodeSequence, data.ComponentType)
+		switch actualComponentType {
+		case "input":
+			projectBreakdown[data.ProjectID]["input"] += data.TotalMessages
+		case "output":
+			projectBreakdown[data.ProjectID]["output"] += data.TotalMessages
+		case "ruleset":
+			projectBreakdown[data.ProjectID]["ruleset"] += data.TotalMessages
+			// Note: plugin_success and plugin_failure are not included in project breakdown
 		}
 	}
 
@@ -250,7 +377,7 @@ func (dsm *DailyStatsManager) GetAggregatedDailyStats(date string) map[string]in
 		"total_ruleset_messages": totalRulesetMessages,
 		"total_plugin_success":   totalPluginSuccess,
 		"total_plugin_failures":  totalPluginFailures,
-		"projects":               projectStats,
+		"project_breakdown":      projectBreakdown, // Changed from "projects" to match frontend expectation
 		"timestamp":              time.Now(),
 	}
 }

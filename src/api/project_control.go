@@ -24,11 +24,20 @@ func syncProjectOperationToFollowers(projectID, action string) {
 	// Just publish the project instruction
 	switch action {
 	case "start":
-		cluster.GlobalInstructionManager.PublishProjectStart(projectID)
+		err := cluster.GlobalInstructionManager.PublishProjectStart(projectID)
+		if err != nil {
+			logger.Error("Failed to publish project start", "project", projectID, "err", err)
+		}
 	case "stop":
-		cluster.GlobalInstructionManager.PublishProjectStop(projectID)
+		err := cluster.GlobalInstructionManager.PublishProjectStop(projectID)
+		if err != nil {
+			logger.Error("Failed to publish project stop", "project", projectID, "err", err)
+		}
 	case "restart":
-		cluster.GlobalInstructionManager.PublishProjectRestart(projectID)
+		err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID)
+		if err != nil {
+			logger.Error("Failed to publish project restart", "project", projectID, "err", err)
+		}
 	default:
 		logger.Warn("Unknown project action", "action", action, "project", projectID)
 	}
@@ -50,25 +59,6 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// Check if project is already running, starting, or stopping
-	if p.Status == common.StatusRunning {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is already running",
-		})
-	}
-
-	if p.Status == common.StatusStarting {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is currently starting, please wait",
-		})
-	}
-
-	if p.Status == common.StatusStopping {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is currently stopping, please wait",
-		})
-	}
-
 	// API-side persistence: Save project states in Redis
 	// proj_states: User intention (what user wants the project to be)
 	if err := common.SetProjectUserIntention(req.ProjectID, true); err != nil {
@@ -87,18 +77,8 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// proj_real: Actual runtime state (what the project actually is)
-	if err := common.SetProjectRealState(common.Config.LocalIP, req.ProjectID, string(p.Status)); err != nil {
-		logger.Warn("Failed to persist project actual state to Redis (proj_real)", "project", req.ProjectID, "error", err)
-	}
-
 	// Record successful operation
 	RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "success", "", nil)
-
-	// Save project last updated time separately
-	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
-		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
-	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Project started successfully"})
 }
@@ -116,23 +96,6 @@ func StopProject(c echo.Context) error {
 	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
-		})
-	}
-
-	// Check if project is running
-	if p.Status != common.StatusRunning {
-		if p.Status == common.StatusStarting {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"error": "Project is currently starting, cannot stop",
-			})
-		}
-		if p.Status == common.StatusStopping {
-			return c.JSON(http.StatusConflict, map[string]string{
-				"error": "Project is already stopping",
-			})
-		}
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is not running",
 		})
 	}
 
@@ -154,18 +117,8 @@ func StopProject(c echo.Context) error {
 		logger.Warn("Failed to update project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
-	// proj_real: Actual runtime state (what the project actually is)
-	if err := common.SetProjectRealState(common.Config.LocalIP, req.ProjectID, string(p.Status)); err != nil {
-		logger.Warn("Failed to update project actual state to Redis (proj_real)", "project", req.ProjectID, "error", err)
-	}
-
 	// Record successful operation
 	RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "success", "", nil)
-
-	// Save project last updated time (stop time)
-	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
-		logger.Warn("Failed to persist project last updated time to Redis", "project", req.ProjectID, "error", err)
-	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"status":  "success",
@@ -193,13 +146,6 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
-	// Error projects cannot be restarted, they must be started instead
-	if p.Status != common.StatusRunning {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Project is not running, please wait.",
-		})
-	}
-
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
 	syncProjectOperationToFollowers(req.ProjectID, "restart")
 
@@ -209,15 +155,6 @@ func RestartProject(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("Failed to restart project: %v", err),
 		})
-	}
-
-	if err := cluster.GlobalInstructionManager.PublishProjectRestart(req.ProjectID); err != nil {
-		logger.Error("Failed to publish project restart instructions", "affected_projects", req.ProjectID, "error", err)
-	}
-
-	// Save project last updated time (restart time) - only update timestamp, not desired state
-	if err := common.SetProjectStateTimestamp(common.Config.LocalIP, req.ProjectID, *p.StatusChangedAt); err != nil {
-		logger.Warn("Failed to persist project restart time to Redis", "project", req.ProjectID, "error", err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

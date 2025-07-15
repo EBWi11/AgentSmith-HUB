@@ -1000,10 +1000,8 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 		}
 	case "restart":
 		if instruction.ComponentType == "project" {
-			// Check if this project exists
-			common.GlobalMu.RLock()
+			// Check if this project exists using safe accessor
 			proj, exists := project.GetProject(instruction.ComponentName)
-			common.GlobalMu.RUnlock()
 
 			if !exists {
 				logger.Warn("Project not found for restart", "project", instruction.ComponentName)

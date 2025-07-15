@@ -499,7 +499,7 @@ func NewProject(path string, raw string, id string, test bool) (*Project, error)
 
 	// Initialize components
 	if err := p.parseContent(); err != nil {
-		p.SetProjectStatus(common.StatusStopped, err)
+		p.SetProjectStatus(common.StatusError, err)
 		return p, fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
@@ -846,25 +846,26 @@ func (p *Project) validateComponent(componentType, componentID string, lineNum i
 
 // Start starts the project and all its components
 func (p *Project) Start() error {
+	// Use dedicated project operation lock to serialize all project lifecycle operations
+	common.ProjectOperationMu.Lock()
+	defer common.ProjectOperationMu.Unlock()
+
 	// Add panic recovery for critical state changes
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Panic during project start", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
 			p.cleanup()
-			p.SetProjectStatus(common.StatusStopped, fmt.Errorf("panic during start: %v", r))
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
 		}
 	}()
 
-	// Use GlobalMu to ensure atomic status check and change
-	common.GlobalMu.Lock()
+	// Check status - no need for additional locking as ProjectOperationMu ensures serialization
 	if p.Status != common.StatusStopped && p.Status != common.StatusError {
-		common.GlobalMu.Unlock()
 		return fmt.Errorf("project is not stopped %s", p.Id)
 	}
-	// Set to starting status atomically
+	// Set to starting status
 	p.SetProjectStatus(common.StatusStarting, nil)
-	common.GlobalMu.Unlock()
 
 	err := p.initComponents()
 	if err != nil {
@@ -889,25 +890,26 @@ func (p *Project) Start() error {
 
 // Stop stops the project and all its components in proper order
 func (p *Project) Stop() error {
+	// Use dedicated project operation lock to serialize all project lifecycle operations
+	common.ProjectOperationMu.Lock()
+	defer common.ProjectOperationMu.Unlock()
+
 	// Add panic recovery for critical state changes
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Panic during project stop", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
 			p.cleanup()
-			p.SetProjectStatus(common.StatusStopped, fmt.Errorf("panic during stop: %v", r))
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during stop: %v", r))
 		}
 	}()
 
-	// Use GlobalMu to ensure atomic status check and change
-	common.GlobalMu.Lock()
+	// Check status - no need for additional locking as ProjectOperationMu ensures serialization
 	if p.Status != common.StatusRunning {
-		common.GlobalMu.Unlock()
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
 	// Set status to stopping immediately to prevent duplicate operations
 	p.SetProjectStatus(common.StatusStopping, nil)
-	common.GlobalMu.Unlock()
 
 	// Overall timeout for the entire stop process
 	overallTimeout := time.After(2 * time.Minute)
@@ -929,14 +931,14 @@ func (p *Project) Stop() error {
 	select {
 	case err := <-stopCompleted:
 		if err != nil {
-			p.SetProjectStatus(common.StatusStopped, fmt.Errorf("failed to stop components: %w", err))
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to stop components: %w", err))
 			return fmt.Errorf("failed to stop project components: %w", err)
 		}
 		p.SetProjectStatus(common.StatusStopped, nil)
 		logger.Info("Project stopped successfully", "project", p.Id)
 		return nil
 	case <-overallTimeout:
-		p.SetProjectStatus(common.StatusStopped, fmt.Errorf("stop operation timed out"))
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("stop operation timed out"))
 		return fmt.Errorf("project stop operation timed out")
 	}
 }
@@ -948,33 +950,27 @@ func (p *Project) Restart() error {
 			logger.Error("Panic during project restart", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
 			p.cleanup()
-			p.SetProjectStatus(common.StatusStopped, fmt.Errorf("panic during restart: %v", r))
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during restart: %v", r))
 		}
 	}()
 
-	// Use GlobalMu to ensure atomic status check
-	common.GlobalMu.RLock()
-	if p.Status != common.StatusRunning {
-		common.GlobalMu.RUnlock()
+	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu
+	if p.Status != common.StatusRunning && p.Status != common.StatusError {
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
-	common.GlobalMu.RUnlock()
 
 	logger.Info("Restarting project", "project", p.Id)
 
 	// Stop the project first
 	err := p.Stop()
 	if err != nil {
-		return fmt.Errorf("failed to stop project for restart: %w", err)
+		logger.Error("Failed to restart project", "project", p.Id, "error", err)
 	}
 
 	// Verify project is actually stopped before starting
-	common.GlobalMu.RLock()
-	if p.Status != common.StatusStopped {
-		common.GlobalMu.RUnlock()
+	if p.Status != common.StatusStopped && p.Status != common.StatusError {
 		return fmt.Errorf("project is not in stopped state after stop operation, current status: %s", p.Status)
 	}
-	common.GlobalMu.RUnlock()
 
 	// Start the project again
 	err = p.Start()
@@ -1077,10 +1073,18 @@ func (p *Project) stopComponentsInternal() error {
 
 // cleanup performs aggressive cleanup when normal stop fails
 func (p *Project) cleanup() {
-	// Close all message channels before clearing them
-	for _, ch := range p.MsgChannels {
+	// Close all message channels with panic protection
+	for pns, ch := range p.MsgChannels {
 		if ch != nil {
-			close(*ch)
+			// Safely close channel, ignore if already closed
+			func(channel *chan map[string]interface{}, channelName string) {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Debug("Channel already closed during cleanup", "project", p.Id, "pns", channelName)
+					}
+				}()
+				close(*channel)
+			}(ch, pns)
 		}
 	}
 

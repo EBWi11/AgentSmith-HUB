@@ -506,11 +506,13 @@ func (in *Input) Stop() error {
 	// Stop consumers to prevent new messages
 	if in.kafkaConsumer != nil {
 		in.kafkaConsumer.Close()
+		in.kafkaConsumer = nil
 	}
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
 			logger.Warn("Failed to close sls consumer", "input", in.Id, "error", err)
 		}
+		in.slsConsumer = nil
 	}
 
 	// Wait for goroutines to finish with timeout

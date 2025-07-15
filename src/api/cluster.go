@@ -254,7 +254,16 @@ func getDailyMessages(c echo.Context) error {
 			}
 
 			for _, statsData := range nodeStats {
-				nodeResult[statsData.ComponentType+"_messages"] += statsData.TotalMessages
+				// Use the same component type classification logic
+				actualComponentType := common.GetComponentTypeFromSequence(statsData.ProjectNodeSequence, statsData.ComponentType)
+				switch actualComponentType {
+				case "input":
+					nodeResult["input_messages"] += statsData.TotalMessages
+				case "output":
+					nodeResult["output_messages"] += statsData.TotalMessages
+				case "ruleset":
+					nodeResult["ruleset_messages"] += statsData.TotalMessages
+				}
 			}
 
 			nodeResult["total_messages"] = nodeResult["input_messages"] + nodeResult["output_messages"] + nodeResult["ruleset_messages"]
@@ -272,7 +281,17 @@ func getDailyMessages(c echo.Context) error {
 						"ruleset_messages": 0,
 					}
 				}
-				nodeResults[statsData.NodeID][statsData.ComponentType+"_messages"] += statsData.TotalMessages
+
+				// Use the same component type classification logic
+				actualComponentType := common.GetComponentTypeFromSequence(statsData.ProjectNodeSequence, statsData.ComponentType)
+				switch actualComponentType {
+				case "input":
+					nodeResults[statsData.NodeID]["input_messages"] += statsData.TotalMessages
+				case "output":
+					nodeResults[statsData.NodeID]["output_messages"] += statsData.TotalMessages
+				case "ruleset":
+					nodeResults[statsData.NodeID]["ruleset_messages"] += statsData.TotalMessages
+				}
 			}
 
 			// Calculate totals for each node
@@ -293,6 +312,9 @@ func getDailyMessages(c echo.Context) error {
 		// Group by ProjectNodeSequence and aggregate across all nodes
 		sequenceGroups := make(map[string]map[string]interface{})
 
+		// Project-level breakdown for frontend convenience
+		projectBreakdown := make(map[string]map[string]uint64)
+
 		for _, statsData := range dailyStats {
 			sequenceKey := statsData.ProjectNodeSequence
 
@@ -307,9 +329,41 @@ func getDailyMessages(c echo.Context) error {
 
 			sequenceGroups[sequenceKey]["total_messages"] = sequenceGroups[sequenceKey]["total_messages"].(uint64) + statsData.TotalMessages
 			sequenceGroups[sequenceKey]["daily_messages"] = sequenceGroups[sequenceKey]["daily_messages"].(uint64) + statsData.TotalMessages // For daily stats, these are the same
+
+			// Build project-level breakdown by component type
+			if _, exists := projectBreakdown[statsData.ProjectID]; !exists {
+				projectBreakdown[statsData.ProjectID] = map[string]uint64{
+					"input":   0,
+					"output":  0,
+					"ruleset": 0,
+				}
+			}
+
+			// Use the same component type classification logic as aggregated totals
+			actualComponentType := common.GetComponentTypeFromSequence(statsData.ProjectNodeSequence, statsData.ComponentType)
+			switch actualComponentType {
+			case "input":
+				projectBreakdown[statsData.ProjectID]["input"] += statsData.TotalMessages
+			case "output":
+				projectBreakdown[statsData.ProjectID]["output"] += statsData.TotalMessages
+			case "ruleset":
+				projectBreakdown[statsData.ProjectID]["ruleset"] += statsData.TotalMessages
+				// Note: plugin_success and plugin_failure are not included in project breakdown
+			}
 		}
 
-		result = sequenceGroups
+		// Include project breakdown in the result for frontend convenience
+		result = map[string]interface{}{
+			"sequences":         sequenceGroups,
+			"project_breakdown": projectBreakdown,
+		}
+
+		// For compatibility, if querying a specific project, merge sequence data to root level
+		if projectID != "" {
+			for key, value := range sequenceGroups {
+				result.(map[string]interface{})[key] = value
+			}
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

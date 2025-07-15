@@ -5,6 +5,9 @@ import eventManager from '../utils/eventManager'
 // Add at top-level (outside Pinia store) a non-reactive map to track in-flight requests
 const ongoingRequests = new Map()
 
+// Priority refresh queue to ensure operation-triggered refreshes have highest priority
+const priorityRefreshQueue = new Set()
+
 export const useDataCacheStore = defineStore('dataCache', {
   state: () => ({
     // Component data cache
@@ -95,6 +98,10 @@ export const useDataCacheStore = defineStore('dataCache', {
         switch (action) {
           case 'created':
             this.clearComponentCache(type)
+            // HIGHEST PRIORITY: Force immediate refresh after creation
+            setTimeout(() => {
+              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+            }, 150)
             break
           case 'updated':
             this.clearComponentCache(type)
@@ -103,6 +110,10 @@ export const useDataCacheStore = defineStore('dataCache', {
               const detailCacheKey = `detail_${type}_${id}`
               ongoingRequests.delete(detailCacheKey)
             }
+            // HIGHEST PRIORITY: Force immediate refresh after update
+            setTimeout(() => {
+              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+            }, 150)
             break
           case 'deleted':
             // Use specialized method for deletion
@@ -111,6 +122,10 @@ export const useDataCacheStore = defineStore('dataCache', {
             } else {
               this.clearComponentCache(type)
             }
+            // HIGHEST PRIORITY: Force immediate refresh after deletion
+            setTimeout(() => {
+              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+            }, 150)
             break
         }
         
@@ -127,6 +142,10 @@ export const useDataCacheStore = defineStore('dataCache', {
         if (Array.isArray(types)) {
           types.forEach(type => {
             this.clearComponentCache(type)
+            // HIGHEST PRIORITY: Force immediate refresh after pending changes applied
+            setTimeout(() => {
+              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+            }, 150)
           })
         }
         
@@ -140,6 +159,10 @@ export const useDataCacheStore = defineStore('dataCache', {
         if (Array.isArray(types)) {
           types.forEach(type => {
             this.clearComponentCache(type)
+            // HIGHEST PRIORITY: Force immediate refresh after local changes loaded
+            setTimeout(() => {
+              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+            }, 150)
           })
         }
         
@@ -147,11 +170,63 @@ export const useDataCacheStore = defineStore('dataCache', {
         this.clearCache('localChanges')
       })
       
+      // Also listen for direct window events (for immediate component operations)
+      const windowEventHandler = (event) => {
+        if (event.detail) {
+          const { action, type, id } = event.detail
+          
+          switch (action) {
+            case 'created':
+              this.clearComponentCache(type + 's') // Convert 'input' to 'inputs'
+              // HIGHEST PRIORITY: Immediate refresh after operation
+              setTimeout(() => {
+                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
+              }, 150)
+              break
+            case 'updated':
+              this.clearComponentCache(type + 's')
+              if (id) {
+                const detailCacheKey = `detail_${type + 's'}_${id}`
+                ongoingRequests.delete(detailCacheKey)
+              }
+              // HIGHEST PRIORITY: Immediate refresh after operation
+              setTimeout(() => {
+                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
+              }, 150)
+              break
+            case 'deleted':
+              if (id) {
+                this.clearComponentRelatedCaches(type + 's', id)
+              } else {
+                this.clearComponentCache(type + 's')
+              }
+              // HIGHEST PRIORITY: Immediate refresh after operation
+              setTimeout(() => {
+                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
+              }, 150)
+              break
+          }
+          
+          // For projects, also clear cluster info cache
+          if (type === 'project') {
+            this.clearCache('clusterInfo')
+            this.clearCache('clusterProjectStates')
+          }
+        }
+      }
+      
+      window.addEventListener('componentChanged', windowEventHandler)
+      
+      const windowCleanup = () => {
+        window.removeEventListener('componentChanged', windowEventHandler)
+      }
+      
       // Store cleanup functions
       this._eventCleanupFunctions.push(
         componentChangedCleanup,
         pendingChangesCleanup,
-        localChangesCleanup
+        localChangesCleanup,
+        windowCleanup
       )
       
     },
@@ -212,15 +287,31 @@ export const useDataCacheStore = defineStore('dataCache', {
     },
     
     // Get component data
-    async fetchComponents(type, forceRefresh = false) {
+    async fetchComponents(type, forceRefresh = false, isPriorityRefresh = false) {
       // Initialize event listeners on first use
       this.initializeEventListeners()
       
       const cacheKey = `components_${type}`
       
-      // If there is already an in-flight request for this key, return the same Promise
-      if (ongoingRequests.has(cacheKey)) {
-        return ongoingRequests.get(cacheKey)
+      // HIGHEST PRIORITY: If this is a priority refresh, cancel existing request and proceed immediately
+      if (isPriorityRefresh) {
+        priorityRefreshQueue.add(cacheKey)
+        if (ongoingRequests.has(cacheKey)) {
+          // Cancel existing request to prioritize this one
+          ongoingRequests.delete(cacheKey)
+        }
+      } else {
+        // If there is already an in-flight request for this key, return the same Promise
+        if (ongoingRequests.has(cacheKey)) {
+          return ongoingRequests.get(cacheKey)
+        }
+        
+        // If this is in priority queue, don't proceed with normal request
+        if (priorityRefreshQueue.has(cacheKey)) {
+          // Wait a bit and try again
+          await new Promise(resolve => setTimeout(resolve, 50))
+          return this.fetchComponents(type, forceRefresh, false)
+        }
       }
 
       const cache = this.components[type]
@@ -265,6 +356,8 @@ export const useDataCacheStore = defineStore('dataCache', {
         } finally {
           cache.loading = false
           ongoingRequests.delete(cacheKey)
+          // Clean up priority queue
+          priorityRefreshQueue.delete(cacheKey)
         }
       })()
 

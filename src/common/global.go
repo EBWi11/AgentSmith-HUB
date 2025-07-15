@@ -17,6 +17,10 @@ var RawConfigMu sync.RWMutex
 
 var GlobalMu sync.RWMutex
 
+// Dedicated lock for project lifecycle operations (start, stop, restart)
+// This ensures project operations are serialized and prevents concurrent cleanup issues
+var ProjectOperationMu sync.Mutex
+
 // Global cluster state
 var (
 	IsLeader bool

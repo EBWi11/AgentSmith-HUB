@@ -178,10 +178,7 @@ func WriteComponentFile(path string, content string) error {
 			case "project":
 				project.SetProjectNew(id, content)
 			case "plugin":
-				if plugin.PluginsNew == nil {
-					plugin.PluginsNew = make(map[string]string)
-				}
-				plugin.PluginsNew[id] = content
+				plugin.SetPluginNew(id, content)
 			}
 		}
 	}
@@ -1099,11 +1096,9 @@ func createComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	// Only lock for memory operations
-	common.GlobalMu.Lock()
 	switch componentType {
 	case "plugin":
-		plugin.PluginsNew[request.ID] = request.Raw
+		plugin.SetPluginNew(request.ID, request.Raw)
 	case "input":
 		project.SetInputNew(request.ID, request.Raw)
 	case "output":
@@ -1113,7 +1108,6 @@ func createComponent(componentType string, c echo.Context) error {
 	case "project":
 		project.SetProjectNew(request.ID, request.Raw)
 	}
-	common.GlobalMu.Unlock()
 
 	// Publish instruction for component creation (NEW - this was missing!)
 	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
@@ -1225,141 +1219,38 @@ func deleteComponent(componentType string, c echo.Context) error {
 		})
 	}
 
-	// Critical section: Check usage and perform deletion atomically
-	// First check if component exists and get project reference without holding lock
-	var componentExists bool
-	var projectToStop *project.Project
+	// Safely delete component using encapsulated functions
+	var affectedProjects []string
+	var deletionErr error
 
-	common.GlobalMu.RLock()
 	switch componentType {
 	case "ruleset":
-		_, componentExists = project.GetRuleset(id)
+		affectedProjects, deletionErr = project.SafeDeleteRuleset(id)
 	case "input":
-		_, componentExists = project.GetInput(id)
+		affectedProjects, deletionErr = project.SafeDeleteInput(id)
 	case "output":
-		_, componentExists = project.GetOutput(id)
+		affectedProjects, deletionErr = project.SafeDeleteOutput(id)
 	case "project":
-		if proj, exists := project.GetProject(id); exists {
-			componentExists = true
-			if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
-				projectToStop = proj
-			}
-		}
+		affectedProjects, deletionErr = project.SafeDeleteProject(id)
 	case "plugin":
-		_, componentExists = plugin.Plugins[id]
-	}
-	common.GlobalMu.RUnlock()
-
-	// Stop project outside of lock to prevent deadlock
-	if projectToStop != nil {
-		logger.Info("Stopping running project before deletion", "project_id", id)
-		// Note: Project.Stop() already includes final statistics collection
-		if err := projectToStop.Stop(); err != nil {
-			// Record failed deletion operation
-			RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("Failed to stop project before deletion: %v", err), []string{})
-			return c.JSON(http.StatusConflict, map[string]string{
-				"error": fmt.Sprintf("Failed to stop project before deletion: %v", err),
-			})
-		}
+		affectedProjects, deletionErr = plugin.SafeDeletePlugin(id)
+	default:
+		deletionErr = fmt.Errorf("unsupported component type: %s", componentType)
 	}
 
-	// Now acquire lock for deletion operations
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	if componentExists {
-		// For projects, wait for project to fully stop
-		if componentType == "project" && projectToStop != nil {
-			// Wait for project to fully stop
-			timeout := time.After(30 * time.Second)
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-timeout:
-					// Record failed deletion operation
-					RecordComponentDelete(componentType, id, "failed", "Timeout waiting for project to stop", []string{})
-					return c.JSON(http.StatusConflict, map[string]string{
-						"error": "Timeout waiting for project to stop",
-					})
-				case <-ticker.C:
-					// Check project status without additional locking since we already hold the lock
-					if proj, exists := project.GetProject(id); exists && proj.Status == common.StatusStopped {
-						goto projectStopped
-					}
-				}
-			}
-		projectStopped:
-			logger.Info("Project stopped successfully before deletion", "project_id", id)
-		} else {
-			// For other components, check if used by any project
-			projects := project.GetAllProjects()
-			for _, p := range projects {
-				var inUse bool
-				switch componentType {
-				case "ruleset":
-					_, inUse = p.Rulesets[id]
-				case "input":
-					_, inUse = p.Inputs[id]
-				case "output":
-					_, inUse = p.Outputs[id]
-				}
-				if inUse {
-					// Record failed deletion operation
-					RecordComponentDelete(componentType, id, "failed", fmt.Sprintf("%s is currently in use by project %s", id, p.Id), []string{})
-					return c.JSON(http.StatusConflict, map[string]string{
-						"error": fmt.Sprintf("%s is currently in use by project %s", id, p.Id),
-					})
-				}
-			}
-		}
-
-		// Remove component from global mapping
-		switch componentType {
-		case "ruleset":
-			project.DeleteRuleset(id)
-		case "input":
-			project.DeleteInput(id)
-		case "output":
-			project.DeleteOutput(id)
-		case "project":
-			project.DeleteProject(id)
-		case "plugin":
-			// Reset statistics before deleting plugin
-			if pluginInstance, exists := plugin.Plugins[id]; exists {
-				pluginInstance.ResetAllStats()
-				logger.Debug("Reset plugin statistics during deletion", "plugin", id)
-			}
-			delete(plugin.Plugins, id)
-		}
+	if deletionErr != nil {
+		// Record failed deletion operation
+		RecordComponentDelete(componentType, id, "failed", deletionErr.Error(), []string{})
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": deletionErr.Error(),
+		})
 	}
 
-	// Delete from memory maps (both temporary and formal)
-	switch componentType {
-	case "ruleset":
-		project.DeleteRulesetNew(id)
-	case "input":
-		project.DeleteInputNew(id)
-	case "output":
-		project.DeleteOutputNew(id)
-	case "project":
-		project.DeleteProjectNew(id)
-	case "plugin":
-		delete(plugin.PluginsNew, id)
-	}
-
-	// Delete from global config maps
-	common.DeleteRawConfig(componentType, id)
+	// Get the affected projects from the safe delete operation for cluster notification
 
 	// If it's leader node, delete files and notify followers
 	if common.IsCurrentNodeLeader() {
-		// Get affected projects before deletion
-		affectedProjects := []string{}
-		if componentType != "project" {
-			// For non-project components, get affected projects
-			affectedProjects = project.GetAffectedProjects(componentType, id)
-		}
+		// Use affected projects from safe delete operation (already calculated)
 
 		// Delete temporary file if exists
 		if tempExists {
@@ -1503,7 +1394,7 @@ func updateComponent(componentType string, c echo.Context) error {
 		tempPath, tempExists := GetComponentPath(componentType, id, true)
 		if tempExists {
 			_ = os.Remove(tempPath)
-			// Also remove from memory with lock protection
+			// Also remove from memory using safe accessors
 			switch componentType {
 			case "input":
 				project.DeleteInputNew(id)
@@ -1514,9 +1405,7 @@ func updateComponent(componentType string, c echo.Context) error {
 			case "project":
 				project.DeleteProjectNew(id)
 			case "plugin":
-				common.GlobalMu.Lock()
-				delete(plugin.PluginsNew, id)
-				common.GlobalMu.Unlock()
+				plugin.DeletePluginNew(id)
 			}
 		}
 		return c.JSON(http.StatusOK, map[string]string{"message": "content identical to original file, no changes needed"})
@@ -1529,8 +1418,6 @@ func updateComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
 	}
 
-	// Update memory with lock protection
-	common.GlobalMu.Lock()
 	switch componentType {
 	case "input":
 		project.SetInputNew(id, req.Raw)
@@ -1541,9 +1428,8 @@ func updateComponent(componentType string, c echo.Context) error {
 	case "project":
 		project.SetProjectNew(id, req.Raw)
 	case "plugin":
-		plugin.PluginsNew[id] = req.Raw
+		plugin.SetPluginNew(id, req.Raw)
 	}
-	common.GlobalMu.Unlock()
 
 	// Record component update operation history (for leader visibility)
 	if common.IsCurrentNodeLeader() {
@@ -1778,12 +1664,10 @@ func cancelOutputUpgrade(c echo.Context) error {
 func cancelPluginUpgrade(c echo.Context) error {
 	id := c.Param("id")
 
-	// Lock for memory operations
-	common.GlobalMu.Lock()
-	delete(plugin.PluginsNew, id)
-	common.GlobalMu.Unlock()
+	// Use safe accessor for memory operations
+	plugin.DeletePluginNew(id)
 
-	// Delete temp file if exists (without holding lock)
+	// Delete temp file if exists
 	tempPath, tempExists := GetComponentPath("plugin", id, true)
 	if tempExists {
 		_ = os.Remove(tempPath)
@@ -3037,12 +2921,9 @@ func getPluginUsage(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "plugin ID is required"})
 	}
 
-	// Check if plugin exists
-	common.GlobalMu.RLock()
-	_, exists := plugin.Plugins[pluginID]
-	common.GlobalMu.RUnlock()
-
-	if !exists {
+	// Check if plugin exists using safe accessor
+	content := getExistingPluginContent(pluginID)
+	if content == "" {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 	}
 
@@ -3084,9 +2965,7 @@ func analyzePluginUsage(pluginID string) PluginUsageInfo {
 		TotalUsage:     0,
 	}
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
+	// Use safe accessors instead of long-term locking
 	// Analyze ruleset usage
 	rulesetUsageMap := make(map[string]*RulesetUsageInfo)
 

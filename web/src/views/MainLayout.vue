@@ -81,6 +81,7 @@ import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
 import ProjectTestModal from '../components/ProjectTestModal.vue'
 import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
+import { useDataCacheStore } from '../stores/dataCache'
 
 // State
 const selected = ref(null)
@@ -310,6 +311,13 @@ function refreshSidebar(type) {
   if (sidebarRef.value && typeof sidebarRef.value.fetchItems === 'function') {
     sidebarRef.value.fetchItems(type)
   }
+  
+  // HIGHEST PRIORITY: Clear cache and force immediate refresh
+  const dataCache = useDataCacheStore()
+  dataCache.clearComponentCache(type)
+  setTimeout(() => {
+    dataCache.fetchComponents(type, true, true) // isPriorityRefresh = true
+  }, 150)
 }
 
 // Open the pending changes view

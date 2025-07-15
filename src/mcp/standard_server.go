@@ -375,8 +375,7 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 		}
 	}
 
-	// Add ruleset resources
-	common.GlobalMu.RLock()
+	// Add ruleset resources using safe accessor
 	project.ForEachRuleset(func(rsID string, _ *rules_engine.Ruleset) bool {
 		// Dynamically find projects using this ruleset (replaces static OwnerProjects)
 		owners := findProjectsUsingRuleset(rsID)
@@ -400,7 +399,6 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 		})
 		return true
 	})
-	common.GlobalMu.RUnlock()
 
 	// Apply filtering & pagination
 	filtered := make([]map[string]interface{}, 0)
@@ -476,9 +474,7 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				return s.createJSONRPCError(id, -32602, "Project not found", uri)
 			}
 		case "ruleset":
-			common.GlobalMu.RLock()
 			rs, ok := project.GetRuleset(resID)
-			common.GlobalMu.RUnlock()
 
 			if !ok || rs == nil {
 				return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)

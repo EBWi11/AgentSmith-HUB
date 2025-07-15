@@ -2146,6 +2146,11 @@ async function confirmAddName() {
         throw new Error('Unsupported type')
     }
     
+    // Trigger global event for immediate cache refresh
+    window.dispatchEvent(new CustomEvent('componentChanged', {
+      detail: { action: 'created', type: addType.value.slice(0, -1), id: addName.value } // Remove 's' from type
+    }))
+    
     // Refresh the list - for creation, we need to rebuild the list structure
     if (addType.value === 'projects') {
       await fetchProjectsComplete()
@@ -2235,6 +2240,11 @@ async function confirmDelete() {
     
     // Emit delete event to notify parent component
     emit('item-deleted', { type, id: item.id })
+    
+    // Also trigger global event for immediate cache refresh
+    window.dispatchEvent(new CustomEvent('componentChanged', {
+      detail: { action: 'deleted', type: type.slice(0, -1), id: item.id } // Remove 's' from type (e.g., 'inputs' -> 'input')
+    }))
     
     // If the currently selected item is the one being deleted, clear selection
     if (props.selected && props.selected.type === type && props.selected.id === item.id) {

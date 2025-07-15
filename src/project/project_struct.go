@@ -6,6 +6,7 @@ import (
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -523,4 +524,223 @@ func GetRulesetsCount() int {
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
 	return len(GlobalProject.Rulesets)
+}
+
+// ===== Safe deletion functions with internal locking =====
+
+// SafeDeleteRuleset safely deletes a ruleset with all necessary validations and locking
+func SafeDeleteRuleset(id string) ([]string, error) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Check if component exists
+	_, componentExists := GlobalProject.Rulesets[id]
+	if !componentExists {
+		// Check if only exists in temporary storage
+		_, tempExists := GlobalProject.RulesetsNew[id]
+		if !tempExists {
+			return nil, fmt.Errorf("ruleset not found: %s", id)
+		}
+		// Only exists in temp, just remove from temp
+		delete(GlobalProject.RulesetsNew, id)
+		common.DeleteRawConfig("ruleset", id)
+		return []string{}, nil
+	}
+
+	// Check if used by any project
+	affectedProjects := make([]string, 0)
+	for projectID, proj := range GlobalProject.Projects {
+		if _, inUse := proj.Rulesets[id]; inUse {
+			return nil, fmt.Errorf("ruleset %s is currently in use by project %s", id, projectID)
+		}
+	}
+
+	// Stop the component if not in use
+	if rs, exists := GlobalProject.Rulesets[id]; exists {
+		projectsUsingRuleset := UsageCounter.CountProjectsUsingRuleset(id)
+		if projectsUsingRuleset == 0 {
+			logger.Info("Stopping ruleset component for deletion", "id", id)
+			// Temporarily release lock for stop operation to prevent deadlock
+			common.GlobalMu.Unlock()
+			err := rs.Stop()
+			common.GlobalMu.Lock()
+			if err != nil {
+				logger.Error("Failed to stop ruleset", "id", id, "error", err)
+			}
+			common.GlobalDailyStatsManager.CollectAllComponentsData()
+		}
+	}
+
+	// Remove from global mappings
+	delete(GlobalProject.Rulesets, id)
+	delete(GlobalProject.RulesetsNew, id)
+	common.DeleteRawConfig("ruleset", id)
+
+	return affectedProjects, nil
+}
+
+// SafeDeleteInput safely deletes an input with all necessary validations and locking
+func SafeDeleteInput(id string) ([]string, error) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Check if component exists
+	_, componentExists := GlobalProject.Inputs[id]
+	if !componentExists {
+		// Check if only exists in temporary storage
+		_, tempExists := GlobalProject.InputsNew[id]
+		if !tempExists {
+			return nil, fmt.Errorf("input not found: %s", id)
+		}
+		// Only exists in temp, just remove from temp
+		delete(GlobalProject.InputsNew, id)
+		common.DeleteRawConfig("input", id)
+		return []string{}, nil
+	}
+
+	// Check if used by any project
+	affectedProjects := make([]string, 0)
+	for projectID, proj := range GlobalProject.Projects {
+		if _, inUse := proj.Inputs[id]; inUse {
+			return nil, fmt.Errorf("input %s is currently in use by project %s", id, projectID)
+		}
+	}
+
+	// Stop the component if not in use
+	if inp, exists := GlobalProject.Inputs[id]; exists {
+		projectsUsingInput := UsageCounter.CountProjectsUsingInput(id)
+		if projectsUsingInput == 0 {
+			logger.Info("Stopping input component for deletion", "id", id)
+			// Temporarily release lock for stop operation to prevent deadlock
+			common.GlobalMu.Unlock()
+			err := inp.Stop()
+			common.GlobalMu.Lock()
+			if err != nil {
+				logger.Error("Failed to stop input", "id", id, "error", err)
+			}
+			common.GlobalDailyStatsManager.CollectAllComponentsData()
+		}
+	}
+
+	// Remove from global mappings
+	delete(GlobalProject.Inputs, id)
+	delete(GlobalProject.InputsNew, id)
+	common.DeleteRawConfig("input", id)
+
+	return affectedProjects, nil
+}
+
+// SafeDeleteOutput safely deletes an output with all necessary validations and locking
+func SafeDeleteOutput(id string) ([]string, error) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Check if component exists
+	_, componentExists := GlobalProject.Outputs[id]
+	if !componentExists {
+		// Check if only exists in temporary storage
+		_, tempExists := GlobalProject.OutputsNew[id]
+		if !tempExists {
+			return nil, fmt.Errorf("output not found: %s", id)
+		}
+		// Only exists in temp, just remove from temp
+		delete(GlobalProject.OutputsNew, id)
+		common.DeleteRawConfig("output", id)
+		return []string{}, nil
+	}
+
+	// Check if used by any project
+	affectedProjects := make([]string, 0)
+	for projectID, proj := range GlobalProject.Projects {
+		if _, inUse := proj.Outputs[id]; inUse {
+			return nil, fmt.Errorf("output %s is currently in use by project %s", id, projectID)
+		}
+	}
+
+	// Stop the component if not in use
+	if out, exists := GlobalProject.Outputs[id]; exists {
+		projectsUsingOutput := UsageCounter.CountProjectsUsingOutput(id)
+		if projectsUsingOutput == 0 {
+			logger.Info("Stopping output component for deletion", "id", id)
+			// Temporarily release lock for stop operation to prevent deadlock
+			common.GlobalMu.Unlock()
+			err := out.Stop()
+			common.GlobalMu.Lock()
+			if err != nil {
+				logger.Error("Failed to stop output", "id", id, "error", err)
+			}
+			common.GlobalDailyStatsManager.CollectAllComponentsData()
+		}
+	}
+
+	// Remove from global mappings
+	delete(GlobalProject.Outputs, id)
+	delete(GlobalProject.OutputsNew, id)
+	common.DeleteRawConfig("output", id)
+
+	return affectedProjects, nil
+}
+
+// SafeDeleteProject safely deletes a project with all necessary validations and locking
+func SafeDeleteProject(id string) ([]string, error) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	// Check if component exists
+	proj, componentExists := GlobalProject.Projects[id]
+	if !componentExists {
+		// Check if only exists in temporary storage
+		_, tempExists := GlobalProject.ProjectsNew[id]
+		if !tempExists {
+			return nil, fmt.Errorf("project not found: %s", id)
+		}
+		// Only exists in temp, just remove from temp
+		delete(GlobalProject.ProjectsNew, id)
+		common.DeleteRawConfig("project", id)
+		return []string{}, nil
+	}
+
+	// Stop project if running
+	if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
+		logger.Info("Stopping running project before deletion", "project_id", id)
+
+		// Temporarily release lock for stop operation to prevent deadlock
+		common.GlobalMu.Unlock()
+
+		// Note: Project.Stop() already includes final statistics collection
+		if err := proj.Stop(); err != nil {
+			// Re-acquire lock before returning
+			common.GlobalMu.Lock()
+			return nil, fmt.Errorf("failed to stop project before deletion: %v", err)
+		}
+
+		// Re-acquire lock after stop
+		common.GlobalMu.Lock()
+
+		// Wait for project to fully stop
+		timeout := time.After(30 * time.Second)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-timeout:
+				return nil, fmt.Errorf("timeout waiting for project to stop")
+			case <-ticker.C:
+				// Check project status without additional locking since we already hold the lock
+				if proj.Status == common.StatusStopped {
+					goto projectStopped
+				}
+			}
+		}
+	projectStopped:
+		logger.Info("Project stopped successfully before deletion", "project_id", id)
+	}
+
+	// Remove from global mappings
+	delete(GlobalProject.Projects, id)
+	delete(GlobalProject.ProjectsNew, id)
+	common.DeleteRawConfig("project", id)
+
+	return []string{id}, nil
 }

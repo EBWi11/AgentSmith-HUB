@@ -158,9 +158,6 @@ func analyzeProjectContext(targetProjects []string, rulePurpose string) (Project
 		CommonFields:      make([]string, 0),
 	}
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
 	allProjects := project.GetAllProjects()
 	context.TotalProjects = len(allProjects)
 
@@ -848,9 +845,7 @@ func getSampleDataForOutput(outputID string) (map[string]interface{}, string, er
 
 // Get sample data for a specific project (simplified using PNS)
 func getSampleDataForProject(projectID string) (map[string]interface{}, string, error) {
-	common.GlobalMu.RLock()
 	proj, exists := project.GetProject(projectID)
-	common.GlobalMu.RUnlock()
 
 	if !exists {
 		return map[string]interface{}{}, "", fmt.Errorf("project %s not found", projectID)

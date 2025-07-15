@@ -25,9 +25,7 @@ func getLocalChanges(c echo.Context) error {
 	changes := make([]map[string]interface{}, 0)
 	configRoot := common.Config.ConfigRoot
 
-	// Lock for reading memory state
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
+	// Use safe accessors instead of long-term locking
 
 	// Check inputs
 	inputDir := filepath.Join(configRoot, "input")
@@ -619,8 +617,6 @@ func loadLocalChanges(c echo.Context) error {
 				if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
 					logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
 				}
-			} else {
-				common.GlobalMu.RUnlock()
 			}
 		}
 	}
@@ -700,8 +696,6 @@ func loadSingleLocalChange(c echo.Context) error {
 			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
 				logger.Error("Failed to publish project restart instructions", "affected_projects", projectID, "error", err)
 			}
-		} else {
-			common.GlobalMu.RUnlock()
 		}
 	}
 

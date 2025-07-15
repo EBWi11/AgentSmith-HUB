@@ -933,7 +933,14 @@ async function saveEdit(content) {
       } else if (currentItem.type === 'projects') {
         ProjectTestCache.clear(currentItem.id);
       }
+      
+      // Emit to parent component
       emit('updated', item)
+      
+      // Also trigger global event for immediate cache refresh
+      window.dispatchEvent(new CustomEvent('componentChanged', {
+        detail: { action: 'updated', type: item.type, id: item.id }
+      }))
     }
   })
   
@@ -980,7 +987,14 @@ async function saveNew(content) {
       } else if (currentItem.type === 'projects') {
         ProjectTestCache.clear(currentItem.id);
       }
+      
+      // Emit to parent component
       emit('created', item)
+      
+      // Also trigger global event for immediate cache refresh
+      window.dispatchEvent(new CustomEvent('componentChanged', {
+        detail: { action: 'created', type: item.type, id: item.id }
+      }))
     }
   })
 }
