@@ -113,6 +113,3 @@ type ComponentUpdateOperation struct {
 	Lock             *DistributedLock
 	mutex            sync.RWMutex
 }
-
-// Global component update manager
-var GlobalComponentUpdateManager *ComponentUpdateManager

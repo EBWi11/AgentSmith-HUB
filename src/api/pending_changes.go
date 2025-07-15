@@ -533,7 +533,7 @@ func ApplyPendingChangesEnhanced(c echo.Context) error {
 	// Convert projects to restart to slice
 	for projectID := range projectsToRestart {
 		common.GlobalMu.RLock()
-		if p, ok := project.GlobalProject.Projects[projectID]; ok {
+		if p, ok := project.GetProject(projectID); ok {
 			common.GlobalMu.RUnlock()
 			err := p.Restart()
 			if err != nil {
@@ -674,13 +674,13 @@ func CancelPendingChange(c echo.Context) error {
 	case "plugin":
 		delete(plugin.PluginsNew, id)
 	case "input":
-		delete(project.GlobalProject.InputsNew, id)
+		project.DeleteInputNew(id)
 	case "output":
-		delete(project.GlobalProject.OutputsNew, id)
+		project.DeleteOutputNew(id)
 	case "ruleset":
-		delete(project.GlobalProject.RulesetsNew, id)
+		project.DeleteRulesetNew(id)
 	case "project":
-		delete(project.GlobalProject.ProjectsNew, id)
+		project.DeleteProjectNew(id)
 	}
 	common.GlobalMu.Unlock()
 
@@ -736,13 +736,13 @@ func CancelAllPendingChanges(c echo.Context) error {
 		case "plugin":
 			delete(plugin.PluginsNew, change.ID)
 		case "input":
-			delete(project.GlobalProject.InputsNew, change.ID)
+			project.DeleteInputNew(change.ID)
 		case "output":
-			delete(project.GlobalProject.OutputsNew, change.ID)
+			project.DeleteOutputNew(change.ID)
 		case "ruleset":
-			delete(project.GlobalProject.RulesetsNew, change.ID)
+			project.DeleteRulesetNew(change.ID)
 		case "project":
-			delete(project.GlobalProject.ProjectsNew, change.ID)
+			project.DeleteProjectNew(change.ID)
 		}
 		common.GlobalMu.Unlock()
 
@@ -908,9 +908,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 	switch req.Type {
 	case "input":
 		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldInput, exists := project.GlobalProject.Inputs[req.ID]
-		common.GlobalMu.RUnlock()
+		oldInput, exists := project.GetInput(req.ID)
 		if exists {
 			// Only stop if no running projects are using it
 			projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(req.ID)
@@ -940,20 +938,15 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 
 		// Replace in global registry
 		common.GlobalMu.Lock()
-		if project.GlobalProject.Inputs == nil {
-			project.GlobalProject.Inputs = make(map[string]*input.Input)
-		}
-		project.GlobalProject.Inputs[req.ID] = newInput
-		delete(project.GlobalProject.InputsNew, req.ID)
+		project.SetInput(req.ID, newInput)
+		project.DeleteInputNew(req.ID)
 		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("input", req.ID)
 
 	case "output":
 		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldOutput, exists := project.GlobalProject.Outputs[req.ID]
-		common.GlobalMu.RUnlock()
+		oldOutput, exists := project.GetOutput(req.ID)
 		if exists {
 			// Only stop if no running projects are using it
 			projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(req.ID)
@@ -983,20 +976,15 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 
 		// Replace in global registry
 		common.GlobalMu.Lock()
-		if project.GlobalProject.Outputs == nil {
-			project.GlobalProject.Outputs = make(map[string]*output.Output)
-		}
-		project.GlobalProject.Outputs[req.ID] = newOutput
-		delete(project.GlobalProject.OutputsNew, req.ID)
+		project.SetOutput(req.ID, newOutput)
+		project.DeleteOutputNew(req.ID)
 		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("output", req.ID)
 
 	case "ruleset":
 		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
-		common.GlobalMu.RUnlock()
+		oldRuleset, exists := project.GetRuleset(req.ID)
 		if exists {
 			// Only stop if no running projects are using it
 			projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(req.ID)
@@ -1026,20 +1014,15 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 
 		// Replace in global registry
 		common.GlobalMu.Lock()
-		if project.GlobalProject.Rulesets == nil {
-			project.GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
-		}
-		project.GlobalProject.Rulesets[req.ID] = newRuleset
-		delete(project.GlobalProject.RulesetsNew, req.ID)
+		project.SetRuleset(req.ID, newRuleset)
+		project.DeleteRulesetNew(req.ID)
 		common.GlobalMu.Unlock()
 
 		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
 
 	case "project":
 		// Stop old component if it exists
-		common.GlobalMu.RLock()
-		oldProject, exists := project.GlobalProject.Projects[req.ID]
-		common.GlobalMu.RUnlock()
+		oldProject, exists := project.GetProject(req.ID)
 		if exists {
 			logger.Info("Stopping old project component for reload", "id", req.ID)
 			err := oldProject.Stop()
@@ -1062,11 +1045,8 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 
 		// Replace in global registry
 		common.GlobalMu.Lock()
-		if project.GlobalProject.Projects == nil {
-			project.GlobalProject.Projects = make(map[string]*project.Project)
-		}
-		project.GlobalProject.Projects[req.ID] = newProject
-		delete(project.GlobalProject.ProjectsNew, req.ID)
+		project.SetProject(req.ID, newProject)
+		project.DeleteProjectNew(req.ID)
 		common.GlobalMu.Unlock()
 
 		// Projects don't have affected projects since they restart themselves
@@ -1221,13 +1201,13 @@ func ApplySingleChange(c echo.Context) error {
 	case "plugin":
 		content, found = plugin.PluginsNew[req.ID]
 	case "input":
-		content, found = project.GlobalProject.InputsNew[req.ID]
+		content, found = project.GetInputNew(req.ID)
 	case "output":
-		content, found = project.GlobalProject.OutputsNew[req.ID]
+		content, found = project.GetOutputNew(req.ID)
 	case "ruleset":
-		content, found = project.GlobalProject.RulesetsNew[req.ID]
+		content, found = project.GetRulesetNew(req.ID)
 	case "project":
-		content, found = project.GlobalProject.ProjectsNew[req.ID]
+		content, found = project.GetProjectNew(req.ID)
 	default:
 		common.GlobalMu.RUnlock()
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid component type"})
@@ -1299,7 +1279,7 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
-				oldInput, exists := project.GlobalProject.Inputs[req.ID]
+				oldInput, exists := project.GetInput(req.ID)
 				common.GlobalMu.RUnlock()
 
 				var oldContent string
@@ -1329,7 +1309,7 @@ func ApplySingleChange(c echo.Context) error {
 					RecordChangePush("input", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
-					project.GlobalProject.Inputs[req.ID] = newInput
+					project.SetInput(req.ID, newInput)
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded input component", "id", req.ID)
 					// Record successful operation
@@ -1338,14 +1318,14 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.InputsNew, req.ID)
+				project.DeleteInputNew(req.ID)
 				common.GlobalMu.Unlock()
 			case "output":
 				outputPath := path.Join(common.Config.ConfigRoot, "output", req.ID+".yaml")
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
-				oldOutput, exists := project.GlobalProject.Outputs[req.ID]
+				oldOutput, exists := project.GetOutput(req.ID)
 				common.GlobalMu.RUnlock()
 
 				var oldContent string
@@ -1376,7 +1356,7 @@ func ApplySingleChange(c echo.Context) error {
 					RecordChangePush("output", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
-					project.GlobalProject.Outputs[req.ID] = newOutput
+					project.SetOutput(req.ID, newOutput)
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded output component", "id", req.ID)
 					// Record successful operation
@@ -1385,14 +1365,14 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.OutputsNew, req.ID)
+				project.DeleteOutputNew(req.ID)
 				common.GlobalMu.Unlock()
 			case "ruleset":
 				rulesetPath := path.Join(common.Config.ConfigRoot, "ruleset", req.ID+".xml")
 
 				// Check if old component exists and count projects using it (using centralized counter)
 				common.GlobalMu.RLock()
-				oldRuleset, exists := project.GlobalProject.Rulesets[req.ID]
+				oldRuleset, exists := project.GetRuleset(req.ID)
 				common.GlobalMu.RUnlock()
 
 				var oldContent string
@@ -1422,7 +1402,7 @@ func ApplySingleChange(c echo.Context) error {
 					RecordChangePush("ruleset", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
-					project.GlobalProject.Rulesets[req.ID] = newRuleset
+					project.SetRuleset(req.ID, newRuleset)
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded ruleset component", "id", req.ID)
 					// Record successful operation
@@ -1431,7 +1411,7 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.RulesetsNew, req.ID)
+				project.DeleteRulesetNew(req.ID)
 				common.GlobalMu.Unlock()
 			case "project":
 				projectPath := path.Join(common.Config.ConfigRoot, "project", req.ID+".yaml")
@@ -1440,7 +1420,7 @@ func ApplySingleChange(c echo.Context) error {
 				var wasRunning bool
 				var oldContent string
 				common.GlobalMu.RLock()
-				oldProject, exists := project.GlobalProject.Projects[req.ID]
+				oldProject, exists := project.GetProject(req.ID)
 				common.GlobalMu.RUnlock()
 				if exists {
 					wasRunning = (oldProject.Status == common.StatusRunning)
@@ -1460,7 +1440,7 @@ func ApplySingleChange(c echo.Context) error {
 					RecordChangePush("project", req.ID, oldContent, content, "", "failed", reloadErr.Error())
 				} else {
 					common.GlobalMu.Lock()
-					project.GlobalProject.Projects[req.ID] = newProject
+					project.SetProject(req.ID, newProject)
 					common.GlobalMu.Unlock()
 					logger.Info("Successfully reloaded project component", "id", req.ID)
 					// Restart project if it was previously running
@@ -1476,7 +1456,7 @@ func ApplySingleChange(c echo.Context) error {
 
 				// Only clear the memory map entry after successful recording
 				common.GlobalMu.Lock()
-				delete(project.GlobalProject.ProjectsNew, req.ID)
+				project.DeleteProjectNew(req.ID)
 				common.GlobalMu.Unlock()
 			}
 		}
@@ -1499,7 +1479,7 @@ func ApplySingleChange(c echo.Context) error {
 
 		for _, id := range affectedProjects {
 			common.GlobalMu.RLock()
-			if p, ok := project.GlobalProject.Projects[id]; ok {
+			if p, ok := project.GetProject(id); ok {
 				common.GlobalMu.RUnlock()
 				err := p.Restart()
 				if err != nil {
@@ -1599,7 +1579,7 @@ func CreateTempFile(c echo.Context) error {
 		originalPath = path.Join(configRoot, "input", id+".yaml")
 		tempPath = originalPath + ".new"
 
-		if i, ok := project.GlobalProject.Inputs[id]; ok {
+		if i, ok := project.GetInput(id); ok {
 			content = i.Config.RawConfig
 		} else {
 			common.GlobalMu.RUnlock()
@@ -1611,7 +1591,7 @@ func CreateTempFile(c echo.Context) error {
 		originalPath = path.Join(configRoot, "output", id+".yaml")
 		tempPath = originalPath + ".new"
 
-		if o, ok := project.GlobalProject.Outputs[id]; ok {
+		if o, ok := project.GetOutput(id); ok {
 			content = o.Config.RawConfig
 		} else {
 			common.GlobalMu.RUnlock()
@@ -1623,7 +1603,7 @@ func CreateTempFile(c echo.Context) error {
 		originalPath = path.Join(configRoot, "ruleset", id+".xml")
 		tempPath = originalPath + ".new"
 
-		if ruleset, ok := project.GlobalProject.Rulesets[id]; ok {
+		if ruleset, ok := project.GetRuleset(id); ok {
 			content = ruleset.RawConfig
 		} else {
 			common.GlobalMu.RUnlock()
@@ -1635,7 +1615,7 @@ func CreateTempFile(c echo.Context) error {
 		originalPath = path.Join(configRoot, "project", id+".yaml")
 		tempPath = originalPath + ".new"
 
-		if proj, ok := project.GlobalProject.Projects[id]; ok {
+		if proj, ok := project.GetProject(id); ok {
 			content = proj.Config.RawConfig
 		} else {
 			common.GlobalMu.RUnlock()
@@ -1704,13 +1684,13 @@ func CreateTempFile(c echo.Context) error {
 	common.GlobalMu.Lock()
 	switch singularType {
 	case "input":
-		project.GlobalProject.InputsNew[id] = content
+		project.SetInputNew(id, content)
 	case "output":
-		project.GlobalProject.OutputsNew[id] = content
+		project.SetOutputNew(id, content)
 	case "ruleset":
-		project.GlobalProject.RulesetsNew[id] = content
+		project.SetRulesetNew(id, content)
 	case "project":
-		project.GlobalProject.ProjectsNew[id] = content
+		project.SetProjectNew(id, content)
 	case "plugin":
 		plugin.PluginsNew[id] = content
 	}
@@ -1785,13 +1765,13 @@ func DeleteTempFile(c echo.Context) error {
 	common.GlobalMu.Lock()
 	switch singularType {
 	case "input":
-		delete(project.GlobalProject.InputsNew, id)
+		project.DeleteInputNew(id)
 	case "output":
-		delete(project.GlobalProject.OutputsNew, id)
+		project.DeleteOutputNew(id)
 	case "ruleset":
-		delete(project.GlobalProject.RulesetsNew, id)
+		project.DeleteRulesetNew(id)
 	case "project":
-		delete(project.GlobalProject.ProjectsNew, id)
+		project.DeleteProjectNew(id)
 	case "plugin":
 		delete(plugin.PluginsNew, id)
 	}

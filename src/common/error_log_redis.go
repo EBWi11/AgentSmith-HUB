@@ -39,12 +39,12 @@ func WriteErrorLogToRedis(entry ErrorLogEntry) error {
 
 	// Use LPUSH to add to the front of the list (newest first)
 	// Keep only the last 10000 entries per node
-	if err := RedisLPush(key, string(jsonData), 10000); err != nil {
+	if err := RedisLPush(key, string(jsonData), 600000); err != nil {
 		return fmt.Errorf("failed to push error log to Redis: %w", err)
 	}
 
 	// Set TTL for the key to 7 days (7 * 24 * 60 * 60 = 604800 seconds)
-	if err := RedisExpire(key, 7*24*60*60); err != nil {
+	if err := RedisExpire(key, 14*24*60*60); err != nil {
 		// Don't fail if TTL setting fails, just log it
 		return nil
 	}

@@ -23,7 +23,7 @@ func GetComponentUsage(c echo.Context) error {
 	switch componentType {
 	case "rulesets":
 		// Check which projects use this ruleset (consider ProjectNodeSequence for independent instances)
-		for _, p := range project.GlobalProject.Projects {
+		project.ForEachProject(func(projectID string, p *project.Project) bool {
 			if ruleset, exists := p.Rulesets[id]; exists {
 				usage = append(usage, map[string]interface{}{
 					"type":                  "project",
@@ -33,10 +33,11 @@ func GetComponentUsage(c echo.Context) error {
 					"project_node_sequence": ruleset.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
-		}
+			return true
+		})
 	case "inputs":
 		// Check which projects use this input (inputs are typically shared, so check by ID)
-		for _, p := range project.GlobalProject.Projects {
+		project.ForEachProject(func(projectID string, p *project.Project) bool {
 			if input, exists := p.Inputs[id]; exists {
 				usage = append(usage, map[string]interface{}{
 					"type":                  "project",
@@ -46,10 +47,11 @@ func GetComponentUsage(c echo.Context) error {
 					"project_node_sequence": input.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
-		}
+			return true
+		})
 	case "outputs":
 		// Check which projects use this output (consider ProjectNodeSequence for independent instances)
-		for _, p := range project.GlobalProject.Projects {
+		project.ForEachProject(func(projectID string, p *project.Project) bool {
 			if output, exists := p.Outputs[id]; exists {
 				usage = append(usage, map[string]interface{}{
 					"type":                  "project",
@@ -59,7 +61,8 @@ func GetComponentUsage(c echo.Context) error {
 					"project_node_sequence": output.ProjectNodeSequence, // Include sequence for clarity
 				})
 			}
-		}
+			return true
+		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

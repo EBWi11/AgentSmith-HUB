@@ -10,6 +10,7 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -376,7 +377,7 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 
 	// Add ruleset resources
 	common.GlobalMu.RLock()
-	for rsID, _ := range project.GlobalProject.Rulesets {
+	project.ForEachRuleset(func(rsID string, _ *rules_engine.Ruleset) bool {
 		// Dynamically find projects using this ruleset (replaces static OwnerProjects)
 		owners := findProjectsUsingRuleset(rsID)
 		sampleCnt := 0
@@ -397,7 +398,8 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 				"sampleCount":   sampleCnt,
 			},
 		})
-	}
+		return true
+	})
 	common.GlobalMu.RUnlock()
 
 	// Apply filtering & pagination
@@ -465,7 +467,7 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 		switch resType {
 		case "project":
 			s.ProjectMu.RLock()
-			proj, ok := project.GlobalProject.Projects[resID]
+			proj, ok := project.GetProject(resID)
 			s.ProjectMu.RUnlock()
 			if ok && proj != nil && proj.Config != nil {
 				content = proj.Config.RawConfig
@@ -475,7 +477,7 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 			}
 		case "ruleset":
 			common.GlobalMu.RLock()
-			rs, ok := project.GlobalProject.Rulesets[resID]
+			rs, ok := project.GetRuleset(resID)
 			common.GlobalMu.RUnlock()
 
 			if !ok || rs == nil {
@@ -568,37 +570,12 @@ func (s *StandardMCPServer) createJSONRPCError(id interface{}, code int, message
 func findProjectsUsingRuleset(rulesetID string) []string {
 	projects := make([]string, 0)
 
-	for projectID, proj := range project.GlobalProject.Projects {
+	project.ForEachProject(func(projectID string, proj *project.Project) bool {
 		if _, exists := proj.Rulesets[rulesetID]; exists {
 			projects = append(projects, projectID)
 		}
-	}
-
-	return projects
-}
-
-// findProjectsUsingInput dynamically finds projects that use a specific input
-func findProjectsUsingInput(inputID string) []string {
-	projects := make([]string, 0)
-
-	for projectID, proj := range project.GlobalProject.Projects {
-		if _, exists := proj.Inputs[inputID]; exists {
-			projects = append(projects, projectID)
-		}
-	}
-
-	return projects
-}
-
-// findProjectsUsingOutput dynamically finds projects that use a specific output
-func findProjectsUsingOutput(outputID string) []string {
-	projects := make([]string, 0)
-
-	for projectID, proj := range project.GlobalProject.Projects {
-		if _, exists := proj.Outputs[outputID]; exists {
-			projects = append(projects, projectID)
-		}
-	}
+		return true
+	})
 
 	return projects
 }

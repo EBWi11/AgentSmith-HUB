@@ -2,8 +2,11 @@ package api
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/project"
+	"AgentSmith-HUB/rules_engine"
 	"fmt"
 	"net/http"
 	"sort"
@@ -158,7 +161,7 @@ func analyzeProjectContext(targetProjects []string, rulePurpose string) (Project
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
 
-	allProjects := project.GlobalProject.Projects
+	allProjects := project.GetAllProjects()
 	context.TotalProjects = len(allProjects)
 
 	// Auto-suggest projects if none specified
@@ -354,17 +357,18 @@ func assessPerformanceLoad(proj *project.Project) string {
 func getAllSamplerNames() []string {
 	samplerNames := make([]string, 0)
 
-	common.GlobalMu.RLock()
-	for inputId := range project.GlobalProject.Inputs {
+	project.ForEachInput(func(inputId string, _ *input.Input) bool {
 		samplerNames = append(samplerNames, "input."+inputId)
-	}
-	for rulesetId := range project.GlobalProject.Rulesets {
+		return true
+	})
+	project.ForEachRuleset(func(rulesetId string, _ *rules_engine.Ruleset) bool {
 		samplerNames = append(samplerNames, "ruleset."+rulesetId)
-	}
-	for outputId := range project.GlobalProject.Outputs {
+		return true
+	})
+	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	return samplerNames
 }
@@ -740,10 +744,7 @@ func findProjectsUsingComponent(componentName string) []string {
 	componentType := parts[0]
 	componentID := parts[1]
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range project.GlobalProject.Projects {
+	project.ForEachProject(func(projectID string, proj *project.Project) bool {
 		switch componentType {
 		case "ruleset":
 			if _, exists := proj.Rulesets[componentID]; exists {
@@ -758,7 +759,8 @@ func findProjectsUsingComponent(componentName string) []string {
 				projects = append(projects, projectID)
 			}
 		}
-	}
+		return true
+	})
 
 	return projects
 }
@@ -847,7 +849,7 @@ func getSampleDataForOutput(outputID string) (map[string]interface{}, string, er
 // Get sample data for a specific project (simplified using PNS)
 func getSampleDataForProject(projectID string) (map[string]interface{}, string, error) {
 	common.GlobalMu.RLock()
-	proj, exists := project.GlobalProject.Projects[projectID]
+	proj, exists := project.GetProject(projectID)
 	common.GlobalMu.RUnlock()
 
 	if !exists {

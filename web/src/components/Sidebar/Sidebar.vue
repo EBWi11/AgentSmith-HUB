@@ -1490,9 +1490,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick, watch } fr
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
-import { useComponentOperations } from '../../composables/useApi'
-import { useDeleteConfirmModal } from '../../composables/useModal'
-import { getComponentTypeLabel, getStatusLabel, getStatusTitle, supportsConnectCheck, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
+import { getStatusLabel, getStatusTitle, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
 // useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
@@ -1808,8 +1806,7 @@ function closeActiveModal() {
 // Lifecycle hooks
 onMounted(async () => {
   await fetchAllItems()
-  startProjectPolling()
-  
+
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
@@ -1847,12 +1844,6 @@ watch(search, (newVal) => {
     searchLoading.value = false
   }
 })
-
-// Methods
-function startProjectPolling() {
-  // Project polling is now handled by setupProjectStatusRefresh for better coordination
-  // This function is kept for compatibility but doesn't create additional intervals
-}
 
 function openAddModal(type) {
   addType.value = type
@@ -2124,39 +2115,6 @@ async function fetchProjectsComplete() {
   }
 }
 
-function getDefaultConfig(type) {
-  const timestamp = Date.now()
-  const id = addName.value || `new_${type.slice(0, -1)}_${timestamp}`
-  switch (type) {
-    case 'inputs':
-      return { id, raw: addRaw.value || `name: "${id}"
-type: "file"
-file:
-  path: "/path/to/input.json"
-  format: "json"` }
-    case 'outputs':
-      return { id, raw: addRaw.value || `type: kafka
-kafka:
-  brokers:
-    - 127.0.0.1:9092
-  topic: test-topic
-  group: test` }
-    case 'rulesets':
-      return { id, raw: addRaw.value || `<root type="DETECTION" name="${id}">\n    <rule id="${id}_01" name="New Rule">\n        <!-- Add operations in any order -->\n        <check type="EQU" field="status">active</check>\n    </rule>\n</root>` }
-    case 'projects':
-      return { id, raw: addRaw.value || `name: "${id}"
-flow:
-  - from: "input.default"
-    to: "ruleset.default"
-  - from: "ruleset.default"
-    to: "output.default"` }
-    case 'plugins':
-      return { id, raw: addRaw.value || `// New plugin code` }
-    default:
-      return { id: '', raw: '' }
-  }
-}
-
 async function confirmAddName() {
   if (!addName.value || addName.value.trim() === '') {
     addError.value = 'Name cannot be empty'
@@ -2288,10 +2246,6 @@ async function confirmDelete() {
   } catch (e) {
     deleteError.value = 'Delete failed: ' + (e?.message || 'Unknown error')
   }
-}
-
-function deleteItem(type, item) {
-  openDeleteModal(type, item)
 }
 
 function closeAllMenus() {

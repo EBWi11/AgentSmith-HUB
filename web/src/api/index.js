@@ -348,21 +348,6 @@ export const hubApi = {
     }
   },
 
-  async fetchClusterStatus() {
-    const response = await publicApi.get('/cluster-status');
-    return response.data;
-  },
-
-  async fetchClusterInfo() {
-    const response = await publicApi.get('/cluster-status');
-    return response.data;
-  },
-
-  async getClusterProjectStates() {
-    const response = await api.get('/cluster-project-states');
-    return response.data;
-  },
-
   async updatePlugin(id, raw) {
     try {
       // Ensure raw is a string

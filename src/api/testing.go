@@ -81,10 +81,10 @@ func testRuleset(c echo.Context) error {
 			formalPath, formalExists := GetComponentPath("ruleset", id, false)
 			if !formalExists {
 				// Check if ruleset exists in memory
-				r := project.GlobalProject.Rulesets[id]
-				if r == nil {
+				r, exists := project.GetRuleset(id)
+				if !exists {
 					// Check if ruleset exists in new rulesets
-					content, ok := project.GlobalProject.RulesetsNew[id]
+					content, ok := project.GetRulesetNew(id)
 					if !ok {
 						return c.JSON(http.StatusNotFound, rulesetErrorResponse(false, false, "Ruleset not found: "+id))
 					}
@@ -449,10 +449,10 @@ func testOutput(c echo.Context) error {
 		formalPath, formalExists := GetComponentPath("output", id, false)
 		if !formalExists {
 			// Check if output exists in memory
-			out := project.GlobalProject.Outputs[id]
-			if out == nil {
+			out, exists := project.GetOutput(id)
+			if !exists {
 				// Check if output exists in new outputs
-				content, ok := project.GlobalProject.OutputsNew[id]
+				content, ok := project.GetOutputNew(id)
 				if !ok {
 					return c.JSON(http.StatusNotFound, map[string]interface{}{
 						"success": false,
@@ -635,10 +635,10 @@ func testProject(c echo.Context) error {
 			formalPath, formalExists := GetComponentPath("project", id, false)
 			if !formalExists {
 				// Check if project exists in memory
-				proj := project.GlobalProject.Projects[id]
-				if proj == nil {
+				proj, exists := project.GetProject(id)
+				if !exists {
 					// Check if project exists in new projects
-					content, ok := project.GlobalProject.ProjectsNew[id]
+					content, ok := project.GetProjectNew(id)
 					if !ok {
 						return c.JSON(http.StatusNotFound, map[string]interface{}{
 							"success": false,
@@ -692,7 +692,7 @@ func testProject(c echo.Context) error {
 
 		// Clean up from global project
 		common.GlobalMu.Lock()
-		delete(project.GlobalProject.Projects, testProjectId)
+		project.DeleteProject(testProjectId)
 		common.GlobalMu.Unlock()
 
 		logger.Info("Test project cleanup completed", "project", testProjectId)
@@ -891,10 +891,10 @@ func getProjectInputs(c echo.Context) error {
 	var isTemp bool
 	var ok bool
 
-	if proj, ok = project.GlobalProject.Projects[id]; ok {
+	if proj, ok = project.GetProject(id); ok {
 		projectContent = proj.Config.Content
 	} else {
-		if projectContent, ok = project.GlobalProject.ProjectsNew[id]; !ok {
+		if projectContent, ok = project.GetProjectNew(id); !ok {
 			return c.JSON(http.StatusNotFound, map[string]interface{}{
 				"success": false,
 				"error":   "Project not found: " + id,
@@ -959,10 +959,10 @@ func connectCheck(c echo.Context) error {
 
 	// Check input component client connection
 	if normalizedType == "inputs" {
-		tempContent, existsNew := project.GlobalProject.InputsNew[id]
-		inputComp := project.GlobalProject.Inputs[id]
+		tempContent, existsNew := project.GetInputNew(id)
+		inputComp, exists := project.GetInput(id)
 
-		if !existsNew && inputComp == nil {
+		if !existsNew && !exists {
 			return c.JSON(http.StatusNotFound, map[string]string{
 				"error": "Input component not found",
 			})
@@ -1031,10 +1031,10 @@ func connectCheck(c echo.Context) error {
 
 		return c.JSON(http.StatusOK, connectivityResult)
 	} else if normalizedType == "outputs" {
-		tempContent, existsNew := project.GlobalProject.OutputsNew[id]
-		outputComp := project.GlobalProject.Outputs[id]
+		tempContent, existsNew := project.GetOutputNew(id)
+		outputComp, exists := project.GetOutput(id)
 
-		if !existsNew && outputComp == nil {
+		if !existsNew && !exists {
 			return c.JSON(http.StatusNotFound, map[string]string{
 				"error": "Output component not found",
 			})
@@ -1131,10 +1131,10 @@ func getProjectComponents(c echo.Context) error {
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
 			// Check if project exists in memory
-			proj := project.GlobalProject.Projects[id]
-			if proj == nil {
+			proj, exists := project.GetProject(id)
+			if !exists {
 				// Check if project exists in new projects
-				content, ok := project.GlobalProject.ProjectsNew[id]
+				content, ok := project.GetProjectNew(id)
 				if !ok {
 					return c.JSON(http.StatusNotFound, map[string]interface{}{
 						"success": false,
@@ -1378,10 +1378,10 @@ func getProjectComponentSequences(c echo.Context) error {
 		formalPath, formalExists := GetComponentPath("project", id, false)
 		if !formalExists {
 			// Check if project exists in memory
-			proj := project.GlobalProject.Projects[id]
-			if proj == nil {
+			proj, exists := project.GetProject(id)
+			if !exists {
 				// Check if project exists in new projects
-				content, ok := project.GlobalProject.ProjectsNew[id]
+				content, ok := project.GetProjectNew(id)
 				if !ok {
 					return c.JSON(http.StatusNotFound, map[string]interface{}{
 						"success": false,

@@ -167,11 +167,6 @@ func (rsm *RedisSampleManager) GetSamples(samplerName string) (map[string][]Samp
 	return result, nil
 }
 
-// GetSamplesByProject is deprecated - use GetSamples() with PNS filtering instead
-// func (rsm *RedisSampleManager) GetSamplesByProject(samplerName string, projectID string, projectNodeSequence string) ([]SampleData, error) {
-// 	return nil, fmt.Errorf("deprecated: use GetSamples() with PNS filtering")
-// }
-
 // getSamplesFromKey retrieves samples from a specific Redis key
 func (rsm *RedisSampleManager) getSamplesFromKey(ctx context.Context, key string) ([]SampleData, error) {
 	// Get all samples from sorted set (latest first)
@@ -271,11 +266,6 @@ func (rsm *RedisSampleManager) Reset(samplerName string) error {
 
 	return nil
 }
-
-// ResetProject is deprecated - use Reset() or implement PNS-based reset
-// func (rsm *RedisSampleManager) ResetProject(samplerName string, projectID string, projectNodeSequence string) error {
-// 	return fmt.Errorf("deprecated: use Reset() or implement PNS-based reset")
-// }
 
 // SetTTL sets the TTL for sample data
 func (rsm *RedisSampleManager) SetTTL(ttl time.Duration) {

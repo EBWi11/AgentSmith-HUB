@@ -42,18 +42,12 @@ func StartProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	p := project.GlobalProject.Projects[req.ProjectID]
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
-	}
-
-	// API-side persistence: Save project states in Redis
-	// proj_states: User intention (what user wants the project to be)
-	if err := common.SetProjectUserIntention(req.ProjectID, true); err != nil {
-		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
 	// Check if project is already running, starting, or stopping
@@ -73,6 +67,12 @@ func StartProject(c echo.Context) error {
 		return c.JSON(http.StatusConflict, map[string]string{
 			"error": "Project is currently stopping, please wait",
 		})
+	}
+
+	// API-side persistence: Save project states in Redis
+	// proj_states: User intention (what user wants the project to be)
+	if err := common.SetProjectUserIntention(req.ProjectID, true); err != nil {
+		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
@@ -111,9 +111,9 @@ func StopProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	p := project.GlobalProject.Projects[req.ProjectID]
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
@@ -185,12 +185,9 @@ func RestartProject(c echo.Context) error {
 		})
 	}
 
-	// Get project
-	common.GlobalMu.RLock()
-	p := project.GlobalProject.Projects[req.ProjectID]
-	common.GlobalMu.RUnlock()
-
-	if p == nil {
+	// Get project using safe accessor
+	p, exists := project.GetProject(req.ProjectID)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{
 			"error": "Project not found",
 		})
@@ -235,8 +232,8 @@ func RestartProject(c echo.Context) error {
 
 func getProjectError(c echo.Context) error {
 	id := c.Param("id")
-	p := project.GlobalProject.Projects[id]
-	if p == nil {
+	p, exists := project.GetProject(id)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 

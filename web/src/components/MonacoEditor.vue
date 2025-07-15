@@ -3500,7 +3500,6 @@ function getIndentLevel(line) {
 }
 
 
-
 // 暴露方法给父组件
 defineExpose({
   focus: () => {
@@ -3654,22 +3653,6 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   return suggestions;
 };
 
-// Fetch plugin parameters with caching
-const fetchPluginParameters = async (pluginId) => {
-  if (pluginParametersCache.has(pluginId)) {
-    return pluginParametersCache.get(pluginId)
-  }
-
-  try {
-    // console.log(`[Monaco] Fetching parameters for plugin: ${pluginId}`);
-    const parameters = await hubApi.getPluginParameters(pluginId)
-    pluginParametersCache.set(pluginId, parameters)
-    return parameters
-  } catch (error) {
-    // console.warn(`Failed to fetch plugin parameters for ${pluginId}:`, error);
-    return []
-  }
-}
 </script>
 
 <style>

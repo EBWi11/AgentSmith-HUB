@@ -170,25 +170,13 @@ func WriteComponentFile(path string, content string) error {
 			// If it's a temporary file, also update the in-memory copy
 			switch componentType {
 			case "input":
-				if project.GlobalProject.InputsNew == nil {
-					project.GlobalProject.InputsNew = make(map[string]string)
-				}
-				project.GlobalProject.InputsNew[id] = content
+				project.SetInputNew(id, content)
 			case "output":
-				if project.GlobalProject.OutputsNew == nil {
-					project.GlobalProject.OutputsNew = make(map[string]string)
-				}
-				project.GlobalProject.OutputsNew[id] = content
+				project.SetOutputNew(id, content)
 			case "ruleset":
-				if project.GlobalProject.RulesetsNew == nil {
-					project.GlobalProject.RulesetsNew = make(map[string]string)
-				}
-				project.GlobalProject.RulesetsNew[id] = content
+				project.SetRulesetNew(id, content)
 			case "project":
-				if project.GlobalProject.ProjectsNew == nil {
-					project.GlobalProject.ProjectsNew = make(map[string]string)
-				}
-				project.GlobalProject.ProjectsNew[id] = content
+				project.SetProjectNew(id, content)
 			case "plugin":
 				if plugin.PluginsNew == nil {
 					plugin.PluginsNew = make(map[string]string)
@@ -320,7 +308,7 @@ func getProjects(c echo.Context) error {
 func getProject(c echo.Context) error {
 	id := c.Param("id")
 
-	p_raw, ok := project.GlobalProject.ProjectsNew[id]
+	p_raw, ok := project.GetProjectNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("project", id, true)
 		// Get sample data for this project (for MCP interface optimization)
@@ -338,8 +326,8 @@ func getProject(c echo.Context) error {
 		return c.JSON(http.StatusOK, response)
 	}
 
-	p := project.GlobalProject.Projects[id]
-	if p == nil {
+	p, exists := project.GetProject(id)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 
@@ -472,7 +460,7 @@ func getRulesets(c echo.Context) error {
 func getRuleset(c echo.Context) error {
 	id := c.Param("id")
 
-	r_raw, ok := project.GlobalProject.RulesetsNew[id]
+	r_raw, ok := project.GetRulesetNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("ruleset", id, true)
 		// Get sample data for this ruleset (for MCP interface optimization)
@@ -489,9 +477,9 @@ func getRuleset(c echo.Context) error {
 		return c.JSON(http.StatusOK, response)
 	}
 
-	r := project.GlobalProject.Rulesets[id]
+	r, exists := project.GetRuleset(id)
 
-	if r != nil {
+	if exists {
 		formalPath, _ := GetComponentPath("ruleset", id, false)
 		// Get sample data for this ruleset (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
@@ -614,7 +602,7 @@ func parseOutputType(rawConfig string) string {
 
 func getInput(c echo.Context) error {
 	id := c.Param("id")
-	in_raw, ok := project.GlobalProject.InputsNew[id]
+	in_raw, ok := project.GetInputNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("input", id, true)
 		// Get sample data for this input (for MCP interface optimization)
@@ -631,9 +619,9 @@ func getInput(c echo.Context) error {
 		return c.JSON(http.StatusOK, response)
 	}
 
-	in := project.GlobalProject.Inputs[id]
+	in, exists := project.GetInput(id)
 
-	if in != nil {
+	if exists {
 		formalPath, _ := GetComponentPath("input", id, false)
 		// Get sample data for this input (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForInput(id)
@@ -1012,7 +1000,7 @@ func getOutputs(c echo.Context) error {
 
 func getOutput(c echo.Context) error {
 	id := c.Param("id")
-	out_raw, ok := project.GlobalProject.OutputsNew[id]
+	out_raw, ok := project.GetOutputNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("output", id, true)
 		// Parse type from temporary file content
@@ -1032,9 +1020,9 @@ func getOutput(c echo.Context) error {
 		return c.JSON(http.StatusOK, response)
 	}
 
-	out := project.GlobalProject.Outputs[id]
+	out, exists := project.GetOutput(id)
 
-	if out != nil {
+	if exists {
 		formalPath, _ := GetComponentPath("output", id, false)
 		// Get sample data for this output (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForOutput(id)
@@ -1107,13 +1095,13 @@ func createComponent(componentType string, c echo.Context) error {
 	case "plugin":
 		plugin.PluginsNew[request.ID] = request.Raw
 	case "input":
-		project.GlobalProject.InputsNew[request.ID] = request.Raw
+		project.SetInputNew(request.ID, request.Raw)
 	case "output":
-		project.GlobalProject.OutputsNew[request.ID] = request.Raw
+		project.SetOutputNew(request.ID, request.Raw)
 	case "ruleset":
-		project.GlobalProject.RulesetsNew[request.ID] = request.Raw
+		project.SetRulesetNew(request.ID, request.Raw)
 	case "project":
-		project.GlobalProject.ProjectsNew[request.ID] = request.Raw
+		project.SetProjectNew(request.ID, request.Raw)
 	}
 	common.GlobalMu.Unlock()
 
@@ -1242,13 +1230,13 @@ func deleteComponent(componentType string, c echo.Context) error {
 	// Check if component exists in global mapping and is in use
 	switch componentType {
 	case "ruleset":
-		_, componentExists = project.GlobalProject.Rulesets[id]
+		_, componentExists = project.GetRuleset(id)
 	case "input":
-		_, componentExists = project.GlobalProject.Inputs[id]
+		_, componentExists = project.GetInput(id)
 	case "output":
-		_, componentExists = project.GlobalProject.Outputs[id]
+		_, componentExists = project.GetOutput(id)
 	case "project":
-		_, componentExists = project.GlobalProject.Projects[id]
+		_, componentExists = project.GetProject(id)
 	case "plugin":
 		_, componentExists = plugin.Plugins[id]
 	}
@@ -1256,7 +1244,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 	if componentExists {
 		// For projects, check if it's running and stop it first
 		if componentType == "project" {
-			if proj, exists := project.GlobalProject.Projects[id]; exists {
+			if proj, exists := project.GetProject(id); exists {
 				if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
 					logger.Info("Stopping running project before deletion", "project_id", id)
 					// Note: Project.Stop() already includes final statistics collection
@@ -1293,7 +1281,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 			}
 		} else {
 			// For other components, check if used by any project
-			projects := project.GlobalProject.Projects
+			projects := project.GetAllProjects()
 			for _, p := range projects {
 				var inUse bool
 				switch componentType {
@@ -1317,13 +1305,13 @@ func deleteComponent(componentType string, c echo.Context) error {
 		// Remove component from global mapping
 		switch componentType {
 		case "ruleset":
-			delete(project.GlobalProject.Rulesets, id)
+			project.DeleteRuleset(id)
 		case "input":
-			delete(project.GlobalProject.Inputs, id)
+			project.DeleteInput(id)
 		case "output":
-			delete(project.GlobalProject.Outputs, id)
+			project.DeleteOutput(id)
 		case "project":
-			delete(project.GlobalProject.Projects, id)
+			project.DeleteProject(id)
 		case "plugin":
 			// Reset statistics before deleting plugin
 			if pluginInstance, exists := plugin.Plugins[id]; exists {
@@ -1337,13 +1325,13 @@ func deleteComponent(componentType string, c echo.Context) error {
 	// Delete from memory maps (both temporary and formal)
 	switch componentType {
 	case "ruleset":
-		delete(project.GlobalProject.RulesetsNew, id)
+		project.DeleteRulesetNew(id)
 	case "input":
-		delete(project.GlobalProject.InputsNew, id)
+		project.DeleteInputNew(id)
 	case "output":
-		delete(project.GlobalProject.OutputsNew, id)
+		project.DeleteOutputNew(id)
 	case "project":
-		delete(project.GlobalProject.ProjectsNew, id)
+		project.DeleteProjectNew(id)
 	case "plugin":
 		delete(plugin.PluginsNew, id)
 	}
@@ -1503,20 +1491,20 @@ func updateComponent(componentType string, c echo.Context) error {
 		if tempExists {
 			_ = os.Remove(tempPath)
 			// Also remove from memory with lock protection
-			common.GlobalMu.Lock()
 			switch componentType {
 			case "input":
-				delete(project.GlobalProject.InputsNew, id)
+				project.DeleteInputNew(id)
 			case "output":
-				delete(project.GlobalProject.OutputsNew, id)
+				project.DeleteOutputNew(id)
 			case "ruleset":
-				delete(project.GlobalProject.RulesetsNew, id)
+				project.DeleteRulesetNew(id)
 			case "project":
-				delete(project.GlobalProject.ProjectsNew, id)
+				project.DeleteProjectNew(id)
 			case "plugin":
+				common.GlobalMu.Lock()
 				delete(plugin.PluginsNew, id)
+				common.GlobalMu.Unlock()
 			}
-			common.GlobalMu.Unlock()
 		}
 		return c.JSON(http.StatusOK, map[string]string{"message": "content identical to original file, no changes needed"})
 	}
@@ -1532,13 +1520,13 @@ func updateComponent(componentType string, c echo.Context) error {
 	common.GlobalMu.Lock()
 	switch componentType {
 	case "input":
-		project.GlobalProject.InputsNew[id] = req.Raw
+		project.SetInputNew(id, req.Raw)
 	case "output":
-		project.GlobalProject.OutputsNew[id] = req.Raw
+		project.SetOutputNew(id, req.Raw)
 	case "ruleset":
-		project.GlobalProject.RulesetsNew[id] = req.Raw
+		project.SetRulesetNew(id, req.Raw)
 	case "project":
-		project.GlobalProject.ProjectsNew[id] = req.Raw
+		project.SetProjectNew(id, req.Raw)
 	case "plugin":
 		plugin.PluginsNew[id] = req.Raw
 	}
@@ -1722,9 +1710,7 @@ func cancelProjectUpgrade(c echo.Context) error {
 	id := c.Param("id")
 
 	// Lock for memory operations
-	common.GlobalMu.Lock()
-	delete(project.GlobalProject.ProjectsNew, id)
-	common.GlobalMu.Unlock()
+	project.DeleteProjectNew(id)
 
 	// Delete temp file if exists (without holding lock)
 	tempPath, tempExists := GetComponentPath("project", id, true)
@@ -1738,9 +1724,7 @@ func cancelRulesetUpgrade(c echo.Context) error {
 	id := c.Param("id")
 
 	// Lock for memory operations
-	common.GlobalMu.Lock()
-	delete(project.GlobalProject.RulesetsNew, id)
-	common.GlobalMu.Unlock()
+	project.DeleteRulesetNew(id)
 
 	// Delete temp file if exists (without holding lock)
 	tempPath, tempExists := GetComponentPath("ruleset", id, true)
@@ -1754,9 +1738,7 @@ func cancelInputUpgrade(c echo.Context) error {
 	id := c.Param("id")
 
 	// Lock for memory operations
-	common.GlobalMu.Lock()
-	delete(project.GlobalProject.InputsNew, id)
-	common.GlobalMu.Unlock()
+	project.DeleteInputNew(id)
 
 	// Delete temp file if exists (without holding lock)
 	tempPath, tempExists := GetComponentPath("input", id, true)
@@ -1770,9 +1752,7 @@ func cancelOutputUpgrade(c echo.Context) error {
 	id := c.Param("id")
 
 	// Lock for memory operations
-	common.GlobalMu.Lock()
-	delete(project.GlobalProject.OutputsNew, id)
-	common.GlobalMu.Unlock()
+	project.DeleteOutputNew(id)
 
 	// Delete temp file if exists (without holding lock)
 	tempPath, tempExists := GetComponentPath("output", id, true)
@@ -1871,17 +1851,11 @@ func GetSamplerData(c echo.Context) error {
 	normalizedType := strings.ToLower(componentType) // Normalize to lowercase for processing
 	switch normalizedType {
 	case "input":
-		common.GlobalMu.RLock()
-		_, componentExists = project.GlobalProject.Inputs[componentId]
-		common.GlobalMu.RUnlock()
+		_, componentExists = project.GetInput(componentId)
 	case "output":
-		common.GlobalMu.RLock()
-		_, componentExists = project.GlobalProject.Outputs[componentId]
-		common.GlobalMu.RUnlock()
+		_, componentExists = project.GetOutput(componentId)
 	case "ruleset":
-		common.GlobalMu.RLock()
-		_, componentExists = project.GlobalProject.Rulesets[componentId]
-		common.GlobalMu.RUnlock()
+		_, componentExists = project.GetRuleset(componentId)
 	default:
 		logger.Error("Unsupported component type in GetSamplerData",
 			"componentType", componentType,
@@ -1909,17 +1883,18 @@ func GetSamplerData(c echo.Context) error {
 
 	// Get potential sampler names based on component types and IDs
 	samplerNames := []string{}
-	common.GlobalMu.RLock()
-	for inputId := range project.GlobalProject.Inputs {
+	project.ForEachInput(func(inputId string, _ *input.Input) bool {
 		samplerNames = append(samplerNames, "input."+inputId)
-	}
-	for rulesetId := range project.GlobalProject.Rulesets {
+		return true
+	})
+	project.ForEachRuleset(func(rulesetId string, _ *rules_engine.Ruleset) bool {
 		samplerNames = append(samplerNames, "ruleset."+rulesetId)
-	}
-	for outputId := range project.GlobalProject.Outputs {
+		return true
+	})
+	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// Search through all samplers for flow paths ending with our target component (suffix matching)
 	totalSamples := 0
@@ -2030,17 +2005,18 @@ func GetRulesetFields(c echo.Context) error {
 
 	// Get potential sampler names based on component types and IDs
 	samplerNames := []string{}
-	common.GlobalMu.RLock()
-	for inputId := range project.GlobalProject.Inputs {
+	project.ForEachInput(func(inputId string, _ *input.Input) bool {
 		samplerNames = append(samplerNames, "input."+inputId)
-	}
-	for rulesetId := range project.GlobalProject.Rulesets {
+		return true
+	})
+	project.ForEachRuleset(func(rulesetId string, _ *rules_engine.Ruleset) bool {
 		samplerNames = append(samplerNames, "ruleset."+rulesetId)
-	}
-	for outputId := range project.GlobalProject.Outputs {
+		return true
+	})
+	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
-	}
-	common.GlobalMu.RUnlock()
+		return true
+	})
 
 	// Collect sample data from all potential sources
 	for _, samplerName := range samplerNames {
@@ -2381,13 +2357,13 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 	if isTemporary {
 		switch componentType {
 		case "input":
-			componentMap = project.GlobalProject.InputsNew
+			componentMap = project.GetAllInputsNew()
 		case "output":
-			componentMap = project.GlobalProject.OutputsNew
+			componentMap = project.GetAllOutputsNew()
 		case "ruleset":
-			componentMap = project.GlobalProject.RulesetsNew
+			componentMap = project.GetAllRulesetsNew()
 		case "project":
-			componentMap = project.GlobalProject.ProjectsNew
+			componentMap = project.GetAllProjectsNew()
 		case "plugin":
 			componentMap = plugin.PluginsNew
 		}
@@ -2396,21 +2372,25 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 		componentMap = make(map[string]string)
 		switch componentType {
 		case "input":
-			for _, comp := range project.GlobalProject.Inputs {
+			project.ForEachInput(func(id string, comp *input.Input) bool {
 				componentMap[comp.Id] = comp.Config.RawConfig
-			}
+				return true
+			})
 		case "output":
-			for _, comp := range project.GlobalProject.Outputs {
+			project.ForEachOutput(func(id string, comp *output.Output) bool {
 				componentMap[comp.Id] = comp.Config.RawConfig
-			}
+				return true
+			})
 		case "ruleset":
-			for _, comp := range project.GlobalProject.Rulesets {
+			project.ForEachRuleset(func(id string, comp *rules_engine.Ruleset) bool {
 				componentMap[comp.RulesetID] = comp.RawConfig
-			}
+				return true
+			})
 		case "project":
-			for _, comp := range project.GlobalProject.Projects {
+			project.ForEachProject(func(id string, comp *project.Project) bool {
 				componentMap[comp.Id] = comp.Config.RawConfig
-			}
+				return true
+			})
 		case "plugin":
 			for _, comp := range plugin.Plugins {
 				if comp.Type == plugin.YAEGI_PLUGIN {
@@ -2492,10 +2472,10 @@ func deleteRulesetRule(c echo.Context) error {
 	var isTemp bool
 
 	// Check temp file first
-	if tempRaw, ok := project.GlobalProject.RulesetsNew[rulesetId]; ok {
+	if tempRaw, ok := project.GetRulesetNew(rulesetId); ok {
 		currentRawConfig = tempRaw
 		isTemp = true
-	} else if r := project.GlobalProject.Rulesets[rulesetId]; r != nil {
+	} else if r, exists := project.GetRuleset(rulesetId); exists {
 		currentRawConfig = r.RawConfig
 		isTemp = false
 	} else {
@@ -2538,9 +2518,7 @@ func deleteRulesetRule(c echo.Context) error {
 	}
 
 	// Update memory
-	common.GlobalMu.Lock()
-	project.GlobalProject.RulesetsNew[rulesetId] = updatedXML
-	common.GlobalMu.Unlock()
+	project.SetRulesetNew(rulesetId, updatedXML)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":  "✅ Rule deleted successfully from temporary file",
@@ -2610,10 +2588,10 @@ func addRulesetRule(c echo.Context) error {
 	var isTemp bool
 
 	// Check temp file first
-	if tempRaw, ok := project.GlobalProject.RulesetsNew[rulesetId]; ok {
+	if tempRaw, ok := project.GetRulesetNew(rulesetId); ok {
 		currentRawConfig = tempRaw
 		isTemp = true
-	} else if r := project.GlobalProject.Rulesets[rulesetId]; r != nil {
+	} else if r, exists := project.GetRuleset(rulesetId); exists {
 		currentRawConfig = r.RawConfig
 		isTemp = false
 	} else {
@@ -2683,9 +2661,7 @@ func addRulesetRule(c echo.Context) error {
 	}
 
 	// Update memory
-	common.GlobalMu.Lock()
-	project.GlobalProject.RulesetsNew[rulesetId] = updatedXML
-	common.GlobalMu.Unlock()
+	project.SetRulesetNew(rulesetId, updatedXML)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":  "✅ Rule added successfully to temporary file",
@@ -2972,10 +2948,11 @@ func GetBatchRulesetFields(c echo.Context) error {
 		result := make(map[string]interface{})
 
 		// Get field keys from all loaded rulesets
-		for id := range project.GlobalProject.Rulesets {
+		project.ForEachRuleset(func(id string, _ *rules_engine.Ruleset) bool {
 			fields := GetRulesetFieldsForID(id)
 			result[id] = fields
-		}
+			return true
+		})
 
 		return c.JSON(http.StatusOK, result)
 	}
@@ -2991,7 +2968,7 @@ func GetBatchRulesetFields(c echo.Context) error {
 		}
 
 		// Check if ruleset exists
-		if _, exists := project.GlobalProject.Rulesets[id]; exists {
+		if _, exists := project.GetRuleset(id); exists {
 			fields := GetRulesetFieldsForID(id)
 			result[id] = fields
 		} else {
@@ -3100,9 +3077,9 @@ func analyzePluginUsage(pluginID string) PluginUsageInfo {
 	// Analyze ruleset usage
 	rulesetUsageMap := make(map[string]*RulesetUsageInfo)
 
-	for rulesetID, ruleset := range project.GlobalProject.Rulesets {
+	project.ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
 		if ruleset == nil || ruleset.RawConfig == "" {
-			continue
+			return true
 		}
 
 		rulesetUsage := analyzePluginUsageInRuleset(pluginID, rulesetID, ruleset.RawConfig)
@@ -3111,14 +3088,15 @@ func analyzePluginUsage(pluginID string) PluginUsageInfo {
 			usage.UsedByRulesets = append(usage.UsedByRulesets, rulesetUsage)
 			usage.TotalUsage += rulesetUsage.UsageCount
 		}
-	}
+		return true
+	})
 
 	// Analyze project usage (which projects use rulesets that use this plugin)
 	projectUsageMap := make(map[string]*ProjectUsageInfo)
 
-	for projectID, proj := range project.GlobalProject.Projects {
+	project.ForEachProject(func(projectID string, proj *project.Project) bool {
 		if proj == nil {
-			continue
+			return true
 		}
 
 		projectUsage := ProjectUsageInfo{
@@ -3138,7 +3116,8 @@ func analyzePluginUsage(pluginID string) PluginUsageInfo {
 			projectUsageMap[projectID] = &projectUsage
 			usage.UsedByProjects = append(usage.UsedByProjects, projectUsage)
 		}
-	}
+		return true
+	})
 
 	return usage
 }

@@ -185,7 +185,7 @@ func main() {
 
 			// Stop all running projects (Stop method handles data drain internally)
 			logger.Info("Stopping all running projects")
-			for _, proj := range project.GlobalProject.Projects {
+			project.ForEachProject(func(id string, proj *project.Project) bool {
 				if proj.Status == common.StatusRunning {
 					logger.Info("Stopping project during shutdown", "project", proj.Id)
 					err := proj.Stop()
@@ -195,7 +195,8 @@ func main() {
 						logger.Info("Project stopped successfully during shutdown", "project", proj.Id)
 					}
 				}
-			}
+				return true
+			})
 
 			if cluster.GlobalClusterManager != nil {
 				cluster.GlobalClusterManager.Stop()
@@ -215,12 +216,13 @@ func main() {
 		case <-shutdownCtx.Done():
 			logger.Error("Shutdown timeout exceeded, forcing exit")
 			// Force cleanup of critical resources
-			for id, p := range project.GlobalProject.Projects {
+			project.ForEachProject(func(id string, p *project.Project) bool {
 				if p.Status == common.StatusRunning || p.Status == common.StatusStarting {
 					logger.Warn("Force stopping project", "id", id)
 					p.SetProjectStatus(common.StatusStopped, nil)
 				}
-			}
+				return true
+			})
 		}
 
 		logger.Info("Hub shutdown complete — bye")
@@ -283,7 +285,7 @@ func loadLocalComponents() {
 		if inp, err := input.NewInput(f, "", id); err != nil {
 			logger.Error("Failed to load new input", "file", f, "error", err)
 		} else {
-			project.GlobalProject.Inputs[id] = inp
+			project.SetInput(id, inp)
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -294,7 +296,7 @@ func loadLocalComponents() {
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new input", "file", f, "error", err)
 		} else {
-			project.GlobalProject.InputsNew[id] = string(content)
+			project.SetInputNew(id, string(content))
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -310,7 +312,7 @@ func loadLocalComponents() {
 		if out, err := output.NewOutput(f, "", id); err != nil {
 			logger.Error("Failed to load output", "file", f, "error", err)
 		} else {
-			project.GlobalProject.Outputs[id] = out
+			project.SetOutput(id, out)
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -321,7 +323,7 @@ func loadLocalComponents() {
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new output", "file", f, "error", err)
 		} else {
-			project.GlobalProject.OutputsNew[id] = string(content)
+			project.SetOutputNew(id, string(content))
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -337,7 +339,7 @@ func loadLocalComponents() {
 		if rs, err := rules_engine.NewRuleset(f, "", id); err != nil {
 			logger.Error("Failed to load ruleset", "file", f, "error", err)
 		} else {
-			project.GlobalProject.Rulesets[id] = rs
+			project.SetRuleset(id, rs)
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -348,7 +350,7 @@ func loadLocalComponents() {
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new ruleset", "file", f, "error", err)
 		} else {
-			project.GlobalProject.RulesetsNew[id] = string(content)
+			project.SetRulesetNew(id, string(content))
 		}
 		common.GlobalMu.Unlock()
 	}
@@ -372,7 +374,7 @@ func loadLocalProjects() {
 		}
 
 		if p, err := project.NewProject(f, "", id, false); err == nil {
-			project.GlobalProject.Projects[id] = p
+			project.SetProject(id, p)
 
 			// Try to restore project status from Redis based on user intention
 			if userWantsRunning, err := common.GetProjectUserIntention(id); err == nil && userWantsRunning {
@@ -411,11 +413,11 @@ func loadLocalProjects() {
 			logger.Error("Failed to read new project", "project", id, "error", err)
 		} else {
 			common.GlobalMu.Lock()
-			project.GlobalProject.ProjectsNew[id] = string(content)
+			project.SetProjectNew(id, string(content))
 			common.GlobalMu.Unlock()
 		}
 	}
-	logger.Info("Finished loading and start local projects", "total_projects", len(project.GlobalProject.Projects))
+	logger.Info("Finished loading and start local projects", "total_projects", project.GetProjectsCount())
 }
 
 // readToken reads existing .token or creates one when create==true.

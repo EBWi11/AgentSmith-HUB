@@ -787,11 +787,11 @@ func getMCPStats(c echo.Context) error {
 			"node_id":   common.GetNodeID(),
 		},
 		"resources": map[string]interface{}{
-			"total_projects": len(project.GlobalProject.Projects),
-			"total_inputs":   len(project.GlobalProject.Inputs),
-			"total_outputs":  len(project.GlobalProject.Outputs),
+			"total_projects": project.GetProjectsCount(),
+			"total_inputs":   project.GetInputsCount(),
+			"total_outputs":  project.GetOutputsCount(),
 			"total_plugins":  len(plugin.Plugins),
-			"total_rulesets": len(project.GlobalProject.Rulesets),
+			"total_rulesets": project.GetRulesetsCount(),
 		},
 		"capabilities": map[string]interface{}{
 			"resources_available": true,

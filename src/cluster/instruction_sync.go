@@ -792,7 +792,7 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 		if err != nil {
 			return fmt.Errorf("failed to create input instance %s: %w", componentName, err)
 		}
-		project.GlobalProject.Inputs[componentName] = inp
+		project.SetInput(componentName, inp)
 		logger.Debug("Created input instance", "name", componentName)
 
 	case "output":
@@ -801,7 +801,7 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 		if err != nil {
 			return fmt.Errorf("failed to create output instance %s: %w", componentName, err)
 		}
-		project.GlobalProject.Outputs[componentName] = out
+		project.SetOutput(componentName, out)
 		logger.Debug("Created output instance", "name", componentName)
 
 	case "ruleset":
@@ -810,7 +810,7 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 		if err != nil {
 			return fmt.Errorf("failed to create ruleset instance %s: %w", componentName, err)
 		}
-		project.GlobalProject.Rulesets[componentName] = rs
+		project.SetRuleset(componentName, rs)
 		logger.Debug("Created ruleset instance", "name", componentName)
 
 	case "project":
@@ -819,7 +819,7 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 		if err != nil {
 			return fmt.Errorf("failed to create project instance %s: %w", componentName, err)
 		}
-		project.GlobalProject.Projects[componentName] = proj
+		project.SetProject(componentName, proj)
 		logger.Debug("Created project instance", "name", componentName)
 
 	case "plugin":
@@ -842,25 +842,25 @@ func (im *InstructionManager) createComponentInstance(componentType, componentNa
 func (im *InstructionManager) deleteComponentInstance(componentType, componentName string) error {
 	switch componentType {
 	case "input":
-		delete(project.GlobalProject.Inputs, componentName)
+		project.DeleteInput(componentName)
 		logger.Debug("Deleted input instance", "name", componentName)
 
 	case "output":
-		delete(project.GlobalProject.Outputs, componentName)
+		project.DeleteOutput(componentName)
 		logger.Debug("Deleted output instance", "name", componentName)
 
 	case "ruleset":
-		delete(project.GlobalProject.Rulesets, componentName)
+		project.DeleteRuleset(componentName)
 		logger.Debug("Deleted ruleset instance", "name", componentName)
 
 	case "project":
-		if proj, exists := project.GlobalProject.Projects[componentName]; exists {
+		if proj, exists := project.GetProject(componentName); exists {
 			// Stop the project first if it's running
 			if proj.Status == common.StatusRunning {
 				proj.Stop()
 			}
 		}
-		delete(project.GlobalProject.Projects, componentName)
+		project.DeleteProject(componentName)
 		logger.Debug("Deleted project instance", "name", componentName)
 
 	case "plugin":
@@ -1017,7 +1017,7 @@ func (im *InstructionManager) applyInstruction(version int64) error {
 		if instruction.ComponentType == "project" {
 			// Check if this project exists
 			common.GlobalMu.RLock()
-			proj, exists := project.GlobalProject.Projects[instruction.ComponentName]
+			proj, exists := project.GetProject(instruction.ComponentName)
 			common.GlobalMu.RUnlock()
 
 			if !exists {
@@ -1128,52 +1128,48 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 
 	// Stop and close all running projects first
 	common.GlobalMu.RLock()
-	if project.GlobalProject.Projects != nil {
-		for projectName, proj := range project.GlobalProject.Projects {
-			if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
-				logger.Info("Stopping project due to session change", "project", projectName)
-				if err := proj.Stop(); err != nil {
-					logger.Warn("Failed to stop project during session change", "project", projectName, "error", err)
-				}
+	project.ForEachProject(func(projectName string, proj *project.Project) bool {
+		if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
+			logger.Info("Stopping project due to session change", "project", projectName)
+			if err := proj.Stop(); err != nil {
+				logger.Warn("Failed to stop project during session change", "project", projectName, "error", err)
 			}
 		}
-	}
+		return true
+	})
 	common.GlobalMu.RUnlock()
 
 	// Stop and release all input instances
 	common.GlobalMu.RLock()
-	if project.GlobalProject.Inputs != nil {
-		for inputName, inp := range project.GlobalProject.Inputs {
-			logger.Debug("Stopping input instance", "name", inputName)
-			if err := inp.Stop(); err != nil {
-				logger.Warn("Failed to stop input instance", "name", inputName, "error", err)
-			}
+	project.ForEachInput(func(inputName string, inp *input.Input) bool {
+		logger.Debug("Stopping input instance", "name", inputName)
+		if err := inp.Stop(); err != nil {
+			logger.Warn("Failed to stop input instance", "name", inputName, "error", err)
 		}
-	}
+		return true
+	})
 	common.GlobalMu.RUnlock()
 
 	// Stop and release all output instances
 	common.GlobalMu.RLock()
-	if project.GlobalProject.Outputs != nil {
-		for outputName, out := range project.GlobalProject.Outputs {
-			logger.Debug("Stopping output instance", "name", outputName)
-			if err := out.Stop(); err != nil {
-				logger.Warn("Failed to stop output instance", "name", outputName, "error", err)
-			}
+	project.ForEachOutput(func(outputName string, out *output.Output) bool {
+		logger.Debug("Stopping output instance", "name", outputName)
+		if err := out.Stop(); err != nil {
+			logger.Warn("Failed to stop output instance", "name", outputName, "error", err)
 		}
-	}
+		return true
+	})
 	common.GlobalMu.RUnlock()
 
 	// Stop and release all ruleset instances
 	common.GlobalMu.RLock()
-	if project.GlobalProject.Rulesets != nil {
-		for rulesetName, rs := range project.GlobalProject.Rulesets {
-			logger.Debug("Stopping ruleset instance", "name", rulesetName)
-			if err := rs.Stop(); err != nil {
-				logger.Warn("Failed to stop ruleset instance", "name", rulesetName, "error", err)
-			}
+	project.ForEachRuleset(func(rulesetName string, rs *rules_engine.Ruleset) bool {
+		logger.Debug("Stopping ruleset instance", "name", rulesetName)
+		if err := rs.Stop(); err != nil {
+			logger.Warn("Failed to stop ruleset instance", "name", rulesetName, "error", err)
 		}
-	}
+		return true
+	})
 	common.GlobalMu.RUnlock()
 
 	// Clear all component instances
@@ -1181,32 +1177,28 @@ func (im *InstructionManager) clearAllLocalComponents() error {
 	defer common.GlobalMu.Unlock()
 
 	// Clear project instances
-	if project.GlobalProject.Projects != nil {
-		for projectName := range project.GlobalProject.Projects {
-			delete(project.GlobalProject.Projects, projectName)
-		}
-	}
+	project.ForEachProject(func(projectName string, _ *project.Project) bool {
+		project.DeleteProject(projectName)
+		return true
+	})
 
 	// Clear input instances
-	if project.GlobalProject.Inputs != nil {
-		for inputName := range project.GlobalProject.Inputs {
-			delete(project.GlobalProject.Inputs, inputName)
-		}
-	}
+	project.ForEachInput(func(inputName string, _ *input.Input) bool {
+		project.DeleteInput(inputName)
+		return true
+	})
 
 	// Clear output instances
-	if project.GlobalProject.Outputs != nil {
-		for outputName := range project.GlobalProject.Outputs {
-			delete(project.GlobalProject.Outputs, outputName)
-		}
-	}
+	project.ForEachOutput(func(outputName string, _ *output.Output) bool {
+		project.DeleteOutput(outputName)
+		return true
+	})
 
 	// Clear ruleset instances
-	if project.GlobalProject.Rulesets != nil {
-		for rulesetName := range project.GlobalProject.Rulesets {
-			delete(project.GlobalProject.Rulesets, rulesetName)
-		}
-	}
+	project.ForEachRuleset(func(rulesetName string, _ *rules_engine.Ruleset) bool {
+		project.DeleteRuleset(rulesetName)
+		return true
+	})
 
 	// Clear plugin instances (plugins are handled differently, but we clear the reference)
 	// Plugin cleanup is handled by the plugin system itself

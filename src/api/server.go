@@ -220,8 +220,8 @@ func ServerStart(listener string) error {
 	auth.GET("/mcp/ws", handleMCPWebSocket)   // WebSocket endpoint (future)
 
 	// MCP Configuration endpoints - REQUIRE AUTH
-	auth.GET("/mcp/prompts", mcp.GetMCPPrompts)    // MCP prompts configuration
-	auth.GET("/mcp/configs", mcp.GetAllMCPConfigs) // All MCP configurations
+	auth.GET("/mcp/prompts", mcp.GetMCPPrompts) // MCP prompts configuration
+	auth.GET("/mcp/configs", mcp.GetMCPConfigs) // All MCP configurations
 
 	// MCP Installation endpoints (public access for easy setup)
 	e.GET("/mcp/install", getMCPInstallConfig) // MCP installation configuration

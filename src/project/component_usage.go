@@ -16,16 +16,15 @@ func (c *ComponentUsageCounter) CountProjectsUsingInput(inputID string, excludeP
 		excludeID = excludeProjectID[0]
 	}
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range GlobalProject.Projects {
+	ForEachProject(func(projectID string, proj *Project) bool {
 		if projectID != excludeID && proj.Status == common.StatusRunning {
 			if _, exists := proj.Inputs[inputID]; exists {
 				count++
 			}
 		}
-	}
+		return true
+	})
+
 	return count
 }
 
@@ -38,16 +37,15 @@ func (c *ComponentUsageCounter) CountProjectsUsingOutput(outputID string, exclud
 		excludeID = excludeProjectID[0]
 	}
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range GlobalProject.Projects {
+	ForEachProject(func(projectID string, proj *Project) bool {
 		if projectID != excludeID && proj.Status == common.StatusRunning {
 			if _, exists := proj.Outputs[outputID]; exists {
 				count++
 			}
 		}
-	}
+		return true
+	})
+
 	return count
 }
 
@@ -60,16 +58,15 @@ func (c *ComponentUsageCounter) CountProjectsUsingRuleset(rulesetID string, excl
 		excludeID = excludeProjectID[0]
 	}
 
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-
-	for projectID, proj := range GlobalProject.Projects {
+	ForEachProject(func(projectID string, proj *Project) bool {
 		if projectID != excludeID && proj.Status == common.StatusRunning {
 			if _, exists := proj.Rulesets[rulesetID]; exists {
 				count++
 			}
 		}
-	}
+		return true
+	})
+
 	return count
 }
 
