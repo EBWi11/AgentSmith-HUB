@@ -1648,8 +1648,7 @@ const projectOperationLoading = ref(false)
 const showProjectWarningModal = ref(false)
 const projectWarningMessage = ref('')
 const projectOperationItem = ref(null)
-
-
+const lastSidebarOperation = ref(0)
 const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
 // Sample Data Modal states
@@ -1689,7 +1688,30 @@ const searchLoading = ref(false)
 // Component refs
 const sidebarRef = ref(null)
 
+// Polling state variables
+const isPollingProject = ref(false)
+const activeProjectPollers = new Map()
+
+// Refresh intervals constants
+const REFRESH_INTERVALS = {
+  POLLING_INTERVAL: 2000, // 2 seconds for polling project status
+  NORMAL_INTERVAL: 60000, // 60 seconds for normal refresh
+  FAST_INTERVAL: 5000    // 5 seconds for fast refresh
+}
+
 // Use smart refresh system instead of manual intervals
+
+// Project status refresh functions
+function setupProjectStatusRefresh() {
+  // This function is no longer needed with the unified cache system
+  // Project status refresh is handled by smart refresh system
+}
+
+function clearProjectStatusRefresh() {
+  // Clear any active project pollers
+  activeProjectPollers.clear()
+  isPollingProject.value = false
+}
 
 // Debounced search function
 const debouncedSearch = debounce(async (query) => {
@@ -1847,6 +1869,27 @@ onMounted(async () => {
     Object.assign(collapsed, restoredState.collapsed)
     search.value = restoredState.search
   }
+  
+  // Listen for cache clear events to refresh data immediately
+  const handleCacheCleared = (event) => {
+    const { reason } = event.detail || {};
+    console.log(`[Sidebar] Cache cleared: ${reason}, refreshing sidebar data`);
+    
+    // Refresh all visible component types
+    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects'];
+    componentTypes.forEach(type => {
+      if (!collapsed[type]) {
+        if (type === 'projects') {
+          refreshProjectStatus();
+        } else {
+          fetchItems(type);
+        }
+      }
+    });
+    
+    // Also refresh cluster consistency data
+    loadClusterConsistencyData();
+  };
   
   window.addEventListener('cacheCleared', handleCacheCleared)
   
@@ -3474,12 +3517,6 @@ async function refreshProjectStatus() {
     // If status refresh fails, don't show error, handle silently
   }
 }
-
-// 添加轮询状态标识
-const isPollingProject = ref(false)
-
-// Add a Map to track polling projects (projectId -> true)
-const activeProjectPollers = new Map()
 
 // Get input type icon and color based on input type
 function getInputTypeInfo(item) {

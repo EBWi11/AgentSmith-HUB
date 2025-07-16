@@ -163,7 +163,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		// Get instruction from Redis
 		key := fmt.Sprintf("cluster:instruction:%d", version)
 		data, err := common.RedisGet(key)
-		if data == "DELETED" {
+		if data == GetDeletedIntentionsString() {
 			continue
 		}
 

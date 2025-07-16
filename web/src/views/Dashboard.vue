@@ -1327,7 +1327,7 @@ function handleKeyDown(event) {
   if ((event.key === 'r' || event.key === 'R') && event.shiftKey) {
     if (!loading.projects && !loading.cluster && !loading.messages && !loading.changes) {
       // Clear cache and force full refresh
-      dataCache.clearAllCache()
+      dataCache.clearAll()
       fetchDashboardData()
     }
     event.preventDefault()

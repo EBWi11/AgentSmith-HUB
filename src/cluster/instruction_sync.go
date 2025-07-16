@@ -38,6 +38,17 @@ var PROJECT_OPERATION = map[string]bool{
 	"restart": true,
 }
 
+func GetDeletedIntentionsString() string {
+	return "{\"component_type\":\"DELETE\"}"
+}
+
+func CheckDeletedIntention(i *Instruction) bool {
+	if i.ComponentType == "DELETE" {
+		return true
+	}
+	return false
+}
+
 // InstructionCompactionRule defines rules for instruction compaction
 type InstructionCompactionRule struct {
 	ComponentType string
@@ -151,6 +162,10 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 
 	instructions = append(instructions, new)
 	for i, ii := range instructions {
+		if CheckDeletedIntention(ii) {
+			continue
+		}
+
 		for i2, ii2 := range instructions {
 			if i != i2 {
 				if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
@@ -166,18 +181,18 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 		}
 	}
 
-	for i, _ := range instructions {
-		if !delInstructions[i] && instructions[i].Operation == "restart" {
-			instructions[i].Operation = "start"
-		}
-	}
+	//for i, _ := range instructions {
+	//	if !delInstructions[i] && instructions[i].Operation == "restart" {
+	//		instructions[i].Operation = "start"
+	//	}
+	//}
 
 	for i, instruction := range instructions {
 		version := i + 1
 		key := fmt.Sprintf("cluster:instruction:%d", version)
 
 		if delInstructions[i] {
-			if _, err := common.RedisSet(key, "DELETED", 0); err != nil {
+			if _, err := common.RedisSet(key, GetDeletedIntentionsString(), 0); err != nil {
 				logger.Error("Failed to store compacted instruction", "version", version, "error", err)
 				continue
 			}

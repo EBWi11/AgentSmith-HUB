@@ -604,6 +604,7 @@ const projectOperationLoading = ref(false)
 const projectWarningModal = ref(false)
 const projectWarningMessage = ref('')
 const projectOperationType = ref('') // 'start', 'stop', 'restart'
+const lastProjectOperation = ref(0)
 
 // Use smart refresh system instead of manual timers
 
