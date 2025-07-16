@@ -353,6 +353,9 @@ func (im *InstructionManager) PublishProjectsRestart(projectNames []string, reas
 
 // InitializeLeaderInstructions creates initial instructions for all components (leader only)
 func (im *InstructionManager) InitializeLeaderInstructions() error {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+
 	if !common.IsCurrentNodeLeader() {
 		return fmt.Errorf("only leader can initialize instructions")
 	}
