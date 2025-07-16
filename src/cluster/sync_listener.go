@@ -196,7 +196,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 
 	// Log final sync result
 	if len(failedInstructions) > 0 {
-		logger.Warn("Instructions synced with some failures",
+		logger.Error("Instructions synced with some failures",
 			"from", sl.GetCurrentVersion(),
 			"to", toVersion,
 			"processed", len(processedInstructions),
