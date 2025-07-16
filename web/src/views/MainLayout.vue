@@ -80,7 +80,7 @@ import ErrorLogs from '../views/ErrorLogs.vue'
 import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
 import ProjectTestModal from '../components/ProjectTestModal.vue'
-import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
+// Test caches are now integrated into DataCache store
 import { useDataCacheStore } from '../stores/dataCache'
 
 // State
@@ -99,6 +99,7 @@ const testProjectId = ref('')
 // Get route and router
 const route = useRoute()
 const router = useRouter()
+const dataCache = useDataCacheStore()
 
 // Helper: update global CSS variable for sidebar width
 function updateSidebarWidth () {
@@ -145,14 +146,7 @@ watch(
     const oldId = oldParams?.id
     const oldComponentType = oldMeta?.componentType
     
-    // Clear test cache when navigating away from components
-    if (oldId && oldComponentType) {
-      if (oldComponentType === 'rulesets' && oldId !== id) {
-        RulesetTestCache.clear(oldId)
-      } else if (oldComponentType === 'projects' && oldId !== id) {
-        ProjectTestCache.clear(oldId)
-      }
-    }
+    // Test cache has TTL and will expire automatically when switching components
     
     if (componentType) {
       if (componentType === 'home') {
@@ -343,9 +337,7 @@ function handleEscKey(event) {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscKey);
   
-  // Clear all test caches when component unmounts
-  RulesetTestCache.clearAll();
-  ProjectTestCache.clearAll();
+  // Test caches have TTL and will expire automatically
 });
 
 // Open the ruleset test modal

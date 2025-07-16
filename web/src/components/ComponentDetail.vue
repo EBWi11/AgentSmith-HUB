@@ -499,7 +499,7 @@
 import { ref, watch, inject, computed, onMounted, onBeforeUnmount, watchEffect } from 'vue'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
-import { clearCacheWithDelay } from '../utils/cacheUtils'
+// Cache management integrated into DataCache
 import MonacoEditor from '@/components/MonacoEditor.vue'
 import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
@@ -510,7 +510,7 @@ import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
 import { useComponentSave } from '../composables/useComponentSave'
 import { extractLineNumber } from '../utils/common'
-import { RulesetTestCache, ProjectTestCache } from '../utils/cacheUtils'
+// Test caches are now integrated into DataCache store
 
 import { getDefaultTemplate } from '../utils/templateGenerator'
 
@@ -605,10 +605,7 @@ const projectWarningModal = ref(false)
 const projectWarningMessage = ref('')
 const projectOperationType = ref('') // 'start', 'stop', 'restart'
 
-// Project status refresh
-const statusRefreshInterval = ref(null)
-const lastProjectOperation = ref(0) // 记录最近项目操作时间
-const currentStatusInterval = ref(300000) // 记录当前刷新间隔
+// Use smart refresh system instead of manual timers
 
 // Watch for item changes
 watch(
@@ -928,12 +925,7 @@ async function saveEdit(content) {
     verifyAfterSave,
     fetchDetail,
     onSuccess: (item) => {
-      // Clear test cache after successful save
-      if (currentItem.type === 'rulesets') {
-        RulesetTestCache.clear(currentItem.id);
-      } else if (currentItem.type === 'projects') {
-        ProjectTestCache.clear(currentItem.id);
-      }
+      // Test cache is now cleared automatically when component cache is updated
       
       // Emit to parent component
       emit('updated', item)
@@ -982,12 +974,7 @@ async function saveNew(content) {
     validateBeforeSave,
     verifyAfterSave,
     onSuccess: (item) => {
-      // Clear test cache after successful save
-      if (currentItem.type === 'rulesets') {
-        RulesetTestCache.clear(currentItem.id);
-      } else if (currentItem.type === 'projects') {
-        ProjectTestCache.clear(currentItem.id);
-      }
+      // Test cache is now cleared automatically when component cache is updated
       
       // Emit to parent component
       emit('created', item)
@@ -1008,14 +995,7 @@ function cancelEdit() {
   saveError.value = ''
   errorLines.value = [] // 清空错误行
   
-  // Clear test cache when canceling edit
-  if (props.item?.id) {
-    if (isRuleset.value) {
-      RulesetTestCache.clear(props.item.id);
-    } else if (isProject.value) {
-      ProjectTestCache.clear(props.item.id);
-    }
-  }
+  // Test cache is preserved when canceling edit to maintain user's test data
   
   // Exit edit mode
   emit('cancel-edit', props.item)
@@ -1088,7 +1068,7 @@ async function startProject() {
       $message?.success?.('Project started successfully')
       
       // Clear all cache since project start affects multiple data types
-      clearCacheWithDelay(2000, `project start: ${props.item.id}`)
+      dataCache.clearAll()
       
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
@@ -1132,7 +1112,7 @@ async function stopProject() {
       $message?.success?.('Project stopped successfully')
       
       // Clear all cache since project stop affects multiple data types
-      clearCacheWithDelay(2000, `project stop: ${props.item.id}`)
+      dataCache.clearAll()
       
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
@@ -1176,7 +1156,7 @@ async function restartProject() {
       $message?.success?.('Project restarted successfully')
       
       // Clear all cache since project restart affects multiple data types
-      clearCacheWithDelay(2000, `project restart: ${props.item.id}`)
+      dataCache.clearAll()
       
       // 不要立即修改状态，让刷新机制去更新状态确保同步
       // 操作后会触发快速刷新来获取真实状态
@@ -1264,99 +1244,11 @@ function continueProjectOperation() {
   }
 }
 
-// 设置定时刷新项目状态
-function setupStatusRefresh() {
-  if (isProject.value && props.item && props.item.id && !statusRefreshInterval.value) {
-    // 动态调整刷新频率：过渡状态1秒，稳定状态60秒
-    const getRefreshInterval = () => {
-      const currentStatus = detail.value?.status;
-      // 过渡状态（starting/stopping）使用更快的刷新频率
-      if (currentStatus === 'starting' || currentStatus === 'stopping') {
-        return 1000; // 1秒
-      }
-      // 检查是否在最近操作后的30秒内
-      const recentOperation = Date.now() - lastProjectOperation.value < 30000;
-      if (recentOperation) {
-        return 1000; // 1秒 - 最近操作后快速刷新
-      }
-      // 稳定状态使用正常频率
-      return 300000; // 5分钟
-    };
-    
-    const refreshStatus = async () => {
-      if (detail.value && !detail.value.isTemporary) {
-        try {
-          // Use dataCache with force refresh for real-time status updates
-          const clusterStatus = await dataCache.fetchClusterInfo(true);
-          if (clusterStatus && clusterStatus.projects) {
-            const projectStatus = clusterStatus.projects.find(p => p.id === props.item.id);
-            if (projectStatus && detail.value) {
-              const oldStatus = detail.value.status;
-              detail.value.status = projectStatus.status || 'stopped';
-              
-              // 检查是否需要调整刷新间隔
-              const newInterval = getRefreshInterval();
-              
-              if (newInterval !== currentStatusInterval.value) {
-                clearInterval(statusRefreshInterval.value);
-                currentStatusInterval.value = newInterval;
-                statusRefreshInterval.value = setInterval(refreshStatus, newInterval);
-                // console.log(`ComponentDetail refresh interval adjusted to ${newInterval}ms for project ${props.item.id}`);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Failed to refresh project status:', error);
-        }
-      }
-    };
-    
-    // 初始设置
-    const initialInterval = getRefreshInterval();
-    currentStatusInterval.value = initialInterval;
-    statusRefreshInterval.value = setInterval(refreshStatus, initialInterval);
-    // console.log(`ComponentDetail refresh started with ${initialInterval}ms for project ${props.item?.id}`);
-    
-    // 立即执行一次刷新
-    refreshStatus();
-  }
-}
-
-// 清除定时刷新
-function clearStatusRefresh() {
-  if (statusRefreshInterval.value) {
-    clearInterval(statusRefreshInterval.value);
-    statusRefreshInterval.value = null;
-  }
-}
-
-// 监听项目类型变化，设置或清除定时刷新
-watch(isProject, (newVal) => {
-  if (newVal) {
-    setupStatusRefresh();
-  } else {
-    clearStatusRefresh();
-  }
-});
-
-// 监听项目ID变化，重置定时刷新
+// Use smart refresh system instead of manual status refresh
+// Clear validation errors when switching between components
 watch(() => props.item?.id, (newVal, oldVal) => {
-  if (newVal !== oldVal) {
-    clearStatusRefresh();
-    if (isProject.value) {
-      setupStatusRefresh();
-    }
-    
-    // Clear test cache when switching between different components
-    if (oldVal && oldVal !== newVal) {
-      if (props.item?.type === 'rulesets') {
-        RulesetTestCache.clear(oldVal);
-        // console.log(`[ComponentDetail] Cleared test cache for previous ruleset: ${oldVal}`);
-      } else if (props.item?.type === 'projects') {
-        ProjectTestCache.clear(oldVal);
-        // console.log(`[ComponentDetail] Cleared test cache for previous project: ${oldVal}`);
-      }
-    }
+  if (newVal !== oldVal && oldVal) {
+    // Test cache has TTL and will expire automatically
     
     // Clear any existing validation errors when switching components
     validationResult.value = { isValid: true, errors: [], warnings: [] };
@@ -1365,24 +1257,8 @@ watch(() => props.item?.id, (newVal, oldVal) => {
   }
 });
 
-// 页面可见性变化处理
-function handleComponentVisibilityChange() {
-  if (document.hidden) {
-    // 页面隐藏时暂停刷新
-    clearStatusRefresh();
-  } else if (isProject.value && props.item?.id) {
-    // 页面重新可见时恢复刷新
-    setupStatusRefresh();
-  }
-}
-
-// 组件卸载时清除定时刷新
+// 组件卸载时清理
 onBeforeUnmount(() => {
-  clearStatusRefresh();
-  
-  // Remove page visibility change listener
-  document.removeEventListener('visibilitychange', handleComponentVisibilityChange);
-  
   // Clear validation timeouts
   if (rulesetValidationTimeout.value) {
     clearTimeout(rulesetValidationTimeout.value);
@@ -1400,16 +1276,7 @@ onBeforeUnmount(() => {
     clearTimeout(pluginValidationTimeout.value);
   }
   
-  // Clear test cache when leaving component interface
-  if (props.item?.id) {
-    if (isRuleset.value) {
-      RulesetTestCache.clear(props.item.id);
-      // console.log(`[ComponentDetail] Cleared test cache for ruleset: ${props.item.id}`);
-    } else if (isProject.value) {
-      ProjectTestCache.clear(props.item.id);
-      // console.log(`[ComponentDetail] Cleared test cache for project: ${props.item.id}`);
-    }
-  }
+  // Test cache has TTL and will expire automatically
 });
 
 

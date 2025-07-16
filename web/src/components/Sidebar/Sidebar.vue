@@ -1495,8 +1495,7 @@ import JsonViewer from '@/components/JsonViewer.vue'
 import { getStatusLabel, getStatusTitle, copyToClipboard, formatNumber, formatPercent } from '../../utils/common'
 import { debounce } from '../../utils/performance'
 import { useDataCacheStore } from '../../stores/dataCache'
-import { clearCacheWithDelay } from '../../utils/cacheUtils'
-import { restoreSidebarState } from '../../utils/stateManager'
+// State management integrated into DataCache
 // useListSmartRefresh removed - using unified refresh mechanism in setupProjectStatusRefresh
 
 // Get router instance
@@ -1672,14 +1671,7 @@ const searchLoading = ref(false)
 // Component refs
 const sidebarRef = ref(null)
 
-// Refresh configuration
-const REFRESH_INTERVALS = {
-  TRANSITION_STATE: 2000,    // 2s - 项目过渡状态时的快速刷新
-  RECENT_OPERATION: 30000,   // 30s - 最近操作后的中等频率刷新
-  STABLE_STATE: 120000,      // 2min - 稳定状态的正常刷新
-  POLLING_INTERVAL: 2000,    // 2s - 状态轮询间隔
-  RECENT_OPERATION_WINDOW: 60000 // 60s - 被认为是"最近操作"的时间窗口
-}
+// Use smart refresh system instead of manual intervals
 
 // Debounced search function
 const debouncedSearch = debounce(async (query) => {
@@ -1820,40 +1812,22 @@ onMounted(async () => {
   // Add click event listener to close menus when clicking outside
   document.addEventListener('click', handleOutsideClick)
   
-  // Listen for pending changes applied event to refresh affected components
-  window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
+  // Removed redundant event listeners - DataCache handles unified event management
   
-  // Listen for local changes loaded event to refresh affected components
-  window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
+  // 自动保存UI状态（当状态发生变化时）
+  watch(collapsed, (newCollapsed) => {
+    dataCache.saveSidebarState(newCollapsed, search.value)
+  }, { deep: true })
   
-  // 监听缓存清理事件，恢复UI状态
-  const handleCacheCleared = (event) => {
-    const { reason, shouldRestoreState } = event.detail || {}
-    console.log(`[Sidebar] Cache cleared: ${reason}, shouldRestore: ${shouldRestoreState}`)
-    
-    if (shouldRestoreState) {
-      // 延迟恢复状态，等待数据重新加载
-      setTimeout(() => {
-        // 创建 exposed 对象供状态管理器使用
-        const exposedObj = {
-          collapsed,
-          selected: props.selected,
-          search,
-          activeModal,
-          sidebarRef: sidebarRef.value
-        }
-        
-        const restoredState = restoreSidebarState(exposedObj)
-        if (restoredState && restoredState.selectedId && restoredState.selectedType) {
-          // 如果恢复了选中状态，通知父组件
-          emit('select-item', { 
-            type: restoredState.selectedType, 
-            id: restoredState.selectedId,
-            _restored: true 
-          })
-        }
-      }, 500) // 给数据刷新一些时间
-    }
+  watch(search, (newSearch) => {
+    dataCache.saveSidebarState(collapsed, newSearch)
+  })
+  
+  // 尝试恢复之前的UI状态
+  const restoredState = dataCache.restoreSidebarState()
+  if (restoredState) {
+    Object.assign(collapsed, restoredState.collapsed)
+    search.value = restoredState.search
   }
   
   window.addEventListener('cacheCleared', handleCacheCleared)
@@ -2577,34 +2551,9 @@ function getArgumentTypeHint() {
   return 'String, number, or boolean value'
 }
 
-// 项目状态自动刷新
-const projectStatusRefreshInterval = ref(null)
-const lastSidebarOperation = ref(0) // 记录最近操作时间
-const currentSidebarInterval = ref(60000) // 记录当前刷新间隔
+// Use smart refresh system for automatic updates
 
-// 设置动态项目状态刷新
-function setupProjectStatusRefresh() {
-  if (projectStatusRefreshInterval.value) {
-    clearInterval(projectStatusRefreshInterval.value)
-  }
-  
-  // 优化的刷新频率：动态调整基于项目状态和用户操作
-  const getRefreshInterval = () => {
-    // 检查是否有项目处于过渡状态
-    const hasTransitionProjects = items.projects && items.projects.some(project => 
-      project.status === 'starting' || project.status === 'stopping'
-    )
-    
-    // 检查是否在最近操作的时间窗口内
-    const recentOperation = Date.now() - lastSidebarOperation.value < REFRESH_INTERVALS.RECENT_OPERATION_WINDOW
-    
-    if (hasTransitionProjects) {
-      return REFRESH_INTERVALS.TRANSITION_STATE
-    } else if (recentOperation) {
-      return REFRESH_INTERVALS.RECENT_OPERATION
-    }
-    return REFRESH_INTERVALS.STABLE_STATE
-  }
+// Smart refresh handles timing automatically based on transition states
   
   const refreshSidebar = async () => {
     try {
@@ -2629,52 +2578,12 @@ function setupProjectStatusRefresh() {
         showClusterStatusModal.value ? loadClusterProjectStates() : Promise.resolve()
       ])
       
-      // 状态刷新后，检查是否需要调整刷新间隔
-      const newInterval = getRefreshInterval()
-      
-      // 如果间隔需要改变，重新设置定时器
-      if (newInterval !== currentSidebarInterval.value) {
-        clearInterval(projectStatusRefreshInterval.value)
-        currentSidebarInterval.value = newInterval
-        projectStatusRefreshInterval.value = setInterval(refreshSidebar, newInterval)
-                  // console.log(`Sidebar refresh interval adjusted to ${newInterval}ms`)
-      }
     } catch (error) {
       console.error('Failed to refresh sidebar:', error)
     }
   }
-  
-  // 初始设置
-  const initialInterval = getRefreshInterval()
-  currentSidebarInterval.value = initialInterval
-  projectStatusRefreshInterval.value = setInterval(refreshSidebar, initialInterval)
-      // console.log(`Sidebar refresh started with ${initialInterval}ms interval`)
-  
-  // 立即执行一次刷新
-  refreshSidebar()
-}
 
-// 清除项目状态刷新
-function clearProjectStatusRefresh() {
-  if (projectStatusRefreshInterval.value) {
-    clearInterval(projectStatusRefreshInterval.value)
-    projectStatusRefreshInterval.value = null
-  }
-}
-
-// 监听项目列表变化，自动设置刷新
-watch(() => items.projects, (newProjects) => {
-  if (newProjects && newProjects.length > 0) {
-    setupProjectStatusRefresh()
-  } else {
-    clearProjectStatusRefresh()
-  }
-}, { deep: true, immediate: true })
-
-// 组件卸载时清理
-onBeforeUnmount(() => {
-  clearProjectStatusRefresh()
-})
+// Removed manual refresh functions - using smart refresh system
 
 // Expose methods to parent component
 defineExpose({
@@ -2682,8 +2591,6 @@ defineExpose({
   fetchAllItems,
   refreshProjectStatus,
   fetchProjectsComplete,
-  setupProjectStatusRefresh,
-  clearProjectStatusRefresh,
   // State properties for state manager
   collapsed,
   selected: props.selected,
@@ -2755,7 +2662,7 @@ async function startProject(item) {
       $message?.success?.('Project start command sent successfully')
       
       // Clear all cache since project start affects multiple data types
-      clearCacheWithDelay(2000, `project start: ${item.id}`)
+      dataCache.clearAll()
       
       pollProjectStatusUntilStable(item.id, 'starting')
     }
@@ -2800,7 +2707,7 @@ async function stopProject(item) {
     $message?.success?.('Project stop command sent successfully')
     
     // Clear all cache since project stop affects multiple data types
-    clearCacheWithDelay(2000, `project stop: ${item.id}`)
+    dataCache.clearAll()
     
     pollProjectStatusUntilStable(item.id, 'stopping')
   } catch (error) {
@@ -2861,7 +2768,9 @@ async function restartProject(item) {
       $message?.success?.('Project restart command sent successfully')
       
       // Clear all cache since project restart affects multiple data types
-      clearCacheWithDelay(2000, `project restart: ${item.id}`)
+      setTimeout(() => {
+        dataCache.clearAll(`project restart: ${item.id}`)
+      }, 2000)
       
       // For restart, we expect: stopping -> starting -> running
       pollProjectStatusUntilStable(item.id, 'stopping')

@@ -6,7 +6,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, onUnmounted, computed, nextTick } from 'vue';
-import { useStore } from 'vuex';
+import { useStore } from 'vuex'
 import * as monaco from 'monaco-editor';
 import { hubApi } from '@/api';
 import { useDataCacheStore } from '@/stores/dataCache';
@@ -135,19 +135,19 @@ const getPluginParameters = async (pluginId) => {
 // Plugin parameters cache - smart computed property that returns current cache state
 const pluginParametersCache = computed(() => globalPluginParametersCache.value);
 
-// Get dynamic field keys for ruleset completion
+// Get dynamic field keys for ruleset completion using unified cache
 const dynamicFieldKeys = computed(() => {
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
-    const rulesetFields = store.getters.getRulesetFields(props.componentId);
-    return rulesetFields.fieldKeys || [];
+    const rulesetFields = dataCache.rulesetFields.get(props.componentId);
+    return rulesetFields?.data?.fieldKeys || [];
   }
   return [];
 });
 
-// Watch for component changes to fetch field data
+// Watch for component changes to fetch field data using unified cache
 watch([() => props.componentId, () => props.componentType], ([newId, newType], [oldId, oldType]) => {
   if ((newType === 'ruleset' || newType === 'rulesets') && newId && (newId !== oldId || newType !== oldType)) {
-    store.dispatch('fetchRulesetFields', newId);
+    dataCache.fetchRulesetFields(newId);
   }
 }, { immediate: true });
 
@@ -190,9 +190,9 @@ onMounted(async () => {
       // console.warn('Failed to preload component data for Monaco:', error);
     }
   
-  // Fetch dynamic field keys for rulesets
+  // Fetch dynamic field keys for rulesets using unified cache
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
-    store.dispatch('fetchRulesetFields', props.componentId);
+    dataCache.fetchRulesetFields(props.componentId);
   }
   
   // Setup Monaco theme
@@ -1016,10 +1016,10 @@ watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalVal
   }
 }, { deep: true });
 
-// Monitor componentId changes to fetch field keys for rulesets
+// Monitor componentId changes to fetch field keys for rulesets using unified cache
 watch(() => [props.componentType, props.componentId], ([newType, newId], [oldType, oldId]) => {
   if (newType === 'ruleset' && newId && newId !== oldId) {
-    store.dispatch('fetchRulesetFields', newId);
+    dataCache.fetchRulesetFields(newId);
   }
   
   // Update global componentType for completion providers

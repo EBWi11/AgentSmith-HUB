@@ -36,6 +36,37 @@ export const useDataCacheStore = defineStore('dataCache', {
     // Plugin statistics cache - Store as Map with LRU mechanism
     pluginStats: new Map(),
     
+    // Available plugins cache (moved from Vuex)
+    availablePlugins: {
+      data: [],
+      timestamp: 0,
+      loading: false
+    },
+    
+    // Ruleset fields cache (moved from Vuex) - Store as Map with LRU mechanism
+    rulesetFields: new Map(),
+    
+    // Test data caches (consolidated from cacheUtils)
+    testCaches: {
+      rulesets: new Map(),
+      projects: new Map()
+    },
+    
+    // UI state persistence (basic replacement for stateManager)
+    uiStates: {
+      sidebarCollapsed: {
+        inputs: true,
+        outputs: true,
+        rulesets: true,
+        plugins: true,
+        projects: true,
+        settings: true,
+        builtinPlugins: true
+      },
+      sidebarSearch: '',
+      lastUpdate: 0
+    },
+    
     // Cluster status cache
     clusterInfo: {
       data: {},
@@ -95,44 +126,72 @@ export const useDataCacheStore = defineStore('dataCache', {
       const componentChangedCleanup = eventManager.on('componentChanged', (data) => {
         const { action, type, id } = data
         
+        // Normalize type to plural form
+        // Handle both singular ('input') and plural ('inputs') forms
+        let normalizedType = type
+        if (!type.endsWith('s')) {
+          // Convert singular to plural
+          if (type === 'ruleset') {
+            normalizedType = 'rulesets'
+          } else {
+            normalizedType = type + 's'
+          }
+        }
+        
         switch (action) {
           case 'created':
-            this.clearComponentCache(type)
+            this.clearComponentCache(normalizedType)
             // HIGHEST PRIORITY: Force immediate refresh after creation
             setTimeout(() => {
-              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+              this.fetchComponents(normalizedType, true, true) // isPriorityRefresh = true
             }, 150)
             break
           case 'updated':
-            this.clearComponentCache(type)
+            this.clearComponentCache(normalizedType)
             // Also clear the specific component detail cache
             if (id) {
-              const detailCacheKey = `detail_${type}_${id}`
+              const detailCacheKey = `detail_${normalizedType}_${id}`
               ongoingRequests.delete(detailCacheKey)
             }
             // HIGHEST PRIORITY: Force immediate refresh after update
             setTimeout(() => {
-              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+              this.fetchComponents(normalizedType, true, true) // isPriorityRefresh = true
             }, 150)
             break
           case 'deleted':
             // Use specialized method for deletion
             if (id) {
-              this.clearComponentRelatedCaches(type, id)
+              this.clearComponentRelatedCaches(normalizedType, id)
             } else {
-              this.clearComponentCache(type)
+              this.clearComponentCache(normalizedType)
             }
             // HIGHEST PRIORITY: Force immediate refresh after deletion
             setTimeout(() => {
-              this.fetchComponents(type, true, true) // isPriorityRefresh = true
+              this.fetchComponents(normalizedType, true, true) // isPriorityRefresh = true
             }, 150)
             break
         }
         
         // For projects, also clear cluster info cache as project status might change
-        if (type === 'projects') {
+        if (normalizedType === 'projects') {
           this.clearCache('clusterInfo')
           this.clearCache('clusterProjectStates')
+        }
+        
+        // Handle ruleset-specific caches
+        if (normalizedType === 'rulesets' && id) {
+          this.clearRulesetFields(id)
+          // Test cache is now cleared automatically in clearComponentRelatedCaches
+        }
+        
+        // Handle plugin-specific caches
+        if (normalizedType === 'plugins') {
+          this.clearCache('availablePlugins')
+        }
+        
+        // Handle project-specific caches
+        if (normalizedType === 'projects' && id) {
+          // Test cache is now cleared automatically in clearComponentRelatedCaches
         }
       })
       
@@ -170,63 +229,11 @@ export const useDataCacheStore = defineStore('dataCache', {
         this.clearCache('localChanges')
       })
       
-      // Also listen for direct window events (for immediate component operations)
-      const windowEventHandler = (event) => {
-        if (event.detail) {
-          const { action, type, id } = event.detail
-          
-          switch (action) {
-            case 'created':
-              this.clearComponentCache(type + 's') // Convert 'input' to 'inputs'
-              // HIGHEST PRIORITY: Immediate refresh after operation
-              setTimeout(() => {
-                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
-              }, 150)
-              break
-            case 'updated':
-              this.clearComponentCache(type + 's')
-              if (id) {
-                const detailCacheKey = `detail_${type + 's'}_${id}`
-                ongoingRequests.delete(detailCacheKey)
-              }
-              // HIGHEST PRIORITY: Immediate refresh after operation
-              setTimeout(() => {
-                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
-              }, 150)
-              break
-            case 'deleted':
-              if (id) {
-                this.clearComponentRelatedCaches(type + 's', id)
-              } else {
-                this.clearComponentCache(type + 's')
-              }
-              // HIGHEST PRIORITY: Immediate refresh after operation
-              setTimeout(() => {
-                this.fetchComponents(type + 's', true, true) // isPriorityRefresh = true
-              }, 150)
-              break
-          }
-          
-          // For projects, also clear cluster info cache
-          if (type === 'project') {
-            this.clearCache('clusterInfo')
-            this.clearCache('clusterProjectStates')
-          }
-        }
-      }
-      
-      window.addEventListener('componentChanged', windowEventHandler)
-      
-      const windowCleanup = () => {
-        window.removeEventListener('componentChanged', windowEventHandler)
-      }
-      
       // Store cleanup functions
       this._eventCleanupFunctions.push(
         componentChangedCleanup,
         pendingChangesCleanup,
-        localChangesCleanup,
-        windowCleanup
+        localChangesCleanup
       )
       
     },
@@ -643,6 +650,12 @@ export const useDataCacheStore = defineStore('dataCache', {
       const detailCacheKey = `detail_${type}_${id}`
       ongoingRequests.delete(detailCacheKey)
       
+      // Clear test caches automatically
+      if (type === 'rulesets') {
+        this.clearTestCache('rulesets', id)
+      } else if (type === 'projects') {
+        this.clearTestCache('projects', id)
+      }
     },
     
     // Clear component cache
@@ -662,9 +675,15 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
       keysToDelete.forEach(key => ongoingRequests.delete(key))
       
+      // Clear all test caches for this component type
+      if (type === 'rulesets') {
+        this.clearTestCache('rulesets')
+      } else if (type === 'projects') {
+        this.clearTestCache('projects')
+      }
     },
     
-    // Clear all cache
+    // Clear all cache (but preserve UI states)
     clearAllCache() {
       // Clear component cache
       Object.keys(this.components).forEach(type => {
@@ -675,12 +694,28 @@ export const useDataCacheStore = defineStore('dataCache', {
       this.clearCache('systemMetrics')
       this.clearCache('messageStats')
       this.clearCache('clusterInfo')
+      this.clearCache('clusterProjectStates')
       this.clearCache('pendingChanges')
       this.clearCache('localChanges')
+      this.clearCache('availablePlugins')
       
       // Clear Map-based caches
       this.pluginStats.clear()
+      this.rulesetFields.clear()
       this.operationsHistory.clear()
+      this.testCaches.rulesets.clear()
+      this.testCaches.projects.clear()
+      
+      // Clear ongoing requests
+      ongoingRequests.clear()
+      priorityRefreshQueue.clear()
+      
+      // Note: UI states are preserved to maintain user experience
+    },
+    
+    // Alias for backward compatibility
+    clearAll() {
+      this.clearAllCache()
     },
     
     // Incremental update component data
@@ -702,12 +737,11 @@ export const useDataCacheStore = defineStore('dataCache', {
     // Remove component data
     removeComponentItem(type, id) {
       const cache = this.components[type]
-      if (!cache.data) return
-      
-      const index = cache.data.findIndex(item => item.id === id)
-      if (index >= 0) {
-        cache.data.splice(index, 1)
-        cache.timestamp = Date.now()
+      if (cache && cache.data) {
+        const index = cache.data.findIndex(item => (item.id || item.name) === id)
+        if (index !== -1) {
+          cache.data.splice(index, 1)
+        }
       }
     },
     
@@ -732,6 +766,158 @@ export const useDataCacheStore = defineStore('dataCache', {
             break
         }
       })
+    },
+    
+    // Available plugins methods (moved from Vuex)
+    async fetchAvailablePlugins(forceRefresh = false) {
+      return this.fetchWithCache(
+        'availablePlugins',
+        () => hubApi.getAvailablePlugins(),
+        300000, // 5min TTL, plugins don't change often
+        forceRefresh
+      )
+    },
+    
+    // Ruleset fields methods (moved from Vuex)
+    async fetchRulesetFields(rulesetId, forceRefresh = false) {
+      const cacheKey = `rulesetFields_${rulesetId}`
+      
+      // If there is already an in-flight request for this key, return the same Promise
+      if (ongoingRequests.has(cacheKey)) {
+        return ongoingRequests.get(cacheKey)
+      }
+      
+      // Check if cache exists and is not expired
+      const cache = this.rulesetFields.get(rulesetId)
+      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 300000) {
+        // Move to end (LRU)
+        this.rulesetFields.delete(rulesetId)
+        this.rulesetFields.set(rulesetId, cache)
+        return cache.data
+      }
+      
+      // Create a Promise for the fetcher and store it in the map to deduplicate
+      const requestPromise = (async () => {
+        // Create cache entry if not exists
+        let cacheEntry = this.rulesetFields.get(rulesetId) || { data: { fieldKeys: [], sampleCount: 0 }, timestamp: 0, loading: false }
+        cacheEntry.loading = true
+        this.rulesetFields.set(rulesetId, cacheEntry)
+        
+        try {
+          const data = await hubApi.getRulesetFields(rulesetId)
+          cacheEntry.data = data || { fieldKeys: [], sampleCount: 0 }
+          cacheEntry.timestamp = Date.now()
+          cacheEntry.loading = false
+          
+          // LRU cleanup: keep only last 20 entries
+          if (this.rulesetFields.size > 20) {
+            const firstKey = this.rulesetFields.keys().next().value
+            this.rulesetFields.delete(firstKey)
+          }
+          
+          return cacheEntry.data
+        } catch (error) {
+          console.warn(`Failed to fetch fields for ruleset ${rulesetId}:`, error)
+          const fallbackData = { fieldKeys: [], sampleCount: 0 }
+          cacheEntry.data = fallbackData
+          cacheEntry.loading = false
+          return fallbackData
+        } finally {
+          ongoingRequests.delete(cacheKey)
+        }
+      })()
+
+      ongoingRequests.set(cacheKey, requestPromise)
+      return requestPromise
+    },
+    
+    // Clear ruleset fields cache
+    clearRulesetFields(rulesetId = null) {
+      if (rulesetId) {
+        this.rulesetFields.delete(rulesetId)
+      } else {
+        this.rulesetFields.clear()
+      }
+    },
+    
+    // Test cache methods (consolidated from cacheUtils)
+    getTestCache(type, id) {
+      if (this.testCaches[type]) {
+        const cache = this.testCaches[type].get(id)
+        if (cache) {
+          // Check if cache is expired (30 minutes TTL)
+          const ttl = 30 * 60 * 1000
+          if (Date.now() - cache.timestamp > ttl) {
+            this.testCaches[type].delete(id)
+            return null
+          }
+          return cache.data
+        }
+      }
+      return null
+    },
+    
+    setTestCache(type, id, data) {
+      if (this.testCaches[type]) {
+        this.testCaches[type].set(id, {
+          data,
+          timestamp: Date.now()
+        })
+        
+        // LRU cleanup: keep only last 10 entries per type
+        if (this.testCaches[type].size > 10) {
+          const firstKey = this.testCaches[type].keys().next().value
+          this.testCaches[type].delete(firstKey)
+        }
+      }
+    },
+    
+    clearTestCache(type, id = null) {
+      if (this.testCaches[type]) {
+        if (id) {
+          this.testCaches[type].delete(id)
+        } else {
+          this.testCaches[type].clear()
+        }
+      }
+    },
+    
+    // UI state management methods
+    saveSidebarState(collapsed, search) {
+      if (collapsed) {
+        Object.assign(this.uiStates.sidebarCollapsed, collapsed)
+      }
+      if (search !== undefined) {
+        this.uiStates.sidebarSearch = search
+      }
+      this.uiStates.lastUpdate = Date.now()
+    },
+    
+    restoreSidebarState() {
+      // Only restore if saved within last 5 minutes
+      const maxAge = 5 * 60 * 1000 // 5 minutes
+      if (Date.now() - this.uiStates.lastUpdate > maxAge) {
+        return null
+      }
+      
+      return {
+        collapsed: { ...this.uiStates.sidebarCollapsed },
+        search: this.uiStates.sidebarSearch
+      }
+    },
+    
+    clearUIStates() {
+      this.uiStates.sidebarCollapsed = {
+        inputs: true,
+        outputs: true,
+        rulesets: true,
+        plugins: true,
+        projects: true,
+        settings: true,
+        builtinPlugins: true
+      }
+      this.uiStates.sidebarSearch = ''
+      this.uiStates.lastUpdate = 0
     }
   }
 }) 

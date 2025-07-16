@@ -1,6 +1,6 @@
 import { ref, inject } from 'vue'
 import { hubApi } from '../api'
-import { clearCacheWithDelay } from '../utils/cacheUtils'
+import { useDataCacheStore } from '../stores/dataCache'
 
 /**
  * Component save operations composable
@@ -10,6 +10,7 @@ export function useComponentSave() {
   const saving = ref(false)
   const saveError = ref('')
   const preventRefetch = ref(false)
+  const dataCache = useDataCacheStore()
   
   // Global message component
   const $message = inject('$message', window?.$toast)
@@ -79,7 +80,9 @@ export function useComponentSave() {
       
       // Clear all cache since component save can affect multiple data types
       const action = isNewComponent ? 'create' : 'save'
-      clearCacheWithDelay(1500, `${action} component: ${componentType}:${componentId}`)
+      setTimeout(() => {
+        dataCache.clearAll(`${action} component: ${componentType}:${componentId}`)
+      }, 1500)
       
       // Call success callback if provided
       if (onSuccess) {
