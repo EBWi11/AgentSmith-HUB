@@ -415,6 +415,24 @@
                     P
                   </span>
 
+                  <!-- Input type badge for inputs -->
+                  <span v-if="type === 'inputs' && getInputTypeInfo(item)" 
+                        class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
+                        :class="getInputTypeInfo(item).color"
+                        @mouseenter="showTooltip($event, getInputTypeInfo(item).tooltip)"
+                        @mouseleave="hideTooltip">
+                    {{ getInputTypeInfo(item).icon }}
+                  </span>
+                  
+                  <!-- Output type badge for outputs -->
+                  <span v-if="type === 'outputs' && getOutputTypeInfo(item)" 
+                        class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
+                        :class="getOutputTypeInfo(item).color"
+                        @mouseenter="showTooltip($event, getOutputTypeInfo(item).tooltip)"
+                        @mouseleave="hideTooltip">
+                    {{ getOutputTypeInfo(item).icon }}
+                  </span>
+
                   <!-- Temporary file badge -->
                   <span v-if="item.hasTemp" 
                         class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
@@ -1805,7 +1823,7 @@ function closeActiveModal() {
 // Lifecycle hooks
 onMounted(async () => {
   await fetchAllItems()
-
+  
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
@@ -3462,6 +3480,34 @@ const isPollingProject = ref(false)
 
 // Add a Map to track polling projects (projectId -> true)
 const activeProjectPollers = new Map()
+
+// Get input type icon and color based on input type
+function getInputTypeInfo(item) {
+  const type = item.type?.toLowerCase() || 'unknown'
+  const typeMap = {
+    'kafka': { icon: 'K', color: 'bg-orange-100 text-orange-800', tooltip: 'Kafka Input' },
+    'kafka_azure': { icon: 'AK', color: 'bg-blue-100 text-blue-800', tooltip: 'Azure Kafka Input' },
+    'kafka_aws': { icon: 'WK', color: 'bg-yellow-100 text-yellow-800', tooltip: 'AWS Kafka Input' },
+    'aliyun_sls': { icon: 'SLS', color: 'bg-green-100 text-green-800', tooltip: 'Aliyun SLS Input' },
+    'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Input Type' }
+  }
+  return typeMap[type] || typeMap['unknown']
+}
+
+// Get output type icon and color based on output type
+function getOutputTypeInfo(item) {
+  const type = item.type?.toLowerCase() || 'unknown'
+  const typeMap = {
+    'kafka': { icon: 'K', color: 'bg-orange-100 text-orange-800', tooltip: 'Kafka Output' },
+    'kafka_azure': { icon: 'AK', color: 'bg-blue-100 text-blue-800', tooltip: 'Azure Kafka Output' },
+    'kafka_aws': { icon: 'WK', color: 'bg-yellow-100 text-yellow-800', tooltip: 'AWS Kafka Output' },
+    'elasticsearch': { icon: 'ES', color: 'bg-purple-100 text-purple-800', tooltip: 'Elasticsearch Output' },
+    'aliyun_sls': { icon: 'SLS', color: 'bg-green-100 text-green-800', tooltip: 'Aliyun SLS Output' },
+    'print': { icon: 'P', color: 'bg-gray-100 text-gray-800', tooltip: 'Print Output' },
+    'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Output Type' }
+  }
+  return typeMap[type] || typeMap['unknown']
+}
 
 </script>
 
