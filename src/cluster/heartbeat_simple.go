@@ -109,7 +109,7 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 		return
 	}
 
-	currentVersion := "v0.0"
+	currentVersion := "0.0"
 	if GlobalSyncListener != nil {
 		currentVersion = GlobalSyncListener.GetCurrentVersion()
 	}

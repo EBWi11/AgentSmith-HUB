@@ -74,7 +74,8 @@ func (sl *SyncListener) listenSyncCommands() {
 			}
 
 			// Check if command is for this node
-			if nodeID, ok := syncCmd["node_id"].(string); !ok || nodeID != sl.nodeID {
+			// Commands without node_id are broadcast commands (like publish_complete)
+			if nodeID, ok := syncCmd["node_id"].(string); ok && nodeID != sl.nodeID {
 				continue
 			}
 

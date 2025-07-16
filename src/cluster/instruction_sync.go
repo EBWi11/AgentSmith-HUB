@@ -455,6 +455,15 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 			}
 		}
 	}
+
+	// Update final version after all instructions are published
+	_, err = im.setCurrentVersion(instructionCount)
+	if err != nil {
+		logger.Error("Failed to update final version after initialization", "error", err)
+		return fmt.Errorf("failed to update final version: %w", err)
+	}
+
+	logger.Info("Leader instructions initialization completed", "final_version", im.GetCurrentVersion(), "instruction_count", instructionCount)
 	return nil
 }
 
