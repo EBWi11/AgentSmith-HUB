@@ -959,21 +959,24 @@ const pluginStats = computed(() => {
     plugins: {}
   }
 
-  // First try to use aggregated data from message statistics (more reliable)
+  // Use aggregated data for totals (more reliable)
   if (messageData.value.data && messageData.value.data.total_plugin_success !== undefined) {
     stats.totalSuccess = messageData.value.data.total_plugin_success || 0
     stats.totalFailure = messageData.value.data.total_plugin_failures || 0
-    return stats
   }
 
-  // Fallback to individual plugin statistics data
+  // Always try to get individual plugin data for detailed view
   if (pluginStatsData.value && pluginStatsData.value.stats) {
     Object.entries(pluginStatsData.value.stats).forEach(([pluginName, pluginData]) => {
       const success = pluginData.success || 0
       const failure = pluginData.failure || 0
       
-      stats.totalSuccess += success
-      stats.totalFailure += failure
+      // If we don't have aggregated totals, calculate them from individual data
+      if (messageData.value.data && messageData.value.data.total_plugin_success === undefined) {
+        stats.totalSuccess += success
+        stats.totalFailure += failure
+      }
+      
       stats.plugins[pluginName] = {
         success,
         failure
