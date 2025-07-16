@@ -472,27 +472,13 @@ async function fetchAllData() {
   }
 }
 
-function startAutoRefresh() {
-  // Refresh data every 15 seconds
-  refreshInterval.value = setInterval(fetchAllData, 15000)
-}
-
-function stopAutoRefresh() {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value)
-    refreshInterval.value = null
-  }
-}
-
+// Use smart refresh system instead of fixed intervals
 // Lifecycle
 onMounted(() => {
   fetchAllData()
-  startAutoRefresh()
 })
 
-onUnmounted(() => {
-  stopAutoRefresh()
-})
+// Smart refresh will handle automatic updates
 </script>
 
 <style scoped>

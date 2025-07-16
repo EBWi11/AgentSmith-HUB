@@ -99,7 +99,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
 import JsonViewer from './JsonViewer.vue';
-import { RulesetTestCache } from '../utils/cacheUtils';
+import { useDataCacheStore } from '../stores/dataCache';
 
 // Props
 const props = defineProps({
@@ -110,6 +110,9 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['close']);
+
+// Data cache store
+const dataCache = useDataCacheStore();
 
 // Reactive state
 const showModal = ref(false);
@@ -144,8 +147,8 @@ watch(() => props.show, (newVal) => {
 
 watch(() => props.rulesetId, (newVal) => {
   if (newVal) {
-    // Load cached test data for this ruleset
-    const cachedData = RulesetTestCache.get(newVal);
+    // Load cached test data for this ruleset using unified cache
+    const cachedData = dataCache.getTestCache('rulesets', newVal);
     if (cachedData) {
       inputData.value = cachedData;
     } else {
@@ -277,7 +280,7 @@ function formatTestResult() {
 // Save test data when it changes
 function onInputDataChange(newValue) {
   if (props.rulesetId) {
-    RulesetTestCache.set(props.rulesetId, newValue);
+    dataCache.setTestCache('rulesets', props.rulesetId, newValue);
   }
 }
 
@@ -291,9 +294,9 @@ function formatJson(obj) {
 }
 
 function resetState() {
-  // Load cached test data or use default
+  // Load cached test data or use default using unified cache
   if (props.rulesetId) {
-    const cachedData = RulesetTestCache.get(props.rulesetId);
+    const cachedData = dataCache.getTestCache('rulesets', props.rulesetId);
     inputData.value = cachedData || defaultTestData;
   } else {
     inputData.value = defaultTestData;

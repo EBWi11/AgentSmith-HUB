@@ -130,7 +130,7 @@ import { useApiOperations } from '../composables/useApi'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
 import { debounce, throttle } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
-import { clearCacheWithDelay } from '../utils/cacheUtils'
+// Cache management integrated into DataCache
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
@@ -425,7 +425,7 @@ async function applyChanges() {
       }
       
       // Clear all cache since pending changes can affect multiple data types
-      clearCacheWithDelay(2000, `apply pending changes: ${result.success_count} changes`)
+      dataCache.clearAll()
     }
     
     if (result.failure_count > 0) {
@@ -509,7 +509,7 @@ async function applySingleChange(change) {
           $message?.success?.(`Change applied successfully!`)
       
           // Clear all cache since single change can affect multiple data types
-    clearCacheWithDelay(2000, `apply single change: ${change.type}:${change.id}`)
+    dataCache.clearAll()
     
     // Force refresh all component lists to ensure hasTemp is updated
     await Promise.all([
@@ -587,7 +587,7 @@ async function restartProjects(projectIds) {
       }
       
       // Clear all cache since project restart affects multiple data types
-      clearCacheWithDelay(2000, `restart projects: ${projectIds.join(', ')}`)
+      dataCache.clearAll()
       
       $message?.success?.(`Projects restarted: ${projectIds.join(', ')}`)
   } catch (e) {

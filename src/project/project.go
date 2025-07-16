@@ -909,8 +909,7 @@ func (p *Project) Stop() error {
 		}
 	}()
 
-	// Check status - no need for additional locking as ProjectOperationMu ensures serialization
-	if p.Status != common.StatusRunning {
+	if p.Status != common.StatusRunning && p.Status != common.StatusError {
 		return fmt.Errorf("project is not running %s", p.Id)
 	}
 	// Set status to stopping immediately to prevent duplicate operations

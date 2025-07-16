@@ -1,2 +1,2 @@
-redis: 192.168.124.9:6379
-redis_password: "toor"
+redis: 127.0.0.1:6379
+redis_password: ""

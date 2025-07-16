@@ -515,8 +515,7 @@ const pendingChanges = ref([])
 const localChanges = ref([])
 const pluginStatsData = ref({})
 const lastUpdated = ref('')
-const refreshInterval = ref(null)
-const statsRefreshInterval = ref(null) // New interval for frequent stats updates
+// Removed independent timers, using smart refresh only
 
 // Cluster consistency checking
 const clusterConsistencyData = ref({})
@@ -1310,31 +1309,18 @@ const debouncedForceRefresh = debounce(() => {
 }, 500)
 
 function startAutoRefresh() {
-  // Smart refresh will start automatically
-  // Additional structural data refresh (every 2 minutes)
-  refreshInterval.value = setInterval(() => {
-    fetchDashboardData()
-  }, 300000)
+  // Smart refresh handles all timing automatically
+  // Only need to fetch initial structural data
+  fetchDashboardData()
 }
 
 function stopAutoRefresh() {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value)
-    refreshInterval.value = null
-  }
   smartRefresh.stop()
 }
 
-// Keyboard shortcuts - updated to use smart refresh
+// Keyboard shortcuts simplified - smart refresh handles most cases
 function handleKeyDown(event) {
-  // Press 'R' to refresh stats
-  if (event.key === 'r' || event.key === 'R') {
-    if (!loading.stats) {
-      smartRefresh.forceRefresh()
-    }
-    event.preventDefault()
-  }
-  // Press 'Shift+R' to full refresh
+  // Press 'Shift+R' to force full refresh
   if ((event.key === 'r' || event.key === 'R') && event.shiftKey) {
     if (!loading.projects && !loading.cluster && !loading.messages && !loading.changes) {
       // Clear cache and force full refresh
@@ -1345,66 +1331,19 @@ function handleKeyDown(event) {
   }
 }
 
-// Page visibility change handling - smart refresh handles automatically, only need to handle structural data
-function handleVisibilityChange() {
-  if (!document.hidden) {
-    // Refresh structural data immediately when page becomes visible
-    fetchDashboardData()
-  }
-}
+// Smart refresh system handles all visibility and timing automatically
 
-// Error recovery mechanism
-let errorCount = 0
-const maxErrors = 3
-
-function handleRefreshError(error) {
-  errorCount++
-  console.error(`Dashboard refresh error (${errorCount}/${maxErrors}):`, error)
-  
-  if (errorCount >= maxErrors) {
-    // Reached maximum error count, enter error recovery mode
-    console.warn('Too many refresh errors, entering recovery mode')
-    stopAutoRefresh()
-    
-    // Use conservative recovery refresh mode, but maintain some intelligence
-    const recoveryRefresh = async () => {
-      try {
-        await fetchDashboardData()
-        // If successful, reset error count and resume normal refresh
-        resetErrorCount()
-        stopAutoRefresh() // Clean up recovery mode timer
-        startAutoRefresh() // Resume normal smart refresh
-      } catch (recoveryError) {
-        console.error('Recovery refresh also failed:', recoveryError)
-        // Continue using recovery mode
-      }
-    }
-    
-    // Recovery refresh with 5-minute interval
-    refreshInterval.value = setInterval(recoveryRefresh, 300000)
-  }
-}
-
-// Reset error count on success
-function resetErrorCount() {
-  if (errorCount > 0) {
-    errorCount = 0
-          // console.log('Dashboard refresh recovered, error count reset')
-  }
-}
+// Error handling is now managed by smart refresh system automatically
 
 // Lifecycle
 onMounted(() => {
   fetchDashboardData()
   startAutoRefresh()
   
-  // Add keyboard event listener
+  // Add keyboard event listener for manual actions
   window.addEventListener('keydown', handleKeyDown)
   
-  // Add page visibility change listener
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  
-  // Add global project operation listener
+  // Add global project operation listener for immediate updates
   window.addEventListener('projectOperation', handleGlobalProjectOperation)
 })
 
@@ -1413,9 +1352,6 @@ onUnmounted(() => {
   
   // Remove keyboard event listener
   window.removeEventListener('keydown', handleKeyDown)
-  
-  // Remove page visibility change listener
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
   
   // Remove global project operation listener
   window.removeEventListener('projectOperation', handleGlobalProjectOperation)

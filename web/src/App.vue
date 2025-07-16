@@ -7,9 +7,11 @@
 import { ref, onMounted, provide } from 'vue'
 import Toast from './components/Toast.vue'
 import { useStore } from 'vuex'
+import { useDataCacheStore } from './stores/dataCache'
 
 const toast = ref(null)
 const store = useStore()
+const dataCache = useDataCacheStore()
 
 // Provide global toast service
 provide('$message', {
@@ -22,7 +24,8 @@ provide('$message', {
 onMounted(() => {
   // Keep global variable for compatibility
   window.$toast = toast.value
-  store.dispatch('fetchAvailablePlugins')
+  // Fetch available plugins using unified cache
+  dataCache.fetchAvailablePlugins()
 })
 </script>
 

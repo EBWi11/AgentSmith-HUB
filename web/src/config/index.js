@@ -94,25 +94,7 @@ async function initializeConfig() {
 // Export the configuration
 const config = getConfig();
 
-// Hot reload configuration in development
-if (import.meta.env.DEV) {
-  // Reload configuration every 10 seconds in development
-  setInterval(async () => {
-    const oldConfig = JSON.stringify(config);
-    await loadRuntimeConfig();
-    const newConfig = JSON.stringify(getConfig());
-    
-    if (oldConfig !== newConfig) {
-      console.log('Configuration changed, reloading...');
-      Object.assign(config, getConfig());
-      
-      // Dispatch configuration change event
-      window.dispatchEvent(new CustomEvent('configurationChanged', {
-        detail: getConfig()
-      }));
-    }
-  }, 10000);
-}
+// Configuration hot reload removed - use smart refresh system for config updates
 
 export { initializeConfig, loadRuntimeConfig };
 export default config; 

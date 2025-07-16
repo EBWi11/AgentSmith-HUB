@@ -132,7 +132,7 @@ import { ref, watch, onMounted, computed, onUnmounted } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
 import JsonViewer from './JsonViewer.vue';
-import { ProjectTestCache } from '../utils/cacheUtils';
+import { useDataCacheStore } from '../stores/dataCache';
 
 // Props
 const props = defineProps({
@@ -143,6 +143,9 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['close']);
+
+// Data cache store
+const dataCache = useDataCacheStore();
 
 // Reactive state
 const showModal = ref(false);
@@ -183,21 +186,21 @@ watch(() => props.projectId, (newVal) => {
   resetState();
 });
 
-// Watch for input data changes and save to cache
+// Watch for input data changes and save to cache using unified cache
 watch(inputData, (newVal) => {
   if (props.projectId && newVal) {
-    const cachedData = ProjectTestCache.get(props.projectId) || {};
+    const cachedData = dataCache.getTestCache('projects', props.projectId) || {};
     cachedData.inputData = newVal;
-    ProjectTestCache.set(props.projectId, cachedData);
+    dataCache.setTestCache('projects', props.projectId, cachedData);
   }
 });
 
-// Watch for selected input node changes and save to cache
+// Watch for selected input node changes and save to cache using unified cache
 watch(selectedInputNode, (newVal) => {
   if (props.projectId && newVal) {
-    const cachedData = ProjectTestCache.get(props.projectId) || {};
+    const cachedData = dataCache.getTestCache('projects', props.projectId) || {};
     cachedData.selectedInputNode = newVal;
-    ProjectTestCache.set(props.projectId, cachedData);
+    dataCache.setTestCache('projects', props.projectId, cachedData);
   }
 });
 
@@ -225,9 +228,9 @@ function resetState() {
   // Clear input nodes first
   inputNodes.value = [];
   
-  // Try to restore cached data for this project
+  // Try to restore cached data for this project using unified cache
   if (props.projectId) {
-    const cachedData = ProjectTestCache.get(props.projectId);
+    const cachedData = dataCache.getTestCache('projects', props.projectId);
     if (cachedData) {
       inputData.value = cachedData.inputData || inputData.value;
       selectedInputNode.value = cachedData.selectedInputNode || '';
