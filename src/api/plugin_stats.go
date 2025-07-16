@@ -3,7 +3,6 @@ package api
 import (
 	"AgentSmith-HUB/common"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,12 +24,15 @@ func GetPluginStats(c echo.Context) error {
 	nodeID := c.QueryParam("node_id")
 	byNode := c.QueryParam("by_node") == "true"
 
-	// Updated pattern: plugin_stats:date:nodeID:pluginName:status
-	pattern := "plugin_stats:" + date + ":*:*:*"
-	keys, err := common.RedisKeys(pattern)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	// Use daily stats system to get plugin statistics
+	// Pattern: hub:daily_stats:{date}#{nodeID}#{projectID}#{projectNodeSequence}
+	// For plugins: projectNodeSequence is "PLUGIN.{pluginName}.success" or "PLUGIN.{pluginName}.failure"
+	if common.GlobalDailyStatsManager == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Daily stats manager not initialized"})
 	}
+
+	// Get all daily stats data for the specified date
+	allData := common.GlobalDailyStatsManager.GetDailyStats(date, "", nodeID)
 
 	type stat struct {
 		Success uint64 `json:"success"`
@@ -41,17 +43,23 @@ func GetPluginStats(c echo.Context) error {
 		// Return results grouped by node
 		nodeStats := make(map[string]map[string]*stat)
 
-		for _, k := range keys {
-			parts := strings.Split(k, ":")
-			if len(parts) != 5 {
-				continue // Skip invalid keys
+		for _, data := range allData {
+			// Only process plugin statistics
+			if data.ComponentType != "plugin_success" && data.ComponentType != "plugin_failure" {
+				continue
 			}
-			keyNodeID := parts[2]
-			plugin := parts[3]
-			status := parts[4]
+
+			// Extract plugin name from ProjectNodeSequence
+			// Format: "PLUGIN.{pluginName}.success" or "PLUGIN.{pluginName}.failure"
+			parts := strings.Split(data.ProjectNodeSequence, ".")
+			if len(parts) != 3 || strings.ToUpper(parts[0]) != "PLUGIN" {
+				continue
+			}
+			plugin := parts[1]
+			status := strings.ToLower(parts[2])
 
 			// Apply node filter
-			if nodeID != "" && nodeID != "all" && keyNodeID != nodeID {
+			if nodeID != "" && nodeID != "all" && data.NodeID != nodeID {
 				continue
 			}
 
@@ -60,24 +68,21 @@ func GetPluginStats(c echo.Context) error {
 				continue
 			}
 
-			cntStr, _ := common.RedisGet(k)
-			cnt, _ := strconv.ParseUint(cntStr, 10, 64)
-
 			// Initialize node map if not exists
-			if _, exists := nodeStats[keyNodeID]; !exists {
-				nodeStats[keyNodeID] = make(map[string]*stat)
+			if _, exists := nodeStats[data.NodeID]; !exists {
+				nodeStats[data.NodeID] = make(map[string]*stat)
 			}
 
 			// Initialize plugin stat if not exists
-			if _, exists := nodeStats[keyNodeID][plugin]; !exists {
-				nodeStats[keyNodeID][plugin] = &stat{}
+			if _, exists := nodeStats[data.NodeID][plugin]; !exists {
+				nodeStats[data.NodeID][plugin] = &stat{}
 			}
 
 			// Add to counter
 			if status == "success" {
-				nodeStats[keyNodeID][plugin].Success += cnt
+				nodeStats[data.NodeID][plugin].Success += data.TotalMessages
 			} else if status == "failure" {
-				nodeStats[keyNodeID][plugin].Failure += cnt
+				nodeStats[data.NodeID][plugin].Failure += data.TotalMessages
 			}
 		}
 
@@ -90,17 +95,23 @@ func GetPluginStats(c echo.Context) error {
 		// Return aggregated results across all nodes (default behavior)
 		stats := make(map[string]*stat)
 
-		for _, k := range keys {
-			parts := strings.Split(k, ":")
-			if len(parts) != 5 {
-				continue // Skip invalid keys
+		for _, data := range allData {
+			// Only process plugin statistics
+			if data.ComponentType != "plugin_success" && data.ComponentType != "plugin_failure" {
+				continue
 			}
-			keyNodeID := parts[2]
-			plugin := parts[3]
-			status := parts[4]
+
+			// Extract plugin name from ProjectNodeSequence
+			// Format: "PLUGIN.{pluginName}.success" or "PLUGIN.{pluginName}.failure"
+			parts := strings.Split(data.ProjectNodeSequence, ".")
+			if len(parts) != 3 || strings.ToUpper(parts[0]) != "PLUGIN" {
+				continue
+			}
+			plugin := parts[1]
+			status := strings.ToLower(parts[2])
 
 			// Apply node filter
-			if nodeID != "" && nodeID != "all" && keyNodeID != nodeID {
+			if nodeID != "" && nodeID != "all" && data.NodeID != nodeID {
 				continue
 			}
 
@@ -108,9 +119,6 @@ func GetPluginStats(c echo.Context) error {
 			if filterPlugin != "" && plugin != filterPlugin {
 				continue
 			}
-
-			cntStr, _ := common.RedisGet(k)
-			cnt, _ := strconv.ParseUint(cntStr, 10, 64)
 
 			// Initialize plugin stat if not exists
 			s := stats[plugin]
@@ -121,9 +129,9 @@ func GetPluginStats(c echo.Context) error {
 
 			// Aggregate across all nodes
 			if status == "success" {
-				s.Success += cnt
+				s.Success += data.TotalMessages
 			} else if status == "failure" {
-				s.Failure += cnt
+				s.Failure += data.TotalMessages
 			}
 		}
 
