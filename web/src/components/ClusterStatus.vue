@@ -118,10 +118,10 @@
               </div>
               
               <!-- Version -->
-              <div class="text-center w-20">
+              <div class="text-center w-32">
                 <div class="text-xs text-purple-600 font-medium mb-1">Version</div>
                 <div 
-                  class="text-xs font-mono px-2 py-1 rounded text-center truncate"
+                  class="text-[10px] font-mono px-1 py-1 rounded text-center break-all leading-tight"
                   :class="getVersionDisplayClass(node)"
                   :title="getVersionTooltip(node)"
                 >
@@ -174,9 +174,9 @@
             </div>
 
             <!-- Far Right: Last Seen -->
-            <div class="text-center flex-shrink-0 w-16">
+            <div class="text-center flex-shrink-0 w-20">
               <div class="text-xs text-gray-600 font-medium mb-1">Last Seen</div>
-              <span class="text-xs text-gray-500">
+              <span class="text-[10px] text-gray-500 leading-tight">
                 {{ formatTimeAgo(node.lastSeen) }}
               </span>
             </div>
