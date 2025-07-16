@@ -10,8 +10,6 @@ import (
 // ComponentOperations provides unified component operations for both API and cluster
 type ComponentOperations struct{}
 
-var GlobalComponentOperations = &ComponentOperations{}
-
 // CreateComponentDirect creates a component directly without HTTP context (for API/leader)
 func (co *ComponentOperations) CreateComponentDirect(componentType, id, content string) error {
 	// Enhanced ID validation

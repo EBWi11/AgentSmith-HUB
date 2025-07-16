@@ -154,7 +154,11 @@ func main() {
 
 	if *isLeader {
 		common.InitClusterSystemManager()
-		cluster.GlobalClusterManager.Start()
+		err := cluster.GlobalClusterManager.Start()
+		if err != nil {
+			logger.Error("InitClusterSystemManager Error", "error", err)
+			return
+		}
 
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
 		go api.ServerStart(listenAddr) // start Echo API on specified port

@@ -36,12 +36,12 @@ func InitCluster(nodeID string, isLeader bool) {
 }
 
 // Start starts the cluster system
-func (cm *ClusterManager) Start() {
+func (cm *ClusterManager) Start() error {
 	if cm.instructionManager != nil {
 		if common.IsCurrentNodeLeader() {
 			// Leader: Initialize instructions for existing components
 			if err := cm.instructionManager.InitializeLeaderInstructions(); err != nil {
-				logger.Error("Failed to initialize leader instructions", "error", err)
+				return err
 			}
 		}
 	}
@@ -55,6 +55,7 @@ func (cm *ClusterManager) Start() {
 	}
 
 	logger.Info("Cluster started successfully")
+	return nil
 }
 
 // Stop stops the cluster system
@@ -67,13 +68,8 @@ func (cm *ClusterManager) Stop() {
 		cm.syncListener.Stop()
 	}
 
-	// Clear execution flag when shutting down (important for followers)
-	if cm.instructionManager != nil && !common.IsCurrentNodeLeader() {
-		if err := cm.instructionManager.ClearFollowerExecutionFlag(common.GetNodeID()); err != nil {
-			logger.Warn("Failed to clear execution flag during shutdown", "error", err)
-		} else {
-			logger.Info("Cleared execution flag during shutdown")
-		}
+	if cm.instructionManager != nil {
+		cm.instructionManager.Stop()
 	}
 
 	logger.Info("Cluster stopped")

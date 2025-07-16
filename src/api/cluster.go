@@ -504,41 +504,6 @@ func getClusterSystemStats(c echo.Context) error {
 	return c.JSON(http.StatusOK, stats)
 }
 
-// compactInstructions manually triggers instruction compaction (leader only)
-func compactInstructions(c echo.Context) error {
-	if err := common.RequireLeader(); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{
-			"error": "Instruction compaction is only available on leader node",
-		})
-	}
-
-	if cluster.GlobalInstructionManager == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "Instruction manager not initialized",
-		})
-	}
-
-	// Get current stats before compaction
-	currentVersion := cluster.GlobalInstructionManager.GetCurrentVersion()
-
-	// Perform compaction
-	if err := cluster.GlobalInstructionManager.CompactInstructions(); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("Compaction failed: %v", err),
-		})
-	}
-
-	// Get new stats after compaction
-	newVersion := cluster.GlobalInstructionManager.GetCurrentVersion()
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":          "Instruction compaction completed successfully",
-		"previous_version": currentVersion,
-		"new_version":      newVersion,
-		"timestamp":        time.Now(),
-	})
-}
-
 // getInstructionStats returns instruction statistics
 func getInstructionStats(c echo.Context) error {
 	if err := common.RequireLeader(); err != nil {

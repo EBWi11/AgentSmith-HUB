@@ -110,8 +110,8 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 	}
 
 	currentVersion := "v0.0"
-	if GlobalInstructionManager != nil {
-		currentVersion = GlobalInstructionManager.GetCurrentVersion()
+	if GlobalSyncListener != nil {
+		currentVersion = GlobalSyncListener.GetCurrentVersion()
 	}
 
 	// Get current system metrics

@@ -6,17 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"AgentSmith-HUB/input"
-	"AgentSmith-HUB/output"
-	"AgentSmith-HUB/plugin"
-	"AgentSmith-HUB/project"
-	"AgentSmith-HUB/rules_engine"
 )
 
 // Instruction represents a single operation
@@ -32,6 +24,20 @@ type Instruction struct {
 	RequiresRestart bool                   `json:"requires_restart"` // whether this operation requires project restart
 }
 
+var CUD_OPERATION = map[string]bool{
+	"add":         true,
+	"delete":      true,
+	"update":      true,
+	"push_change": true,
+	"local_push":  true,
+}
+
+var PROJECT_OPERATION = map[string]bool{
+	"start":   true,
+	"stop":    true,
+	"restart": true,
+}
+
 // InstructionCompactionRule defines rules for instruction compaction
 type InstructionCompactionRule struct {
 	ComponentType string
@@ -41,15 +47,17 @@ type InstructionCompactionRule struct {
 
 // InstructionManager manages version-based synchronization
 type InstructionManager struct {
-	currentVersion int64
-	baseVersion    string
-	mu             sync.RWMutex
-	// Add compaction settings
-	compactionEnabled   bool
-	maxInstructions     int64 // trigger compaction when exceeding this number
-	compactionThreshold int64 // minimum instructions before compaction
-	// Add follower execution tracking
-	executionFlagTTL int64 // TTL for execution flags in seconds
+	currentVersion  int64
+	baseVersion     string
+	mu              sync.RWMutex
+	maxInstructions int64 // trigger compaction when exceeding this number
+}
+
+func (im *InstructionManager) NewInstructionManagerFollower() *InstructionManager {
+	return &InstructionManager{
+		currentVersion: 0,
+		baseVersion:    "0",
+	}
 }
 
 var GlobalInstructionManager *InstructionManager
@@ -76,120 +84,28 @@ func generateSessionID() string {
 // InitInstructionManager initializes the instruction manager
 func InitInstructionManager() {
 	GlobalInstructionManager = &InstructionManager{
-		currentVersion:      0,                   // Start with version 0 (temporary state)
-		baseVersion:         generateSessionID(), // Session identifier (6-char random string)
-		compactionEnabled:   true,
-		maxInstructions:     1000, // compact when > 1000 instructions
-		compactionThreshold: 100,  // don't compact if < 100 instructions
-		executionFlagTTL:    30,   // 30 seconds TTL for execution flags
+		currentVersion:  0,                   // Start with version 0 (temporary state)
+		baseVersion:     generateSessionID(), // Session identifier (6-char random string)
+		maxInstructions: 2000,                // compact when > 1000 instructions
 	}
 }
 
 // GetCurrentVersion returns current version string
 func (im *InstructionManager) GetCurrentVersion() string {
-	im.mu.RLock()
-	defer im.mu.RUnlock()
 	return fmt.Sprintf("%s.%d", im.baseVersion, im.currentVersion)
 }
 
-// CompactInstructions performs instruction compaction to reduce Redis storage
-// This method implements the algorithm you described:
-// 1. Wait for all followers to finish executing
-// 2. Set version to 0 (followers skip processing)
-// 3. Analyze and remove redundant instructions
-// 4. Increment version properly
-func (im *InstructionManager) CompactInstructions() error {
-	if !common.IsCurrentNodeLeader() {
-		return fmt.Errorf("only leader can compact instructions")
-	}
+func (im *InstructionManager) setCurrentVersion(veresion int64) (int64, error) {
+	ori := im.currentVersion
+	im.currentVersion = veresion
 
-	logger.Info("Starting instruction compaction", "current_version", im.currentVersion)
-
-	// Step 1: Wait for all followers to finish executing instructions
-	if err := im.WaitForAllFollowersIdle(200 * time.Second); err != nil {
-		logger.Warn("Some followers may still be executing, proceeding with caution", "error", err)
-		// Continue with compaction but log the warning
-	}
-
-	im.mu.Lock()
-	originalVersion := im.currentVersion
-	im.mu.Unlock()
-
-	// Step 2: Set version to 0 to signal followers to skip
-	im.mu.Lock()
-	im.currentVersion = 0
-	im.mu.Unlock()
-
-	// Notify followers that compaction is starting
-	compactionSignal := map[string]interface{}{
-		"action":           "compaction_start",
-		"original_version": originalVersion,
-		"timestamp":        time.Now().Unix(),
-	}
-	if data, err := json.Marshal(compactionSignal); err == nil {
-		_ = common.RedisPublish("cluster:compaction", string(data))
-	}
-
-	// Step 2: Load all existing instructions
-	instructions, err := im.loadAllInstructions(originalVersion)
+	_, err := common.RedisSet("cluster:leader_version", im.GetCurrentVersion(), 0)
 	if err != nil {
-		// Restore version on error
-		im.currentVersion = originalVersion
-		return fmt.Errorf("failed to load instructions: %w", err)
+		im.currentVersion = ori
+		return 0, fmt.Errorf("failed to update cluster version in Redis: %w", err)
 	}
 
-	// Step 3: Perform compaction analysis
-	compactedInstructions := im.analyzeAndCompact(instructions)
-
-	// Step 4: Clear old instructions from Redis
-	if err := im.clearOldInstructions(originalVersion); err != nil {
-		logger.Warn("Failed to clear old instructions", "error", err)
-		// Continue anyway, old instructions will just take up space
-	}
-
-	// Step 5: Store compacted instructions with new version numbers (starting from 1)
-	newVersion := int64(1)
-	for _, instruction := range compactedInstructions {
-		instruction.Version = newVersion
-		instruction.Timestamp = time.Now().Unix()
-
-		key := fmt.Sprintf("cluster:instruction:%d", newVersion)
-		data, err := json.Marshal(instruction)
-		if err != nil {
-			logger.Error("Failed to marshal compacted instruction", "version", newVersion, "error", err)
-			continue
-		}
-
-		if _, err := common.RedisSet(key, string(data), 86400); err != nil {
-			logger.Error("Failed to store compacted instruction", "version", newVersion, "error", err)
-			continue
-		}
-
-		newVersion++
-	}
-
-	// Step 6: Update current version
-	im.mu.Lock()
-	im.currentVersion = newVersion - 1
-	im.mu.Unlock()
-
-	// Step 7: Notify followers that compaction is complete
-	compactionComplete := map[string]interface{}{
-		"action":      "compaction_complete",
-		"new_version": im.GetCurrentVersion(),
-		"timestamp":   time.Now().Unix(),
-	}
-	if data, err := json.Marshal(compactionComplete); err == nil {
-		_ = common.RedisPublish("cluster:compaction", string(data))
-	}
-
-	logger.Info("Instruction compaction completed",
-		"original_instructions", len(instructions),
-		"compacted_instructions", len(compactedInstructions),
-		"new_version", im.GetCurrentVersion(),
-		"compression_ratio", fmt.Sprintf("%.2f%%", float64(len(compactedInstructions))/float64(len(instructions))*100))
-
-	return nil
+	return ori, nil
 }
 
 // loadAllInstructions loads all instructions from Redis
@@ -200,7 +116,6 @@ func (im *InstructionManager) loadAllInstructions(maxVersion int64) ([]*Instruct
 		key := fmt.Sprintf("cluster:instruction:%d", version)
 		data, err := common.RedisGet(key)
 		if err != nil {
-			logger.Debug("Instruction not found", "version", version, "error", err)
 			continue
 		}
 
@@ -216,166 +131,86 @@ func (im *InstructionManager) loadAllInstructions(maxVersion int64) ([]*Instruct
 	return instructions, nil
 }
 
-// analyzeAndCompact performs the core compaction logic
-// Since leader has verify mechanism, runtime operations are already safe to group by component
-// Only leader initialization needs special ordering (handled in InitializeLeaderInstructions)
-func (im *InstructionManager) analyzeAndCompact(instructions []*Instruction) []*Instruction {
-	// Group instructions by component - safe because:
-	// 1. Leader initialization already handles proper dependency order
-	// 2. Runtime operations are verified before submission, ensuring safety
-	componentGroups := make(map[string][]*Instruction)
-
-	for _, instruction := range instructions {
-		key := fmt.Sprintf("%s:%s", instruction.ComponentType, instruction.ComponentName)
-		componentGroups[key] = append(componentGroups[key], instruction)
+func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error {
+	if err := im.WaitForAllFollowersIdle(90 * time.Second); err != nil {
+		logger.Error("Some followers may still be executing, proceeding with caution", "error", err)
 	}
 
-	var compactedInstructions []*Instruction
-
-	// Process each component group
-	for _, group := range componentGroups {
-		compacted := im.compactComponentInstructions(group)
-		compactedInstructions = append(compactedInstructions, compacted...)
+	originalVersion, err := im.setCurrentVersion(0)
+	if err != nil {
+		return err
 	}
 
-	// Sort by original timestamp to maintain order
-	sort.Slice(compactedInstructions, func(i, j int) bool {
-		return compactedInstructions[i].Timestamp < compactedInstructions[j].Timestamp
-	})
-
-	return compactedInstructions
-}
-
-// compactComponentInstructions compacts instructions for a single component to keep only the final state
-// The goal is to eliminate all intermediate states and keep only what's needed to reach the final state
-func (im *InstructionManager) compactComponentInstructions(instructions []*Instruction) []*Instruction {
-	if len(instructions) <= 1 {
-		return instructions
+	delInstructions := map[int]bool{}
+	instructions, err := im.loadAllInstructions(originalVersion)
+	if err != nil {
+		im.currentVersion = originalVersion
+		_, _ = im.setCurrentVersion(originalVersion)
+		return fmt.Errorf("failed to load instructions: %w", err)
 	}
 
-	// Sort by version to process in chronological order
-	sort.Slice(instructions, func(i, j int) bool {
-		return instructions[i].Version < instructions[j].Version
-	})
-
-	// Analyze the final state by scanning all instructions
-	var result []*Instruction
-
-	// Find the final state for each aspect of the component
-	var finalDefinition *Instruction   // Final content/configuration
-	var finalControlState *Instruction // Final start/stop/restart state
-	var hasDelete bool
-
-	// Scan through all instructions to determine final state
-	for _, inst := range instructions {
-		switch inst.Operation {
-		case "add", "update", "local_push", "push_change":
-			// These operations define the component content/configuration
-			finalDefinition = inst
-			hasDelete = false // Reset delete flag if component is redefined
-
-		case "delete":
-			// Delete operation makes component non-existent
-			hasDelete = true
-			finalDefinition = nil
-			finalControlState = nil
-
-		case "start", "stop", "restart":
-			// These operations control the component state (only for projects)
-			if !hasDelete {
-				finalControlState = inst
+	instructions = append(instructions, new)
+	for i, ii := range instructions {
+		for i2, ii2 := range instructions {
+			if i != i2 {
+				if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
+					if CUD_OPERATION[ii.Operation] && CUD_OPERATION[ii2.Operation] {
+						delInstructions[i] = true
+						break
+					} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
+						delInstructions[i] = true
+						break
+					}
+				}
 			}
 		}
 	}
 
-	// Build result based on final state
-	if hasDelete {
-		// If component is deleted, only keep the delete instruction
-		for _, inst := range instructions {
-			if inst.Operation == "delete" {
-				result = append(result, inst)
-				break
-			}
-		}
-	} else {
-		// Component exists, keep final definition and final control state
-		if finalDefinition != nil {
-			result = append(result, finalDefinition)
-		}
-
-		if finalControlState != nil {
-			result = append(result, finalControlState)
+	for i, _ := range instructions {
+		if !delInstructions[i] && instructions[i].Operation == "restart" {
+			instructions[i].Operation = "start"
 		}
 	}
 
-	// If no meaningful operations found, return the last instruction to be safe
-	if len(result) == 0 {
-		result = append(result, instructions[len(instructions)-1])
-	}
-
-	return result
-}
-
-// clearOldInstructions removes old instructions from Redis
-func (im *InstructionManager) clearOldInstructions(maxVersion int64) error {
-	var errors []string
-
-	for version := int64(1); version <= maxVersion; version++ {
+	for i, instruction := range instructions {
+		version := i + 1
 		key := fmt.Sprintf("cluster:instruction:%d", version)
-		if err := common.RedisDel(key); err != nil {
-			errors = append(errors, fmt.Sprintf("version %d: %v", version, err))
+
+		if delInstructions[i] {
+			if _, err := common.RedisSet(key, "DELETED", 0); err != nil {
+				logger.Error("Failed to store compacted instruction", "version", version, "error", err)
+				continue
+			}
+		} else {
+			data, _ := json.Marshal(instruction)
+			if _, err := common.RedisSet(key, string(data), 0); err != nil {
+				logger.Error("Failed to store compacted instruction", "version", version, "error", err)
+				continue
+			}
 		}
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to clear some instructions: %s", strings.Join(errors, "; "))
+	_, err = im.setCurrentVersion(int64(len(instructions)))
+	if err != nil {
+		return err
 	}
-
 	return nil
 }
 
-// shouldTriggerCompaction checks if compaction should be triggered
-// Only trigger compaction when instruction count exceeds threshold
-func (im *InstructionManager) shouldTriggerCompaction() bool {
-	if !im.compactionEnabled {
-		return false
-	}
-
-	// Only trigger compaction when we have accumulated enough instructions
-	// This avoids excessive compaction overhead while maintaining system efficiency
-	return im.currentVersion >= im.compactionThreshold
-}
-
-// PublishInstruction publishes a new instruction (leader only)
 func (im *InstructionManager) PublishInstruction(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+
 	if !common.IsCurrentNodeLeader() {
-		return fmt.Errorf("only leader can publish instructions")
+		return fmt.Errorf("only leader can initialize instructions")
 	}
 
-	// Input validation
 	if componentName == "" || componentType == "" || operation == "" {
 		return fmt.Errorf("component name, type, and operation are required")
 	}
 
-	// Check if compaction should be triggered before publishing
-	if im.shouldTriggerCompaction() {
-		logger.Info("Triggering instruction compaction before publishing new instruction")
-		if err := im.CompactInstructions(); err != nil {
-			logger.Error("Failed to compact instructions", "error", err)
-			// Continue with publishing even if compaction fails
-		}
-	}
-
-	im.mu.Lock()
-	im.currentVersion++
-	version := im.currentVersion
-	im.mu.Unlock()
-
-	// Determine if this operation requires project restart
 	requiresRestart := im.operationRequiresRestart(operation, componentType)
-
 	instruction := Instruction{
-		Version:         version,
 		ComponentName:   componentName,
 		ComponentType:   componentType,
 		Content:         content,
@@ -386,45 +221,57 @@ func (im *InstructionManager) PublishInstruction(componentName, componentType, c
 		RequiresRestart: requiresRestart,
 	}
 
-	// Store instruction in Redis
-	key := fmt.Sprintf("cluster:instruction:%d", version)
-	data, err := json.Marshal(instruction)
+	err := im.CompactAndSaveInstructions(&instruction)
 	if err != nil {
-		// Rollback version on failure
-		im.mu.Lock()
-		im.currentVersion--
-		im.mu.Unlock()
-		return fmt.Errorf("failed to marshal instruction: %w", err)
+		logger.Error("Failed to compact and save instructions", "error", err)
 	}
 
-	if _, err := common.RedisSet(key, string(data), 86400); err != nil {
-		// Rollback version on failure
-		im.mu.Lock()
-		im.currentVersion--
-		im.mu.Unlock()
-
-		return fmt.Errorf("failed to store instruction: %w", err)
+	publishComplete := map[string]interface{}{
+		"action":         "publish_complete",
+		"leader_version": im.GetCurrentVersion(),
+		"timestamp":      time.Now().Unix(),
 	}
 
-	logger.Debug("Published instruction", "version", version, "component", componentName, "operation", operation, "requires_restart", requiresRestart)
+	if data, err := json.Marshal(publishComplete); err == nil {
+		_ = common.RedisPublish("cluster:sync_command", string(data))
+	}
+	logger.Info("Instruction published successfully", "version", im.currentVersion, "component", componentName, "operation", operation, "requires_restart", requiresRestart)
 
-	// Record instruction publish operation to history
-	common.RecordClusterInstruction(
-		common.OpTypeInstructionPublish,
-		operation,     // instruction type
-		componentName, // component ID
-		componentType, // component type
-		"success",     // status
-		"",            // no error
-		content,       // instruction content
-		map[string]interface{}{ // details
-			"version":          version,
-			"requires_restart": requiresRestart,
-			"dependencies":     dependencies,
-			"metadata":         metadata,
-			"role":             "leader",
-		},
-	)
+	if err == nil {
+		common.RecordClusterInstruction(
+			common.OpTypeInstructionPublish,
+			operation,     // instruction type
+			componentName, // component ID
+			componentType, // component type
+			"success",     // status
+			"",            // no error
+			content,       // instruction content
+			map[string]interface{}{ // details
+				"version":          im.currentVersion,
+				"requires_restart": requiresRestart,
+				"dependencies":     dependencies,
+				"metadata":         metadata,
+				"role":             "leader",
+			},
+		)
+	} else {
+		common.RecordClusterInstruction(
+			common.OpTypeInstructionPublish,
+			operation,     // instruction type
+			componentName, // component ID
+			componentType, // component type
+			"failed",      // status
+			err.Error(),   // no error
+			content,       // instruction content
+			map[string]interface{}{ // details
+				"version":          im.currentVersion,
+				"requires_restart": requiresRestart,
+				"dependencies":     dependencies,
+				"metadata":         metadata,
+				"role":             "leader",
+			},
+		)
+	}
 
 	return nil
 }
@@ -512,21 +359,13 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 
 	logger.Info("Initializing leader instructions")
 
-	// Keep version at 0 during initialization so followers skip processing
-	im.mu.Lock()
-	im.currentVersion = 0
-	im.mu.Unlock()
+	_, err := im.setCurrentVersion(0)
+	if err != nil {
+		err = fmt.Errorf("Failed to write leader version to Redis during initialization", "error", err)
+		return err
+	}
 
 	var instructionCount int64 = 0
-
-	// Defer version restoration
-	defer func() {
-		im.mu.Lock()
-		// Set version to the number of instructions we've created
-		im.currentVersion = instructionCount
-		im.mu.Unlock()
-		logger.Info("Leader instructions initialized", "version", im.GetCurrentVersion())
-	}()
 
 	// Helper function to publish instruction without triggering compaction
 	publishInstructionDirectly := func(componentName, componentType, content, operation string, dependencies []string, metadata map[string]interface{}) error {
@@ -602,451 +441,21 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		return true
 	})
 
-	// 6. Start running projects (读取Redis中的用户期望状态)
+	// 6. Start running projects
 	logger.Info("Reading project user intentions from Redis to send start instructions...")
 
-	// 读取Redis中用户期望运行的项目（用户期望状态）
 	if userIntentions, err := common.GetAllProjectUserIntentions(); err == nil {
-		startInstructionCount := 0
 		for projectID, wantRunning := range userIntentions {
 			if wantRunning {
 				if err := publishInstructionDirectly(projectID, "project", "", "start", nil, nil); err != nil {
 					logger.Error("Failed to publish project start instruction", "project", projectID, "error", err)
 				} else {
 					logger.Info("Published project start instruction", "project", projectID)
-					startInstructionCount++
 				}
 			}
 		}
-
-		if startInstructionCount > 0 {
-			logger.Info("Published start instructions for user intended running projects", "count", startInstructionCount)
-		} else {
-			logger.Info("No projects intended to be running by user, no start instructions published")
-		}
-	} else {
-		logger.Warn("Failed to read project user intentions from Redis", "error", err)
-		logger.Info("No start instructions published due to Redis read failure")
-	}
-
-	// Update the final version count - this will be handled by the defer function
-	return nil
-}
-
-// SyncInstructions syncs instructions from a specific version to target version (follower only)
-func (im *InstructionManager) SyncInstructions(fromVersion, toVersion string) error {
-	if common.IsCurrentNodeLeader() {
-		return fmt.Errorf("leader doesn't need to sync instructions")
-	}
-
-	// Set execution flag to indicate this follower is executing instructions
-	if err := im.SetFollowerExecutionFlag(common.GetNodeID()); err != nil {
-		logger.Warn("Failed to set execution flag", "error", err)
-	}
-
-	// Ensure flag is cleared when done (with defer for safety)
-	defer func() {
-		if err := im.ClearFollowerExecutionFlag(common.GetNodeID()); err != nil {
-			logger.Warn("Failed to clear execution flag", "error", err)
-		}
-	}()
-
-	// Parse follower version
-	parts := strings.Split(fromVersion, ".")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid version format: %s", fromVersion)
-	}
-
-	startVersion, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid version number: %s", parts[1])
-	}
-
-	// Parse target version (leader version)
-	leaderParts := strings.Split(toVersion, ".")
-	if len(leaderParts) != 2 {
-		return fmt.Errorf("invalid target version format: %s", toVersion)
-	}
-
-	endVersion, err := strconv.ParseInt(leaderParts[1], 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid target version number: %s", leaderParts[1])
-	}
-
-	// Check if session has changed (leader restart) or if this is a new follower
-	if parts[0] != leaderParts[0] || fromVersion == "v0.0" {
-		logger.Info("Follower needs full sync",
-			"reason", func() string {
-				if fromVersion == "v0.0" {
-					return "new follower"
-				}
-				return "leader session changed"
-			}(),
-			"from", fromVersion,
-			"to", toVersion)
-
-		// Clear all local components and projects
-		if err := im.clearAllLocalComponents(); err != nil {
-			logger.Error("Failed to clear local components", "error", err)
-			return fmt.Errorf("failed to clear local components: %w", err)
-		}
-
-		// Start from version 0, so we'll sync from version 1 to endVersion
-		startVersion = 0
-	}
-
-	// Track instruction execution details
-	var processedInstructions []string
-	var failedInstructions []string
-
-	// Process instructions from startVersion+1 to endVersion
-	// Instructions are numbered from 1 onwards (version 0 is temporary state)
-	for version := startVersion + 1; version <= endVersion; version++ {
-
-		// Refresh execution flag during long operations
-		if err := im.RefreshFollowerExecutionFlag(common.GetNodeID()); err != nil {
-			logger.Warn("Failed to refresh execution flag", "error", err)
-		}
-
-		// Get instruction from Redis
-		key := fmt.Sprintf("cluster:instruction:%d", version)
-		data, err := common.RedisGet(key)
-		if err != nil {
-			// Instruction not found - likely deleted due to compaction, skip it
-			logger.Debug("Instruction not found (likely compacted), skipping", "version", version)
-			continue
-		}
-
-		var instruction Instruction
-		if err := json.Unmarshal([]byte(data), &instruction); err != nil {
-			logger.Error("Failed to unmarshal instruction", "version", version, "error", err)
-			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: unmarshal error", version))
-			continue // Continue processing other instructions
-		}
-
-		// Apply instruction - execute once regardless of success/failure
-		if err := im.applyInstruction(version); err != nil {
-			logger.Error("Failed to apply instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation, "error", err)
-			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: %s %s %s (failed: %v)", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName, err))
-		} else {
-			// Record successfully applied instruction details
-			instructionDesc := fmt.Sprintf("v%d: %s %s %s", version, instruction.Operation, instruction.ComponentType, instruction.ComponentName)
-			if instruction.Content != "" && len(instruction.Content) > 100 {
-				instructionDesc += fmt.Sprintf(" (content: %d chars)", len(instruction.Content))
-			} else if instruction.Content != "" {
-				instructionDesc += fmt.Sprintf(" (content: %s)", instruction.Content)
-			}
-			processedInstructions = append(processedInstructions, instructionDesc)
-		}
-
-		// Continue to next instruction regardless of success/failure
-	}
-
-	// Always update to target version regardless of individual instruction failures
-	im.mu.Lock()
-	im.currentVersion = endVersion
-	im.baseVersion = leaderParts[0]
-	im.mu.Unlock()
-
-	// Log final sync result
-	if len(failedInstructions) > 0 {
-		logger.Warn("Instructions synced with some failures",
-			"from", fromVersion,
-			"to", toVersion,
-			"processed", len(processedInstructions),
-			"failed", len(failedInstructions),
-			"successful_instructions", strings.Join(processedInstructions, "; "),
-			"failed_instructions", strings.Join(failedInstructions, "; "))
-	} else {
-		logger.Info("Instructions synced successfully",
-			"from", fromVersion,
-			"to", toVersion,
-			"count", len(processedInstructions),
-			"instructions", strings.Join(processedInstructions, "; "))
-	}
-
-	return nil
-}
-
-// createComponentInstance creates actual component instances from configuration
-func (im *InstructionManager) createComponentInstance(componentType, componentName, content string) error {
-	switch componentType {
-	case "input":
-		// Import the input package at the top if not already imported
-		inp, err := input.NewInput("", content, componentName)
-		if err != nil {
-			return fmt.Errorf("failed to create input instance %s: %w", componentName, err)
-		}
-		project.SetInput(componentName, inp)
-		logger.Debug("Created input instance", "name", componentName)
-
-	case "output":
-		// Import the output package at the top if not already imported
-		out, err := output.NewOutput("", content, componentName)
-		if err != nil {
-			return fmt.Errorf("failed to create output instance %s: %w", componentName, err)
-		}
-		project.SetOutput(componentName, out)
-		logger.Debug("Created output instance", "name", componentName)
-
-	case "ruleset":
-		// Import the rules_engine package at the top if not already imported
-		rs, err := rules_engine.NewRuleset("", content, componentName)
-		if err != nil {
-			return fmt.Errorf("failed to create ruleset instance %s: %w", componentName, err)
-		}
-		project.SetRuleset(componentName, rs)
-		logger.Debug("Created ruleset instance", "name", componentName)
-
-	case "project":
-		// For projects, we create the project instance
-		proj, err := project.NewProject("", content, componentName, false)
-		if err != nil {
-			return fmt.Errorf("failed to create project instance %s: %w", componentName, err)
-		}
-		project.SetProject(componentName, proj)
-		logger.Debug("Created project instance", "name", componentName)
-
-	case "plugin":
-		// For plugins, we just store the content as plugins are handled differently
-		// Import the plugin package at the top if not already imported
-		err := plugin.NewPlugin("", content, componentName, plugin.YAEGI_PLUGIN)
-		if err != nil {
-			return fmt.Errorf("failed to create plugin instance %s: %w", componentName, err)
-		}
-		logger.Debug("Created plugin instance", "name", componentName)
-
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	return nil
-}
-
-// deleteComponentInstance deletes actual component instances
-func (im *InstructionManager) deleteComponentInstance(componentType, componentName string) error {
-	switch componentType {
-	case "input":
-		project.DeleteInput(componentName)
-		logger.Debug("Deleted input instance", "name", componentName)
-
-	case "output":
-		project.DeleteOutput(componentName)
-		logger.Debug("Deleted output instance", "name", componentName)
-
-	case "ruleset":
-		project.DeleteRuleset(componentName)
-		logger.Debug("Deleted ruleset instance", "name", componentName)
-
-	case "project":
-		if proj, exists := project.GetProject(componentName); exists {
-			// Stop the project first if it's running
-			if proj.Status == common.StatusRunning {
-				proj.Stop()
-			}
-		}
-		project.DeleteProject(componentName)
-		logger.Debug("Deleted project instance", "name", componentName)
-
-	case "plugin":
-		// For plugins, we need to handle differently based on the plugin system
-		// This might need specific plugin cleanup logic
-		logger.Debug("Deleted plugin instance", "name", componentName)
-
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	return nil
-}
-
-// updateComponentInstance updates existing component instances with new configuration
-func (im *InstructionManager) updateComponentInstance(componentType, componentName, content string) error {
-	// For updates, we delete the old instance and create a new one
-	if err := im.deleteComponentInstance(componentType, componentName); err != nil {
-		logger.Warn("Failed to delete old component instance during update", "type", componentType, "name", componentName, "error", err)
-	}
-
-	return im.createComponentInstance(componentType, componentName, content)
-}
-
-// applyInstruction applies a single instruction
-func (im *InstructionManager) applyInstruction(version int64) error {
-	key := fmt.Sprintf("cluster:instruction:%d", version)
-	data, err := common.RedisGet(key)
-	if err != nil {
-		return fmt.Errorf("failed to get instruction %d: %w", version, err)
-	}
-
-	var instruction Instruction
-	if err := json.Unmarshal([]byte(data), &instruction); err != nil {
-		return fmt.Errorf("failed to unmarshal instruction %d: %w", version, err)
-	}
-
-	logger.Debug("Applying instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation)
-
-	switch instruction.Operation {
-	case "add":
-		// First store config in memory
-		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Then create actual component instances for follower
-		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Record successful operation
-		common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
-		return nil
-	case "delete":
-		// First delete component instance
-		if err := im.deleteComponentInstance(instruction.ComponentType, instruction.ComponentName); err != nil {
-			logger.Warn("Failed to delete component instance", "type", instruction.ComponentType, "name", instruction.ComponentName, "error", err)
-		}
-		// Then remove from memory
-		err := common.GlobalComponentOperations.DeleteComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName)
-
-		// Get affected projects from instruction metadata for history recording
-		affectedProjects := []string{}
-		if instruction.Metadata != nil {
-			if projects, exists := instruction.Metadata["affected_projects"]; exists {
-				if projectList, ok := projects.([]interface{}); ok {
-					for _, project := range projectList {
-						if projectStr, ok := project.(string); ok {
-							affectedProjects = append(affectedProjects, projectStr)
-						}
-					}
-				}
-			}
-		}
-
-		if err != nil {
-			// Record failed operation
-			common.RecordComponentDelete(instruction.ComponentType, instruction.ComponentName, "failed", err.Error(), affectedProjects)
-			return err
-		}
-		// Record successful operation
-		common.RecordComponentDelete(instruction.ComponentType, instruction.ComponentName, "success", "", affectedProjects)
-		return nil
-	case "update":
-		// First update config in memory
-		if err := common.GlobalComponentOperations.UpdateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Then update component instance
-		if err := im.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Record successful operation
-		common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
-		return nil
-	case "local_push":
-		// First store config in memory
-		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Then create actual component instances for follower
-		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
-			return err
-		}
-		// Record successful operation
-		common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
-		return nil
-	case "push_change":
-		// First store config in memory
-		if err := common.GlobalComponentOperations.CreateComponentMemoryOnly(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
-			return err
-		}
-		// Then create actual component instances for follower
-		if err := im.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			// Record failed operation
-			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
-			return err
-		}
-		// Record successful operation
-		common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
-		return nil
-	case "start":
-		if instruction.ComponentType == "project" {
-			if globalProjectCmdHandler != nil {
-				// Follower nodes should record operations when executing cluster instructions
-				// to show actual execution results on each node
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "start", true)
-			}
-			return fmt.Errorf("project handler not initialized")
-		}
-	case "stop":
-		if instruction.ComponentType == "project" {
-			if globalProjectCmdHandler != nil {
-				// Follower nodes should record operations when executing cluster instructions
-				// to show actual execution results on each node
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "stop", true)
-			}
-			return fmt.Errorf("project handler not initialized")
-		}
-	case "restart":
-		if instruction.ComponentType == "project" {
-			// Check if this project exists using safe accessor
-			proj, exists := project.GetProject(instruction.ComponentName)
-
-			if !exists {
-				logger.Warn("Project not found for restart", "project", instruction.ComponentName)
-				return fmt.Errorf("project %s not found", instruction.ComponentName)
-			}
-
-			// Restart project regardless of current status
-			// This ensures restart instruction works consistently
-			logger.Debug("Restarting project", "project", instruction.ComponentName, "current_status", proj.Status)
-
-			if globalProjectCmdHandler != nil {
-				// Follower nodes should record operations when executing cluster instructions
-				// to show actual execution results on each node
-				return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "restart", true)
-			}
-			return fmt.Errorf("project handler not initialized")
-		}
-	default:
-		return fmt.Errorf("unknown operation: %s", instruction.Operation)
-	}
-
-	return nil
-}
-
-// SetFollowerExecutionFlag sets a flag indicating follower is executing instructions
-func (im *InstructionManager) SetFollowerExecutionFlag(nodeID string) error {
-	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	_, err := common.RedisSet(key, "executing", int(im.executionFlagTTL))
-	if err != nil {
-		return fmt.Errorf("failed to set execution flag: %w", err)
 	}
 	return nil
-}
-
-// ClearFollowerExecutionFlag clears the execution flag for a follower
-func (im *InstructionManager) ClearFollowerExecutionFlag(nodeID string) error {
-	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	return common.RedisDel(key)
-}
-
-// RefreshFollowerExecutionFlag refreshes the TTL of execution flag
-func (im *InstructionManager) RefreshFollowerExecutionFlag(nodeID string) error {
-	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	_, err := common.RedisSet(key, "executing", int(im.executionFlagTTL))
-	return err
 }
 
 // GetActiveFollowers returns list of followers currently executing instructions
@@ -1097,7 +506,6 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 			return nil
 		}
 
-		logger.Debug("Waiting for followers to finish", "active_followers", activeFollowers)
 		time.Sleep(checkInterval)
 	}
 
@@ -1105,107 +513,12 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 	return fmt.Errorf("timeout waiting for followers to become idle, still active: %v", activeFollowers)
 }
 
-// clearAllLocalComponents clears all local components and projects when leader session changes
-func (im *InstructionManager) clearAllLocalComponents() error {
-	logger.Info("Clearing all local components and projects due to leader session change")
-
-	// Stop and close all running projects first
-	// Collect running projects first to avoid deadlock
-	var runningProjects []*project.Project
-	project.ForEachProject(func(projectName string, proj *project.Project) bool {
-		if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
-			runningProjects = append(runningProjects, proj)
-		}
-		return true
-	})
-
-	// Stop projects without holding locks
-	for _, proj := range runningProjects {
-		logger.Info("Stopping project due to session change", "project", proj.Id)
-		if err := proj.Stop(); err != nil {
-			logger.Warn("Failed to stop project during session change", "project", proj.Id, "error", err)
-		}
+func (im *InstructionManager) Stop() {
+	is, _ := im.loadAllInstructions(im.maxInstructions)
+	for i := range is {
+		key := fmt.Sprintf("cluster:instruction:%d", i)
+		_ = common.RedisDel(key)
 	}
-
-	// Stop and release all input instances
-	// Collect inputs first to avoid deadlock
-	var inputs []*input.Input
-	project.ForEachInput(func(inputName string, inp *input.Input) bool {
-		inputs = append(inputs, inp)
-		return true
-	})
-
-	// Stop inputs without holding locks
-	for _, inp := range inputs {
-		logger.Debug("Stopping input instance", "name", inp.Id)
-		if err := inp.Stop(); err != nil {
-			logger.Warn("Failed to stop input instance", "name", inp.Id, "error", err)
-		}
-	}
-
-	// Stop and release all output instances
-	// Collect outputs first to avoid deadlock
-	var outputs []*output.Output
-	project.ForEachOutput(func(outputName string, out *output.Output) bool {
-		outputs = append(outputs, out)
-		return true
-	})
-
-	// Stop outputs without holding locks
-	for _, out := range outputs {
-		logger.Debug("Stopping output instance", "name", out.Id)
-		if err := out.Stop(); err != nil {
-			logger.Warn("Failed to stop output instance", "name", out.Id, "error", err)
-		}
-	}
-
-	// Stop and release all ruleset instances
-	// Collect rulesets first to avoid deadlock
-	var rulesets []*rules_engine.Ruleset
-	project.ForEachRuleset(func(rulesetName string, rs *rules_engine.Ruleset) bool {
-		rulesets = append(rulesets, rs)
-		return true
-	})
-
-	// Stop rulesets without holding locks
-	for _, rs := range rulesets {
-		logger.Debug("Stopping ruleset instance", "name", rs.RulesetID)
-		if err := rs.Stop(); err != nil {
-			logger.Warn("Failed to stop ruleset instance", "name", rs.RulesetID, "error", err)
-		}
-	}
-
-	// Clear all component instances
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	// Clear project instances
-	project.ForEachProject(func(projectName string, _ *project.Project) bool {
-		project.DeleteProject(projectName)
-		return true
-	})
-
-	// Clear input instances
-	project.ForEachInput(func(inputName string, _ *input.Input) bool {
-		project.DeleteInput(inputName)
-		return true
-	})
-
-	// Clear output instances
-	project.ForEachOutput(func(outputName string, _ *output.Output) bool {
-		project.DeleteOutput(outputName)
-		return true
-	})
-
-	// Clear ruleset instances
-	project.ForEachRuleset(func(rulesetName string, _ *rules_engine.Ruleset) bool {
-		project.DeleteRuleset(rulesetName)
-		return true
-	})
-
-	// Clear global component config maps
-	common.ClearAllRawConfigsForAllTypes()
-
-	logger.Info("Successfully cleared and released all local components and projects")
-	return nil
+	_ = common.RedisDel(fmt.Sprintf("cluster:instruction:%d", len(is)))
+	_ = common.RedisDel("cluster:leader_version")
 }

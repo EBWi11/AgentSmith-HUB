@@ -154,7 +154,6 @@ func ServerStart(listener string) error {
 	// Cluster management endpoints - REQUIRE AUTH
 	auth.GET("/config_root", leaderConfig)
 	auth.GET("/config/download", downloadConfig)
-	auth.POST("/cluster/compact-instructions", compactInstructions)
 	auth.GET("/cluster/instruction-stats", getInstructionStats)
 	auth.GET("/cluster/follower-execution-status", getFollowerExecutionStatus)
 

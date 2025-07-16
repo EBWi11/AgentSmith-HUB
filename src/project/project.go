@@ -147,53 +147,18 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 type projectCommandHandler struct{}
 
 func (h *projectCommandHandler) ExecuteCommand(projectID, action string) error {
-	// Default to recording operations for the simple ExecuteCommand method
 	return h.ExecuteCommandWithOptions(projectID, action, true)
 }
 
 func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action string, recordOperation bool) error {
-	// Use safe accessor to get project
-	proj, exists := GetProject(projectID)
-
-	if !exists {
-		// Try to create project from global config if it doesn't exist
-		logger.Info("Project not found locally, attempting to create from global config", "project_id", projectID)
-
-		// First try to get config from Redis (most reliable source)
-		projectConfig, err := common.GetProjectConfig(projectID)
-		if err != nil || projectConfig == "" {
-			// Fallback to global config map
-			projectConfig, _ = common.GetRawConfig("project", projectID)
-		}
-
-		if projectConfig != "" {
-			// Create project from config
-			newProj, err := NewProject("", projectConfig, projectID, false)
-			if err != nil {
-				logger.Error("Failed to create project from config", "project_id", projectID, "error", err)
-				return fmt.Errorf("failed to create project from config: %w", err)
-			}
-
-			// Add to global projects using safe accessor
-			SetProject(projectID, newProj)
-
-			proj = newProj
-			logger.Info("Successfully created project from config", "project_id", projectID)
-		} else {
-			logger.Error("Project config not found in Redis or global config", "project_id", projectID)
-			return fmt.Errorf("project not found: %s", projectID)
-		}
-	}
-
-	// Get node ID from common config instead of cluster package
 	nodeID := common.Config.LocalIP
+	proj, exists := GetProject(projectID)
+	if !exists {
+		return fmt.Errorf("project not found: %s", projectID)
+	}
 
 	switch action {
 	case "start":
-		if proj.Status == common.StatusRunning {
-			logger.Info("Project already running", "project_id", projectID)
-			return nil
-		}
 		err := proj.Start()
 		if err != nil {
 			// Record operation failure only if requested
@@ -216,10 +181,6 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 		return nil
 
 	case "stop":
-		if proj.Status == common.StatusStopped {
-			logger.Info("Project already stopped", "project_id", projectID)
-			return nil
-		}
 		err := proj.Stop()
 		if err != nil {
 			// Record operation failure only if requested
@@ -242,22 +203,7 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 		return nil
 
 	case "restart":
-		// First stop if running
-		if proj.Status == common.StatusRunning {
-			err := proj.Stop()
-			if err != nil {
-				if recordOperation {
-					common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to stop: %v", err), map[string]interface{}{
-						"triggered_by": "cluster_command",
-						"node_id":      nodeID,
-					})
-				}
-				return fmt.Errorf("failed to stop project for restart: %w", err)
-			}
-		}
-
-		// Then start
-		err := proj.Start()
+		err := proj.Restart()
 		if err != nil {
 			if recordOperation {
 				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{

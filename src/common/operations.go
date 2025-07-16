@@ -323,13 +323,6 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 	logger.Info("Local push operation recorded", "type", componentType, "component", componentID, "status", status)
 }
 
-// InitComponentUpdateManager initializes the global component update manager
-func InitComponentUpdateManager() {
-	GlobalComponentUpdateManager = &ComponentUpdateManager{
-		activeUpdates: make(map[string]*ComponentUpdateOperation),
-	}
-}
-
 // StartComponentUpdate starts a new component update operation
 func (cum *ComponentUpdateManager) StartComponentUpdate(componentType, componentID string, affectedProjects []string) (*ComponentUpdateOperation, error) {
 	cum.mutex.Lock()
