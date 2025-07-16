@@ -44,14 +44,14 @@
           'ring-1 ring-yellow-500 border-yellow-500': node.hasPerformanceIssue
         }"
       >
-        <!-- Main Node Info Row -->
-        <div class="px-6 py-4">
-          <div class="flex items-center justify-between">
+        <!-- Main Node Info Row with horizontal scroll for wide content -->
+        <div class="px-6 py-4 overflow-x-auto">
+          <div class="flex items-center min-w-max space-x-6">
             <!-- Left: Basic Info -->
-            <div class="flex items-center space-x-4 min-w-0 w-80 flex-shrink-0">
+            <div class="flex items-center space-x-4 flex-shrink-0">
               <!-- Role Badge -->
               <span 
-                class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium flex-shrink-0 w-24 justify-center"
+                class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium w-20 justify-center"
                 :class="{
                   'bg-blue-100 text-blue-800': node.isLeader,
                   'bg-gray-100 text-gray-800': !node.isLeader
@@ -65,9 +65,9 @@
               </span>
               
               <!-- Node Address & ID -->
-              <div class="w-40 flex-shrink-0">
-                <div class="text-lg font-semibold text-gray-900 truncate">{{ node.address }}</div>
-                <div class="text-sm text-gray-500 truncate">ID: {{ node.id }}</div>
+              <div class="w-36 flex-shrink-0">
+                <div class="text-lg font-semibold text-gray-900 truncate" :title="node.address">{{ node.address }}</div>
+                <div class="text-sm text-gray-500 truncate" :title="node.id">ID: {{ node.id }}</div>
               </div>
               
               <!-- Status Indicators -->
@@ -100,28 +100,28 @@
             </div>
 
             <!-- Center: Message Metrics -->
-            <div class="flex items-center space-x-4 mx-8 flex-shrink-0">
+            <div class="flex items-center space-x-4 flex-shrink-0">
               <!-- Input Messages -->
-              <div class="text-center w-20">
+              <div class="text-center w-16">
                 <div class="text-xs text-blue-600 font-medium mb-1">Input/d</div>
-                <div class="text-xl font-bold text-blue-800">
+                <div class="text-lg font-bold text-blue-800">
                   {{ formatMessagesPerDay(node.metrics.inputMessages) }}
                 </div>
               </div>
               
               <!-- Output Messages -->
-              <div class="text-center w-20">
+              <div class="text-center w-16">
                 <div class="text-xs text-green-600 font-medium mb-1">Output/d</div>
-                <div class="text-xl font-bold text-green-800">
+                <div class="text-lg font-bold text-green-800">
                   {{ formatMessagesPerDay(node.metrics.outputMessages) }}
                 </div>
               </div>
               
               <!-- Version -->
-              <div class="text-center w-24">
+              <div class="text-center w-20">
                 <div class="text-xs text-purple-600 font-medium mb-1">Version</div>
                 <div 
-                  class="text-xs font-mono px-2 py-1 rounded text-center truncate max-w-full"
+                  class="text-xs font-mono px-2 py-1 rounded text-center truncate"
                   :class="getVersionDisplayClass(node)"
                   :title="getVersionTooltip(node)"
                 >
@@ -131,12 +131,12 @@
             </div>
 
             <!-- Right: System Resources -->
-            <div class="flex items-center space-x-8 flex-shrink-0">
+            <div class="flex items-center space-x-6 flex-shrink-0">
               <!-- CPU Usage -->
-              <div class="text-center min-w-0">
+              <div class="text-center">
                 <div class="text-xs text-gray-600 font-medium mb-1">CPU</div>
                 <div class="flex items-center space-x-2">
-                  <div class="w-16 bg-gray-200 rounded-full h-2">
+                  <div class="w-12 bg-gray-200 rounded-full h-2">
                     <div 
                       class="h-2 rounded-full transition-all duration-300"
                       :class="getCPUBarColor(node.metrics.cpuPercent)"
@@ -150,10 +150,10 @@
               </div>
 
               <!-- Memory Usage -->
-              <div class="text-center min-w-0">
+              <div class="text-center">
                 <div class="text-xs text-gray-600 font-medium mb-1">Memory</div>
                 <div class="flex items-center space-x-2">
-                  <div class="w-16 bg-gray-200 rounded-full h-2">
+                  <div class="w-12 bg-gray-200 rounded-full h-2">
                     <div 
                       class="h-2 rounded-full transition-all duration-300"
                       :class="getMemoryBarColor(node.metrics.memoryPercent)"
@@ -167,14 +167,15 @@
               </div>
               
               <!-- Goroutines -->
-              <div class="text-center">
+              <div class="text-center w-16">
                 <div class="text-xs text-gray-600 font-medium mb-1">Goroutines</div>
                 <div class="text-lg font-semibold text-gray-800">{{ node.metrics.goroutineCount }}</div>
               </div>
             </div>
 
             <!-- Far Right: Last Seen -->
-            <div class="text-right flex-shrink-0 ml-6 w-20">
+            <div class="text-center flex-shrink-0 w-16">
+              <div class="text-xs text-gray-600 font-medium mb-1">Last Seen</div>
               <span class="text-xs text-gray-500">
                 {{ formatTimeAgo(node.lastSeen) }}
               </span>
