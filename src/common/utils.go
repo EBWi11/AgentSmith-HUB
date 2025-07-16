@@ -23,6 +23,20 @@ func GetComponentFromSequenceID(sequence string) (string, string) {
 		return "", ""
 	}
 
+	// Special handling for PLUGIN sequences
+	// Format: "PLUGIN.pluginName.success" or "PLUGIN.pluginName.failure"
+	if len(parts) == 3 && strings.ToUpper(parts[0]) == "PLUGIN" {
+		pluginName := parts[1]
+		status := strings.ToLower(parts[2])
+
+		if status == "success" {
+			return "plugin_success", pluginName
+		} else if status == "failure" {
+			return "plugin_failure", pluginName
+		}
+	}
+
+	// For other components, use the last two parts
 	return parts[len(parts)-2], parts[len(parts)-1]
 }
 
