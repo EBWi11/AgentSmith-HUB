@@ -699,7 +699,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 	}
 
 	// For other check types, if field doesn't exist, the check should fail
-	if !exist {
+	if !exist && checkNode.Type != "PLUGIN" {
 		return false
 	}
 
