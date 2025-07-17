@@ -108,9 +108,19 @@
                 <!-- Vertical line from top to current item (all items have this) -->
                 <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
                 
-                <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                <div class="flex items-center justify-between min-w-0 flex-1 pl-8 pr-3">
                   <!-- 移除所有子组件的图标 -->
                   <span class="text-sm truncate">{{ child.title }}</span>
+                  <!-- Settings badges -->
+                  <div v-if="settingsBadges[child.type] > 0" 
+                       class="flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-medium rounded-full text-white ml-2"
+                       :class="{
+                         'bg-orange-500': child.type === 'pending-changes',
+                         'bg-purple-500': child.type === 'load-local-components', 
+                         'bg-red-500': child.type === 'error-logs'
+                       }">
+                    {{ settingsBadges[child.type] > 99 ? '99+' : settingsBadges[child.type] }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1699,6 +1709,9 @@ const REFRESH_INTERVALS = {
   FAST_INTERVAL: 5000    // 5 seconds for fast refresh
 }
 
+// Settings menu badges - computed from dataCache
+const settingsBadges = computed(() => dataCache.settingsBadges.data)
+
 // Use smart refresh system instead of manual intervals
 
 // Project status refresh functions
@@ -1849,6 +1862,9 @@ onMounted(async () => {
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
+  // 初始化设置菜单标识
+  await dataCache.fetchSettingsBadges()
+  
   // Add click event listener to close menus when clicking outside
   document.addEventListener('click', handleOutsideClick)
   
@@ -1893,6 +1909,14 @@ onMounted(async () => {
   
   window.addEventListener('cacheCleared', handleCacheCleared)
   
+  // Listen for pending changes and local changes events to update badges
+  window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
+  window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
+  
+  // 设置定时刷新设置菜单标识（每5分钟刷新一次）
+  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 60 * 1000)
+  window._settingsBadgeInterval = settingsBadgeInterval
+  
   // Store event handler for cleanup
   window._sidebarCacheHandler = handleCacheCleared
 })
@@ -1917,6 +1941,12 @@ onBeforeUnmount(() => {
   if (window._sidebarCacheHandler) {
     window.removeEventListener('cacheCleared', window._sidebarCacheHandler)
     delete window._sidebarCacheHandler
+  }
+  
+  // Clear settings badges refresh timer
+  if (window._settingsBadgeInterval) {
+    clearInterval(window._settingsBadgeInterval)
+    delete window._settingsBadgeInterval
   }
 })
 
@@ -3456,10 +3486,15 @@ const debouncedFullRefresh = debounce(async () => {
     if (showClusterStatusModal.value) {
       await loadClusterProjectStates()
     }
+    
+    // 刷新设置菜单标识
+    await dataCache.fetchSettingsBadges()
   } catch (error) {
     console.error('Failed to refresh after changes:', error)
   }
 }, 500)
+
+
 
 // 优化项目状态刷新，避免与轮询冲突
 async function refreshProjectStatus() {

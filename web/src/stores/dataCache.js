@@ -92,6 +92,17 @@ export const useDataCacheStore = defineStore('dataCache', {
     // Operations history cache - Store as Map with LRU mechanism
     operationsHistory: new Map(),
     
+    // Settings badges cache
+    settingsBadges: {
+      data: {
+        'pending-changes': 0,
+        'load-local-components': 0,
+        'error-logs': 0
+      },
+      timestamp: 0,
+      loading: false
+    },
+    
     // Event cleanup functions
     _eventCleanupFunctions: []
   }),
@@ -698,6 +709,7 @@ export const useDataCacheStore = defineStore('dataCache', {
       this.clearCache('pendingChanges')
       this.clearCache('localChanges')
       this.clearCache('availablePlugins')
+      this.clearCache('settingsBadges')
       
       // Clear Map-based caches
       this.pluginStats.clear()
@@ -918,6 +930,77 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
       this.uiStates.sidebarSearch = ''
       this.uiStates.lastUpdate = 0
+    },
+
+    // Fetch settings badges data
+    async fetchSettingsBadges(force = false) {
+      const TTL = 5 * 60 * 1000 // 5 minutes
+      
+      if (!force && !this.isExpired('settingsBadges', TTL) && !this.settingsBadges.loading) {
+        return this.settingsBadges.data
+      }
+
+      if (this.settingsBadges.loading) {
+        return this.settingsBadges.data
+      }
+
+      this.settingsBadges.loading = true
+
+      try {
+        // Get pending changes count from cache or API
+        let pendingCount = 0
+        if (this.pendingChanges.data && Array.isArray(this.pendingChanges.data)) {
+          pendingCount = this.pendingChanges.data.length
+        } else {
+          try {
+            const pendingData = await hubApi.fetchEnhancedPendingChanges()
+            pendingCount = Array.isArray(pendingData) ? pendingData.length : 0
+          } catch (e) {
+            console.warn('Failed to fetch pending changes for badge:', e)
+          }
+        }
+
+        // Get local changes count from cache or API
+        let localCount = 0
+        if (this.localChanges.data && Array.isArray(this.localChanges.data)) {
+          localCount = this.localChanges.data.length
+        } else {
+          try {
+            const localData = await hubApi.fetchLocalChanges()
+            localCount = Array.isArray(localData) ? localData.length : 0
+          } catch (e) {
+            console.warn('Failed to fetch local changes for badge:', e)
+          }
+        }
+
+        // Get error logs count for last hour
+        let errorCount = 0
+        try {
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+          const params = new URLSearchParams()
+          params.append('start_time', oneHourAgo)
+          params.append('limit', '1000')
+          
+          const errorData = await hubApi.getErrorLogs(params.toString())
+          errorCount = errorData?.total_count || 0
+        } catch (e) {
+          console.warn('Failed to fetch error logs for badge:', e)
+        }
+
+        this.settingsBadges.data = {
+          'pending-changes': pendingCount,
+          'load-local-components': localCount,
+          'error-logs': errorCount
+        }
+        this.settingsBadges.timestamp = Date.now()
+
+        return this.settingsBadges.data
+      } catch (error) {
+        console.error('Failed to fetch settings badges:', error)
+        throw error
+      } finally {
+        this.settingsBadges.loading = false
+      }
     }
   }
 }) 
