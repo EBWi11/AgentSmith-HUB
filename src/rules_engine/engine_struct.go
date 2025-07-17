@@ -506,6 +506,13 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	// Check for duplicate elements within this rule
 	validateRuleDuplicateElements(xmlContent, ruleID, ruleIndex, result)
 
+	// Validate standalone checks in CheckMap
+	checkCount := 0
+	for _, checkNode := range rule.CheckMap {
+		validateStandaloneCheck(&checkNode, xmlContent, ruleID, ruleIndex, checkCount, result)
+		checkCount++
+	}
+
 	// Validate checklists in ChecklistMap
 	for _, checklist := range rule.ChecklistMap {
 		validateChecklist(&checklist, xmlContent, ruleID, ruleIndex, result)
@@ -517,13 +524,17 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	}
 
 	// Validate appends in AppendsMap
+	appendCount := 0
 	for _, appendElem := range rule.AppendsMap {
-		validateAppend(&appendElem, xmlContent, ruleID, ruleIndex, 0, result)
+		validateAppend(&appendElem, xmlContent, ruleID, ruleIndex, appendCount, result)
+		appendCount++
 	}
 
 	// Validate plugins in PluginMap
+	pluginCount := 0
 	for _, plugin := range rule.PluginMap {
-		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, 0, result)
+		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, pluginCount, result)
+		pluginCount++
 	}
 }
 
@@ -583,6 +594,112 @@ func validateRuleDuplicateElements(xmlContent, ruleID string, ruleIndex int, res
 	}
 }
 
+// validateStandaloneCheck validates standalone check elements
+func validateStandaloneCheck(checkNode *CheckNodes, xmlContent, ruleID string, ruleIndex, checkIndex int, result *ValidationResult) {
+	checkLine := findElementInRule(xmlContent, ruleID, "<check", ruleIndex, checkIndex)
+
+	// Check required attributes
+	if checkNode.Type == "" || strings.TrimSpace(checkNode.Type) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Check type cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	} else {
+		// Validate check type against all supported types
+		validTypes := []string{
+			"PLUGIN", "END", "START", "NEND", "NSTART", "INCL", "NI",
+			"NCS_END", "NCS_START", "NCS_NEND", "NCS_NSTART", "NCS_INCL", "NCS_NI",
+			"MT", "LT", "REGEX", "ISNULL", "NOTNULL", "EQU", "NEQ", "NCS_EQU", "NCS_NEQ",
+		}
+
+		isValid := false
+		for _, validType := range validTypes {
+			if checkNode.Type == validType {
+				isValid = true
+				break
+			}
+		}
+
+		if !isValid {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    checkLine,
+				Message: "Check type must be one of: PLUGIN, END, START, NEND, NSTART, INCL, NI, NCS_END, NCS_START, NCS_NEND, NCS_NSTART, NCS_INCL, NCS_NI, MT, LT, REGEX, ISNULL, NOTNULL, EQU, NEQ, NCS_EQU, NCS_NEQ",
+				Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, checkNode.Type),
+			})
+		}
+	}
+
+	// For PLUGIN type nodes, field is optional since plugins can have their own parameters
+	// For other node types, field is required
+	if checkNode.Type != "PLUGIN" && (checkNode.Field == "" || strings.TrimSpace(checkNode.Field) == "") {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Check field cannot be empty for non-PLUGIN types",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	// Validate specific check types
+	if checkNode.Type == "REGEX" {
+		nodeValue := strings.TrimSpace(checkNode.Value)
+		if nodeValue == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    checkLine,
+				Message: "REGEX check value cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		} else {
+			if _, err := regexp.Compile(nodeValue); err != nil {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    checkLine,
+					Message: "Invalid regex pattern",
+					Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+				})
+			}
+		}
+	}
+
+	// Validate plugin check
+	if checkNode.Type == "PLUGIN" {
+		nodeValue := strings.TrimSpace(checkNode.Value)
+		if nodeValue == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    checkLine,
+				Message: "PLUGIN check value cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		} else {
+			// Validate plugin parameters and return type for checknode
+			validateCheckNodePluginCall(nodeValue, checkLine, ruleID, result)
+		}
+	}
+
+	// Validate logic and delimiter combination
+	if checkNode.Logic != "" && checkNode.Delimiter == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Delimiter cannot be empty when logic is specified",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+	if checkNode.Logic == "" && checkNode.Delimiter != "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Logic cannot be empty when delimiter is specified",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+}
+
 // validateChecklist validates checklist elements
 func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
 	if len(checklist.CheckNodes) == 0 {
@@ -600,7 +717,7 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 	hasCondition := checklist.Condition != "" && strings.TrimSpace(checklist.Condition) != ""
 
 	for nodeIndex, node := range checklist.CheckNodes {
-		nodeLine := findElementInRule(xmlContent, ruleID, "<node", ruleIndex, nodeIndex)
+		nodeLine := findElementInRule(xmlContent, ruleID, "<check", ruleIndex, nodeIndex)
 
 		// Check required attributes
 		if node.Type == "" || strings.TrimSpace(node.Type) == "" {
@@ -1540,7 +1657,15 @@ func parseValue(s string) (*PluginArg, error) {
 		return &res, nil
 	}
 
+	// Support both simple field names and dynamic field references with _$ prefix
 	if matched, _ := regexpgo.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, s); matched {
+		res.Value = s
+		res.Type = 1
+		return &res, nil
+	}
+
+	// Support dynamic field references with _$ prefix (e.g., _$field, _$parent.child)
+	if matched, _ := regexpgo.MatchString(`^_\$[a-zA-Z_][a-zA-Z0-9_.]*$`, s); matched {
 		res.Value = s
 		res.Type = 1
 		return &res, nil

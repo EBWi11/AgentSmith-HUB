@@ -331,20 +331,23 @@ async function viewSampleData() {
           if (response && response[nodeType]) {
             // Filter and merge sample data from all project node sequences
             Object.keys(response[nodeType]).forEach(seqKey => {
-              // Split the sequence and get the component parts (after the project prefix)
-              const parts = seqKey.split(':')
-              if (parts.length >= 2) {
-                const sequencePart = parts[1] // The part after "projectId:"
-                const sequenceComponents = sequencePart.split('.')
-                
-                // Check if this sequence ends with our target component
-                if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
-                  const lastComponentType = sequenceComponents[sequenceComponents.length - 2]
-                  const lastComponentId = sequenceComponents[sequenceComponents.length - 1]
+              // ProjectNodeSequence format: "INPUT.api_sec.RULESET.test" or "RULESET.test"
+              // Split the sequence directly by '.'
+              const sequenceComponents = seqKey.split('.')
+              
+              // Check if this sequence contains our target component
+              // Sequence format: component1.id1.component2.id2.component3.id3...
+              // We need to check if the sequence contains our component type and id
+              if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
+                // Look for our component type and id in the sequence
+                for (let i = 0; i < sequenceComponents.length - 1; i += 2) {
+                  const currentComponentType = sequenceComponents[i].toLowerCase()
+                  const currentComponentId = sequenceComponents[i + 1]
                   
-                  // Only include sequences that end with our component
-                  if (lastComponentType === nodeType && lastComponentId === componentId) {
+                  // Check if this component matches our target
+                  if (currentComponentType === nodeType && currentComponentId === componentId) {
                     allSampleData[seqKey] = response[nodeType][seqKey]
+                    break
                   }
                 }
               }
@@ -367,20 +370,23 @@ async function viewSampleData() {
         const filteredData = {}
         
         Object.keys(response[nodeType]).forEach(projectNodeSequence => {
-          // Split the sequence and get the component parts (after the project prefix)
-          const parts = projectNodeSequence.split(':')
-          if (parts.length >= 2) {
-            const sequencePart = parts[1] // The part after "projectId:"
-            const sequenceComponents = sequencePart.split('.')
-            
-            // Check if this sequence ends with our target component
-            if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
-              const lastComponentType = sequenceComponents[sequenceComponents.length - 2]
-              const lastComponentId = sequenceComponents[sequenceComponents.length - 1]
+          // ProjectNodeSequence format: "INPUT.api_sec.RULESET.test" or "RULESET.test"
+          // Split the sequence directly by '.'
+          const sequenceComponents = projectNodeSequence.split('.')
+          
+          // Check if this sequence contains our target component
+          // Sequence format: component1.id1.component2.id2.component3.id3...
+          // We need to check if the sequence contains our component type and id
+          if (sequenceComponents.length >= 2 && sequenceComponents.length % 2 === 0) {
+            // Look for our component type and id in the sequence
+            for (let i = 0; i < sequenceComponents.length - 1; i += 2) {
+              const currentComponentType = sequenceComponents[i].toLowerCase()
+              const currentComponentId = sequenceComponents[i + 1]
               
-              // Only include sequences that end with our component
-              if (lastComponentType === nodeType && lastComponentId === componentId) {
+              // Check if this component matches our target
+              if (currentComponentType === nodeType && currentComponentId === componentId) {
                 filteredData[projectNodeSequence] = response[nodeType][projectNodeSequence]
+                break
               }
             }
           }
