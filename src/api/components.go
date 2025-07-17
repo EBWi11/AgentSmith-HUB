@@ -3000,9 +3000,10 @@ func analyzePluginUsage(pluginID string) PluginUsageInfo {
 		}
 
 		// Check which rulesets in this project use the plugin
-		for rulesetID := range proj.Rulesets {
-			if _, usesPlugin := rulesetUsageMap[rulesetID]; usesPlugin {
-				projectUsage.RulesetIDs = append(projectUsage.RulesetIDs, rulesetID)
+		for _, rulesetComponent := range proj.Rulesets {
+			actualRulesetID := rulesetComponent.RulesetID
+			if _, usesPlugin := rulesetUsageMap[actualRulesetID]; usesPlugin {
+				projectUsage.RulesetIDs = append(projectUsage.RulesetIDs, actualRulesetID)
 			}
 		}
 
