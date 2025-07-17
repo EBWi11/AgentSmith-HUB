@@ -723,6 +723,11 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 		return nil
 	}
 
+	// Skip PNS duplication check if project ID is empty (validation mode)
+	if strings.TrimSpace(p.Id) == "" {
+		return nil
+	}
+
 	// Use safe iteration to check existing projects
 	var duplicateProjectID string
 	ForEachProject(func(existingProjectID string, existingProject *Project) bool {

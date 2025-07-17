@@ -22,44 +22,50 @@ func GetComponentUsage(c echo.Context) error {
 	// This ensures we only show projects that are actually using specific component instances
 	switch componentType {
 	case "rulesets":
-		// Check which projects use this ruleset (consider ProjectNodeSequence for independent instances)
+		// Check which projects use this ruleset (need to iterate through ProjectNodeSequence keys)
 		project.ForEachProject(func(projectID string, p *project.Project) bool {
-			if ruleset, exists := p.Rulesets[id]; exists {
-				usage = append(usage, map[string]interface{}{
-					"type":                  "project",
-					"id":                    p.Id,
-					"name":                  p.Id,
-					"status":                p.Status,
-					"project_node_sequence": ruleset.ProjectNodeSequence, // Include sequence for clarity
-				})
+			for pns, rulesetComponent := range p.Rulesets {
+				if rulesetComponent.RulesetID == id {
+					usage = append(usage, map[string]interface{}{
+						"type":                  "project",
+						"id":                    p.Id,
+						"name":                  p.Id,
+						"status":                p.Status,
+						"project_node_sequence": pns, // Use the actual ProjectNodeSequence key
+					})
+				}
 			}
 			return true
 		})
 	case "inputs":
-		// Check which projects use this input (inputs are typically shared, so check by ID)
+		// Check which projects use this input (need to iterate through ProjectNodeSequence keys)
 		project.ForEachProject(func(projectID string, p *project.Project) bool {
-			if input, exists := p.Inputs[id]; exists {
-				usage = append(usage, map[string]interface{}{
-					"type":                  "project",
-					"id":                    p.Id,
-					"name":                  p.Id,
-					"status":                p.Status,
-					"project_node_sequence": input.ProjectNodeSequence, // Include sequence for clarity
-				})
+			for pns, inputComponent := range p.Inputs {
+				if inputComponent.Id == id {
+					usage = append(usage, map[string]interface{}{
+						"type":                  "project",
+						"id":                    p.Id,
+						"name":                  p.Id,
+						"status":                p.Status,
+						"project_node_sequence": pns, // Use the actual ProjectNodeSequence key
+					})
+				}
 			}
 			return true
 		})
 	case "outputs":
-		// Check which projects use this output (consider ProjectNodeSequence for independent instances)
+		// Check which projects use this output (need to iterate through ProjectNodeSequence keys)
 		project.ForEachProject(func(projectID string, p *project.Project) bool {
-			if output, exists := p.Outputs[id]; exists {
-				usage = append(usage, map[string]interface{}{
-					"type":                  "project",
-					"id":                    p.Id,
-					"name":                  p.Id,
-					"status":                p.Status,
-					"project_node_sequence": output.ProjectNodeSequence, // Include sequence for clarity
-				})
+			for pns, outputComponent := range p.Outputs {
+				if outputComponent.Id == id {
+					usage = append(usage, map[string]interface{}{
+						"type":                  "project",
+						"id":                    p.Id,
+						"name":                  p.Id,
+						"status":                p.Status,
+						"project_node_sequence": pns, // Use the actual ProjectNodeSequence key
+					})
+				}
 			}
 			return true
 		})
