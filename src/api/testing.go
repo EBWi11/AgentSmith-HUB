@@ -279,12 +279,9 @@ func testPlugin(c echo.Context) error {
 			})
 		}
 
-		if existsInMemory {
-			// Use existing plugin
-			pluginToTest = p
-			isTemporary = false
-		} else {
-			// Create a temporary plugin instance for testing (isolated from global registry)
+		// Prioritize temporary version for testing if it exists
+		if existsInTemp {
+			// Use temporary version for testing (prioritize temporary version)
 			tempPluginName := id + "_test_temp"
 			tempPlugin, err := plugin.NewTestPlugin("", tempContent, tempPluginName, plugin.YAEGI_PLUGIN)
 			if err != nil {
@@ -297,6 +294,10 @@ func testPlugin(c echo.Context) error {
 
 			pluginToTest = tempPlugin
 			isTemporary = true
+		} else if existsInMemory {
+			// Use existing plugin only if no temporary version exists
+			pluginToTest = p
+			isTemporary = false
 		}
 	} else {
 		// Neither content nor id provided
