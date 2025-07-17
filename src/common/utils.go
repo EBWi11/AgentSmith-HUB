@@ -281,6 +281,62 @@ func GetCheckData(data map[string]interface{}, checkKeyList []string) (res strin
 	return res, exist
 }
 
+// GetCheckDataWithType traverses a nested map[string]interface{} using a key path (checkKeyList).
+// Returns the original typed value and whether it exists.
+// Handles map, slice, JSON string, and URL query string as intermediate nodes.
+// Unlike GetCheckData, this function preserves the original data type.
+func GetCheckDataWithType(data map[string]interface{}, checkKeyList []string) (res interface{}, exist bool) {
+	tmp := data
+	res = nil
+	keyListLen := len(checkKeyList) - 1
+	for i, k := range checkKeyList {
+		tmpRes, ok := tmp[k]
+		if !ok || tmpRes == nil {
+			// Key not found or value is nil
+			return nil, false
+		}
+		if i != keyListLen {
+			switch value := tmpRes.(type) {
+			case map[string]interface{}:
+				// Continue traversing nested map
+				tmp = value
+			case []interface{}:
+				// Convert slice to map with index keys
+				tmpMapForList := make(map[string]interface{}, len(value))
+				for idx, v := range value {
+					tmpKey := "#_" + strconv.Itoa(idx)
+					tmpMapForList[tmpKey] = v
+				}
+				tmp = tmpMapForList
+			case string:
+				// Try to parse as JSON if it looks like JSON
+				if (strings.Contains(value, ":") || strings.Contains(value, "{") || strings.Contains(value, "[")) && len(value) > 2 {
+					tmpValue := make(map[string]interface{})
+					if err := sonic.Unmarshal([]byte(value), &tmpValue); err == nil {
+						tmp = tmpValue
+						continue
+					}
+				}
+				// Try to parse as URL query string
+				if tmpValue, err := url.ParseQuery(value); err == nil {
+					tmp = UrlValueToMap(tmpValue)
+					continue
+				}
+				// Not a traversable structure
+				return nil, false
+			default:
+				// Unsupported type for traversal
+				return nil, false
+			}
+		} else {
+			// Last key, return original typed value
+			res = tmpRes
+			exist = true
+		}
+	}
+	return res, exist
+}
+
 // ReadContentFromPathOrRaw reads content from file path or returns raw content
 // This is a common utility function used by all component verification functions
 func ReadContentFromPathOrRaw(path string, raw string) ([]byte, error) {

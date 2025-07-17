@@ -17,8 +17,9 @@ const (
 
 // CheckCoreCache for rule engine
 type CheckCoreCache struct {
-	Exist bool
-	Data  string
+	Exist     bool
+	Data      string      // String representation (for backward compatibility)
+	TypedData interface{} // Original typed data (for type-preserving access)
 }
 
 type HubConfig struct {

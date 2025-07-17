@@ -138,7 +138,8 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 		case 1:
 			key := v.Value.(string)
 			keyList := common.StringToList(strings.TrimSpace(key))
-			if v.RealValue, ok = GetCheckDataFromCache(cache, key, data, keyList); !ok {
+			// For plugin arguments, use typed data to preserve original data types
+			if v.RealValue, ok = GetCheckDataWithTypeFromCache(cache, key, data, keyList); !ok {
 				res[i] = nil
 			} else {
 				res[i] = v.RealValue
@@ -157,9 +158,11 @@ func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkK
 	} else {
 		checkKeyList := common.StringToList(checkKey[FromRawSymbolLen:])
 		res, exist := common.GetCheckData(data, checkKeyList)
+		typedRes, _ := common.GetCheckDataWithType(data, checkKeyList)
 		cache[checkKey] = common.CheckCoreCache{
-			Exist: exist,
-			Data:  res,
+			Exist:     exist,
+			Data:      res,
+			TypedData: typedRes,
 		}
 		return res
 	}
@@ -171,9 +174,31 @@ func GetCheckDataFromCache(cache map[string]common.CheckCoreCache, checkKey stri
 		return tmpRes.Data, tmpRes.Exist
 	} else {
 		res, exist := common.GetCheckData(data, checkKeyList)
+		typedRes, _ := common.GetCheckDataWithType(data, checkKeyList)
 		cache[checkKey] = common.CheckCoreCache{
-			Exist: exist,
-			Data:  res,
+			Exist:     exist,
+			Data:      res,
+			TypedData: typedRes,
+		}
+		return res, exist
+	}
+}
+
+// GetCheckDataWithTypeFromCache retrieves typed data from cache or fetches and caches it
+func GetCheckDataWithTypeFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res interface{}, exist bool) {
+	tmpRes, ok := cache[checkKey]
+	if ok {
+		return tmpRes.TypedData, tmpRes.Exist
+	} else {
+		res, exist := common.GetCheckDataWithType(data, checkKeyList)
+		strRes := ""
+		if exist && res != nil {
+			strRes = common.AnyToString(res)
+		}
+		cache[checkKey] = common.CheckCoreCache{
+			Exist:     exist,
+			Data:      strRes, // For backward compatibility
+			TypedData: res,    // Original typed data
 		}
 		return res, exist
 	}
