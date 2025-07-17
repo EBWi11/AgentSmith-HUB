@@ -943,8 +943,8 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 #### String Matching Types
 | Type | Description | Case Sensitive | Example |
 |------|-------------|----------------|---------|
-| EQU | Exact match | Yes | `<check type="EQU" field="status">active</check>` |
-| NEQ | Not equal | Yes | `<check type="NEQ" field="status">inactive</check>` |
+| EQU | Exact match | No (case insensitive) | `<check type="EQU" field="status">active</check>` |
+| NEQ | Not equal | No (case insensitive) | `<check type="NEQ" field="status">inactive</check>` |
 | INCL | Contains substring | Yes | `<check type="INCL" field="message">error</check>` |
 | NI | Does not contain | Yes | `<check type="NI" field="message">success</check>` |
 | START | Starts with | Yes | `<check type="START" field="path">/admin</check>` |
