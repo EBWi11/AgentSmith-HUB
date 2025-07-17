@@ -1124,9 +1124,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = []string{}
 
 	case "plugin":
-		// Stop old component if it exists (plugins don't have explicit stop)
-		// Use safe deletion via plugin package
-
 		// Create new component instance
 		var err error
 		if req.WriteToFile && filePath != "" {

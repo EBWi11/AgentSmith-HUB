@@ -100,7 +100,7 @@ const NewRulesetData = `<root author="name">
         
         <checklist condition="a or b">
             <check id="a" type="EQU" field="status">200</check>
-            <check id="b" type="NEXCL" field="path">favicon.ico</check>
+            <check id="b" type="INCL" field="path">favicon.ico</check>
         </checklist>
     </rule>
 </root>`
