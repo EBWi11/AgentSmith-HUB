@@ -137,7 +137,16 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 			res[i] = v.Value
 		case 1:
 			key := v.Value.(string)
-			keyList := common.StringToList(strings.TrimSpace(key))
+			// Handle _$ syntax: remove _$ prefix before parsing field path
+			var keyList []string
+			if strings.HasPrefix(key, FromRawSymbol) {
+				// Remove _$ prefix and parse the field path
+				fieldPath := strings.TrimSpace(key[FromRawSymbolLen:])
+				keyList = common.StringToList(fieldPath)
+			} else {
+				// Regular field reference without _$ prefix
+				keyList = common.StringToList(strings.TrimSpace(key))
+			}
 			// For plugin arguments, use typed data to preserve original data types
 			if v.RealValue, ok = GetCheckDataWithTypeFromCache(cache, key, data, keyList); !ok {
 				res[i] = nil
