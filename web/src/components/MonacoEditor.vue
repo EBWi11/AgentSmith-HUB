@@ -1331,18 +1331,17 @@ function getInputCompletions(fullText, lineText, range, position) {
     if (prefix === 'INPUT') {
       
               if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, including temporary components
+          // Suggest all INPUT components, but filter out temporary components
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id)) {
-              const isTemp = input.hasTemp;
+                !suggestions.some(s => s.label === input.id) &&
+                !input.hasTemp) {  // Filter out temporary components
               suggestions.push({
-                label: isTemp ? `${input.id} (temp)` : input.id,
+                label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Input component: ${input.id}${isTemp ? ' (temporary version)' : ''}`,
+                documentation: `Input component: ${input.id}`,
                 insertText: input.id,
-                range: range,
-                sortText: isTemp ? `1_${input.id}` : `0_${input.id}` // Show temp components first
+                range: range
               });
             }
           });
@@ -1926,18 +1925,17 @@ function getOutputCompletions(fullText, lineText, range, position) {
     const partialLower = (partial || '').toLowerCase();
     
     if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
-      // 提示所有OUTPUT组件，包含临时组件
+      // 提示所有OUTPUT组件，但过滤掉临时组件
       outputComponents.value.forEach(output => {
         if ((!partial || output.id.toLowerCase().includes(partialLower)) && 
-            !suggestions.some(s => s.label === output.id)) {
-          const isTemp = output.hasTemp;
+            !suggestions.some(s => s.label === output.id) &&
+            !output.hasTemp) {  // 过滤掉临时组件
           suggestions.push({
-            label: isTemp ? `${output.id} (temp)` : output.id,
+            label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
-            documentation: `Output component: ${output.id}${isTemp ? ' (temporary version)' : ''}`,
+            documentation: `Output component: ${output.id}`,
             insertText: output.id,
-            range: range,
-            sortText: isTemp ? `1_${output.id}` : `0_${output.id}` // Show temp components first
+            range: range
           });
         }
       });
@@ -2565,18 +2563,17 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         };
         
         if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, including temporary ones
+          // Suggest all INPUT components, but filter out temporary ones
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id)) {
-              const isTemp = input.hasTemp;
+                !suggestions.some(s => s.label === input.id) &&
+                !input.hasTemp) {  // Filter out temporary components
               suggestions.push({
-                label: isTemp ? `${input.id} (temp)` : input.id,
+                label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Input component: ${input.id}${isTemp ? ' (temporary version)' : ''}`,
+                documentation: `Input component: ${input.id}`,
                 insertText: input.id,
-                range: replaceRange,
-                sortText: isTemp ? `1_${input.id}` : `0_${input.id}` // Show temp components first
+                range: replaceRange
               });
             }
           });
@@ -2607,18 +2604,17 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
 
         
         if (rulesetComponents.value.length > 0) {
-          // Suggest all RULESET components, including temporary ones
+          // Suggest all RULESET components, but filter out temporary ones
           rulesetComponents.value.forEach(ruleset => {
             if ((!partial || ruleset.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === ruleset.id)) {
-              const isTemp = ruleset.hasTemp;
+                !suggestions.some(s => s.label === ruleset.id) &&
+                !ruleset.hasTemp) {  // Filter out temporary components
               suggestions.push({
-                label: isTemp ? `${ruleset.id} (temp)` : ruleset.id,
+                label: ruleset.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Ruleset component: ${ruleset.id}${isTemp ? ' (temporary version)' : ''}`,
+                documentation: `Ruleset component: ${ruleset.id}`,
                 insertText: ruleset.id,
-                range: replaceRange,
-                sortText: isTemp ? `1_${ruleset.id}` : `0_${ruleset.id}` // Show temp components first
+                range: replaceRange
               });
             }
           });
@@ -2646,20 +2642,19 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // Suggest all OUTPUT components, including temporary ones
+      // Suggest all OUTPUT components, but filter out temporary ones
       outputComponents.value.forEach(output => {
         const matches = !partial || output.id.toLowerCase().includes(partialLower);
         const alreadyExists = suggestions.some(s => s.label === output.id);
+        const isNotTemp = !output.hasTemp;  // Filter out temporary components
         
-        if (matches && !alreadyExists) {
-          const isTemp = output.hasTemp;
+        if (matches && !alreadyExists && isNotTemp) {
           suggestions.push({
-            label: isTemp ? `${output.id} (temp)` : output.id,
+            label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
-            documentation: `Output component: ${output.id}${isTemp ? ' (temporary version)' : ''}`,
+            documentation: `Output component: ${output.id}`,
             insertText: output.id,
-            range: replaceRange,
-            sortText: isTemp ? `1_${output.id}` : `0_${output.id}` // Show temp components first
+            range: replaceRange
           });
         }
       });
@@ -3287,9 +3282,9 @@ function getXmlTagContentCompletions(context, range, fullText) {
     const pluginSuggestions = getPluginSuggestions(range, isInCheckNode);
     suggestions.push(...pluginSuggestions);
     
-    // Only add generic plugin templates if no plugins exist at all
-    const hasAnyPlugins = (pluginComponents.value || []).length > 0;
-    if (!hasAnyPlugins) {
+    // Only add generic plugin templates if no real plugins exist
+    const hasRealPlugins = (pluginComponents.value || []).some(plugin => !plugin.hasTemp);
+    if (!hasRealPlugins) {
       suggestions.push({
         label: 'plugin_name(_$ORIDATA)',
         kind: monaco.languages.CompletionItemKind.Snippet,
@@ -3480,8 +3475,8 @@ function addFieldSuggestionsForFunctionParams(suggestions, range, context) {
   
   // Add common parameter patterns
   const patterns = [
-    { label: 'true', desc: 'Boolean true value', insertText: '"true"' },
-    { label: 'false', desc: 'Boolean false value', insertText: '"false"' }
+    { label: 'true', desc: 'Boolean true value', insertText: 'true' },
+    { label: 'false', desc: 'Boolean false value', insertText: 'false' }
   ];
   
   patterns.forEach(pattern => {
@@ -3544,10 +3539,10 @@ let lastPluginDataHash = '';
 // 计算插件数据hash用于缓存失效检测
 const calculatePluginDataHash = () => {
   try {
-    const plugins = pluginComponents.value || [];
-    const pluginData = plugins.map(p => `${p.id}:${p.hasTemp ? 'temp' : 'real'}`).sort().join(',');
+    const plugins = pluginComponents.value?.filter(p => !p.hasTemp) || [];
+    const pluginIds = plugins.map(p => p.id).sort().join(',');
     const parameterKeys = Object.keys(pluginParametersCache.value || {}).sort().join(',');
-    return `${pluginData}:${parameterKeys}`;
+    return `${pluginIds}:${parameterKeys}`;
   } catch (error) {
     console.warn('Error calculating plugin data hash:', error);
     return Date.now().toString(); // fallback to timestamp
@@ -3578,7 +3573,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   
   // 构建新的补全建议
   const suggestions = [];
-  const validPlugins = pluginComponents.value || [];
+  const validPlugins = (pluginComponents.value || []).filter(plugin => !plugin.hasTemp);
   
   validPlugins.forEach(plugin => {
     // For checknode, only show plugins with bool return type
@@ -3586,12 +3581,11 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       return; // Skip this plugin
     }
     
-    const isTemp = plugin.hasTemp;
     const cachedParameters = (pluginParametersCache.value || {})[plugin.id];
     const hasParameterInfo = plugin.id in (pluginParametersCache.value || {});
     
     let insertText = plugin.id;
-    let documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}`;
+    let documentation = `Plugin: ${plugin.id}`;
     
     if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
       // Create parameter template based on actual plugin signature
@@ -3616,13 +3610,13 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       const paramDocs = cachedParameters.map(p => 
         `${p.name}: ${p.type}${p.required ? ' (required)' : ' (optional)'}`
       ).join('\n');
-      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nParameters:\n${paramDocs}`;
+      documentation = `Plugin: ${plugin.id}\n\nParameters:\n${paramDocs}`;
     } else if (hasParameterInfo) {
       insertText = `${plugin.id}()`;
-      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nNo parameters required`;
+      documentation = `Plugin: ${plugin.id}\n\nNo parameters required`;
     } else {
       insertText = `${plugin.id}()`;
-      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nLoading parameter information...`;
+      documentation = `Plugin: ${plugin.id}\n\nLoading parameter information...`;
       
       // 异步获取参数，但不阻塞当前补全
       getPluginParameters(plugin.id).then(() => {
@@ -3637,9 +3631,9 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
     let pluginLabel;
     if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
       const simpleParams = cachedParameters.map(param => param.name).join(', ');
-      pluginLabel = isTemp ? `${plugin.id}(${simpleParams}) (temp)` : `${plugin.id}(${simpleParams})`;
+      pluginLabel = `${plugin.id}(${simpleParams})`;
     } else {
-      pluginLabel = isTemp ? `${plugin.id}() (temp)` : `${plugin.id}()`;
+      pluginLabel = `${plugin.id}()`;
     }
     
     suggestions.push({
@@ -3648,7 +3642,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       documentation: documentation,
       insertText: insertText,
       range: range, // 这个会在返回时动态更新
-      sortText: isTemp ? `1_${plugin.id}` : `0_${plugin.id}` // Temporary plugins shown first
+      sortText: `0_${plugin.id}` // Higher priority for actual plugins
     });
   });
   

@@ -1657,15 +1657,9 @@ func parseValue(s string) (*PluginArg, error) {
 		return &res, nil
 	}
 
-	// Support both simple field names and dynamic field references with _$ prefix
-	if matched, _ := regexpgo.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, s); matched {
-		res.Value = s
-		res.Type = 1
-		return &res, nil
-	}
-
-	// Support dynamic field references with _$ prefix (e.g., _$field, _$parent.child)
-	if matched, _ := regexpgo.MatchString(`^_\$[a-zA-Z_][a-zA-Z0-9_.]*$`, s); matched {
+	// Support field references - any unquoted identifier is treated as field reference
+	// Supports both simple names (field) and nested paths (parent.child)
+	if matched, _ := regexpgo.MatchString(`^[a-zA-Z_][a-zA-Z0-9_.]*$`, s); matched {
 		res.Value = s
 		res.Type = 1
 		return &res, nil

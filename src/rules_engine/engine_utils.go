@@ -128,6 +128,26 @@ func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeI
 	}
 }
 
+// convertPluginArgument converts complex objects to strings for plugin consumption
+// while preserving simple types
+func convertPluginArgument(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string, int, int64, float64, bool:
+		// Keep simple types as is
+		return v
+	case map[string]interface{}, []interface{}, []map[string]interface{}:
+		// Convert complex objects to JSON string
+		return common.AnyToString(v)
+	default:
+		// For any other types, convert to string
+		return common.AnyToString(v)
+	}
+}
+
 func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map[string]common.CheckCoreCache) []interface{} {
 	var ok bool
 	res := make([]interface{}, len(args))
@@ -137,21 +157,14 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 			res[i] = v.Value
 		case 1:
 			key := v.Value.(string)
-			// Handle _$ syntax: remove _$ prefix before parsing field path
-			var keyList []string
-			if strings.HasPrefix(key, FromRawSymbol) {
-				// Remove _$ prefix and parse the field path
-				fieldPath := strings.TrimSpace(key[FromRawSymbolLen:])
-				keyList = common.StringToList(fieldPath)
-			} else {
-				// Regular field reference without _$ prefix
-				keyList = common.StringToList(strings.TrimSpace(key))
-			}
-			// For plugin arguments, use typed data to preserve original data types
+			keyList := common.StringToList(strings.TrimSpace(key))
+			// Get typed data for field reference
 			if v.RealValue, ok = GetCheckDataWithTypeFromCache(cache, key, data, keyList); !ok {
-				res[i] = nil
+				// If field not found, return empty string
+				res[i] = ""
 			} else {
-				res[i] = v.RealValue
+				// Convert complex objects to string for plugin consumption
+				res[i] = convertPluginArgument(v.RealValue)
 			}
 		case 2:
 			res[i] = common.MapDeepCopy(data)
