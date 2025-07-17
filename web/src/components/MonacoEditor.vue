@@ -3287,9 +3287,9 @@ function getXmlTagContentCompletions(context, range, fullText) {
     const pluginSuggestions = getPluginSuggestions(range, isInCheckNode);
     suggestions.push(...pluginSuggestions);
     
-    // Only add generic plugin templates if no real plugins exist
-    const hasRealPlugins = (pluginComponents.value || []).some(plugin => !plugin.hasTemp);
-    if (!hasRealPlugins) {
+    // Only add generic plugin templates if no plugins exist at all
+    const hasAnyPlugins = (pluginComponents.value || []).length > 0;
+    if (!hasAnyPlugins) {
       suggestions.push({
         label: 'plugin_name(_$ORIDATA)',
         kind: monaco.languages.CompletionItemKind.Snippet,
@@ -3544,10 +3544,10 @@ let lastPluginDataHash = '';
 // 计算插件数据hash用于缓存失效检测
 const calculatePluginDataHash = () => {
   try {
-    const plugins = pluginComponents.value?.filter(p => !p.hasTemp) || [];
-    const pluginIds = plugins.map(p => p.id).sort().join(',');
+    const plugins = pluginComponents.value || [];
+    const pluginData = plugins.map(p => `${p.id}:${p.hasTemp ? 'temp' : 'real'}`).sort().join(',');
     const parameterKeys = Object.keys(pluginParametersCache.value || {}).sort().join(',');
-    return `${pluginIds}:${parameterKeys}`;
+    return `${pluginData}:${parameterKeys}`;
   } catch (error) {
     console.warn('Error calculating plugin data hash:', error);
     return Date.now().toString(); // fallback to timestamp
@@ -3578,7 +3578,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   
   // 构建新的补全建议
   const suggestions = [];
-  const validPlugins = (pluginComponents.value || []).filter(plugin => !plugin.hasTemp);
+  const validPlugins = pluginComponents.value || [];
   
   validPlugins.forEach(plugin => {
     // For checknode, only show plugins with bool return type
@@ -3586,11 +3586,12 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       return; // Skip this plugin
     }
     
+    const isTemp = plugin.hasTemp;
     const cachedParameters = (pluginParametersCache.value || {})[plugin.id];
     const hasParameterInfo = plugin.id in (pluginParametersCache.value || {});
     
     let insertText = plugin.id;
-    let documentation = `Plugin: ${plugin.id}`;
+    let documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}`;
     
     if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
       // Create parameter template based on actual plugin signature
@@ -3615,13 +3616,13 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       const paramDocs = cachedParameters.map(p => 
         `${p.name}: ${p.type}${p.required ? ' (required)' : ' (optional)'}`
       ).join('\n');
-      documentation = `Plugin: ${plugin.id}\n\nParameters:\n${paramDocs}`;
+      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nParameters:\n${paramDocs}`;
     } else if (hasParameterInfo) {
       insertText = `${plugin.id}()`;
-      documentation = `Plugin: ${plugin.id}\n\nNo parameters required`;
+      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nNo parameters required`;
     } else {
       insertText = `${plugin.id}()`;
-      documentation = `Plugin: ${plugin.id}\n\nLoading parameter information...`;
+      documentation = `Plugin: ${plugin.id}${isTemp ? ' (temporary version)' : ''}\n\nLoading parameter information...`;
       
       // 异步获取参数，但不阻塞当前补全
       getPluginParameters(plugin.id).then(() => {
@@ -3636,9 +3637,9 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
     let pluginLabel;
     if (hasParameterInfo && cachedParameters && cachedParameters.length > 0) {
       const simpleParams = cachedParameters.map(param => param.name).join(', ');
-      pluginLabel = `${plugin.id}(${simpleParams})`;
+      pluginLabel = isTemp ? `${plugin.id}(${simpleParams}) (temp)` : `${plugin.id}(${simpleParams})`;
     } else {
-      pluginLabel = `${plugin.id}()`;
+      pluginLabel = isTemp ? `${plugin.id}() (temp)` : `${plugin.id}()`;
     }
     
     suggestions.push({
@@ -3647,7 +3648,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
       documentation: documentation,
       insertText: insertText,
       range: range, // 这个会在返回时动态更新
-      sortText: `0_${plugin.id}` // Higher priority for actual plugins
+      sortText: isTemp ? `1_${plugin.id}` : `0_${plugin.id}` // Temporary plugins shown first
     });
   });
   
