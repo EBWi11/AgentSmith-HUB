@@ -218,8 +218,14 @@ func (dsm *DailyStatsManager) getDailyStatsLegacy(date, projectID, nodeID string
 		dailyData, err := dsm.parserKey(key)
 		if err != nil {
 			logger.Error("Failed to get daily stats key from Redis", "pattern", pattern, "error", err)
+			continue
 		}
-		result[dailyData.ProjectNodeSequence] = &dailyData
+
+		// Preserve all node data by using unique keys including NodeID
+		// This prevents data overwriting while maintaining node-level information for byNode queries
+		// Format: ProjectNodeSequence#NodeID
+		uniqueKey := dailyData.ProjectNodeSequence + "#" + dailyData.NodeID
+		result[uniqueKey] = &dailyData
 	}
 
 	return result
