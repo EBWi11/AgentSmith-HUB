@@ -44,6 +44,9 @@ type Plugin struct {
 	// Whether the plugin result should be negated (for ! prefix)
 	IsNegated bool `json:"is_negated"`
 
+	// Whether this plugin instance is in test mode (skip statistics recording)
+	IsTestMode bool `json:"is_test_mode"`
+
 	// Plugin statistics (atomic counters)
 	successTotal uint64 // Total successful invocations
 	failureTotal uint64 // Total failed invocations
@@ -160,7 +163,7 @@ func NewTestPlugin(path string, raw string, name string, pluginType int) (*Plugi
 		content = []byte(raw)
 	}
 
-	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
+	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name, IsTestMode: true}
 
 	err = p.yaegiLoad()
 	if err != nil {
@@ -758,7 +761,13 @@ func isStandardLibraryPackage(pkg string) bool {
 }
 
 // RecordInvocation increments the appropriate counter based on success/failure
+// Skip recording if plugin is in test mode
 func (p *Plugin) RecordInvocation(success bool) {
+	// Skip statistics recording for test mode plugins
+	if p.IsTestMode {
+		return
+	}
+
 	if success {
 		atomic.AddUint64(&p.successTotal, 1)
 	} else {

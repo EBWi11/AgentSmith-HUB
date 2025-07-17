@@ -804,9 +804,10 @@ func getPlugins(c echo.Context) error {
 				if content != "" {
 					// Create a temporary plugin instance to get return type
 					tempPlugin := &plugin.Plugin{
-						Name:    name,
-						Payload: []byte(content),
-						Type:    plugin.YAEGI_PLUGIN,
+						Name:       name,
+						Payload:    []byte(content),
+						Type:       plugin.YAEGI_PLUGIN,
+						IsTestMode: true, // Set test mode to avoid statistics recording
 					}
 					// Try to load temporarily to get return type
 					if err := tempPlugin.YaegiLoad(); err == nil {
@@ -2046,9 +2047,10 @@ func GetPluginParameters(c echo.Context) error {
 	if tempContent, exists := plugin.PluginsNew[id]; exists {
 		// Create a temporary plugin instance to parse parameters
 		tempPlugin := &plugin.Plugin{
-			Name:    id,
-			Payload: []byte(tempContent),
-			Type:    plugin.YAEGI_PLUGIN,
+			Name:       id,
+			Payload:    []byte(tempContent),
+			Type:       plugin.YAEGI_PLUGIN,
+			IsTestMode: true, // Set test mode to avoid statistics recording
 		}
 
 		// Try to load the temporary plugin to get parameters
