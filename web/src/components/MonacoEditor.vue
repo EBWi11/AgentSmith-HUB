@@ -1331,17 +1331,18 @@ function getInputCompletions(fullText, lineText, range, position) {
     if (prefix === 'INPUT') {
       
               if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, but filter out temporary components
+          // Suggest all INPUT components, including temporary components
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === input.id)) {
+              const isTemp = input.hasTemp;
               suggestions.push({
-                label: input.id,
+                label: isTemp ? `${input.id} (temp)` : input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Input component: ${input.id}`,
+                documentation: `Input component: ${input.id}${isTemp ? ' (temporary version)' : ''}`,
                 insertText: input.id,
-                range: range
+                range: range,
+                sortText: isTemp ? `1_${input.id}` : `0_${input.id}` // Show temp components first
               });
             }
           });
@@ -1925,17 +1926,18 @@ function getOutputCompletions(fullText, lineText, range, position) {
     const partialLower = (partial || '').toLowerCase();
     
     if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
-      // 提示所有OUTPUT组件，但过滤掉临时组件
+      // 提示所有OUTPUT组件，包含临时组件
       outputComponents.value.forEach(output => {
         if ((!partial || output.id.toLowerCase().includes(partialLower)) && 
-            !suggestions.some(s => s.label === output.id) &&
-            !output.hasTemp) {  // 过滤掉临时组件
+            !suggestions.some(s => s.label === output.id)) {
+          const isTemp = output.hasTemp;
           suggestions.push({
-            label: output.id,
+            label: isTemp ? `${output.id} (temp)` : output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
-            documentation: `Output component: ${output.id}`,
+            documentation: `Output component: ${output.id}${isTemp ? ' (temporary version)' : ''}`,
             insertText: output.id,
-            range: range
+            range: range,
+            sortText: isTemp ? `1_${output.id}` : `0_${output.id}` // Show temp components first
           });
         }
       });
@@ -2563,17 +2565,18 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         };
         
         if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, but filter out temporary ones
+          // Suggest all INPUT components, including temporary ones
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === input.id)) {
+              const isTemp = input.hasTemp;
               suggestions.push({
-                label: input.id,
+                label: isTemp ? `${input.id} (temp)` : input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Input component: ${input.id}`,
+                documentation: `Input component: ${input.id}${isTemp ? ' (temporary version)' : ''}`,
                 insertText: input.id,
-                range: replaceRange
+                range: replaceRange,
+                sortText: isTemp ? `1_${input.id}` : `0_${input.id}` // Show temp components first
               });
             }
           });
@@ -2604,17 +2607,18 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
 
         
         if (rulesetComponents.value.length > 0) {
-          // Suggest all RULESET components, but filter out temporary ones
+          // Suggest all RULESET components, including temporary ones
           rulesetComponents.value.forEach(ruleset => {
             if ((!partial || ruleset.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === ruleset.id) &&
-                !ruleset.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === ruleset.id)) {
+              const isTemp = ruleset.hasTemp;
               suggestions.push({
-                label: ruleset.id,
+                label: isTemp ? `${ruleset.id} (temp)` : ruleset.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
-                documentation: `Ruleset component: ${ruleset.id}`,
+                documentation: `Ruleset component: ${ruleset.id}${isTemp ? ' (temporary version)' : ''}`,
                 insertText: ruleset.id,
-                range: replaceRange
+                range: replaceRange,
+                sortText: isTemp ? `1_${ruleset.id}` : `0_${ruleset.id}` // Show temp components first
               });
             }
           });
@@ -2642,19 +2646,20 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // Suggest all OUTPUT components, but filter out temporary ones
+      // Suggest all OUTPUT components, including temporary ones
       outputComponents.value.forEach(output => {
         const matches = !partial || output.id.toLowerCase().includes(partialLower);
         const alreadyExists = suggestions.some(s => s.label === output.id);
-        const isNotTemp = !output.hasTemp;  // Filter out temporary components
         
-        if (matches && !alreadyExists && isNotTemp) {
+        if (matches && !alreadyExists) {
+          const isTemp = output.hasTemp;
           suggestions.push({
-            label: output.id,
+            label: isTemp ? `${output.id} (temp)` : output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
-            documentation: `Output component: ${output.id}`,
+            documentation: `Output component: ${output.id}${isTemp ? ' (temporary version)' : ''}`,
             insertText: output.id,
-            range: replaceRange
+            range: replaceRange,
+            sortText: isTemp ? `1_${output.id}` : `0_${output.id}` // Show temp components first
           });
         }
       });
