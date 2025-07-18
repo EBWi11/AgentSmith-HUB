@@ -1262,8 +1262,8 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 字符串匹配类
 | 类型 | 说明 | 大小写 | 示例 |
 |------|------|--------|------|
-| EQU | 完全相等 | 敏感 | `<check type="EQU" field="status">active</check>` |
-| NEQ | 完全不等 | 敏感 | `<check type="NEQ" field="status">inactive</check>` |
+| EQU | 完全相等 | 不敏感 | `<check type="EQU" field="status">active</check>` |
+| NEQ | 完全不等 | 不敏感 | `<check type="NEQ" field="status">inactive</check>` |
 | INCL | 包含子串 | 敏感 | `<check type="INCL" field="message">error</check>` |
 | NI | 不包含子串 | 敏感 | `<check type="NI" field="message">success</check>` |
 | START | 开头匹配 | 敏感 | `<check type="START" field="path">/admin</check>` |

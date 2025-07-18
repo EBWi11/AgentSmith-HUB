@@ -109,11 +109,10 @@
 
     "SYNTAX_REFERENCE": {
       "check_types": {
-        "EQU": "Exact match",
-        "NEQ": "Not equal",
-        "GT": "Greater than",
+        "EQU": "Exact match (case insensitive)",
+        "NEQ": "Not equal (case insensitive)",
+        "MT": "Greater than (More Than)",
         "LT": "Less than",
-        "MT": "Greater than or equal (More Than)",
         "INCL": "String contains",
         "NI": "String does not contain",
         "START": "String starts with",

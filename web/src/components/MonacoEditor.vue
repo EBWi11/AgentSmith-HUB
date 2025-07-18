@@ -2895,8 +2895,8 @@ function getXmlAttributeValueCompletions(context, range) {
   if ((context.currentTag === 'check' || context.currentTag === 'node') && context.currentAttribute === 'type') {
     const checkTypes = [
       { value: 'REGEX', description: 'Regular expression match' },
-      { value: 'EQU', description: 'Equal comparison' },
-      { value: 'NEQ', description: 'Not equal comparison' },
+      { value: 'EQU', description: 'Equal comparison (case insensitive)' },
+      { value: 'NEQ', description: 'Not equal comparison (case insensitive)' },
       { value: 'INCL', description: 'Include check' },
       { value: 'NI', description: 'Not include check' },
       { value: 'START', description: 'Starts with check' },
