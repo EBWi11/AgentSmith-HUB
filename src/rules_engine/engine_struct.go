@@ -918,17 +918,70 @@ func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, ap
 				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 			})
 		} else {
+			// For append elements, we support both check-type (bool) and interface{} type plugins
+			// Parse the plugin function call
+			pluginName, args, err := ParseFunctionCall(value)
+			if err != nil {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    appendLine,
+					Message: "Invalid plugin call syntax",
+					Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+				})
+				return
+			}
+
+			// Check if plugin exists
+			var pluginInstance *plugin.Plugin
+			if p, ok := plugin.Plugins[pluginName]; ok {
+				pluginInstance = p
+			} else {
+				// Check if it's a temporary component
+				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					result.IsValid = false
+					result.Errors = append(result.Errors, ValidationError{
+						Line:    appendLine,
+						Message: "Cannot reference temporary plugin, please save it first",
+						Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+					})
+					return
+				} else {
+					result.IsValid = false
+					result.Errors = append(result.Errors, ValidationError{
+						Line:    appendLine,
+						Message: "Plugin not found",
+						Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+					})
+					return
+				}
+			}
+
 			// Validate plugin parameters
-			validatePluginCall(value, appendLine, ruleID, result)
+			validatePluginParameters(pluginInstance, args, value, appendLine, ruleID, result)
+
+			// Add info about supported plugin types for user awareness
+			if pluginInstance.ReturnType == "bool" {
+				result.Warnings = append(result.Warnings, ValidationWarning{
+					Line:    appendLine,
+					Message: fmt.Sprintf("Plugin '%s' returns bool type", pluginName),
+					Detail:  fmt.Sprintf("Rule ID: %s, Bool value (true/false) will be appended to field '%s'", ruleID, appendElem.FieldName),
+				})
+			} else if pluginInstance.ReturnType == "interface{}" {
+				result.Warnings = append(result.Warnings, ValidationWarning{
+					Line:    appendLine,
+					Message: fmt.Sprintf("Plugin '%s' returns interface{} type", pluginName),
+					Detail:  fmt.Sprintf("Rule ID: %s, Plugin result will be appended to field '%s'", ruleID, appendElem.FieldName),
+				})
+			}
 		}
 	}
 }
 
 // validatePlugin validates plugin elements
-func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, pluginIndex int, result *ValidationResult) {
+func validatePlugin(pluginElem *Plugin, xmlContent, ruleID string, ruleIndex, pluginIndex int, result *ValidationResult) {
 	pluginLine := findElementInRule(xmlContent, ruleID, "<plugin", ruleIndex, pluginIndex)
 
-	value := strings.TrimSpace(plugin.Value)
+	value := strings.TrimSpace(pluginElem.Value)
 	if value == "" {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
@@ -937,8 +990,61 @@ func validatePlugin(plugin *Plugin, xmlContent, ruleID string, ruleIndex, plugin
 			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 		})
 	} else {
+		// For plugin elements, we support any type of plugins (both bool and interface{} return types)
+		// Parse the plugin function call
+		pluginName, args, err := ParseFunctionCall(value)
+		if err != nil {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    pluginLine,
+				Message: "Invalid plugin call syntax",
+				Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+			})
+			return
+		}
+
+		// Check if plugin exists (using fully qualified names to avoid conflict with parameter name)
+		var pluginInstance *plugin.Plugin
+		if p, ok := plugin.Plugins[pluginName]; ok {
+			pluginInstance = p
+		} else {
+			// Check if it's a temporary component
+			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    pluginLine,
+					Message: "Cannot reference temporary plugin, please save it first",
+					Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+				})
+				return
+			} else {
+				result.IsValid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Line:    pluginLine,
+					Message: "Plugin not found",
+					Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+				})
+				return
+			}
+		}
+
 		// Validate plugin parameters
-		validatePluginCall(value, pluginLine, ruleID, result)
+		validatePluginParameters(pluginInstance, args, value, pluginLine, ruleID, result)
+
+		// Add info about supported plugin types for user awareness
+		if pluginInstance.ReturnType == "bool" {
+			result.Warnings = append(result.Warnings, ValidationWarning{
+				Line:    pluginLine,
+				Message: fmt.Sprintf("Plugin '%s' returns bool type", pluginName),
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin will be executed as a check operation", ruleID),
+			})
+		} else if pluginInstance.ReturnType == "interface{}" {
+			result.Warnings = append(result.Warnings, ValidationWarning{
+				Line:    pluginLine,
+				Message: fmt.Sprintf("Plugin '%s' returns interface{} type", pluginName),
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin will be executed for side effects", ruleID),
+			})
+		}
 	}
 }
 

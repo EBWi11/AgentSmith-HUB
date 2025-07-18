@@ -626,18 +626,33 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string
 	} else {
 		// Plugin
 		args := GetPluginRealArgs(appendOp.PluginArgs, dataCopy, ruleCache)
-		res, ok, err := appendOp.Plugin.FuncEvalOther(args...)
-		if err == nil && ok {
-			if appendOp.FieldName == PluginArgFromRawSymbol {
-				if r, ok := res.(map[string]interface{}); ok {
-					res = common.MapDeepCopy(r)
-				} else {
-					logger.PluginError("Plugin result is not a map", "plugin", appendOp.Plugin.Name, "result", res)
-					res = nil
-				}
-			}
 
-			dataCopy[appendOp.FieldName] = res
+		// Check plugin return type to determine which evaluation method to use
+		if appendOp.Plugin.ReturnType == "bool" {
+			// For check-type plugins (bool return type), use FuncEvalCheckNode and get the boolean result
+			boolResult, err := appendOp.Plugin.FuncEvalCheckNode(args...)
+			if err == nil {
+				dataCopy[appendOp.FieldName] = boolResult
+			} else {
+				logger.PluginError("Check-type plugin evaluation error in append", "plugin", appendOp.Plugin.Name, "error", err)
+			}
+		} else {
+			// For interface{} type plugins, use the original FuncEvalOther logic
+			res, ok, err := appendOp.Plugin.FuncEvalOther(args...)
+			if err == nil && ok {
+				if appendOp.FieldName == PluginArgFromRawSymbol {
+					if r, ok := res.(map[string]interface{}); ok {
+						res = common.MapDeepCopy(r)
+					} else {
+						logger.PluginError("Plugin result is not a map", "plugin", appendOp.Plugin.Name, "result", res)
+						res = nil
+					}
+				}
+
+				dataCopy[appendOp.FieldName] = res
+			} else if err != nil {
+				logger.PluginError("Interface-type plugin evaluation error in append", "plugin", appendOp.Plugin.Name, "error", err)
+			}
 		}
 	}
 }
@@ -663,13 +678,27 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 
 	args := GetPluginRealArgs(pluginOp.PluginArgs, dataCopy, ruleCache)
 
-	ok, err := pluginOp.Plugin.FuncEvalCheckNode(args...)
-	if err != nil {
-		logger.PluginError("Plugin evaluation error", "plugin", pluginOp.Plugin.Name, "error", err)
-	}
+	// Check plugin return type to determine which evaluation method to use
+	if pluginOp.Plugin.ReturnType == "bool" {
+		// For check-type plugins (bool return type), use FuncEvalCheckNode
+		ok, err := pluginOp.Plugin.FuncEvalCheckNode(args...)
+		if err != nil {
+			logger.PluginError("Check-type plugin evaluation error", "plugin", pluginOp.Plugin.Name, "error", err)
+		}
 
-	if !ok {
-		logger.Info("Plugin check failed", "plugin", pluginOp.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+		if !ok {
+			logger.Info("Check-type plugin check failed", "plugin", pluginOp.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+		}
+	} else {
+		// For interface{} type plugins, use FuncEvalOther (for side effects, result is ignored)
+		_, ok, err := pluginOp.Plugin.FuncEvalOther(args...)
+		if err != nil {
+			logger.PluginError("Interface-type plugin evaluation error", "plugin", pluginOp.Plugin.Name, "error", err)
+		}
+
+		if !ok {
+			logger.Info("Interface-type plugin execution failed", "plugin", pluginOp.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
+		}
 	}
 }
 

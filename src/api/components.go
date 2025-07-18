@@ -388,9 +388,11 @@ func getRulesets(c echo.Context) error {
 		lines := strings.Split(xmlContent, "\n")
 		for _, line := range lines {
 			if strings.Contains(line, "<root") && strings.Contains(line, "type=") {
-				if strings.Contains(line, `type="detection"`) || strings.Contains(line, `type='detection'`) {
+				// Convert line to lowercase for case-insensitive matching
+				lowerLine := strings.ToLower(line)
+				if strings.Contains(lowerLine, `type="detection"`) || strings.Contains(lowerLine, `type='detection'`) {
 					return "detection"
-				} else if strings.Contains(line, `type="whitelist"`) || strings.Contains(line, `type='whitelist'`) {
+				} else if strings.Contains(lowerLine, `type="whitelist"`) || strings.Contains(lowerLine, `type='whitelist'`) {
 					return "whitelist"
 				}
 			}
