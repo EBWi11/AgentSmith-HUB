@@ -20,20 +20,6 @@
           tooltip="Built-in Plugin"
         />
         
-        <!-- Ruleset type badge -->
-        <StatusBadge 
-          v-if="type === 'rulesets' && item.type === 'detection'"
-          text="D"
-          type="detection"
-          tooltip="Detection Ruleset"
-        />
-        <StatusBadge 
-          v-if="type === 'rulesets' && item.type === 'whitelist'"
-          text="W"
-          type="whitelist"
-          tooltip="Whitelist Ruleset"
-        />
-        
         <!-- Temporary file badge -->
         <StatusBadge 
           v-if="item.hasTemp"
