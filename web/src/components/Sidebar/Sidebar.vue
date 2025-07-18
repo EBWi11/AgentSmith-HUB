@@ -443,6 +443,15 @@
                     {{ getOutputTypeInfo(item).icon }}
                   </span>
 
+                  <!-- Ruleset type badge for rulesets -->
+                  <span v-if="type === 'rulesets' && getRulesetTypeInfo(item)" 
+                        class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
+                        :class="getRulesetTypeInfo(item).color"
+                        @mouseenter="showTooltip($event, getRulesetTypeInfo(item).tooltip)"
+                        @mouseleave="hideTooltip">
+                    {{ getRulesetTypeInfo(item).icon }}
+                  </span>
+
                   <!-- Temporary file badge -->
                   <span v-if="item.hasTemp" 
                         class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
@@ -3578,6 +3587,17 @@ function getOutputTypeInfo(item) {
     'aliyun_sls': { icon: 'SLS', color: 'bg-green-100 text-green-800', tooltip: 'Aliyun SLS Output' },
     'print': { icon: 'P', color: 'bg-gray-100 text-gray-800', tooltip: 'Print Output' },
     'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Output Type' }
+  }
+  return typeMap[type] || typeMap['unknown']
+}
+
+// Get ruleset type icon and color based on ruleset type
+function getRulesetTypeInfo(item) {
+  const type = item.type?.toLowerCase() || 'unknown'
+  const typeMap = {
+    'detection': { icon: 'D', color: 'bg-red-100 text-red-800', tooltip: 'Detection Ruleset' },
+    'whitelist': { icon: 'W', color: 'bg-green-100 text-green-800', tooltip: 'Whitelist Ruleset' },
+    'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Ruleset Type' }
   }
   return typeMap[type] || typeMap['unknown']
 }
