@@ -320,6 +320,8 @@ export function useSmartRefresh(refreshFunction, options = {}) {
     start,
     stop,
     restart,
+    resetErrorCount,  // 导出resetErrorCount函数
+    handleError,      // 导出handleError函数
     
     // 配置
     setBaseInterval: (interval) => {

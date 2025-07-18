@@ -1292,6 +1292,9 @@ const smartRefresh = useDashboardSmartRefresh(refreshStats, {
   slowInterval: 300000    // 5 minute slow interval
 })
 
+// Extract functions from smart refresh for use in refreshStats
+const { resetErrorCount, handleError: handleRefreshError } = smartRefresh
+
 // Global project operation event listener
 function handleGlobalProjectOperation(event) {
   if (event.detail && event.detail.timestamp) {

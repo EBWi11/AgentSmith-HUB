@@ -977,11 +977,12 @@ export const useDataCacheStore = defineStore('dataCache', {
         let errorCount = 0
         try {
           const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-          const params = new URLSearchParams()
-          params.append('start_time', oneHourAgo)
-          params.append('limit', '1000')
+          const params = {
+            start_time: oneHourAgo,
+            limit: '1000'
+          }
           
-          const errorData = await hubApi.getErrorLogs(params.toString())
+          const errorData = await hubApi.getErrorLogs(params)
           errorCount = errorData?.total_count || 0
         } catch (e) {
           console.warn('Failed to fetch error logs for badge:', e)

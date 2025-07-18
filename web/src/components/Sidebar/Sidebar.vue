@@ -1516,7 +1516,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, inject, nextTick, watch, computed } from 'vue'
 import { hubApi } from '@/api'
 import { useRouter } from 'vue-router'
 import JsonViewer from '@/components/JsonViewer.vue'
