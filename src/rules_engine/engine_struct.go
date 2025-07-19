@@ -1374,6 +1374,15 @@ func Verify(path string, raw string) error {
 		return fmt.Errorf("failed to read ruleset configuration: %w", err)
 	}
 
+	valiRes, err := ValidateWithDetails("", string(raw))
+	if err != nil {
+		return fmt.Errorf("failed to validate resource: %w", err)
+	}
+
+	if valiRes != nil && len(valiRes.Errors) > 0 {
+		return fmt.Errorf(valiRes.Errors[0].Message)
+	}
+
 	// Parse with new flexible ruleset syntax
 	ruleset, err := ParseRuleset(rawRuleset)
 	if err != nil {
