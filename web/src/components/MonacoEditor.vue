@@ -830,9 +830,9 @@ function initializeEditor() {
     }
   }
   
-  // Add save shortcut
+  // Add save shortcut (Cmd+S on Mac, Ctrl+S on Windows/Linux)
   try {
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function() {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
       const content = editor.getValue();
       emit('save', content);
     });

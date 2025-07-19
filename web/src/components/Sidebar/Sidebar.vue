@@ -164,7 +164,8 @@
                        <div v-for="(item, index) in getOrganizedPlugins().builtinPlugins" :key="item.id"
                             class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                             :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
-                            @click="handleItemClick(type, item)">
+                            @click="handleItemClick(type, item)"
+                            @dblclick="handleItemDoubleClick(type, item)">
                          <!-- Tree lines for built-in plugins -->
                          <div class="absolute left-8 top-1/2 bottom-0 w-px bg-gray-300 z-10" v-if="index < getOrganizedPlugins().builtinPlugins.length - 1"></div>
                          <div class="absolute left-8 top-1/2 w-2 h-px bg-gray-300 z-10"></div>
@@ -250,7 +251,8 @@
                 <div v-for="(item, index) in getOrganizedPlugins().customPlugins" :key="item.id || item.name"
                      class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                      :class="{ 'bg-blue-50': selected && (selected.id === item.id || selected.id === item.name) && selected.type === type }"
-                     @click="handleItemClick(type, item)">
+                     @click="handleItemClick(type, item)"
+                     @dblclick="handleItemDoubleClick(type, item)">
                   <!-- Tree lines for custom plugins -->
                   <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < getOrganizedPlugins().customPlugins.length - 1"></div>
                   <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
@@ -376,7 +378,8 @@
               <div v-else v-for="(item, index) in filteredItems(type)" :key="item.id" 
                    class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                    :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
-                   @click="handleItemClick(type, item)">
+                   @click="handleItemClick(type, item)"
+                   @dblclick="handleItemDoubleClick(type, item)">
                 <!-- Tree lines -->
                 <!-- Vertical line connecting to next item (except for last item) -->
                 <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < filteredItems(type).length - 1"></div>
@@ -2699,9 +2702,40 @@ defineExpose({
   sidebarRef
 })
 
+// Debounce click to prevent double click from triggering single click
+let clickTimeout = null;
+
 function handleItemClick(type, item) {
+  // Clear any existing timeout
+  if (clickTimeout) {
+    clearTimeout(clickTimeout);
+    clickTimeout = null;
+    return; // This was a double click, don't handle single click
+  }
+  
+  // Set timeout to handle single click
+  clickTimeout = setTimeout(() => {
+    const id = item.id || item.name;
+    emit('select-item', { type, id });
+    clickTimeout = null;
+  }, 200); // 200ms delay to detect double click
+}
+
+function handleItemDoubleClick(type, item) {
+  // Clear the single click timeout
+  if (clickTimeout) {
+    clearTimeout(clickTimeout);
+    clickTimeout = null;
+  }
+  
+  // Don't allow editing for built-in plugins
+  if (type === 'plugins' && item.type === 'local') {
+    return;
+  }
+  
   const id = item.id || item.name;
-  emit('select-item', { type, id });
+  // Double click opens editor in edit mode
+  emit('open-editor', { type, id, isEdit: true });
 }
 
 // 发送全局项目操作事件
