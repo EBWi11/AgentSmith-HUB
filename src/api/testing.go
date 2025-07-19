@@ -696,7 +696,7 @@ func testProject(c echo.Context) error {
 		}
 
 		// Stop the project (this will handle component cleanup)
-		if stopErr := tempProject.Stop(); stopErr != nil {
+		if stopErr := tempProject.Stop(true); stopErr != nil {
 			logger.Warn("Failed to stop test project: %v", stopErr)
 		}
 
@@ -723,7 +723,7 @@ func testProject(c echo.Context) error {
 	}
 
 	// Start the project to initialize PNS components
-	err = tempProject.Start()
+	err = tempProject.Start(true)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"success": false,

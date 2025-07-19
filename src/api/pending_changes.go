@@ -470,149 +470,6 @@ func cleanupObsoleteChanges() {
 	}
 }
 
-// ApplyPendingChangesEnhanced applies all pending changes with improved transaction handling
-func ApplyPendingChangesEnhanced(c echo.Context) error {
-	// Add panic recovery
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Panic in ApplyPendingChangesEnhanced", "panic", r)
-			c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": "Internal server error during change application",
-			})
-		}
-	}()
-
-	// Sync from legacy storage first
-	syncLegacyToEnhancedManager()
-
-	// Get all pending changes
-	changes := globalPendingChangeManager.GetAllChanges()
-	if len(changes) == 0 {
-		return c.JSON(http.StatusOK, ChangeTransactionResult{
-			TotalChanges: 0,
-			SuccessCount: 0,
-			FailureCount: 0,
-		})
-	}
-
-	// Check for nil changes
-	filteredChanges := make([]*EnhancedPendingChange, 0, len(changes))
-	for _, change := range changes {
-		if change != nil && change.Type != "" && change.ID != "" {
-			filteredChanges = append(filteredChanges, change)
-		} else {
-			logger.Warn("Skipping invalid change", "change", change)
-		}
-	}
-	changes = filteredChanges
-
-	if len(changes) == 0 {
-		return c.JSON(http.StatusOK, ChangeTransactionResult{
-			TotalChanges: 0,
-			SuccessCount: 0,
-			FailureCount: 0,
-		})
-	}
-
-	// Phase 1: Verify all changes first
-	logger.Info("Starting enhanced apply process", "total_changes", len(changes))
-
-	verificationErrors := make([]FailedChangeInfo, 0)
-	validChanges := make([]*EnhancedPendingChange, 0)
-
-	for _, change := range changes {
-		if change.Status == ChangeStatusVerified {
-			validChanges = append(validChanges, change)
-			continue
-		}
-
-		err := globalPendingChangeManager.VerifyChange(change.Type, change.ID)
-		if err != nil {
-			verificationErrors = append(verificationErrors, FailedChangeInfo{
-				Type:  change.Type,
-				ID:    change.ID,
-				Error: fmt.Sprintf("Verification failed: %v", err),
-			})
-			logger.Error("Change verification failed", "type", change.Type, "id", change.ID, "error", err)
-		} else {
-			validChanges = append(validChanges, change)
-		}
-	}
-
-	// If any verification failed, return early
-	if len(verificationErrors) > 0 {
-		return c.JSON(http.StatusBadRequest, ChangeTransactionResult{
-			TotalChanges:  len(changes),
-			SuccessCount:  0,
-			FailureCount:  len(verificationErrors),
-			FailedChanges: verificationErrors,
-		})
-	}
-
-	// Phase 2: Apply changes with transaction-like behavior
-	result := ChangeTransactionResult{
-		TotalChanges:      len(validChanges),
-		SuccessfulIDs:     make([]string, 0),
-		FailedChanges:     make([]FailedChangeInfo, 0),
-		ProjectsToRestart: make([]string, 0),
-	}
-
-	projectsToRestart := make(map[string]struct{})
-
-	// Apply changes by type to maintain dependencies
-	changesByType := make(map[string][]*EnhancedPendingChange)
-	for _, change := range validChanges {
-		changesByType[change.Type] = append(changesByType[change.Type], change)
-	}
-
-	// Apply in dependency order: plugins -> inputs/outputs -> rulesets -> projects
-	applyOrder := []string{"plugin", "input", "output", "ruleset", "project"}
-
-	for _, changeType := range applyOrder {
-		changes := changesByType[changeType]
-		for _, change := range changes {
-			err := applyEnhancedSingleChange(change, projectsToRestart)
-			if err != nil {
-				result.FailedChanges = append(result.FailedChanges, FailedChangeInfo{
-					Type:  change.Type,
-					ID:    change.ID,
-					Error: err.Error(),
-				})
-				result.FailureCount++
-				globalPendingChangeManager.UpdateChangeStatus(change.Type, change.ID, ChangeStatusFailed, err.Error())
-			} else {
-				result.SuccessfulIDs = append(result.SuccessfulIDs, fmt.Sprintf("%s:%s", change.Type, change.ID))
-				result.SuccessCount++
-				globalPendingChangeManager.UpdateChangeStatus(change.Type, change.ID, ChangeStatusApplied, "")
-				// Remove from enhanced manager after successful application
-				globalPendingChangeManager.RemoveChange(change.Type, change.ID)
-			}
-		}
-	}
-
-	// Convert projects to restart to slice
-	for projectID := range projectsToRestart {
-		// Use safe accessor without additional locking
-		if p, ok := project.GetProject(projectID); ok {
-			err := p.Restart()
-			if err != nil {
-				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
-			}
-			if err := cluster.GlobalInstructionManager.PublishProjectRestart(projectID); err != nil {
-				logger.Error("Failed to publish project restart instructions", "affected_projects", result.ProjectsToRestart, "error", err)
-			}
-		}
-	}
-
-	logger.Info("Enhanced apply process completed",
-		"total", result.TotalChanges,
-		"success", result.SuccessCount,
-		"failed", result.FailureCount,
-		"projects_to_restart", len(projectsToRestart))
-
-	return c.JSON(http.StatusOK, result)
-}
-
 // VerifyPendingChanges verifies all pending changes without applying them
 func VerifyPendingChanges(c echo.Context) error {
 	// Sync from legacy storage first
@@ -832,49 +689,6 @@ func CancelAllPendingChanges(c echo.Context) error {
 		"message":         "All pending changes cancelled successfully",
 		"cancelled_count": cancelledCount,
 	})
-}
-
-// applyEnhancedSingleChange applies a single enhanced pending change
-func applyEnhancedSingleChange(change *EnhancedPendingChange, projectsToRestart map[string]struct{}) error {
-	switch change.Type {
-	case "plugin":
-		affectedProjects, err := applyPluginChange(change)
-		if err != nil {
-			return err
-		}
-		for _, projectID := range affectedProjects {
-			projectsToRestart[projectID] = struct{}{}
-		}
-		return nil
-	case "input", "output", "ruleset":
-		affectedProjects, err := applyComponentChange(change)
-		if err != nil {
-			return err
-		}
-		for _, projectID := range affectedProjects {
-			projectsToRestart[projectID] = struct{}{}
-		}
-		return nil
-	case "project":
-		return applyProjectChange(change)
-	default:
-		return fmt.Errorf("unsupported component type: %s", change.Type)
-	}
-}
-
-// Component-specific apply functions
-func applyPluginChange(change *EnhancedPendingChange) ([]string, error) {
-	req := &ComponentReloadRequest{
-		Type:        "plugin",
-		ID:          change.ID,
-		NewContent:  change.NewContent,
-		OldContent:  change.OldContent,
-		Source:      SourceChangePush,
-		SkipVerify:  true, // Change push already verified
-		WriteToFile: true, // Change push writes to file
-	}
-
-	return reloadComponentUnified(req)
 }
 
 // ComponentReloadSource represents the source of component reload
@@ -1098,7 +912,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		oldProject, exists := project.GetProject(req.ID)
 		if exists {
 			logger.Info("Stopping old project component for reload", "id", req.ID)
-			err := oldProject.Stop()
+			err := oldProject.Stop(true)
 			if err != nil {
 				logger.Error("Failed to stop old project", "type", req.Type, "id", req.ID, "error", err)
 			}
@@ -1172,36 +986,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 func updateGlobalComponentConfigMap(componentType, id, content string) {
 	common.SetRawConfig(componentType, id, content)
 	logger.Debug("Updated global component config map", "type", componentType, "id", id)
-}
-
-// applyComponentChange applies a single enhanced pending change using unified reload logic
-func applyComponentChange(change *EnhancedPendingChange) ([]string, error) {
-	req := &ComponentReloadRequest{
-		Type:        change.Type,
-		ID:          change.ID,
-		NewContent:  change.NewContent,
-		OldContent:  change.OldContent,
-		Source:      SourceChangePush,
-		SkipVerify:  true, // Change push already verified
-		WriteToFile: true, // Change push writes to file
-	}
-
-	return reloadComponentUnified(req)
-}
-
-func applyProjectChange(change *EnhancedPendingChange) error {
-	req := &ComponentReloadRequest{
-		Type:        "project",
-		ID:          change.ID,
-		NewContent:  change.NewContent,
-		OldContent:  change.OldContent,
-		Source:      SourceChangePush,
-		SkipVerify:  true, // Change push already verified
-		WriteToFile: true, // Change push writes to file
-	}
-
-	_, err := reloadComponentUnified(req)
-	return err
 }
 
 // ApplySingleChange applies a single pending change
@@ -1313,53 +1097,6 @@ func ApplySingleChange(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Change applied successfully"})
-}
-
-// mergeComponentFile merges a .new file with its original
-func mergeComponentFile(componentType string, id string) error {
-	var suffix string
-	var dir string
-
-	switch componentType {
-	case "input":
-		suffix = ".yaml"
-		dir = "input"
-	case "output":
-		suffix = ".yaml"
-		dir = "output"
-	case "ruleset":
-		suffix = ".xml"
-		dir = "ruleset"
-	case "project":
-		suffix = ".yaml"
-		dir = "project"
-	default:
-		return fmt.Errorf("unsupported component type: %s", componentType)
-	}
-
-	configRoot := common.Config.ConfigRoot
-	originalPath := path.Join(configRoot, dir, id+suffix)
-	tempPath := originalPath + ".new"
-
-	// Read the temp file
-	tempData, err := os.ReadFile(tempPath)
-	if err != nil {
-		return fmt.Errorf("failed to read temp file: %w", err)
-	}
-
-	// Write to the original file
-	err = os.WriteFile(originalPath, tempData, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write to original file: %w", err)
-	}
-
-	// Delete the temp file
-	err = os.Remove(tempPath)
-	if err != nil {
-		logger.Warn("Failed to delete temp file after merging", "path", tempPath, "error", err)
-	}
-
-	return nil
 }
 
 // CreateTempFile creates a temporary file for editing
@@ -1560,7 +1297,7 @@ func DeleteTempFile(c echo.Context) error {
 		})
 	}
 
-	// Remove temporary file content from memory using safe accessors
+	// Remove tempo`rary file content from memory using safe accessors
 	switch singularType {
 	case "input":
 		project.DeleteInputNew(id)

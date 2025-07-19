@@ -205,7 +205,7 @@ func main() {
 			// Stop projects without holding locks
 			for _, proj := range runningProjects {
 				logger.Info("Stopping project during shutdown", "project", proj.Id)
-				err := proj.Stop()
+				err := proj.Stop(true)
 				if err != nil {
 					logger.Error("Failed to stop project during shutdown", "project", proj.Id, "error", err)
 				} else {
@@ -386,7 +386,7 @@ func loadLocalProjects() {
 			if userWantsRunning, err := common.GetProjectUserIntention(id); err == nil && userWantsRunning {
 				// User wants project to be running, start it
 				logger.Info("Restoring project to running state based on user intention", "id", p.Id)
-				if err := p.Start(); err != nil {
+				if err := p.Start(true); err != nil {
 					logger.Error("Failed to start project during restore", "project", p.Id, "error", err)
 					// Record failed restore operation
 					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", err.Error(), map[string]interface{}{

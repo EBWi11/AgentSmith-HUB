@@ -69,7 +69,7 @@ func StartProject(c echo.Context) error {
 	syncProjectOperationToFollowers(req.ProjectID, "start")
 
 	// Start the project
-	if err := p.Start(); err != nil {
+	if err := p.Start(true); err != nil {
 		// Record failed operation
 		RecordProjectOperation(OpTypeProjectStart, req.ProjectID, "failed", err.Error(), nil)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -103,7 +103,7 @@ func StopProject(c echo.Context) error {
 	syncProjectOperationToFollowers(req.ProjectID, "stop")
 
 	// Stop the project
-	if err := p.Stop(); err != nil {
+	if err := p.Stop(true); err != nil {
 		// Record failed operation
 		RecordProjectOperation(OpTypeProjectStop, req.ProjectID, "failed", err.Error(), nil)
 		return c.JSON(http.StatusInternalServerError, map[string]string{

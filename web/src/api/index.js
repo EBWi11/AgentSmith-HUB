@@ -406,17 +406,6 @@ export const hubApi = {
     }
   },
 
-  // Apply all pending changes with enhanced transaction support
-  async applyPendingChangesEnhanced() {
-    try {
-      const response = await api.post('/apply-changes/enhanced');
-      return response.data;
-    } catch (error) {
-      console.error('Error applying pending changes (enhanced):', error);
-      throw error;
-    }
-  },
-
   // Verify all pending changes without applying them
   async verifyPendingChanges() {
     try {

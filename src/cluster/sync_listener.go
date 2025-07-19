@@ -330,7 +330,7 @@ func (sl *SyncListener) clearAllLocalComponents() error {
 	// Stop projects without holding locks
 	for _, proj := range runningProjects {
 		logger.Info("Stopping project due to session change", "project", proj.Id)
-		if err := proj.Stop(); err != nil {
+		if err := proj.Stop(true); err != nil {
 			logger.Warn("Failed to stop project during session change", "project", proj.Id, "error", err)
 		}
 	}
@@ -416,7 +416,7 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		if proj, exists := project.GetProject(componentName); exists {
 			// Stop the project first if it's running
 			if proj.Status == common.StatusRunning {
-				proj.Stop()
+				proj.Stop(true)
 			}
 		}
 		project.DeleteProject(componentName)

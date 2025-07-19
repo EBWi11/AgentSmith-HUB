@@ -159,7 +159,7 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 
 	switch action {
 	case "start":
-		err := proj.Start()
+		err := proj.Start(true)
 		if err != nil {
 			// Record operation failure only if requested
 			if recordOperation {
@@ -181,7 +181,7 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 		return nil
 
 	case "stop":
-		err := proj.Stop()
+		err := proj.Stop(true)
 		if err != nil {
 			// Record operation failure only if requested
 			if recordOperation {
@@ -796,10 +796,16 @@ func (p *Project) validateComponent(componentType, componentID string, lineNum i
 }
 
 // Start starts the project and all its components
-func (p *Project) Start() error {
-	// Use dedicated project operation lock to serialize all project lifecycle operations
-	common.ProjectOperationMu.Lock()
-	defer common.ProjectOperationMu.Unlock()
+func (p *Project) Start(lock bool) error {
+	if lock {
+		common.ProjectOperationMu.Lock()
+	}
+
+	defer func() {
+		if lock {
+			common.ProjectOperationMu.Unlock()
+		}
+	}()
 
 	err := p.parseContent()
 	if err != nil {
@@ -845,10 +851,17 @@ func (p *Project) Start() error {
 }
 
 // Stop stops the project and all its components in proper order
-func (p *Project) Stop() error {
+func (p *Project) Stop(lock bool) error {
 	// Use dedicated project operation lock to serialize all project lifecycle operations
-	common.ProjectOperationMu.Lock()
-	defer common.ProjectOperationMu.Unlock()
+	if lock {
+		common.ProjectOperationMu.Lock()
+	}
+
+	defer func() {
+		if lock {
+			common.ProjectOperationMu.Unlock()
+		}
+	}()
 
 	// Add panic recovery for critical state changes
 	defer func() {
@@ -899,6 +912,9 @@ func (p *Project) Stop() error {
 }
 
 func (p *Project) Restart() error {
+	common.ProjectOperationMu.Lock()
+	common.ProjectOperationMu.Unlock()
+
 	// Add panic recovery for critical state changes
 	defer func() {
 		if r := recover(); r != nil {
@@ -917,7 +933,7 @@ func (p *Project) Restart() error {
 	logger.Info("Restarting project", "project", p.Id)
 
 	// Stop the project first
-	err := p.Stop()
+	err := p.Stop(false)
 	if err != nil {
 		logger.Error("Failed to restart project", "project", p.Id, "error", err)
 	}
@@ -928,7 +944,7 @@ func (p *Project) Restart() error {
 	}
 
 	// Start the project again
-	err = p.Start()
+	err = p.Start(true)
 	if err != nil {
 		return fmt.Errorf("failed to start project after restart: %w", err)
 	}

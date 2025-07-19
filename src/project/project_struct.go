@@ -708,7 +708,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 		common.GlobalMu.Unlock()
 
 		// Note: Project.Stop() already includes final statistics collection
-		if err := proj.Stop(); err != nil {
+		if err := proj.Stop(true); err != nil {
 			// Re-acquire lock before returning
 			common.GlobalMu.Lock()
 			return nil, fmt.Errorf("failed to stop project before deletion: %v", err)

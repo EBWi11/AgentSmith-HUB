@@ -158,14 +158,13 @@ func ServerStart(listener string) error {
 	auth.GET("/cluster/follower-execution-status", getFollowerExecutionStatus)
 
 	// Pending changes management (enhanced) - REQUIRE AUTH
-	auth.GET("/pending-changes", GetPendingChanges)                   // Legacy endpoint
-	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges)  // Enhanced endpoint with status info
-	auth.POST("/apply-changes/enhanced", ApplyPendingChangesEnhanced) // Keep for backward compatibility
-	auth.POST("/apply-single-change", ApplySingleChange)              // Legacy endpoint
-	auth.POST("/verify-changes", VerifyPendingChanges)                // Verify all changes
-	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange)  // Verify single change
-	auth.DELETE("/cancel-change/:type/:id", CancelPendingChange)      // Cancel single change
-	auth.DELETE("/cancel-all-changes", CancelAllPendingChanges)       // Cancel all changes
+	auth.GET("/pending-changes", GetPendingChanges)                  // Legacy endpoint
+	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges) // Enhanced endpoint with status info
+	auth.POST("/apply-single-change", ApplySingleChange)             // Legacy endpoint
+	auth.POST("/verify-changes", VerifyPendingChanges)               // Verify all changes
+	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange) // Verify single change
+	auth.DELETE("/cancel-change/:type/:id", CancelPendingChange)     // Cancel single change
+	auth.DELETE("/cancel-all-changes", CancelAllPendingChanges)      // Cancel all changes
 
 	// Temporary file management - REQUIRE AUTH
 	auth.POST("/temp-file/:type/:id", CreateTempFile)
