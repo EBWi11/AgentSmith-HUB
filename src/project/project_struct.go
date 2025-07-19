@@ -83,7 +83,8 @@ type Project struct {
 
 	Config *ProjectConfig `json:"config"`
 
-	FlowNodes []FlowNode
+	FlowNodes       []FlowNode
+	BackUpFlowNodes []FlowNode
 
 	// Components
 	Inputs   map[string]*input.Input          `json:"-"`
@@ -457,6 +458,16 @@ func SafeDeleteInputDownstream(inputID, downstreamID string) {
 	}
 }
 
+// Helper function to safely access input downstream
+func SafeDeleteRulesetDownstream(rulesetID, downstreamID string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if i, exists := GlobalProject.Rulesets[rulesetID]; exists {
+		delete(i.DownStream, downstreamID)
+	}
+}
+
 // GetAllProjectsNew returns a copy of all projects new map
 func GetAllProjectsNew() map[string]string {
 	common.GlobalMu.RLock()
@@ -557,7 +568,7 @@ func SafeDeleteRuleset(id string) ([]string, error) {
 
 	// Stop the component if not in use
 	if rs, exists := GlobalProject.Rulesets[id]; exists {
-		projectsUsingRuleset := UsageCounter.CountProjectsUsingRuleset(id)
+		projectsUsingRuleset := UsageCounter.CountProjectsUsing("RULESET", id)
 		if projectsUsingRuleset == 0 {
 			logger.Info("Stopping ruleset component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock
@@ -608,7 +619,7 @@ func SafeDeleteInput(id string) ([]string, error) {
 
 	// Stop the component if not in use
 	if inp, exists := GlobalProject.Inputs[id]; exists {
-		projectsUsingInput := UsageCounter.CountProjectsUsingInput(id)
+		projectsUsingInput := UsageCounter.CountProjectsUsing("INPUT", id)
 		if projectsUsingInput == 0 {
 			logger.Info("Stopping input component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock
@@ -659,7 +670,7 @@ func SafeDeleteOutput(id string) ([]string, error) {
 
 	// Stop the component if not in use
 	if out, exists := GlobalProject.Outputs[id]; exists {
-		projectsUsingOutput := UsageCounter.CountProjectsUsingOutput(id)
+		projectsUsingOutput := UsageCounter.CountProjectsUsing("OUTPUT", id)
 		if projectsUsingOutput == 0 {
 			logger.Info("Stopping output component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock

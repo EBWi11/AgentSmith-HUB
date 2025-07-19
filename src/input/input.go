@@ -235,6 +235,9 @@ func (in *Input) cleanup() {
 	// Reset atomic counter
 	atomic.StoreUint64(&in.consumeTotal, 0)
 	atomic.StoreUint64(&in.lastReportedTotal, 0)
+
+	// Clear component channel connections to prevent leaks
+	in.DownStream = make(map[string]*chan map[string]interface{})
 }
 
 // Start initializes and starts the input component based on its type

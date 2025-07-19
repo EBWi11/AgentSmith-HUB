@@ -261,6 +261,9 @@ func (out *Output) cleanup() {
 
 	// Clear test collection channel
 	out.TestCollectionChan = nil
+
+	// Clear component channel connections to prevent leaks
+	out.UpStream = make(map[string]*chan map[string]interface{})
 }
 
 // enhanceMessageWithProjectNodeSequence adds ProjectNodeSequence and output metadata to the message
@@ -734,6 +737,9 @@ func (out *Output) StopForTesting() error {
 	atomic.StoreUint64(&out.produceTotal, 0)
 	atomic.StoreUint64(&out.lastReportedTotal, 0)
 	logger.Debug("Reset atomic counter for test output component", "output", out.Id, "previous_total", previousTotal)
+
+	// Clear component channel connections to prevent leaks
+	out.UpStream = make(map[string]*chan map[string]interface{})
 
 	out.SetStatus(common.StatusStopped, nil)
 	return nil

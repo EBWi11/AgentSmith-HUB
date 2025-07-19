@@ -7,9 +7,7 @@ type ComponentUsageCounter struct{}
 
 var UsageCounter = &ComponentUsageCounter{}
 
-// CountProjectsUsingInput counts how many running projects are using the specified input component
-// excludeProjectID: optional project ID to exclude from the count (for self-exclusion during stop operations)
-func (c *ComponentUsageCounter) CountProjectsUsingInput(inputID string, excludeProjectID ...string) int {
+func (c *ComponentUsageCounter) CountProjectsUsing(t string, id string, excludeProjectID ...string) int {
 	count := 0
 	var excludeID string
 	if len(excludeProjectID) > 0 {
@@ -17,51 +15,11 @@ func (c *ComponentUsageCounter) CountProjectsUsingInput(inputID string, excludeP
 	}
 
 	ForEachProject(func(projectID string, proj *Project) bool {
-		if projectID != excludeID && proj.Status == common.StatusRunning {
-			if _, exists := proj.Inputs[inputID]; exists {
-				count++
-			}
-		}
-		return true
-	})
-
-	return count
-}
-
-// CountProjectsUsingOutput counts how many running projects are using the specified output component
-// excludeProjectID: optional project ID to exclude from the count (for self-exclusion during stop operations)
-func (c *ComponentUsageCounter) CountProjectsUsingOutput(outputID string, excludeProjectID ...string) int {
-	count := 0
-	var excludeID string
-	if len(excludeProjectID) > 0 {
-		excludeID = excludeProjectID[0]
-	}
-
-	ForEachProject(func(projectID string, proj *Project) bool {
-		if projectID != excludeID && proj.Status == common.StatusRunning {
-			if _, exists := proj.Outputs[outputID]; exists {
-				count++
-			}
-		}
-		return true
-	})
-
-	return count
-}
-
-// CountProjectsUsingRuleset counts how many running projects are using the specified ruleset component
-// excludeProjectID: optional project ID to exclude from the count (for self-exclusion during stop operations)
-func (c *ComponentUsageCounter) CountProjectsUsingRuleset(rulesetID string, excludeProjectID ...string) int {
-	count := 0
-	var excludeID string
-	if len(excludeProjectID) > 0 {
-		excludeID = excludeProjectID[0]
-	}
-
-	ForEachProject(func(projectID string, proj *Project) bool {
-		if projectID != excludeID && proj.Status == common.StatusRunning {
-			if _, exists := proj.Rulesets[rulesetID]; exists {
-				count++
+		if projectID != excludeID {
+			if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+				if proj.CheckExist(t, id) {
+					count++
+				}
 			}
 		}
 		return true

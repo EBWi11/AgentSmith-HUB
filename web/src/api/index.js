@@ -1139,8 +1139,12 @@ export const hubApi = {
     }
   },
 
-  async getSamplerData(params) {
+  async getSamplerData(componentName, projectNodeSequence) {
     try {
+      const params = {
+        name: componentName,
+        projectNodeSequence: projectNodeSequence
+      };
       const response = await api.get('/samplers/data', { params });
       return response.data;
     } catch (error) {

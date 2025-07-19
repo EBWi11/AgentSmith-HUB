@@ -205,13 +205,13 @@
     </div>
     <!-- Default full-screen editor for other component types -->
            <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
-    <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
+    <div class="flex justify-end mt-3 px-3 space-x-1.5 border-t pt-3 pb-2">
       <!-- Cancel Button -->
       <button 
         @click="cancelEdit" 
-        class="btn btn-secondary btn-md"
+        class="btn btn-secondary btn-sm"
       >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
         Cancel
@@ -221,9 +221,9 @@
       <button 
         v-if="isRuleset"
         @click="showTestModal = true" 
-        class="btn btn-test-ruleset btn-md"
+        class="btn btn-test-ruleset btn-sm"
       >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Ruleset
@@ -231,9 +231,9 @@
       <button 
         v-if="isProject"
         @click="showProjectTestModal = true" 
-        class="btn btn-test-project btn-md"
+        class="btn btn-test-project btn-sm"
       >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Project
@@ -241,9 +241,9 @@
       <button 
         v-if="isPlugin"
         @click="showPluginTestModal = true" 
-        class="btn btn-test-plugin btn-md"
+        class="btn btn-test-plugin btn-sm"
       >
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Plugin
@@ -253,11 +253,11 @@
       <button 
         v-if="isRuleset"
         @click="verifyCurrentComponent" 
-        class="btn btn-verify btn-md"
+        class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
       >
-        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {{ verifyLoading ? 'Verifying...' : 'Verify' }}
@@ -265,11 +265,11 @@
       <button 
         v-if="isProject"
         @click="verifyCurrentComponent" 
-        class="btn btn-verify btn-md"
+        class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
       >
-        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {{ verifyLoading ? 'Verifying...' : 'Verify' }}
@@ -277,11 +277,11 @@
       <button 
         v-if="isPlugin"
         @click="verifyCurrentComponent" 
-        class="btn btn-verify btn-md"
+        class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
       >
-        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {{ verifyLoading ? 'Verifying...' : 'Verify' }}
@@ -289,11 +289,11 @@
       <button 
         v-if="isOutput"
         @click="verifyCurrentComponent" 
-        class="btn btn-verify btn-md"
+        class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
       >
-        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {{ verifyLoading ? 'Verifying...' : 'Verify' }}
@@ -301,11 +301,11 @@
       <button 
         v-if="isInput"
         @click="verifyCurrentComponent" 
-        class="btn btn-verify btn-md"
+        class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
       >
-        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
         {{ verifyLoading ? 'Verifying...' : 'Verify' }}
@@ -315,11 +315,11 @@
       <button 
         v-if="supportsConnectCheck"
         @click="connectCheck" 
-        class="btn btn-connect btn-md"
+        class="btn btn-connect btn-sm"
         :disabled="connectCheckLoading"
       >
-        <span v-if="connectCheckLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="connectCheckLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
         {{ connectCheckLoading ? 'Checking...' : 'Connect Check' }}
@@ -328,14 +328,14 @@
       <!-- Save Button -->
       <button 
         @click="() => saveEdit()" 
-        class="btn btn-primary btn-md"
+        class="btn btn-primary btn-sm"
         :disabled="saving"
       >
-        <span v-if="saving" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <span v-if="saving" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.71,7.71,11,5.41V15a1,1,0,0,0,2,0V5.41l2.29,2.3a1,1,0,0,0,1.42,0,1,1,0,0,0,0-1.42l-4-4a1,1,0,0,0-.33-.21,1,1,0,0,0-.76,0,1,1,0,0,0-.33.21l-4,4A1,1,0,1,0,8.71,7.71ZM21,12a1,1,0,0,0-1,1v6a1,1,0,0,1-1,1H5a1,1,0,0,1-1-1V13a1,1,0,0,0-2,0v6a3,3,0,0,0,3,3H19a3,3,0,0,0,3-3V13A1,1,0,0,0,21,12Z" />
         </svg>
-        {{ saving ? 'Saving...' : 'Update' }}
+        {{ saving ? 'Saving...' : 'Save' }}
       </button>
     </div>
     <div v-if="saveError" class="text-xs text-red-500 mt-2 px-4 mb-3">{{ saveError }}</div>
@@ -1296,14 +1296,8 @@ onMounted(async () => {
       }
     }
     
-    if (isProject.value) {
-      setupStatusRefresh();
-    }
-  }
-  
-  // Add page visibility change listener for projects
-  if (isProject.value) {
-    document.addEventListener('visibilitychange', handleComponentVisibilityChange);
+    // Project status refresh is now handled by the unified cache system
+    // No manual setup needed
   }
 });
 

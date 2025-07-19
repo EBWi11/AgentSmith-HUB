@@ -109,7 +109,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	case "input":
 		// Find all projects using this input
 		ForEachProject(func(projectID string, p *Project) bool {
-			if _, exists := p.Inputs[componentID]; exists {
+			if p.CheckExist("INPUT", componentID) {
 				affectedProjects[projectID] = struct{}{}
 			}
 			return true
@@ -117,7 +117,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	case "output":
 		// Find all projects using this output
 		ForEachProject(func(projectID string, p *Project) bool {
-			if _, exists := p.Outputs[componentID]; exists {
+			if p.CheckExist("OUTPUT", componentID) {
 				affectedProjects[projectID] = struct{}{}
 			}
 			return true
@@ -125,7 +125,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	case "ruleset":
 		// Find all projects using this ruleset
 		ForEachProject(func(projectID string, p *Project) bool {
-			if _, exists := p.Rulesets[componentID]; exists {
+			if p.CheckExist("RULESET", componentID) {
 				affectedProjects[projectID] = struct{}{}
 			}
 			return true
@@ -477,6 +477,7 @@ func (p *Project) parseContent() error {
 	edgeSet := make(map[string]struct{}) // Used to detect duplicate flows
 
 	p.FlowNodes = []FlowNode{}
+	p.BackUpFlowNodes = []FlowNode{}
 
 	for lineNum, line := range lines {
 		line = strings.TrimSpace(line)
@@ -543,6 +544,7 @@ func (p *Project) parseContent() error {
 		}
 
 		p.FlowNodes = append(p.FlowNodes, tmpNode)
+		p.BackUpFlowNodes = append(p.BackUpFlowNodes, tmpNode)
 	}
 
 	// check loop
@@ -832,14 +834,14 @@ func (p *Project) Start(lock bool) error {
 	err = p.initComponents()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
-		p.cleanup()
+		_ = p.stopComponentsInternal()
 		return fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
 	err = p.runComponents()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
-		p.cleanup()
+		_ = p.stopComponentsInternal()
 		return fmt.Errorf("failed to run project components: %w", err)
 	}
 
@@ -920,7 +922,7 @@ func (p *Project) Restart() error {
 		if r := recover(); r != nil {
 			logger.Error("Panic during project restart", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
-			p.cleanup()
+			p.stopComponentsInternal()
 			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during restart: %v", r))
 		}
 	}()
@@ -936,11 +938,6 @@ func (p *Project) Restart() error {
 	err := p.Stop(false)
 	if err != nil {
 		logger.Error("Failed to restart project", "project", p.Id, "error", err)
-	}
-
-	// Verify project is actually stopped before starting
-	if p.Status != common.StatusStopped && p.Status != common.StatusError {
-		return fmt.Errorf("project is not in stopped state after stop operation, current status: %s", p.Status)
 	}
 
 	// Start the project again
@@ -970,35 +967,7 @@ func (p *Project) getPartner(t string, pns string) []string {
 func (p *Project) stopComponentsInternal() error {
 	var err error
 	logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
-	for id, in := range p.Inputs {
-		rightNodes := p.getPartner("right", id)
-
-		for _, id2 := range rightNodes {
-			SafeDeleteInputDownstream(in.Id, id2)
-		}
-
-		// Input components need reference counting to determine if they should be stopped
-		// Only stop when this is the last project using this input
-		if GetRefCount(id) == 1 {
-			// Use safe accessor to get global input
-			globalInput, exists := GetInput(in.Id)
-
-			if exists {
-				if p.Testing {
-					err = globalInput.StopForTesting()
-				} else {
-					err = globalInput.Stop()
-				}
-				if err != nil {
-					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
-				} else {
-					logger.Info("Stopped input", "project", p.Id, "input", in.Id, "sequence", id)
-				}
-			} else {
-				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
-			}
-		}
-	}
+	p.cleanupInputChannel()
 
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
 	p.waitForCompleteDataProcessing()
@@ -1042,9 +1011,24 @@ func (p *Project) stopComponentsInternal() error {
 	return nil
 }
 
+func (p *Project) CheckExist(t string, id string) bool {
+	for _, node := range p.BackUpFlowNodes {
+		if node.ToType == t && node.ToID == id {
+			return true
+		}
+
+		if node.FromType == t && node.FromID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // cleanup performs aggressive cleanup when normal stop fails
 func (p *Project) cleanup() {
-	// Close all message channels with panic protection
+	p.cleanupInputChannel()
+	p.cleanupRulesetChannel()
+
 	for pns, ch := range p.MsgChannels {
 		if ch != nil {
 			// Safely close channel, ignore if already closed
@@ -1059,7 +1043,10 @@ func (p *Project) cleanup() {
 		}
 	}
 
+	p.BackUpFlowNodes = make([]FlowNode, len(p.FlowNodes))
 	for i := range p.FlowNodes {
+		p.BackUpFlowNodes[i] = p.FlowNodes[i]
+
 		if p.FlowNodes[i].FromInit {
 			p.FlowNodes[i].FromInit = false
 			ReduceRefCount(p.FlowNodes[i].FromPNS)
@@ -1120,6 +1107,53 @@ func (p *Project) waitForCompleteDataProcessing() {
 				logger.Info("All data processing completed", "project", p.Id)
 				time.Sleep(5 * time.Second)
 				return
+			}
+		}
+	}
+}
+
+func (p *Project) cleanupInputChannel() {
+	var err error
+	for id, in := range p.Inputs {
+		rightNodes := p.getPartner("right", id)
+
+		for _, id2 := range rightNodes {
+			SafeDeleteInputDownstream(in.Id, id2)
+		}
+
+		// Input components need reference counting to determine if they should be stopped
+		// Only stop when this is the last project using this input
+		if GetRefCount(id) == 1 {
+			// Use safe accessor to get global input
+			globalInput, exists := GetInput(in.Id)
+
+			if exists {
+				if p.Testing {
+					err = globalInput.StopForTesting()
+				} else {
+					err = globalInput.Stop()
+				}
+				if err != nil {
+					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+				} else {
+					logger.Info("Stopped input", "project", p.Id, "input", in.Id, "sequence", id)
+				}
+			} else {
+				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
+			}
+		}
+	}
+}
+
+func (p *Project) cleanupRulesetChannel() {
+	for i := range p.FlowNodes {
+		node := &p.FlowNodes[i]
+
+		if node.FromType == "RULESET" {
+			if GetRefCount(node.FromPNS) > 1 {
+				if r, exist := GetRuleset(node.FromPNS); exist {
+					delete(r.DownStream, node.ToPNS)
+				}
 			}
 		}
 	}

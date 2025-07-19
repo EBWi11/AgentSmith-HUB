@@ -800,23 +800,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 	var affectedProjects []string
 	switch req.Type {
 	case "input":
-		// Stop old component if it exists
-		oldInput, exists := project.GetInput(req.ID)
-		if exists {
-			// Only stop if no running projects are using it
-			projectsUsingInput := project.UsageCounter.CountProjectsUsingInput(req.ID)
-			if projectsUsingInput == 0 {
-				logger.Info("Stopping old input component for reload", "id", req.ID)
-				err := oldInput.Stop()
-				if err != nil {
-					logger.Error("Failed to stop old input", "type", req.Type, "id", req.ID, "error", err)
-				}
-				common.GlobalDailyStatsManager.CollectAllComponentsData()
-			} else {
-				logger.Info("Input component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingInput)
-			}
-		}
-
 		// Create new component instance
 		var newInput *input.Input
 		var err error
@@ -836,23 +819,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("input", req.ID)
 
 	case "output":
-		// Stop old component if it exists
-		oldOutput, exists := project.GetOutput(req.ID)
-		if exists {
-			// Only stop if no running projects are using it
-			projectsUsingOutput := project.UsageCounter.CountProjectsUsingOutput(req.ID)
-			if projectsUsingOutput == 0 {
-				logger.Info("Stopping old output component for reload", "id", req.ID)
-				err := oldOutput.Stop()
-				if err != nil {
-					logger.Error("Failed to stop old output", "type", req.Type, "id", req.ID, "error", err)
-				}
-				common.GlobalDailyStatsManager.CollectAllComponentsData()
-			} else {
-				logger.Info("Output component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingOutput)
-			}
-		}
-
 		// Create new component instance
 		var newOutput *output.Output
 		var err error
@@ -872,23 +838,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("output", req.ID)
 
 	case "ruleset":
-		// Stop old component if it exists
-		oldRuleset, exists := project.GetRuleset(req.ID)
-		if exists {
-			// Only stop if no running projects are using it
-			projectsUsingRuleset := project.UsageCounter.CountProjectsUsingRuleset(req.ID)
-			if projectsUsingRuleset == 0 {
-				logger.Info("Stopping old ruleset component for reload", "id", req.ID)
-				err := oldRuleset.Stop()
-				if err != nil {
-					logger.Error("Failed to stop old ruleset", "type", req.Type, "id", req.ID, "error", err)
-				}
-				common.GlobalDailyStatsManager.CollectAllComponentsData()
-			} else {
-				logger.Info("Ruleset component still in use, skipping stop during reload", "id", req.ID, "projects_using", projectsUsingRuleset)
-			}
-		}
-
 		// Create new component instance
 		var newRuleset *rules_engine.Ruleset
 		var err error
@@ -908,16 +857,6 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
 
 	case "project":
-		// Stop old component if it exists
-		oldProject, exists := project.GetProject(req.ID)
-		if exists {
-			logger.Info("Stopping old project component for reload", "id", req.ID)
-			err := oldProject.Stop(true)
-			if err != nil {
-				logger.Error("Failed to stop old project", "type", req.Type, "id", req.ID, "error", err)
-			}
-		}
-
 		// Create new component instance
 		var newProject *project.Project
 		var err error
@@ -935,7 +874,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		project.DeleteProjectNew(req.ID)
 
 		// Projects don't have affected projects since they restart themselves
-		affectedProjects = []string{}
+		affectedProjects = []string{req.ID}
 
 	case "plugin":
 		// Create new component instance

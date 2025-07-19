@@ -323,10 +323,7 @@ async function viewSampleData() {
       // Use the actual project node sequences for this component in the current project
       for (const projectNodeSequence of projectNodeSequences) {
         try {
-          const response = await hubApi.getSamplerData({
-            name: nodeType,
-            projectNodeSequence: projectNodeSequence
-          });
+          const response = await hubApi.getSamplerData(nodeType, projectNodeSequence);
           
           if (response && response[nodeType]) {
             // Filter and merge sample data from all project node sequences
@@ -360,10 +357,9 @@ async function viewSampleData() {
     } else {
       // Fallback to simple construction if project node sequences are not available
       // This might happen if messageData hasn't been loaded yet
-      const response = await hubApi.getSamplerData({
-        name: nodeType,
-        projectNodeSequence: `${nodeType.toUpperCase()}.${componentId}`
-      })
+      // Ensure we don't duplicate the component type prefix
+      const projectNodeSequence = componentId.startsWith(`${nodeType}.`) ? componentId : `${nodeType}.${componentId}`;
+      const response = await hubApi.getSamplerData(nodeType, projectNodeSequence)
       
       if (response && response[nodeType]) {
         // Filter the sample data to only show sequences that belong to this component
@@ -631,10 +627,10 @@ async function fetchMessageData() {
     messageData.value = messageResponse || {};
     componentSequences.value = sequenceResponse.data || {};
     
-    // Debug: Log message data for troubleshooting
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[ProjectWorkflow] Message data for project ${props.projectId}:`, messageResponse);
-      console.log(`[ProjectWorkflow] Component sequences:`, sequenceResponse.data);
+    // Debug: Log message data for troubleshooting (only on first load or errors)
+    if (process.env.NODE_ENV === 'development' && !messageData.value.data) {
+      console.log(`[ProjectWorkflow] Initial message data for project ${props.projectId}:`, messageResponse);
+      console.log(`[ProjectWorkflow] Initial component sequences:`, sequenceResponse.data);
     }
     
     // Update nodes with message data (including 0 values)

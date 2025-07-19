@@ -196,11 +196,46 @@ watch(inputData, (newVal) => {
 });
 
 // Watch for selected input node changes and save to cache using unified cache
-watch(selectedInputNode, (newVal) => {
+watch(selectedInputNode, async (newVal) => {
   if (props.projectId && newVal) {
     const cachedData = dataCache.getTestCache('projects', props.projectId) || {};
     cachedData.selectedInputNode = newVal;
     dataCache.setTestCache('projects', props.projectId, cachedData);
+    
+    // Try to get sample data for the selected input
+    try {
+      // Ensure we don't duplicate the 'input.' prefix
+      const projectNodeSequence = newVal.startsWith('input.') ? newVal : `input.${newVal}`;
+      const sampleDataResponse = await hubApi.getSamplerData('input', projectNodeSequence);
+      if (sampleDataResponse && sampleDataResponse.input && Object.keys(sampleDataResponse.input).length > 0) {
+        // Extract the first sample data from the response
+        let firstSampleData = null;
+        for (const [flowPath, samples] of Object.entries(sampleDataResponse.input)) {
+          if (Array.isArray(samples) && samples.length > 0) {
+            // Take only the first sample from the first flow path that has data
+            const firstSample = samples[0];
+            if (firstSample && firstSample.data) {
+              firstSampleData = firstSample.data;
+              break; // Stop after finding the first sample
+            }
+          }
+        }
+        
+        if (firstSampleData) {
+          // Convert sample data to JSON string for the editor
+          const sampleJson = JSON.stringify(firstSampleData, null, 2);
+          inputData.value = sampleJson;
+          
+          // Update cache with the sample data
+          cachedData.inputData = sampleJson;
+          dataCache.setTestCache('projects', props.projectId, cachedData);
+          console.log(`Loaded 1 sample for input ${newVal}`);
+        }
+      }
+    } catch (error) {
+      // If sample data fetch fails, keep existing input data
+      console.log('No sample data available for input:', newVal);
+    }
   }
 });
 
@@ -460,6 +495,42 @@ async function fetchProjectInputs() {
       // If there are input nodes, auto-select the first one
       if (inputNodes.value.length > 0) {
         selectedInputNode.value = inputNodes.value[0].id;
+        
+        // Try to get sample data for the first input node
+        try {
+          // Ensure we don't duplicate the 'input.' prefix
+          const projectNodeSequence = inputNodes.value[0].id.startsWith('input.') ? inputNodes.value[0].id : `input.${inputNodes.value[0].id}`;
+          const sampleDataResponse = await hubApi.getSamplerData('input', projectNodeSequence);
+          if (sampleDataResponse && sampleDataResponse.input && Object.keys(sampleDataResponse.input).length > 0) {
+            // Extract the first sample data from the response
+            let firstSampleData = null;
+            for (const [flowPath, samples] of Object.entries(sampleDataResponse.input)) {
+              if (Array.isArray(samples) && samples.length > 0) {
+                // Take only the first sample from the first flow path that has data
+                const firstSample = samples[0];
+                if (firstSample && firstSample.data) {
+                  firstSampleData = firstSample.data;
+                  break; // Stop after finding the first sample
+                }
+              }
+            }
+            
+            if (firstSampleData) {
+              // Convert sample data to JSON string for the editor
+              const sampleJson = JSON.stringify(firstSampleData, null, 2);
+              inputData.value = sampleJson;
+              
+              // Update cache with the sample data
+              const cachedData = dataCache.getTestCache('projects', props.projectId) || {};
+              cachedData.inputData = sampleJson;
+              dataCache.setTestCache('projects', props.projectId, cachedData);
+              console.log(`Loaded 1 sample for first input ${inputNodes.value[0].id}`);
+            }
+          }
+        } catch (error) {
+          // If sample data fetch fails, keep existing input data
+          console.log('No sample data available for first input:', inputNodes.value[0].id);
+        }
       }
     } else {
       // Handle error case

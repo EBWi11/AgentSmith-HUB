@@ -1509,6 +1509,10 @@ func (r *Ruleset) cleanup() {
 	// Reset atomic counter
 	atomic.StoreUint64(&r.processTotal, 0)
 	atomic.StoreUint64(&r.lastReportedTotal, 0)
+
+	// Clear component channel connections to prevent leaks
+	r.UpStream = make(map[string]*chan map[string]interface{})
+	r.DownStream = make(map[string]*chan map[string]interface{})
 }
 
 // NewFromExisting creates a new Ruleset instance from an existing one with a different ProjectNodeSequence

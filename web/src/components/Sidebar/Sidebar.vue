@@ -3306,10 +3306,9 @@ function closeSampleDataModal() {
 async function fetchSampleData(componentType, id) {
   try {
     // Get all sample data for this component type and ID across all projects
-    const response = await hubApi.getSamplerData({
-      name: componentType,
-      projectNodeSequence: `${componentType.toUpperCase()}.${id}`
-    })
+    // Ensure we don't duplicate the component type prefix
+    const projectNodeSequence = id.startsWith(`${componentType}.`) ? id : `${componentType}.${id}`;
+    const response = await hubApi.getSamplerData(componentType, projectNodeSequence)
     
     if (response && response[componentType]) {
       // Filter the sample data to only show sequences that belong to this component

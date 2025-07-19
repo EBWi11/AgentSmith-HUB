@@ -376,6 +376,50 @@ async function verifySingleChange(change) {
   }
 }
 
+// Apply a single change
+async function applySingleChange(change) {
+  applying.value = true
+  
+  try {
+    // Call apply API
+    await hubApi.applySingleChange(change.type, change.id)
+    
+    $message?.success?.(`Change applied successfully for ${getComponentTypeLabel(change.type)} "${change.id}"`)
+    
+    // Immediately clear pending changes cache to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    // Also clear the affected component type cache for immediate UI update
+    dataCache.clearComponentCache(change.type)
+    
+    // Force refresh all component lists to ensure hasTemp is updated
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
+    
+    // Refresh the list to remove the applied change
+    await refreshChanges()
+    
+    // Refresh affected component type list
+    emit('refresh-list', getApiComponentType(change.type))
+    
+    // Ensure editor layout is correct
+    refreshEditorsLayout()
+  } catch (e) {
+    $message?.error?.('Failed to apply change: ' + (e?.message || 'Unknown error'))
+    
+    // Even if failed, clear cache and refresh list to ensure latest status is displayed
+    dataCache.clearCache('pendingChanges')
+    await refreshChanges();
+    emit('refresh-list', getApiComponentType(change.type))
+  } finally {
+    applying.value = false
+  }
+}
+
 // Cancel upgrade for a single change
 async function cancelUpgrade(change) {
   // Confirm the action
