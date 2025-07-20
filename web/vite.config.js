@@ -10,6 +10,27 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      '/mcp': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
+      },
+      '/ping': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
+      },
+      '/token-check': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
+      }
+    }
+  },
   optimizeDeps: {
     include: ['monaco-editor/esm/vs/language/json/json.worker', 
               'monaco-editor/esm/vs/language/css/css.worker', 

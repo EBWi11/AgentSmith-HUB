@@ -6,7 +6,7 @@
 // Default configuration
 const defaultConfig = {
   // API Configuration
-  apiBaseUrl: 'http://localhost:8080',
+  apiBaseUrl: '/api',
   apiTimeout: 30000, // 30 seconds
   
   // Feature flags
@@ -24,7 +24,7 @@ const envConfig = {
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 
               (import.meta.env.DEV 
                 ? 'http://localhost:8080' 
-                : `${window.location.protocol}//${window.location.hostname}:8080`),
+                : '/api'),
   apiTimeout: import.meta.env.VITE_API_TIMEOUT ? parseInt(import.meta.env.VITE_API_TIMEOUT) : 30000,
   enableDebugMode: import.meta.env.VITE_DEBUG_MODE === 'true',
   enableClusterMode: import.meta.env.VITE_CLUSTER_MODE !== 'false',
