@@ -24,7 +24,7 @@ jobs:
         fetch-depth: 0  # Fetch full history for git info
     
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.24.5'
     
@@ -158,7 +158,7 @@ jobs:
       run: |
         # Create a clean directory structure for the archive
         RELEASE_NAME="${{ steps.version.outputs.release_name }}"
-        ARCHIVE_DIR="agentsmith-hub-${{ matrix.arch }}"
+        ARCHIVE_DIR="agentsmith-hub"
         ARCHIVE_NAME="agentsmith-hub-${{ matrix.arch }}.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
@@ -181,6 +181,10 @@ jobs:
         # Copy configuration files
         cp -r config "$ARCHIVE_DIR/"
         cp -r mcp_config "$ARCHIVE_DIR/"
+        
+        # Copy nginx configuration
+        mkdir -p "$ARCHIVE_DIR/nginx"
+        cp script/nginx.conf "$ARCHIVE_DIR/nginx/nginx.conf"
         
         # Generate architecture-aware scripts
         chmod +x ./script/create_scripts.sh
@@ -218,7 +222,7 @@ jobs:
     
     - name: Create Release (on tag)
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           agentsmith-hub-${{ matrix.arch }}.tar.gz
@@ -232,6 +236,7 @@ jobs:
           - Frontend web application
           - Required libraries (librure.so for ${{ matrix.arch }})
           - Configuration templates
+          - Nginx configuration for web serving
           - Architecture-aware start and stop scripts
           - Deployment documentation
           
@@ -244,14 +249,23 @@ jobs:
           2. Extract and deploy:
              ```bash
              tar -xzf agentsmith-hub-${{ matrix.arch }}.tar.gz
-             cd agentsmith-hub-${{ matrix.arch }}
+             cd agentsmith-hub
              ```
           
           3. Configure your settings in `config/config.yaml`
           
-          4. Run `./start.sh` to start the application
+          4. (Optional) Configure nginx for web serving:
+             ```bash
+             sudo cp nginx/agentsmith-hub.conf /etc/nginx/conf.d/
+             # Edit the path in the config file if needed
+             sudo nginx -t && sudo systemctl reload nginx
+             ```
           
-          5. Access the web interface at http://localhost:8080
+          5. Run `./start.sh` to start the application
+          
+          6. Access the web interface:
+             - With nginx: http://localhost
+             - Direct backend: http://localhost:8080
           
           ### Architecture Support
           
