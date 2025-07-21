@@ -186,25 +186,74 @@
     </div>
     
          <!-- Special layout for projects: Split view with live preview -->
-     <div v-if="isProject" class="flex h-full">
-       <div class="w-1/2 h-full">
-         <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+     <div v-if="isProject" class="h-full flex flex-col">
+       <!-- Unified header for project edit mode -->
+       <div class="flex justify-between px-4 py-1.5 bg-gray-50 border-b">
+         <div class="flex items-center">
+           <!-- Component type and filename -->
+           <span class="text-xs font-medium text-gray-700 mr-3">
+             {{ getComponentTypeLabel(props.item?.type) }}: {{ props.item?.id }}
+           </span>
+           
+           <!-- Temporary file indicator -->
+           <span v-if="detail?.isTemporary" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md mr-2">
+             Temporary Version
+           </span>
+           
+           <!-- Edit mode indicator -->
+           <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-md">
+             Edit Mode
+           </span>
+         </div>
        </div>
-       <div class="w-1/2 h-full border-l border-gray-200">
-        <div class="p-3 bg-gray-50 border-b border-gray-200">
-          <h3 class="text-sm font-medium text-gray-700 flex items-center">
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            Live Preview
-          </h3>
+       
+       <div class="flex h-full">
+         <div class="w-1/2 h-full">
+           <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+         </div>
+         <div class="w-1/2 h-full border-l border-gray-200">
+          <div class="p-3 bg-gray-50 border-b border-gray-200">
+            <h3 class="text-sm font-medium text-gray-700 flex items-center">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Live Preview
+            </h3>
+          </div>
+          <ProjectWorkflow :projectContent="editorValue" :projectId="props.item?.id" :enableMessages="false" />
         </div>
-        <ProjectWorkflow :projectContent="editorValue" :projectId="props.item?.id" :enableMessages="false" />
-      </div>
-    </div>
+       </div>
+     </div>
     <!-- Default full-screen editor for other component types -->
-           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+    <div v-else class="h-full flex flex-col">
+      <!-- Unified header for edit mode -->
+      <div class="flex justify-between px-4 py-1.5 bg-gray-50 border-b">
+        <div class="flex items-center">
+          <!-- Component type and filename -->
+          <span class="text-xs font-medium text-gray-700 mr-3">
+            {{ getComponentTypeLabel(props.item?.type) }}: {{ props.item?.id }}
+          </span>
+          
+          <!-- Temporary file indicator -->
+          <span v-if="detail?.isTemporary" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md mr-2">
+            Temporary Version
+          </span>
+          
+          <!-- Built-in plugin indicator -->
+          <span v-if="isPlugin && detail?.type === 'local'" class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-md mr-2">
+            Built-in Plugin
+          </span>
+          
+          <!-- Edit mode indicator -->
+          <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-md">
+            Edit Mode
+          </span>
+        </div>
+      </div>
+      
+      <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+    </div>
     <div class="flex justify-end mt-3 px-3 space-x-1.5 border-t pt-3 pb-2">
       <!-- Cancel Button -->
       <button 
@@ -342,24 +391,59 @@
   </div>
 
   <!-- Special layout for projects -->
-  <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="flex h-full">
-    <div class="w-1/2 h-full">
-       <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" :component-id="props.item?.id" :component-type="props.item?.type" />
+  <div v-else-if="props.item && props.item.type === 'projects' && detail && detail.raw" class="h-full flex flex-col">
+    <!-- Unified header for project view mode -->
+    <div class="flex justify-between px-4 py-1.5 bg-gray-50 border-b">
+      <div class="flex items-center">
+        <!-- Component type and filename -->
+        <span class="text-xs font-medium text-gray-700 mr-3">
+          {{ getComponentTypeLabel(props.item?.type) }}: {{ props.item?.id }}
+        </span>
+        
+        <!-- Temporary file indicator -->
+        <span v-if="detail.isTemporary" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md mr-2">
+          Temporary Version
+        </span>
+        
+        <!-- View mode indicator -->
+        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-md">
+          View Mode
+        </span>
+      </div>
     </div>
-    <div class="w-1/2 h-full border-l border-gray-200">
-      <ProjectWorkflow :projectContent="detail.raw" :projectId="props.item?.id || detail.id" :enableMessages="detail.status === 'running'" />
+    
+    <div class="flex h-full">
+      <div class="w-1/2 h-full">
+         <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="h-full" :component-id="props.item?.id" :component-type="props.item?.type" />
+      </div>
+      <div class="w-1/2 h-full border-l border-gray-200">
+        <ProjectWorkflow :projectContent="detail.raw" :projectId="props.item?.id || detail.id" :enableMessages="detail.status === 'running'" />
+      </div>
     </div>
   </div>
 
   <!-- Default layout for other components -->
   <div v-else-if="detail && detail.raw" class="h-full flex flex-col">
-    <div class="flex justify-between px-4 py-2 bg-gray-50 border-b">
+    <div class="flex justify-between px-4 py-1.5 bg-gray-50 border-b">
       <div class="flex items-center">
+        <!-- Component type and filename -->
+        <span class="text-xs font-medium text-gray-700 mr-3">
+          {{ getComponentTypeLabel(props.item?.type) }}: {{ props.item?.id }}
+        </span>
+        
+        <!-- Temporary file indicator -->
         <span v-if="detail.isTemporary" class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-md mr-2">
           Temporary Version
         </span>
+        
+        <!-- Built-in plugin indicator -->
         <span v-if="isPlugin && detail.type === 'local'" class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-md mr-2">
           Built-in Plugin
+        </span>
+        
+        <!-- View mode indicator -->
+        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-md">
+          View Mode
         </span>
         
         <!-- Project control buttons -->
@@ -509,7 +593,7 @@ import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
 import { useComponentSave } from '../composables/useComponentSave'
-import { extractLineNumber } from '../utils/common'
+import { extractLineNumber, getComponentTypeLabel } from '../utils/common'
 // Test caches are now integrated into DataCache store
 
 import { getDefaultTemplate } from '../utils/templateGenerator'

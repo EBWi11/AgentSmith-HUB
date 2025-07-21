@@ -727,6 +727,13 @@ function initializeEditor() {
     scrollBeyondLastColumn: 0,
     wordWrapColumn: 80,
     wrappingIndent: 'none',
+    scrollbar: {
+      verticalScrollbarSize: 10,
+      horizontalScrollbarSize: 10,
+      useShadows: false,
+      verticalHasArrows: false,
+      horizontalHasArrows: false,
+    },
   };
   
   // If diff mode, create diff editor
@@ -755,13 +762,13 @@ function initializeEditor() {
         showMoves: true,
       },
       scrollbar: {
-        useShadows: true,
-        verticalHasArrows: true,
-        horizontalHasArrows: true,
+        useShadows: false,
+        verticalHasArrows: false,
+        horizontalHasArrows: false,
         vertical: 'visible',
         horizontal: 'visible',
-        verticalScrollbarSize: 12,
-        horizontalScrollbarSize: 12,
+        verticalScrollbarSize: 10,
+        horizontalScrollbarSize: 10,
       }
     });
     
@@ -878,6 +885,13 @@ function initializeEditor() {
         setTimeout(() => {
           if (isEditorValid(editor)) {
             editor.layout();
+            
+            // Force consistent top spacing by updating editor options
+            editor.updateOptions({
+              padding: { top: 0, bottom: 0, left: 0, right: 0 },
+              scrollBeyondLastLine: false,
+              scrollBeyondLastColumn: 0
+            });
           }
         }, 50);
       }
@@ -900,6 +914,8 @@ function getLanguage() {
       return 'json';
   }
 }
+
+
 
 // Helper function to check if editor is valid and not disposed
 function isEditorValid(editorInstance) {
@@ -3656,7 +3672,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
 </script>
 
 <style>
-/* 导入编程字体 - 本地版本，避免网络超时 */
+/* Import programming fonts - local version to avoid network timeout */
 @import url('../assets/fonts/jetbrains-mono.css');
 
 .monaco-editor-wrapper {
@@ -3673,6 +3689,8 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "liga" 1, "calt" 1;
 }
+
+
 
 
 
@@ -3768,6 +3786,83 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
 .monaco-diff-editor .view-zone {
   margin: 0 !important;
   padding: 0 !important;
+}
+
+/* Ensure consistent display between read-only and edit modes */
+.monaco-editor,
+.monaco-diff-editor {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Force consistent top spacing for all editor modes */
+.monaco-editor .monaco-editor-background,
+.monaco-diff-editor .monaco-editor-background {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor content */
+.monaco-editor .view-lines,
+.monaco-diff-editor .view-lines {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor viewport */
+.monaco-editor .view-overlays,
+.monaco-diff-editor .view-overlays {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor scrollable element */
+.monaco-editor .monaco-scrollable-element,
+.monaco-diff-editor .monaco-scrollable-element {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor overflow guard */
+.monaco-editor .overflow-guard,
+.monaco-diff-editor .overflow-guard {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor lines content */
+.monaco-editor .lines-content,
+.monaco-diff-editor .lines-content {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor view zone */
+.monaco-editor .view-zone,
+.monaco-diff-editor .view-zone {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor margin view overlays */
+.monaco-editor .margin-view-overlays,
+.monaco-diff-editor .margin-view-overlays {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor glyph margin */
+.monaco-editor .glyph-margin,
+.monaco-diff-editor .glyph-margin {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Force consistent top spacing for editor line numbers */
+.monaco-editor .line-numbers,
+.monaco-diff-editor .line-numbers {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
 /* 最强制性的样式 - 确保完全填满 */
