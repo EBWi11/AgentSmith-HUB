@@ -22,6 +22,7 @@
               class="h-full" 
               :error-lines="jsonError ? [{ line: jsonErrorLine }] : []"
               style="height: 100%; min-height: 380px;"
+              @update:value="onInputDataChange"
             />
           </div>
         </div>
@@ -111,6 +112,7 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { hubApi } from '../api';
 import MonacoEditor from './MonacoEditor.vue';
+import { useDataCacheStore } from '../stores/dataCache';
 
 // Props
 const props = defineProps({
@@ -120,6 +122,9 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['close']);
+
+// Data cache store
+const dataCache = useDataCacheStore();
 
 // Reactive state
 const showModal = ref(false);
@@ -131,6 +136,9 @@ const testExecuted = ref(false);
 const jsonError = ref(null);
 const jsonErrorLine = ref(null);
 
+// Default test data
+const defaultTestData = '[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]';
+
 // Debug info on mount
 onMounted(() => {
 });
@@ -139,8 +147,8 @@ onMounted(() => {
 watch(() => props.show, (newVal) => {
   showModal.value = newVal;
   if (newVal) {
-    // Reset state when opening modal
-    resetState();
+    // Load cached test data when opening modal
+    loadTestData();
     // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
@@ -149,11 +157,15 @@ watch(() => props.show, (newVal) => {
   }
 }, { immediate: true });
 
-watch(() => props.outputId, (newVal) => {
-  // Reset state when output changes
-  testResults.value = {};
-  testError.value = null;
-  testExecuted.value = false;
+watch(() => props.outputId, (newVal, oldVal) => {
+  if (newVal !== oldVal && newVal) {
+    // Load cached test data for the new output
+    loadTestData();
+    // Reset test results when output changes
+    testResults.value = {};
+    testError.value = null;
+    testExecuted.value = false;
+  }
 });
 
 // Remove event listener on component unmount
@@ -168,9 +180,65 @@ function handleEscKey(event) {
   }
 }
 
+// Load test data for the current output
+async function loadTestData() {
+  if (props.outputId) {
+    // First try to load cached test data
+    const cachedData = dataCache.getTestCache('outputs', props.outputId);
+    if (cachedData) {
+      inputData.value = cachedData;
+      return;
+    }
+    
+    // If no cached data, try to get sample data from backend
+    try {
+      // Ensure we don't duplicate the 'output.' prefix
+      const projectNodeSequence = props.outputId.startsWith('output.') ? props.outputId : `output.${props.outputId}`;
+      const sampleDataResponse = await hubApi.getSamplerData('output', projectNodeSequence);
+      if (sampleDataResponse && sampleDataResponse.output && Object.keys(sampleDataResponse.output).length > 0) {
+        // Extract the first sample data from the response
+        let firstSampleData = null;
+        for (const [flowPath, samples] of Object.entries(sampleDataResponse.output)) {
+          if (Array.isArray(samples) && samples.length > 0) {
+            // Take only the first sample from the first flow path that has data
+            const firstSample = samples[0];
+            if (firstSample && firstSample.data) {
+              firstSampleData = firstSample.data;
+              break; // Stop after finding the first sample
+            }
+          }
+        }
+        
+        if (firstSampleData) {
+          // Use the first sample data as test data
+          const sampleJson = JSON.stringify(firstSampleData, null, 2);
+          inputData.value = sampleJson;
+          
+          // Cache the sample data for future use
+          dataCache.setTestCache('outputs', props.outputId, sampleJson);
+        } else {
+          inputData.value = defaultTestData;
+        }
+      } else {
+        inputData.value = defaultTestData;
+      }
+    } catch (error) {
+      inputData.value = defaultTestData;
+    }
+  } else {
+    inputData.value = defaultTestData;
+  }
+}
+
+// Save test data when it changes
+function onInputDataChange(newValue) {
+  if (props.outputId && newValue && newValue.trim() !== '') {
+    dataCache.setTestCache('outputs', props.outputId, newValue);
+  }
+}
+
 function resetState() {
-  // Reset state when opening modal
-  inputData.value = '[\n  {\n    "timestamp": 1698765432,\n    "event_type": "login",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true,\n    "device_info": {\n      "os": "Windows",\n      "browser": "Chrome",\n      "version": "96.0.4664.110"\n    }\n  },\n  {\n    "timestamp": 1698765433,\n    "event_type": "logout",\n    "user_id": "user123",\n    "source_ip": "192.168.1.100",\n    "success": true\n  }\n]';
+  // Reset test results and errors
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;

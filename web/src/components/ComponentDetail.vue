@@ -56,6 +56,16 @@
         </svg>
         Test Plugin
       </button>
+      <button 
+        v-if="isOutput"
+        @click="showOutputTestModal = true" 
+        class="btn btn-test-output btn-md"
+      >
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Output
+      </button>
       
       <!-- Verify Buttons -->
       <button 
@@ -296,6 +306,16 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Plugin
+      </button>
+      <button 
+        v-if="isOutput"
+        @click="showOutputTestModal = true" 
+        class="btn btn-test-output btn-sm"
+      >
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Output
       </button>
       
       <!-- Verify Buttons -->
@@ -554,6 +574,13 @@
     @close="showProjectTestModal = false"
   />
 
+  <OutputTestModal
+    v-if="props.item && props.item.type === 'outputs'"
+    :show="showOutputTestModal"
+    :outputId="props.item?.id"
+    @close="showOutputTestModal = false"
+  />
+
   <!-- Project Operation Warning Modal -->
   <div v-if="projectWarningModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
     <div class="bg-white rounded-lg shadow-xl w-96 p-6">
@@ -589,6 +616,7 @@ import ProjectWorkflow from './Visualization/ProjectWorkflow.vue'
 import RulesetTestModal from './RulesetTestModal.vue'
 import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
+import OutputTestModal from './OutputTestModal.vue'
 import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
@@ -676,6 +704,7 @@ const supportsConnectCheck = computed(() => {
 const showTestModal = ref(false)
 const showPluginTestModal = ref(false)
 const showProjectTestModal = ref(false)
+const showOutputTestModal = ref(false)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -877,6 +906,10 @@ function handleTestShortcut() {
   // Test project if it's a project
   else if (isProject.value) {
     showProjectTestModal.value = true;
+  }
+  // Test output if it's an output
+  else if (isOutput.value) {
+    showOutputTestModal.value = true;
   }
 }
 
