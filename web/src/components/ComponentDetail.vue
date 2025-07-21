@@ -7,7 +7,7 @@
     <!-- Special layout for projects: Split view with live preview -->
     <div v-if="isProject" class="flex h-full">
       <div class="w-1/2 h-full">
-        <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+        <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveNew" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
       </div>
       <div class="w-1/2 h-full border-l border-gray-200">
         <div class="p-3 bg-gray-50 border-b border-gray-200">
@@ -23,7 +23,7 @@
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
-          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
       <!-- Test Buttons -->
       <button 
@@ -209,7 +209,7 @@
        
        <div class="flex h-full">
          <div class="w-1/2 h-full">
-           <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+           <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="h-full" @save="saveEdit" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
          </div>
          <div class="w-1/2 h-full border-l border-gray-200">
           <div class="p-3 bg-gray-50 border-b border-gray-200">
@@ -252,7 +252,7 @@
         </div>
       </div>
       
-      <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+      <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
     </div>
     <div class="flex justify-end mt-3 px-3 space-x-1.5 border-t pt-3 pb-2">
       <!-- Cancel Button -->
@@ -868,6 +868,18 @@ async function verifyCurrentComponent() {
   await verifyComponent(props.item.type, props.item.id, contentToVerify);
 }
 
+// Handle test shortcut from MonacoEditor
+function handleTestShortcut() {
+  // Test ruleset if it's a ruleset
+  if (isRuleset.value) {
+    showTestModal.value = true;
+  }
+  // Test project if it's a project
+  else if (isProject.value) {
+    showProjectTestModal.value = true;
+  }
+}
+
 // All specific verification functions replaced with generic verifyCurrentComponent()
 
 // Connect check function for both input and output components
@@ -1368,6 +1380,34 @@ onBeforeUnmount(() => {
 
 // Mount hook for initial setup
 onMounted(async () => {
+  // Add keyboard shortcuts
+  const handleKeyDown = (event) => {
+    // Cmd+D (Mac) or Ctrl+D (Windows/Linux) for test
+    if ((event.metaKey || event.ctrlKey) && event.key === 'd') {
+      event.preventDefault();
+      
+      // Test ruleset if it's a ruleset
+      if (isRuleset.value) {
+        showTestModal.value = true;
+      }
+      // Test project if it's a project
+      else if (isProject.value) {
+        showProjectTestModal.value = true;
+      }
+    }
+  };
+  
+  // Add event listener
+  document.addEventListener('keydown', handleKeyDown);
+  
+  // Store cleanup function
+  const cleanup = () => {
+    document.removeEventListener('keydown', handleKeyDown);
+  };
+  
+  // Clean up on unmount
+  onBeforeUnmount(cleanup);
+  
   if (props.item) {
     if (props.item.isNew) {
       detail.value = null;

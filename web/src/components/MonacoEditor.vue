@@ -24,7 +24,7 @@ const props = defineProps({
 });
 
 // Properly declare emits
-const emit = defineEmits(['update:value', 'save', 'line-change']);
+const emit = defineEmits(['update:value', 'save', 'line-change', 'test']);
 
 const container = ref(null);
 let editor = null;
@@ -845,6 +845,16 @@ function initializeEditor() {
     });
   } catch (error) {
     console.warn('Failed to add save command:', error);
+  }
+  
+  // Add test shortcut (Cmd+D on Mac, Ctrl+D on Windows/Linux)
+  try {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD, function() {
+      // Emit a custom event for test action
+      emit('test', editor.getValue());
+    });
+  } catch (error) {
+    console.warn('Failed to add test command:', error);
   }
   
   // Listen for content changes
