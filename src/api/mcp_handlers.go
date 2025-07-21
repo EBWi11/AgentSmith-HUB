@@ -332,6 +332,49 @@ func handleMCPPost(c echo.Context) error {
 	}
 }
 
+// getMCPBaseURL determines the correct base URL for MCP API calls
+func getMCPBaseURL(c echo.Context) string {
+	scheme := "http"
+	if c.Request().TLS != nil {
+		scheme = "https"
+	}
+
+	// Always use localhost with the configured port for internal API calls
+	// This ensures MCP always calls the backend directly, not through nginx
+	// Use the port from the original request, or default to 8080
+	host := "localhost:8080"
+
+	// Try to get the actual port from the request if available
+	if c.Request().Host != "" {
+		// Extract port from the original request host
+		if strings.Contains(c.Request().Host, ":") {
+			parts := strings.Split(c.Request().Host, ":")
+			if len(parts) == 2 {
+				port := parts[1]
+				// Only use the port if it's a valid number
+				if _, err := strconv.Atoi(port); err == nil {
+					host = "localhost:" + port
+				}
+			}
+		} else {
+			// If no port in host, try to get from X-Forwarded-Host or use default
+			if forwardedHost := c.Request().Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+				if strings.Contains(forwardedHost, ":") {
+					parts := strings.Split(forwardedHost, ":")
+					if len(parts) == 2 {
+						port := parts[1]
+						if _, err := strconv.Atoi(port); err == nil {
+							host = "localhost:" + port
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
 // handleMCPJSONRPC handles a JSON-RPC request using the StandardMCPServer
 func handleMCPJSONRPC(requestData []byte) ([]byte, error) {
 	// Use the StandardMCPServer to handle the request
@@ -358,11 +401,7 @@ func handleSingleMessage(c echo.Context, messageData map[string]interface{}, ses
 	}
 
 	// Update MCP server configuration
-	scheme := "http"
-	if c.Request().TLS != nil {
-		scheme = "https"
-	}
-	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request().Host)
+	baseURL := getMCPBaseURL(c)
 	mcpServer.UpdateConfig(baseURL, session.Token)
 
 	// Handle the MCP message using StandardMCPServer
@@ -400,11 +439,7 @@ func handleBatchMessages(c echo.Context, messagesData []interface{}, session *MC
 	responses := make([]*common.MCPMessage, 0, len(messagesData))
 
 	// Update MCP server configuration
-	scheme := "http"
-	if c.Request().TLS != nil {
-		scheme = "https"
-	}
-	baseURL := fmt.Sprintf("%s://%s", scheme, c.Request().Host)
+	baseURL := getMCPBaseURL(c)
 	mcpServer.UpdateConfig(baseURL, session.Token)
 
 	for _, messageData := range messagesData {
