@@ -1,0 +1,346 @@
+{
+  "version": "2024-12-19",
+  "description": "AgentSmith-HUB Plugin MCP Configuration",
+  "plugin_development": {
+    "create_plugin": {
+      "name": "plugin_wizard",
+      "description": "Interactive plugin creation wizard",
+      "parameters": {
+        "plugin_type": {
+          "type": "string",
+          "enum": ["check", "data", "action"],
+          "description": "Type of plugin to create"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "What the plugin should do"
+        },
+        "parameters": {
+          "type": "string",
+          "description": "Comma-separated list of parameters"
+        },
+        "auto_create": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically create the plugin after generation"
+        }
+      },
+      "examples": [
+        "plugin_wizard plugin_type='check' purpose='check if IP is in blacklist' parameters='ip_address' auto_create='false'",
+        "plugin_wizard plugin_type='data' purpose='calculate risk score' parameters='user_id,action_type,source_ip' auto_create='false'",
+        "plugin_wizard plugin_type='action' purpose='send Slack alert' parameters='_$ORIDATA,webhook_url' auto_create='false'"
+      ]
+    },
+    "validate_plugin": {
+      "name": "plugin_validate",
+      "description": "Validate plugin syntax and requirements",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID to validate"
+        }
+      },
+      "examples": [
+        "plugin_validate component_id='my_plugin'"
+      ]
+    },
+    "test_plugin": {
+      "name": "plugin_test",
+      "description": "Test plugin with sample data",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID to test"
+        },
+        "test_data": {
+          "type": "string",
+          "description": "JSON array of test parameters"
+        },
+        "performance_mode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run performance tests"
+        }
+      },
+      "examples": [
+        "plugin_test component_id='my_plugin' test_data='[\"test_value\"]'",
+        "plugin_test component_id='my_plugin' test_data='[\"192.168.1.100\"]' performance_mode='true'"
+      ]
+    }
+  },
+  "plugin_management": {
+    "list_plugins": {
+      "name": "plugin_list",
+      "description": "List all available plugins",
+      "parameters": {
+        "filter": {
+          "type": "string",
+          "optional": true,
+          "description": "Filter plugins by type or name"
+        }
+      },
+      "examples": [
+        "plugin_list",
+        "plugin_list filter='check'"
+      ]
+    },
+    "plugin_info": {
+      "name": "plugin_info",
+      "description": "Get detailed information about a plugin",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID"
+        }
+      },
+      "examples": [
+        "plugin_info component_id='my_plugin'"
+      ]
+    },
+    "plugin_stats": {
+      "name": "plugin_stats",
+      "description": "Get plugin usage statistics",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID"
+        },
+        "time_range": {
+          "type": "string",
+          "optional": true,
+          "default": "24h",
+          "description": "Time range for statistics"
+        }
+      },
+      "examples": [
+        "plugin_stats component_id='my_plugin'",
+        "plugin_stats component_id='my_plugin' time_range='7d'"
+      ]
+    }
+  },
+  "plugin_templates": {
+    "get_template": {
+      "name": "plugin_template",
+      "description": "Get plugin template by type",
+      "parameters": {
+        "template_type": {
+          "type": "string",
+          "enum": ["check", "data", "action", "cache", "counter", "http", "json"],
+          "description": "Type of template to get"
+        }
+      },
+      "examples": [
+        "plugin_template template_type='check'",
+        "plugin_template template_type='cache'"
+      ]
+    },
+    "list_templates": {
+      "name": "plugin_templates_list",
+      "description": "List all available plugin templates",
+      "examples": [
+        "plugin_templates_list"
+      ]
+    }
+  },
+  "plugin_examples": {
+    "get_example": {
+      "name": "plugin_example",
+      "description": "Get real-world plugin example",
+      "parameters": {
+        "example_type": {
+          "type": "string",
+          "enum": ["ip_reputation", "risk_score", "slack_alert", "rate_limit"],
+          "description": "Type of example to get"
+        }
+      },
+      "examples": [
+        "plugin_example example_type='ip_reputation'",
+        "plugin_example example_type='slack_alert'"
+      ]
+    },
+    "list_examples": {
+      "name": "plugin_examples_list",
+      "description": "List all available plugin examples",
+      "examples": [
+        "plugin_examples_list"
+      ]
+    }
+  },
+  "plugin_help": {
+    "quick_guide": {
+      "name": "plugin_quick_guide",
+      "description": "Get quick reference guide for plugin development",
+      "examples": [
+        "plugin_quick_guide"
+      ]
+    },
+    "complete_guide": {
+      "name": "plugin_complete_guide",
+      "description": "Get comprehensive plugin development guide",
+      "examples": [
+        "plugin_complete_guide"
+      ]
+    },
+    "troubleshooting": {
+      "name": "plugin_troubleshooting",
+      "description": "Get troubleshooting guide for plugin issues",
+      "examples": [
+        "plugin_troubleshooting"
+      ]
+    }
+  },
+  "plugin_patterns": {
+    "cache_pattern": {
+      "name": "plugin_cache_pattern",
+      "description": "Get caching pattern for plugins",
+      "examples": [
+        "plugin_cache_pattern"
+      ]
+    },
+    "counter_pattern": {
+      "name": "plugin_counter_pattern",
+      "description": "Get counter pattern for plugins",
+      "examples": [
+        "plugin_counter_pattern"
+      ]
+    },
+    "http_pattern": {
+      "name": "plugin_http_pattern",
+      "description": "Get HTTP request pattern for plugins",
+      "examples": [
+        "plugin_http_pattern"
+      ]
+    },
+    "json_pattern": {
+      "name": "plugin_json_pattern",
+      "description": "Get JSON processing pattern for plugins",
+      "examples": [
+        "plugin_json_pattern"
+      ]
+    }
+  },
+  "plugin_debugging": {
+    "debug_plugin": {
+      "name": "plugin_debug",
+      "description": "Debug plugin with detailed logging",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID to debug"
+        },
+        "test_data": {
+          "type": "string",
+          "description": "JSON array of test parameters"
+        },
+        "verbose": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose logging"
+        }
+      },
+      "examples": [
+        "plugin_debug component_id='my_plugin' test_data='[\"test_value\"]'",
+        "plugin_debug component_id='my_plugin' test_data='[\"test_value\"]' verbose='true'"
+      ]
+    },
+    "plugin_logs": {
+      "name": "plugin_logs",
+      "description": "Get plugin execution logs",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID"
+        },
+        "tail": {
+          "type": "integer",
+          "default": 50,
+          "description": "Number of log lines to retrieve"
+        }
+      },
+      "examples": [
+        "plugin_logs component_id='my_plugin'",
+        "plugin_logs component_id='my_plugin' tail='100'"
+      ]
+    }
+  },
+  "plugin_performance": {
+    "benchmark_plugin": {
+      "name": "plugin_benchmark",
+      "description": "Benchmark plugin performance",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID to benchmark"
+        },
+        "iterations": {
+          "type": "integer",
+          "default": 1000,
+          "description": "Number of iterations for benchmark"
+        },
+        "test_data": {
+          "type": "string",
+          "description": "JSON array of test parameters"
+        }
+      },
+      "examples": [
+        "plugin_benchmark component_id='my_plugin' test_data='[\"test_value\"]'",
+        "plugin_benchmark component_id='my_plugin' test_data='[\"test_value\"]' iterations='5000'"
+      ]
+    },
+    "plugin_profile": {
+      "name": "plugin_profile",
+      "description": "Profile plugin for performance analysis",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID to profile"
+        },
+        "duration": {
+          "type": "integer",
+          "default": 30,
+          "description": "Profile duration in seconds"
+        }
+      },
+      "examples": [
+        "plugin_profile component_id='my_plugin'",
+        "plugin_profile component_id='my_plugin' duration='60'"
+      ]
+    }
+  },
+  "plugin_integration": {
+    "test_in_rule": {
+      "name": "plugin_test_rule",
+      "description": "Test plugin in actual rule context",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Rule ID to test with"
+        },
+        "test_data": {
+          "type": "string",
+          "description": "JSON test data"
+        }
+      },
+      "examples": [
+        "plugin_test_rule component_id='my_plugin' rule_id='test_rule' test_data='{\"source_ip\": \"192.168.1.100\"}'"
+      ]
+    },
+    "plugin_usage": {
+      "name": "plugin_usage_examples",
+      "description": "Get examples of how to use plugin in rulesets",
+      "parameters": {
+        "component_id": {
+          "type": "string",
+          "description": "Plugin component ID"
+        }
+      },
+      "examples": [
+        "plugin_usage_examples component_id='my_plugin'"
+      ]
+    }
+  }
+} 

@@ -220,6 +220,79 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Annotations: createAnnotations("Testing Lab", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 
+		// === PLUGIN DEVELOPMENT TOOLS ===
+		// Specialized tools for plugin development and management
+
+		{
+			Name:        "plugin_wizard",
+			Description: "PLUGIN CREATION WIZARD: Interactive plugin creation with guided development, templates, and validation. Creates plugins based on natural language descriptions.",
+			InputSchema: map[string]common.MCPToolArg{
+				"plugin_type": {Type: "string", Description: "Plugin type: check/data/action", Required: true},
+				"purpose":     {Type: "string", Description: "What the plugin should do (e.g., 'check if IP is in blacklist')", Required: true},
+				"parameters":  {Type: "string", Description: "Comma-separated list of parameters", Required: true},
+				"auto_create": {Type: "string", Description: "Automatically create the plugin after generation (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Plugin Wizard", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_test",
+			Description: "PLUGIN TESTING: Test plugins with sample data, performance analysis, and debugging. Comprehensive testing for plugin functionality.",
+			InputSchema: map[string]common.MCPToolArg{
+				"component_id":     {Type: "string", Description: "Plugin component ID to test", Required: true},
+				"test_data":        {Type: "string", Description: "JSON array of test parameters", Required: true},
+				"performance_mode": {Type: "string", Description: "Run performance tests (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Plugin Testing", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_debug",
+			Description: "PLUGIN DEBUGGING: Debug plugins with detailed logging, error analysis, and troubleshooting. Advanced debugging for plugin development.",
+			InputSchema: map[string]common.MCPToolArg{
+				"component_id": {Type: "string", Description: "Plugin component ID to debug", Required: true},
+				"test_data":    {Type: "string", Description: "JSON array of test parameters", Required: true},
+				"verbose":      {Type: "string", Description: "Enable verbose logging (true/false)", Required: false},
+			},
+			Annotations: createAnnotations("Plugin Debugging", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_list",
+			Description: "PLUGIN LIST: List all available plugins with filtering and status information. Discover and manage plugin components.",
+			InputSchema: map[string]common.MCPToolArg{
+				"filter": {Type: "string", Description: "Filter plugins by type or name (optional)", Required: false},
+			},
+			Annotations: createAnnotations("Plugin List", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_info",
+			Description: "PLUGIN INFORMATION: Get detailed information about a specific plugin including usage, parameters, and examples.",
+			InputSchema: map[string]common.MCPToolArg{
+				"component_id": {Type: "string", Description: "Plugin component ID", Required: true},
+			},
+			Annotations: createAnnotations("Plugin Information", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_template",
+			Description: "PLUGIN TEMPLATE: Get plugin template by type for quick development. Provides ready-to-use templates for different plugin types.",
+			InputSchema: map[string]common.MCPToolArg{
+				"template_type": {Type: "string", Description: "Type of template: check/data/action/cache/counter/http/json", Required: true},
+			},
+			Annotations: createAnnotations("Plugin Template", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
+		{
+			Name:        "plugin_example",
+			Description: "PLUGIN EXAMPLE: Get real-world plugin examples for learning and reference. Provides complete working examples.",
+			InputSchema: map[string]common.MCPToolArg{
+				"example_type": {Type: "string", Description: "Type of example: ip_reputation/risk_score/slack_alert/rate_limit", Required: true},
+			},
+			Annotations: createAnnotations("Plugin Example", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
+		},
+
 		// === DEPLOYMENT & RESOURCES ===
 		// Smart deployment and learning tools
 
@@ -439,6 +512,20 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		}
 	case "test_lab":
 		return m.handleTestComponent(args)
+	case "plugin_wizard":
+		return m.handlePluginWizard(args)
+	case "plugin_test":
+		return m.handlePluginTest(args)
+	case "plugin_debug":
+		return m.handlePluginDebug(args)
+	case "plugin_list":
+		return m.handlePluginList(args)
+	case "plugin_info":
+		return m.handlePluginInfo(args)
+	case "plugin_template":
+		return m.handlePluginTemplate(args)
+	case "plugin_example":
+		return m.handlePluginExample(args)
 	case "deployment_center":
 		return m.handleApplyChanges(args)
 	case "learning_center":
@@ -3413,6 +3500,872 @@ func (m *APIMapper) executeSingleOperation(op BatchOperation) BatchOperationResu
 	result.Success = true
 	result.Message = fmt.Sprintf("%s %s '%s' completed successfully", op.Type, op.Component, op.ID)
 
+	return result
+}
+
+// === PLUGIN DEVELOPMENT HANDLERS ===
+
+// handlePluginWizard handles plugin creation wizard
+func (m *APIMapper) handlePluginWizard(args map[string]interface{}) (common.MCPToolResult, error) {
+	pluginType, ok := args["plugin_type"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: plugin_type parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	purpose, ok := args["purpose"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: purpose parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	parameters, ok := args["parameters"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: parameters parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	autoCreate := false
+	if ac, ok := args["auto_create"].(string); ok {
+		autoCreate = ac == "true"
+	}
+
+	// Generate plugin code based on type and purpose
+	pluginCode := m.generatePluginCode(pluginType, purpose, parameters)
+	
+	// Generate component ID from purpose
+	componentID := m.generatePluginID(purpose)
+
+	result := fmt.Sprintf("# Plugin Creation Wizard\n\n## Generated Plugin: %s\n\n**Type:** %s\n**Purpose:** %s\n**Parameters:** %s\n\n### Plugin Code:\n```go\n%s\n```\n\n### Usage in Ruleset:\n```xml\n<check type=\"PLUGIN\">%s(%s)</check>\n```\n\n### Next Steps:\n1. **Test the plugin:**\n   ```bash\n   test_lab test_target='plugin' component_id='%s' custom_data='[\"test_value\"]'\n   ```\n\n2. **Create the component:**\n   ```bash\n   component_wizard component_type='plugin' component_id='%s' config_content='%s'\n   ```\n\n3. **Deploy:**\n   ```bash\n   smart_deployment\n   ```\n\n### Tips:\n- Test with various input types\n- Check error handling\n- Verify performance with real data\n- Use plugin_info for detailed documentation", 
+		componentID, pluginType, purpose, parameters, pluginCode, componentID, parameters, componentID, componentID, strings.ReplaceAll(pluginCode, "\n", "\\n"))
+
+	if autoCreate {
+		// Auto-create the plugin component
+		createResult, err := m.handleComponentCreate("plugin", componentID, pluginCode, false)
+		if err != nil {
+			result += fmt.Sprintf("\n\n⚠️ **Auto-creation failed:** %v", err)
+		} else {
+			result += "\n\n✅ **Plugin created successfully!**"
+		}
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: result}},
+	}, nil
+}
+
+// handlePluginTest handles plugin testing
+func (m *APIMapper) handlePluginTest(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentID, ok := args["component_id"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: component_id parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	testData, ok := args["test_data"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: test_data parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	performanceMode := false
+	if pm, ok := args["performance_mode"].(string); ok {
+		performanceMode = pm == "true"
+	}
+
+	// Use existing test_lab functionality for plugin testing
+	testArgs := map[string]interface{}{
+		"test_target": "plugin",
+		"component_id": componentID,
+		"custom_data": testData,
+		"test_mode": "thorough",
+	}
+
+	if performanceMode {
+		testArgs["test_mode"] = "performance"
+	}
+
+	return m.handleTestComponent(testArgs)
+}
+
+// handlePluginDebug handles plugin debugging
+func (m *APIMapper) handlePluginDebug(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentID, ok := args["component_id"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: component_id parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	testData, ok := args["test_data"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: test_data parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	verbose := false
+	if v, ok := args["verbose"].(string); ok {
+		verbose = v == "true"
+	}
+
+	result := fmt.Sprintf("# Plugin Debugging: %s\n\n## Test Data: %s\n## Verbose Mode: %t\n\n### Debugging Steps:\n\n1. **Check plugin syntax:**\n   ```bash\n   component_wizard component_type='plugin' component_id='%s' validate_only='true'\n   ```\n\n2. **Test with sample data:**\n   ```bash\n   test_lab test_target='plugin' component_id='%s' custom_data='%s'\n   ```\n\n3. **Check error logs:**\n   ```bash\n   get_error_logs component_id='%s' tail='50'\n   ```\n\n4. **Verify plugin configuration:**\n   ```bash\n   component_manager action='view' component_type='plugin' component_id='%s'\n   ```\n\n### Common Debugging Issues:\n\n- **Syntax errors:** Check Go syntax and package declaration\n- **Import errors:** Verify only standard library imports\n- **Parameter errors:** Check parameter types and validation\n- **Return type errors:** Ensure correct return type (bool for check, interface{} for data)\n- **Logic errors:** Test with edge cases and null values\n\n### Verbose Testing:\n%s", componentID, testData, verbose, componentID, componentID, testData, componentID, componentID, 
+		func() string {
+			if verbose {
+				return fmt.Sprintf("\n**Extended testing commands:**\n```bash\n# Test with various input types\ntest_lab test_target='plugin' component_id='%s' custom_data='[\"valid_input\"]'\ntest_lab test_target='plugin' component_id='%s' custom_data='[\"\"]'\ntest_lab test_target='plugin' component_id='%s' custom_data='[]'\n\n# Performance testing\ntest_lab test_target='plugin' component_id='%s' custom_data='[\"load_test\"]' test_mode='performance'\n```", componentID, componentID, componentID, componentID)
+			}
+			return ""
+		}())
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: result}},
+	}, nil
+}
+
+// handlePluginList handles plugin listing
+func (m *APIMapper) handlePluginList(args map[string]interface{}) (common.MCPToolResult, error) {
+	filter := ""
+	if f, ok := args["filter"].(string); ok {
+		filter = f
+	}
+
+	// Use explore_components to list plugins
+	exploreArgs := map[string]interface{}{
+		"component_type": "plugin",
+		"search_term": filter,
+		"show_status": "true",
+		"include_details": "false",
+	}
+
+	return m.handleExploreComponents(exploreArgs)
+}
+
+// handlePluginInfo handles plugin information
+func (m *APIMapper) handlePluginInfo(args map[string]interface{}) (common.MCPToolResult, error) {
+	componentID, ok := args["component_id"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: component_id parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	// Use component_manager to get plugin details
+	infoArgs := map[string]interface{}{
+		"action": "view",
+		"component_type": "plugin",
+		"component_id": componentID,
+	}
+
+	return m.handleComponentManager(infoArgs)
+}
+
+// handlePluginTemplate handles plugin template retrieval
+func (m *APIMapper) handlePluginTemplate(args map[string]interface{}) (common.MCPToolResult, error) {
+	templateType, ok := args["template_type"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: template_type parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	templates := map[string]string{
+		"check": `package plugin
+
+import (
+	"strings"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "myCheck":
+		if len(params) < 1 {
+			return false, nil
+		}
+		value := params[0].(string)
+		return strings.Contains(value, "suspicious"), nil
+	}
+	return nil, nil
+}`,
+		"data": `package plugin
+
+import (
+	"time"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "myDataProcessor":
+		if len(params) < 1 {
+			return "", nil
+		}
+		input := params[0].(string)
+		return input + "_processed_" + time.Now().Format("20060102150405"), nil
+	}
+	return nil, nil
+}`,
+		"action": `package plugin
+
+import (
+	"fmt"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "myAction":
+		if len(params) < 1 {
+			return nil, nil
+		}
+		message := params[0].(string)
+		// Perform action (e.g., send alert, log, etc.)
+		fmt.Printf("Action executed: %s\n", message)
+		return true, nil
+	}
+	return nil, nil
+}`,
+		"cache": `package plugin
+
+import (
+	"sync"
+	"time"
+)
+
+var cache = make(map[string]interface{})
+var cacheMutex sync.RWMutex
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "cacheGet":
+		if len(params) < 1 {
+			return nil, nil
+		}
+		key := params[0].(string)
+		cacheMutex.RLock()
+		defer cacheMutex.RUnlock()
+		return cache[key], nil
+	case "cacheSet":
+		if len(params) < 2 {
+			return nil, nil
+		}
+		key := params[0].(string)
+		value := params[1]
+		cacheMutex.Lock()
+		defer cacheMutex.Unlock()
+		cache[key] = value
+		return true, nil
+	}
+	return nil, nil
+}`,
+		"counter": `package plugin
+
+import (
+	"sync"
+)
+
+var counters = make(map[string]int)
+var counterMutex sync.RWMutex
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "incrementCounter":
+		if len(params) < 1 {
+			return 0, nil
+		}
+		key := params[0].(string)
+		counterMutex.Lock()
+		defer counterMutex.Unlock()
+		counters[key]++
+		return counters[key], nil
+	case "getCounter":
+		if len(params) < 1 {
+			return 0, nil
+		}
+		key := params[0].(string)
+		counterMutex.RLock()
+		defer counterMutex.RUnlock()
+		return counters[key], nil
+	}
+	return nil, nil
+}`,
+		"http": `package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "httpGet":
+		if len(params) < 1 {
+			return nil, nil
+		}
+		url := params[0].(string)
+		
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+		
+		resp, err := client.Get(url)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		
+		return string(body), nil
+	}
+	return nil, nil
+}`,
+		"json": `package plugin
+
+import (
+	"encoding/json"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "parseJSON":
+		if len(params) < 1 {
+			return nil, nil
+		}
+		jsonStr := params[0].(string)
+		
+		var result map[string]interface{}
+		err := json.Unmarshal([]byte(jsonStr), &result)
+		if err != nil {
+			return nil, err
+		}
+		
+		return result, nil
+	case "toJSON":
+		if len(params) < 1 {
+			return "{}", nil
+		}
+		data := params[0]
+		
+		jsonBytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		
+		return string(jsonBytes), nil
+	}
+	return nil, nil
+}`,
+	}
+
+	template, exists := templates[templateType]
+	if !exists {
+		availableTypes := make([]string, 0, len(templates))
+		for t := range templates {
+			availableTypes = append(availableTypes, t)
+		}
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{
+				Type: "text", 
+				Text: fmt.Sprintf("Error: Unknown template type '%s'. Available types: %v", templateType, availableTypes),
+			}},
+			IsError: true,
+		}, nil
+	}
+
+	result := fmt.Sprintf(`# Plugin Template: %s
+
+## Template Code:
+\`\`\`go
+%s
+\`\`\`
+
+## Usage:
+1. Copy the template code
+2. Modify the function name and logic
+3. Test with plugin_test
+4. Deploy with component_wizard
+
+## Available Template Types:
+- check: Boolean check plugins
+- data: Data processing plugins  
+- action: Action execution plugins
+- cache: Caching functionality
+- counter: Counter/tracking functionality
+- http: HTTP request functionality
+- json: JSON parsing functionality`, templateType, template)
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: result}},
+	}, nil
+}
+
+// handlePluginExample handles plugin example retrieval
+func (m *APIMapper) handlePluginExample(args map[string]interface{}) (common.MCPToolResult, error) {
+	exampleType, ok := args["example_type"].(string)
+	if !ok {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: "Error: example_type parameter is required"}},
+			IsError: true,
+		}, nil
+	}
+
+	examples := map[string]string{
+		"ip_reputation": `# IP Reputation Plugin Example
+
+## Plugin Code:
+\`\`\`go
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "checkIPReputation":
+		if len(params) < 1 {
+			return false, nil
+		}
+		ip := params[0].(string)
+		
+		// Check against abuseipdb.com (example)
+		url := fmt.Sprintf("https://api.abuseipdb.com/api/v2/check?ipAddress=%s", ip)
+		
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return false, err
+		}
+		
+		req.Header.Set("Key", "YOUR_API_KEY")
+		req.Header.Set("Accept", "application/json")
+		
+		resp, err := client.Do(req)
+		if err != nil {
+			return false, err
+		}
+		defer resp.Body.Close()
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false, err
+		}
+		
+		var result map[string]interface{}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return false, err
+		}
+		
+		if data, ok := result["data"].(map[string]interface{}); ok {
+			if abuseConfidenceScore, ok := data["abuseConfidenceScore"].(float64); ok {
+				return abuseConfidenceScore > 50, nil
+			}
+		}
+		
+		return false, nil
+	}
+	return nil, nil
+}
+\`\`\`
+
+## Usage in Ruleset:
+\`\`\`xml
+<check type="PLUGIN">checkIPReputation(_$source_ip)</check>
+\`\`\`
+
+## Test Command:
+\`\`\`bash
+test_lab test_target='plugin' component_id='ip_reputation' custom_data='["192.168.1.100"]'
+\`\`\``,
+		"risk_score": `# Risk Score Plugin Example
+
+## Plugin Code:
+\`\`\`go
+package plugin
+
+import (
+	"strings"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "calculateRiskScore":
+		if len(params) < 1 {
+			return 0, nil
+		}
+		
+		score := 0
+		
+		// Analyze user behavior
+		if userAgent, ok := params[0].(string); ok {
+			if strings.Contains(strings.ToLower(userAgent), "bot") {
+				score += 30
+			}
+			if strings.Contains(strings.ToLower(userAgent), "curl") {
+				score += 20
+			}
+		}
+		
+		// Analyze IP address
+		if len(params) > 1 {
+			if ip, ok := params[1].(string); ok {
+				if strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") {
+					score -= 10 // Internal IPs get lower score
+				}
+			}
+		}
+		
+		// Analyze request frequency
+		if len(params) > 2 {
+			if freq, ok := params[2].(float64); ok {
+				if freq > 100 {
+					score += 40
+				} else if freq > 50 {
+					score += 20
+				}
+			}
+		}
+		
+		// Cap score at 100
+		if score > 100 {
+			score = 100
+		}
+		if score < 0 {
+			score = 0
+		}
+		
+		return score, nil
+	}
+	return nil, nil
+}
+\`\`\`
+
+## Usage in Ruleset:
+\`\`\`xml
+<append type="PLUGIN" field="risk_score">calculateRiskScore(_$user_agent, _$source_ip, _$request_frequency)</append>
+<check type="MT" field="risk_score">80</check>
+\`\`\`
+
+## Test Command:
+\`\`\`bash
+test_lab test_target='plugin' component_id='risk_score' custom_data='["Mozilla/5.0", "192.168.1.100", 150.0]'
+\`\`\``,
+		"slack_alert": `# Slack Alert Plugin Example
+
+## Plugin Code:
+\`\`\`go
+package plugin
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "sendSlackAlert":
+		if len(params) < 2 {
+			return false, nil
+		}
+		
+		webhookURL := params[0].(string)
+		message := params[1].(string)
+		
+		payload := map[string]interface{}{
+			"text": message,
+			"username": "AgentSmith-HUB",
+			"icon_emoji": ":warning:",
+		}
+		
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			return false, err
+		}
+		
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Post(webhookURL, "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			return false, err
+		}
+		defer resp.Body.Close()
+		
+		return resp.StatusCode == 200, nil
+	}
+	return nil, nil
+}
+\`\`\`
+
+## Usage in Ruleset:
+\`\`\`xml
+<plugin>sendSlackAlert("https://hooks.slack.com/services/YOUR/WEBHOOK/URL", "Security alert: Suspicious activity detected from _$source_ip")</plugin>
+\`\`\`
+
+## Test Command:
+\`\`\`bash
+test_lab test_target='plugin' component_id='slack_alert' custom_data='["https://hooks.slack.com/services/YOUR/WEBHOOK/URL", "Test alert message"]'
+\`\`\``,
+		"rate_limit": `# Rate Limit Plugin Example
+
+## Plugin Code:
+\`\`\`go
+package plugin
+
+import (
+	"sync"
+	"time"
+)
+
+type RateLimiter struct {
+	requests map[string][]time.Time
+	mutex    sync.RWMutex
+	window   time.Duration
+	limit    int
+}
+
+var rateLimiters = make(map[string]*RateLimiter)
+var rlMutex sync.RWMutex
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "checkRateLimit":
+		if len(params) < 3 {
+			return false, nil
+		}
+		
+		key := params[0].(string)
+		limit := int(params[1].(float64))
+		windowSeconds := int(params[2].(float64))
+		
+		rlMutex.Lock()
+		limiter, exists := rateLimiters[key]
+		if !exists {
+			limiter = &RateLimiter{
+				requests: make(map[string][]time.Time),
+				window:   time.Duration(windowSeconds) * time.Second,
+				limit:    limit,
+			}
+			rateLimiters[key] = limiter
+		}
+		rlMutex.Unlock()
+		
+		limiter.mutex.Lock()
+		defer limiter.mutex.Unlock()
+		
+		now := time.Now()
+		windowStart := now.Add(-limiter.window)
+		
+		// Clean old requests
+		var validRequests []time.Time
+		for _, reqTime := range limiter.requests[key] {
+			if reqTime.After(windowStart) {
+				validRequests = append(validRequests, reqTime)
+			}
+		}
+		limiter.requests[key] = validRequests
+		
+		// Check if limit exceeded
+		if len(validRequests) >= limiter.limit {
+			return true, nil // Rate limit exceeded
+		}
+		
+		// Add current request
+		limiter.requests[key] = append(limiter.requests[key], now)
+		return false, nil // Within rate limit
+	}
+	return nil, nil
+}
+\`\`\`
+
+## Usage in Ruleset:
+\`\`\`xml
+<check type="PLUGIN">checkRateLimit(_$user_id, 10, 60)</check>
+\`\`\`
+
+## Test Command:
+\`\`\`bash
+test_lab test_target='plugin' component_id='rate_limit' custom_data='["user123", 10, 60]'
+\`\`\``,
+	}
+
+	example, exists := examples[exampleType]
+	if !exists {
+		availableTypes := make([]string, 0, len(examples))
+		for t := range examples {
+			availableTypes = append(availableTypes, t)
+		}
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{
+				Type: "text", 
+				Text: fmt.Sprintf("Error: Unknown example type '%s'. Available types: %v", exampleType, availableTypes),
+			}},
+			IsError: true,
+		}, nil
+	}
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: example}},
+	}, nil
+}
+
+// Helper functions for plugin development
+
+// generatePluginCode generates plugin code based on type and purpose
+func (m *APIMapper) generatePluginCode(pluginType, purpose, parameters string) string {
+	paramList := strings.Split(parameters, ",")
+	for i, param := range paramList {
+		paramList[i] = strings.TrimSpace(param)
+	}
+	
+	paramStr := strings.Join(paramList, ", ")
+	paramVars := ""
+	for i, param := range paramList {
+		if i > 0 {
+			paramVars += ", "
+		}
+		paramVars += fmt.Sprintf("params[%d].(string)", i)
+	}
+	
+	funcName := m.generatePluginID(purpose)
+	
+	switch pluginType {
+	case "check":
+		return fmt.Sprintf(`package plugin
+
+import (
+	"strings"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "%s":
+		if len(params) < %d {
+			return false, nil
+		}
+		%s
+		
+		// TODO: Implement your check logic here
+		// Example: return strings.Contains(value, "suspicious"), nil
+		return true, nil
+	}
+	return nil, nil
+}`, funcName, len(paramList), paramVars)
+	
+	case "data":
+		return fmt.Sprintf(`package plugin
+
+import (
+	"time"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "%s":
+		if len(params) < %d {
+			return "", nil
+		}
+		%s
+		
+		// TODO: Implement your data processing logic here
+		// Example: return input + "_processed_" + time.Now().Format("20060102150405"), nil
+		return "processed_data", nil
+	}
+	return nil, nil
+}`, funcName, len(paramList), paramVars)
+	
+	case "action":
+		return fmt.Sprintf(`package plugin
+
+import (
+	"fmt"
+)
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "%s":
+		if len(params) < %d {
+			return nil, nil
+		}
+		%s
+		
+		// TODO: Implement your action logic here
+		// Example: fmt.Printf("Action executed with: %s\n", value)
+		fmt.Printf("Action executed\n")
+		return true, nil
+	}
+	return nil, nil
+}`, funcName, len(paramList), paramVars)
+	
+	default:
+		return fmt.Sprintf(`package plugin
+
+func Eval(funcName string, params ...interface{}) (interface{}, error) {
+	switch funcName {
+	case "%s":
+		// TODO: Implement your plugin logic here
+		return nil, nil
+	}
+	return nil, nil
+}`, funcName)
+	}
+}
+
+// generatePluginID generates a plugin ID from purpose
+func (m *APIMapper) generatePluginID(purpose string) string {
+	// Convert purpose to camelCase ID
+	words := strings.Fields(strings.ToLower(purpose))
+	if len(words) == 0 {
+		return "myPlugin"
+	}
+	
+	result := words[0]
+	for i := 1; i < len(words); i++ {
+		if len(words[i]) > 0 {
+			result += strings.Title(words[i])
+		}
+	}
+	
+	// Remove special characters and limit length
+	result = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, result)
+	
+	if len(result) > 50 {
+		result = result[:50]
+	}
+	
+	if result == "" {
+		result = "myPlugin"
+	}
+	
 	return result
 }
 

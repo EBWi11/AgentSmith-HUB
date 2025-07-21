@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/logger"
 
 	"github.com/labstack/echo/v4"
 )
@@ -52,8 +53,9 @@ func loadMCPConfigFile(filename string) ([]byte, error) {
 	return nil, fmt.Errorf("config file %s not found in ./mcp_config or ../mcp_config", filename)
 }
 
-// LoadMCPPrompts loads all MCP prompts from configuration
+// LoadMCPPrompts loads all MCP prompts from configuration including plugin guides
 func LoadMCPPrompts() ([]common.MCPPrompt, error) {
+	// Load main prompts
 	data, err := loadMCPConfigFile("prompts.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load prompts config: %w", err)
@@ -66,7 +68,52 @@ func LoadMCPPrompts() ([]common.MCPPrompt, error) {
 		return nil, fmt.Errorf("failed to parse prompts file: %w", err)
 	}
 
+	// Load plugin guides
+	pluginData, err := loadMCPConfigFile("plugin_guide.json")
+	if err != nil {
+		// Plugin guide is optional, log warning but continue
+		logger.Warn("Failed to load plugin guide config, continuing without plugin prompts", "error", err)
+	} else {
+		var pluginGuideFile map[string]interface{}
+		if err := json.Unmarshal(pluginData, &pluginGuideFile); err != nil {
+			logger.Warn("Failed to parse plugin guide file, continuing without plugin prompts", "error", err)
+		} else {
+			// Convert plugin guide entries to MCPPrompt format
+			pluginPrompts := convertPluginGuideToPrompts(pluginGuideFile)
+			promptFile.Prompts = append(promptFile.Prompts, pluginPrompts...)
+		}
+	}
+
 	return promptFile.Prompts, nil
+}
+
+// convertPluginGuideToPrompts converts plugin guide entries to MCPPrompt format
+func convertPluginGuideToPrompts(pluginGuideFile map[string]interface{}) []common.MCPPrompt {
+	var prompts []common.MCPPrompt
+
+	// Convert each plugin guide entry to MCPPrompt
+	for key, value := range pluginGuideFile {
+		if key == "version" || key == "description" {
+			continue // Skip metadata fields
+		}
+
+		if guideEntry, ok := value.(map[string]interface{}); ok {
+			if name, ok := guideEntry["name"].(string); ok {
+				if description, ok := guideEntry["description"].(string); ok {
+					if template, ok := guideEntry["template"].(string); ok {
+						prompt := common.MCPPrompt{
+							Name:        name,
+							Description: description,
+							Template:    template,
+						}
+						prompts = append(prompts, prompt)
+					}
+				}
+			}
+		}
+	}
+
+	return prompts
 }
 
 // GetMCPPrompt gets a specific prompt by name

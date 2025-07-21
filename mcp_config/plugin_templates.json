@@ -1,0 +1,150 @@
+{
+  "version": "2024-12-19",
+  "description": "AgentSmith-HUB Plugin Development Guide and Templates",
+  "plugin_types": {
+    "check_plugin": {
+      "name": "Check Plugin Template",
+      "description": "Plugin that returns boolean for check operations",
+      "usage": "<check type=\"PLUGIN\">myCheckPlugin(field_name)</check>",
+      "template": "package plugin\n\nimport (\n    \"errors\"\n    \"fmt\"\n)\n\nfunc Eval(args ...interface{}) (bool, error) {\n    if len(args) == 0 {\n        return false, errors.New(\"plugin requires at least one argument\")\n    }\n    \n    // Parameter validation\n    data, ok := args[0].(string)\n    if !ok {\n        return false, errors.New(\"first argument must be string\")\n    }\n    \n    // Your logic here\n    if someCondition {\n        return true, nil\n    }\n    \n    return false, nil\n}"
+    },
+    "data_plugin": {
+      "name": "Data Processing Plugin Template",
+      "description": "Plugin that returns data for append operations",
+      "usage": "<append type=\"PLUGIN\" field=\"result\">myDataPlugin(data)</append>",
+      "template": "package plugin\n\nimport (\n    \"errors\"\n    \"fmt\"\n)\n\nfunc Eval(args ...interface{}) (interface{}, bool, error) {\n    if len(args) == 0 {\n        return nil, false, errors.New(\"plugin requires at least one argument\")\n    }\n    \n    // Parameter validation\n    input := args[0]\n    \n    // Your processing logic here\n    result := processData(input)\n    \n    return result, true, nil\n}"
+    },
+    "action_plugin": {
+      "name": "Action Plugin Template",
+      "description": "Plugin that performs external actions",
+      "usage": "<plugin>myActionPlugin(_$ORIDATA)</plugin>",
+      "template": "package plugin\n\nimport (\n    \"errors\"\n    \"fmt\"\n)\n\nfunc Eval(args ...interface{}) (interface{}, bool, error) {\n    if len(args) == 0 {\n        return nil, false, errors.New(\"plugin requires at least one argument\")\n    }\n    \n    // Get the data\n    data := args[0]\n    \n    // Perform your action here\n    err := performAction(data)\n    if err != nil {\n        return nil, false, fmt.Errorf(\"action failed: %v\", err)\n    }\n    \n    return \"action completed\", true, nil\n}"
+    }
+  },
+  "common_patterns": {
+    "cache_pattern": {
+      "name": "Cache Pattern",
+      "description": "Plugin with caching for performance optimization",
+      "template": "package plugin\n\nimport (\n    \"sync\"\n    \"time\"\n)\n\nvar (\n    cache = make(map[string]interface{})\n    cacheMutex sync.RWMutex\n    lastUpdate time.Time\n)\n\nfunc init() {\n    refreshCache()\n}\n\nfunc Eval(key string) (interface{}, bool, error) {\n    // Check if cache needs refresh\n    if time.Since(lastUpdate) > 10*time.Minute {\n        refreshCache()\n    }\n    \n    cacheMutex.RLock()\n    if value, exists := cache[key]; exists {\n        cacheMutex.RUnlock()\n        return value, true, nil\n    }\n    cacheMutex.RUnlock()\n    \n    // Compute and cache result\n    result := computeResult(key)\n    cacheMutex.Lock()\n    cache[key] = result\n    cacheMutex.Unlock()\n    \n    return result, true, nil\n}\n\nfunc refreshCache() {\n    // Implementation for refreshing cache\n    lastUpdate = time.Now()\n}\n\nfunc computeResult(key string) interface{} {\n    // Your computation logic here\n    return \"computed_result\"\n}"
+    },
+    "counter_pattern": {
+      "name": "Counter Pattern",
+      "description": "Plugin for counting events with time windows",
+      "template": "package plugin\n\nimport (\n    \"sync\"\n    \"time\"\n)\n\nvar (\n    counters = make(map[string]int)\n    lastReset = make(map[string]time.Time)\n    mutex sync.RWMutex\n)\n\nfunc Eval(key string, limit int, windowSeconds int) (bool, error) {\n    now := time.Now()\n    \n    mutex.Lock()\n    defer mutex.Unlock()\n    \n    last, exists := lastReset[key]\n    if !exists || now.Sub(last) > time.Duration(windowSeconds)*time.Second {\n        counters[key] = 0\n        lastReset[key] = now\n    }\n    \n    counters[key]++\n    return counters[key] > limit, nil\n}"
+    },
+    "http_request_pattern": {
+      "name": "HTTP Request Pattern",
+      "description": "Plugin for making HTTP requests",
+      "template": "package plugin\n\nimport (\n    \"encoding/json\"\n    \"fmt\"\n    \"io\"\n    \"net/http\"\n    \"time\"\n)\n\nfunc Eval(url string) (interface{}, bool, error) {\n    client := &http.Client{Timeout: 10 * time.Second}\n    \n    resp, err := client.Get(url)\n    if err != nil {\n        return nil, false, fmt.Errorf(\"HTTP request failed: %v\", err)\n    }\n    defer resp.Body.Close()\n    \n    if resp.StatusCode != 200 {\n        return nil, false, fmt.Errorf(\"HTTP status: %d\", resp.StatusCode)\n    }\n    \n    body, err := io.ReadAll(resp.Body)\n    if err != nil {\n        return nil, false, fmt.Errorf(\"failed to read response: %v\", err)\n    }\n    \n    return string(body), true, nil\n}"
+    },
+    "json_processing_pattern": {
+      "name": "JSON Processing Pattern",
+      "description": "Plugin for processing JSON data",
+      "template": "package plugin\n\nimport (\n    \"encoding/json\"\n    \"errors\"\n    \"fmt\"\n)\n\nfunc Eval(jsonStr string, fieldName string) (interface{}, bool, error) {\n    var data map[string]interface{}\n    \n    err := json.Unmarshal([]byte(jsonStr), &data)\n    if err != nil {\n        return nil, false, fmt.Errorf(\"JSON parsing failed: %v\", err)\n    }\n    \n    if value, exists := data[fieldName]; exists {\n        return value, true, nil\n    }\n    \n    return nil, false, errors.New(\"field not found\")\n}"
+    }
+  },
+  "real_world_examples": {
+    "ip_reputation_check": {
+      "name": "IP Reputation Check",
+      "description": "Check if IP address is in blacklist",
+      "template": "package plugin\n\nimport (\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n    \"sync\"\n    \"time\"\n)\n\nvar (\n    reputationCache = make(map[string]bool)\n    cacheMutex sync.RWMutex\n    lastRefresh time.Time\n)\n\nfunc init() {\n    refreshReputationData()\n}\n\nfunc Eval(ip string) (bool, error) {\n    if time.Since(lastRefresh) > 10*time.Minute {\n        refreshReputationData()\n    }\n    \n    cacheMutex.RLock()\n    isMalicious, exists := reputationCache[ip]\n    cacheMutex.RUnlock()\n    \n    if !exists {\n        return false, nil\n    }\n    \n    return isMalicious, nil\n}\n\nfunc refreshReputationData() {\n    // Implementation for refreshing reputation data\n    // This could call an external API or read from a file\n    lastRefresh = time.Now()\n}"
+    },
+    "risk_score_calculator": {
+      "name": "Risk Score Calculator",
+      "description": "Calculate risk score based on user behavior",
+      "template": "package plugin\n\nimport (\n    \"fmt\"\n    \"strings\"\n)\n\nfunc Eval(userID string, actionType string, sourceIP string) (interface{}, bool, error) {\n    score := 0\n    \n    // Check user ID patterns\n    if strings.Contains(userID, \"admin\") || strings.Contains(userID, \"root\") {\n        score += 10\n    }\n    \n    // Check action type\n    switch actionType {\n    case \"login\":\n        score += 5\n    case \"download\":\n        score += 15\n    case \"delete\":\n        score += 20\n    }\n    \n    // Check IP patterns\n    if strings.HasPrefix(sourceIP, \"192.168.\") || strings.HasPrefix(sourceIP, \"10.\") {\n        score -= 5 // Internal IP, lower risk\n    }\n    \n    // Normalize score to 0-100 range\n    if score < 0 {\n        score = 0\n    } else if score > 100 {\n        score = 100\n    }\n    \n    return score, true, nil\n}"
+    },
+    "slack_alert_sender": {
+      "name": "Slack Alert Sender",
+      "description": "Send alerts to Slack webhook",
+      "template": "package plugin\n\nimport (\n    \"bytes\"\n    \"encoding/json\"\n    \"fmt\"\n    \"net/http\"\n)\n\ntype SlackMessage struct {\n    Text string `json:\"text\"`\n}\n\nfunc Eval(webhookURL string, message string) (interface{}, bool, error) {\n    slackMsg := SlackMessage{\n        Text: message,\n    }\n    \n    jsonData, err := json.Marshal(slackMsg)\n    if err != nil {\n        return nil, false, fmt.Errorf(\"failed to marshal JSON: %v\", err)\n    }\n    \n    resp, err := http.Post(webhookURL, \"application/json\", bytes.NewBuffer(jsonData))\n    if err != nil {\n        return nil, false, fmt.Errorf(\"failed to send to Slack: %v\", err)\n    }\n    defer resp.Body.Close()\n    \n    if resp.StatusCode != 200 {\n        return nil, false, fmt.Errorf(\"Slack API returned status: %d\", resp.StatusCode)\n    }\n    \n    return \"alert sent successfully\", true, nil\n}"
+    }
+  },
+  "parameter_types": {
+    "field_reference": {
+      "name": "Field Reference",
+      "description": "Reference to data field",
+      "example": "source_ip",
+      "note": "No _$ prefix needed for regular fields"
+    },
+    "original_data": {
+      "name": "Original Data",
+      "description": "Complete data object",
+      "example": "_$ORIDATA",
+      "note": "Only this needs _$ prefix"
+    },
+    "string_value": {
+      "name": "String Value",
+      "description": "String literal",
+      "example": "\"value\" or 'value'",
+      "note": "Must be quoted"
+    },
+    "number_value": {
+      "name": "Number Value",
+      "description": "Numeric literal",
+      "example": "123 or 123.45",
+      "note": "No quotes needed"
+    },
+    "boolean_value": {
+      "name": "Boolean Value",
+      "description": "Boolean literal",
+      "example": "true or false",
+      "note": "No quotes needed"
+    }
+  },
+  "allowed_libraries": {
+    "core": [
+      "fmt",
+      "strings", 
+      "strconv",
+      "errors"
+    ],
+    "encoding": [
+      "encoding/json",
+      "encoding/base64",
+      "encoding/hex"
+    ],
+    "crypto": [
+      "crypto/md5",
+      "crypto/sha256",
+      "crypto/rand"
+    ],
+    "time": [
+      "time"
+    ],
+    "regex": [
+      "regexp"
+    ],
+    "net": [
+      "net",
+      "net/url"
+    ],
+    "concurrency": [
+      "sync"
+    ],
+    "io": [
+      "io"
+    ],
+    "http": [
+      "net/http"
+    ]
+  },
+  "forbidden_libraries": [
+    "Any third-party packages",
+    "External dependencies",
+    "github.com/*",
+    "gopkg.in/*",
+    "Any non-standard library"
+  ],
+  "testing_examples": {
+    "test_command": "test_lab test_target='plugin' component_id='my_plugin' custom_data='[\"test_value\"]'",
+    "validation_command": "component_wizard component_type='plugin' component_id='my_plugin' validate_only='true'",
+    "sample_data": [
+      "[\"valid_input\"]",
+      "[\"\"]",
+      "[]",
+      "[\"192.168.1.100\"]",
+      "[\"user123\", \"login\", \"192.168.1.100\"]"
+    ]
+  }
+}

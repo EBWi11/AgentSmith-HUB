@@ -38,6 +38,12 @@
     "validation": "Verify package name, function signature, and import restrictions before creating plugins.",
     "forbidden_actions": "Never use external packages, wrong function names, or incorrect return types."
   },
+  "plugin_guides": {
+    "complete_guide": "Use plugin_creation_complete_guide for comprehensive plugin development information",
+    "quick_reference": "Use plugin_quick_reference for fast syntax lookup",
+    "creation_wizard": "Use plugin_creation_wizard for interactive plugin creation",
+    "troubleshooting": "Use plugin_troubleshooting_guide for debugging plugin issues"
+  },
   "data_sources": {
     "allowed": [
       "MCP Server: get_samplers_data response",
