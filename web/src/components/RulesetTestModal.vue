@@ -135,8 +135,8 @@ onMounted(() => {
 watch(() => props.show, async (newVal) => {
   showModal.value = newVal;
   if (newVal) {
-    // Reset state when opening modal but preserve test data
-    await resetState();
+    // Load cached test data when opening modal
+    await loadTestData();
     // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
@@ -145,52 +145,15 @@ watch(() => props.show, async (newVal) => {
   }
 }, { immediate: true });
 
-watch(() => props.rulesetId, async (newVal) => {
-  if (newVal) {
-    // Load cached test data for this ruleset using unified cache
-    const cachedData = dataCache.getTestCache('rulesets', newVal);
-    if (cachedData) {
-      inputData.value = cachedData;
-    } else {
-      // Try to get sample data from backend
-      try {
-        // Ensure we don't duplicate the 'ruleset.' prefix
-        const projectNodeSequence = newVal.startsWith('ruleset.') ? newVal : `ruleset.${newVal}`;
-        const sampleDataResponse = await hubApi.getSamplerData('ruleset', projectNodeSequence);
-        if (sampleDataResponse && sampleDataResponse.ruleset && Object.keys(sampleDataResponse.ruleset).length > 0) {
-          // Extract the first sample data from the response
-          let firstSampleData = null;
-          for (const [flowPath, samples] of Object.entries(sampleDataResponse.ruleset)) {
-            if (Array.isArray(samples) && samples.length > 0) {
-              // Take only the first sample from the first flow path that has data
-              const firstSample = samples[0];
-              if (firstSample && firstSample.data) {
-                firstSampleData = firstSample.data;
-                break; // Stop after finding the first sample
-              }
-            }
-          }
-          
-          if (firstSampleData) {
-            // Use the first sample data as test data
-            inputData.value = JSON.stringify(firstSampleData, null, 2);
-            console.log(`Loaded 1 sample for ruleset ${newVal}`);
-          } else {
-            inputData.value = defaultTestData;
-          }
-        } else {
-          inputData.value = defaultTestData;
-        }
-      } catch (error) {
-        console.warn(`Failed to load sample data for ruleset ${newVal}:`, error);
-        inputData.value = defaultTestData;
-      }
-    }
+watch(() => props.rulesetId, async (newVal, oldVal) => {
+  if (newVal !== oldVal && newVal) {
+    // Load cached test data for the new ruleset
+    await loadTestData();
+    // Reset test results when ruleset changes
+    testResults.value = [];
+    testError.value = null;
+    testExecuted.value = false;
   }
-  // Reset other state when ruleset changes
-  testResults.value = [];
-  testError.value = null;
-  testExecuted.value = false;
 });
 
 // Remove event listener on component unmount
@@ -218,14 +181,7 @@ async function runTest() {
   jsonError.value = null;
   jsonErrorLine.value = null;
   
-  // Debug: Check parameters
-  console.log('DEBUG: runTest called with:', {
-    rulesetId: props.rulesetId,
-    rulesetContent: props.rulesetContent,
-    rulesetContentType: typeof props.rulesetContent,
-    rulesetContentLength: props.rulesetContent?.length || 0,
-    willUseContentAPI: props.rulesetContent !== undefined
-  });
+
   
   try {
     // Parse input data
@@ -311,7 +267,7 @@ function formatTestResult() {
 
 // Save test data when it changes
 function onInputDataChange(newValue) {
-  if (props.rulesetId) {
+  if (props.rulesetId && newValue && newValue.trim() !== '') {
     dataCache.setTestCache('rulesets', props.rulesetId, newValue);
   }
 }
@@ -325,51 +281,59 @@ function formatJson(obj) {
   }
 }
 
-async function resetState() {
-  // Load cached test data or use default using unified cache
+// Load test data for the current ruleset
+async function loadTestData() {
   if (props.rulesetId) {
+    // First try to load cached test data
     const cachedData = dataCache.getTestCache('rulesets', props.rulesetId);
     if (cachedData) {
       inputData.value = cachedData;
-    } else {
-      // Try to get sample data from backend
-      try {
-        // Ensure we don't duplicate the 'ruleset.' prefix
-        const projectNodeSequence = props.rulesetId.startsWith('ruleset.') ? props.rulesetId : `ruleset.${props.rulesetId}`;
-        const sampleDataResponse = await hubApi.getSamplerData('ruleset', projectNodeSequence);
-        if (sampleDataResponse && sampleDataResponse.ruleset && Object.keys(sampleDataResponse.ruleset).length > 0) {
-          // Extract the first sample data from the response
-          let firstSampleData = null;
-          for (const [flowPath, samples] of Object.entries(sampleDataResponse.ruleset)) {
-            if (Array.isArray(samples) && samples.length > 0) {
-              // Take only the first sample from the first flow path that has data
-              const firstSample = samples[0];
-              if (firstSample && firstSample.data) {
-                firstSampleData = firstSample.data;
-                break; // Stop after finding the first sample
-              }
+      return;
+    }
+    
+    // If no cached data, try to get sample data from backend
+    try {
+      // Ensure we don't duplicate the 'ruleset.' prefix
+      const projectNodeSequence = props.rulesetId.startsWith('ruleset.') ? props.rulesetId : `ruleset.${props.rulesetId}`;
+      const sampleDataResponse = await hubApi.getSamplerData('ruleset', projectNodeSequence);
+      if (sampleDataResponse && sampleDataResponse.ruleset && Object.keys(sampleDataResponse.ruleset).length > 0) {
+        // Extract the first sample data from the response
+        let firstSampleData = null;
+        for (const [flowPath, samples] of Object.entries(sampleDataResponse.ruleset)) {
+          if (Array.isArray(samples) && samples.length > 0) {
+            // Take only the first sample from the first flow path that has data
+            const firstSample = samples[0];
+            if (firstSample && firstSample.data) {
+              firstSampleData = firstSample.data;
+              break; // Stop after finding the first sample
             }
           }
-          
-          if (firstSampleData) {
+        }
+        
+                  if (firstSampleData) {
             // Use the first sample data as test data
-            inputData.value = JSON.stringify(firstSampleData, null, 2);
-            console.log(`Loaded 1 sample for ruleset ${props.rulesetId}`);
+            const sampleJson = JSON.stringify(firstSampleData, null, 2);
+            inputData.value = sampleJson;
+            
+            // Cache the sample data for future use
+            dataCache.setTestCache('rulesets', props.rulesetId, sampleJson);
           } else {
-            inputData.value = defaultTestData;
-          }
-        } else {
           inputData.value = defaultTestData;
         }
-      } catch (error) {
-        console.warn(`Failed to load sample data for ruleset ${props.rulesetId}:`, error);
+      } else {
         inputData.value = defaultTestData;
       }
+    } catch (error) {
+      console.warn(`Failed to load sample data for ruleset ${props.rulesetId}:`, error);
+      inputData.value = defaultTestData;
     }
   } else {
     inputData.value = defaultTestData;
   }
-  
+}
+
+async function resetState() {
+  // Reset test results and errors
   testResults.value = [];
   testError.value = null;
   testExecuted.value = false;
