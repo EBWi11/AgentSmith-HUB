@@ -175,7 +175,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
         
         <!-- 使用插件计算超出比例（假设有自定义插件） -->
         <append type="PLUGIN" field="over_ratio">
-            calculate_ratio(_$amount, _$user.daily_limit)
+            calculate_ratio(amount, user.daily_limit)
         </append>
         
         <!-- 根据VIP等级添加不同处理 -->
@@ -190,30 +190,30 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 `_$` 前缀用于动态引用数据中的其他字段值，而不是使用静态的字符串。
 
 **语法格式：**
-- `_$字段名`：引用单个字段
-- `_$父字段.子字段`：引用嵌套字段
-- `_$ORIDATA`：引用整个原始数据对象
+- `_$字段名`：引用单个字段（插件内使用不需要遵循该语法）。
+- `_$父字段.子字段`：引用嵌套字段（插件内使用不需要遵循该语法）。
+- `_$ORIDATA`：引用整个原始数据对象（插件内使用也需要遵循该语法）。
 
 **工作原理：**
-1. 当规则引擎遇到 `_$` 前缀时，会将其识别为动态引用
+1. 当规则引擎遇到 `_$` 前缀时，会将其识别为动态引用；但是在插件中要应用检测数据内数据时，不需要使用该前缀，直接使用该字段即可。
 2. 从当前处理的数据中提取对应字段的值
 3. 使用提取的值进行比较或处理
 
 **在上面的例子中：**
-- `_$user.daily_limit` 从数据中提取 `user.daily_limit` 的值（5000）
-- `_$amount` 提取 `amount` 字段的值（10000）
+- check 中 `_$user.daily_limit` 从数据中提取 `user.daily_limit` 的值（5000）；
+- plugin 中 `amount` 提取 `amount` 字段的值（10000）；`user.daily_limit` 从数据中提取 `user.daily_limit` 的值（5000）；
 - 动态比较：10000 > 5000，条件满足
 
 **常见用法：**
 ```xml
 <!-- 动态比较两个字段 -->
-<check type="NEQ" field="current_user">_$login_user</check>
+<check type="NEQ" field="current_user">login_user</check>
 
 <!-- 在 append 中使用动态值 -->
-<append field="message">User _$username logged in from _$source_ip</append>
+<append field="username">_$username</append>
 
 <!-- 在插件参数中使用 -->
-<plugin>blockIP(_$malicious_ip, _$block_duration)</plugin>
+<plugin>blockIP(malicious_ip, block_duration)</plugin>
 ```
 
 **_$ORIDATA 的使用：**
@@ -248,7 +248,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <threshold group_by="source_ip" range="5m" value="10"/>
     
     <!-- 继续其他检查（假设有自定义插件） -->
-    <check type="PLUGIN">is_working_hours(_$check_time)</check>
+    <check type="PLUGIN">is_working_hours(check_time)</check>
     
     <!-- 最后处理 -->
     <append field="processed">true</append>
@@ -340,10 +340,10 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
                    range="1h" value="3"/>
         
         <!-- 使用插件进行深度分析（假设有自定义插件） -->
-        <check type="PLUGIN">analyze_transfer_risk(_$request.body)</check>
+        <check type="PLUGIN">analyze_transfer_risk(request.body)</check>
         
         <!-- 提取和处理user-agent -->
-        <append type="PLUGIN" field="client_info">parseUA(_$request.headers.user-agent)</append>
+        <append type="PLUGIN" field="client_info">parseUA(request.headers.user-agent)</append>
         
         <!-- 清理敏感信息 -->
         <del>request.headers.authorization</del>
@@ -405,16 +405,16 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
             </check>
             <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
             <check id="unknown_hash" type="PLUGIN">
-                is_known_malware(_$hash)
+                is_known_malware(hash)
             </check>
 </checklist>
         
         <!-- 丰富化数据 -->
-        <append type="PLUGIN" field="virus_scan">virusTotal(_$hash)</append>
+        <append type="PLUGIN" field="virus_scan">virusTotal(hash)</append>
         <append field="threat_level">high</append>
         
         <!-- 自动响应（假设有自定义插件） -->
-        <plugin>quarantine_file(_$filename)</plugin>
+        <plugin>quarantine_file(filename)</plugin>
         <plugin>notify_security_team(_$ORIDATA)</plugin>
     </rule>
 </root>
@@ -519,7 +519,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
     <threshold group_by="user,ip" range="5m" value="5"/>
     
     <append field="alert_type">brute_force_attempt</append>
-    <plugin>block_ip(_$ip, 3600)</plugin>  <!-- 封禁1小时 -->
+    <plugin>block_ip(ip, 3600)</plugin>  <!-- 封禁1小时 -->
 </rule>
 ```
 
@@ -606,17 +606,18 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 🧩 内置插件完整列表
 
 ##### 检查类插件（用于条件判断）
-可在 `<check type="PLUGIN">` 中使用，返回布尔值。支持使用 `!` 前缀对结果取反，例如 `<check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>` 表示当IP不是私有地址时条件成立。
+可在 `<check type="PLUGIN">` 中使用，返回布尔值。支持使用 `!` 前缀对结果取反，例如 `<check type="PLUGIN">!isPrivateIP(dest_ip)</check>` 表示当IP不是私有地址时条件成立。
 
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `isPrivateIP` | 检查IP是否为私有地址 | ip (string) | `<check type="PLUGIN">isPrivateIP(_$source_ip)</check>` |
-| `cidrMatch` | 检查IP是否在CIDR范围内 | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(_$client_ip, "192.168.1.0/24")</check>` |
-| `geoMatch` | 检查IP是否属于指定国家 | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(_$source_ip, "US")</check>` |
-| `suppressOnce` | 告警抑制：时间窗口内只触发一次 | key (any), windowSec (int), ruleid (string, 可选) | `<check type="PLUGIN">suppressOnce(_$alert_key, 300, "rule_001")</check>` |
+| `isPrivateIP` | 检查IP是否为私有地址 | ip (string) | `<check type="PLUGIN">isPrivateIP(source_ip)</check>` |
+| `cidrMatch` | 检查IP是否在CIDR范围内 | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(client_ip, "192.168.1.0/24")</check>` |
+| `geoMatch` | 检查IP是否属于指定国家 | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(source_ip, "US")</check>` |
+| `suppressOnce` | 告警抑制：时间窗口内只触发一次 | key (any), windowSec (int), ruleid (string, 可选) | `<check type="PLUGIN">suppressOnce(alert_key, 300, "rule_001")</check>` |
 
 **注意插件参数格式**：
-- 当引用数据中的字段时，使用 `_$` 前缀：`_$source_ip`
+- 当引用数据中的字段时，无需使用 `_$` 前缀，直接使用字段名：`source_ip`
+- 当完整引用全部原始数据时：`_$ORIDATA`
 - 当使用静态值时，直接使用字符串（带引号）：`"192.168.1.0/24"`
 - 当使用数字时，不需要引号：`300`
 
@@ -630,43 +631,43 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | `ago` | 获取N秒前的时间戳 | seconds (int/float/string) | `<append type="PLUGIN" field="past_time">ago(3600)</append>` |
 | `dayOfWeek` | 获取星期几(0-6, 0=周日) | 可选: timestamp (int64) | `<append type="PLUGIN" field="weekday">dayOfWeek()</append>` |
 | `hourOfDay` | 获取小时(0-23) | 可选: timestamp (int64) | `<append type="PLUGIN" field="hour">hourOfDay()</append>` |
-| `tsToDate` | 时间戳转RFC3339格式 | timestamp (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(_$event_time)</append>` |
+| `tsToDate` | 时间戳转RFC3339格式 | timestamp (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(event_time)</append>` |
 
 **编码和哈希插件**
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `base64Encode` | Base64编码 | input (string) | `<append type="PLUGIN" field="encoded">base64Encode(_$raw_data)</append>` |
-| `base64Decode` | Base64解码 | encoded (string) | `<append type="PLUGIN" field="decoded">base64Decode(_$encoded_data)</append>` |
-| `hashMD5` | 计算MD5哈希 | input (string) | `<append type="PLUGIN" field="md5">hashMD5(_$password)</append>` |
-| `hashSHA1` | 计算SHA1哈希 | input (string) | `<append type="PLUGIN" field="sha1">hashSHA1(_$content)</append>` |
-| `hashSHA256` | 计算SHA256哈希 | input (string) | `<append type="PLUGIN" field="sha256">hashSHA256(_$file_data)</append>` |
+| `base64Encode` | Base64编码 | input (string) | `<append type="PLUGIN" field="encoded">base64Encode(raw_data)</append>` |
+| `base64Decode` | Base64解码 | encoded (string) | `<append type="PLUGIN" field="decoded">base64Decode(encoded_data)</append>` |
+| `hashMD5` | 计算MD5哈希 | input (string) | `<append type="PLUGIN" field="md5">hashMD5(password)</append>` |
+| `hashSHA1` | 计算SHA1哈希 | input (string) | `<append type="PLUGIN" field="sha1">hashSHA1(content)</append>` |
+| `hashSHA256` | 计算SHA256哈希 | input (string) | `<append type="PLUGIN" field="sha256">hashSHA256(file_data)</append>` |
 
 **URL处理插件**
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `extractDomain` | 从URL提取域名 | urlOrHost (string) | `<append type="PLUGIN" field="domain">extractDomain(_$request_url)</append>` |
-| `extractTLD` | 从域名提取顶级域名 | domain (string) | `<append type="PLUGIN" field="tld">extractTLD(_$hostname)</append>` |
-| `extractSubdomain` | 从主机名提取子域名 | host (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(_$full_hostname)</append>` |
+| `extractDomain` | 从URL提取域名 | urlOrHost (string) | `<append type="PLUGIN" field="domain">extractDomain(request_url)</append>` |
+| `extractTLD` | 从域名提取顶级域名 | domain (string) | `<append type="PLUGIN" field="tld">extractTLD(hostname)</append>` |
+| `extractSubdomain` | 从主机名提取子域名 | host (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(full_hostname)</append>` |
 
 **字符串处理插件**
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `replace` | 字符串替换 | input (string), old (string), new (string) | `<append type="PLUGIN" field="cleaned">replace(_$raw_text, "bad", "good")</append>` |
-| `regexExtract` | 正则表达式提取 | input (string), pattern (string) | `<append type="PLUGIN" field="extracted">regexExtract(_$log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
-| `regexReplace` | 正则表达式替换 | input (string), pattern (string), replacement (string) | `<append type="PLUGIN" field="masked">regexReplace(_$email, "(.+)@(.+)", "$1@***")</append>` |
+| `replace` | 字符串替换 | input (string), old (string), new (string) | `<append type="PLUGIN" field="cleaned">replace(raw_text, "bad", "good")</append>` |
+| `regexExtract` | 正则表达式提取 | input (string), pattern (string) | `<append type="PLUGIN" field="extracted">regexExtract(log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
+| `regexReplace` | 正则表达式替换 | input (string), pattern (string), replacement (string) | `<append type="PLUGIN" field="masked">regexReplace(email, "(.+)@(.+)", "$1@***")</append>` |
 
 **数据解析插件**
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `parseJSON` | 解析JSON字符串 | jsonString (string) | `<append type="PLUGIN" field="parsed">parseJSON(_$json_data)</append>` |
-| `parseUA` | 解析User-Agent | userAgent (string) | `<append type="PLUGIN" field="browser_info">parseUA(_$user_agent)</append>` |
+| `parseJSON` | 解析JSON字符串 | jsonString (string) | `<append type="PLUGIN" field="parsed">parseJSON(json_data)</append>` |
+| `parseUA` | 解析User-Agent | userAgent (string) | `<append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>` |
 
 **威胁情报插件**
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | hash (string), apiKey (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(_$file_hash)</append>` |
-| `shodan` | 查询Shodan IP地址基础设施情报 | ip (string), apiKey (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(_$ip_address)</append>` |
-| `threatBook` | 查询微步在线威胁情报 | queryValue (string), queryType (string), apiKey (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(_$target_ip, "ip")</append>` |
+| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | hash (string), apiKey (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(file_hash)</append>` |
+| `shodan` | 查询Shodan IP地址基础设施情报 | ip (string), apiKey (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(ip_address)</append>` |
+| `threatBook` | 查询微步在线威胁情报 | queryValue (string), queryType (string), apiKey (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(target_ip, "ip")</append>` |
 
 **威胁情报插件配置说明**：
 - API Key 可以在配置文件中统一设置，也可以在插件调用时传入
@@ -693,11 +694,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <rule id="suspicious_connection" name="可疑连接检测">
         <!-- 检查是否为外部连接 -->
-    <check type="PLUGIN">isPrivateIP(_$source_ip)</check>  <!-- 源是内网 -->
-    <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>  <!-- 目标是外网 -->
+    <check type="PLUGIN">isPrivateIP(source_ip)</check>  <!-- 源是内网 -->
+    <check type="PLUGIN">!isPrivateIP(dest_ip)</check>  <!-- 目标是外网 -->
     
         <!-- 检查地理位置 -->
-    <append type="PLUGIN" field="dest_country">geoMatch(_$dest_ip)</append>
+    <append type="PLUGIN" field="dest_country">geoMatch(dest_ip)</append>
     
     <!-- 添加时间戳 -->
     <append type="PLUGIN" field="detection_time">now()</append>
@@ -710,7 +711,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <append field="alert_type">potential_data_exfiltration</append>
     
     <!-- 查询威胁情报（如果有配置） -->
-    <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
+    <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
 </rule>
 ```
 
@@ -739,10 +740,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <check type="EQU" field="datatype">external_connection</check>
    
    <!-- 第2步：确认目标IP是公网地址 -->
-   <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+   <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
 
    <!-- 第3步：查询威胁情报，增强数据 -->
-    <append type="PLUGIN" field="threat_intel">threatBook(_$dest_ip, "ip")</append>
+    <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
     
     <!-- 第4步：解析威胁情报结果 -->
     <append type="PLUGIN" field="threat_level">
@@ -759,14 +760,14 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <!-- 第6步：丰富告警信息 -->
     <append field="alert_title">Malicious IP Communication Detected</append>
     <append type="PLUGIN" field="ip_reputation">
-        parseJSON(_$threat_intel).reputation_score
+        parseJSON(threat_intel.reputation_score)
     </append>
     <append type="PLUGIN" field="threat_tags">
-        parseJSON(_$threat_intel).tags
+        parseJSON(threat_intel.tags)
     </append>
     
     <!-- 第7步：生成详细告警（假设有自定义插件） -->
-    <plugin>generateThreatAlert(_$ORIDATA, _$threat_intel)</plugin>
+    <plugin>generateThreatAlert(_$ORIDATA, threat_intel)</plugin>
 </rule>
 ```
 
@@ -802,10 +803,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <check type="EQU" field="log_level">ERROR</check>
     
     <!-- 解析JSON数据 -->
-    <append type="PLUGIN" field="parsed_body">parseJSON(_$request_body)</append>
+    <append type="PLUGIN" field="parsed_body">parseJSON(request_body)</append>
     
     <!-- 解析User-Agent -->
-    <append type="PLUGIN" field="browser_info">parseUA(_$user_agent)</append>
+    <append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>
     
     <!-- 提取错误信息 -->
     <append type="PLUGIN" field="error_type">
@@ -813,16 +814,16 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     </append>
     
     <!-- 时间处理 -->
-    <append type="PLUGIN" field="readable_time">tsToDate(_$timestamp)</append>
-    <append type="PLUGIN" field="hour">hourOfDay(_$timestamp)</append>
+    <append type="PLUGIN" field="readable_time">tsToDate(timestamp)</append>
+    <append type="PLUGIN" field="hour">hourOfDay(timestamp)</append>
     
     <!-- 数据脱敏 -->
     <append type="PLUGIN" field="sanitized_message">
-        regexReplace(_$message, "password\":\"[^\"]+", "password\":\"***")
+        regexReplace(message, "password\":\"[^\"]+", "password\":\"***")
     </append>
     
     <!-- 告警抑制：同类错误5分钟只报一次 -->
-    <check type="PLUGIN">suppressOnce(_$error_type, 300, "error_log_analysis")</check>
+    <check type="PLUGIN">suppressOnce(error_type, 300, "error_log_analysis")</check>
     
     <!-- 生成告警（假设有自定义插件） -->
     <plugin>sendToElasticsearch(_$ORIDATA)</plugin>
@@ -836,15 +837,15 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <check type="EQU" field="contains_sensitive_data">true</check>
     
     <!-- 数据哈希化 -->
-    <append type="PLUGIN" field="user_id_hash">hashSHA256(_$user_id)</append>
-    <append type="PLUGIN" field="session_hash">hashMD5(_$session_id)</append>
+    <append type="PLUGIN" field="user_id_hash">hashSHA256(user_id)</append>
+    <append type="PLUGIN" field="session_hash">hashMD5(session_id)</append>
     
     <!-- 敏感信息编码 -->
-    <append type="PLUGIN" field="encoded_payload">base64Encode(_$sensitive_payload)</append>
+    <append type="PLUGIN" field="encoded_payload">base64Encode(sensitive_payload)</append>
     
     <!-- 清理和替换 -->
-    <append type="PLUGIN" field="cleaned_log">replace(_$raw_log, _$user_password, "***")</append>
-    <append type="PLUGIN" field="masked_phone">regexReplace(_$phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
+    <append type="PLUGIN" field="cleaned_log">replace(raw_log, user_password, "***")</append>
+    <append type="PLUGIN" field="masked_phone">regexReplace(phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
     
     <!-- 删除原始敏感数据 -->
     <del>user_password,raw_sensitive_data,unencrypted_payload</del>
@@ -862,12 +863,12 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 规则A：网络威胁检测 -->
 <rule id="network_threat">
-    <check type="PLUGIN">suppressOnce(_$source_ip, 300)</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300)</check>
 </rule>
 
 <!-- 规则B：登录异常检测 -->  
 <rule id="login_anomaly">
-    <check type="PLUGIN">suppressOnce(_$source_ip, 300)</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300)</check>
 </rule>
 ```
 
@@ -878,12 +879,12 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <!-- 规则A：网络威胁检测 -->
 <rule id="network_threat">
-    <check type="PLUGIN">suppressOnce(_$source_ip, 300, "network_threat")</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300, "network_threat")</check>
 </rule>
 
 <!-- 规则B：登录异常检测 -->  
 <rule id="login_anomaly">
-    <check type="PLUGIN">suppressOnce(_$source_ip, 300, "login_anomaly")</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300, "login_anomaly")</check>
 </rule>
 ```
 
@@ -901,7 +902,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="optimized">
     <check type="INCL" field="alert_level">high</check>
     <check type="NOTNULL" field="source_ip"></check>
-    <append type="PLUGIN" field="threat_intel">threatBook(_$source_ip, "ip")</append>
+    <append type="PLUGIN" field="threat_intel">threatBook(source_ip, "ip")</append>
 </rule>
 ```
 
@@ -929,13 +930,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             chrome.exe|firefox.exe|explorer.exe
         </check>
         <!-- 可以添加多个检查条件，全部满足才会被白名单过滤 -->
-        <check type="PLUGIN">isPrivateIP(_$source_ip)</check>
+        <check type="PLUGIN">isPrivateIP(source_ip)</check>
 </rule>
     
     <!-- 白名单规则3：内部测试流量 -->
     <rule id="test_traffic">
         <check type="INCL" field="user_agent">internal-testing-bot</check>
-        <check type="PLUGIN">cidrMatch(_$source_ip, "192.168.100.0/24")</check>
+        <check type="PLUGIN">cidrMatch(source_ip, "192.168.100.0/24")</check>
     </rule>
 </root>
 ```
@@ -951,7 +952,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <!-- 规则1：PowerShell Empire检测 -->
     <rule id="powershell_empire" name="PowerShell Empire C2检测">
         <!-- 灵活顺序：先enrichment再检测 -->
-        <append type="PLUGIN" field="decoded_cmd">base64Decode(_$command_line)</append>
+        <append type="PLUGIN" field="decoded_cmd">base64Decode(command_line)</append>
         
         <!-- 检查进程名 -->
         <check type="INCL" field="process_name">powershell</check>
@@ -969,15 +970,15 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 威胁情报查询 -->
         <append type="PLUGIN" field="c2_url">
-            regexExtract(_$decoded_cmd, "https?://[^\\s]+")
+            regexExtract(decoded_cmd, "https?://[^\\s]+")
         </append>
         
         <!-- 生成IoC -->
         <append field="ioc_type">powershell_empire_c2</append>
-        <append type="PLUGIN" field="ioc_hash">hashSHA256(_$decoded_cmd)</append>
+        <append type="PLUGIN" field="ioc_hash">hashSHA256(decoded_cmd)</append>
         
         <!-- 自动响应（假设有自定义插件） -->
-        <plugin>isolateHost(_$hostname)</plugin>
+        <plugin>isolateHost(hostname)</plugin>
         <plugin>extractAndShareIoCs(_$ORIDATA)</plugin>
     </rule>
     
@@ -993,7 +994,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             <check id="rdp_brute" type="EQU" field="event_id">4625</check>
             <!-- 排除内部扫描 -->
             <check id="internal_scan" type="PLUGIN">
-                isPrivateIP(_$source_ip)
+                isPrivateIP(source_ip)
             </check>
 </checklist>
         
@@ -1002,10 +1003,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 风险评分（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_score">
-            calculateLateralMovementRisk(_$ORIDATA)
+            calculateLateralMovementRisk(ORIDATA)
         </append>
         
-        <plugin>updateAttackGraph(_$source_ip, _$dest_ip)</plugin>
+        <plugin>updateAttackGraph(source_ip, dest_ip)</plugin>
     </rule>
     
     <!-- 规则3：数据外泄检测 -->
@@ -1016,7 +1017,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </check>
 
        <!-- 检查外联行为 -->
-       <check type="PLUGIN">!isPrivateIP(_$dest_ip)</check>
+       <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
        
         <!-- 异常传输检测 -->
         <threshold group_by="source_ip" range="1h" count_type="SUM" 
@@ -1025,17 +1026,17 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <!-- DNS隧道检测（假设有自定义插件） -->
         <checklist condition="dns_tunnel_check">
             <check id="dns_tunnel_check" type="PLUGIN">
-                detectDNSTunnel(_$dns_queries)
+                detectDNSTunnel(dns_queries)
             </check>
         </checklist>
         
         <!-- 生成告警 -->
         <append field="alert_severity">critical</append>
         <append type="PLUGIN" field="data_classification">
-            classifyData(_$file_path)
+            classifyData(file_path)
         </append>
         
-        <plugin>blockDataTransfer(_$source_ip, _$dest_ip)</plugin>
+        <plugin>blockDataTransfer(source_ip, dest_ip)</plugin>
         <plugin>triggerIncidentResponse(_$ORIDATA)</plugin>
     </rule>
 </root>
@@ -1049,23 +1050,23 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <rule id="account_takeover" name="账户接管检测">
         <!-- 实时设备指纹（假设有自定义插件） -->
         <append type="PLUGIN" field="device_fingerprint">
-            generateFingerprint(_$user_agent, _$screen_resolution, _$timezone)
+            generateFingerprint(user_agent, screen_resolution, timezone)
         </append>
         
         <!-- 检查设备变更（假设有自定义插件） -->
         <check type="PLUGIN">
-            isNewDevice(_$user_id, _$device_fingerprint)
+            isNewDevice(user_id, device_fingerprint)
         </check>
         
         <!-- 地理位置异常（假设有自定义插件） -->
         <append type="PLUGIN" field="geo_distance">
-            calculateGeoDistance(_$user_id, _$current_ip, _$last_ip)
+            calculateGeoDistance(user_id, current_ip, last_ip)
         </append>
         <check type="MT" field="geo_distance">500</check>  <!-- 500km -->
         
         <!-- 行为模式分析（假设有自定义插件） -->
         <append type="PLUGIN" field="behavior_score">
-            analyzeBehaviorPattern(_$user_id, _$recent_actions)
+            analyzeBehaviorPattern(user_id, recent_actions)
         </append>
         
         <!-- 交易速度检测 -->
@@ -1073,12 +1074,12 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 风险决策（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_decision">
-            makeRiskDecision(_$behavior_score, _$geo_distance, _$device_fingerprint)
+            makeRiskDecision(behavior_score, geo_distance, device_fingerprint)
         </append>
         
         <!-- 实时干预（假设有自定义插件） -->
-        <plugin>requireMFA(_$user_id, _$transaction_id)</plugin>
-        <plugin>notifyUser(_$user_id, "suspicious_activity")</plugin>
+        <plugin>requireMFA(user_id, transaction_id)</plugin>
+        <plugin>notifyUser(user_id, "suspicious_activity")</plugin>
     </rule>
     
     <!-- 规则2：洗钱行为检测 -->
@@ -1087,21 +1088,21 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <checklist condition="structuring or layering or integration">
             <!-- 结构化拆分 -->
             <check id="structuring" type="PLUGIN">
-                detectStructuring(_$user_id, _$transaction_history)
+                detectStructuring(user_id, transaction_history)
             </check>
             <!-- 分层处理 -->
             <check id="layering" type="PLUGIN">
-                detectLayering(_$account_network, _$transaction_flow)
+                detectLayering(account_network, transaction_flow)
             </check>
             <!-- 整合阶段 -->
             <check id="integration" type="PLUGIN">
-                detectIntegration(_$merchant_category, _$transaction_pattern)
+                detectIntegration(merchant_category, transaction_pattern)
             </check>
         </checklist>
         
         <!-- 关联分析（假设有自定义插件） -->
         <append type="PLUGIN" field="network_risk">
-            analyzeAccountNetwork(_$user_id, _$connected_accounts)
+            analyzeAccountNetwork(user_id, connected_accounts)
         </append>
         
         <!-- 累计金额监控 -->
@@ -1113,8 +1114,8 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
             generateSAR(_$ORIDATA)  <!-- Suspicious Activity Report -->
         </append>
         
-        <plugin>freezeAccountCluster(_$account_cluster)</plugin>
-        <plugin>notifyCompliance(_$sar_report)</plugin>
+        <plugin>freezeAccountCluster(account_cluster)</plugin>
+        <plugin>notifyCompliance(sar_report)</plugin>
     </rule>
 </root>
 ```
@@ -1129,16 +1130,16 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="NOTNULL" field="auth_token"></check>
         
         <!-- 验证token有效性（假设有自定义插件） -->
-        <check type="PLUGIN">validateToken(_$auth_token)</check>
+        <check type="PLUGIN">validateToken(auth_token)</check>
         
         <!-- 上下文感知（假设有自定义插件） -->
         <append type="PLUGIN" field="trust_score">
             calculateTrustScore(
-                _$user_id,
-                _$device_trust,
-                _$network_location,
-                _$behavior_baseline,
-                _$time_of_access
+                user_id,
+                device_trust,
+                network_location,
+                behavior_baseline,
+                time_of_access
             )
         </append>
         
@@ -1146,17 +1147,17 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <checklist condition="low_trust or anomaly_detected">
             <check id="low_trust" type="LT" field="trust_score">0.7</check>
             <check id="anomaly_detected" type="PLUGIN">
-                detectAnomaly(_$current_behavior, _$baseline_behavior)
+                detectAnomaly(current_behavior, baseline_behavior)
             </check>
     </checklist>
         
         <!-- 微分段策略（假设有自定义插件） -->
         <append type="PLUGIN" field="allowed_resources">
-            applyMicroSegmentation(_$trust_score, _$requested_resource)
+            applyMicroSegmentation(trust_score, requested_resource)
         </append>
         
         <!-- 实时策略执行（假设有自定义插件） -->
-        <plugin>enforcePolicy(_$user_id, _$allowed_resources)</plugin>
+        <plugin>enforcePolicy(user_id, allowed_resources)</plugin>
         <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
 </rule>
     
@@ -1164,28 +1165,28 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <rule id="device_trust" name="设备信任评估">
         <!-- 设备健康检查（假设有自定义插件） -->
         <append type="PLUGIN" field="device_health">
-            checkDeviceHealth(_$device_id)
+            checkDeviceHealth(device_id)
         </append>
         
         <!-- 合规性验证（假设有自定义插件） -->
         <checklist condition="patch_level and antivirus and encryption and mdm_enrolled">
             <check id="patch_level" type="PLUGIN">
-                isPatchCurrent(_$os_version, _$patch_level)
+                isPatchCurrent(os_version, patch_level)
             </check>
             <check id="antivirus" type="PLUGIN">
-                isAntivirusActive(_$av_status)
+                isAntivirusActive(av_status)
             </check>
             <check id="encryption" type="PLUGIN">
-                isDiskEncrypted(_$device_id)
+                isDiskEncrypted(device_id)
             </check>
             <check id="mdm_enrolled" type="PLUGIN">
-                isMDMEnrolled(_$device_id)
+                isMDMEnrolled(device_id)
             </check>
     </checklist>
         
         <!-- 证书验证（假设有自定义插件） -->
         <check type="PLUGIN">
-            validateDeviceCertificate(_$device_cert)
+            validateDeviceCertificate(device_cert)
         </check>
         
         <!-- 信任评分（假设有自定义插件） -->
@@ -1194,7 +1195,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </append>
         
         <!-- 访问决策（假设有自定义插件） -->
-        <plugin>applyDevicePolicy(_$device_id, _$device_trust_score)</plugin>
+        <plugin>applyDevicePolicy(device_id, device_trust_score)</plugin>
 </rule>
 </root>
 ```
@@ -1299,7 +1300,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | 类型 | 说明 | 示例 |
 |------|------|------|
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
-| PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(_$email)</check>` |
+| PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
 ### 5.4 数据处理操作
 
@@ -1370,19 +1371,19 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 检查类插件（返回bool）
 | 插件 | 功能 | 参数 | 示例 |
 |------|------|------|------|
-| isPrivateIP | 检查私有IP | ip | `isPrivateIP(_$ip)` |
-| cidrMatch | CIDR匹配 | ip, cidr | `cidrMatch(_$ip, "10.0.0.0/8")` |
-| geoMatch | 地理位置匹配 | ip, country | `geoMatch(_$ip, "US")` |
-| suppressOnce | 告警抑制 | key, seconds, ruleid | `suppressOnce(_$ip, 300, "rule1")` |
+| isPrivateIP | 检查私有IP | ip | `isPrivateIP(ip)` |
+| cidrMatch | CIDR匹配 | ip, cidr | `cidrMatch(ip, "10.0.0.0/8")` |
+| geoMatch | 地理位置匹配 | ip, country | `geoMatch(ip, "US")` |
+| suppressOnce | 告警抑制 | key, seconds, ruleid | `suppressOnce(ip, 300, "rule1")` |
 
 #### 数据处理插件（返回各种类型）
 | 插件 | 功能 | 返回类型 | 示例 |
 |------|------|----------|------|
 | now | 当前时间 | int64 | `now()` |
-| base64Encode | Base64编码 | string | `base64Encode(_$data)` |
-| hashSHA256 | SHA256哈希 | string | `hashSHA256(_$content)` |
-| parseJSON | JSON解析 | object | `parseJSON(_$json_str)` |
-| regexExtract | 正则提取 | string | `regexExtract(_$text, pattern)` |
+| base64Encode | Base64编码 | string | `base64Encode(data)` |
+| hashSHA256 | SHA256哈希 | string | `hashSHA256(content)` |
+| parseJSON | JSON解析 | object | `parseJSON(json_str)` |
+| regexExtract | 正则提取 | string | `regexExtract(text, pattern)` |
 
 ### 5.7 性能优化建议
 
@@ -1567,7 +1568,7 @@ func Eval(email string, allowedDomain string) (bool, error) {
 
 使用示例：
 ```xml
-<check type="PLUGIN">checkEmailDomain(_$email, "company.com")</check>
+<check type="PLUGIN">checkEmailDomain(email, "company.com")</check>
 ```
 
 #### 数据处理插件示例
@@ -1622,7 +1623,7 @@ func Eval(userAgent string) (interface{}, bool, error) {
 使用示例：
 ```xml
 <!-- 提取信息到新字段 -->
-<append type="PLUGIN" field="ua_info">parseCustomUA(_$user_agent)</append>
+<append type="PLUGIN" field="ua_info">parseCustomUA(user_agent)</append>
 
 <!-- 后续可以访问解析结果 -->
 <check type="EQU" field="ua_info.browser">Chrome</check>
@@ -1833,8 +1834,8 @@ func Eval(userID string, threshold int) (bool, error) {
 ```xml
 <!-- 测试规则 -->
 <rule id="test_custom_plugin">
-    <check type="PLUGIN">myCustomPlugin(_$test_field, "expected_value")</check>
-    <append type="PLUGIN" field="result">myDataPlugin(_$input_data)</append>
+    <check type="PLUGIN">myCustomPlugin(test_field, "expected_value")</check>
+    <append type="PLUGIN" field="result">myDataPlugin(input_data)</append>
 </rule>
 ```
 

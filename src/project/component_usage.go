@@ -14,7 +14,7 @@ func (c *ComponentUsageCounter) CountProjectsUsing(t string, id string, excludeP
 		excludeID = excludeProjectID[0]
 	}
 
-	ForEachProject(func(projectID string, proj *Project) bool {
+	ForEachProjectUnsafa(func(projectID string, proj *Project) bool {
 		if projectID != excludeID {
 			if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
 				if proj.CheckExist(t, id) {

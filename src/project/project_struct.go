@@ -415,6 +415,15 @@ func ForEachProject(fn func(id string, project *Project) bool) {
 	}
 }
 
+// Safe iteration functions
+func ForEachProjectUnsafa(fn func(id string, project *Project) bool) {
+	for id, proj := range GlobalProject.Projects {
+		if !fn(id, proj) {
+			break
+		}
+	}
+}
+
 func ForEachInput(fn func(id string, inp *input.Input) bool) {
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
