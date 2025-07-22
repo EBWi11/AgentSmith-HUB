@@ -12,5 +12,5 @@ AgentSmith-HUB is a next-generation **Security Data Pipeline Platform** designed
 4. Run start.sh or stop.sh under the hub to start or stop the hub backend service, like: `nohup ./start.sh &`, The satrt.sh default mode is Leader, `start.sh --follower` will run in follower mode. In this mode, config.yaml needs to be consistent with Leader (that is, use the same Redis instance).
 5. The first time you run the backend, a token will be created, located in `/etc/hub/.token`
 6. The backend logs are located in `/var/log/hub_logs/`
-7. Install Nginx, and `sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/conf.d/`(This will overwrite your previous nginx.conf. Please back it up in advance if necessary), and run `sudo nginx -t reload`, the frontend will work on port 80 and a token is required for access.
+7. Install Nginx, and `sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/`(This will overwrite your previous nginx.conf. Please back it up in advance if necessary), and run `sudo nginx -t reload`, the frontend will work on port 80 and a token is required for access.
 
