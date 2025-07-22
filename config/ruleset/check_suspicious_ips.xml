@@ -1,0 +1,14 @@
+<root author="will.chen">
+    <rule id="check_suspicious_ips_01" name="Detect suspicious IP addresses">
+        <!-- Detection logic -->
+        <check type="PLUGIN">T1071</check>
+
+        <!-- Add ATT&CK information -->
+        <append field="mitre_attack_id">T1071</append>
+        <append field="attack_tactic">Command and Control</append>
+        <append field="threat_type">malicious_external_connection</append>
+
+        <!-- Push alert messages to teams -->
+        <plugin>pushMsgToTeams("teams_send_msg_url", _$ORIDATA)</plugin>
+    </rule>
+</root>

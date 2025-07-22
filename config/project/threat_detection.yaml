@@ -1,0 +1,2 @@
+content: |
+  INPUT.kafka -> RULESET.check_suspicious_ips
