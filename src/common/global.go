@@ -117,6 +117,22 @@ func DeleteRawConfig(componentType, id string) {
 	}
 }
 
+// DeleteRawConfig removes raw configuration by type and ID
+func DeleteRawConfigUnsafe(componentType, id string) {
+	switch componentType {
+	case "input":
+		delete(AllInputsRawConfig, id)
+	case "output":
+		delete(AllOutputsRawConfig, id)
+	case "ruleset":
+		delete(AllRulesetsRawConfig, id)
+	case "project":
+		delete(AllProjectRawConfig, id)
+	case "plugin":
+		delete(AllPluginsRawConfig, id)
+	}
+}
+
 // ClearAllRawConfigsForAllTypes clears all raw configurations for all types
 func ClearAllRawConfigsForAllTypes() {
 	RawConfigMu.Lock()

@@ -48,8 +48,8 @@ func GetRefCount(id string) int {
 
 func AddRefCount(id string) {
 	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
 	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] + 1
-	common.GlobalMu.Unlock()
 }
 
 func ReduceRefCount(id string) {
@@ -415,7 +415,7 @@ func ForEachProject(fn func(id string, project *Project) bool) {
 	}
 }
 
-// Safe iteration functions
+// Unsafe iteration functions - use with caution, caller must ensure proper locking
 func ForEachProjectUnsafa(fn func(id string, project *Project) bool) {
 	for id, proj := range GlobalProject.Projects {
 		if !fn(id, proj) {
@@ -563,7 +563,7 @@ func SafeDeleteRuleset(id string) ([]string, error) {
 		}
 		// Only exists in temp, just remove from temp
 		delete(GlobalProject.RulesetsNew, id)
-		common.DeleteRawConfig("ruleset", id)
+		common.DeleteRawConfigUnsafe("ruleset", id)
 		return []string{}, nil
 	}
 
@@ -583,18 +583,18 @@ func SafeDeleteRuleset(id string) ([]string, error) {
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
 			err := rs.Stop()
-			common.GlobalMu.Lock()
 			if err != nil {
 				logger.Error("Failed to stop ruleset", "id", id, "error", err)
 			}
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
+			common.GlobalMu.Lock()
 		}
 	}
 
 	// Remove from global mappings
 	delete(GlobalProject.Rulesets, id)
 	delete(GlobalProject.RulesetsNew, id)
-	common.DeleteRawConfig("ruleset", id)
+	common.DeleteRawConfigUnsafe("ruleset", id)
 
 	return affectedProjects, nil
 }
@@ -614,7 +614,7 @@ func SafeDeleteInput(id string) ([]string, error) {
 		}
 		// Only exists in temp, just remove from temp
 		delete(GlobalProject.InputsNew, id)
-		common.DeleteRawConfig("input", id)
+		common.DeleteRawConfigUnsafe("input", id)
 		return []string{}, nil
 	}
 
@@ -634,18 +634,19 @@ func SafeDeleteInput(id string) ([]string, error) {
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
 			err := inp.Stop()
-			common.GlobalMu.Lock()
 			if err != nil {
 				logger.Error("Failed to stop input", "id", id, "error", err)
 			}
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
+			common.GlobalMu.Lock()
 		}
 	}
 
 	// Remove from global mappings
 	delete(GlobalProject.Inputs, id)
 	delete(GlobalProject.InputsNew, id)
-	common.DeleteRawConfig("input", id)
+
+	common.DeleteRawConfigUnsafe("input", id)
 
 	return affectedProjects, nil
 }
@@ -665,7 +666,7 @@ func SafeDeleteOutput(id string) ([]string, error) {
 		}
 		// Only exists in temp, just remove from temp
 		delete(GlobalProject.OutputsNew, id)
-		common.DeleteRawConfig("output", id)
+		common.DeleteRawConfigUnsafe("output", id)
 		return []string{}, nil
 	}
 
@@ -685,18 +686,18 @@ func SafeDeleteOutput(id string) ([]string, error) {
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
 			err := out.Stop()
-			common.GlobalMu.Lock()
 			if err != nil {
 				logger.Error("Failed to stop output", "id", id, "error", err)
 			}
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
+			common.GlobalMu.Lock()
 		}
 	}
 
 	// Remove from global mappings
 	delete(GlobalProject.Outputs, id)
 	delete(GlobalProject.OutputsNew, id)
-	common.DeleteRawConfig("output", id)
+	common.DeleteRawConfigUnsafe("output", id)
 
 	return affectedProjects, nil
 }
@@ -716,7 +717,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 		}
 		// Only exists in temp, just remove from temp
 		delete(GlobalProject.ProjectsNew, id)
-		common.DeleteRawConfig("project", id)
+		common.DeleteRawConfigUnsafe("project", id)
 		return []string{}, nil
 	}
 
@@ -760,7 +761,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 	// Remove from global mappings
 	delete(GlobalProject.Projects, id)
 	delete(GlobalProject.ProjectsNew, id)
-	common.DeleteRawConfig("project", id)
+	common.DeleteRawConfigUnsafe("project", id)
 
 	return []string{id}, nil
 }

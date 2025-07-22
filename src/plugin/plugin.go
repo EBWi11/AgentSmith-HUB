@@ -12,6 +12,7 @@ import (
 	"reflect"
 	regexpgo "regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/traefik/yaegi/interp"
@@ -65,6 +66,7 @@ type PluginParameter struct {
 
 var Plugins = make(map[string]*Plugin)
 var PluginsNew = make(map[string]string)
+var PluginsMu sync.RWMutex
 
 func init() {
 	for name, f := range local_plugin.LocalPluginBoolRes {
@@ -143,7 +145,9 @@ func NewPlugin(path string, raw string, name string, pluginType int) error {
 		return fmt.Errorf("plugin yaegi load err %s: %w", name, err)
 	}
 
+	PluginsMu.Lock()
 	Plugins[p.Name] = p
+	PluginsMu.Unlock()
 	return nil
 }
 
@@ -822,7 +826,7 @@ func SafeDeletePlugin(id string) ([]string, error) {
 		}
 		// Only exists in temp, just remove from temp
 		delete(PluginsNew, id)
-		common.DeleteRawConfig("plugin", id)
+		common.DeleteRawConfigUnsafe("plugin", id)
 		return []string{}, nil
 	}
 
@@ -843,7 +847,7 @@ func SafeDeletePlugin(id string) ([]string, error) {
 	// Remove from global mappings
 	delete(Plugins, id)
 	delete(PluginsNew, id)
-	common.DeleteRawConfig("plugin", id)
+	common.DeleteRawConfigUnsafe("plugin", id)
 
 	return affectedProjects, nil
 }

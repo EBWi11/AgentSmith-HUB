@@ -1080,17 +1080,20 @@ func createComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
 	}
 
-	switch componentType {
-	case "plugin":
-		request.Raw = NewPluginData
-	case "input":
-		request.Raw = NewInputData
-	case "output":
-		request.Raw = NewOutputData
-	case "ruleset":
-		request.Raw = NewRulesetData
-	case "project":
-		request.Raw = NewProjectData
+	// Only use default templates if no raw content is provided
+	if request.Raw == "" {
+		switch componentType {
+		case "plugin":
+			request.Raw = NewPluginData
+		case "input":
+			request.Raw = NewInputData
+		case "output":
+			request.Raw = NewOutputData
+		case "ruleset":
+			request.Raw = NewRulesetData
+		case "project":
+			request.Raw = NewProjectData
+		}
 	}
 
 	// Write file without lock (file system operations are atomic)
@@ -1168,19 +1171,6 @@ func createPlugin(c echo.Context) error {
 func deleteComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
 
-	// Create distributed lock for this component deletion
-	lockKey := fmt.Sprintf("delete_%s_%s", componentType, id)
-	lock := common.NewDistributedLock(lockKey, 30*time.Second)
-
-	// Try to acquire lock with timeout
-	if err := lock.TryAcquire(10 * time.Second); err != nil {
-		return c.JSON(http.StatusConflict, map[string]string{
-			"error": "Another deletion operation is in progress for this component",
-		})
-	}
-	defer lock.Release()
-
-	// Determine file paths and extensions
 	var suffix string
 	var dir string
 
