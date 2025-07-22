@@ -26,7 +26,7 @@ func formatMapToReadableString(data map[string]interface{}) string {
 // Eval sends a map payload to a Discord channel via Webhook.
 // Param1: WebhookURL (required)
 // Param2: (unused, keep for signature compatibility)
-func Eval(WebhookURL string, _ string, data map[string]interface{}) (bool, error) {
+func Eval(WebhookURL string, data map[string]interface{}) (bool, error) {
 	if WebhookURL == "" {
 		return false, errors.New("webhook URL is required")
 	}
