@@ -100,6 +100,117 @@ setup_library_path() {
     fi
 }
 
+# Function to check for running processes
+check_processes() {
+    local pids=$(pgrep -f "agentsmith-hub" 2>/dev/null)
+    if [ -n "$pids" ]; then
+        echo "$pids"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to show process information
+show_process_info() {
+    local pids="$1"
+    if [ -n "$pids" ]; then
+        print_info "Found running AgentSmith-HUB processes:"
+        echo "$pids" | while read pid; do
+            if [ -n "$pid" ]; then
+                ps -p "$pid" -o pid,ppid,cmd --no-headers 2>/dev/null || echo "PID $pid (process info unavailable)"
+            fi
+        done
+    fi
+}
+
+# Function to gracefully stop processes
+graceful_stop() {
+    local pids="$1"
+    if [ -n "$pids" ]; then
+        print_info "Sending TERM signal to processes..."
+        echo "$pids" | xargs kill -TERM 2>/dev/null || true
+        
+        # Wait for graceful shutdown
+        local wait_time=20
+        print_info "Waiting ${wait_time} seconds for graceful shutdown..."
+        sleep $wait_time
+        
+        # Check if processes are still running
+        local remaining_pids=$(check_processes)
+        if [ -n "$remaining_pids" ]; then
+            return 1
+        else
+            return 0
+        fi
+    fi
+    return 0
+}
+
+# Function to force kill processes
+force_stop() {
+    local pids="$1"
+    if [ -n "$pids" ]; then
+        print_warn "Force killing remaining processes..."
+        echo "$pids" | xargs kill -KILL 2>/dev/null || true
+        sleep 1
+        
+        # Final check
+        local remaining_pids=$(check_processes)
+        if [ -n "$remaining_pids" ]; then
+            print_error "Some processes could not be stopped:"
+            show_process_info "$remaining_pids"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Function to stop existing processes
+stop_existing_processes() {
+    local force_mode="$1"
+    
+    print_info "Checking for existing AgentSmith-HUB processes..."
+    
+    # Check for running processes
+    local pids=$(check_processes)
+    if [ -z "$pids" ]; then
+        print_info "No running AgentSmith-HUB processes found."
+        return 0
+    fi
+    
+    # Show process information
+    show_process_info "$pids"
+    
+    print_info "Stopping existing AgentSmith-HUB processes..."
+    
+    if [ "$force_mode" = "true" ]; then
+        # Force mode: kill immediately
+        if force_stop "$pids"; then
+            print_info "All processes stopped successfully."
+        else
+            print_error "Failed to stop some processes."
+            return 1
+        fi
+    else
+        # Normal mode: try graceful first, then force
+        if graceful_stop "$pids"; then
+            print_info "All processes stopped gracefully."
+        else
+            print_warn "Graceful shutdown failed, attempting force stop..."
+            local remaining_pids=$(check_processes)
+            if force_stop "$remaining_pids"; then
+                print_info "All processes stopped successfully."
+            else
+                print_error "Failed to stop some processes."
+                return 1
+            fi
+        fi
+    fi
+    
+    return 0
+}
+
 # Function to check config directory
 check_config() {
     local binary_dir="$(dirname "$1")"
@@ -187,6 +298,15 @@ main() {
     print_info "Config root: $CONFIG_ROOT"
     echo ""
     
+    # Stop existing processes if requested
+    if [ "$STOP_EXISTING" = "true" ]; then
+        if ! stop_existing_processes "$FORCE_STOP"; then
+            print_error "Failed to stop existing processes. Exiting."
+            exit 1
+        fi
+        echo ""
+    fi
+    
     # Calculate config path for binary
     BINARY_DIR="$(dirname "$BINARY_PATH")"
     
@@ -222,6 +342,8 @@ main() {
 
 # Parse command line arguments
 IS_FOLLOWER="false"
+STOP_EXISTING="false"
+FORCE_STOP="false"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
@@ -234,9 +356,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --version, -v        Show version information and exit"
             echo "  --check, -c          Check dependencies and configuration"
             echo "  --follower           Run as follower node (auto-discovers cluster via Redis)"
+            echo "  --restart            Stop existing processes before starting (graceful shutdown)"
+            echo "  --force-restart      Force stop existing processes before starting"
             echo ""
             echo "Default Mode: Leader (starts with web interface on port 8080)"
             echo "Follower Mode: Connects to existing cluster via Redis configuration"
+            echo ""
+            echo "Process Management:"
+            echo "  --restart            Check for running processes and stop them gracefully before starting"
+            echo "  --force-restart      Force kill any running processes before starting"
             echo ""
             echo "This script automatically detects the binary location and configuration."
             echo "It will look for the binary in the following order:"
@@ -261,6 +389,9 @@ while [[ $# -gt 0 ]]; do
             echo "Examples:"
             echo "  $0                    # Start as leader (default)"
             echo "  $0 --follower         # Start as follower"
+            echo "  $0 --restart          # Stop existing processes and restart as leader"
+            echo "  $0 --force-restart    # Force stop existing processes and restart as leader"
+            echo "  $0 --follower --restart # Stop existing processes and restart as follower"
             echo ""
             echo "Note: Both leader and follower nodes need the same Redis configuration"
             echo "      in their config.yaml file to join the same cluster."
@@ -269,6 +400,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --follower)
             IS_FOLLOWER="true"
+            shift
+            ;;
+        --restart)
+            STOP_EXISTING="true"
+            FORCE_STOP="false"
+            shift
+            ;;
+        --force-restart)
+            STOP_EXISTING="true"
+            FORCE_STOP="true"
             shift
             ;;
         --version|-v)
@@ -294,6 +435,15 @@ while [[ $# -gt 0 ]]; do
                 print_info "✓ Binary found: $BINARY_PATH"
             else
                 print_error "✗ Binary not found"
+            fi
+            
+            # Check for running processes
+            local pids=$(check_processes)
+            if [ -n "$pids" ]; then
+                print_info "✓ Found running AgentSmith-HUB processes:"
+                show_process_info "$pids"
+            else
+                print_info "✓ No running AgentSmith-HUB processes found"
             fi
             
             # Check config
