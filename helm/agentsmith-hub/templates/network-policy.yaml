@@ -1,0 +1,62 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "agentsmith-hub.fullname" . }}
+  labels:
+    {{- include "agentsmith-hub.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agentsmith-hub.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if .Values.networkPolicy.ingressRules }}
+    {{- toYaml .Values.networkPolicy.ingressRules | nindent 4 }}
+    {{- else }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "agentsmith-hub.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 80
+    {{- end }}
+  egress:
+    {{- if .Values.networkPolicy.egressRules }}
+    {{- toYaml .Values.networkPolicy.egressRules | nindent 4 }}
+    {{- else }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agentsmith-hub.redis.selectorLabels" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agentsmith-hub.leader.selectorLabels" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agentsmith-hub.follower.selectorLabels" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agentsmith-hub.frontend.selectorLabels" . | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: 80
+    {{- end }}
+{{- end }} 

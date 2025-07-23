@@ -1,0 +1,17 @@
+apiVersion: v2
+name: agentsmith-hub
+description: A Helm chart for AgentSmith-HUB Security Data Pipeline Platform
+type: application
+version: 0.1.0
+appVersion: "0.1.6"
+keywords:
+  - security
+  - data-pipeline
+  - threat-detection
+  - rules-engine
+home: https://github.com/your-org/AgentSmith-HUB
+sources:
+  - https://github.com/your-org/AgentSmith-HUB
+maintainers:
+  - name: AgentSmith Team
+    email: team@agentsmith.com 
