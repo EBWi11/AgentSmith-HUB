@@ -14,8 +14,10 @@ PluginTest&showuseage
 Search
 Errlog&Operations
 ClusterAdd&Show
+project cluster status show
 Push Changes
 LoadLocalconfig
+MCP
 
 ## Deployment Tutorial
 
