@@ -1,4 +1,4 @@
-# 🛡️ AgentSmith-HUB Rules Engine Complete Guide
+# 🛡️ AgentSmith-HUB Guide
 
 The AgentSmith-HUB rules engine is a powerful real-time data processing engine that can:
 - 🔍 **Real-time Detection**: Identify threats and anomalies from data streams
@@ -10,9 +10,228 @@ The AgentSmith-HUB rules engine is a powerful real-time data processing engine t
 
 The rules engine adopts a **flexible execution order**, where operations are executed according to their appearance order in XML, allowing you to freely combine various operations based on specific requirements.
 
-## 📚 Part One: Getting Started
+## 📋 Part One: Core Component Syntax
 
-### 1.1 Your First Rule
+### 1.1 INPUT Syntax
+
+INPUT defines data input sources, supporting multiple data source types.
+
+#### Basic Syntax
+```yaml
+type: "data_source_type"
+# specific configuration parameters
+```
+
+#### Supported Data Source Types
+
+##### Kafka Input
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+    - "localhost:9093"
+  topic: "security_events"
+  group: "agentsmith_consumer"
+  compression: "snappy"  # optional: none, snappy, gzip
+  # SASL authentication (optional)
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "your_username"
+    password: "your_password"
+  # TLS configuration (optional)
+  tls:
+    enable: true
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+```
+
+##### Aliyun SLS Input
+```yaml
+type: aliyun_sls
+aliyun_sls:
+  endpoint: "cn-hangzhou.log.aliyuncs.com"
+  access_key_id: "YOUR_ACCESS_KEY_ID"
+  access_key_secret: "YOUR_ACCESS_KEY_SECRET"
+  project: "your_project_name"
+  logstore: "your_logstore_name"
+  consumer_group_name: "your_consumer_group"
+  consumer_name: "your_consumer_name"
+  cursor_position: "end"  # begin, end, or specific timestamp
+  cursor_start_time: 1640995200000  # Unix timestamp (milliseconds)
+  query: "* | where attack_type_name != 'null'"  # optional query filter
+```
+
+##### Kafka Azure Input
+```yaml
+type: kafka_azure
+kafka:
+  brokers:
+    - "your-namespace.servicebus.windows.net:9093"
+  topic: "your_topic"
+  group: "your_consumer_group"
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "$ConnectionString"
+    password: "your_connection_string"
+  tls:
+    enable: true
+```
+
+##### Kafka AWS Input
+```yaml
+type: kafka_aws
+kafka:
+  brokers:
+    - "your-cluster.amazonaws.com:9092"
+  topic: "your_topic"
+  group: "your_consumer_group"
+  sasl:
+    enable: true
+    mechanism: "aws_msk_iam"
+    aws_region: "us-east-1"
+  tls:
+    enable: true
+```
+
+### 1.2 OUTPUT Syntax
+
+OUTPUT defines the output destination for data processing results.
+
+#### Basic Syntax
+```yaml
+type: "output_type"
+# specific configuration parameters
+```
+
+#### Supported Output Types
+
+##### Print Output (Console Print)
+```yaml
+type: print
+```
+
+##### Kafka Output
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+    - "localhost:9093"
+  topic: "processed_events"
+  key: "user_id"  # optional: specify message key field
+  compression: "snappy"  # optional: none, snappy, gzip
+  # SASL authentication (optional)
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "your_username"
+    password: "your_password"
+  # TLS configuration (optional)
+  tls:
+    enable: true
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+```
+
+##### Elasticsearch Output
+```yaml
+type: elasticsearch
+elasticsearch:
+  hosts:
+    - "http://localhost:9200"
+    - "https://localhost:9201"
+  index: "security-events-{YYYY.MM.DD}"  # supports time patterns
+  batch_size: 1000  # batch write size
+  flush_dur: "5s"   # flush interval
+  # authentication configuration (optional)
+  auth:
+    type: basic  # basic, api_key, bearer
+    username: "elastic"
+    password: "password"
+    # or use API Key
+    # api_key: "your-api-key"
+    # or use Bearer Token
+    # token: "your-bearer-token"
+```
+
+### 1.3 PROJECT Syntax
+
+PROJECT defines the overall configuration of a project using simple arrow syntax to describe data flow.
+
+#### Basic Syntax
+```yaml
+content: |
+  INPUT.input_component_name -> RULESET.ruleset_name
+  RULESET.ruleset_name -> OUTPUT.output_component_name
+```
+
+#### Project Configuration Example
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.security_rules
+  RULESET.security_rules -> OUTPUT.elasticsearch
+```
+
+#### Complex Data Flow Example
+
+```yaml
+content: |
+  # Main data flow
+  INPUT.kafka -> RULESET.whitelist
+  RULESET.whitelist -> RULESET.threat_detection
+  RULESET.threat_detection -> RULESET.compliance_check
+  RULESET.compliance_check -> OUTPUT.elasticsearch
+  
+  # Alert flow
+  RULESET.threat_detection -> OUTPUT.alert_kafka
+  
+  # Log flow
+  RULESET.compliance_check -> OUTPUT.print
+```
+
+#### Data Flow Rules
+
+**Basic Rules:**
+- Use `->` arrow to indicate data flow direction
+- Component reference format: `type.component_name`
+- Supported types: `INPUT`, `RULESET`, `OUTPUT`
+- One data flow definition per line
+- Support comments (starting with `#`)
+
+**Data Flow Characteristics:**
+- Data flows in the direction of arrows
+- One component can have multiple downstream components
+- Support branching and merging
+- Whitelist rulesets are usually placed first
+
+**Real Project Example:**
+
+```yaml
+content: |
+  # Network security monitoring project
+  # Data flows from Kafka, processed through multiple rule layers, finally output to different targets
+  
+  INPUT.security_kafka -> RULESET.whitelist
+  RULESET.whitelist -> RULESET.threat_detection
+  RULESET.threat_detection -> RULESET.behavior_analysis
+  RULESET.behavior_analysis -> OUTPUT.security_es
+  
+  # High threat events alert separately
+  RULESET.threat_detection -> OUTPUT.alert_kafka
+  
+  # Debug information print
+  RULESET.behavior_analysis -> OUTPUT.debug_print
+```
+
+## 📚 Part Two: RULESET Syntax Details
+
+### 2.1 Your First Rule
 
 Suppose we have such data flowing in:
 ```json
@@ -83,7 +302,7 @@ The output data will become:
 }
 ```
 
-### 1.2 Adding More Check Conditions
+### 2.2 Adding More Check Conditions
 
 Input data:
 ```json
@@ -151,7 +370,7 @@ In the above example, all three check conditions must be **fully satisfied**:
 - `<plugin>`: Executes operation, doesn't return value
 - `<append type="PLUGIN">`: Executes plugin and adds return value to data
 
-### 1.3 Using Dynamic Values
+### 2.3 Using Dynamic Values
 
 Input data:
 ```json
@@ -230,9 +449,9 @@ The `_$` prefix is used to dynamically reference other field values in data, rat
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ```
 
-## 📊 Part Two: Advanced Data Processing
+## 📊 Part Three: Advanced Data Processing
 
-### 2.1 Flexible Execution Order
+### 3.1 Flexible Execution Order
 
 One of the major features of the rules engine is flexible execution order:
 
@@ -292,7 +511,7 @@ One of the major features of the rules engine is flexible execution order:
 - Count events within 5 minutes
 - If an IP triggers 10 times within 5 minutes, the threshold check passes
 
-### 2.2 Complex Nested Data Processing
+### 3.2 Complex Nested Data Processing
 
 Input data:
 ```json
@@ -376,7 +595,7 @@ Rules for processing nested data:
 - Use `<del>` to delete this field after data processing
 - Ensure sensitive information won't be stored or transmitted
 
-### 2.3 Conditional Combination Logic
+### 3.3 Conditional Combination Logic
 
 Input data:
 ```json
@@ -420,7 +639,7 @@ Rules using conditional combinations:
 </root>
 ```
 
-## 🚨 Part Four: Practical Case Studies
+## 🚨 Part Five: Practical Case Studies
 
 ### Case 1: APT Attack Detection
 
@@ -679,9 +898,9 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 </root>
 ```
 
-## 📖 Part Five: Syntax Reference Manual
+## 📖 Part Six: Syntax Reference Manual
 
-### 5.1 Ruleset Structure
+### 6.1 Ruleset Structure
 
 #### Root Element `<root>`
 ```xml
@@ -708,7 +927,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 | id | Yes | Unique rule identifier |
 | name | No | Human-readable rule description |
 
-### 5.2 Check Operations
+### 6.2 Check Operations
 
 #### Independent Check `<check>`
 ```xml
@@ -737,7 +956,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 |-----------|----------|-------------|
 | condition | No | Logical expression (e.g., `a and (b or c)`) |
 
-### 5.3 Complete List of Check Types
+### 6.3 Complete List of Check Types
 
 #### String Matching Types
 | Type | Description | Case Sensitive | Example |
@@ -781,7 +1000,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 | REGEX | Regular expression | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
 | PLUGIN | Plugin function (supports `!` negation) | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
-### 5.4 Data Processing Operations
+### 6.4 Data Processing Operations
 
 #### Threshold Detection `<threshold>`
 ```xml
@@ -818,7 +1037,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <plugin>plugin_function(parameter1, parameter2)</plugin>
 ```
 
-### 5.5 Field Access Syntax
+### 6.5 Field Access Syntax
 
 #### Basic Access
 - **Direct field**: `field_name`
@@ -845,7 +1064,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
-### 5.6 Built-in Plugin Quick Reference
+### 6.6 Built-in Plugin Quick Reference
 
 #### Check Plugins (return bool)
 | Plugin | Function | Parameters | Example |
@@ -864,7 +1083,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 | parseJSON | JSON parsing | object | `parseJSON(json_str)` |
 | regexExtract | Regex extraction | string | `regexExtract(text, pattern)` |
 
-### 5.7 Performance Optimization Suggestions
+### 6.7 Performance Optimization Suggestions
 
 #### Operation Order Optimization
 ```xml
@@ -887,7 +1106,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- Don't exceed 24h -->
 ```
 
-### 5.8 Common Errors and Solutions
+### 6.8 Common Errors and Solutions
 
 #### XML Syntax Errors
 ```xml
@@ -962,9 +1181,9 @@ Use append to verify if fields are correctly obtained:
 </rule>
 ```
 
-## 🔧 Part Six: Custom Plugin Development
+## 🔧 Part Seven: Custom Plugin Development
 
-### 6.1 Plugin Classification
+### 7.1 Plugin Classification
 
 AgentSmith-HUB supports two types of plugins:
 
@@ -976,7 +1195,7 @@ AgentSmith-HUB supports two types of plugins:
 1. **Check Node Plugin**: Returns `(bool, error)`, used in `<check type="PLUGIN">`
 2. **Other Plugin**: Returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`
 
-### 6.2 Plugin Function Signature
+### 7.2 Plugin Function Signature
 
 #### Important: Eval Function Signature Description
 
@@ -997,7 +1216,7 @@ func Eval(parameters...) (interface{}, bool, error)
 - Second return value: Success flag (true/false)
 - Third return value: Error message (if any)
 
-### 6.3 Writing Custom Plugins
+### 7.3 Writing Custom Plugins
 
 #### Basic Structure
 
@@ -1109,7 +1328,7 @@ Usage example:
 <check type="EQU" field="ua_info.is_mobile">true</check>
 ```
 
-### 6.4 Plugin Development Standards
+### 7.4 Plugin Development Standards
 
 #### Naming Conventions
 - Plugin names use camelCase: `isValidEmail`, `extractDomain`
@@ -1171,7 +1390,7 @@ func Eval(email string) (bool, error) {
 }
 ```
 
-### 6.5 Advanced Plugin Examples
+### 7.5 Advanced Plugin Examples
 
 #### Complex Data Processing Plugin
 
@@ -1284,7 +1503,7 @@ func Eval(userID string, threshold int) (bool, error) {
 }
 ```
 
-### 6.6 Plugin Limitations and Notes
+### 7.6 Plugin Limitations and Notes
 
 #### Allowed Standard Library Packages
 Plugins can only import Go standard library, cannot use third-party packages. Common standard libraries include:
@@ -1301,7 +1520,7 @@ Plugins can only import Go standard library, cannot use third-party packages. Co
 3. **Graceful degradation**: Return reasonable default values on errors
 4. **Thorough testing**: Test various boundary conditions
 
-### 6.7 Plugin Deployment and Management
+### 7.7 Plugin Deployment and Management
 
 #### Creating Plugins
 1. Click "New Plugin" on the plugin management page in Web UI
@@ -1323,7 +1542,7 @@ Plugins can only import Go standard library, cannot use third-party packages. Co
 - Can view plugin modification history
 - Support rollback to previous versions
 
-### 6.8 Frequently Asked Questions
+### 7.8 Frequently Asked Questions
 
 #### Q: How to know which function signature to use?
 A: Based on plugin usage scenario:
@@ -1419,9 +1638,9 @@ When you need to check if a field matches multiple values, you can use multi-val
 - Use OR logic: any extension matches is sufficient
 - Use | as separator
 
-## 🔧 Part Three: Advanced Features Explained
+## 🔧 Part Four: Advanced Features Explained
 
-### 3.1 Three Modes of Threshold Detection
+### 4.1 Three Modes of Threshold Detection
 
 The `<threshold>` tag not only supports simple counting, but also three powerful statistical modes:
 
@@ -1534,7 +1753,7 @@ Rule:
 - Data exfiltration detection (access multiple different files)
 - Anomaly behavior detection (use multiple different accounts)
 
-### 3.2 Built-in Plugin System
+### 4.2 Built-in Plugin System
 
 AgentSmith-HUB provides rich built-in plugins that can be used without additional development.
 
@@ -1843,10 +2062,10 @@ Optimization suggestions:
 </rule>
 ```
 
-### 3.3 Whitelist Rulesets
+### 4.3 Whitelist Rulesets
 
 Whitelisting is used to filter out data that does not need to be processed (ruleset type is WHITELIST). Special behavior of whitelist:
-- When a whitelist rule matches, the data is “disallowed” (i.e., it is filtered out of further processing and the data is discarded).
+- When a whitelist rule matches, the data is "disallowed" (i.e., it is filtered out of further processing and the data is discarded).
 - When all the whitelist rules do not match, the data continues to be passed to the subsequent processing.
 
 ```xml

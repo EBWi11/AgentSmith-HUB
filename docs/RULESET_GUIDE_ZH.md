@@ -1,4 +1,4 @@
-# 🛡️ AgentSmith-HUB 规则引擎完整指南
+# 🛡️ AgentSmith-HUB 完整指南
 
 AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
 - 🔍 **实时检测**：从数据流中识别威胁和异常
@@ -10,9 +10,229 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 
 规则引擎采用**灵活的执行顺序**，操作按照在XML中的出现顺序执行，让你可以根据具体需求自由组合各种操作。
 
-## 📚 第一部分：从零开始
+## 📋 第一部分：核心组件语法
 
-### 1.1 你的第一个规则
+### 1.1 INPUT 语法说明
+
+INPUT 定义了数据输入源，支持多种数据源类型。
+
+#### 基本语法
+```yaml
+type: "数据源类型"
+# 具体配置参数
+```
+
+#### 支持的数据源类型
+
+##### Kafka 输入
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+    - "localhost:9093"
+  topic: "security_events"
+  group: "agentsmith_consumer"
+  compression: "snappy"  # 可选：none, snappy, gzip
+  # SASL 认证（可选）
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "your_username"
+    password: "your_password"
+  # TLS 配置（可选）
+  tls:
+    enable: true
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+```
+
+##### 阿里云SLS 输入
+```yaml
+type: aliyun_sls
+aliyun_sls:
+  endpoint: "cn-hangzhou.log.aliyuncs.com"
+  access_key_id: "YOUR_ACCESS_KEY_ID"
+  access_key_secret: "YOUR_ACCESS_KEY_SECRET"
+  project: "your_project_name"
+  logstore: "your_logstore_name"
+  consumer_group_name: "your_consumer_group"
+  consumer_name: "your_consumer_name"
+  cursor_position: "end"  # begin, end, 或具体时间戳
+  cursor_start_time: 1640995200000  # Unix时间戳（毫秒）
+  query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
+```
+
+##### Kafka Azure 输入
+```yaml
+type: kafka_azure
+kafka:
+  brokers:
+    - "your-namespace.servicebus.windows.net:9093"
+  topic: "your_topic"
+  group: "your_consumer_group"
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "$ConnectionString"
+    password: "your_connection_string"
+  tls:
+    enable: true
+```
+
+##### Kafka AWS 输入
+```yaml
+type: kafka_aws
+kafka:
+  brokers:
+    - "your-cluster.amazonaws.com:9092"
+  topic: "your_topic"
+  group: "your_consumer_group"
+  sasl:
+    enable: true
+    mechanism: "aws_msk_iam"
+    aws_region: "us-east-1"
+  tls:
+    enable: true
+```
+
+### 1.2 OUTPUT 语法说明
+
+OUTPUT 定义了数据处理结果的输出目标。
+
+#### 基本语法
+```yaml
+type: "输出类型"
+# 具体配置参数
+```
+
+#### 支持的输出类型
+
+##### Print 输出（控制台打印）
+```yaml
+type: print
+```
+
+##### Kafka 输出
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+    - "localhost:9093"
+  topic: "processed_events"
+  key: "user_id"  # 可选：指定消息key字段
+  compression: "snappy"  # 可选：none, snappy, gzip
+  # SASL 认证（可选）
+  sasl:
+    enable: true
+    mechanism: "plain"
+    username: "your_username"
+    password: "your_password"
+  # TLS 配置（可选）
+  tls:
+    enable: true
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+```
+
+##### Elasticsearch 输出
+```yaml
+type: elasticsearch
+elasticsearch:
+  hosts:
+    - "http://localhost:9200"
+    - "https://localhost:9201"
+  index: "security-events-{YYYY.MM.DD}"  # 支持时间模式
+  batch_size: 1000  # 批量写入大小
+  flush_dur: "5s"   # 刷新间隔
+  # 认证配置（可选）
+  auth:
+    type: basic  # basic, api_key, bearer
+    username: "elastic"
+    password: "password"
+    # 或者使用API Key
+    # api_key: "your-api-key"
+    # 或者使用Bearer Token
+    # token: "your-bearer-token"
+```
+
+
+### 1.3 PROJECT 语法说明
+
+PROJECT 定义了项目的整体配置，使用简单的箭头语法来描述数据流。
+
+#### 基本语法
+```yaml
+content: |
+  INPUT.输入组件名 -> RULESET.规则集名
+  RULESET.规则集名 -> OUTPUT.输出组件名
+```
+
+#### 项目配置示例
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.security_rules
+  RULESET.security_rules -> OUTPUT.elasticsearch
+```
+
+#### 复杂数据流示例
+
+```yaml
+content: |
+  # 主数据流
+  INPUT.kafka -> RULESET.whitelist
+  RULESET.whitelist -> RULESET.threat_detection
+  RULESET.threat_detection -> RULESET.compliance_check
+  RULESET.compliance_check -> OUTPUT.elasticsearch
+  
+  # 告警流
+  RULESET.threat_detection -> OUTPUT.alert_kafka
+  
+  # 日志流
+  RULESET.compliance_check -> OUTPUT.print
+```
+
+#### 数据流规则说明
+
+**基本规则**：
+- 使用 `->` 箭头表示数据流向
+- 组件引用格式：`类型.组件名`
+- 支持的类型：`INPUT`、`RULESET`、`OUTPUT`
+- 每行一个数据流定义
+- 支持注释（以 `#` 开头）
+
+**数据流特点**：
+- 数据按箭头方向流动
+- 一个组件可以有多个下游组件
+- 支持分支和合并
+- 白名单规则集通常放在最前面
+
+**实际项目示例**：
+
+```yaml
+content: |
+  # 网络安全监控项目
+  # 数据从Kafka流入，经过多层规则处理，最终输出到不同目标
+  
+  INPUT.security_kafka -> RULESET.whitelist
+  RULESET.whitelist -> RULESET.threat_detection
+  RULESET.threat_detection -> RULESET.behavior_analysis
+  RULESET.behavior_analysis -> OUTPUT.security_es
+  
+  # 高威胁事件单独告警
+  RULESET.threat_detection -> OUTPUT.alert_kafka
+  
+  # 调试信息打印
+  RULESET.behavior_analysis -> OUTPUT.debug_print
+```
+
+## 📚 第二部分：RULESET 语法详解
+
+### 2.1 你的第一个规则
 
 假设我们有这样的数据流入：
 ```json
@@ -83,7 +303,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 }
 ```
 
-### 1.2 添加更多检查条件
+### 2.2 添加更多检查条件
 
 输入数据：
 ```json
@@ -151,7 +371,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - `<plugin>`：执行操作，不返回值
 - `<append type="PLUGIN">`：执行插件并将返回值添加到数据中
 
-### 1.3 使用动态值
+### 2.3 使用动态值
 
 输入数据：
 ```json
@@ -230,9 +450,9 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ```
 
-## 📊 第二部分：数据处理进阶
+## 📊 第三部分：数据处理进阶
 
-### 2.1 灵活的执行顺序
+### 3.1 灵活的执行顺序
 
 规则引擎的一大特点是灵活的执行顺序：
 
@@ -292,7 +512,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 统计 5 分钟内的事件数
 - 如果某个 IP 在 5 分钟内触发 10 次，则阈值检查通过
 
-### 2.2 复杂的嵌套数据处理
+### 3.2 复杂的嵌套数据处理
 
 输入数据：
 ```json
@@ -376,7 +596,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 使用 `<del>` 在数据处理后删除该字段
 - 确保敏感信息不会被存储或传输
 
-### 2.3 条件组合逻辑
+### 3.3 条件组合逻辑
 
 输入数据：
 ```json
@@ -484,9 +704,9 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 使用 OR 逻辑：任一扩展名匹配即可
 - 使用 | 作为分隔符
 
-## 🔧 第三部分：高级特性详解
+## 🔧 第四部分：高级特性详解
 
-### 3.1 阈值检测的三种模式
+### 4.1 阈值检测的三种模式
 
 `<threshold>` 标签不仅可以简单计数，还支持三种强大的统计模式：
 
@@ -599,7 +819,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 数据外泄检测（访问多个不同文件）
 - 异常行为检测（使用多个不同账号）
 
-### 3.2 内置插件系统
+### 4.2 内置插件系统
 
 AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用。
 
@@ -906,7 +1126,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 3.3 白名单规则集
+### 4.3 白名单规则集
 
 白名单用于过滤掉不需要处理的数据（ruleset type 为 WHITELIST）。白名单的特殊行为：
 - 当白名单规则匹配时，数据被"不允许通过"（即被过滤掉，不再继续处理，数据将被丢弃）
@@ -939,7 +1159,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 🚨 第四部分：实战案例集
+## 🚨 第五部分：实战案例集
 
 ### 案例1：APT攻击检测
 
@@ -1198,9 +1418,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 📖 第五部分：语法参考手册
+## 📖 第六部分：语法参考手册
 
-### 5.1 规则集结构
+### 6.1 规则集结构
 
 #### 根元素 `<root>`
 ```xml
@@ -1227,7 +1447,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | id | 是 | 规则唯一标识符 |
 | name | 否 | 规则可读描述 |
 
-### 5.2 检查操作
+### 6.2 检查操作
 
 #### 独立检查 `<check>`
 ```xml
@@ -1256,7 +1476,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 |------|------|------|
 | condition | 否 | 逻辑表达式（如：`a and (b or c)`） |
 
-### 5.3 检查类型完整列表
+### 6.3 检查类型完整列表
 
 #### 字符串匹配类
 | 类型 | 说明 | 大小写 | 示例 |
@@ -1300,7 +1520,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
 | PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
-### 5.4 数据处理操作
+### 6.4 数据处理操作
 
 #### 阈值检测 `<threshold>`
 ```xml
@@ -1337,7 +1557,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <plugin>插件函数(参数1, 参数2)</plugin>
 ```
 
-### 5.5 字段访问语法
+### 6.5 字段访问语法
 
 #### 基本访问
 - **直接字段**：`field_name`
@@ -1364,7 +1584,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
-### 5.6 内置插件快速参考
+### 6.6 内置插件快速参考
 
 #### 检查类插件（返回bool）
 | 插件 | 功能 | 参数 | 示例 |
@@ -1383,7 +1603,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | parseJSON | JSON解析 | object | `parseJSON(json_str)` |
 | regexExtract | 正则提取 | string | `regexExtract(text, pattern)` |
 
-### 5.7 性能优化建议
+### 6.7 性能优化建议
 
 #### 操作顺序优化
 ```xml
@@ -1406,7 +1626,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
 ```
 
-### 5.8 常见错误和解决方案
+### 6.8 常见错误和解决方案
 
 #### XML语法错误
 ```xml
@@ -1445,7 +1665,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     </rule>
 ```
 
-### 5.9 调试技巧
+### 6.9 调试技巧
 
 #### 1. 使用append跟踪执行流程
 ```xml
@@ -1481,9 +1701,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-## 🔧 第六部分：自定义插件开发
+## 🔧 第七部分：自定义插件开发
 
-### 6.1 插件分类
+### 7.1 插件分类
 
 AgentSmith-HUB 支持两种类型的插件：
 
@@ -1495,7 +1715,7 @@ AgentSmith-HUB 支持两种类型的插件：
 1. **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
 2. **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
 
-### 6.2 插件函数签名
+### 7.2 插件函数签名
 
 #### 重要：Eval函数签名说明
 
@@ -1516,7 +1736,7 @@ func Eval(参数...) (interface{}, bool, error)
 - 第二个返回值：是否成功（true/false）
 - 第三个返回值：错误信息（如果有）
 
-### 6.3 编写自定义插件
+### 7.3 编写自定义插件
 
 #### 基本结构
 
@@ -1628,7 +1848,7 @@ func Eval(userAgent string) (interface{}, bool, error) {
 <check type="EQU" field="ua_info.is_mobile">true</check>
 ```
 
-### 6.4 插件开发规范
+### 7.4 插件开发规范
 
 #### 命名规范
 - 插件名使用驼峰命名法：`isValidEmail`、`extractDomain`
@@ -1690,7 +1910,7 @@ func Eval(email string) (bool, error) {
 }
 ```
 
-### 6.5 高级插件示例
+### 7.5 高级插件示例
 
 #### 复杂数据处理插件
 
@@ -1803,7 +2023,7 @@ func Eval(userID string, threshold int) (bool, error) {
 }
 ```
 
-### 6.6 插件限制和注意事项
+### 7.6 插件限制和注意事项
 
 #### 允许的标准库包
 插件只能导入 Go 标准库，不能使用第三方包。常用的标准库包括：
@@ -1820,7 +2040,7 @@ func Eval(userID string, threshold int) (bool, error) {
 3. **优雅降级**：错误时返回合理的默认值
 4. **充分测试**：测试各种边界情况
 
-### 6.7 插件部署和管理
+### 7.7 插件部署和管理
 
 #### 创建插件
 1. 在 Web UI 的插件管理页面点击"新建插件"
@@ -1842,7 +2062,7 @@ func Eval(userID string, threshold int) (bool, error) {
 - 可以查看插件修改历史
 - 支持回滚到之前版本
 
-### 6.8 常见问题解答
+### 7.8 常见问题解答
 
 #### Q: 如何知道应该使用哪种函数签名？
 A: 根据插件的使用场景：
