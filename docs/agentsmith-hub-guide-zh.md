@@ -4,6 +4,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 🔍 **实时检测**：从数据流中识别威胁和异常
 - 🔄 **数据转换**：对数据进行加工和丰富化
 - 📊 **统计分析**：进行阈值检测和频率分析
+- 📖 **插件支持 **：支持自定义插件
 - 🚨 **自动响应**：触发告警和自动化操作
 
 ### 核心理念：灵活的执行顺序
@@ -18,7 +19,7 @@ INPUT 定义了数据输入源，支持多种数据源类型。
 
 #### 支持的数据源类型
 
-##### Kafka 输入
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -42,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### 阿里云SLS 输入
+##### 阿里云SLS 
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -58,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
 ```
 
-##### Kafka Azure 输入
+##### Kafka Azure 
 ```yaml
 type: kafka_azure
 kafka:
@@ -75,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS 输入
+##### Kafka AWS 
 ```yaml
 type: kafka_aws
 kafka:
@@ -97,11 +98,12 @@ OUTPUT 定义了数据处理结果的输出目标。
 
 #### 支持的输出类型
 
-##### Print 输出（控制台打印）```yaml
+##### Print 输出（控制台打印）
+```yaml
 type: print
 ```
 
-##### Kafka 输出
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -125,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch 输出
+##### Elasticsearch 
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -583,7 +585,7 @@ content: |
 - 使用 `<del>` 在数据处理后删除该字段
 - 确保敏感信息不会被存储或传输
 
-### 3.3 条件组合逻辑
+### 3.3 条件组合逻辑（checklist）
 
 输入数据：
 ```json
@@ -1138,24 +1140,6 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-#### 插件性能说明
-
-性能等级（从高到低）：
-1. **检查节点插件**：`isPrivateIP`, `cidrMatch` - 纯计算，性能较高
-2. **字符串处理插件**：`replace`, `hashMD5/SHA1/SHA256` - 中等性能
-3. **正则表达式插件**：`regexExtract`, `regexReplace` - 性能较低
-4. **威胁情报插件**：`virusTotal`, `shodan`, `threatBook` - 外部API调用，性能最低
-
-优化建议：
-```xml
-<!-- 推荐：先用高性能检查，再用低性能插件 -->
-<rule id="optimized">
-    <check type="INCL" field="alert_level">high</check>
-    <check type="NOTNULL" field="source_ip"></check>
-    <append type="PLUGIN" field="threat_intel">threatBook(source_ip, "ip")</append>
-</rule>
-```
-
 ### 5.4 白名单规则集
 
 白名单用于过滤掉不需要处理的数据（ruleset type 为 WHITELIST）。白名单的特殊行为：
@@ -1661,7 +1645,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <checklist condition="a and b">
     <check id="a" type="EQU" field="status">active</check>
     <check id="b" type="NOTNULL" field="user"></check>
-        </checklist>
+</checklist>
 ```
 
 #### 性能问题
@@ -1675,7 +1659,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="fast">
     <check type="EQU" field="type">target</check>
     <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
-    </rule>
+</rule>
 ```
 
 ### 7.10 调试技巧
@@ -1857,136 +1841,6 @@ func Eval(key string) (interface{}, bool, error) {
 - 正则：`regexp`
 - 网络：`net`, `net/url`
 - 并发：`sync`
-
-## 第九部分：最佳实践
-
-### 9.1 性能优化
-1. **执行顺序**：快速检查在前，慢速操作在后
-2. **缓存使用**：利用内置插件的缓存机制
-3. **避免重复计算**：合理使用字段引用
-
-### 9.2 错误处理
-1. **参数验证**：插件内部必须验证参数
-2. **优雅降级**：错误时返回合理的默认值
-3. **日志记录**：重要操作记录日志
-
-### 9.3 有状态插件设计
-```go
-// 线程安全的状态管理
-var (
-    dataCache = make(map[string]interface{})
-    cacheMutex sync.RWMutex
-    lastRefresh time.Time
-    refreshInterval = 10 * time.Minute
-)
-
-func init() {
-    // 初始化缓存
-    refreshCache()
-    
-    // 启动后台刷新任务
-    go func() {
-        ticker := time.NewTicker(5 * time.Minute)
-        for range ticker.C {
-            refreshCache()
-        }
-    }()
-}
-
-func Eval(key string) (interface{}, bool, error) {
-    // 检查是否需要刷新
-    if time.Since(lastRefresh) > refreshInterval {
-        refreshCache()
-    }
-    
-    cacheMutex.RLock()
-    if value, exists := dataCache[key]; exists {
-        cacheMutex.RUnlock()
-        return value, true, nil
-    }
-    cacheMutex.RUnlock()
-    
-    return nil, false, nil
-}
-
-func refreshCache() {
-    // 刷新缓存逻辑
-    cacheMutex.Lock()
-    defer cacheMutex.Unlock()
-    
-    // 执行刷新操作
-    lastRefresh = time.Now()
-}
-```
-
-### 9.4 调试技巧
-1. **使用append跟踪**：添加调试字段
-2. **分步测试**：逐个测试插件功能
-3. **验证字段**：确保字段引用正确
-
-### 9.5 常见模式
-
-#### 缓存模式
-```go
-var cache = make(map[string]interface{})
-var mutex sync.RWMutex
-
-func Eval(key string) (interface{}, bool, error) {
-    mutex.RLock()
-    if value, exists := cache[key]; exists {
-        mutex.RUnlock()
-        return value, true, nil
-    }
-    mutex.RUnlock()
-    
-    // 计算并缓存
-    result := expensiveCalculation(key)
-    mutex.Lock()
-    cache[key] = result
-    mutex.Unlock()
-    
-    return result, true, nil
-}
-```
-
-#### 计数器模式
-```go
-var counters = make(map[string]int)
-var counterMutex sync.RWMutex
-
-func Eval(key string, threshold int) (bool, error) {
-    counterMutex.Lock()
-    defer counterMutex.Unlock()
-    
-    counters[key]++
-    return counters[key] > threshold, nil
-}
-```
-
-#### 时间窗口模式
-```go
-var (
-    lastSeen = make(map[string]time.Time)
-    timeMutex sync.RWMutex
-    window = 5 * time.Minute
-)
-
-func Eval(key string) (bool, error) {
-    now := time.Now()
-    
-    timeMutex.Lock()
-    defer timeMutex.Unlock()
-    
-    if last, exists := lastSeen[key]; exists {
-        if now.Sub(last) < window {
-            return false, nil // 在时间窗口内，不触发
-        }
-    }
-    
-    lastSeen[key] = now
-    return true, nil // 触发
-}
-```
 
 ## 总结
 

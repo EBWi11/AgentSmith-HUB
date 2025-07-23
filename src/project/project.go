@@ -485,6 +485,11 @@ func (p *Project) parseContent() error {
 			continue
 		}
 
+		// Skip comment lines (lines starting with #)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+
 		// Only support standard arrow format: ->
 		parts := strings.Split(line, "->")
 
@@ -497,7 +502,7 @@ func (p *Project) parseContent() error {
 			} else if strings.Contains(line, "-->") {
 				return fmt.Errorf("invalid arrow format at line %d: use '->' instead of '-->' in %q", lineNum+1, line)
 			} else if strings.Contains(line, "=>") {
-				return fmt.Errorf("invalid arrow format at line %d: use '->' instead of '=>' in %q", lineNum+1, line)
+				return fmt.Errorf("invalid arrow format at line %d: use '=>' instead of '=>' in %q", lineNum+1, line)
 			} else if strings.Contains(line, "—") || strings.Contains(line, "–") || strings.Contains(line, "―") {
 				return fmt.Errorf("invalid arrow format at line %d: use '->' instead of dash characters in %q", lineNum+1, line)
 			}
@@ -512,7 +517,7 @@ func (p *Project) parseContent() error {
 		toType, toID := parseNode(to)
 
 		if fromType == "" || toType == "" {
-			return fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
+			return fmt.Errorf("invalid node format at line %d: %s -> %s (expected format: TYPE.ID -> TYPE.ID)", lineNum+1, from, to)
 		}
 
 		// Validate flow rules
@@ -576,15 +581,39 @@ func (p *Project) detectCycle() error {
 	graph := make(map[string][]string)
 	nodeLines := make(map[string]int) // Track line numbers for error reporting
 
-	for i, node := range p.FlowNodes {
+	// Create a map to store line numbers for each flow node content
+	contentLineMap := make(map[string]int)
+	lines := strings.Split(p.Config.Content, "\n")
+	actualLineNum := 0
+
+	for i, line := range lines {
+		actualLineNum = i + 1
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip empty lines and comment lines when building the map
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") {
+			continue
+		}
+
+		// Store the actual line number for this content
+		contentLineMap[trimmedLine] = actualLineNum
+	}
+
+	for _, node := range p.FlowNodes {
 		fromKey := getNodeFromKey(node)
 		toKey := getNodeToKey(node)
 
 		graph[fromKey] = append(graph[fromKey], toKey)
 
-		// Store line numbers for error reporting (assuming 1-based line numbers)
-		nodeLines[fromKey] = i + 1
-		nodeLines[toKey] = i + 1
+		// Get the actual line number from our map
+		if lineNum, exists := contentLineMap[node.Content]; exists {
+			nodeLines[fromKey] = lineNum
+			nodeLines[toKey] = lineNum
+		} else {
+			// Fallback: use a default line number if not found
+			nodeLines[fromKey] = 1
+			nodeLines[toKey] = 1
+		}
 	}
 
 	// DFS states: 0=white (unvisited), 1=gray (visiting), 2=black (visited)
@@ -692,7 +721,21 @@ func parseNode(s string) (string, string) {
 	if len(parts) != 2 {
 		return "", ""
 	}
-	return strings.ToUpper(strings.TrimSpace(parts[0])), strings.TrimSpace(parts[1])
+
+	componentType := strings.ToUpper(strings.TrimSpace(parts[0]))
+	componentID := strings.TrimSpace(parts[1])
+
+	// Validate component type
+	if componentType != "INPUT" && componentType != "OUTPUT" && componentType != "RULESET" {
+		return "", ""
+	}
+
+	// Validate component ID is not empty
+	if componentID == "" {
+		return "", ""
+	}
+
+	return componentType, componentID
 }
 
 // validateComponentExistence checks if all referenced components exist in the system
@@ -702,12 +745,35 @@ func (p *Project) validateComponentExistence(flowGraph map[string][]string) erro
 		return fmt.Errorf("project is empty, no flow nodes defined")
 	}
 
+	// Create a map to store line numbers for each flow node content
+	contentLineMap := make(map[string]int)
+	lines := strings.Split(p.Config.Content, "\n")
+	actualLineNum := 0
+
+	for i, line := range lines {
+		actualLineNum = i + 1
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip empty lines and comment lines when building the map
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") {
+			continue
+		}
+
+		// Store the actual line number for this content
+		contentLineMap[trimmedLine] = actualLineNum
+	}
+
 	for _, node := range p.FlowNodes {
-		lineNum := 0
-		for i, line := range strings.Split(p.Config.Content, "\n") {
-			if strings.TrimSpace(line) == node.Content {
-				lineNum = i + 1
-				break
+		// Get the line number from our map
+		lineNum, exists := contentLineMap[node.Content]
+		if !exists {
+			// Fallback: try to find the line number by content matching
+			lineNum = 0
+			for i, line := range lines {
+				if strings.TrimSpace(line) == node.Content {
+					lineNum = i + 1
+					break
+				}
 			}
 		}
 

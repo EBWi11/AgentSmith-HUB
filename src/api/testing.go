@@ -986,12 +986,14 @@ func extractInputsFromProject(proj *project.Project) []map[string]string {
 	return inputs
 }
 
-// parseProjectInputsDirect parses project configuration and extracts input information without creating a project instance
 func parseProjectInputsDirect(projectContent string) ([]map[string]string, error) {
-	// Parse the YAML content directly
-	var cfg project.ProjectConfig
+	var cfg struct {
+		Content string `yaml:"content"`
+	}
+
+	// Parse YAML to extract content
 	if err := yaml.Unmarshal([]byte(projectContent), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+		return nil, fmt.Errorf("failed to parse project configuration: %w", err)
 	}
 
 	if strings.TrimSpace(cfg.Content) == "" {
@@ -1001,17 +1003,24 @@ func parseProjectInputsDirect(projectContent string) ([]map[string]string, error
 	// Parse content to extract input information
 	lines := strings.Split(cfg.Content, "\n")
 	inputNames := make(map[string]bool)
+	actualLineNum := 0
 
-	for lineNum, line := range lines {
+	for i, line := range lines {
+		actualLineNum = i + 1
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+
+		// Skip comment lines
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 
 		// Parse arrow format: ->
 		parts := strings.Split(line, "->")
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
+			return nil, fmt.Errorf("invalid line format at line %d: %s", actualLineNum, line)
 		}
 
 		from := strings.TrimSpace(parts[0])
@@ -1020,7 +1029,7 @@ func parseProjectInputsDirect(projectContent string) ([]map[string]string, error
 		fromType, fromID := parseNodeDirect(from)
 
 		if fromType == "" {
-			return nil, fmt.Errorf("invalid node format at line %d: %s", lineNum+1, from)
+			return nil, fmt.Errorf("invalid node format at line %d: %s", actualLineNum, from)
 		}
 
 		// Collect input names
@@ -1372,16 +1381,22 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 	outputNames := make(map[string]bool)
 	rulesetNames := make(map[string]bool)
 
-	for lineNum, line := range lines {
+	for i, line := range lines {
+		actualLineNum := i + 1
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+
+		// Skip comment lines
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 
 		// Parse arrow format: ->
 		parts := strings.Split(line, "->")
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
+			return nil, fmt.Errorf("invalid line format at line %d: %s", actualLineNum, line)
 		}
 
 		from := strings.TrimSpace(parts[0])
@@ -1392,7 +1407,7 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 		toType, toID := parseNodeDirect(to)
 
 		if fromType == "" || toType == "" {
-			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
+			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", actualLineNum, from, to)
 		}
 
 		// Collect component names
@@ -1727,16 +1742,22 @@ func parseProjectSequencesDirect(projectContent string) (map[string]map[string][
 	lines := strings.Split(cfg.Content, "\n")
 	var flowNodes []project.FlowNode
 
-	for lineNum, line := range lines {
+	for i, line := range lines {
+		actualLineNum := i + 1
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+
+		// Skip comment lines
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
 
 		// Parse arrow format: ->
 		parts := strings.Split(line, "->")
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid line format at line %d: %s", lineNum+1, line)
+			return nil, fmt.Errorf("invalid line format at line %d: %s", actualLineNum, line)
 		}
 
 		from := strings.TrimSpace(parts[0])
@@ -1747,16 +1768,16 @@ func parseProjectSequencesDirect(projectContent string) (map[string]map[string][
 		toType, toID := parseNodeDirect(to)
 
 		if fromType == "" || toType == "" {
-			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", lineNum+1, from, to)
+			return nil, fmt.Errorf("invalid node format at line %d: %s -> %s", actualLineNum, from, to)
 		}
 
 		// Validate flow rules
 		if toType == "INPUT" {
-			return nil, fmt.Errorf("INPUT node %q cannot be a destination at line %d", to, lineNum+1)
+			return nil, fmt.Errorf("INPUT node %q cannot be a destination at line %d", to, actualLineNum)
 		}
 
 		if fromType == "OUTPUT" {
-			return nil, fmt.Errorf("OUTPUT node %q cannot be a source at line %d", from, lineNum+1)
+			return nil, fmt.Errorf("OUTPUT node %q cannot be a source at line %d", from, actualLineNum)
 		}
 
 		tmpNode := project.FlowNode{

@@ -4,6 +4,7 @@ AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能�
 - 🔍 **实时检测**：从数据流中识别威胁和异常
 - 🔄 **数据转换**：对数据进行加工和丰富化
 - 📊 **统计分析**：进行阈值检测和频率分析
+- 📖 **插件支持 **：支持自定义插件
 - 🚨 **自动响应**：触发告警和自动化操作
 
 ### 核心理念：灵活的执行顺序
@@ -18,7 +19,7 @@ INPUT 定义了数据输入源，支持多种数据源类型。
 
 #### 支持的数据源类型
 
-##### Kafka 输入
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -42,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### 阿里云SLS 输入
+##### 阿里云SLS 
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -58,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
 ```
 
-##### Kafka Azure 输入
+##### Kafka Azure 
 ```yaml
 type: kafka_azure
 kafka:
@@ -75,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS 输入
+##### Kafka AWS 
 ```yaml
 type: kafka_aws
 kafka:
@@ -102,7 +103,7 @@ OUTPUT 定义了数据处理结果的输出目标。
 type: print
 ```
 
-##### Kafka 输出
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -126,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch 输出
+##### Elasticsearch 
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -584,7 +585,7 @@ content: |
 - 使用 `<del>` 在数据处理后删除该字段
 - 确保敏感信息不会被存储或传输
 
-### 3.3 条件组合逻辑
+### 3.3 条件组合逻辑（checklist）
 
 输入数据：
 ```json
@@ -874,27 +875,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - 当使用静态值时，直接使用字符串（带引号）：`"192.168.1.0/24"`
 - 当使用数字时，不需要引号：`300`
 
-## 4. 在Ruleset中的使用方式
+## 第五部分：Ruleset 最佳实践
 
-### 4.1 基本使用模式
-
-```xml
-<root author="example" type="DETECTION" name="plugin_example">
-    <rule id="plugin_usage" name="Plugin Usage Examples">
-        <!-- 1. 检查类插件 -->
-        <check type="PLUGIN">isPrivateIP(source_ip)</check>
-        
-        <!-- 2. 数据处理插件 -->
-        <append type="PLUGIN" field="timestamp">now()</append>
-        <append type="PLUGIN" field="hash">hashSHA256(file_content)</append>
-        
-        <!-- 3. 执行操作插件 -->
-        <plugin>sendAlert(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 4.2 复杂逻辑组合
+### 5.1 复杂逻辑组合
 
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
@@ -915,7 +898,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 4.3 告警抑制示例
+### 5.2 告警抑制示例
 
 ```xml
 <rule id="suppression_example" name="Alert Suppression">
@@ -925,7 +908,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 4.4 数据转换示例
+### 5.3 数据转换示例
 
 ```xml
 <rule id="data_transformation" name="Data Transformation">
@@ -1157,25 +1140,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-#### 插件性能说明
-
-性能等级（从高到低）：
-1. **检查节点插件**：`isPrivateIP`, `cidrMatch` - 纯计算，性能较高
-2. **字符串处理插件**：`replace`, `hashMD5/SHA1/SHA256` - 中等性能
-3. **正则表达式插件**：`regexExtract`, `regexReplace` - 性能较低
-4. **威胁情报插件**：`virusTotal`, `shodan`, `threatBook` - 外部API调用，性能最低
-
-优化建议：
-```xml
-<!-- 推荐：先用高性能检查，再用低性能插件 -->
-<rule id="optimized">
-    <check type="INCL" field="alert_level">high</check>
-    <check type="NOTNULL" field="source_ip"></check>
-    <append type="PLUGIN" field="threat_intel">threatBook(source_ip, "ip")</append>
-</rule>
-```
-
-### 4.3 白名单规则集
+### 5.4 白名单规则集
 
 白名单用于过滤掉不需要处理的数据（ruleset type 为 WHITELIST）。白名单的特殊行为：
 - 当白名单规则匹配时，数据被"不允许通过"（即被过滤掉，不再继续处理，数据将被丢弃）
@@ -1208,9 +1173,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 🚨 第五部分：实战案例集
+## 🚨 第六部分：实战案例集
 
-### 案例1：APT攻击检测
+### 6.1 案例1：APT攻击检测
 
 完整的APT攻击检测规则集（使用内置插件和假设的自定义插件）：
 
@@ -1309,7 +1274,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-### 案例2：金融欺诈实时检测
+### 6.2 案例2：金融欺诈实时检测
 
 ```xml
 <root type="DETECTION" name="fraud_detection_system" author="risk_team">
@@ -1387,7 +1352,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-### 案例3：零信任安全架构
+### 6.3 案例3：零信任安全架构
 
 ```xml
 <root type="DETECTION" name="zero_trust_security" author="security_architect">
@@ -1467,9 +1432,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 📖 第六部分：语法参考手册
+## 📖 第七部分：语法参考手册
 
-### 6.1 规则集结构
+### 7.1 规则集结构
 
 #### 根元素 `<root>`
 ```xml
@@ -1496,7 +1461,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | id | 是 | 规则唯一标识符 |
 | name | 否 | 规则可读描述 |
 
-### 6.2 检查操作
+### 7.2 检查操作
 
 #### 独立检查 `<check>`
 ```xml
@@ -1525,7 +1490,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 |------|------|------|
 | condition | 否 | 逻辑表达式（如：`a and (b or c)`） |
 
-### 6.3 检查类型完整列表
+### 7.3 检查类型完整列表
 
 #### 字符串匹配类
 | 类型 | 说明 | 大小写 | 示例 |
@@ -1569,7 +1534,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
 | PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
-### 6.4 数据处理操作
+### 7.4 频率检测
 
 #### 阈值检测 `<threshold>`
 ```xml
@@ -1585,6 +1550,8 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | count_type | 否 | 计数类型 | 默认：计数，`SUM`：求和，`CLASSIFY`：去重计数 |
 | count_field | 条件 | 统计字段 | 使用SUM/CLASSIFY时必需 |
 | local_cache | 否 | 使用本地缓存 | `true` 或 `false` |
+
+### 7.5 数据处理操作
 
 #### 字段追加 `<append>`
 ```xml
@@ -1606,7 +1573,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <plugin>插件函数(参数1, 参数2)</plugin>
 ```
 
-### 6.5 字段访问语法
+### 7.6 字段访问语法
 
 #### 基本访问
 - **直接字段**：`field_name`
@@ -1633,26 +1600,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
-### 6.6 内置插件快速参考
-
-#### 检查类插件（返回bool）
-| 插件 | 功能 | 参数 | 示例 |
-|------|------|------|------|
-| isPrivateIP | 检查私有IP | ip | `isPrivateIP(ip)` |
-| cidrMatch | CIDR匹配 | ip, cidr | `cidrMatch(ip, "10.0.0.0/8")` |
-| geoMatch | 地理位置匹配 | ip, country | `geoMatch(ip, "US")` |
-| suppressOnce | 告警抑制 | key, seconds, ruleid | `suppressOnce(ip, 300, "rule1")` |
-
-#### 数据处理插件（返回各种类型）
-| 插件 | 功能 | 返回类型 | 示例 |
-|------|------|----------|------|
-| now | 当前时间 | int64 | `now()` |
-| base64Encode | Base64编码 | string | `base64Encode(data)` |
-| hashSHA256 | SHA256哈希 | string | `hashSHA256(content)` |
-| parseJSON | JSON解析 | object | `parseJSON(json_str)` |
-| regexExtract | 正则提取 | string | `regexExtract(text, pattern)` |
-
-### 6.7 性能优化建议
+### 7.8 性能优化建议
 
 #### 操作顺序优化
 ```xml
@@ -1675,7 +1623,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
 ```
 
-### 6.8 常见错误和解决方案
+### 7.9 常见错误和解决方案
 
 #### XML语法错误
 ```xml
@@ -1697,7 +1645,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <checklist condition="a and b">
     <check id="a" type="EQU" field="status">active</check>
     <check id="b" type="NOTNULL" field="user"></check>
-        </checklist>
+</checklist>
 ```
 
 #### 性能问题
@@ -1711,10 +1659,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <rule id="fast">
     <check type="EQU" field="type">target</check>
     <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
-    </rule>
+</rule>
 ```
 
-### 6.9 调试技巧
+### 7.10 调试技巧
 
 #### 1. 使用append跟踪执行流程
 ```xml
@@ -1750,9 +1698,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-## 5. 自定义插件开发
+## 第八部分：自定义插件开发
 
-### 5.1 插件分类
+### 8.1 插件分类
 
 #### 按运行方式分类
 - **本地插件（Local Plugin）**：编译到程序中的内置插件，性能最高
@@ -1762,7 +1710,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
 - **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
 
-### 5.2 插件语法
+### 8.2 插件语法
 
 #### 基本语法
 ```xml
@@ -1789,7 +1737,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <check type="PLUGIN">!isPrivateIP(source_ip)</check>
 ```
 
-### 5.3 插件函数签名
+### 8.3 插件函数签名
 
 #### 检查类插件
 ```go
@@ -1843,7 +1791,7 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 }
 ```
 
-### 5.4 Yaegi插件的有状态特性
+### 8.4 Yaegi插件的有状态特性
 
 #### 状态保持机制
 ```go
@@ -1879,13 +1827,13 @@ func Eval(key string) (interface{}, bool, error) {
 }
 ```
 
-### 5.5 插件限制
+### 8.5 插件限制
 - 只能使用Go标准库
 - 不能使用第三方包
 - 必须定义名为`Eval`的函数
 - 函数签名必须严格匹配
 
-### 5.6 常用标准库
+### 8.6 常用标准库
 - 基础：`fmt`, `strings`, `strconv`, `errors`
 - 编码：`encoding/json`, `encoding/base64`, `encoding/hex`
 - 加密：`crypto/md5`, `crypto/sha256`, `crypto/rand`
@@ -1894,157 +1842,7 @@ func Eval(key string) (interface{}, bool, error) {
 - 网络：`net`, `net/url`
 - 并发：`sync`
 
-## 6. 最佳实践
-
-### 6.1 性能优化
-1. **执行顺序**：快速检查在前，慢速操作在后
-2. **缓存使用**：利用内置插件的缓存机制
-3. **避免重复计算**：合理使用字段引用
-
-### 6.2 错误处理
-1. **参数验证**：插件内部必须验证参数
-2. **优雅降级**：错误时返回合理的默认值
-3. **日志记录**：重要操作记录日志
-
-### 6.3 有状态插件设计
-```go
-// 线程安全的状态管理
-var (
-    dataCache = make(map[string]interface{})
-    cacheMutex sync.RWMutex
-    lastRefresh time.Time
-    refreshInterval = 10 * time.Minute
-)
-
-func init() {
-    // 初始化缓存
-    refreshCache()
-    
-    // 启动后台刷新任务
-    go func() {
-        ticker := time.NewTicker(5 * time.Minute)
-        for range ticker.C {
-            refreshCache()
-        }
-    }()
-}
-
-func Eval(key string) (interface{}, bool, error) {
-    // 检查是否需要刷新
-    if time.Since(lastRefresh) > refreshInterval {
-        refreshCache()
-    }
-    
-    cacheMutex.RLock()
-    if value, exists := dataCache[key]; exists {
-        cacheMutex.RUnlock()
-        return value, true, nil
-    }
-    cacheMutex.RUnlock()
-    
-    return nil, false, nil
-}
-
-func refreshCache() {
-    // 刷新缓存逻辑
-    cacheMutex.Lock()
-    defer cacheMutex.Unlock()
-    
-    // 执行刷新操作
-    lastRefresh = time.Now()
-}
-```
-
-### 6.4 调试技巧
-1. **使用append跟踪**：添加调试字段
-2. **分步测试**：逐个测试插件功能
-3. **验证字段**：确保字段引用正确
-
-### 6.5 常见模式
-
-#### 缓存模式
-```go
-var cache = make(map[string]interface{})
-var mutex sync.RWMutex
-
-func Eval(key string) (interface{}, bool, error) {
-    mutex.RLock()
-    if value, exists := cache[key]; exists {
-        mutex.RUnlock()
-        return value, true, nil
-    }
-    mutex.RUnlock()
-    
-    // 计算并缓存
-    result := expensiveCalculation(key)
-    mutex.Lock()
-    cache[key] = result
-    mutex.Unlock()
-    
-    return result, true, nil
-}
-```
-
-#### 计数器模式
-```go
-var counters = make(map[string]int)
-var counterMutex sync.RWMutex
-
-func Eval(key string, threshold int) (bool, error) {
-    counterMutex.Lock()
-    defer counterMutex.Unlock()
-    
-    counters[key]++
-    return counters[key] > threshold, nil
-}
-```
-
-#### 时间窗口模式
-```go
-var (
-    lastSeen = make(map[string]time.Time)
-    timeMutex sync.RWMutex
-    window = 5 * time.Minute
-)
-
-func Eval(key string) (bool, error) {
-    now := time.Now()
-    
-    timeMutex.Lock()
-    defer timeMutex.Unlock()
-    
-    if last, exists := lastSeen[key]; exists {
-        if now.Sub(last) < window {
-            return false, nil // 在时间窗口内，不触发
-        }
-    }
-    
-    lastSeen[key] = now
-    return true, nil // 触发
-}
-```
-
 ## 总结
-
-AgentSmith-HUB的插件系统提供了强大的扩展能力：
-
-1. **类型丰富**：支持检查类和数据处理类插件
-2. **状态管理**：Yaegi插件支持有状态和init函数
-3. **并发安全**：支持线程安全的状态管理
-4. **性能优化**：内置缓存和后台任务支持
-5. **易于开发**：清晰的函数签名和错误处理机制
-
-通过合理使用插件，可以构建复杂的数据处理流程和业务逻辑，实现灵活的安全检测和响应机制。
-
-## 🎯 总结
-
-AgentSmith-HUB 规则引擎的核心优势：
-
-1. **完全灵活的执行顺序**：操作按XML中的出现顺序执行
-2. **简洁的语法**：独立的 `<check>` 标签，支持灵活组合
-3. **强大的数据处理**：丰富的内置插件和灵活的字段访问
-4. **可扩展性**：支持自定义插件开发
-5. **高性能设计**：智能优化和缓存机制
 
 记住核心理念：**按需组合，灵活编排**。根据你的具体需求，自由组合各种操作，创建最适合的规则。
 
