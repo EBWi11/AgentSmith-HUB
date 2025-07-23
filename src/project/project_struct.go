@@ -582,10 +582,7 @@ func SafeDeleteRuleset(id string) ([]string, error) {
 			logger.Info("Stopping ruleset component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
-			err := rs.Stop()
-			if err != nil {
-				logger.Error("Failed to stop ruleset", "id", id, "error", err)
-			}
+			_ = rs.Stop()
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
 			common.GlobalMu.Lock()
 		}
@@ -633,10 +630,7 @@ func SafeDeleteInput(id string) ([]string, error) {
 			logger.Info("Stopping input component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
-			err := inp.Stop()
-			if err != nil {
-				logger.Error("Failed to stop input", "id", id, "error", err)
-			}
+			_ = inp.Stop()
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
 			common.GlobalMu.Lock()
 		}
@@ -685,10 +679,7 @@ func SafeDeleteOutput(id string) ([]string, error) {
 			logger.Info("Stopping output component for deletion", "id", id)
 			// Temporarily release lock for stop operation to prevent deadlock
 			common.GlobalMu.Unlock()
-			err := out.Stop()
-			if err != nil {
-				logger.Error("Failed to stop output", "id", id, "error", err)
-			}
+			_ = out.Stop()
 			common.GlobalDailyStatsManager.CollectAllComponentsData()
 			common.GlobalMu.Lock()
 		}
@@ -722,7 +713,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 	}
 
 	// Stop project if running
-	if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting {
+	if proj.Status == common.StatusRunning || proj.Status == common.StatusStarting || proj.Status == common.StatusError {
 		logger.Info("Stopping running project before deletion", "project_id", id)
 
 		// Temporarily release lock for stop operation to prevent deadlock
@@ -730,9 +721,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 
 		// Note: Project.Stop() already includes final statistics collection
 		if err := proj.Stop(true); err != nil {
-			// Re-acquire lock before returning
-			common.GlobalMu.Lock()
-			return nil, fmt.Errorf("failed to stop project before deletion: %v", err)
+			logger.Error("failed to stop project before deletion: %v", err)
 		}
 
 		// Re-acquire lock after stop
