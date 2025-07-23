@@ -183,7 +183,7 @@ async function loadTutorialContent() {
     loading.value = true
     error.value = null
 
-    const fileName = currentLanguage.value === 'en' ? '/RULESET_GUIDE.md' : '/RULESET_GUIDE_ZH.md'
+    const fileName = currentLanguage.value === 'en' ? '/agentsmith-hub-guide.md' : '/agentsmith-hub-guide-zh.md'
     const response = await fetch(fileName)
     
     if (!response.ok) {

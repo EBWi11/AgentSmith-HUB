@@ -825,15 +825,60 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 🧩 内置插件完整列表
 
-##### 检查类插件（用于条件判断）
-可在 `<check type="PLUGIN">` 中使用，返回布尔值。支持使用 `!` 前缀对结果取反，例如 `<check type="PLUGIN">!isPrivateIP(dest_ip)</check>` 表示当IP不是私有地址时条件成立。
+##### 检查类插件（返回bool）
 
 | 插件名 | 功能 | 参数 | 示例 |
 |--------|------|------|------|
-| `isPrivateIP` | 检查IP是否为私有地址 | ip (string) | `<check type="PLUGIN">isPrivateIP(source_ip)</check>` |
-| `cidrMatch` | 检查IP是否在CIDR范围内 | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(client_ip, "192.168.1.0/24")</check>` |
-| `geoMatch` | 检查IP是否属于指定国家 | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(source_ip, "US")</check>` |
-| `suppressOnce` | 告警抑制：时间窗口内只触发一次 | key (any), windowSec (int), ruleid (string, 可选) | `<check type="PLUGIN">suppressOnce(alert_key, 300, "rule_001")</check>` |
+| `isPrivateIP` | 检查IP是否为私有地址 | ip (string) | `isPrivateIP(source_ip)` |
+| `cidrMatch` | 检查IP是否在CIDR范围内 | ip (string), cidr (string) | `cidrMatch(client_ip, "192.168.1.0/24")` |
+| `geoMatch` | 检查IP所属国家 | ip (string), countryISO (string) | `geoMatch(source_ip, "US")` |
+| `suppressOnce` | 告警抑制 | key (any), windowSec (int), ruleid (string, optional) | `suppressOnce(alert_key, 300, "rule_001")` |
+
+##### 数据处理插件（返回各种类型）
+
+#### 时间处理插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `now` | 获取当前时间戳 | 可选：format (unix/ms/rfc3339) | `now()` |
+| `dayOfWeek` | 获取星期几 (0-6, 0=周日) | 可选：timestamp (int64) | `dayOfWeek()` |
+| `hourOfDay` | 获取小时 (0-23) | 可选：timestamp (int64) | `hourOfDay()` |
+| `tsToDate` | 时间戳转RFC3339格式 | timestamp (int64) | `tsToDate(timestamp)` |
+
+#### 编码和哈希插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `base64Encode` | Base64编码 | input (string) | `base64Encode(data)` |
+| `base64Decode` | Base64解码 | input (string) | `base64Decode(encoded_data)` |
+| `hashMD5` | MD5哈希 | input (string) | `hashMD5(data)` |
+| `hashSHA1` | SHA1哈希 | input (string) | `hashSHA1(data)` |
+| `hashSHA256` | SHA256哈希 | input (string) | `hashSHA256(data)` |
+
+#### URL解析插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `extractDomain` | 从URL提取域名 | urlOrHost (string) | `extractDomain(url)` |
+| `extractTLD` | 提取顶级域名 | domain (string) | `extractTLD(domain)` |
+| `extractSubdomain` | 提取子域名 | host (string) | `extractSubdomain(host)` |
+
+#### 字符串处理插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `replace` | 字符串替换 | input (string), old (string), new (string) | `replace(text, "old", "new")` |
+| `regexExtract` | 正则提取 | input (string), pattern (string) | `regexExtract(text, "\\d+")` |
+| `regexReplace` | 正则替换 | input (string), pattern (string), replacement (string) | `regexReplace(text, "\\d+", "NUMBER")` |
+
+#### 数据解析插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `parseJSON` | 解析JSON字符串 | jsonString (string) | `parseJSON(json_data)` |
+| `parseUA` | 解析User-Agent | userAgent (string) | `parseUA(user_agent)` |
+
+#### 威胁情报插件
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `virusTotal` | VirusTotal查询 | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
+| `shodan` | Shodan查询 | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
+| `threatBook` | 微步在线查询 | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
 
 **注意插件参数格式**：
 - 当引用数据中的字段时，无需使用 `_$` 前缀，直接使用字段名：`source_ip`
@@ -841,58 +886,74 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - 当使用静态值时，直接使用字符串（带引号）：`"192.168.1.0/24"`
 - 当使用数字时，不需要引号：`300`
 
-##### 数据处理插件（用于数据转换）
-可在 `<append type="PLUGIN">` 中使用，返回各种类型的值：
+## 4. 在Ruleset中的使用方式
 
-**时间处理插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `now` | 获取当前时间戳 | 可选: format (unix/ms/rfc3339) | `<append type="PLUGIN" field="timestamp">now()</append>` |
-| `ago` | 获取N秒前的时间戳 | seconds (int/float/string) | `<append type="PLUGIN" field="past_time">ago(3600)</append>` |
-| `dayOfWeek` | 获取星期几(0-6, 0=周日) | 可选: timestamp (int64) | `<append type="PLUGIN" field="weekday">dayOfWeek()</append>` |
-| `hourOfDay` | 获取小时(0-23) | 可选: timestamp (int64) | `<append type="PLUGIN" field="hour">hourOfDay()</append>` |
-| `tsToDate` | 时间戳转RFC3339格式 | timestamp (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(event_time)</append>` |
+### 4.1 基本使用模式
 
-**编码和哈希插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `base64Encode` | Base64编码 | input (string) | `<append type="PLUGIN" field="encoded">base64Encode(raw_data)</append>` |
-| `base64Decode` | Base64解码 | encoded (string) | `<append type="PLUGIN" field="decoded">base64Decode(encoded_data)</append>` |
-| `hashMD5` | 计算MD5哈希 | input (string) | `<append type="PLUGIN" field="md5">hashMD5(password)</append>` |
-| `hashSHA1` | 计算SHA1哈希 | input (string) | `<append type="PLUGIN" field="sha1">hashSHA1(content)</append>` |
-| `hashSHA256` | 计算SHA256哈希 | input (string) | `<append type="PLUGIN" field="sha256">hashSHA256(file_data)</append>` |
+```xml
+<root author="example" type="DETECTION" name="plugin_example">
+    <rule id="plugin_usage" name="Plugin Usage Examples">
+        <!-- 1. 检查类插件 -->
+        <check type="PLUGIN">isPrivateIP(source_ip)</check>
+        
+        <!-- 2. 数据处理插件 -->
+        <append type="PLUGIN" field="timestamp">now()</append>
+        <append type="PLUGIN" field="hash">hashSHA256(file_content)</append>
+        
+        <!-- 3. 执行操作插件 -->
+        <plugin>sendAlert(_$ORIDATA)</plugin>
+    </rule>
+</root>
+```
 
-**URL处理插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `extractDomain` | 从URL提取域名 | urlOrHost (string) | `<append type="PLUGIN" field="domain">extractDomain(request_url)</append>` |
-| `extractTLD` | 从域名提取顶级域名 | domain (string) | `<append type="PLUGIN" field="tld">extractTLD(hostname)</append>` |
-| `extractSubdomain` | 从主机名提取子域名 | host (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(full_hostname)</append>` |
+### 4.2 复杂逻辑组合
 
-**字符串处理插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `replace` | 字符串替换 | input (string), old (string), new (string) | `<append type="PLUGIN" field="cleaned">replace(raw_text, "bad", "good")</append>` |
-| `regexExtract` | 正则表达式提取 | input (string), pattern (string) | `<append type="PLUGIN" field="extracted">regexExtract(log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
-| `regexReplace` | 正则表达式替换 | input (string), pattern (string), replacement (string) | `<append type="PLUGIN" field="masked">regexReplace(email, "(.+)@(.+)", "$1@***")</append>` |
+```xml
+<rule id="complex_plugin_usage" name="Complex Plugin Usage">
+    <!-- 使用checklist组合多个条件 -->
+    <checklist condition="(private_ip or suspicious_country) and not whitelisted">
+        <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
+        <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
+        <check id="whitelisted" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
+    </checklist>
+    
+    <!-- 数据富化 -->
+    <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
+    <append type="PLUGIN" field="geo_info">shodan(source_ip)</append>
+    
+    <!-- 时间相关处理 -->
+    <append type="PLUGIN" field="hour">hourOfDay()</append>
+    <check type="PLUGIN">hourOfDay() > 22</check>
+</rule>
+```
 
-**数据解析插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `parseJSON` | 解析JSON字符串 | jsonString (string) | `<append type="PLUGIN" field="parsed">parseJSON(json_data)</append>` |
-| `parseUA` | 解析User-Agent | userAgent (string) | `<append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>` |
+### 4.3 告警抑制示例
 
-**威胁情报插件**
-| 插件名 | 功能 | 参数 | 示例 |
-|--------|------|------|------|
-| `virusTotal` | 查询VirusTotal文件哈希威胁情报 | hash (string), apiKey (string, 可选) | `<append type="PLUGIN" field="vt_scan">virusTotal(file_hash)</append>` |
-| `shodan` | 查询Shodan IP地址基础设施情报 | ip (string), apiKey (string, 可选) | `<append type="PLUGIN" field="shodan_intel">shodan(ip_address)</append>` |
-| `threatBook` | 查询微步在线威胁情报 | queryValue (string), queryType (string), apiKey (string, 可选) | `<append type="PLUGIN" field="tb_intel">threatBook(target_ip, "ip")</append>` |
+```xml
+<rule id="suppression_example" name="Alert Suppression">
+    <check type="EQU" field="event_type">login_failed</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300, "login_brute_force")</check>
+    <append field="alert_type">brute_force</append>
+</rule>
+```
 
-**威胁情报插件配置说明**：
-- API Key 可以在配置文件中统一设置，也可以在插件调用时传入
-- 如果不提供 API Key，某些功能可能受限
-- 建议在系统配置中统一管理 API Key，避免在规则中硬编码
+### 4.4 数据转换示例
+
+```xml
+<rule id="data_transformation" name="Data Transformation">
+    <check type="EQU" field="content_type">json</check>
+    
+    <!-- 解析JSON并提取字段 -->
+    <append type="PLUGIN" field="parsed_data">parseJSON(raw_content)</append>
+    <append field="user_id">parsed_data.user.id</append>
+    
+    <!-- 编码处理 -->
+    <append type="PLUGIN" field="encoded">base64Encode(sensitive_data)</append>
+    
+    <!-- 哈希计算 -->
+    <append type="PLUGIN" field="content_hash">hashSHA256(raw_content)</append>
+</rule>
+```
 
 #### 内置插件使用示例
 
@@ -913,11 +974,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 使用内置插件的规则：
 ```xml
 <rule id="suspicious_connection" name="可疑连接检测">
-        <!-- 检查是否为外部连接 -->
+    <!-- 检查是否为外部连接 -->
     <check type="PLUGIN">isPrivateIP(source_ip)</check>  <!-- 源是内网 -->
     <check type="PLUGIN">!isPrivateIP(dest_ip)</check>  <!-- 目标是外网 -->
     
-        <!-- 检查地理位置 -->
+    <!-- 检查地理位置 -->
     <append type="PLUGIN" field="dest_country">geoMatch(dest_ip)</append>
     
     <!-- 添加时间戳 -->
@@ -959,10 +1020,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <!-- 第1步：检查数据类型，快速过滤 -->
     <check type="EQU" field="datatype">external_connection</check>
    
-   <!-- 第2步：确认目标IP是公网地址 -->
-   <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
+    <!-- 第2步：确认目标IP是公网地址 -->
+    <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
 
-   <!-- 第3步：查询威胁情报，增强数据 -->
+    <!-- 第3步：查询威胁情报，增强数据 -->
     <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
     
     <!-- 第4步：解析威胁情报结果 -->
@@ -1701,384 +1762,291 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-## 🔧 第七部分：自定义插件开发
+## 5. 自定义插件开发
 
-### 7.1 插件分类
+### 5.1 插件分类
 
-AgentSmith-HUB 支持两种类型的插件：
+#### 按运行方式分类
+- **本地插件（Local Plugin）**：编译到程序中的内置插件，性能最高
+- **Yaegi插件（Yaegi Plugin）**：使用Yaegi解释器运行的动态插件，**支持有状态和init函数**
 
-#### 插件运行方式分类
-1. **本地插件（Local Plugin）**：编译到程序中的内置插件，性能最高
-2. **Yaegi插件（Yaegi Plugin）**：使用 Yaegi 解释器运行的动态插件，灵活度最高
+#### 按返回类型分类
+- **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
+- **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
 
-#### 插件返回类型分类
-1. **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
-2. **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
+### 5.2 插件语法
 
-### 7.2 插件函数签名
-
-#### 重要：Eval函数签名说明
-
-插件必须定义一个名为 `Eval` 的函数，根据插件用途选择正确的函数签名：
-
-**检查类插件签名**：
-```go
-func Eval(参数...) (bool, error)
-```
-- 第一个返回值：检查结果（true/false）
-- 第二个返回值：错误信息（如果有）
-
-**数据处理插件签名**：
-```go
-func Eval(参数...) (interface{}, bool, error)
-```
-- 第一个返回值：处理结果（任意类型）
-- 第二个返回值：是否成功（true/false）
-- 第三个返回值：错误信息（如果有）
-
-### 7.3 编写自定义插件
-
-#### 基本结构
-
-```go
-package plugin
-
-import (
-    "strings"
-    "fmt"
-)
-
-// Eval 是插件的入口函数，必须定义此函数
-// 根据插件用途选择合适的函数签名
-```
-
-#### 检查类插件示例
-
-用于条件判断，返回 bool 值：
-
-```go
-package plugin
-
-import (
-    "strings"
-    "fmt"
-)
-
-// 检查邮箱是否来自指定域名
-// 返回 (bool, error) - 用于 check 节点
-func Eval(email string, allowedDomain string) (bool, error) {
-    if email == "" {
-        return false, nil
-    }
-    
-    // 提取邮箱域名
-    parts := strings.Split(email, "@")
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid email format: %s", email)
-    }
-    
-    domain := strings.ToLower(parts[1])
-    allowed := strings.ToLower(allowedDomain)
-    
-    return domain == allowed, nil
-}
-```
-
-使用示例：
+#### 基本语法
 ```xml
-<check type="PLUGIN">checkEmailDomain(email, "company.com")</check>
+<!-- 检查类插件 -->
+<check type="PLUGIN">pluginName(param1, param2, ...)</check>
+
+<!-- 数据处理插件 -->
+<append type="PLUGIN" field="field_name">pluginName(param1, param2, ...)</append>
+
+<!-- 执行操作插件 -->
+<plugin>pluginName(param1, param2, ...)</plugin>
 ```
 
-#### 数据处理插件示例
+#### 参数类型
+- **字符串**：`"value"` 或 `'value'`
+- **数字**：`123` 或 `123.45`
+- **布尔值**：`true` 或 `false`
+- **字段引用**：`field_name` 或 `parent.child.field`
+- **原始数据**：`_$ORIDATA`（唯一需要_$前缀的）
 
-用于数据转换、计算等，返回任意类型：
-
-```go
-package plugin
-
-import (
-    "strings"
-)
-
-// 解析并提取User-Agent中的信息
-// 返回 (interface{}, bool, error) - 用于 append 或 plugin 节点
-func Eval(userAgent string) (interface{}, bool, error) {
-    if userAgent == "" {
-        return nil, false, nil
-    }
-    
-    result := make(map[string]interface{})
-    
-    // 简单的浏览器检测
-    if strings.Contains(userAgent, "Chrome") {
-        result["browser"] = "Chrome"
-    } else if strings.Contains(userAgent, "Firefox") {
-        result["browser"] = "Firefox"
-    } else if strings.Contains(userAgent, "Safari") {
-        result["browser"] = "Safari"
-    } else {
-        result["browser"] = "Unknown"
-    }
-    
-    // 操作系统检测
-    if strings.Contains(userAgent, "Windows") {
-        result["os"] = "Windows"
-    } else if strings.Contains(userAgent, "Mac") {
-        result["os"] = "macOS"
-    } else if strings.Contains(userAgent, "Linux") {
-        result["os"] = "Linux"
-    } else {
-        result["os"] = "Unknown"
-    }
-    
-    // 是否移动设备
-    result["is_mobile"] = strings.Contains(userAgent, "Mobile")
-    
-    return result, true, nil
-}
-```
-
-使用示例：
+#### 否定语法
+检查类插件支持否定前缀：
 ```xml
-<!-- 提取信息到新字段 -->
-<append type="PLUGIN" field="ua_info">parseCustomUA(user_agent)</append>
-
-<!-- 后续可以访问解析结果 -->
-<check type="EQU" field="ua_info.browser">Chrome</check>
-<check type="EQU" field="ua_info.is_mobile">true</check>
+<check type="PLUGIN">!isPrivateIP(source_ip)</check>
 ```
 
-### 7.4 插件开发规范
+### 5.3 插件函数签名
 
-#### 命名规范
-- 插件名使用驼峰命名法：`isValidEmail`、`extractDomain`
-- 检查类插件通常以 `is`、`has`、`check` 开头
-- 处理类插件通常以动词开头：`parse`、`extract`、`calculate`
-
-#### 参数设计
-```go
-// 推荐：参数明确，易于理解
-func Eval(ip string, cidr string) (bool, error)
-
-// 避免：参数过多
-func Eval(a, b, c, d, e string) (bool, error)
-
-// 支持可变参数
-func Eval(ip string, cidrs ...string) (bool, error)
-```
-
-#### 错误处理
-```go
-func Eval(data string) (interface{}, bool, error) {
-    // 输入验证
-    if data == "" {
-        return nil, false, nil  // 空输入返回 false，不报错
-    }
-    
-    // 处理可能的错误
-    result, err := processData(data)
-    if err != nil {
-        return nil, false, fmt.Errorf("process data failed: %w", err)
-    }
-    
-    return result, true, nil
-}
-```
-
-#### 性能考虑
+#### 检查类插件
 ```go
 package plugin
 
 import (
-    "regexp"
-    "sync"
-)
-
-// 使用全局变量缓存正则表达式
-var (
-    emailRegex *regexp.Regexp
-    regexOnce  sync.Once
-)
-
-func Eval(email string) (bool, error) {
-    // 确保正则只编译一次
-    regexOnce.Do(func() {
-        emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-    })
-    
-    return emailRegex.MatchString(email), nil
-}
-```
-
-### 7.5 高级插件示例
-
-#### 复杂数据处理插件
-
-```go
-package plugin
-
-import (
-    "crypto/md5"
-    "encoding/hex"
-    "encoding/json"
+    "errors"
     "fmt"
-    "time"
 )
 
-// 生成用户行为指纹
-func Eval(userID string, actions string, timestamp int64) (interface{}, bool, error) {
-    // 解析用户行为
-    var actionList []map[string]interface{}
-    if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
-        return nil, false, fmt.Errorf("invalid actions format: %w", err)
+// Eval 函数必须返回 (bool, error)
+func Eval(args ...interface{}) (bool, error) {
+    if len(args) == 0 {
+        return false, errors.New("plugin requires at least one argument")
     }
     
-    // 分析行为模式
-    result := map[string]interface{}{
-        "user_id": userID,
-        "timestamp": timestamp,
-        "action_count": len(actionList),
-        "time_of_day": time.Unix(timestamp, 0).Hour(),
+    // 参数处理
+    data := args[0]
+    
+    // 插件逻辑
+    if someCondition {
+        return true, nil
     }
     
-    // 计算行为频率
-    actionTypes := make(map[string]int)
-    for _, action := range actionList {
-        if actionType, ok := action["type"].(string); ok {
-            actionTypes[actionType]++
-        }
+    return false, nil
+}
+```
+
+#### 数据处理插件
+```go
+package plugin
+
+import (
+    "errors"
+    "fmt"
+)
+
+// Eval 函数必须返回 (interface{}, bool, error)
+func Eval(args ...interface{}) (interface{}, bool, error) {
+    if len(args) == 0 {
+        return nil, false, errors.New("plugin requires at least one argument")
     }
-    result["action_types"] = actionTypes
     
-    // 生成行为指纹
-    fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
-    hash := md5.Sum([]byte(fingerprint))
-    result["fingerprint"] = hex.EncodeToString(hash[:])
+    // 参数处理
+    input := args[0]
     
-    // 风险评分
-    riskScore := 0
-    if len(actionList) > 100 {
-        riskScore += 20
-    }
-    if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
-        riskScore += 30
-    }
-    result["risk_score"] = riskScore
+    // 数据处理逻辑
+    result := processData(input)
     
     return result, true, nil
 }
 ```
 
-#### 状态管理插件
+### 5.4 Yaegi插件的有状态特性
 
+#### 状态保持机制
 ```go
-package plugin
-
-import (
-    "sync"
-    "time"
-)
-
+// Yaegi插件支持全局变量和init函数
 var (
-    requestCount = make(map[string]*userRequest)
-    mu          sync.RWMutex
-)
-
-type userRequest struct {
-    count      int
+    cache = make(map[string]interface{})
+    cacheMutex sync.RWMutex
     lastUpdate time.Time
+)
+
+// init函数在插件加载时执行
+func init() {
+    // 初始化缓存
+    refreshCache()
 }
 
-// 检测用户请求频率是否异常
-func Eval(userID string, threshold int) (bool, error) {
-    mu.Lock()
-    defer mu.Unlock()
-    
-    now := time.Now()
-    
-    // 获取或创建用户记录
-    req, exists := requestCount[userID]
-    if !exists {
-        req = &userRequest{
-            count:      1,
-            lastUpdate: now,
-        }
-        requestCount[userID] = req
-        return false, nil
+// 有状态的Eval函数
+func Eval(key string) (interface{}, bool, error) {
+    cacheMutex.RLock()
+    if value, exists := cache[key]; exists {
+        cacheMutex.RUnlock()
+        return value, true, nil
     }
+    cacheMutex.RUnlock()
     
-    // 如果距离上次请求超过1分钟，重置计数
-    if now.Sub(req.lastUpdate) > time.Minute {
-        req.count = 1
-        req.lastUpdate = now
-        return false, nil
-    }
+    // 计算并缓存结果
+    result := computeResult(key)
+    cacheMutex.Lock()
+    cache[key] = result
+    cacheMutex.Unlock()
     
-    // 增加计数
-    req.count++
-    req.lastUpdate = now
-    
-    // 检查是否超过阈值
-    return req.count > threshold, nil
+    return result, true, nil
 }
 ```
 
-### 7.6 插件限制和注意事项
+### 5.5 插件限制
+- 只能使用Go标准库
+- 不能使用第三方包
+- 必须定义名为`Eval`的函数
+- 函数签名必须严格匹配
 
-#### 允许的标准库包
-插件只能导入 Go 标准库，不能使用第三方包。常用的标准库包括：
+### 5.6 常用标准库
 - 基础：`fmt`, `strings`, `strconv`, `errors`
 - 编码：`encoding/json`, `encoding/base64`, `encoding/hex`
 - 加密：`crypto/md5`, `crypto/sha256`, `crypto/rand`
 - 时间：`time`
 - 正则：`regexp`
 - 网络：`net`, `net/url`
+- 并发：`sync`
 
-#### 最佳实践
-1. **保持简单**：插件应该专注于单一功能
-2. **快速返回**：避免复杂计算，考虑使用缓存
-3. **优雅降级**：错误时返回合理的默认值
-4. **充分测试**：测试各种边界情况
+## 6. 最佳实践
 
-### 7.7 插件部署和管理
+### 6.1 性能优化
+1. **执行顺序**：快速检查在前，慢速操作在后
+2. **缓存使用**：利用内置插件的缓存机制
+3. **避免重复计算**：合理使用字段引用
 
-#### 创建插件
-1. 在 Web UI 的插件管理页面点击"新建插件"
-2. 输入插件名称和代码
-3. 系统会自动验证插件语法和安全性
-4. 保存后立即可用
+### 6.2 错误处理
+1. **参数验证**：插件内部必须验证参数
+2. **优雅降级**：错误时返回合理的默认值
+3. **日志记录**：重要操作记录日志
 
-#### 测试插件
-```xml
-<!-- 测试规则 -->
-<rule id="test_custom_plugin">
-    <check type="PLUGIN">myCustomPlugin(test_field, "expected_value")</check>
-    <append type="PLUGIN" field="result">myDataPlugin(input_data)</append>
-</rule>
+### 6.3 有状态插件设计
+```go
+// 线程安全的状态管理
+var (
+    dataCache = make(map[string]interface{})
+    cacheMutex sync.RWMutex
+    lastRefresh time.Time
+    refreshInterval = 10 * time.Minute
+)
+
+func init() {
+    // 初始化缓存
+    refreshCache()
+    
+    // 启动后台刷新任务
+    go func() {
+        ticker := time.NewTicker(5 * time.Minute)
+        for range ticker.C {
+            refreshCache()
+        }
+    }()
+}
+
+func Eval(key string) (interface{}, bool, error) {
+    // 检查是否需要刷新
+    if time.Since(lastRefresh) > refreshInterval {
+        refreshCache()
+    }
+    
+    cacheMutex.RLock()
+    if value, exists := dataCache[key]; exists {
+        cacheMutex.RUnlock()
+        return value, true, nil
+    }
+    cacheMutex.RUnlock()
+    
+    return nil, false, nil
+}
+
+func refreshCache() {
+    // 刷新缓存逻辑
+    cacheMutex.Lock()
+    defer cacheMutex.Unlock()
+    
+    // 执行刷新操作
+    lastRefresh = time.Now()
+}
 ```
 
-#### 插件版本管理
-- 修改插件会创建新版本
-- 可以查看插件修改历史
-- 支持回滚到之前版本
+### 6.4 调试技巧
+1. **使用append跟踪**：添加调试字段
+2. **分步测试**：逐个测试插件功能
+3. **验证字段**：确保字段引用正确
 
-### 7.8 常见问题解答
+### 6.5 常见模式
 
-#### Q: 如何知道应该使用哪种函数签名？
-A: 根据插件的使用场景：
-- 在 `<check type="PLUGIN">` 中使用：返回 `(bool, error)`
-- 在 `<append type="PLUGIN">` 或 `<plugin>` 中使用：返回 `(interface{}, bool, error)`
+#### 缓存模式
+```go
+var cache = make(map[string]interface{})
+var mutex sync.RWMutex
 
-#### Q: 插件可以修改输入数据吗？
-A: 不可以。插件接收的参数是值传递，修改不会影响原始数据。如需修改数据，应通过返回值实现。
+func Eval(key string) (interface{}, bool, error) {
+    mutex.RLock()
+    if value, exists := cache[key]; exists {
+        mutex.RUnlock()
+        return value, true, nil
+    }
+    mutex.RUnlock()
+    
+    // 计算并缓存
+    result := expensiveCalculation(key)
+    mutex.Lock()
+    cache[key] = result
+    mutex.Unlock()
+    
+    return result, true, nil
+}
+```
 
-#### Q: 如何在插件之间共享数据？
-A: 推荐通过规则引擎的数据流：
-1. 第一个插件返回结果到字段
-2. 第二个插件从该字段读取数据
+#### 计数器模式
+```go
+var counters = make(map[string]int)
+var counterMutex sync.RWMutex
 
-#### Q: 插件执行超时怎么办？
-A: 系统有默认的超时保护机制。如果插件执行时间过长，会被强制终止并返回错误。
+func Eval(key string, threshold int) (bool, error) {
+    counterMutex.Lock()
+    defer counterMutex.Unlock()
+    
+    counters[key]++
+    return counters[key] > threshold, nil
+}
+```
+
+#### 时间窗口模式
+```go
+var (
+    lastSeen = make(map[string]time.Time)
+    timeMutex sync.RWMutex
+    window = 5 * time.Minute
+)
+
+func Eval(key string) (bool, error) {
+    now := time.Now()
+    
+    timeMutex.Lock()
+    defer timeMutex.Unlock()
+    
+    if last, exists := lastSeen[key]; exists {
+        if now.Sub(last) < window {
+            return false, nil // 在时间窗口内，不触发
+        }
+    }
+    
+    lastSeen[key] = now
+    return true, nil // 触发
+}
+```
+
+## 总结
+
+AgentSmith-HUB的插件系统提供了强大的扩展能力：
+
+1. **类型丰富**：支持检查类和数据处理类插件
+2. **状态管理**：Yaegi插件支持有状态和init函数
+3. **并发安全**：支持线程安全的状态管理
+4. **性能优化**：内置缓存和后台任务支持
+5. **易于开发**：清晰的函数签名和错误处理机制
+
+通过合理使用插件，可以构建复杂的数据处理流程和业务逻辑，实现灵活的安全检测和响应机制。
 
 ## 🎯 总结
 

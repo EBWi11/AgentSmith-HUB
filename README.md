@@ -2,7 +2,20 @@
 
 > **Enterprise Security Data Pipeline Platform (SDPP) with Integrated Real-Time Threat Detection Engine**
 
-AgentSmith-HUB is a next-generation **Security Data Pipeline Platform** designed to provide comprehensive security data processing, real-time threat detection, and automated incident response capabilities. Built with a high-performance Go backend and modern Vue3 frontend, it enables security teams to build, deploy, and manage sophisticated detection and response workflows at enterprise scale.
+AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comprehensive security data processing, real-time threat detection, and automated incident response capabilities. It enables security teams to build, deploy, and manage sophisticated detection and response workflows at enterprise scale.
+
+## Founction Show
+InputEdit&ConnectCheck
+RuleEdit
+RuleTest
+ProjectEdit
+ProjectTest
+PluginTest&showuseage
+Search
+Errlog&Operations
+ClusterAdd&Show
+Push Changes
+LoadLocalconfig
 
 ## Deployment Tutorial
 

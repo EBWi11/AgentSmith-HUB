@@ -1181,384 +1181,293 @@ Use append to verify if fields are correctly obtained:
 </rule>
 ```
 
-## 🔧 Part Seven: Custom Plugin Development
+## 5. Custom Plugin Development
 
-### 7.1 Plugin Classification
+### 5.1 Plugin Classification
 
-AgentSmith-HUB supports two types of plugins:
+#### By Runtime Method
+- **Local Plugin**: Built-in plugins compiled into the program, highest performance
+- **Yaegi Plugin**: Dynamic plugins run using Yaegi interpreter, **supports stateful and init functions**
 
-#### Plugin Runtime Classification
-1. **Local Plugin**: Built-in plugins compiled into the program, highest performance
-2. **Yaegi Plugin**: Dynamic plugins run using Yaegi interpreter, highest flexibility
+#### By Return Type
+- **Check Plugin**: Returns `(bool, error)`, used in `<check type="PLUGIN">`
+- **Data Processing Plugin**: Returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`
 
-#### Plugin Return Type Classification
-1. **Check Node Plugin**: Returns `(bool, error)`, used in `<check type="PLUGIN">`
-2. **Other Plugin**: Returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`
+### 5.2 Plugin Syntax
 
-### 7.2 Plugin Function Signature
-
-#### Important: Eval Function Signature Description
-
-Plugins must define a function named `Eval`, choose the correct function signature based on plugin usage:
-
-**Check Plugin Signature**:
-```go
-func Eval(parameters...) (bool, error)
-```
-- First return value: Check result (true/false)
-- Second return value: Error message (if any)
-
-**Data Processing Plugin Signature**:
-```go
-func Eval(parameters...) (interface{}, bool, error)
-```
-- First return value: Processing result (any type)
-- Second return value: Success flag (true/false)
-- Third return value: Error message (if any)
-
-### 7.3 Writing Custom Plugins
-
-#### Basic Structure
-
-```go
-package plugin
-
-import (
-    "strings"
-    "fmt"
-)
-
-// Eval is the entry function for plugins, must define this function
-// Choose appropriate function signature based on plugin usage
-```
-
-#### Check Plugin Example
-
-Used for conditional judgment, returns bool value:
-
-```go
-package plugin
-
-import (
-    "strings"
-    "fmt"
-)
-
-// Check if email is from specified domain
-// Returns (bool, error) - used in check nodes
-func Eval(email string, allowedDomain string) (bool, error) {
-    if email == "" {
-        return false, nil
-    }
-    
-    // Extract email domain
-    parts := strings.Split(email, "@")
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid email format: %s", email)
-    }
-    
-    domain := strings.ToLower(parts[1])
-    allowed := strings.ToLower(allowedDomain)
-    
-    return domain == allowed, nil
-}
-```
-
-Usage example:
+#### Basic Syntax
 ```xml
-<check type="PLUGIN">checkEmailDomain(email, "company.com")</check>
+<!-- Check plugins -->
+<check type="PLUGIN">pluginName(param1, param2, ...)</check>
+
+<!-- Data processing plugins -->
+<append type="PLUGIN" field="field_name">pluginName(param1, param2, ...)</append>
+
+<!-- Action plugins -->
+<plugin>pluginName(param1, param2, ...)</plugin>
 ```
 
-#### Data Processing Plugin Example
+#### Parameter Types
+- **String**: `"value"` or `'value'`
+- **Number**: `123` or `123.45`
+- **Boolean**: `true` or `false`
+- **Field reference**: `field_name` or `parent.child.field`
+- **Original data**: `_$ORIDATA` (only one that needs _$ prefix)
 
-Used for data transformation, calculation, etc., returns any type:
-
-```go
-package plugin
-
-import (
-    "strings"
-)
-
-// Parse and extract information from User-Agent
-// Returns (interface{}, bool, error) - used in append or plugin nodes
-func Eval(userAgent string) (interface{}, bool, error) {
-    if userAgent == "" {
-        return nil, false, nil
-    }
-    
-    result := make(map[string]interface{})
-    
-    // Simple browser detection
-    if strings.Contains(userAgent, "Chrome") {
-        result["browser"] = "Chrome"
-    } else if strings.Contains(userAgent, "Firefox") {
-        result["browser"] = "Firefox"
-    } else if strings.Contains(userAgent, "Safari") {
-        result["browser"] = "Safari"
-    } else {
-        result["browser"] = "Unknown"
-    }
-    
-    // Operating system detection
-    if strings.Contains(userAgent, "Windows") {
-        result["os"] = "Windows"
-    } else if strings.Contains(userAgent, "Mac") {
-        result["os"] = "macOS"
-    } else if strings.Contains(userAgent, "Linux") {
-        result["os"] = "Linux"
-    } else {
-        result["os"] = "Unknown"
-    }
-    
-    // Whether mobile device
-    result["is_mobile"] = strings.Contains(userAgent, "Mobile")
-    
-    return result, true, nil
-}
-```
-
-Usage example:
+#### Negation Syntax
+Check plugins support negation prefix:
 ```xml
-<!-- Extract information to new field -->
-<append type="PLUGIN" field="ua_info">parseCustomUA(user_agent)</append>
-
-<!-- Can access parsed results later -->
-<check type="EQU" field="ua_info.browser">Chrome</check>
-<check type="EQU" field="ua_info.is_mobile">true</check>
+<check type="PLUGIN">!isPrivateIP(source_ip)</check>
 ```
 
-### 7.4 Plugin Development Standards
+### 5.3 Plugin Function Signatures
 
-#### Naming Conventions
-- Plugin names use camelCase: `isValidEmail`, `extractDomain`
-- Check plugins usually start with `is`, `has`, `check`
-- Processing plugins usually start with verbs: `parse`, `extract`, `calculate`
-
-#### Parameter Design
-```go
-// Recommended: Clear parameters, easy to understand
-func Eval(ip string, cidr string) (bool, error)
-
-// Avoid: Too many parameters
-func Eval(a, b, c, d, e string) (bool, error)
-
-// Support variable parameters
-func Eval(ip string, cidrs ...string) (bool, error)
-```
-
-#### Error Handling
-```go
-func Eval(data string) (interface{}, bool, error) {
-    // Input validation
-    if data == "" {
-        return nil, false, nil  // Empty input returns false, no error
-    }
-    
-    // Handle possible errors
-    result, err := processData(data)
-    if err != nil {
-        return nil, false, fmt.Errorf("process data failed: %w", err)
-    }
-    
-    return result, true, nil
-}
-```
-
-#### Performance Considerations
+#### Check Plugins
 ```go
 package plugin
 
 import (
-    "regexp"
-    "sync"
-)
-
-// Use global variables to cache regular expressions
-var (
-    emailRegex *regexp.Regexp
-    regexOnce  sync.Once
-)
-
-func Eval(email string) (bool, error) {
-    // Ensure regex is compiled only once
-    regexOnce.Do(func() {
-        emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-    })
-    
-    return emailRegex.MatchString(email), nil
-}
-```
-
-### 7.5 Advanced Plugin Examples
-
-#### Complex Data Processing Plugin
-
-```go
-package plugin
-
-import (
-    "crypto/md5"
-    "encoding/hex"
-    "encoding/json"
+    "errors"
     "fmt"
-    "time"
 )
 
-// Generate user behavior fingerprint
-func Eval(userID string, actions string, timestamp int64) (interface{}, bool, error) {
-    // Parse user behavior
-    var actionList []map[string]interface{}
-    if err := json.Unmarshal([]byte(actions), &actionList); err != nil {
-        return nil, false, fmt.Errorf("invalid actions format: %w", err)
+// Eval function must return (bool, error)
+func Eval(args ...interface{}) (bool, error) {
+    if len(args) == 0 {
+        return false, errors.New("plugin requires at least one argument")
     }
     
-    // Analyze behavior patterns
-    result := map[string]interface{}{
-        "user_id": userID,
-        "timestamp": timestamp,
-        "action_count": len(actionList),
-        "time_of_day": time.Unix(timestamp, 0).Hour(),
+    // Parameter processing
+    data := args[0]
+    
+    // Plugin logic
+    if someCondition {
+        return true, nil
     }
     
-    // Calculate behavior frequency
-    actionTypes := make(map[string]int)
-    for _, action := range actionList {
-        if actionType, ok := action["type"].(string); ok {
-            actionTypes[actionType]++
-        }
+    return false, nil
+}
+```
+
+#### Data Processing Plugins
+```go
+package plugin
+
+import (
+    "errors"
+    "fmt"
+)
+
+// Eval function must return (interface{}, bool, error)
+func Eval(args ...interface{}) (interface{}, bool, error) {
+    if len(args) == 0 {
+        return nil, false, errors.New("plugin requires at least one argument")
     }
-    result["action_types"] = actionTypes
     
-    // Generate behavior fingerprint
-    fingerprint := fmt.Sprintf("%s-%d-%v", userID, len(actionList), actionTypes)
-    hash := md5.Sum([]byte(fingerprint))
-    result["fingerprint"] = hex.EncodeToString(hash[:])
+    // Parameter processing
+    input := args[0]
     
-    // Risk scoring
-    riskScore := 0
-    if len(actionList) > 100 {
-        riskScore += 20
-    }
-    if hour := result["time_of_day"].(int); hour < 6 || hour > 22 {
-        riskScore += 30
-    }
-    result["risk_score"] = riskScore
+    // Data processing logic
+    result := processData(input)
     
     return result, true, nil
 }
 ```
 
-#### State Management Plugin
+### 5.4 Yaegi Plugin Stateful Features
 
+#### State Persistence Mechanism
 ```go
-package plugin
-
-import (
-    "sync"
-    "time"
-)
-
+// Yaegi plugins support global variables and init functions
 var (
-    requestCount = make(map[string]*userRequest)
-    mu          sync.RWMutex
-)
-
-type userRequest struct {
-    count      int
+    cache = make(map[string]interface{})
+    cacheMutex sync.RWMutex
     lastUpdate time.Time
+)
+
+// init function executes when plugin loads
+func init() {
+    // Initialize cache
+    refreshCache()
 }
 
-// Detect if user request frequency is abnormal
-func Eval(userID string, threshold int) (bool, error) {
-    mu.Lock()
-    defer mu.Unlock()
-    
-    now := time.Now()
-    
-    // Get or create user record
-    req, exists := requestCount[userID]
-    if !exists {
-        req = &userRequest{
-            count:      1,
-            lastUpdate: now,
-        }
-        requestCount[userID] = req
-        return false, nil
+// Stateful Eval function
+func Eval(key string) (interface{}, bool, error) {
+    cacheMutex.RLock()
+    if value, exists := cache[key]; exists {
+        cacheMutex.RUnlock()
+        return value, true, nil
     }
+    cacheMutex.RUnlock()
     
-    // If more than 1 minute since last request, reset count
-    if now.Sub(req.lastUpdate) > time.Minute {
-        req.count = 1
-        req.lastUpdate = now
-        return false, nil
-    }
+    // Calculate and cache result
+    result := computeResult(key)
+    cacheMutex.Lock()
+    cache[key] = result
+    cacheMutex.Unlock()
     
-    // Increase count
-    req.count++
-    req.lastUpdate = now
-    
-    // Check if exceeds threshold
-    return req.count > threshold, nil
+    return result, true, nil
 }
 ```
 
-### 7.6 Plugin Limitations and Notes
+### 5.5 Plugin Limitations
+- Can only use Go standard library
+- Cannot use third-party packages
+- Must define function named `Eval`
+- Function signature must strictly match
 
-#### Allowed Standard Library Packages
-Plugins can only import Go standard library, cannot use third-party packages. Common standard libraries include:
+### 5.6 Common Standard Libraries
 - Basic: `fmt`, `strings`, `strconv`, `errors`
 - Encoding: `encoding/json`, `encoding/base64`, `encoding/hex`
 - Crypto: `crypto/md5`, `crypto/sha256`, `crypto/rand`
 - Time: `time`
 - Regex: `regexp`
 - Network: `net`, `net/url`
+- Concurrency: `sync`
 
-#### Best Practices
-1. **Keep it simple**: Plugins should focus on single functionality
-2. **Fast return**: Avoid complex calculations, consider using cache
-3. **Graceful degradation**: Return reasonable default values on errors
-4. **Thorough testing**: Test various boundary conditions
+## 6. Best Practices
 
-### 7.7 Plugin Deployment and Management
+### 6.1 Performance Optimization
+1. **Execution order**: Fast checks first, slow operations later
+2. **Cache usage**: Leverage built-in plugin caching mechanisms
+3. **Avoid repeated calculations**: Reasonable use of field references
 
-#### Creating Plugins
-1. Click "New Plugin" on the plugin management page in Web UI
-2. Enter plugin name and code
-3. System automatically validates plugin syntax and security
-4. Available immediately after saving
+### 6.2 Error Handling
+1. **Parameter validation**: Plugins must validate parameters internally
+2. **Graceful degradation**: Return reasonable default values on errors
+3. **Logging**: Record important operations
 
-#### Testing Plugins
-```xml
-<!-- Test rule -->
-<rule id="test_custom_plugin">
-    <check type="PLUGIN">myCustomPlugin(test_field, "expected_value")</check>
-    <append type="PLUGIN" field="result">myDataPlugin(input_data)</append>
-</rule>
+### 6.3 Stateful Plugin Design
+```go
+// Thread-safe state management
+var (
+    dataCache = make(map[string]interface{})
+    cacheMutex sync.RWMutex
+    lastRefresh time.Time
+    refreshInterval = 10 * time.Minute
+)
+
+func init() {
+    // Initialize cache
+    refreshCache()
+    
+    // Start background refresh task
+    go func() {
+        ticker := time.NewTicker(5 * time.Minute)
+        for range ticker.C {
+            refreshCache()
+        }
+    }()
+}
+
+func Eval(key string) (interface{}, bool, error) {
+    // Check if refresh is needed
+    if time.Since(lastRefresh) > refreshInterval {
+        refreshCache()
+    }
+    
+    cacheMutex.RLock()
+    if value, exists := dataCache[key]; exists {
+        cacheMutex.RUnlock()
+        return value, true, nil
+    }
+    cacheMutex.RUnlock()
+    
+    return nil, false, nil
+}
+
+func refreshCache() {
+    // Cache refresh logic
+    cacheMutex.Lock()
+    defer cacheMutex.Unlock()
+    
+    // Execute refresh operation
+    lastRefresh = time.Now()
+}
 ```
 
-#### Plugin Version Management
-- Modifying plugins creates new versions
-- Can view plugin modification history
-- Support rollback to previous versions
+### 6.4 Debugging Tips
+1. **Use append for tracking**: Add debug fields
+2. **Step-by-step testing**: Test plugin functions individually
+3. **Verify fields**: Ensure field references are correct
 
-### 7.8 Frequently Asked Questions
+### 6.5 Common Patterns
 
-#### Q: How to know which function signature to use?
-A: Based on plugin usage scenario:
-- Used in `<check type="PLUGIN">`: Return `(bool, error)`
-- Used in `<append type="PLUGIN">` or `<plugin>`: Return `(interface{}, bool, error)`
+#### Cache Pattern
+```go
+var cache = make(map[string]interface{})
+var mutex sync.RWMutex
 
-#### Q: Can plugins modify input data?
-A: No. Plugin parameters are passed by value, modifications won't affect original data. If data modification is needed, implement through return values.
+func Eval(key string) (interface{}, bool, error) {
+    mutex.RLock()
+    if value, exists := cache[key]; exists {
+        mutex.RUnlock()
+        return value, true, nil
+    }
+    mutex.RUnlock()
+    
+    // Calculate and cache
+    result := expensiveCalculation(key)
+    mutex.Lock()
+    cache[key] = result
+    mutex.Unlock()
+    
+    return result, true, nil
+}
+```
 
-#### Q: How to share data between plugins?
-A: Recommended through rules engine data flow:
-1. First plugin returns result to field
-2. Second plugin reads data from that field
+#### Counter Pattern
+```go
+var counters = make(map[string]int)
+var counterMutex sync.RWMutex
 
-#### Q: What if plugin execution times out?
-A: System has default timeout protection mechanism. If plugin execution takes too long, it will be forcibly terminated and return error.
+func Eval(key string, threshold int) (bool, error) {
+    counterMutex.Lock()
+    defer counterMutex.Unlock()
+    
+    counters[key]++
+    return counters[key] > threshold, nil
+}
+```
+
+#### Time Window Pattern
+```go
+var (
+    lastSeen = make(map[string]time.Time)
+    timeMutex sync.RWMutex
+    window = 5 * time.Minute
+)
+
+func Eval(key string) (bool, error) {
+    now := time.Now()
+    
+    timeMutex.Lock()
+    defer timeMutex.Unlock()
+    
+    if last, exists := lastSeen[key]; exists {
+        if now.Sub(last) < window {
+            return false, nil // Within time window, don't trigger
+        }
+    }
+    
+    lastSeen[key] = now
+    return true, nil // Trigger
+}
+```
+
+## Summary
+
+AgentSmith-HUB's plugin system provides powerful extension capabilities:
+
+1. **Rich types**: Supports check and data processing plugins
+2. **State management**: Yaegi plugins support stateful and init functions
+3. **Concurrency safety**: Supports thread-safe state management
+4. **Performance optimization**: Built-in caching and background task support
+5. **Easy development**: Clear function signatures and error handling mechanisms
+
+Through reasonable use of plugins, complex data processing workflows and business logic can be built, achieving flexible security detection and response mechanisms.
+
+## 🔧 Part Seven: Custom Plugin Development
 
 ## 🎯 Summary
 
@@ -1759,15 +1668,60 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 #### 🧩 Complete List of Built-in Plugins
 
-##### Check Plugins (for conditional judgment)
-Can be used in `<check type="PLUGIN">`, returns boolean values. Supports using `!` prefix to negate results, e.g., `<check type="PLUGIN">!isPrivateIP(dest_ip)</check>` means condition is true when IP is not a private address.
+##### Check Plugins (return bool)
 
 | Plugin Name | Function | Parameters | Example |
 |-------------|----------|------------|---------|
-| `isPrivateIP` | Check if IP is private address | ip (string) | `<check type="PLUGIN">isPrivateIP(source_ip)</check>` |
-| `cidrMatch` | Check if IP is in CIDR range | ip (string), cidr (string) | `<check type="PLUGIN">cidrMatch(client_ip, "192.168.1.0/24")</check>` |
-| `geoMatch` | Check if IP belongs to specified country | ip (string), countryISO (string) | `<check type="PLUGIN">geoMatch(source_ip, "US")</check>` |
-| `suppressOnce` | Alert suppression: trigger only once within time window | key (any), windowSec (int), ruleid (string, optional) | `<check type="PLUGIN">suppressOnce(alert_key, 300, "rule_001")</check>` |
+| `isPrivateIP` | Check if IP is private address | ip (string) | `isPrivateIP(source_ip)` |
+| `cidrMatch` | Check if IP is in CIDR range | ip (string), cidr (string) | `cidrMatch(client_ip, "192.168.1.0/24")` |
+| `geoMatch` | Check IP country | ip (string), countryISO (string) | `geoMatch(source_ip, "US")` |
+| `suppressOnce` | Alert suppression | key (any), windowSec (int), ruleid (string, optional) | `suppressOnce(alert_key, 300, "rule_001")` |
+
+##### Data Processing Plugins (return various types)
+
+#### Time Processing Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `now` | Get current timestamp | optional: format (unix/ms/rfc3339) | `now()` |
+| `dayOfWeek` | Get day of week (0-6, 0=Sunday) | optional: timestamp (int64) | `dayOfWeek()` |
+| `hourOfDay` | Get hour (0-23) | optional: timestamp (int64) | `hourOfDay()` |
+| `tsToDate` | Convert timestamp to RFC3339 format | timestamp (int64) | `tsToDate(timestamp)` |
+
+#### Encoding and Hash Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `base64Encode` | Base64 encoding | input (string) | `base64Encode(data)` |
+| `base64Decode` | Base64 decoding | input (string) | `base64Decode(encoded_data)` |
+| `hashMD5` | MD5 hash | input (string) | `hashMD5(data)` |
+| `hashSHA1` | SHA1 hash | input (string) | `hashSHA1(data)` |
+| `hashSHA256` | SHA256 hash | input (string) | `hashSHA256(data)` |
+
+#### URL Parsing Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `extractDomain` | Extract domain from URL | urlOrHost (string) | `extractDomain(url)` |
+| `extractTLD` | Extract top-level domain | domain (string) | `extractTLD(domain)` |
+| `extractSubdomain` | Extract subdomain | host (string) | `extractSubdomain(host)` |
+
+#### String Processing Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `replace` | String replacement | input (string), old (string), new (string) | `replace(text, "old", "new")` |
+| `regexExtract` | Regex extraction | input (string), pattern (string) | `regexExtract(text, "\\d+")` |
+| `regexReplace` | Regex replacement | input (string), pattern (string), replacement (string) | `regexReplace(text, "\\d+", "NUMBER")` |
+
+#### Data Parsing Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `parseJSON` | Parse JSON string | jsonString (string) | `parseJSON(json_data)` |
+| `parseUA` | Parse User-Agent | userAgent (string) | `parseUA(user_agent)` |
+
+#### Threat Intelligence Plugins
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `virusTotal` | VirusTotal query | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
+| `shodan` | Shodan query | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
+| `threatBook` | ThreatBook query | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
 
 **Note on plugin parameter format**:
 - When referencing fields in data, no need to use `_$` prefix, use field name directly: `source_ip`
@@ -1775,58 +1729,74 @@ Can be used in `<check type="PLUGIN">`, returns boolean values. Supports using `
 - When using static values, use strings directly (with quotes): `"192.168.1.0/24"`
 - When using numbers, no quotes needed: `300`
 
-##### Data Processing Plugins (for data transformation)
-Can be used in `<append type="PLUGIN">`, returns various types of values:
+## 4. Usage in Rulesets
 
-**Time Processing Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `now` | Get current timestamp | optional: format (unix/ms/rfc3339) | `<append type="PLUGIN" field="timestamp">now()</append>` |
-| `ago` | Get timestamp N seconds ago | seconds (int/float/string) | `<append type="PLUGIN" field="past_time">ago(3600)</append>` |
-| `dayOfWeek` | Get day of week (0-6, 0=Sunday) | optional: timestamp (int64) | `<append type="PLUGIN" field="weekday">dayOfWeek()</append>` |
-| `hourOfDay` | Get hour (0-23) | optional: timestamp (int64) | `<append type="PLUGIN" field="hour">hourOfDay()</append>` |
-| `tsToDate` | Convert timestamp to RFC3339 format | timestamp (int64) | `<append type="PLUGIN" field="formatted_time">tsToDate(event_time)</append>` |
+### 4.1 Basic Usage Patterns
 
-**Encoding and Hash Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `base64Encode` | Base64 encoding | input (string) | `<append type="PLUGIN" field="encoded">base64Encode(raw_data)</append>` |
-| `base64Decode` | Base64 decoding | encoded (string) | `<append type="PLUGIN" field="decoded">base64Decode(encoded_data)</append>` |
-| `hashMD5` | Calculate MD5 hash | input (string) | `<append type="PLUGIN" field="md5">hashMD5(password)</append>` |
-| `hashSHA1` | Calculate SHA1 hash | input (string) | `<append type="PLUGIN" field="sha1">hashSHA1(content)</append>` |
-| `hashSHA256` | Calculate SHA256 hash | input (string) | `<append type="PLUGIN" field="sha256">hashSHA256(file_data)</append>` |
+```xml
+<root author="example" type="DETECTION" name="plugin_example">
+    <rule id="plugin_usage" name="Plugin Usage Examples">
+        <!-- 1. Check plugins -->
+        <check type="PLUGIN">isPrivateIP(source_ip)</check>
+        
+        <!-- 2. Data processing plugins -->
+        <append type="PLUGIN" field="timestamp">now()</append>
+        <append type="PLUGIN" field="hash">hashSHA256(file_content)</append>
+        
+        <!-- 3. Action plugins -->
+        <plugin>sendAlert(_$ORIDATA)</plugin>
+    </rule>
+</root>
+```
 
-**URL Processing Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `extractDomain` | Extract domain from URL | urlOrHost (string) | `<append type="PLUGIN" field="domain">extractDomain(request_url)</append>` |
-| `extractTLD` | Extract top-level domain from domain | domain (string) | `<append type="PLUGIN" field="tld">extractTLD(hostname)</append>` |
-| `extractSubdomain` | Extract subdomain from hostname | host (string) | `<append type="PLUGIN" field="subdomain">extractSubdomain(full_hostname)</append>` |
+### 4.2 Complex Logic Combinations
 
-**String Processing Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `replace` | String replacement | input (string), old (string), new (string) | `<append type="PLUGIN" field="cleaned">replace(raw_text, "bad", "good")</append>` |
-| `regexExtract` | Regular expression extraction | input (string), pattern (string) | `<append type="PLUGIN" field="extracted">regexExtract(log_line, "IP: (\\d+\\.\\d+\\.\\d+\\.\\d+)")</append>` |
-| `regexReplace` | Regular expression replacement | input (string), pattern (string), replacement (string) | `<append type="PLUGIN" field="masked">regexReplace(email, "(.+)@(.+)", "$1@***")</append>` |
+```xml
+<rule id="complex_plugin_usage" name="Complex Plugin Usage">
+    <!-- Use checklist to combine multiple conditions -->
+    <checklist condition="(private_ip or suspicious_country) and not whitelisted">
+        <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
+        <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
+        <check id="whitelisted" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
+    </checklist>
+    
+    <!-- Data enrichment -->
+    <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
+    <append type="PLUGIN" field="geo_info">shodan(source_ip)</append>
+    
+    <!-- Time-related processing -->
+    <append type="PLUGIN" field="hour">hourOfDay()</append>
+    <check type="PLUGIN">hourOfDay() > 22</check>
+</rule>
+```
 
-**Data Parsing Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `parseJSON` | Parse JSON string | jsonString (string) | `<append type="PLUGIN" field="parsed">parseJSON(json_data)</append>` |
-| `parseUA` | Parse User-Agent | userAgent (string) | `<append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>` |
+### 4.3 Alert Suppression Example
 
-**Threat Intelligence Plugins**
-| Plugin Name | Function | Parameters | Example |
-|-------------|----------|------------|---------|
-| `virusTotal` | Query VirusTotal file hash threat intelligence | hash (string), apiKey (string, optional) | `<append type="PLUGIN" field="vt_scan">virusTotal(file_hash)</append>` |
-| `shodan` | Query Shodan IP address infrastructure intelligence | ip (string), apiKey (string, optional) | `<append type="PLUGIN" field="shodan_intel">shodan(ip_address)</append>` |
-| `threatBook` | Query ThreatBook threat intelligence | queryValue (string), queryType (string), apiKey (string, optional) | `<append type="PLUGIN" field="tb_intel">threatBook(target_ip, "ip")</append>` |
+```xml
+<rule id="suppression_example" name="Alert Suppression">
+    <check type="EQU" field="event_type">login_failed</check>
+    <check type="PLUGIN">suppressOnce(source_ip, 300, "login_brute_force")</check>
+    <append field="alert_type">brute_force</append>
+</rule>
+```
 
-**Threat Intelligence Plugin Configuration Notes**:
-- API Keys can be set uniformly in configuration files, or passed in during plugin calls
-- If API Key is not provided, some functions may be limited
-- It's recommended to manage API Keys uniformly in system configuration, avoiding hardcoding in rules
+### 4.4 Data Transformation Example
+
+```xml
+<rule id="data_transformation" name="Data Transformation">
+    <check type="EQU" field="content_type">json</check>
+    
+    <!-- Parse JSON and extract fields -->
+    <append type="PLUGIN" field="parsed_data">parseJSON(raw_content)</append>
+    <append field="user_id">parsed_data.user.id</append>
+    
+    <!-- Encoding processing -->
+    <append type="PLUGIN" field="encoded">base64Encode(sensitive_data)</append>
+    
+    <!-- Hash calculation -->
+    <append type="PLUGIN" field="content_hash">hashSHA256(raw_content)</append>
+</rule>
+```
 
 #### Built-in Plugin Usage Examples
 
