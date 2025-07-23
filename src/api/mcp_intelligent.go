@@ -721,6 +721,11 @@ func getSampleDataFromComponent(componentName string) []interface{} {
 					"source":                componentName,
 				}
 				samples = append(samples, convertedSample)
+
+				// Limit to 3 samples to save MCP context space
+				if len(samples) >= 3 {
+					return samples
+				}
 			}
 		}
 	}

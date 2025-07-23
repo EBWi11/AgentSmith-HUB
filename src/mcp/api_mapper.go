@@ -176,7 +176,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "rule_manager",
-			Description: "INTELLIGENT RULE MANAGER: Smart context-aware rule management - auto-discovers target projects, fetches relevant sample data, analyzes data structure, creates rules based on user intent + real data patterns. CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only!",
+			Description: "INTELLIGENT RULE MANAGER: Smart context-aware rule management - auto-discovers target projects, fetches relevant sample data, analyzes data structure, creates rules based on user intent + real data patterns. CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only! IMPORTANT: Always provide 'human_readable' parameter with clear rule description for better user understanding!",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":          {Type: "string", Description: "Action: add_rule/update_rule/delete_rule/view_rules/create_ruleset/update_ruleset", Required: true},
 				"id":              {Type: "string", Description: "Target ruleset ID", Required: true},
@@ -187,6 +187,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 				"raw":             {Type: "string", Description: "Complete ruleset XML (for create/update ruleset actions)", Required: false},
 				"data":            {Type: "string", Description: "MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. NEVER use imagined data like 'data_type=59'!", Required: false},
 				"auto_deploy":     {Type: "string", Description: "Auto-deploy if validation passes (true/false)", Required: false},
+				"human_readable":  {Type: "string", Description: "HUMAN-READABLE RULE DESCRIPTION: Provide a clear, structured description of what the rule does, its conditions, and expected behavior. This helps users understand the rule without reading XML. Format: 'Rule Purpose: [what it detects] | Conditions: [list of conditions] | Actions: [what happens when triggered] | Examples: [sample scenarios]'. Example: 'Rule Purpose: Detect suspicious login attempts | Conditions: source IP is from high-risk countries, login time is outside business hours, failed attempts > 3 | Actions: Block IP for 24 hours, send alert to security team | Examples: Multiple failed logins from Russia at 3 AM'", Required: false},
 			},
 			Annotations: createAnnotations("Rule Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -336,6 +337,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 				"anomaly_detection":  {Type: "string", Description: "Enable anomaly detection: true/false (default: true)", Required: false},
 				"sampler_type":       {Type: "string", Description: "Backward compatibility: specific sampler type", Required: false},
 				"count":              {Type: "string", Description: "Backward compatibility: sample count (default: 10, max: 100)", Required: false},
+				"mcp_limit":          {Type: "string", Description: "MCP context optimization: limit samples to 3 for token efficiency (default: true)", Required: false},
 			},
 			Annotations: createAnnotations("Data Analyzer", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -369,10 +371,11 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// Direct Rule Operations
 		{
 			Name:        "add_ruleset_rule",
-			Description: "ADD RULE TO RULESET: Add a single rule to an existing ruleset. CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. NEVER use imagined data like 'data_type=59' or fake field names!",
+			Description: "ADD RULE TO RULESET: Add a single rule to an existing ruleset. CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. NEVER use imagined data like 'data_type=59' or fake field names! IMPORTANT: Always provide 'human_readable' parameter with clear rule description for better user understanding!",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":       {Type: "string", Description: "Ruleset ID", Required: true},
-				"rule_raw": {Type: "string", Description: "Complete rule XML content", Required: true},
+				"id":             {Type: "string", Description: "Ruleset ID", Required: true},
+				"rule_raw":       {Type: "string", Description: "Complete rule XML content", Required: true},
+				"human_readable": {Type: "string", Description: "HUMAN-READABLE RULE DESCRIPTION: Provide a clear, structured description of what the rule does, its conditions, and expected behavior. This helps users understand the rule without reading XML. Format: 'Rule Purpose: [what it detects] | Conditions: [list of conditions] | Actions: [what happens when triggered] | Examples: [sample scenarios]'. Example: 'Rule Purpose: Detect suspicious login attempts | Conditions: source IP is from high-risk countries, login time is outside business hours, failed attempts > 3 | Actions: Block IP for 24 hours, send alert to security team | Examples: Multiple failed logins from Russia at 3 AM'", Required: false},
 			},
 			Annotations: createAnnotations("Add Rule", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -534,6 +537,10 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		return m.handleTroubleshootSystem(args)
 	case "get_samplers_data_intelligent":
 		return m.handleGetSamplersDataIntelligent(args)
+	case "get_input":
+		return m.handleGetInput(args)
+	case "get_output":
+		return m.handleGetOutput(args)
 	case "project_wizard":
 		return m.handleProjectWizard(args)
 	case "rule_ai_generator":
@@ -948,6 +955,13 @@ func (m *APIMapper) handleUpdateRuleSafely(args map[string]interface{}) (common.
 
 	var results []string
 	results = append(results, "=== SAFE RULE UPDATE WORKFLOW ===\n")
+
+	// Step 0: Display human-readable description if provided
+	if humanReadable, exists := args["human_readable"].(string); exists && humanReadable != "" {
+		results = append(results, "📋 **Updated Rule Description (Human-Readable):**")
+		results = append(results, humanReadable)
+		results = append(results, "")
+	}
 
 	// Step 1: Get current ruleset for backup
 	results = append(results, "Step 1: Backing up current ruleset...")
@@ -1490,6 +1504,192 @@ func (m *APIMapper) handleGetRulesets(args map[string]interface{}) (common.MCPTo
 	}, nil
 }
 
+// handleGetInput retrieves complete information for a specific input component with MCP optimization
+func (m *APIMapper) handleGetInput(args map[string]interface{}) (common.MCPToolResult, error) {
+	inputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== INPUT DETAILS ===\n")
+
+	// Step 1: Retrieve input
+	results = append(results, "Step 1: Retrieving input...")
+	inputResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/inputs/%s", inputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get input: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+
+	// Parse response to extract key information and limit sample data for MCP context
+	var inputData map[string]interface{}
+	if err := json.Unmarshal(inputResponse, &inputData); err == nil {
+		// Extract basic input info
+		id, _ := inputData["id"].(string)
+		raw, _ := inputData["raw"].(string)
+		path, _ := inputData["path"].(string)
+		inputType, _ := inputData["type"].(string)
+
+		results = append(results, fmt.Sprintf("✓ Input ID: %s", id))
+		results = append(results, fmt.Sprintf("✓ Type: %s", inputType))
+		results = append(results, fmt.Sprintf("✓ Path: %s", path))
+		results = append(results, fmt.Sprintf("✓ Raw Config Length: %d characters", len(raw)))
+
+		// Handle sample data with MCP context optimization
+		if sampleData, exists := inputData["sample_data"].(map[string]interface{}); exists && len(sampleData) > 0 {
+			results = append(results, "\n=== Sample Data (MCP Optimized) ===")
+
+			// Limit sample data display for MCP context
+			sampleCount := 0
+			maxSamples := 3
+
+			for componentName, samples := range sampleData {
+				if sampleCount >= maxSamples {
+					break
+				}
+
+				if sampleList, ok := samples.([]interface{}); ok {
+					displayCount := len(sampleList)
+					if displayCount > maxSamples {
+						displayCount = maxSamples
+					}
+
+					results = append(results, fmt.Sprintf("\n📊 %s (%d samples, showing first %d):", componentName, len(sampleList), displayCount))
+					prettyJSON, _ := json.MarshalIndent(sampleList[:displayCount], "", "  ")
+					results = append(results, string(prettyJSON))
+
+					if len(sampleList) > displayCount {
+						results = append(results, fmt.Sprintf("... and %d more samples", len(sampleList)-displayCount))
+					}
+
+					sampleCount++
+				}
+			}
+
+			if dataSource, exists := inputData["data_source"].(string); exists {
+				results = append(results, fmt.Sprintf("\n📡 Data Source: %s", dataSource))
+			}
+
+			results = append(results, "\n💡 **MCP Context Optimization**: Showing limited sample data to save token space.")
+		} else {
+			results = append(results, "\n📊 No sample data available for this input")
+		}
+	} else {
+		// Fallback to raw response if parsing fails
+		results = append(results, fmt.Sprintf("✓ Input retrieved: %s\n", string(inputResponse)))
+	}
+
+	// Step 2: Add deployment guidance
+	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", inputId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which projects use this input:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='input' and id='%s'", inputId))
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_input' - Test this input with sample data")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
+// handleGetOutput retrieves complete information for a specific output component with MCP optimization
+func (m *APIMapper) handleGetOutput(args map[string]interface{}) (common.MCPToolResult, error) {
+	outputId := args["id"].(string)
+
+	var results []string
+	results = append(results, "=== OUTPUT DETAILS ===\n")
+
+	// Step 1: Retrieve output
+	results = append(results, "Step 1: Retrieving output...")
+	outputResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/outputs/%s", outputId), nil, true)
+	if err != nil {
+		return common.MCPToolResult{
+			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get output: %v", err)}},
+			IsError: true,
+		}, nil
+	}
+
+	// Parse response to extract key information and limit sample data for MCP context
+	var outputData map[string]interface{}
+	if err := json.Unmarshal(outputResponse, &outputData); err == nil {
+		// Extract basic output info
+		id, _ := outputData["id"].(string)
+		raw, _ := outputData["raw"].(string)
+		path, _ := outputData["path"].(string)
+		outputType, _ := outputData["type"].(string)
+
+		results = append(results, fmt.Sprintf("✓ Output ID: %s", id))
+		results = append(results, fmt.Sprintf("✓ Type: %s", outputType))
+		results = append(results, fmt.Sprintf("✓ Path: %s", path))
+		results = append(results, fmt.Sprintf("✓ Raw Config Length: %d characters", len(raw)))
+
+		// Handle sample data with MCP context optimization
+		if sampleData, exists := outputData["sample_data"].(map[string]interface{}); exists && len(sampleData) > 0 {
+			results = append(results, "\n=== Sample Data (MCP Optimized) ===")
+
+			// Limit sample data display for MCP context
+			sampleCount := 0
+			maxSamples := 3
+
+			for componentName, samples := range sampleData {
+				if sampleCount >= maxSamples {
+					break
+				}
+
+				if sampleList, ok := samples.([]interface{}); ok {
+					displayCount := len(sampleList)
+					if displayCount > maxSamples {
+						displayCount = maxSamples
+					}
+
+					results = append(results, fmt.Sprintf("\n📊 %s (%d samples, showing first %d):", componentName, len(sampleList), displayCount))
+					prettyJSON, _ := json.MarshalIndent(sampleList[:displayCount], "", "  ")
+					results = append(results, string(prettyJSON))
+
+					if len(sampleList) > displayCount {
+						results = append(results, fmt.Sprintf("... and %d more samples", len(sampleList)-displayCount))
+					}
+
+					sampleCount++
+				}
+			}
+
+			if dataSource, exists := outputData["data_source"].(string); exists {
+				results = append(results, fmt.Sprintf("\n📡 Data Source: %s", dataSource))
+			}
+
+			results = append(results, "\n💡 **MCP Context Optimization**: Showing limited sample data to save token space.")
+		} else {
+			results = append(results, "\n📊 No sample data available for this output")
+		}
+	} else {
+		// Fallback to raw response if parsing fails
+		results = append(results, fmt.Sprintf("✓ Output retrieved: %s\n", string(outputResponse)))
+	}
+
+	// Step 2: Add deployment guidance
+	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+	results = append(results, "📋 **Check if changes are deployed:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_pending_changes' to check if '%s' has unpublished changes", outputId))
+	results = append(results, "   → If you see temporary changes above, they are NOT ACTIVE until deployed!")
+	results = append(results, "")
+	results = append(results, "🔗 **Check which projects use this output:**")
+	results = append(results, fmt.Sprintf("   → Use 'get_component_usage' with type='output' and id='%s'", outputId))
+	results = append(results, "")
+	results = append(results, "⚡ **Quick Actions:**")
+	results = append(results, "   → 'test_output' - Test this output with sample data")
+	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+}
+
 // handleGetRuleset retrieves complete information for a specific ruleset
 func (m *APIMapper) handleGetRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
 	rulesetId := args["id"].(string)
@@ -1506,7 +1706,62 @@ func (m *APIMapper) handleGetRuleset(args map[string]interface{}) (common.MCPToo
 			IsError: true,
 		}, nil
 	}
-	results = append(results, fmt.Sprintf("✓ Ruleset retrieved: %s\n", string(rulesetResponse)))
+
+	// Parse response to extract key information and limit sample data for MCP context
+	var rulesetData map[string]interface{}
+	if err := json.Unmarshal(rulesetResponse, &rulesetData); err == nil {
+		// Extract basic ruleset info
+		id, _ := rulesetData["id"].(string)
+		raw, _ := rulesetData["raw"].(string)
+		path, _ := rulesetData["path"].(string)
+
+		results = append(results, fmt.Sprintf("✓ Ruleset ID: %s", id))
+		results = append(results, fmt.Sprintf("✓ Path: %s", path))
+		results = append(results, fmt.Sprintf("✓ Raw Config Length: %d characters", len(raw)))
+
+		// Handle sample data with MCP context optimization
+		if sampleData, exists := rulesetData["sample_data"].(map[string]interface{}); exists && len(sampleData) > 0 {
+			results = append(results, "\n=== Sample Data (MCP Optimized) ===")
+
+			// Limit sample data display for MCP context
+			sampleCount := 0
+			maxSamples := 3
+
+			for componentName, samples := range sampleData {
+				if sampleCount >= maxSamples {
+					break
+				}
+
+				if sampleList, ok := samples.([]interface{}); ok {
+					displayCount := len(sampleList)
+					if displayCount > maxSamples {
+						displayCount = maxSamples
+					}
+
+					results = append(results, fmt.Sprintf("\n📊 %s (%d samples, showing first %d):", componentName, len(sampleList), displayCount))
+					prettyJSON, _ := json.MarshalIndent(sampleList[:displayCount], "", "  ")
+					results = append(results, string(prettyJSON))
+
+					if len(sampleList) > displayCount {
+						results = append(results, fmt.Sprintf("... and %d more samples", len(sampleList)-displayCount))
+					}
+
+					sampleCount++
+				}
+			}
+
+			if dataSource, exists := rulesetData["data_source"].(string); exists {
+				results = append(results, fmt.Sprintf("\n📡 Data Source: %s", dataSource))
+			}
+
+			results = append(results, "\n💡 **MCP Context Optimization**: Showing limited sample data to save token space.")
+		} else {
+			results = append(results, "\n📊 No sample data available for this ruleset")
+		}
+	} else {
+		// Fallback to raw response if parsing fails
+		results = append(results, fmt.Sprintf("✓ Ruleset retrieved: %s\n", string(rulesetResponse)))
+	}
 
 	// Step 2: Add critical analysis guidance
 	results = append(results, "\n=== ⚠️  DEPLOYMENT & USAGE ANALYSIS ===")
@@ -1563,6 +1818,13 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 
 	var results []string
 	results = append(results, "=== RULE ADDITION ===\n")
+
+	// Step 0: Display human-readable description if provided
+	if humanReadable, exists := args["human_readable"].(string); exists && humanReadable != "" {
+		results = append(results, "📋 **Rule Description (Human-Readable):**")
+		results = append(results, humanReadable)
+		results = append(results, "")
+	}
 
 	// Step 1: Add rule
 	results = append(results, "Step 1: Adding rule to ruleset...")
@@ -1818,12 +2080,21 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 		rulePurpose = rp
 	}
 
+	// MCP context optimization: limit samples to 3 by default
+	mcpLimit := true
+	if limitStr, ok := args["mcp_limit"].(string); ok {
+		mcpLimit = limitStr != "false"
+	}
+
 	// Count parameter is passed to backend but also used for display limit
 	if countStr, ok := args["count"].(string); ok {
 		if c, err := strconv.Atoi(countStr); err == nil && c > 0 && c <= 100 {
 			// Update args for backend request
 			args["count"] = countStr
 		}
+	} else if mcpLimit {
+		// If no count specified and MCP limit is enabled, default to 3
+		args["count"] = "3"
 	}
 
 	// Make the request to backend
@@ -1944,9 +2215,9 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 	}
 
 	// Include sample data at the end
-	results = append(results, "\n## Sample Data (First 5)")
+	results = append(results, "\n## Sample Data (First 3)")
 	results = append(results, "```json")
-	displayCount := 5
+	displayCount := 3
 	if len(sampleData) < displayCount {
 		displayCount = len(sampleData)
 	}
@@ -1956,6 +2227,8 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 
 	if len(sampleData) > displayCount {
 		results = append(results, fmt.Sprintf("\n... and %d more samples", len(sampleData)-displayCount))
+		results = append(results, "\n💡 **MCP Context Optimization**: Showing only 3 samples to save token space.")
+		results = append(results, "   Use 'mcp_limit=false' parameter to see more samples if needed.")
 	}
 
 	return common.MCPToolResult{
@@ -2537,7 +2810,6 @@ func (m *APIMapper) generateRulesetConfig(projectID, businessGoal string) string
     </rule>
 </root>`, projectID)
 	}
-
 	// DDoS Detection
 	if strings.Contains(goal, "ddos") || strings.Contains(goal, "denial of service") {
 		return fmt.Sprintf(`<root type="DETECTION" name="%s_rules" author="AI Generated">
