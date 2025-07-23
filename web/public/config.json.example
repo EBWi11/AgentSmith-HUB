@@ -1,8 +1,0 @@
-{
-  "apiBaseUrl": "http://localhost:8080",
-  "apiTimeout": 30000,
-  "enableDebugMode": false,
-  "enableClusterMode": true,
-  "theme": "light",
-  "language": "en"
-} 
