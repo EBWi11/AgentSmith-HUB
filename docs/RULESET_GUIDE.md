@@ -692,7 +692,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
 
 | Attribute | Required | Description | Default |
 |-----------|----------|-------------|---------|
-| type | No | Ruleset type | DETECTION |
+| type | No | Rule set type, DETECTION type for hits passed backward, WHITELIST for hits not passed backward | DETECTION |
 | name | No | Ruleset name | - |
 | author | No | Author information | - |
 
@@ -1845,10 +1845,9 @@ Optimization suggestions:
 
 ### 3.3 Whitelist Rulesets
 
-Whitelists are used to filter out data that doesn't need processing. Special behavior of whitelists:
-- When a whitelist rule matches, data is "allowed to pass" (i.e., filtered out, no longer processed)
-- When a whitelist rule doesn't match, data continues to be passed to subsequent processing
-- `append`, `del`, `plugin` operations in whitelists won't execute (because matched data will be filtered)
+Whitelisting is used to filter out data that does not need to be processed (ruleset type is WHITELIST). Special behavior of whitelist:
+- When a whitelist rule matches, the data is “disallowed” (i.e., it is filtered out of further processing and the data is discarded).
+- When all the whitelist rules do not match, the data continues to be passed to the subsequent processing.
 
 ```xml
 <root type="WHITELIST" name="security_whitelist" author="security_team">
