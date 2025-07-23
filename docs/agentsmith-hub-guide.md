@@ -16,12 +16,6 @@ The rules engine adopts a **flexible execution order**, where operations are exe
 
 INPUT defines data input sources, supporting multiple data source types.
 
-#### Basic Syntax
-```yaml
-type: "data_source_type"
-# specific configuration parameters
-```
-
 #### Supported Data Source Types
 
 ##### Kafka Input
@@ -100,12 +94,6 @@ kafka:
 ### 1.2 OUTPUT Syntax
 
 OUTPUT defines the output destination for data processing results.
-
-#### Basic Syntax
-```yaml
-type: "output_type"
-# specific configuration parameters
-```
 
 #### Supported Output Types
 
