@@ -24,7 +24,7 @@
     </div>
     <!-- Default full-screen editor for other component types -->
           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
-    <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3">
+    <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3 button-group-container">
       <!-- Test Buttons -->
       <button 
         v-if="isRuleset"
@@ -264,7 +264,7 @@
       
       <MonacoEditor v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveEdit" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
     </div>
-    <div class="flex justify-end mt-3 px-3 space-x-1.5 border-t pt-3 pb-2">
+    <div class="flex justify-end mt-3 px-3 space-x-1.5 border-t pt-3 pb-2 button-group-container">
       <!-- Cancel Button -->
       <button 
         @click="cancelEdit" 
@@ -1751,6 +1751,15 @@ button:focus {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.025em;
+}
+
+/* Button group container - ensure proper anchoring */
+.button-group-container {
+  position: relative;
+  right: 0;
+  margin-right: 0;
+  padding-right: 1rem;
+  z-index: 10;
 }
 
 </style> 
