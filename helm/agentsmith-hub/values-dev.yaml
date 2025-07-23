@@ -1,0 +1,271 @@
+# Development environment values for AgentSmith-HUB
+
+# Authentication Configuration
+auth:
+  token: "dev-token-12345-67890-abcdef"  # Development token
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+  nameOverride: ""
+  fullnameOverride: ""
+
+# Image configuration
+image:
+  repository: agentsmith-hub
+  tag: "0.1.6"
+  pullPolicy: IfNotPresent
+
+# Leader configuration
+leader:
+  enabled: true
+  replicaCount: 1
+  
+  # Leader specific configuration
+  config:
+    port: 8080
+    mode: "leader"
+    configRoot: "/opt/config"
+  
+  # Leader service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  
+  # Leader resources (reduced for development)
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  
+  # Leader security context (relaxed for development)
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    fsGroup: 0
+  
+  # Leader container security context (relaxed for development)
+  containerSecurityContext:
+    allowPrivilegeEscalation: true
+    readOnlyRootFilesystem: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+# Follower configuration
+follower:
+  enabled: true
+  replicaCount: 1  # Reduced for development
+  
+  # Follower specific configuration
+  config:
+    port: 8080
+    mode: "follower"
+    configRoot: "/opt/config"
+  
+  # Follower service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  
+  # Follower resources (reduced for development)
+  resources:
+    limits:
+      cpu: 250m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  
+  # Follower security context (relaxed for development)
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    fsGroup: 0
+  
+  # Follower container security context (relaxed for development)
+  containerSecurityContext:
+    allowPrivilegeEscalation: true
+    readOnlyRootFilesystem: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+# Frontend configuration
+frontend:
+  enabled: true
+  replicaCount: 1
+  
+  # Frontend image configuration
+  image:
+    repository: agentsmith-hub-frontend
+    tag: "0.1.6"
+    pullPolicy: IfNotPresent
+  
+  # Frontend service configuration
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  
+  # Frontend resources (reduced for development)
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  
+  # Frontend security context (relaxed for development)
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    fsGroup: 0
+  
+  # Frontend container security context (relaxed for development)
+  containerSecurityContext:
+    allowPrivilegeEscalation: true
+    readOnlyRootFilesystem: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+# Redis configuration
+redis:
+  enabled: true
+  
+  # Redis image configuration
+  image:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+  
+  # Redis architecture
+  architecture: standalone
+  
+  # Redis auth configuration
+  auth:
+    enabled: true
+    password: "toor"
+    existingSecret: ""
+    existingSecretPasswordKey: ""
+  
+  # Redis master configuration (no persistence for development)
+  master:
+    persistence:
+      enabled: false  # Disabled for development
+      storageClass: ""
+      size: 8Gi
+    resources:
+      limits:
+        cpu: 250m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  
+  # Redis service configuration
+  service:
+    type: ClusterIP
+    port: 6379
+    annotations: {}
+  
+  # Redis security context (relaxed for development)
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+    fsGroup: 0
+  
+  # Redis container security context (relaxed for development)
+  containerSecurityContext:
+    allowPrivilegeEscalation: true
+    readOnlyRootFilesystem: false
+    runAsNonRoot: false
+    runAsUser: 0
+
+# Configuration
+config:
+  # AgentSmith-HUB configuration
+  agentsmith:
+    redis: "agentsmith-hub-redis:6379"
+    redisPassword: "toor"
+    logLevel: "debug"  # More verbose logging for development
+    logPath: "/tmp/hub_logs"
+  
+  # Frontend configuration
+  frontend:
+    apiBaseUrl: "http://agentsmith-hub-leader:8080"
+    apiTimeout: 30000
+    enableDebugMode: true  # Enabled for development
+    enableClusterMode: true
+    theme: "light"
+    language: "en"
+
+# Persistence configuration (disabled for development)
+persistence:
+  enabled: false  # Disabled for development
+  storageClass: ""
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod disruption budget
+pdb:
+  enabled: false
+  minAvailable: 1
+
+# Horizontal pod autoscaler
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Network policy
+networkPolicy:
+  enabled: false  # Disabled for development
+  ingressRules: []
+  egressRules: []
+
+# Pod security policy
+podSecurityPolicy:
+  enabled: false
+
+# Pod security standards
+podSecurityStandards:
+  enabled: false  # Disabled for development
+  level: "restricted"
+
+# Monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+  prometheusRule:
+    enabled: false
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retention: 7
+  storage:
+    type: "s3"
+    bucket: ""
+    region: "" 

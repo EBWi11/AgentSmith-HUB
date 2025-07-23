@@ -319,6 +319,13 @@ main() {
         CONFIG_ARG=$(realpath --relative-to="$BINARY_DIR" "$CONFIG_ROOT")
     fi
     
+    # Check for environment variable token
+    if [ -n "${AGENTSMITH_TOKEN:-}" ]; then
+        print_info "Using token from environment variable AGENTSMITH_TOKEN"
+    else
+        print_info "No AGENTSMITH_TOKEN environment variable found, will use file-based token"
+    fi
+    
     # Start the application based on mode
     cd "$(dirname "$BINARY_PATH")"
     if [ "$RUN_MODE" = "follower" ]; then

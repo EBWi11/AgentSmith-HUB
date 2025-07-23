@@ -1,0 +1,132 @@
+{{- if .Values.follower.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agentsmith-hub.follower.fullname" . }}
+  labels:
+    {{- include "agentsmith-hub.follower.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.follower.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agentsmith-hub.follower.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "agentsmith-hub.follower.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "agentsmith-hub.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.follower.securityContext | nindent 8 }}
+      containers:
+        - name: agentsmith-hub
+          image: {{ include "agentsmith-hub.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config_root"
+            - "{{ .Values.follower.config.configRoot }}"
+            - "--port"
+            - "{{ .Values.follower.config.port | toString }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.follower.config.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.follower.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.follower.containerSecurityContext | nindent 12 }}
+          env:
+            - name: REDIS_HOST
+              value: {{ include "agentsmith-hub.redis.fullname" . }}
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              value: {{ .Values.redis.auth.password | quote }}
+            - name: LEADER_ADDR
+              value: {{ include "agentsmith-hub.leader.fullname" . }}:{{ .Values.leader.service.port }}
+            - name: NODE_ID
+              value: "follower"
+            - name: LOG_LEVEL
+              value: {{ .Values.config.agentsmith.logLevel | quote }}
+            - name: CONFIG_ROOT
+              value: {{ .Values.follower.config.configRoot | quote }}
+            - name: MCP_ENABLED
+              value: "false"
+            - name: AGENTSMITH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agentsmith-hub.fullname" . }}-token
+                  key: token
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.follower.config.configRoot }}
+            - name: logs
+              mountPath: /tmp/hub_logs
+            - name: lib
+              mountPath: /opt/lib
+            - name: mcp-config
+              mountPath: /opt/mcp_config
+      {{- with .Values.follower.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.follower.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.follower.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "agentsmith-hub.configVolumeName" . }}
+        - name: logs
+          emptyDir: {}
+        - name: lib
+          emptyDir: {}
+        - name: mcp-config
+          configMap:
+            name: {{ include "agentsmith-hub.mcpConfigVolumeName" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentsmith-hub.follower.fullname" . }}
+  labels:
+    {{- include "agentsmith-hub.follower.labels" . | nindent 4 }}
+  {{- with .Values.follower.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.follower.service.type }}
+  ports:
+    - port: {{ .Values.follower.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "agentsmith-hub.follower.selectorLabels" . | nindent 4 }}
+{{- end }} 

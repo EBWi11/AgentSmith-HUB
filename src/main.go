@@ -422,8 +422,15 @@ func loadLocalProjects() {
 	logger.Info("Finished loading and start local projects", "total_projects", project.GetProjectsCount())
 }
 
-// readToken reads existing .token or creates one when create==true.
+// readToken reads token from environment variable first, then from .token file, or creates one when create==true.
 func readToken(create bool) (string, error) {
+	// First check environment variable
+	if envToken := os.Getenv("AGENTSMITH_TOKEN"); envToken != "" {
+		logger.Info("Using token from environment variable")
+		return strings.TrimSpace(envToken), nil
+	}
+
+	// Fallback to file-based token
 	tokenPath := common.GetConfigPath(".token")
 	if data, err := os.ReadFile(tokenPath); err == nil {
 		return strings.TrimSpace(string(data)), nil

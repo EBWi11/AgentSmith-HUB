@@ -1,0 +1,332 @@
+# Default values for agentsmith-hub
+# This is a YAML-formatted file.
+
+# Authentication Configuration
+auth:
+  token: "9ef0c170-069e-44dd-a406-2d85eca0a0b2"  # Default token, should be changed in production
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+  nameOverride: ""
+  fullnameOverride: ""
+
+# Image configuration
+image:
+  repository: agentsmith-hub
+  tag: "0.1.6"
+  pullPolicy: IfNotPresent
+
+# Leader configuration
+leader:
+  enabled: true
+  replicaCount: 1
+  
+  # Leader specific configuration
+  config:
+    port: 8080
+    mode: "leader"
+    configRoot: "/opt/config"
+  
+  # Leader service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  
+  # Leader ingress configuration
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: agentsmith-hub.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  
+  # Leader resources
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  
+  # Leader node selector
+  nodeSelector: {}
+  
+  # Leader tolerations
+  tolerations: []
+  
+  # Leader affinity
+  affinity: {}
+  
+  # Leader security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  
+  # Leader container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+
+# Follower configuration
+follower:
+  enabled: true
+  replicaCount: 2
+  
+  # Follower specific configuration
+  config:
+    port: 8080
+    mode: "follower"
+    configRoot: "/opt/config"
+  
+  # Follower service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  
+  # Follower resources
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  
+  # Follower node selector
+  nodeSelector: {}
+  
+  # Follower tolerations
+  tolerations: []
+  
+  # Follower affinity
+  affinity: {}
+  
+  # Follower security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  
+  # Follower container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+
+# Frontend configuration
+frontend:
+  enabled: true
+  replicaCount: 1
+  
+  # Frontend image configuration
+  image:
+    repository: agentsmith-hub-frontend
+    tag: "0.1.6"
+    pullPolicy: IfNotPresent
+  
+  # Frontend service configuration
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  
+  # Frontend ingress configuration
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: agentsmith-hub.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  
+  # Frontend resources
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Frontend node selector
+  nodeSelector: {}
+  
+  # Frontend tolerations
+  tolerations: []
+  
+  # Frontend affinity
+  affinity: {}
+  
+  # Frontend security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+  
+  # Frontend container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 101
+
+# Redis configuration
+redis:
+  enabled: true
+  
+  # Redis image configuration
+  image:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+  
+  # Redis architecture
+  architecture: standalone
+  
+  # Redis auth configuration
+  auth:
+    enabled: true
+    password: "toor"
+    existingSecret: ""
+    existingSecretPasswordKey: ""
+  
+  # Redis master configuration
+  master:
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 8Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+  
+  # Redis service configuration
+  service:
+    type: ClusterIP
+    port: 6379
+    annotations: {}
+  
+  # Redis node selector
+  nodeSelector: {}
+  
+  # Redis tolerations
+  tolerations: []
+  
+  # Redis affinity
+  affinity: {}
+  
+  # Redis security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+  
+  # Redis container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1001
+
+# Configuration
+config:
+  # AgentSmith-HUB configuration
+  agentsmith:
+    redis: "agentsmith-hub-redis:6379"
+    redisPassword: "toor"
+    logLevel: "info"
+    logPath: "/tmp/hub_logs"
+  
+  # Frontend configuration
+  frontend:
+    apiBaseUrl: "http://agentsmith-hub-leader:8080"
+    apiTimeout: 30000
+    enableDebugMode: false
+    enableClusterMode: true
+    theme: "light"
+    language: "en"
+
+# Persistence configuration
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# Service account configuration
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod disruption budget
+pdb:
+  enabled: false
+  minAvailable: 1
+
+# Horizontal pod autoscaler
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Network policy
+networkPolicy:
+  enabled: false
+  ingressRules: []
+  egressRules: []
+
+# Pod security policy
+podSecurityPolicy:
+  enabled: false
+
+# Pod security standards
+podSecurityStandards:
+  enabled: false
+  level: "restricted"
+
+# Monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+  prometheusRule:
+    enabled: false
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retention: 7
+  storage:
+    type: "s3"
+    bucket: ""
+    region: "" 
