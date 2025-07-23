@@ -915,33 +915,27 @@ func (p *Project) Stop(lock bool) error {
 
 func (p *Project) Restart() error {
 	common.ProjectOperationMu.Lock()
-	common.ProjectOperationMu.Unlock()
+	defer common.ProjectOperationMu.Unlock()
+
+	logger.Info("Restarting project", "project", p.Id)
 
 	// Add panic recovery for critical state changes
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Panic during project restart", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
-			p.stopComponentsInternal()
+			_ = p.stopComponentsInternal()
 			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during restart: %v", r))
 		}
 	}()
 
 	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu
-	if p.Status != common.StatusRunning && p.Status != common.StatusError {
-		return fmt.Errorf("project is not running %s", p.Id)
-	}
-
-	logger.Info("Restarting project", "project", p.Id)
-
-	// Stop the project first
-	err := p.Stop(false)
-	if err != nil {
-		logger.Error("Failed to restart project", "project", p.Id, "error", err)
+	if p.Status == common.StatusRunning || p.Status == common.StatusError {
+		_ = p.Stop(false)
 	}
 
 	// Start the project again
-	err = p.Start(true)
+	err := p.Start(false)
 	if err != nil {
 		return fmt.Errorf("failed to start project after restart: %w", err)
 	}
