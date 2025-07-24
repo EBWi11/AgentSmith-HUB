@@ -111,7 +111,10 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this input
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("INPUT", componentID) {
-				affectedProjects[projectID] = struct{}{}
+				// Check if user wants this project to be running
+				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+					affectedProjects[projectID] = struct{}{}
+				}
 			}
 			return true
 		})
@@ -119,7 +122,10 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this output
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("OUTPUT", componentID) {
-				affectedProjects[projectID] = struct{}{}
+				// Check if user wants this project to be running
+				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+					affectedProjects[projectID] = struct{}{}
+				}
 			}
 			return true
 		})
@@ -127,12 +133,18 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this ruleset
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("RULESET", componentID) {
-				affectedProjects[projectID] = struct{}{}
+				// Check if user wants this project to be running
+				if userWantsRunning, err := common.GetProjectUserIntention(projectID); err == nil && userWantsRunning {
+					affectedProjects[projectID] = struct{}{}
+				}
 			}
 			return true
 		})
 	case "project":
-		affectedProjects[componentID] = struct{}{}
+		// For project changes, check if user wants this project to be running
+		if userWantsRunning, err := common.GetProjectUserIntention(componentID); err == nil && userWantsRunning {
+			affectedProjects[componentID] = struct{}{}
+		}
 	}
 
 	// Convert to string slice
