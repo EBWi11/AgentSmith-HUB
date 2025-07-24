@@ -3,13 +3,12 @@
 ## 部署组件
 
 1. **Redis** - 缓存和消息队列
-2. **Leader** - 主节点，处理配置管理和集群协调
+2. **Leader** - 主节点，处理配置管理和集群协调，包含前端Web界面
 3. **Follower** - 从节点，处理实际的数据处理任务
-4. **Frontend** - 前端 Web 界面
 
-> **注意**: Leader 和 Follower 使用相同的 Docker 镜像 `agentsmith-hub:0.1.6`，通过不同的启动参数和环境变量来区分角色：
-> - Leader: 使用 `--leader` 参数启动，启用 MCP 功能
-> - Follower: 不使用 `--leader` 参数，配置 `LEADER_ADDR` 指向 Leader 服务
+> **注意**: Leader 和 Follower 使用相同的 Docker 镜像 `ghcr.io/will/agentsmith-hub:latest`，通过环境变量 `MODE` 来区分角色：
+> - Leader: `MODE=leader`，启动后端API和前端Web界面
+> - Follower: `MODE=follower`，仅启动后端API，不包含前端
 
 ## 快速开始
 
@@ -18,8 +17,7 @@
 1. 确保你有可用的 Kubernetes 集群
 2. 安装并配置 `kubectl`
 3. 确保以下 Docker 镜像可用：
-   - `ghcr.io/your-username/agentsmith-hub:latest` (Leader 和 Follower 共用同一个镜像，通过启动参数区分)
-   - `ghcr.io/your-username/agentsmith-hub-frontend:latest`
+   - `ghcr.io/will/agentsmith-hub:latest` (Leader 和 Follower 共用同一个镜像，通过环境变量 MODE 区分)
    - `redis:7-alpine`
    
    > **注意**: 镜像可以通过 GitHub Actions 自动构建，详见 [Docker 镜像构建](#docker-镜像构建)
@@ -38,8 +36,8 @@
 
 3. **访问应用**：
    ```bash
-   # 前端界面
-   kubectl port-forward svc/agentsmith-hub-frontend 8080:80 -n agentsmith-hub
+   # 前端界面 (通过 Leader 服务)
+   kubectl port-forward svc/agentsmith-hub-leader 8080:80 -n agentsmith-hub
    
    # API 接口
    kubectl port-forward svc/agentsmith-hub-leader 8081:8080 -n agentsmith-hub
@@ -55,20 +53,19 @@
 
 ### 环境变量
 
+- `MODE` - 运行模式 (leader/follower)
 - `REDIS_HOST` - Redis 服务地址
 - `REDIS_PORT` - Redis 端口 (6379)
 - `REDIS_PASSWORD` - Redis 密码
-- `NODE_ID` - 节点标识 (leader/follower)
+- `NODE_ID` - 节点标识
 - `LOG_LEVEL` - 日志级别
 - `CONFIG_ROOT` - 配置文件路径
-- `MCP_ENABLED` - 是否启用 MCP 功能
 - `AGENTSMITH_TOKEN` - 认证令牌
 
 ### 资源配置
 
 - **Leader**: 1Gi 内存，500m CPU (请求) / 2Gi 内存，1000m CPU (限制)
 - **Follower**: 1Gi 内存，500m CPU (请求) / 2Gi 内存，1000m CPU (限制)
-- **Frontend**: 256Mi 内存，250m CPU (请求) / 512Mi 内存，500m CPU (限制)
 - **Redis**: 256Mi 内存，250m CPU (请求) / 512Mi 内存，500m CPU (限制)
 
 ## 自定义配置
@@ -129,9 +126,6 @@ kubectl logs -f deployment/agentsmith-hub-leader -n agentsmith-hub
 # Follower 日志
 kubectl logs -f deployment/agentsmith-hub-follower -n agentsmith-hub
 
-# Frontend 日志
-kubectl logs -f deployment/agentsmith-hub-frontend -n agentsmith-hub
-
 # Redis 日志
 kubectl logs -f deployment/agentsmith-hub-redis -n agentsmith-hub
 ```
@@ -158,7 +152,7 @@ kubectl get secrets -n agentsmith-hub
 ### 常见问题
 
 1. **Pod 启动失败**
-   - 检查镜像是否存在（Leader 和 Follower 使用相同镜像 `ghcr.io/your-username/agentsmith-hub:latest`）
+   - 检查镜像是否存在（Leader 和 Follower 使用相同镜像 `ghcr.io/will/agentsmith-hub:latest`）
    - 查看 Pod 日志：`kubectl logs <pod-name> -n agentsmith-hub`
    - 检查资源配置是否足够
 
@@ -207,8 +201,7 @@ kubectl get events -n agentsmith-hub --sort-by='.lastTimestamp'
 
 #### 构建的镜像
 
-- **AgentSmith-HUB**: `ghcr.io/your-username/agentsmith-hub:latest`
-- **Frontend**: `ghcr.io/your-username/agentsmith-hub-frontend:latest`
+- **AgentSmith-HUB**: `ghcr.io/will/agentsmith-hub:latest` (统一镜像，包含前端和后端)
 
 #### 镜像标签
 
@@ -227,26 +220,23 @@ kubectl get events -n agentsmith-hub --sort-by='.lastTimestamp'
 如果需要本地构建镜像：
 
 ```bash
-# 构建后端镜像
+# 构建统一镜像（包含前端和后端）
 docker build -t agentsmith-hub:latest .
-
-# 构建前端镜像
-docker build -t agentsmith-hub-frontend:latest ./web
 ```
 
 ### 使用自定义镜像
 
-在 `k8s-deployment.yaml` 中修改镜像地址：
+在 `agentsmith-hub-deployment.yaml` 中修改镜像地址：
 
 ```yaml
 # 使用 GitHub Container Registry
-image: ghcr.io/your-username/agentsmith-hub:latest
+image: ghcr.io/will/agentsmith-hub:latest
 
 # 使用本地镜像
 image: agentsmith-hub:latest
 
 # 使用特定版本
-image: ghcr.io/your-username/agentsmith-hub:v1.0.0
+image: ghcr.io/will/agentsmith-hub:v1.0.0
 ```
 
 ## 支持

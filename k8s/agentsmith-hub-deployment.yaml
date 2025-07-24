@@ -75,13 +75,15 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
         imagePullPolicy: Always
-        command: ["/opt/agentsmith-hub/leader-start.sh"]
         ports:
         - containerPort: 8080
           name: api
         - containerPort: 80
           name: http
         env:
+        # Mode configuration
+        - name: MODE
+          value: "leader"
         # To use an external Redis, change the value of REDIS_HOST to your Redis endpoint
         # and ensure the REDIS_PASSWORD secretKeyRef points to a secret containing your password.
         - name: REDIS_HOST
@@ -162,11 +164,13 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
         imagePullPolicy: Always
-        command: ["/opt/agentsmith-hub/follower-start.sh"]
         ports:
         - containerPort: 8080
           name: api
         env:
+        # Mode configuration
+        - name: MODE
+          value: "follower"
         # To use an external Redis, change the value of REDIS_HOST to your Redis endpoint
         # and ensure the REDIS_PASSWORD secretKeyRef points to a secret containing your password.
         - name: REDIS_HOST
