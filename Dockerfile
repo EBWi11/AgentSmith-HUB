@@ -24,8 +24,6 @@ WORKDIR /opt/agentsmith-hub
 ARG TARGETARCH
 COPY agentsmith-hub-*.tar.gz ./
 RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
-    mv agentsmith-hub/* . && \
-    rmdir agentsmith-hub && \
     rm agentsmith-hub-*.tar.gz && \
     chmod +x ./agentsmith-hub
 
