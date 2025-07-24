@@ -18,7 +18,7 @@ RUN addgroup -g 1000 agentsmith && \
     adduser -D -s /bin/bash -u 1000 -G agentsmith agentsmith
 
 # Set working directory
-WORKDIR /opt/agentsmith-hub
+WORKDIR /opt
 
 # Copy and extract the deployment archive
 ARG TARGETARCH
@@ -30,17 +30,16 @@ RUN echo "=== STEP 1: Extract tar.gz ===" && \
     ls -la && \
     echo "=== STEP 3: Check agentsmith-hub directory ===" && \
     ls -la agentsmith-hub/ && \
-    echo "=== STEP 4: Remove tar.gz and copy files ===" && \
+    echo "=== STEP 4: Remove tar.gz and move files ===" && \
     rm agentsmith-hub-*.tar.gz && \
-    rm -rf ./agentsmith-hub && \
-    cp -r agentsmith-hub/* . && \
-    rm -rf agentsmith-hub && \
+    mv agentsmith-hub/* . && \
+    rmdir agentsmith-hub && \
     echo "=== STEP 5: Final structure ===" && \
     ls -la && \
     chmod +x ./agentsmith-hub
 
 # Ensure startup scripts are executable
-RUN chmod +x ./start.sh ./stop.sh
+RUN chmod +x ./agentsmith-hub/start.sh ./agentsmith-hub/stop.sh
 
 # Create docker-entrypoint.sh with frontend and backend
 RUN echo '#!/bin/bash' > ./docker-entrypoint.sh && \
@@ -51,9 +50,9 @@ RUN echo '#!/bin/bash' > ./docker-entrypoint.sh && \
     echo '' >> ./docker-entrypoint.sh && \
     echo '# Start backend' >> ./docker-entrypoint.sh && \
     echo 'if [ "$MODE" = "follower" ]; then' >> ./docker-entrypoint.sh && \
-    echo '  exec ./start.sh --follower' >> ./docker-entrypoint.sh && \
+    echo '  exec ./agentsmith-hub/start.sh --follower' >> ./docker-entrypoint.sh && \
     echo 'else' >> ./docker-entrypoint.sh && \
-    echo '  exec ./start.sh' >> ./docker-entrypoint.sh && \
+    echo '  exec ./agentsmith-hub/start.sh' >> ./docker-entrypoint.sh && \
     echo 'fi' >> ./docker-entrypoint.sh && \
     chmod +x ./docker-entrypoint.sh
 
@@ -61,7 +60,7 @@ RUN echo '#!/bin/bash' > ./docker-entrypoint.sh && \
 RUN mkdir -p /tmp/hub_logs /var/lib/nginx/html /var/log/nginx
 
 # Configure nginx (nginx.conf is now available from the extracted archive)
-RUN cp nginx/nginx.conf /etc/nginx/nginx.conf
+RUN cp agentsmith-hub/nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Set proper ownership
 RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /var/lib/nginx /var/log/nginx /etc/nginx/nginx.conf
