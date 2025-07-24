@@ -610,7 +610,7 @@ func loadLocalChanges(c echo.Context) error {
 		affectedProjects := project.GetAffectedProjects(component["type"], component["id"])
 		for _, projectID := range affectedProjects {
 			if p, ok := project.GetProject(projectID); ok {
-				err := p.Restart()
+				err := p.Restart(true, "local_change")
 				if err != nil {
 					logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
 				}
@@ -689,7 +689,7 @@ func loadSingleLocalChange(c echo.Context) error {
 
 	for _, projectID := range affectedProjects {
 		if p, ok := project.GetProject(projectID); ok {
-			err := p.Restart()
+			err := p.Restart(true, "local_change")
 			if err != nil {
 				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
 			}

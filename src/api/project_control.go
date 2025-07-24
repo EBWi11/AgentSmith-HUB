@@ -149,7 +149,7 @@ func RestartProject(c echo.Context) error {
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
 	syncProjectOperationToFollowers(req.ProjectID, "restart")
 
-	err := p.Restart()
+	err := p.Restart(true, "api")
 	if err != nil {
 		logger.Error("Failed to restart project after component change", "project_id", req.ProjectID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
