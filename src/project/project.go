@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -1020,6 +1021,16 @@ func (p *Project) Stop(lock bool) error {
 }
 
 func (p *Project) Restart() error {
+	// Cooldown mechanism to prevent rapid restarts
+	p.restartMu.Lock()
+	if time.Since(p.lastRestartTime) < 5*time.Second {
+		p.restartMu.Unlock()
+		logger.Info("Project restart skipped due to cooldown", "project", p.Id)
+		return nil
+	}
+	p.lastRestartTime = time.Now()
+	p.restartMu.Unlock()
+
 	common.ProjectOperationMu.Lock()
 	defer common.ProjectOperationMu.Unlock()
 
@@ -1213,7 +1224,6 @@ func (p *Project) waitForCompleteDataProcessing() {
 }
 
 func (p *Project) cleanupInputChannel() {
-	var err error
 	for id, in := range p.Inputs {
 		rightNodes := p.getPartner("right", id)
 
@@ -1229,14 +1239,9 @@ func (p *Project) cleanupInputChannel() {
 
 			if exists {
 				if p.Testing {
-					err = globalInput.StopForTesting()
+					_ = globalInput.StopForTesting()
 				} else {
-					err = globalInput.Stop()
-				}
-				if err != nil {
-					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
-				} else {
-					logger.Info("Stopped input", "project", p.Id, "input", in.Id, "sequence", id)
+					_ = globalInput.Stop()
 				}
 			} else {
 				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)

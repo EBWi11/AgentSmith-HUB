@@ -93,6 +93,10 @@ type Project struct {
 
 	// Data flow
 	MsgChannels map[string]*chan map[string]interface{} `json:"-"` // Channels for message passing between components
+
+	// Restart cooldown
+	lastRestartTime time.Time
+	restartMu       sync.Mutex
 }
 
 // ProjectMetrics holds runtime metrics for the project

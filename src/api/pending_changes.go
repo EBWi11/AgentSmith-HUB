@@ -1014,23 +1014,24 @@ func ApplySingleChange(c echo.Context) error {
 	}
 
 	if len(affectedProjects) > 0 {
-		logger.Info("Restarting affected projects", "count", len(affectedProjects))
-
-		for _, id := range affectedProjects {
-			// Use safe accessor without additional locking
-			if p, ok := project.GetProject(id); ok {
-				err := p.Restart()
-				if err != nil {
-					logger.Error("Failed to restart affected project", "id", id, "error", err)
-					if err := cluster.GlobalInstructionManager.PublishProjectRestart(id); err != nil {
-						logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+		logger.Info("Restarting affected projects asynchronously", "count", len(affectedProjects))
+		go func() {
+			for _, id := range affectedProjects {
+				// Use safe accessor without additional locking
+				if p, ok := project.GetProject(id); ok {
+					err := p.Restart()
+					if err != nil {
+						logger.Error("Failed to restart affected project", "id", id, "error", err)
+						if err := cluster.GlobalInstructionManager.PublishProjectRestart(id); err != nil {
+							logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
+						}
 					}
 				}
 			}
-		}
+		}()
 
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"message":            "Change applied successfully",
+			"message":            "Change applied successfully, projects are restarting asynchronously",
 			"restarted_projects": len(affectedProjects),
 		})
 	}
