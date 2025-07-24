@@ -100,10 +100,7 @@ spec:
               key: token
         volumeMounts:
         - name: config
-          mountPath: /opt/agentsmith-hub/config
-        - name: nginx-config
-          mountPath: /etc/nginx/http.d/default.conf
-          subPath: nginx.conf
+          mountPath: /opt/config
         livenessProbe:
           httpGet:
             path: /ping
@@ -118,9 +115,6 @@ spec:
           periodSeconds: 5
       volumes:
       - name: config
-        configMap:
-          name: agentsmith-hub-config
-      - name: nginx-config
         configMap:
           name: agentsmith-hub-config
 

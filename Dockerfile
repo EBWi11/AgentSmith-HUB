@@ -20,27 +20,17 @@ RUN addgroup -g 1000 agentsmith && \
 # Set working directory
 WORKDIR /opt/agentsmith-hub
 
-# Copy pre-built binary based on target architecture
-# The binary is expected to be in the root of the build context
+# Copy and extract the deployment archive
 ARG TARGETARCH
-COPY agentsmith-hub-${TARGETARCH} ./agentsmith-hub
-RUN chmod +x ./agentsmith-hub
+COPY agentsmith-hub-${TARGETARCH}.tar.gz ./
+RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
+    mv agentsmith-hub/* . && \
+    rmdir agentsmith-hub && \
+    rm agentsmith-hub-${TARGETARCH}.tar.gz && \
+    chmod +x ./agentsmith-hub
 
-# Copy libraries based on target architecture
-COPY lib/linux/${TARGETARCH}/ ./lib/
-
-# Copy configuration files
-COPY config/ ./config/
-COPY mcp_config/ ./mcp_config/
-
-# Copy web frontend
-# The web/dist directory is expected to be in the build context
-COPY web/dist/ ./web/dist/
-
-# Copy startup scripts
-COPY scripts/docker/leader-start.sh ./leader-start.sh
-COPY scripts/docker/follower-start.sh ./follower-start.sh
-COPY scripts/docker/docker-entrypoint.sh ./docker-entrypoint.sh
+# Startup scripts are already included in the tar.gz archive
+# Just ensure they have execute permissions
 RUN chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
 
 # Create necessary directories
