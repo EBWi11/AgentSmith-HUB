@@ -21,12 +21,11 @@ RUN addgroup -g 1000 agentsmith && \
 WORKDIR /opt/agentsmith-hub
 
 # Copy and extract the deployment archive
-ARG TARGETARCH
-COPY agentsmith-hub-${TARGETARCH}.tar.gz ./
-RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
+COPY agentsmith-hub-*.tar.gz ./
+RUN tar -xzf agentsmith-hub-*.tar.gz && \
     mv agentsmith-hub/* . && \
     rmdir agentsmith-hub && \
-    rm agentsmith-hub-${TARGETARCH}.tar.gz && \
+    rm agentsmith-hub-*.tar.gz && \
     chmod +x ./agentsmith-hub
 
 # Ensure startup scripts are executable
