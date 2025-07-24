@@ -77,21 +77,55 @@ jobs:
             export CGO_ENABLED=1
             export GOOS=linux
             export GOARCH=arm64
-            export LIBRARY_PATH="../lib/linux/arm64:$LIBRARY_PATH"
-            export LD_LIBRARY_PATH="../lib/linux/arm64:$LD_LIBRARY_PATH"
-            # For cross-compilation, we need to specify the library path explicitly
-            export LDFLAGS_EXTRA="-L../lib/linux/arm64 -Wl,-rpath,../lib/linux/arm64"
-            # Set PKG_CONFIG_PATH for pkg-config to find the library
-            export PKG_CONFIG_PATH="../lib/linux/arm64:$PKG_CONFIG_PATH"
+            LIB_PATH="$(pwd)/../lib/linux/arm64"
+            export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+            export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
           else
             export CGO_ENABLED=1
             export GOOS=linux
             export GOARCH=amd64
-            export LIBRARY_PATH="../lib/linux/amd64:$LIBRARY_PATH"
-            export LD_LIBRARY_PATH="../lib/linux/amd64:$LD_LIBRARY_PATH"
-            export LDFLAGS_EXTRA="-L../lib/linux/amd64 -Wl,-rpath,../lib/linux/amd64"
-            export PKG_CONFIG_PATH="../lib/linux/amd64:$PKG_CONFIG_PATH"
+            LIB_PATH="$(pwd)/../lib/linux/amd64"
+            export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+            export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
           fi
+          
+          # Debug: Show current directory and file structure
+          echo "Current directory: $(pwd)"
+          echo "Library directory structure:"
+          find ../lib -type f -name "*.so" 2>/dev/null || echo "No .so files found"
+          
+          # Verify library exists and show debug info
+          echo "Expected library path: ${LIB_PATH}"
+          if [ -f "${LIB_PATH}/librure.so" ]; then
+            echo "✓ Library file found"
+            ls -la "${LIB_PATH}/"
+          else
+            echo "✗ Library file not found, checking alternative locations..."
+            # Check if library exists in alternative locations
+            if [ -f "../lib/linux/librure.so" ]; then
+              echo "Found library in ../lib/linux/"
+              LIB_PATH="../lib/linux"
+            elif [ -f "../lib/librure.so" ]; then
+              echo "Found library in ../lib/"
+              LIB_PATH="../lib"
+            else
+              echo "ERROR: Cannot find librure.so in any expected location"
+              echo "Directory contents:"
+              ls -la ../lib/ || echo "lib directory not found"
+              exit 1
+            fi
+          fi
+          
+          # Update CGO flags with correct path
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          else
+            export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          fi
+          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
+          
+          echo "Updated CGO_LDFLAGS: $CGO_LDFLAGS"
+          echo "Updated LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
           
           # Build with version information
           VERSION_RAW=$(cat ../VERSION 2>/dev/null)
@@ -101,15 +135,24 @@ jobs:
           fi
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-          LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT' $LDFLAGS_EXTRA"
+          LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
+          
+          # Copy library to system path for linking
+          echo "Copying library to system path..."
+          sudo cp "${LIB_PATH}/librure.so" /usr/lib/
+          sudo ldconfig
           
           # Build the binary
           echo "Building binary for ${{ matrix.arch }}..."
-          echo "Using library path: $LIBRARY_PATH"
-          echo "Using LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
-          echo "Using LDFLAGS: $LDFLAGS"
-          echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-          go build -ldflags="$LDFLAGS" -o "../${{ env.BINARY_NAME }}-${{ matrix.arch }}" .
+          if go build -ldflags "$LDFLAGS" -o "../${{ env.BINARY_NAME }}-${{ matrix.arch }}" .; then
+            echo "✓ Build completed successfully"
+            ls -la "../${{ env.BINARY_NAME }}-${{ matrix.arch }}"
+            echo "Checking binary dependencies:"
+            ldd "../${{ env.BINARY_NAME }}-${{ matrix.arch }}" || echo "ldd not available"
+          else
+            echo "✗ Build failed"
+            exit 1
+          fi
 
       - name: Upload backend artifact
         id: upload-artifact
