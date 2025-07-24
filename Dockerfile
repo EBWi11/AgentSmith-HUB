@@ -35,8 +35,8 @@ RUN chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
 # Create necessary directories
 RUN mkdir -p /tmp/hub_logs /opt/lib /opt/mcp_config /opt/config /var/lib/nginx/html /var/log/nginx
 
-# Configure nginx
-COPY nginx/nginx.conf /etc/nginx/http.d/default.conf
+# Configure nginx (nginx.conf is now available from the extracted archive)
+RUN cp nginx/nginx.conf /etc/nginx/http.d/default.conf
 
 # Set proper ownership
 RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx /etc/nginx/http.d/default.conf
