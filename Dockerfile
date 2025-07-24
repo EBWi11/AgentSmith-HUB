@@ -22,6 +22,7 @@ WORKDIR /opt/agentsmith-hub
 
 # Copy and extract the deployment archive
 ARG TARGETARCH
+RUN rm -f agentsmith-hub* 2>/dev/null || true
 COPY agentsmith-hub-*.tar.gz ./
 RUN echo "=== STEP 1: Extract tar.gz ===" && \
     tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
@@ -31,6 +32,7 @@ RUN echo "=== STEP 1: Extract tar.gz ===" && \
     ls -la agentsmith-hub/ && \
     echo "=== STEP 4: Remove tar.gz and copy files ===" && \
     rm agentsmith-hub-*.tar.gz && \
+    rm -f ./agentsmith-hub && \
     cp -r agentsmith-hub/* . && \
     rm -rf agentsmith-hub && \
     echo "=== STEP 5: Final structure ===" && \
