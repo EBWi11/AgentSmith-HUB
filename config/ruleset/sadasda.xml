@@ -1,0 +1,18 @@
+<root author="name">
+    <rule id="rule_id" name="name">
+        <check type="REGEX" field="exe">testcases</check>
+        
+        <threshold group_by="src_ip" range="1m" value="100" />
+        
+        <check type="INCL" field="exe" logic="OR" delimiter="|">abc|edf</check>
+        <check type="PLUGIN" field="exe">isPrivateIP("127.0.0.1")</check>
+        
+        <append field="abc">123</append>
+        <del>exe,argv</del>
+        
+        <checklist condition="a or b">
+            <check id="a" type="EQU" field="status">200</check>
+            <check id="b" type="INCL" field="path">favicon.ico</check>
+        </checklist>
+    </rule>
+</root>
