@@ -285,4 +285,75 @@ jobs:
         draft: false
         prerelease: false
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to Docker Hub
+      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Login to GitHub Container Registry
+      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Prepare Docker build context
+      run: |
+        # Create build directory structure for Docker
+        mkdir -p build-docker
+        mkdir -p lib/linux/amd64
+        mkdir -p lib/linux/arm64
+        
+        # Copy binaries and libraries
+        cp build/${BINARY_NAME}-amd64 build-docker/agentsmith-hub-amd64
+        cp build/${BINARY_NAME}-arm64 build-docker/agentsmith-hub-arm64
+        
+        cp -r lib/linux/amd64/* lib/linux/amd64/
+        cp -r lib/linux/arm64/* lib/linux/arm64/
+        
+        # Make binaries executable
+        chmod +x build-docker/agentsmith-hub-*
+        
+        # Copy web frontend
+        cp -r web/dist web-dist
+        
+        echo "Prepared Docker build context:"
+        ls -la build-docker/
+        
+    - name: Extract metadata for Docker
+      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ secrets.DOCKER_USERNAME }}/agentsmith-hub
+          ghcr.io/${{ github.repository }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=${{ steps.version.outputs.version }}
+          
+    - name: Build and push Docker image
+      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          VERSION=${{ steps.version.outputs.version }}
+          GIT_COMMIT=${{ github.sha }}
+          BUILD_TIME=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
