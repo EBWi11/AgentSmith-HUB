@@ -38,23 +38,21 @@ fi
 
 print_status "Starting AgentSmith-HUB deployment..."
 
-# Step 1: Create namespace
-print_status "Creating namespace..."
-kubectl apply -f k8s-deployment.yaml --dry-run=client -o yaml | kubectl apply -f -
+# Step 1: Create namespace and deploy Redis (if using internal Redis)
+print_status "Creating namespace and deploying Redis..."
+# To use an external Redis, comment out the next line
+kubectl apply -f redis-deployment.yaml
 
-# Step 2: Wait for namespace to be ready
-print_status "Waiting for namespace to be ready..."
-kubectl wait --for=condition=Ready namespace/agentsmith-hub --timeout=30s
-
-# Step 3: Deploy all resources
+# Step 2: Deploy AgentSmith-HUB components
 print_status "Deploying AgentSmith-HUB components..."
-kubectl apply -f k8s-deployment.yaml
+kubectl apply -f agentsmith-hub-deployment.yaml
 
-# Step 4: Wait for deployments to be ready
+# Step 3: Wait for deployments to be ready
 print_status "Waiting for deployments to be ready..."
 
-# Wait for Redis
+# Wait for Redis (if using internal Redis)
 print_status "Waiting for Redis deployment..."
+# To use an external Redis, comment out the next line
 kubectl wait --for=condition=available --timeout=300s deployment/agentsmith-hub-redis -n agentsmith-hub
 
 # Wait for Leader

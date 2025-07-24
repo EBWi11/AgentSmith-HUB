@@ -1,4 +1,4 @@
-name: Build and Release AgentSmith-HUB
+name: Build, Release and Publish Docker Image
 
 on:
   push:
@@ -9,306 +9,213 @@ on:
 
 env:
   BINARY_NAME: agentsmith-hub
+  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
-  build:
+  build-frontend:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend-artifact-name: ${{ steps.upload-artifact.outputs.artifact-name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./web
+        run: npm run build
+
+      - name: Upload frontend artifact
+        id: upload-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist/
+          retention-days: 1
+
+  build-backend:
+    needs: build-frontend
     runs-on: ubuntu-latest
     strategy:
       matrix:
         arch: [amd64, arm64]
-    
+    outputs:
+      binary-artifact-name: ${{ steps.upload-artifact.outputs.artifact-name }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24.5'
-    
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: web/package-lock.json
-    
-    - name: Install frontend dependencies
-      run: |
-        cd web
-        npm ci
-    
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential
-        # Install cross-compilation tools for ARM64
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-        fi
-    
-    - name: Build frontend
-      run: |
-        cd web
-        npm run build
-    
-    - name: Build backend
-      run: |
-        cd src
-        mkdir -p ../build
-        
-        # Set architecture-specific build variables
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export CC=aarch64-linux-gnu-gcc
-          export CGO_ENABLED=1
-          export GOOS=linux
-          export GOARCH=arm64
-          LIB_PATH="$(pwd)/../lib/linux/arm64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
-        else
-          export CGO_ENABLED=1
-          export GOOS=linux
-          export GOARCH=amd64
-          LIB_PATH="$(pwd)/../lib/linux/amd64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
-        fi
-        
-        # Verify library exists
-        if [ ! -f "${LIB_PATH}/librure.so" ]; then
-          echo "ERROR: Cannot find librure.so at ${LIB_PATH}"
-          exit 1
-        fi
-        
-        # Build with version information
-        VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
-        BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
-        
-        # Copy library to system path for linking
-        sudo cp "${LIB_PATH}/librure.so" /usr/lib/
-        sudo ldconfig
-        
-        # Build the binary
-        echo "Building binary for ${{ matrix.arch }}..."
-        if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
-          echo "✓ Build completed successfully"
-          ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
-        else
-          echo "✗ Build failed"
-          exit 1
-        fi
-    
-    - name: Get version info
-      id: version
-      run: |
-        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-    
-    - name: Create deployment archive
-      run: |
-        # Create a clean directory structure for the archive
-        RELEASE_NAME="${{ steps.version.outputs.version }}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-        ARCHIVE_DIR="agentsmith-hub"
-        ARCHIVE_NAME="agentsmith-hub-${{ matrix.arch }}.tar.gz"
-        
-        echo "Creating archive: $ARCHIVE_NAME"
-        
-        # Create the archive directory
-        mkdir -p "$ARCHIVE_DIR"
-        
-        # Copy binary (rename to standard name)
-        cp "build/${BINARY_NAME}-${{ matrix.arch }}" "$ARCHIVE_DIR/$BINARY_NAME"
-        chmod +x "$ARCHIVE_DIR/$BINARY_NAME"
-        
-        # Copy frontend files
-        cp -r web/dist "$ARCHIVE_DIR/web"
-        
-        # Copy architecture-specific libraries
-        mkdir -p "$ARCHIVE_DIR/lib"
-        cp -r "lib/linux/${{ matrix.arch }}"/* "$ARCHIVE_DIR/lib/"
-        
-        # Copy configuration files
-        cp -r config "$ARCHIVE_DIR/"
-        cp -r mcp_config "$ARCHIVE_DIR/"
-        
-        # Copy nginx configuration
-        mkdir -p "$ARCHIVE_DIR/nginx"
-        cp script/nginx.conf "$ARCHIVE_DIR/nginx/nginx.conf"
-        
-        # Generate architecture-aware scripts
-        chmod +x ./script/create_scripts.sh
-        ./script/create_scripts.sh "$ARCHIVE_DIR" "${{ matrix.arch }}"
-        
-        # Copy documentation
-        cp README.md "$ARCHIVE_DIR/"
-        cp VERSION "$ARCHIVE_DIR/"
-        
-        # Create the tar.gz archive
-        tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
-        
-        # Create checksum
-        sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
-        
-        # Clean up
-        rm -rf "$ARCHIVE_DIR"
-        
-        echo "Archive created successfully: $ARCHIVE_NAME"
-    
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: agentsmith-hub-${{ matrix.arch }}-${{ steps.version.outputs.version }}
-        path: |
-          agentsmith-hub-${{ matrix.arch }}.tar.gz
-          agentsmith-hub-${{ matrix.arch }}.tar.gz.sha256
-        retention-days: 30
-    
-    - name: Create Docker package
-      run: |
-        echo "Creating Docker package for ${{ matrix.arch }}..."
-        
-        # Create a temporary directory for packaging
-        mkdir -p docker-package
-        
-        # Copy binary
-        cp "build/${BINARY_NAME}-${{ matrix.arch }}" "docker-package/${BINARY_NAME}-${{ matrix.arch }}"
-        chmod +x "docker-package/${BINARY_NAME}-${{ matrix.arch }}"
-        
-        # Copy web frontend
-        cp -r web/dist "docker-package/web-dist"
-        
-        # Copy startup scripts
-        cp scripts/docker/leader-start.sh "docker-package/leader-start.sh"
-        cp scripts/docker/follower-start.sh "docker-package/follower-start.sh"
-        cp scripts/docker/docker-entrypoint.sh "docker-package/docker-entrypoint.sh"
-        chmod +x "docker-package/leader-start.sh" "docker-package/follower-start.sh" "docker-package/docker-entrypoint.sh"
-        
-        # Create tar.gz package
-        tar -czf "docker-package-${{ matrix.arch }}.tar.gz" -C docker-package .
-        
-        echo "Docker package created: docker-package-${{ matrix.arch }}.tar.gz"
-        ls -la docker-package-*.tar.gz
-    
-    - name: Upload Docker package
-      uses: actions/upload-artifact@v4
-      with:
-        name: docker-package-${{ matrix.arch }}
-        path: docker-package-${{ matrix.arch }}.tar.gz
-        retention-days: 30
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  docker:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-    env:
-      BINARY_NAME: agentsmith-hub
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Download build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Prepare Docker build context
-      run: |
-        echo "Preparing Docker build context..."
-        
-        # Create build directory structure for Docker
-        mkdir -p build-docker
-        
-        # Extract packages for both architectures
-        for arch in amd64 arm64; do
-          if [ -f "artifacts/docker-package-${arch}/docker-package-${arch}.tar.gz" ]; then
-            echo "Extracting ${arch} package..."
-            tar -xzf "artifacts/docker-package-${arch}/docker-package-${arch}.tar.gz" -C build-docker/
-            
-            # Rename binary to standard name
-            if [ -f "build-docker/${BINARY_NAME}-${arch}" ]; then
-              mv "build-docker/${BINARY_NAME}-${arch}" "build-docker/agentsmith-hub-${arch}"
-              chmod +x "build-docker/agentsmith-hub-${arch}"
-              echo "✓ Extracted and renamed ${arch} binary"
-            else
-              echo "✗ ${arch} binary not found in extracted package"
-              exit 1
-            fi
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.5'
+
+      - name: Set up cross-compilation tools
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build backend
+        working-directory: ./src
+        run: |
+          # Set architecture-specific build variables
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            export CC=aarch64-linux-gnu-gcc
+            export CGO_ENABLED=1
+            export GOOS=linux
+            export GOARCH=arm64
           else
-            echo "✗ ${arch} package not found"
-            exit 1
+            export CGO_ENABLED=1
+            export GOOS=linux
+            export GOARCH=amd64
           fi
-        done
-        
-        # Copy web frontend (use from amd64 package)
-        if [ -d "build-docker/web-dist" ]; then
-          mv "build-docker/web-dist" web-dist
-          echo "✓ Extracted web frontend"
-        else
-          echo "✗ Web frontend not found in extracted package"
-          exit 1
-        fi
-        
-        # Copy startup scripts (use from amd64 package)
-        if [ -f "build-docker/leader-start.sh" ] && [ -f "build-docker/follower-start.sh" ] && [ -f "build-docker/docker-entrypoint.sh" ]; then
-          cp "build-docker/leader-start.sh" ./
-          cp "build-docker/follower-start.sh" ./
-          cp "build-docker/docker-entrypoint.sh" ./
-          chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
-          echo "✓ Extracted startup scripts"
-        else
-          echo "✗ Startup scripts not found in extracted package"
-          exit 1
-        fi
-        
-        echo "Docker build context prepared:"
-        ls -la build-docker/
-        echo "Web dist contents:"
-        ls -la web-dist/ | head -5
-    
-    - name: Get version info
-      id: version
-      run: |
-        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        
-    - name: Extract metadata for Docker
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=raw,value=latest,enable={{is_default_branch}}
-          type=raw,value=${{ steps.version.outputs.version }}
           
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        build-args: |
-          VERSION=${{ steps.version.outputs.version }}
-          GIT_COMMIT=${{ github.sha }}
-          BUILD_TIME=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+          # Build with version information
+          VERSION_RAW=$(cat ../VERSION 2>/dev/null)
+          VERSION=$(echo "$VERSION_RAW" | tr -d '\n\r')
+          if [ -z "$VERSION" ]; then
+            VERSION="unknown"
+          fi
+          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
+          
+          # Build the binary
+          echo "Building binary for ${{ matrix.arch }}..."
+          go build -ldflags="$LDFLAGS" -o "../${{ env.BINARY_NAME }}-${{ matrix.arch }}" .
+
+      - name: Upload backend artifact
+        id: upload-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.arch }}
+          path: ./${{ env.BINARY_NAME }}-${{ matrix.arch }}
+          retention-days: 1
+
+  create-release-archive:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-frontend, build-backend]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-${{ matrix.arch }}
+
+      - name: Get version info        id: version        run: |
+          VERSION_RAW=$(cat VERSION 2>/dev/null)
+          VERSION=$(echo "$VERSION_RAW" | tr -d '\n\r')
+          if [ -z "$VERSION" ]; then
+            VERSION="unknown"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create deployment archive
+        run: |
+          ARCHIVE_DIR="agentsmith-hub"
+          ARCHIVE_NAME="agentsmith-hub-${{ steps.version.outputs.version }}-${{ matrix.arch }}.tar.gz"
+          
+          mkdir -p "$ARCHIVE_DIR/web"
+          mv "${{ env.BINARY_NAME }}-${{ matrix.arch }}" "$ARCHIVE_DIR/${{ env.BINARY_NAME }}"
+          mv web/dist "$ARCHIVE_DIR/web/"
+          cp -r config "$ARCHIVE_DIR/"
+          cp -r mcp_config "$ARCHIVE_DIR/"
+          cp -r lib/linux/${{ matrix.arch }}/* "$ARCHIVE_DIR/lib/"
+          cp README.md VERSION "$ARCHIVE_DIR/"
+          
+          tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
+          sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            *.tar.gz
+            *.sha256
+          retention-days: 7
+
+  push-docker-image:
+    if: github.event_name == 'push'
+    needs: [build-frontend, build-backend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist
+
+      - name: Download backend artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-*
+          path: .
+          merge-multiple: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_IMAGE_NAME }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

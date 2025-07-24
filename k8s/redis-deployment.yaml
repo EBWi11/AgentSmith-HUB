@@ -1,0 +1,55 @@
+---
+# Secret for Redis password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentsmith-hub-redis-secret
+  namespace: agentsmith-hub
+type: Opaque
+data:
+  # Randomly generated password, base64 encoded.
+  password: "UjNkMXNQQHNzdzA0ZEUwckh1YiE="
+
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-redis
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        command: ["redis-server", "--requirepass", "$(REDIS_PASSWORD)"]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret
+              key: password
+        ports:
+        - containerPort: 6379
+
+--- 
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+  selector:
+    app: agentsmith-hub-redis
