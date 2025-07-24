@@ -1,0 +1,245 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.5'
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: |
+        cd web
+        npm ci
+    
+    - name: Build frontend
+      run: |
+        cd web
+        npm run build
+    
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+        # Install cross-compilation tools for ARM64
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+        fi
+    
+    - name: Build backend
+      run: |
+        cd src
+        mkdir -p ../build
+        
+        # Set architecture-specific build variables
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          export CC=aarch64-linux-gnu-gcc
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=arm64
+          LIB_PATH="$(pwd)/../lib/linux/arm64"
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
+        else
+          export CGO_ENABLED=1
+          export GOOS=linux
+          export GOARCH=amd64
+          LIB_PATH="$(pwd)/../lib/linux/amd64"
+          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
+        fi
+        
+        # Verify library exists
+        if [ -f "${LIB_PATH}/librure.so" ]; then
+          echo "✓ Library file found"
+        else
+          echo "✗ Library file not found, checking alternative locations..."
+          if [ -f "../lib/linux/librure.so" ]; then
+            echo "Found library in ../lib/linux/"
+            LIB_PATH="../lib/linux"
+          elif [ -f "../lib/librure.so" ]; then
+            echo "Found library in ../lib/"
+            LIB_PATH="../lib"
+          else
+            echo "ERROR: Cannot find librure.so in any expected location"
+            exit 1
+          fi
+        fi
+        
+        # Update CGO flags with correct path
+        export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
+        export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
+        
+        # Build with version information
+        VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
+        BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
+        
+        # Copy library to system path for linking
+        sudo cp "${LIB_PATH}/librure.so" /usr/lib/
+        sudo ldconfig
+        
+        # Build the binary
+        go build -ldflags "$LDFLAGS" -o ../build/agentsmith-hub-${{ matrix.arch }} .
+    
+    - name: Get version info
+      id: version
+      run: |
+        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Set image tag based on tag or branch
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          IMAGE_TAG=${GITHUB_REF#refs/tags/}
+        else
+          IMAGE_TAG="${VERSION}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+        fi
+        # Remove any spaces and newlines from image tag
+        IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r ')
+        echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Build and push AgentSmith-HUB image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.arch }}-latest
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+          VERSION=${{ steps.version.outputs.version }}
+          GIT_COMMIT=${{ github.sha }}
+          BUILD_TIME=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        file: Dockerfile
+    
+    - name: Build and push Frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./web
+        platforms: ${{ matrix.platform }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ matrix.arch }}-latest
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+          VERSION=${{ steps.version.outputs.version }}
+          GIT_COMMIT=${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        file: Dockerfile
+
+  # Multi-platform manifest job (only for releases)
+  create-manifest:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    steps:
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Get version info
+      id: version
+      run: |
+        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          IMAGE_TAG=${GITHUB_REF#refs/tags/}
+        else
+          IMAGE_TAG="${VERSION}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+        fi
+        IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r ')
+        echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+    
+    - name: Create multi-platform manifest for AgentSmith-HUB
+      run: |
+        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:amd64-latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64-latest
+        
+        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:amd64-${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64-${{ steps.version.outputs.image_tag }}
+        
+        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+    
+    - name: Create multi-platform manifest for Frontend
+      run: |
+        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-latest
+        
+        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-${{ steps.version.outputs.image_tag }}
+        
+        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
+        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }} 
