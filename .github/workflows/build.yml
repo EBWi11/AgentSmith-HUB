@@ -129,7 +129,9 @@ jobs:
         with:
           name: backend-${{ matrix.arch }}
 
-      - name: Get version info        id: version        run: |
+      - name: Get version info
+        id: version
+        run: |
           VERSION_RAW=$(cat VERSION 2>/dev/null)
           VERSION=$(echo "$VERSION_RAW" | tr -d '\n\r')
           if [ -z "$VERSION" ]; then
