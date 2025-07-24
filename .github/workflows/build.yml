@@ -220,6 +220,15 @@ jobs:
           agentsmith-hub-${{ matrix.arch }}.tar.gz.sha256
         retention-days: 30
     
+    - name: Upload binary for Docker
+      uses: actions/upload-artifact@v4
+      with:
+        name: agentsmith-hub-${{ matrix.arch }}-binary
+        path: |
+          build/${BINARY_NAME}-${{ matrix.arch }}
+          web/dist/
+        retention-days: 30
+    
     - name: Create Release (on tag)
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
@@ -287,11 +296,29 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    env:
+      BINARY_NAME: agentsmith-hub
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
       
     - name: Login to GitHub Container Registry
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
@@ -300,29 +327,60 @@ jobs:
         
     - name: Prepare Docker build context
       run: |
+        # Debug: Show current working directory and contents
+        echo "Current working directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        
         # Create build directory structure for Docker
         mkdir -p build-docker
-        mkdir -p lib/linux/amd64
-        mkdir -p lib/linux/arm64
         
-        # Copy binaries and libraries
-        cp build/${BINARY_NAME}-amd64 build-docker/agentsmith-hub-amd64
-        cp build/${BINARY_NAME}-arm64 build-docker/agentsmith-hub-arm64
+        # Extract binaries from artifacts
+        echo "Extracting artifacts..."
+        for arch in amd64 arm64; do
+          if [ -d "artifacts/agentsmith-hub-${arch}-binary" ]; then
+            echo "Found artifact for ${arch}"
+            # Find the binary in the artifact
+            BINARY_PATH=$(find "artifacts/agentsmith-hub-${arch}-binary" -name "${BINARY_NAME}-${arch}" -type f | head -1)
+            if [ -n "$BINARY_PATH" ]; then
+              cp "$BINARY_PATH" "build-docker/agentsmith-hub-${arch}"
+              chmod +x "build-docker/agentsmith-hub-${arch}"
+              echo "✓ Copied ${arch} binary from artifacts"
+            else
+              echo "✗ Could not find ${arch} binary in artifacts"
+              find "artifacts/agentsmith-hub-${arch}-binary" -type f
+              exit 1
+            fi
+          else
+            echo "✗ Artifact for ${arch} not found"
+            ls -la artifacts/
+            exit 1
+          fi
+        done
         
-        cp -r lib/linux/amd64/* lib/linux/amd64/
-        cp -r lib/linux/arm64/* lib/linux/arm64/
-        
-        # Make binaries executable
-        chmod +x build-docker/agentsmith-hub-*
-        
-        # Copy web frontend
-        cp -r web/dist web-dist
+        # Copy web frontend from one of the artifacts (use amd64 artifact)
+        WEB_DIST_PATH="artifacts/agentsmith-hub-amd64-binary/dist"
+        if [ -d "$WEB_DIST_PATH" ]; then
+          cp -r "$WEB_DIST_PATH" web-dist
+          echo "✓ Copied web frontend from artifacts"
+        else
+          echo "✗ Web frontend not found in artifacts"
+          find artifacts -type d
+          exit 1
+        fi
         
         echo "Prepared Docker build context:"
         ls -la build-docker/
+        echo "Web dist contents:"
+        ls -la web-dist/ | head -10
+        
+    - name: Get version info
+      id: version
+      run: |
+        VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
         
     - name: Extract metadata for Docker
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
       id: meta
       uses: docker/metadata-action@v5
       with:
@@ -336,7 +394,6 @@ jobs:
           type=raw,value=${{ steps.version.outputs.version }}
           
     - name: Build and push Docker image
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
       uses: docker/build-push-action@v5
       with:
         context: .
