@@ -78,11 +78,19 @@ jobs:
             export GOOS=linux
             export GOARCH=arm64
             export LIBRARY_PATH="../lib/linux/arm64:$LIBRARY_PATH"
+            export LD_LIBRARY_PATH="../lib/linux/arm64:$LD_LIBRARY_PATH"
+            # For cross-compilation, we need to specify the library path explicitly
+            export LDFLAGS_EXTRA="-L../lib/linux/arm64 -Wl,-rpath,../lib/linux/arm64"
+            # Set PKG_CONFIG_PATH for pkg-config to find the library
+            export PKG_CONFIG_PATH="../lib/linux/arm64:$PKG_CONFIG_PATH"
           else
             export CGO_ENABLED=1
             export GOOS=linux
             export GOARCH=amd64
             export LIBRARY_PATH="../lib/linux/amd64:$LIBRARY_PATH"
+            export LD_LIBRARY_PATH="../lib/linux/amd64:$LD_LIBRARY_PATH"
+            export LDFLAGS_EXTRA="-L../lib/linux/amd64 -Wl,-rpath,../lib/linux/amd64"
+            export PKG_CONFIG_PATH="../lib/linux/amd64:$PKG_CONFIG_PATH"
           fi
           
           # Build with version information
@@ -93,11 +101,14 @@ jobs:
           fi
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-          LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
+          LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT' $LDFLAGS_EXTRA"
           
           # Build the binary
           echo "Building binary for ${{ matrix.arch }}..."
           echo "Using library path: $LIBRARY_PATH"
+          echo "Using LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+          echo "Using LDFLAGS: $LDFLAGS"
+          echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
           go build -ldflags="$LDFLAGS" -o "../${{ env.BINARY_NAME }}-${{ matrix.arch }}" .
 
       - name: Upload backend artifact
