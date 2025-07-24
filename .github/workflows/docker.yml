@@ -34,6 +34,14 @@ jobs:
       with:
         fetch-depth: 0
     
+    - name: Set image name
+      id: image_name
+      run: |
+        # Convert repository name to lowercase for Docker registry
+        IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+        echo "Using image name: $IMAGE_NAME"
+    
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -156,10 +164,10 @@ jobs:
         platforms: ${{ matrix.platform }}
         push: ${{ github.event_name != 'pull_request' }}
         tags: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.arch }}-latest
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:latest
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ matrix.arch }}-latest
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           VERSION=${{ steps.version.outputs.version }}
@@ -176,10 +184,10 @@ jobs:
         platforms: ${{ matrix.platform }}
         push: ${{ github.event_name != 'pull_request' }}
         tags: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }}
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ matrix.arch }}-latest
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}-frontend:latest
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}-frontend:${{ steps.version.outputs.image_tag }}
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}-frontend:${{ matrix.arch }}-latest
+          ${{ env.REGISTRY }}/${{ steps.image_name.outputs.image_name }}-frontend:${{ matrix.arch }}-${{ steps.version.outputs.image_tag }}
         build-args: |
           BUILDKIT_INLINE_CACHE=1
           VERSION=${{ steps.version.outputs.version }}
@@ -217,29 +225,33 @@ jobs:
         fi
         IMAGE_TAG=$(echo "$IMAGE_TAG" | tr -d '\n\r ')
         echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+        
+        # Convert repository name to lowercase for Docker registry
+        IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
     
     - name: Create multi-platform manifest for AgentSmith-HUB
       run: |
-        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:amd64-latest \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64-latest
+        docker manifest create ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:latest \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:amd64-latest \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:arm64-latest
         
-        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }} \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:amd64-${{ steps.version.outputs.image_tag }} \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arm64-${{ steps.version.outputs.image_tag }}
+        docker manifest create ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:amd64-${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:arm64-${{ steps.version.outputs.image_tag }}
         
-        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+        docker manifest push ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:latest
+        docker manifest push ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}:${{ steps.version.outputs.image_tag }}
     
     - name: Create multi-platform manifest for Frontend
       run: |
-        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-latest
+        docker manifest create ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:latest \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:amd64-latest \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:arm64-latest
         
-        docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }} \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-${{ steps.version.outputs.image_tag }} \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-${{ steps.version.outputs.image_tag }}
+        docker manifest create ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:amd64-${{ steps.version.outputs.image_tag }} \
+          ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:arm64-${{ steps.version.outputs.image_tag }}
         
-        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
-        docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ steps.version.outputs.image_tag }} 
+        docker manifest push ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:latest
+        docker manifest push ${{ env.REGISTRY }}/${{ steps.version.outputs.image_name }}-frontend:${{ steps.version.outputs.image_tag }} 
