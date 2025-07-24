@@ -21,8 +21,10 @@ RUN addgroup -g 1000 agentsmith && \
 WORKDIR /opt/agentsmith-hub
 
 # Copy pre-built binary based on target architecture
+# The binary is expected to be in the root of the build context
 ARG TARGETARCH
-COPY build-docker/agentsmith-hub-${TARGETARCH} ./agentsmith-hub
+COPY agentsmith-hub-${TARGETARCH} ./agentsmith-hub
+RUN chmod +x ./agentsmith-hub
 
 # Copy libraries based on target architecture
 COPY lib/linux/${TARGETARCH}/ ./lib/
@@ -32,7 +34,8 @@ COPY config/ ./config/
 COPY mcp_config/ ./mcp_config/
 
 # Copy web frontend
-COPY web-dist/ ./web/dist/
+# The web/dist directory is expected to be in the build context
+COPY web/dist/ ./web/dist/
 
 # Copy startup scripts
 COPY scripts/docker/leader-start.sh ./leader-start.sh

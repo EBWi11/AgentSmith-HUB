@@ -1,0 +1,227 @@
+---
+# AgentSmith-HUB Native Kubernetes Deployment
+# Simplified and optimized for the new multi-arch Docker image
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentsmith-hub
+
+---
+# ConfigMap for AgentSmith-HUB configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentsmith-hub-config
+  namespace: agentsmith-hub
+data:
+  # Default configuration. Consider externalizing this for production.
+  config.yaml: |
+    # Paste content from your config/config.yaml here
+    # Example:
+    # api_version: v1
+    # ...
+  # Nginx configuration for serving the frontend
+  nginx.conf: |
+    server {
+      listen 80;
+      server_name localhost;
+
+      location / {
+        root /opt/agentsmith-hub/web/dist;
+        try_files $uri $uri/ /index.html;
+      }
+
+      location /api/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      }
+    }
+
+---
+# Secret for authentication token
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentsmith-hub-token
+  namespace: agentsmith-hub
+type: Opaque
+data:
+  # Default token: 9ef0c170-069e-44dd-a406-2d85eca0a0b2 (Base64 encoded)
+  token: OWVmMGMxNzAtMDY5ZS00NGRkLWE0MDYtMmQ4NWVjYTBhMGIy
+
+
+
+---
+# Leader Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-leader
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-leader
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
+        imagePullPolicy: Always
+        command: ["/opt/agentsmith-hub/leader-start.sh"]
+        ports:
+        - containerPort: 8080
+          name: api
+        - containerPort: 80
+          name: http
+        env:
+        # To use an external Redis, change the value of REDIS_HOST to your Redis endpoint
+        # and ensure the REDIS_PASSWORD secretKeyRef points to a secret containing your password.
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis" # Default: internal Redis service
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret # Default: secret for internal Redis
+              key: password
+        - name: AGENTSMITH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token
+              key: token
+        volumeMounts:
+        - name: config
+          mountPath: /opt/agentsmith-hub/config
+        - name: nginx-config
+          mountPath: /etc/nginx/http.d/default.conf
+          subPath: nginx.conf
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: api
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: api
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: agentsmith-hub-config
+      - name: nginx-config
+        configMap:
+          name: agentsmith-hub-config
+
+---
+# Leader Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: api
+    name: api
+  - port: 80
+    targetPort: http
+    name: http
+  selector:
+    app: agentsmith-hub-leader
+
+---
+# Follower Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-follower
+  namespace: agentsmith-hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agentsmith-hub-follower
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-follower
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
+        imagePullPolicy: Always
+        command: ["/opt/agentsmith-hub/follower-start.sh"]
+        ports:
+        - containerPort: 8080
+          name: api
+        env:
+        # To use an external Redis, change the value of REDIS_HOST to your Redis endpoint
+        # and ensure the REDIS_PASSWORD secretKeyRef points to a secret containing your password.
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis" # Default: internal Redis service
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret # Default: secret for internal Redis
+              key: password
+        - name: LEADER_ADDR
+          value: "agentsmith-hub-leader:8080"
+        - name: AGENTSMITH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token
+              key: token
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: api
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: api
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentsmith-hub-ingress
+  namespace: agentsmith-hub
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  rules:
+  - host: agentsmith-hub.local # Change this to your domain
+    http:
+      paths:
+      - path: /api(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: agentsmith-hub-leader
+            port:
+              name: api
+      - path: /()(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: agentsmith-hub-leader
+            port:
+              name: http 
