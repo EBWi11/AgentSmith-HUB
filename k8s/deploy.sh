@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# AgentSmith-HUB Native Kubernetes Deployment Script
-# Simple deployment without Helm complexity
+# AgentSmith-HUB Unified Kubernetes Deployment Script
+# Single image deployment for both leader and follower modes
 
 set -e
 
@@ -36,23 +36,17 @@ if ! kubectl cluster-info &> /dev/null; then
     exit 1
 fi
 
-print_status "Starting AgentSmith-HUB deployment..."
+print_status "Starting AgentSmith-HUB unified deployment..."
 
-# Step 1: Create namespace and deploy Redis (if using internal Redis)
-print_status "Creating namespace and deploying Redis..."
-# To use an external Redis, comment out the next line
-kubectl apply -f redis-deployment.yaml
-
-# Step 2: Deploy AgentSmith-HUB components
+# Step 1: Deploy all components (Redis, Leader, Follower)
 print_status "Deploying AgentSmith-HUB components..."
-kubectl apply -f agentsmith-hub-deployment.yaml
+kubectl apply -f k8s-deployment.yaml
 
-# Step 3: Wait for deployments to be ready
+# Step 2: Wait for deployments to be ready
 print_status "Waiting for deployments to be ready..."
 
-# Wait for Redis (if using internal Redis)
+# Wait for Redis
 print_status "Waiting for Redis deployment..."
-# To use an external Redis, comment out the next line
 kubectl wait --for=condition=available --timeout=300s deployment/agentsmith-hub-redis -n agentsmith-hub
 
 # Wait for Leader
@@ -63,11 +57,7 @@ kubectl wait --for=condition=available --timeout=300s deployment/agentsmith-hub-
 print_status "Waiting for Follower deployments..."
 kubectl wait --for=condition=available --timeout=300s deployment/agentsmith-hub-follower -n agentsmith-hub
 
-# Wait for Frontend
-print_status "Waiting for Frontend deployment..."
-kubectl wait --for=condition=available --timeout=300s deployment/agentsmith-hub-frontend -n agentsmith-hub
-
-# Step 5: Show deployment status
+# Step 3: Show deployment status
 print_status "Deployment completed! Showing status..."
 echo ""
 kubectl get all -n agentsmith-hub
@@ -82,21 +72,19 @@ kubectl get pods -n agentsmith-hub
 
 echo ""
 print_warning "Important notes:"
-echo "1. Make sure you have the correct Docker images available:"
-echo "   - agentsmith-hub:0.1.6"
-echo "   - agentsmith-hub-frontend:latest"
+echo "1. Make sure you have the correct Docker image available:"
+echo "   - ghcr.io/ebwi11/agentsmith-hub:latest"
 echo "   - redis:7-alpine"
 echo ""
-echo "2. Update the ConfigMap with your actual configuration files"
-echo "3. Update the hostname in Ingress if needed"
+echo "2. Image address is already configured: ghcr.io/ebwi11/agentsmith-hub:latest"
+echo "3. Leader configuration is persisted using PVC"
 echo "4. The default token is: 9ef0c170-069e-44dd-a406-2d85eca0a0b2"
 echo ""
 print_status "To access the application:"
-echo "- Frontend: kubectl port-forward svc/agentsmith-hub-frontend 8080:80 -n agentsmith-hub"
+echo "- Frontend: kubectl port-forward svc/agentsmith-hub-leader 8080:80 -n agentsmith-hub"
 echo "- API: kubectl port-forward svc/agentsmith-hub-leader 8081:8080 -n agentsmith-hub"
 echo ""
 print_status "To view logs:"
 echo "- Leader: kubectl logs -f deployment/agentsmith-hub-leader -n agentsmith-hub"
 echo "- Follower: kubectl logs -f deployment/agentsmith-hub-follower -n agentsmith-hub"
-echo "- Frontend: kubectl logs -f deployment/agentsmith-hub-frontend -n agentsmith-hub"
 echo "- Redis: kubectl logs -f deployment/agentsmith-hub-redis -n agentsmith-hub" 
