@@ -27,6 +27,8 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24.5'
+        cache: true
+        cache-dependency-path: src/go.sum
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
