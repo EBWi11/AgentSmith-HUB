@@ -30,13 +30,11 @@ RUN echo "=== STEP 1: Extract tar.gz ===" && \
     ls -la && \
     echo "=== STEP 3: Check agentsmith-hub directory ===" && \
     ls -la agentsmith-hub/ && \
-    echo "=== STEP 4: Remove tar.gz and move files ===" && \
+    echo "=== STEP 4: Remove tar.gz ===" && \
     rm agentsmith-hub-*.tar.gz && \
-    mv agentsmith-hub/* . && \
-    rmdir agentsmith-hub && \
     echo "=== STEP 5: Final structure ===" && \
     ls -la && \
-    chmod +x ./agentsmith-hub
+    chmod +x ./agentsmith-hub/agentsmith-hub
 
 # Ensure startup scripts are executable
 RUN chmod +x ./agentsmith-hub/start.sh ./agentsmith-hub/stop.sh
