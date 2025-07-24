@@ -157,7 +157,7 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/your-username/agentsmith-hub:latest
         imagePullPolicy: Always
-        command: ["./leader-start.sh"]
+        # Use the new docker-entrypoint.sh which will start leader mode based on MODE env var
         ports:
         - containerPort: 8080
           name: backend
@@ -276,7 +276,7 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/your-username/agentsmith-hub:latest
         imagePullPolicy: Always
-        command: ["./follower-start.sh"]
+        # Use the new docker-entrypoint.sh which will start follower mode based on MODE env var
         ports:
         - containerPort: 8080
           name: backend
@@ -289,8 +289,6 @@ spec:
           value: "6379"
         - name: REDIS_PASSWORD
           value: "agentsmith123"
-        - name: LEADER_ADDR
-          value: "http://agentsmith-hub-leader:8080"
         - name: NODE_ID
           valueFrom:
             fieldRef:

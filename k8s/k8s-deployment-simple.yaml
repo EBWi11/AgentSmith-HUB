@@ -1,0 +1,266 @@
+---
+# AgentSmith-HUB Simple Kubernetes Deployment Example
+# This example shows how to deploy with environment variable configuration
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentsmith-hub
+
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-redis
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        env:
+        - name: REDIS_PASSWORD
+          value: "your-redis-password"  # Change this to your desired password
+        command:
+        - sh
+        - -c
+        - redis-server --requirepass $REDIS_PASSWORD
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: agentsmith-hub-redis
+
+---
+# Leader Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-leader
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-leader
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/your-username/agentsmith-hub:latest  # Replace with your image
+        ports:
+        - containerPort: 8080
+          name: backend
+        - containerPort: 80
+          name: frontend
+        env:
+        # Mode configuration
+        - name: MODE
+          value: "leader"
+        
+        # Redis configuration via environment variables
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          value: "your-redis-password"  # Must match Redis password above
+        
+        # Application configuration
+        - name: NODE_ID
+          value: "leader"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_ROOT
+          value: "/opt/config"
+        
+        # Authentication token (you can set this via environment variable)
+        - name: AGENTSMITH_TOKEN
+          value: "your-token-here"  # Or use Secret
+        
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+---
+# Leader Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: backend
+  - port: 80
+    targetPort: 80
+    name: frontend
+  selector:
+    app: agentsmith-hub-leader
+
+---
+# Follower Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-follower
+  namespace: agentsmith-hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agentsmith-hub-follower
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-follower
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/your-username/agentsmith-hub:latest  # Replace with your image
+        ports:
+        - containerPort: 8080
+          name: backend
+        env:
+        # Mode configuration
+        - name: MODE
+          value: "follower"
+        
+        # Redis configuration via environment variables
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          value: "your-redis-password"  # Must match Redis password above
+        
+        # Application configuration
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_ROOT
+          value: "/opt/config"
+        
+        # Authentication token (you can set this via environment variable)
+        - name: AGENTSMITH_TOKEN
+          value: "your-token-here"  # Or use Secret
+        
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+---
+# Follower Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-follower
+  namespace: agentsmith-hub
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: agentsmith-hub-follower
+
+---
+# Example: Using Secrets for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentsmith-hub-secrets
+  namespace: agentsmith-hub
+type: Opaque
+data:
+  redis-password: eW91ci1yZWRpcy1wYXNzd29yZA==  # base64 encoded "your-redis-password"
+  token: eW91ci10b2tlbi1oZXJl  # base64 encoded "your-token-here"
+
+---
+# Example: Deployment using Secrets
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-leader-secret
+  namespace: agentsmith-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-leader-secret
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-leader-secret
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/your-username/agentsmith-hub:latest
+        env:
+        - name: MODE
+          value: "leader"
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-secrets
+              key: redis-password
+        - name: AGENTSMITH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-secrets
+              key: token
+        - name: NODE_ID
+          value: "leader"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_ROOT
+          value: "/opt/config" 

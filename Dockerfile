@@ -37,6 +37,8 @@ COPY web-dist/ ./web/dist/
 # Copy startup scripts
 COPY scripts/docker/leader-start.sh ./leader-start.sh
 COPY scripts/docker/follower-start.sh ./follower-start.sh
+COPY scripts/docker/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
 
 # Create necessary directories
 RUN mkdir -p /tmp/hub_logs /opt/lib /opt/mcp_config /opt/config /var/lib/nginx/html /var/log/nginx && \
@@ -61,5 +63,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER agentsmith
 
-# Default command
-ENTRYPOINT ["./leader-start.sh"]
+# Default command - use environment variable to determine mode
+ENTRYPOINT ["./docker-entrypoint.sh"]
