@@ -21,7 +21,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history for git info
+        fetch-depth: 0
     
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -44,7 +44,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential
-        # Install cross-compilation tools for ARM64
         if [ "${{ matrix.arch }}" = "arm64" ]; then
           sudo apt-get install -y gcc-aarch64-linux-gnu
         fi
@@ -62,58 +61,25 @@ jobs:
         # Set architecture-specific build variables
         if [ "${{ matrix.arch }}" = "arm64" ]; then
           export CC=aarch64-linux-gnu-gcc
-          export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=arm64
           LIB_PATH="$(pwd)/../lib/linux/arm64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         else
-          export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=amd64
           LIB_PATH="$(pwd)/../lib/linux/amd64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         fi
         
-        # Debug: Show current directory and file structure
-        echo "Current directory: $(pwd)"
-        echo "Library directory structure:"
-        find ../lib -type f -name "*.so" 2>/dev/null || echo "No .so files found"
-        
-        # Verify library exists and show debug info
-        echo "Expected library path: ${LIB_PATH}"
-        if [ -f "${LIB_PATH}/librure.so" ]; then
-          echo "✓ Library file found"
-          ls -la "${LIB_PATH}/"
-        else
-          echo "✗ Library file not found, checking alternative locations..."
-          # Check if library exists in alternative locations
-          if [ -f "../lib/linux/librure.so" ]; then
-            echo "Found library in ../lib/linux/"
-            LIB_PATH="../lib/linux"
-          elif [ -f "../lib/librure.so" ]; then
-            echo "Found library in ../lib/"
-            LIB_PATH="../lib"
-          else
-            echo "ERROR: Cannot find librure.so in any expected location"
-            echo "Directory contents:"
-            ls -la ../lib/ || echo "lib directory not found"
-            exit 1
-          fi
-        fi
-        
-        # Update CGO flags with correct path
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-        else
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-        fi
+        export CGO_ENABLED=1
+        export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
         export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         
-        echo "Updated CGO_LDFLAGS: $CGO_LDFLAGS"
-        echo "Updated LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+        # Verify library exists
+        if [ ! -f "${LIB_PATH}/librure.so" ]; then
+          echo "ERROR: Cannot find librure.so at ${LIB_PATH}"
+          ls -la ../lib/ || echo "lib directory not found"
+          exit 1
+        fi
         
         # Build with version information
         VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
@@ -122,17 +88,13 @@ jobs:
         LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
         
         # Copy library to system path for linking
-        echo "Copying library to system path..."
         sudo cp "${LIB_PATH}/librure.so" /usr/lib/
         sudo ldconfig
         
         # Build the binary
-        echo "Building binary..."
         if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
           echo "✓ Build completed successfully"
           ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
-          echo "Checking binary dependencies:"
-          ldd ../build/${BINARY_NAME}-${{ matrix.arch }} || echo "ldd not available"
         else
           echo "✗ Build failed"
           exit 1
@@ -144,30 +106,25 @@ jobs:
         VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         
-        # Set release name based on tag or branch
         if [[ $GITHUB_REF == refs/tags/* ]]; then
           RELEASE_NAME=${GITHUB_REF#refs/tags/}
         else
           RELEASE_NAME="${VERSION}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
         fi
-        # Remove any spaces and newlines from release name
         RELEASE_NAME=$(echo "$RELEASE_NAME" | tr -d '\n\r ')
         echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
     
     - name: Create deployment archive
       run: |
-        # Create a clean directory structure for the archive
-        RELEASE_NAME="${{ steps.version.outputs.release_name }}"
         ARCHIVE_DIR="agentsmith-hub"
         ARCHIVE_NAME="agentsmith-hub-${{ matrix.arch }}.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
-        echo "Architecture: ${{ matrix.arch }}"
         
         # Create the archive directory
         mkdir -p "$ARCHIVE_DIR"
         
-        # Copy binary (rename to standard name)
+        # Copy binary
         cp "build/${BINARY_NAME}-${{ matrix.arch }}" "$ARCHIVE_DIR/$BINARY_NAME"
         chmod +x "$ARCHIVE_DIR/$BINARY_NAME"
         
@@ -193,11 +150,6 @@ jobs:
         # Copy documentation
         cp README.md "$ARCHIVE_DIR/"
         cp VERSION "$ARCHIVE_DIR/"
-        
-        # Show what we're packaging
-        echo "Contents to be archived:"
-        find "$ARCHIVE_DIR" -type f | head -20
-        echo "..."
         
         # Create the tar.gz archive
         tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
@@ -254,16 +206,9 @@ jobs:
           
           3. Configure your settings in `config/config.yaml`
           
-          4. (Optional) Configure nginx for web serving:
-             ```bash
-             sudo cp nginx/agentsmith-hub.conf /etc/nginx/conf.d/
-             # Edit the path in the config file if needed
-             sudo nginx -t && sudo systemctl reload nginx
-             ```
+          4. Run `./start.sh` to start the application
           
-          5. Run `./start.sh` to start the application
-          
-          6. Access the web interface:
+          5. Access the web interface:
              - With nginx: http://localhost
              - Direct backend: http://localhost:8080
           
@@ -271,8 +216,6 @@ jobs:
           
           - **AMD64**: Standard x86_64 architecture (Intel/AMD processors)
           - **ARM64**: ARM 64-bit architecture (Apple Silicon, ARM servers)
-          
-          The scripts automatically detect your system architecture and use the appropriate libraries.
           
           ### Version Information
           
@@ -289,6 +232,7 @@ jobs:
 
   push-docker-image:
     if: github.event_name == 'push'
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -297,20 +241,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: ./web
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: ./web
-        run: npm run build
+          pattern: agentsmith-hub-*
+          path: .
+          merge-multiple: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

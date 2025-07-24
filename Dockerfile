@@ -3,7 +3,7 @@
 
 FROM alpine:3.19
 
-# Install runtime dependencies including web server
+# Install runtime dependencies
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -29,16 +29,17 @@ RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
     rm agentsmith-hub-${TARGETARCH}.tar.gz && \
     chmod +x ./agentsmith-hub
 
-# Startup scripts are already included in the tar.gz archive
-# Just ensure they have execute permissions
+# Ensure startup scripts are executable
 RUN chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
 
 # Create necessary directories
-RUN mkdir -p /tmp/hub_logs /opt/lib /opt/mcp_config /opt/config /var/lib/nginx/html /var/log/nginx && \
-    chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx
+RUN mkdir -p /tmp/hub_logs /opt/lib /opt/mcp_config /opt/config /var/lib/nginx/html /var/log/nginx
 
-# Configure nginx for web frontend
-COPY scripts/docker/nginx.conf /etc/nginx/http.d/default.conf
+# Configure nginx
+COPY nginx/nginx.conf /etc/nginx/http.d/default.conf
+
+# Set proper ownership
+RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx /etc/nginx/http.d/default.conf
 
 # Set environment variables
 ENV CONFIG_ROOT=/opt/config
@@ -56,5 +57,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Switch to non-root user
 USER agentsmith
 
-# Default command - use environment variable to determine mode
+# Default command
 ENTRYPOINT ["./docker-entrypoint.sh"]
