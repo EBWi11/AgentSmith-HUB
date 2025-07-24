@@ -25,8 +25,8 @@ ARG TARGETARCH
 COPY agentsmith-hub-*.tar.gz ./
 RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
     rm agentsmith-hub-*.tar.gz && \
-    mv agentsmith-hub/* . && \
-    rmdir agentsmith-hub && \
+    cp -r agentsmith-hub/* . && \
+    rm -rf agentsmith-hub && \
     chmod +x ./agentsmith-hub
 
 # Ensure startup scripts are executable
@@ -54,10 +54,10 @@ RUN mkdir -p /tmp/hub_logs /var/lib/nginx/html /var/log/nginx
 RUN cp nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Set proper ownership
-RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx /etc/nginx/nginx.conf
+RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /var/lib/nginx /var/log/nginx /etc/nginx/nginx.conf
 
 # Set environment variables
-ENV CONFIG_ROOT=/opt/config
+ENV CONFIG_ROOT=/opt/agentsmith-hub/config
 ENV LOG_LEVEL=info
 ENV NODE_ID=default
 ENV MODE=leader
