@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -402,7 +403,34 @@ func Verify(path string, raw string) error {
 
 	err = p.parseContent()
 	if err != nil {
-		return fmt.Errorf("failed to parse project content: %v", err)
+		// Enhance error message with YAML line number adjustment
+		errMsg := err.Error()
+
+		// Extract line number from error message
+		linePattern := `at line (\d+)`
+		if match := regexp.MustCompile(linePattern).FindStringSubmatch(errMsg); len(match) > 1 {
+			contentLineNum, _ := strconv.Atoi(match[1])
+
+			// Calculate the actual line number in the full YAML
+			// Find the line number of 'content:' in the original YAML
+			lines := strings.Split(raw, "\n")
+			contentLineIndex := -1
+			for i, line := range lines {
+				if strings.TrimSpace(line) == "content:" || strings.TrimSpace(line) == "content: |" {
+					contentLineIndex = i
+					break
+				}
+			}
+
+			if contentLineIndex != -1 {
+				// Adjust line number: content line number + content line index + 1
+				actualLineNum := contentLineNum + contentLineIndex + 1
+				// Replace the line number in the error message
+				errMsg = regexp.MustCompile(`at line \d+`).ReplaceAllString(errMsg, fmt.Sprintf("at line %d", actualLineNum))
+			}
+		}
+
+		return fmt.Errorf("failed to parse project content: %v", errMsg)
 	}
 
 	return nil
