@@ -35,19 +35,23 @@ ARG TARGETARCH
 ENV CGO_ENABLED=1
 ENV GOOS=linux
 
-# Set architecture-specific variables
+# Set architecture-specific variables and build
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        export GOARCH=arm64; \
-        export CC=aarch64-linux-gnu-gcc; \
-        LIB_PATH="/app/lib/linux/arm64"; \
+        GOARCH=arm64 \
+        CC=aarch64-linux-gnu-gcc \
+        LIB_PATH="/app/lib/linux/arm64" \
+        CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}" \
+        LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH" \
+        LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.BuildTime=${BUILD_TIME}' -X 'main.GitCommit=${GIT_COMMIT}'" \
+        go build -ldflags "$LDFLAGS" -o agentsmith-hub .; \
     else \
-        export GOARCH=amd64; \
-        LIB_PATH="/app/lib/linux/amd64"; \
-    fi && \
-    export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}" && \
-    export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH" && \
-    LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.BuildTime=${BUILD_TIME}' -X 'main.GitCommit=${GIT_COMMIT}'" && \
-    go build -ldflags "$LDFLAGS" -o agentsmith-hub .
+        GOARCH=amd64 \
+        LIB_PATH="/app/lib/linux/amd64" \
+        CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}" \
+        LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH" \
+        LDFLAGS="-s -w -X 'main.Version=${VERSION}' -X 'main.BuildTime=${BUILD_TIME}' -X 'main.GitCommit=${GIT_COMMIT}'" \
+        go build -ldflags "$LDFLAGS" -o agentsmith-hub .; \
+    fi
 
 # Runtime stage
 FROM alpine:3.19
