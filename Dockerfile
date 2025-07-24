@@ -31,9 +31,8 @@ RUN echo "=== STEP 1: Extract tar.gz ===" && \
     ls -la agentsmith-hub/ && \
     echo "=== STEP 4: Remove tar.gz and copy files ===" && \
     rm agentsmith-hub-*.tar.gz && \
-    rm -rf agentsmith-hub && \
     cp -r agentsmith-hub/* . && \
-    rmdir agentsmith-hub && \
+    rm -rf agentsmith-hub && \
     echo "=== STEP 5: Final structure ===" && \
     ls -la && \
     chmod +x ./agentsmith-hub
