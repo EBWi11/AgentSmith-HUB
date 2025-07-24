@@ -453,7 +453,7 @@ One of the major features of the rules engine is flexible execution order:
     <check type="EQU" field="event_type">security_event</check>
     
     <!-- Statistical thresholds can be placed anywhere -->
-    <threshold group_by="source_ip" range="5m" value="10"/>
+   <threshold group_by="source_ip" range="5m">10</threshold>
     
     <!-- Continue other checks (assuming custom plugins) -->
     <check type="PLUGIN">is_working_hours(check_time)</check>
@@ -482,7 +482,7 @@ One of the major features of the rules engine is flexible execution order:
 
 **Basic Syntax:**
 ```xml
-<threshold group_by="grouping_field" range="time_range" value="threshold"/>
+<threshold group_by="grouping_field" range="time_range">threshold value</threshold>
 ```
 
 **Attribute Description:**
@@ -545,7 +545,7 @@ Rule for processing nested data:
         
         <!-- Threshold detection based on geographic location -->
         <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
-                   range="1h" value="3"/>
+                   range="1h">3</threshold>
         
         <!-- Use plugin for deep analysis (assuming custom plugin) -->
         <check type="PLUGIN">analyze_transfer_risk(request.body)</check>
@@ -724,7 +724,7 @@ Rule:
     <check type="EQU" field="event">login_failed</check>
     
     <!-- 5 failures for same user and IP within 5 minutes -->
-    <threshold group_by="user,ip" range="5m" value="5"/>
+   <threshold group_by="user,ip" range="5m">5</threshold>
     
     <append field="alert_type">brute_force_attempt</append>
     <plugin>block_ip(ip, 3600)</plugin>  <!-- Block for 1 hour -->
@@ -748,7 +748,7 @@ Rule:
     
     <!-- Cumulative amount exceeds 50000 within 24 hours -->
     <threshold group_by="user" range="24h" count_type="SUM" 
-               count_field="amount" value="50000"/>
+               count_field="amount">50000</threshold>
     
     <append field="action">freeze_account</append>
 </rule>
@@ -783,7 +783,7 @@ Rule:
     
     <!-- Access more than 25 different files within 1 hour -->
     <threshold group_by="user" range="1h" count_type="CLASSIFY" 
-               count_field="file_id" value="25"/>
+               count_field="file_id">25</threshold>
     
     <append field="risk_score">high</append>
     <plugin>alert_dlp_team(_$ORIDATA)</plugin>
@@ -1278,8 +1278,8 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 
 #### Threshold Detection `<threshold>`
 ```xml
-<threshold group_by="field1,field2" range="time_range" value="threshold" 
-           count_type="SUM|CLASSIFY" count_field="statistical_field" local_cache="true|false"/>
+<threshold group_by="field1,field2" range="time_range"
+           count_type="SUM|CLASSIFY" count_field="statistical_field" local_cache="true|false">threshold value</threshold>>
 ```
 
 | Attribute | Required | Description | Example |
@@ -1357,10 +1357,10 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 #### Threshold Configuration Optimization
 ```xml
 <!-- Use local cache to improve performance -->
-<threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
+<threshold group_by="user_id" range="5m" local_cache="true">10</threshold>
 
 <!-- Avoid overly large time windows -->
-<threshold group_by="ip" range="1h" value="1000"/>  <!-- Don't exceed 24h -->
+<threshold group_by="ip" range="1h">1000</threshold>  <!-- Don't exceed 24h -->
 ```
 
 ### 7.9 Common Errors and Solutions
@@ -1411,7 +1411,7 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
     <check type="EQU" field="type">target</check>
     
     <append field="_debug_step2">check passed</append>
-    <threshold group_by="user" range="5m" value="10"/>
+   <threshold group_by="user" range="5m">10</threshold>
     
     <append field="_debug_step3">threshold passed</append>
     <!-- Final data will contain all debug fields, showing execution flow -->
@@ -1613,7 +1613,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
         <check type="INCL" field="command_line">-EncodedCommand</check>
         
         <!-- Network connection detection -->
-        <threshold group_by="hostname" range="10m" value="3"/>
+       <threshold group_by="hostname" range="10m">3</threshold>
         
         <!-- Threat intelligence query -->
         <append type="PLUGIN" field="c2_url">
@@ -1646,7 +1646,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
         </checklist>
         
         <!-- Time window detection -->
-        <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
+       <threshold group_by="source_ip,dest_ip" range="30m">5</threshold>
         
         <!-- Risk scoring (assuming custom plugin) -->
         <append type="PLUGIN" field="risk_score">
@@ -1668,7 +1668,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
        
         <!-- Anomalous transmission detection -->
         <threshold group_by="source_ip" range="1h" count_type="SUM" 
-                   count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
+                   count_field="bytes_sent">1073741824</threshold>  <!-- 1GB -->
         
         <!-- DNS tunnel detection (assuming custom plugin) -->
         <checklist condition="dns_tunnel_check">
@@ -1717,7 +1717,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
         </append>
         
         <!-- Transaction speed detection -->
-        <threshold group_by="user_id" range="10m" value="5"/>
+       <threshold group_by="user_id" range="10m">5</threshold>
         
         <!-- Risk decision (assuming custom plugin) -->
         <append type="PLUGIN" field="risk_decision">
@@ -1754,7 +1754,7 @@ Complete APT attack detection ruleset (using built-in plugins and assumed custom
         
         <!-- Cumulative amount monitoring -->
         <threshold group_by="account_cluster" range="7d" count_type="SUM"
-                   count_field="amount" value="1000000"/>
+                   count_field="amount">1000000</threshold>
         
         <!-- Compliance reporting (assuming custom plugin) -->
         <append type="PLUGIN" field="sar_report">

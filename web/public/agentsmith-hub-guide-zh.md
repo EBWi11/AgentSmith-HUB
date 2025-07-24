@@ -19,7 +19,7 @@ INPUT 定义了数据输入源，支持多种数据源类型。
 
 #### 支持的数据源类型
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
@@ -43,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### 阿里云SLS 
+##### 阿里云SLS
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -59,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
 ```
 
-##### Kafka Azure 
+##### Kafka Azure
 ```yaml
 type: kafka_azure
 kafka:
@@ -76,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS 
+##### Kafka AWS
 ```yaml
 type: kafka_aws
 kafka:
@@ -103,7 +103,7 @@ OUTPUT 定义了数据处理结果的输出目标。
 type: print
 ```
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
@@ -127,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch 
+##### Elasticsearch
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -338,7 +338,7 @@ content: |
 - 这种设计提高了性能：尽早失败，避免不必要的检查
 
 在上面的例子中，三个检查条件必须**全部满足**：
-1. username 等于 "admin" 
+1. username 等于 "admin"
 2. login_time 大于 22（晚上10点后）
 3. failed_attempts 大于 3
 
@@ -454,7 +454,7 @@ content: |
     <check type="EQU" field="event_type">security_event</check>
     
     <!-- 统计阈值可以放在任何位置 -->
-    <threshold group_by="source_ip" range="5m" value="10"/>
+   <threshold group_by="source_ip" range="5m">10</threshold>
     
     <!-- 继续其他检查（假设有自定义插件） -->
     <check type="PLUGIN">is_working_hours(check_time)</check>
@@ -483,7 +483,7 @@ content: |
 
 **基本语法：**
 ```xml
-<threshold group_by="分组字段" range="时间范围" value="阈值"/>
+<threshold group_by="分组字段" range="时间范围">阈值</threshold>
 ```
 
 **属性说明：**
@@ -546,7 +546,7 @@ content: |
         
         <!-- 基于地理位置的阈值检测 -->
         <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
-                   range="1h" value="3"/>
+                   range="1h">3</threshold>
         
         <!-- 使用插件进行深度分析（假设有自定义插件） -->
         <check type="PLUGIN">analyze_transfer_risk(request.body)</check>
@@ -725,7 +725,7 @@ content: |
     <check type="EQU" field="event">login_failed</check>
     
     <!-- 5分钟内同一用户和IP失败5次 -->
-    <threshold group_by="user,ip" range="5m" value="5"/>
+   <threshold group_by="user,ip" range="5m">5</threshold>
     
     <append field="alert_type">brute_force_attempt</append>
     <plugin>block_ip(ip, 3600)</plugin>  <!-- 封禁1小时 -->
@@ -749,7 +749,7 @@ content: |
     
     <!-- 24小时内累计金额超过50000 -->
     <threshold group_by="user" range="24h" count_type="SUM" 
-               count_field="amount" value="50000"/>
+               count_field="amount">50000</threshold>
     
     <append field="action">freeze_account</append>
 </rule>
@@ -784,7 +784,7 @@ content: |
     
     <!-- 1小时内访问超过25个不同文件 -->
     <threshold group_by="user" range="1h" count_type="CLASSIFY" 
-               count_field="file_id" value="25"/>
+               count_field="file_id">25</threshold>
     
     <append field="risk_score">high</append>
     <plugin>alert_dlp_team(_$ORIDATA)</plugin>
@@ -1198,7 +1198,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         <check type="INCL" field="command_line">-EncodedCommand</check>
         
         <!-- 网络连接检测 -->
-        <threshold group_by="hostname" range="10m" value="3"/>
+       <threshold group_by="hostname" range="10m">3</threshold>
         
         <!-- 威胁情报查询 -->
         <append type="PLUGIN" field="c2_url">
@@ -1231,7 +1231,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </checklist>
         
         <!-- 时间窗口检测 -->
-        <threshold group_by="source_ip,dest_ip" range="30m" value="5"/>
+       <threshold group_by="source_ip,dest_ip" range="30m">5</threshold>
         
         <!-- 风险评分（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_score">
@@ -1253,7 +1253,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
        
         <!-- 异常传输检测 -->
         <threshold group_by="source_ip" range="1h" count_type="SUM" 
-                   count_field="bytes_sent" value="1073741824"/>  <!-- 1GB -->
+                   count_field="bytes_sent">1073741824</threshold>  <!-- 1GB -->
         
         <!-- DNS隧道检测（假设有自定义插件） -->
         <checklist condition="dns_tunnel_check">
@@ -1302,7 +1302,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         </append>
         
         <!-- 交易速度检测 -->
-        <threshold group_by="user_id" range="10m" value="5"/>
+       <threshold group_by="user_id" range="10m">5</threshold>
         
         <!-- 风险决策（假设有自定义插件） -->
         <append type="PLUGIN" field="risk_decision">
@@ -1339,7 +1339,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
         
         <!-- 累计金额监控 -->
         <threshold group_by="account_cluster" range="7d" count_type="SUM"
-                   count_field="amount" value="1000000"/>
+                   count_field="amount">1000000</threshold>
         
         <!-- 合规报告（假设有自定义插件） -->
         <append type="PLUGIN" field="sar_report">
@@ -1538,8 +1538,8 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 阈值检测 `<threshold>`
 ```xml
-<threshold group_by="字段1,字段2" range="时间范围" value="阈值" 
-           count_type="SUM|CLASSIFY" count_field="统计字段" local_cache="true|false"/>
+<threshold group_by="字段1,字段2" range="时间范围"
+           count_type="SUM|CLASSIFY" count_field="统计字段" local_cache="true|false">阈值</threshold>
 ```
 
 | 属性 | 必需 | 说明 | 示例 |
@@ -1617,10 +1617,10 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 阈值配置优化
 ```xml
 <!-- 使用本地缓存提升性能 -->
-<threshold group_by="user_id" range="5m" value="10" local_cache="true"/>
+<threshold group_by="user_id" range="5m" local_cache="true">10</threshold>
 
 <!-- 避免过大的时间窗口 -->
-<threshold group_by="ip" range="1h" value="1000"/>  <!-- 不要超过24h -->
+<threshold group_by="ip" range="1h">1000</threshold>  <!-- 不要超过24h -->
 ```
 
 ### 7.9 常见错误和解决方案

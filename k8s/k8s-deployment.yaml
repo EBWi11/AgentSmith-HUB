@@ -1,0 +1,453 @@
+---
+# AgentSmith-HUB Native Kubernetes Deployment
+# Simple deployment without Helm complexity
+
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentsmith-hub
+  labels:
+    name: agentsmith-hub
+
+---
+# ConfigMap for AgentSmith-HUB configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentsmith-hub-config
+  namespace: agentsmith-hub
+data:
+  # Copy your config files here
+  config.yaml: |
+    # Your AgentSmith-HUB configuration
+    # Copy content from config/config.yaml
+  frontend-config.json: |
+    {
+      "apiBaseUrl": "http://agentsmith-hub-leader:8080",
+      "apiTimeout": 30000,
+      "enableDebugMode": false,
+      "enableClusterMode": true,
+      "theme": "dark",
+      "language": "zh-CN"
+    }
+
+---
+# Secret for authentication token
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentsmith-hub-token
+  namespace: agentsmith-hub
+type: Opaque
+data:
+  token: OWVmMGMxNzAtMDY5ZS00NGRkLWE0MDYtMmQ4NWVjYTBhMGIy  # base64 encoded token
+
+---
+# Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-redis
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        env:
+        - name: REDIS_PASSWORD
+          value: "agentsmith123"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: redis-data
+        emptyDir: {}
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-redis
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+  selector:
+    app: agentsmith-hub-redis
+
+---
+# Leader Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-leader
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-leader
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-leader
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/your-username/agentsmith-hub:latest
+        imagePullPolicy: Always
+        args:
+        - "--config_root"
+        - "/opt/config"
+        - "--leader"
+        - "--port"
+        - "8080"
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          value: "agentsmith123"
+        - name: NODE_ID
+          value: "leader"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_ROOT
+          value: "/opt/config"
+        - name: MCP_ENABLED
+          value: "true"
+        - name: AGENTSMITH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token
+              key: token
+        volumeMounts:
+        - name: config
+          mountPath: /opt/config
+        - name: logs
+          mountPath: /tmp/hub_logs
+        - name: lib
+          mountPath: /opt/lib
+        - name: mcp-config
+          mountPath: /opt/mcp_config
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: config
+        configMap:
+          name: agentsmith-hub-config
+      - name: logs
+        emptyDir: {}
+      - name: lib
+        emptyDir: {}
+      - name: mcp-config
+        configMap:
+          name: agentsmith-hub-config
+
+---
+# Leader Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-leader
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-leader
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: agentsmith-hub-leader
+
+---
+# Follower Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-follower
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-follower
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agentsmith-hub-follower
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-follower
+    spec:
+      containers:
+      - name: agentsmith-hub
+        image: ghcr.io/your-username/agentsmith-hub:latest
+        imagePullPolicy: Always
+        args:
+        - "--config_root"
+        - "/opt/config"
+        - "--port"
+        - "8080"
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: REDIS_HOST
+          value: "agentsmith-hub-redis"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          value: "agentsmith123"
+        - name: LEADER_ADDR
+          value: "agentsmith-hub-leader:8080"
+        - name: NODE_ID
+          value: "follower"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_ROOT
+          value: "/opt/config"
+        - name: MCP_ENABLED
+          value: "false"
+        - name: AGENTSMITH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token
+              key: token
+        volumeMounts:
+        - name: config
+          mountPath: /opt/config
+        - name: logs
+          mountPath: /tmp/hub_logs
+        - name: lib
+          mountPath: /opt/lib
+        - name: mcp-config
+          mountPath: /opt/mcp_config
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: config
+        configMap:
+          name: agentsmith-hub-config
+      - name: logs
+        emptyDir: {}
+      - name: lib
+        emptyDir: {}
+      - name: mcp-config
+        configMap:
+          name: agentsmith-hub-config
+
+---
+# Follower Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-follower
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-follower
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: agentsmith-hub-follower
+
+---
+# Frontend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-hub-frontend
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentsmith-hub-frontend
+  template:
+    metadata:
+      labels:
+        app: agentsmith-hub-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ghcr.io/your-username/agentsmith-hub-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: API_BASE_URL
+          value: "http://agentsmith-hub-leader:8080"
+        - name: API_TIMEOUT
+          value: "30000"
+        - name: DEBUG_MODE
+          value: "false"
+        - name: CLUSTER_MODE
+          value: "true"
+        - name: THEME
+          value: "dark"
+        - name: LANGUAGE
+          value: "zh-CN"
+        volumeMounts:
+        - name: config
+          mountPath: /usr/share/nginx/html/config.json
+          subPath: frontend-config.json
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: agentsmith-hub-config
+
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentsmith-hub-frontend
+  namespace: agentsmith-hub
+  labels:
+    app: agentsmith-hub-frontend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: agentsmith-hub-frontend
+
+---
+# Ingress for external access (optional)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentsmith-hub-ingress
+  namespace: agentsmith-hub
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: agentsmith-hub.local  # Change this to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: agentsmith-hub-frontend
+            port:
+              number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: agentsmith-hub-leader
+            port:
+              number: 8080 
