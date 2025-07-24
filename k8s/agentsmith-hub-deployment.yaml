@@ -28,7 +28,7 @@ data:
       server_name localhost;
 
       location / {
-        root /opt/agentsmith-hub/web/dist;
+        root /opt/agentsmith-hub/web/;
         try_files $uri $uri/ /index.html;
       }
 
@@ -73,7 +73,7 @@ spec:
     spec:
       containers:
       - name: agentsmith-hub
-        image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
+        image: ghcr.io/ebwi11/agentsmith-hub:latest # Using the unified image
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -156,7 +156,7 @@ spec:
     spec:
       containers:
       - name: agentsmith-hub
-        image: ghcr.io/will/agentsmith-hub:latest # Using the unified image
+        image: ghcr.io/ebwi11/agentsmith-hub:latest # Using the unified image
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
