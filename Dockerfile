@@ -28,16 +28,31 @@ RUN tar -xzf agentsmith-hub-${TARGETARCH}.tar.gz && \
     chmod +x ./agentsmith-hub
 
 # Ensure startup scripts are executable
-RUN chmod +x ./leader-start.sh ./follower-start.sh ./docker-entrypoint.sh
+RUN chmod +x ./start.sh ./stop.sh
+
+# Create docker-entrypoint.sh with frontend and backend
+RUN echo '#!/bin/bash' > ./docker-entrypoint.sh && \
+    echo 'set -e' >> ./docker-entrypoint.sh && \
+    echo '' >> ./docker-entrypoint.sh && \
+    echo '# Start nginx for frontend' >> ./docker-entrypoint.sh && \
+    echo 'nginx -g "daemon off;" &' >> ./docker-entrypoint.sh && \
+    echo '' >> ./docker-entrypoint.sh && \
+    echo '# Start backend' >> ./docker-entrypoint.sh && \
+    echo 'if [ "$MODE" = "follower" ]; then' >> ./docker-entrypoint.sh && \
+    echo '  exec ./start.sh --follower' >> ./docker-entrypoint.sh && \
+    echo 'else' >> ./docker-entrypoint.sh && \
+    echo '  exec ./start.sh' >> ./docker-entrypoint.sh && \
+    echo 'fi' >> ./docker-entrypoint.sh && \
+    chmod +x ./docker-entrypoint.sh
 
 # Create necessary directories
-RUN mkdir -p /tmp/hub_logs /opt/lib /opt/mcp_config /opt/config /var/lib/nginx/html /var/log/nginx
+RUN mkdir -p /tmp/hub_logs /var/lib/nginx/html /var/log/nginx
 
 # Configure nginx (nginx.conf is now available from the extracted archive)
-RUN cp nginx/nginx.conf /etc/nginx/http.d/default.conf
+RUN cp nginx/nginx.conf /etc/nginx/nginx.conf
 
 # Set proper ownership
-RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx /etc/nginx/http.d/default.conf
+RUN chown -R agentsmith:agentsmith /opt/agentsmith-hub /tmp/hub_logs /opt/config /var/lib/nginx /var/log/nginx /etc/nginx/nginx.conf
 
 # Set environment variables
 ENV CONFIG_ROOT=/opt/config
