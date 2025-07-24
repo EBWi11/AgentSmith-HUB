@@ -251,6 +251,7 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 	}
 
 	affectedProjects := []string{}
+	source := ""
 	if instruction.Metadata != nil {
 		if projects, exists := instruction.Metadata["affected_projects"]; exists {
 			if projectList, ok := projects.([]interface{}); ok {
@@ -259,6 +260,11 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 						affectedProjects = append(affectedProjects, projectStr)
 					}
 				}
+			}
+		}
+		if s, exists := instruction.Metadata["source"]; exists {
+			if sourceStr, ok := s.(string); ok {
+				source = sourceStr
 			}
 		}
 	}
@@ -274,25 +280,21 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 		if err := sl.deleteComponentInstance(instruction.ComponentType, instruction.ComponentName); err != nil {
 			return err
 		}
-		common.RecordComponentDelete(instruction.ComponentType, instruction.ComponentName, "success", "", affectedProjects)
 	case "update":
 		if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
-		common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
 	case "local_push":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
-		common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
 	case "push_change":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 			return err
 		}
-		common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
 	case "start":
 		return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, "start", true)
 	case "stop":
@@ -303,10 +305,16 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 		return fmt.Errorf("unknown operation: %s", instruction.Operation)
 	}
 
-	for _, p := range affectedProjects {
-		err := globalProjectCmdHandler.ExecuteCommandWithOptions(p, "restart", true)
-		if err != nil {
-			return err
+	// For operations that affect projects, trigger a restart.
+	// The restart operation itself will be logged with the correct trigger source.
+	for _, projectName := range affectedProjects {
+		if proj, exists := project.GetProject(projectName); exists {
+			if err := proj.Restart(true, source); err != nil {
+				// Restart already logs its own failure. We just need to bubble up the error.
+				return fmt.Errorf("failed to restart affected project %s: %w", projectName, err)
+			}
+		} else {
+			logger.Warn("Follower: Project to restart not found", "project", projectName)
 		}
 	}
 

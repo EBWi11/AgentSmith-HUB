@@ -1008,24 +1008,14 @@ func ApplySingleChange(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
 	}
 
-	// Publish cluster instructions and restart affected projects
-	if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, content, affectedProjects); err != nil {
-		logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
-	}
-
 	if len(affectedProjects) > 0 {
 		logger.Info("Restarting affected projects asynchronously", "count", len(affectedProjects))
 		go func() {
 			for _, id := range affectedProjects {
 				// Use safe accessor without additional locking
 				if p, ok := project.GetProject(id); ok {
-					err := p.Restart()
-					if err != nil {
-						logger.Error("Failed to restart affected project", "id", id, "error", err)
-						if err := cluster.GlobalInstructionManager.PublishProjectRestart(id); err != nil {
-							logger.Error("Failed to publish project restart instructions", "affected_projects", affectedProjects, "error", err)
-						}
-					}
+					// Restart and record the operation
+					p.Restart(true, "change_push")
 				}
 			}
 		}()

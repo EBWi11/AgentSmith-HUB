@@ -217,22 +217,9 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 		return nil
 
 	case "restart":
-		err := proj.Restart()
+		err := proj.Restart(recordOperation, "cluster_command")
 		if err != nil {
-			if recordOperation {
-				common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "failed", fmt.Sprintf("Failed to start: %v", err), map[string]interface{}{
-					"triggered_by": "cluster_command",
-					"node_id":      nodeID,
-				})
-			}
-			return fmt.Errorf("failed to start project for restart: %w", err)
-		}
-		// Record operation success only if requested
-		if recordOperation {
-			common.RecordProjectOperation(common.OpTypeProjectRestart, projectID, "success", "", map[string]interface{}{
-				"triggered_by": "cluster_command",
-				"node_id":      nodeID,
-			})
+			return fmt.Errorf("failed to restart project via cluster command: %w", err)
 		}
 		logger.Info("Project restarted successfully via cluster command", "project_id", projectID)
 		return nil
@@ -1020,7 +1007,7 @@ func (p *Project) Stop(lock bool) error {
 	}
 }
 
-func (p *Project) Restart() error {
+func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) {
 	// Cooldown mechanism to prevent rapid restarts
 	p.restartMu.Lock()
 	if time.Since(p.lastRestartTime) < 5*time.Second {
@@ -1036,13 +1023,30 @@ func (p *Project) Restart() error {
 
 	logger.Info("Restarting project", "project", p.Id)
 
-	// Add panic recovery for critical state changes
+	// Defer the recording of the operation
 	defer func() {
 		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during restart: %v", r)
 			logger.Error("Panic during project restart", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
 			_ = p.stopComponentsInternal()
-			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during restart: %v", r))
+			p.SetProjectStatus(common.StatusError, err)
+		}
+
+		if recordOperation {
+			status := "success"
+			errMsg := ""
+			if err != nil {
+				status = "failed"
+				errMsg = err.Error()
+			}
+			details := map[string]interface{}{
+				"node_id": common.GetNodeID(),
+			}
+			if triggeredBy != "" {
+				details["triggered_by"] = triggeredBy
+			}
+			common.RecordProjectOperation(common.OpTypeProjectRestart, p.Id, status, errMsg, details)
 		}
 	}()
 
@@ -1052,9 +1056,10 @@ func (p *Project) Restart() error {
 	}
 
 	// Start the project again
-	err := p.Start(false)
+	err = p.Start(false)
 	if err != nil {
-		return fmt.Errorf("failed to start project after restart: %w", err)
+		err = fmt.Errorf("failed to start project after restart: %w", err)
+		return err
 	}
 
 	logger.Info("Project restarted successfully", "project", p.Id)
