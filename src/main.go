@@ -446,14 +446,53 @@ func readToken(create bool) (string, error) {
 
 // loadHubConfig loads config.yaml inside given root directory into common.Config.
 func loadHubConfig(root string) error {
+	// Initialize config
+	common.Config = &common.HubConfig{}
+
+	// Try to load from config file first
 	cfgFile := filepath.Join(root, "config.yaml")
-	data, err := os.ReadFile(cfgFile)
-	if err != nil {
-		return err
+	if data, err := os.ReadFile(cfgFile); err == nil {
+		if err := yaml.Unmarshal(data, &common.Config); err != nil {
+			logger.Error("Failed to parse config.yaml", "error", err)
+		}
 	}
-	if err := yaml.Unmarshal(data, &common.Config); err != nil {
-		return err
+
+	// Override with environment variables if set
+	if envRedis := os.Getenv("REDIS_HOST"); envRedis != "" {
+		common.Config.Redis = envRedis
+		logger.Info("Using Redis host from environment variable", "host", envRedis)
 	}
+
+	if envRedisPort := os.Getenv("REDIS_PORT"); envRedisPort != "" {
+		// If REDIS_HOST is set, append port to it
+		if common.Config.Redis == "" {
+			common.Config.Redis = "localhost:" + envRedisPort
+		} else {
+			// Extract host from current Redis config and append new port
+			if strings.Contains(common.Config.Redis, ":") {
+				host := strings.Split(common.Config.Redis, ":")[0]
+				common.Config.Redis = host + ":" + envRedisPort
+			} else {
+				common.Config.Redis = common.Config.Redis + ":" + envRedisPort
+			}
+		}
+		logger.Info("Using Redis port from environment variable", "port", envRedisPort)
+	}
+
+	if envRedisPassword := os.Getenv("REDIS_PASSWORD"); envRedisPassword != "" {
+		common.Config.RedisPassword = envRedisPassword
+		logger.Info("Using Redis password from environment variable")
+	}
+
+	// Set config root
 	common.Config.ConfigRoot = root
+
+	// Validate Redis configuration
+	if common.Config.Redis == "" {
+		return fmt.Errorf("Redis host not configured. Please set REDIS_HOST environment variable or configure in config.yaml")
+	}
+
+	logger.Info("Final Redis configuration", "host", common.Config.Redis, "password_set", common.Config.RedisPassword != "")
+
 	return nil
 }

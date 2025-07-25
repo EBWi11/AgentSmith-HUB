@@ -103,7 +103,18 @@ print_info "Web interface will be available at: http://localhost:8080"
 print_info "Press Ctrl+C to stop"
 
 # Start the application
-exec "./$BINARY_NAME" -config_root "$CONFIG_ROOT"
+if [ "$1" = "--follower" ]; then
+    print_info "Starting AgentSmith-HUB in follower mode..."
+    if [ -n "$LEADER_ADDR" ]; then
+        exec "./$BINARY_NAME" -config_root "$CONFIG_ROOT" --follower "$LEADER_ADDR"
+    else
+        print_error "LEADER_ADDR environment variable is required for follower mode"
+        exit 1
+    fi
+else
+    print_info "Starting AgentSmith-HUB in leader mode..."
+    exec "./$BINARY_NAME" -config_root "$CONFIG_ROOT"
+fi
 EOF
     chmod +x "$TARGET_DIR/start.sh"
 fi

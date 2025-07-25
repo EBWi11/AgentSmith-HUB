@@ -21,12 +21,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Fetch full history for git info
+        fetch-depth: 0
     
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.24.5'
+        cache: true
+        cache-dependency-path: src/go.sum
     
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -44,7 +46,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential
-        # Install cross-compilation tools for ARM64
         if [ "${{ matrix.arch }}" = "arm64" ]; then
           sudo apt-get install -y gcc-aarch64-linux-gnu
         fi
@@ -62,58 +63,25 @@ jobs:
         # Set architecture-specific build variables
         if [ "${{ matrix.arch }}" = "arm64" ]; then
           export CC=aarch64-linux-gnu-gcc
-          export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=arm64
           LIB_PATH="$(pwd)/../lib/linux/arm64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         else
-          export CGO_ENABLED=1
           export GOOS=linux
           export GOARCH=amd64
           LIB_PATH="$(pwd)/../lib/linux/amd64"
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-          export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         fi
         
-        # Debug: Show current directory and file structure
-        echo "Current directory: $(pwd)"
-        echo "Library directory structure:"
-        find ../lib -type f -name "*.so" 2>/dev/null || echo "No .so files found"
-        
-        # Verify library exists and show debug info
-        echo "Expected library path: ${LIB_PATH}"
-        if [ -f "${LIB_PATH}/librure.so" ]; then
-          echo "✓ Library file found"
-          ls -la "${LIB_PATH}/"
-        else
-          echo "✗ Library file not found, checking alternative locations..."
-          # Check if library exists in alternative locations
-          if [ -f "../lib/linux/librure.so" ]; then
-            echo "Found library in ../lib/linux/"
-            LIB_PATH="../lib/linux"
-          elif [ -f "../lib/librure.so" ]; then
-            echo "Found library in ../lib/"
-            LIB_PATH="../lib"
-          else
-            echo "ERROR: Cannot find librure.so in any expected location"
-            echo "Directory contents:"
-            ls -la ../lib/ || echo "lib directory not found"
-            exit 1
-          fi
-        fi
-        
-        # Update CGO flags with correct path
-        if [ "${{ matrix.arch }}" = "arm64" ]; then
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-        else
-          export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
-        fi
+        export CGO_ENABLED=1
+        export CGO_LDFLAGS="-L${LIB_PATH} -lrure -Wl,-rpath,${LIB_PATH}"
         export LD_LIBRARY_PATH="${LIB_PATH}:$LD_LIBRARY_PATH"
         
-        echo "Updated CGO_LDFLAGS: $CGO_LDFLAGS"
-        echo "Updated LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+        # Verify library exists
+        if [ ! -f "${LIB_PATH}/librure.so" ]; then
+          echo "ERROR: Cannot find librure.so at ${LIB_PATH}"
+          ls -la ../lib/ || echo "lib directory not found"
+          exit 1
+        fi
         
         # Build with version information
         VERSION=$(cat ../VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
@@ -122,17 +90,13 @@ jobs:
         LDFLAGS="-s -w -X 'main.Version=$VERSION' -X 'main.BuildTime=$BUILD_TIME' -X 'main.GitCommit=$GIT_COMMIT'"
         
         # Copy library to system path for linking
-        echo "Copying library to system path..."
         sudo cp "${LIB_PATH}/librure.so" /usr/lib/
         sudo ldconfig
         
         # Build the binary
-        echo "Building binary..."
         if go build -ldflags "$LDFLAGS" -o ../build/${BINARY_NAME}-${{ matrix.arch }} .; then
           echo "✓ Build completed successfully"
           ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
-          echo "Checking binary dependencies:"
-          ldd ../build/${BINARY_NAME}-${{ matrix.arch }} || echo "ldd not available"
         else
           echo "✗ Build failed"
           exit 1
@@ -144,30 +108,25 @@ jobs:
         VERSION=$(cat VERSION 2>/dev/null | tr -d '\n\r ' || echo "unknown")
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         
-        # Set release name based on tag or branch
         if [[ $GITHUB_REF == refs/tags/* ]]; then
           RELEASE_NAME=${GITHUB_REF#refs/tags/}
         else
           RELEASE_NAME="${VERSION}-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
         fi
-        # Remove any spaces and newlines from release name
         RELEASE_NAME=$(echo "$RELEASE_NAME" | tr -d '\n\r ')
         echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
     
     - name: Create deployment archive
       run: |
-        # Create a clean directory structure for the archive
-        RELEASE_NAME="${{ steps.version.outputs.release_name }}"
         ARCHIVE_DIR="agentsmith-hub"
         ARCHIVE_NAME="agentsmith-hub-${{ matrix.arch }}.tar.gz"
         
         echo "Creating archive: $ARCHIVE_NAME"
-        echo "Architecture: ${{ matrix.arch }}"
         
         # Create the archive directory
         mkdir -p "$ARCHIVE_DIR"
         
-        # Copy binary (rename to standard name)
+        # Copy binary
         cp "build/${BINARY_NAME}-${{ matrix.arch }}" "$ARCHIVE_DIR/$BINARY_NAME"
         chmod +x "$ARCHIVE_DIR/$BINARY_NAME"
         
@@ -193,11 +152,6 @@ jobs:
         # Copy documentation
         cp README.md "$ARCHIVE_DIR/"
         cp VERSION "$ARCHIVE_DIR/"
-        
-        # Show what we're packaging
-        echo "Contents to be archived:"
-        find "$ARCHIVE_DIR" -type f | head -20
-        echo "..."
         
         # Create the tar.gz archive
         tar -czf "$ARCHIVE_NAME" "$ARCHIVE_DIR"
@@ -254,16 +208,9 @@ jobs:
           
           3. Configure your settings in `config/config.yaml`
           
-          4. (Optional) Configure nginx for web serving:
-             ```bash
-             sudo cp nginx/agentsmith-hub.conf /etc/nginx/conf.d/
-             # Edit the path in the config file if needed
-             sudo nginx -t && sudo systemctl reload nginx
-             ```
+          4. Run `./start.sh` to start the application
           
-          5. Run `./start.sh` to start the application
-          
-          6. Access the web interface:
+          5. Access the web interface:
              - With nginx: http://localhost
              - Direct backend: http://localhost:8080
           
@@ -271,8 +218,6 @@ jobs:
           
           - **AMD64**: Standard x86_64 architecture (Intel/AMD processors)
           - **ARM64**: ARM 64-bit architecture (Apple Silicon, ARM servers)
-          
-          The scripts automatically detect your system architecture and use the appropriate libraries.
           
           ### Version Information
           
@@ -287,64 +232,54 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: Login to GitHub Container Registry
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Prepare Docker build context
-      run: |
-        # Create build directory structure for Docker
-        mkdir -p build-docker
-        mkdir -p lib/linux/amd64
-        mkdir -p lib/linux/arm64
-        
-        # Copy binaries and libraries
-        cp build/${BINARY_NAME}-amd64 build-docker/agentsmith-hub-amd64
-        cp build/${BINARY_NAME}-arm64 build-docker/agentsmith-hub-arm64
-        
-        cp -r lib/linux/amd64/* lib/linux/amd64/
-        cp -r lib/linux/arm64/* lib/linux/arm64/
-        
-        # Make binaries executable
-        chmod +x build-docker/agentsmith-hub-*
-        
-        # Copy web frontend
-        cp -r web/dist web-dist
-        
-        echo "Prepared Docker build context:"
-        ls -la build-docker/
-        
-    - name: Extract metadata for Docker
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=raw,value=latest,enable={{is_default_branch}}
-          type=raw,value=${{ steps.version.outputs.version }}
-          
-    - name: Build and push Docker image
-      if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        build-args: |
-          VERSION=${{ steps.version.outputs.version }}
-          GIT_COMMIT=${{ github.sha }}
-          BUILD_TIME=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+  push-docker-image:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agentsmith-hub-*
+          path: .
+          merge-multiple: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }} 
