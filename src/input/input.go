@@ -496,7 +496,7 @@ func (in *Input) Stop() error {
 		}
 	}()
 
-	if in.Status != common.StatusRunning {
+	if in.Status != common.StatusRunning && in.Status != common.StatusError {
 		return fmt.Errorf("input %s is not running", in.Id)
 	}
 	in.SetStatus(common.StatusStopping, nil)

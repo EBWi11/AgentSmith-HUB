@@ -151,6 +151,7 @@ jobs:
         
         # Copy documentation
         cp README.md "$ARCHIVE_DIR/"
+        cp LICENSE "$ARCHIVE_DIR/"
         cp VERSION "$ARCHIVE_DIR/"
         
         # Create the tar.gz archive
