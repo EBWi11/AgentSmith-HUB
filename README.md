@@ -29,3 +29,12 @@ MCP
 6. The backend logs are located in `/var/log/hub_logs/`
 7. Install Nginx, and `sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/`(This will overwrite your previous nginx.conf. Please back it up in advance if necessary), and run `sudo nginx -t reload`, the frontend will work on port 80 and a token is required for access.
 
+## License
+
+AgentSmith-HUB is licensed under the Apache License 2.0 with the Commons Clause restriction. This means:
+
+- You are free to use, modify, and distribute the software for personal or non-commercial purposes.
+- Commercial use, including direct or indirect integration into commercial products or services, is strictly prohibited.
+
+For more details, see the [LICENSE](./LICENSE) file.
+

@@ -1,4 +1,4 @@
-                                 Apache License
+Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
 
@@ -187,4 +187,35 @@
    distributed under the License is distributed on an "AS IS" BASIS,
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
-   limitations under the License. 
+   limitations under the License.
+
+------------------------------------------------------------------------
+
+   Commons Clause Restriction:
+
+   The Software is provided to you by the Licensor under the License, as
+   defined below, subject to the following condition.
+
+   Without limiting other conditions in the License, the grant of rights
+   under the License does not include, and the License does not grant you
+   the right to, Sell the Software.
+
+   For purposes of the foregoing, “Sell” means practicing any or all of
+   the rights granted to you under the License to provide to third parties,
+   for a fee or other consideration (including without limitation fees for
+   hosting, consulting/support services, or integration into commercial
+   products), a product or service whose value derives, entirely or
+   substantially, from the functionality of the Software.
+
+   This restriction applies to both direct and indirect use of the Software.
+   For example:
+   - Direct use includes integrating the Software into a commercial product
+     or service that is sold to customers.
+   - Indirect use includes using the Software as a dependency, library, or
+     component in a commercial product or service, even if the Software is
+     not directly exposed to end users.
+
+   Any license notice or attribution required by the License must also
+   include this Commons Clause License Condition notice.
+
+   For purposes of the clause above, the Licensor is AgentSmith-HUB.
