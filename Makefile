@@ -168,6 +168,8 @@ package-arch:
 	cp -r mcp_config $(DIST_DIR)/$(TARGET_GOARCH)/
 	@echo "Creating scripts..."
 	./script/create_scripts.sh $(DIST_DIR)/$(TARGET_GOARCH) $(TARGET_GOARCH)
+	@echo "Copying LICENSE file..."
+	cp LICENSE $(BUILD_DIR)/LICENSE
 	@echo ""
 	@echo "=== Linux $(TARGET_GOARCH) Package Complete ==="
 	@echo "Deployment files are ready in: $(DIST_DIR)/$(TARGET_GOARCH)/"
@@ -277,4 +279,4 @@ help:
 	@echo "  1. Run 'make package-amd64' or 'make package-arm64'"
 	@echo "  2. Copy $(DIST_DIR)/<arch>/ to Linux target server"
 	@echo "  3. Run './start.sh' to start services"
-	@echo "  4. Run './stop.sh' to stop services" 
+	@echo "  4. Run './stop.sh' to stop services"
