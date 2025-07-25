@@ -19,7 +19,7 @@ INPUT defines data input sources and supports multiple data source types.
 
 #### Supported Data Source Types
 
-##### Kafka
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -43,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Alibaba Cloud SLS
+##### Alibaba Cloud SLS 
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -59,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # Optional query filter conditions
 ```
 
-##### Kafka Azure
+##### Kafka Azure 
 ```yaml
 type: kafka_azure
 kafka:
@@ -76,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS
+##### Kafka AWS 
 ```yaml
 type: kafka_aws
 kafka:
@@ -103,7 +103,7 @@ OUTPUT defines the output target for data processing results.
 type: print
 ```
 
-##### Kafka
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -127,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch
+##### Elasticsearch 
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -337,7 +337,7 @@ When there are multiple `<check>` tags in a rule:
 - This design improves performance: Fail early, avoid unnecessary checks
 
 In the above example, all three check conditions must be **fully satisfied**:
-1. username equals "admin"
+1. username equals "admin" 
 2. login_time greater than 22 (after 10 PM)
 3. failed_attempts greater than 3
 
@@ -998,7 +998,7 @@ Threat intelligence detection rule:
     
     <!-- Step 4: Parse threat intelligence results -->
     <append type="PLUGIN" field="threat_level">
-        parseJSON(_$threat_intel).severity_level
+        parseJSON(threat_intel)
     </append>
     
     <!-- Step 5: Make judgments based on threat level -->
@@ -1061,7 +1061,7 @@ Log processing rule:
     
     <!-- Extract error information -->
     <append type="PLUGIN" field="error_type">
-        regexExtract(_$stack_trace, "([A-Za-z.]+Exception)")
+        regexExtract(stack_trace, "([A-Za-z.]+Exception)")
     </append>
     
     <!-- Time processing -->

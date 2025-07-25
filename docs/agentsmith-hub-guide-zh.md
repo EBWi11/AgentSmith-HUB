@@ -999,7 +999,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     
     <!-- 第4步：解析威胁情报结果 -->
     <append type="PLUGIN" field="threat_level">
-        parseJSON(_$threat_intel).severity_level
+        parseJSON(threat_intel)
     </append>
     
     <!-- 第5步：基于威胁等级进行判断 -->
@@ -1062,7 +1062,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     
     <!-- 提取错误信息 -->
     <append type="PLUGIN" field="error_type">
-        regexExtract(_$stack_trace, "([A-Za-z.]+Exception)")
+        regexExtract(stack_trace, "([A-Za-z.]+Exception)")
     </append>
     
     <!-- 时间处理 -->

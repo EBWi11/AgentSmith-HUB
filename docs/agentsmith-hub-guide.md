@@ -998,7 +998,7 @@ Threat intelligence detection rule:
     
     <!-- Step 4: Parse threat intelligence results -->
     <append type="PLUGIN" field="threat_level">
-        parseJSON(_$threat_intel).severity_level
+        parseJSON(threat_intel)
     </append>
     
     <!-- Step 5: Make judgments based on threat level -->
@@ -1061,7 +1061,7 @@ Log processing rule:
     
     <!-- Extract error information -->
     <append type="PLUGIN" field="error_type">
-        regexExtract(_$stack_trace, "([A-Za-z.]+Exception)")
+        regexExtract(stack_trace, "([A-Za-z.]+Exception)")
     </append>
     
     <!-- Time processing -->

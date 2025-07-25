@@ -19,7 +19,7 @@ INPUT 定义了数据输入源，支持多种数据源类型。
 
 #### 支持的数据源类型
 
-##### Kafka
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -43,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### 阿里云SLS
+##### 阿里云SLS 
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -59,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
 ```
 
-##### Kafka Azure
+##### Kafka Azure 
 ```yaml
 type: kafka_azure
 kafka:
@@ -76,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS
+##### Kafka AWS 
 ```yaml
 type: kafka_aws
 kafka:
@@ -103,7 +103,7 @@ OUTPUT 定义了数据处理结果的输出目标。
 type: print
 ```
 
-##### Kafka
+##### Kafka 
 ```yaml
 type: kafka
 kafka:
@@ -127,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch
+##### Elasticsearch 
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -338,7 +338,7 @@ content: |
 - 这种设计提高了性能：尽早失败，避免不必要的检查
 
 在上面的例子中，三个检查条件必须**全部满足**：
-1. username 等于 "admin"
+1. username 等于 "admin" 
 2. login_time 大于 22（晚上10点后）
 3. failed_attempts 大于 3
 
@@ -999,7 +999,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     
     <!-- 第4步：解析威胁情报结果 -->
     <append type="PLUGIN" field="threat_level">
-        parseJSON(_$threat_intel).severity_level
+        parseJSON(threat_intel)
     </append>
     
     <!-- 第5步：基于威胁等级进行判断 -->
@@ -1062,7 +1062,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     
     <!-- 提取错误信息 -->
     <append type="PLUGIN" field="error_type">
-        regexExtract(_$stack_trace, "([A-Za-z.]+Exception)")
+        regexExtract(stack_trace, "([A-Za-z.]+Exception)")
     </append>
     
     <!-- 时间处理 -->
