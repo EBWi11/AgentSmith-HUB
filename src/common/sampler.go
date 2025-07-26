@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	// Use bitwise operation to optimize sampling rate calculation
-	SamplingMask = 63 // 2^6 - 1, corresponding to 1/64 sampling rate (sample 1 out of every 64 messages)
+	// Use timer-based sampling: sample once every 3 minutes
+	SamplingInterval = 3 * time.Minute // Sample once every 3 minutes
 )
 
 // SampleData represents a single sample with its metadata
@@ -19,7 +19,7 @@ type SampleData struct {
 	Data                interface{} `json:"data"`
 	Timestamp           time.Time   `json:"timestamp"`
 	ProjectNodeSequence string      `json:"project_node_sequence"`
-	// ProjectID removed as it's redundant with PNS
+	// Removed SamplerName as it's not needed for simplified approach
 }
 
 // SamplerStats represents statistics about sampling
@@ -33,14 +33,15 @@ type SamplerStats struct {
 	ProjectStats   map[string]int64 `json:"projectStats"`
 }
 
-// Sampler represents a sampling instance (Redis-only storage)
+// Sampler represents a sampling instance with timer-based sampling
 type Sampler struct {
-	name         string
-	totalCount   uint64
-	sampledCount uint64
-	maxSamples   int
-	pool         *ants.Pool // Used for asynchronous processing of sampling data
-	closed       int32      // Mark whether it's closed
+	name              string
+	totalCount        uint64
+	sampledCount      uint64
+	maxSamples        int
+	pool              *ants.Pool // Used for asynchronous processing of sampling data
+	closed            int32      // Mark whether it's closed
+	lastSampleTime    sync.Map   // Cache for last sample time per project sequence
 }
 
 // NewSampler creates a new sampler instance
@@ -50,6 +51,7 @@ func NewSampler(name string) *Sampler {
 		// If creating goroutine pool fails, use default pool
 		pool = nil
 	}
+	
 	return &Sampler{
 		name:       name,
 		maxSamples: 100,
@@ -57,25 +59,7 @@ func NewSampler(name string) *Sampler {
 	}
 }
 
-// isFirstSampleForProject checks if this is the first sample for a project sequence
-func (s *Sampler) isFirstSampleForProject(projectNodeSequence string) bool {
-	rsm := GetRedisSampleManager()
-	if rsm == nil {
-		return true
-	}
-	all, err := rsm.GetSamples(s.name)
-	if err != nil {
-		return true
-	}
-	for _, arr := range all {
-		if len(arr) > 0 && arr[0].ProjectNodeSequence == projectNodeSequence {
-			return false
-		}
-	}
-	return true
-}
-
-// Sample attempts to sample the data based on sampling rate
+// Sample attempts to sample the data based on timer (simplified version)
 func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Normalize ProjectNodeSequence to lower-case to avoid case-sensitivity issues downstream
 	projectNodeSequence = strings.ToLower(projectNodeSequence)
@@ -90,18 +74,29 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 		return false
 	}
 
-	// Increment counter using atomic operations
-	total := atomic.AddUint64(&s.totalCount, 1)
+	// Increment total counter using atomic operations
+	atomic.AddUint64(&s.totalCount, 1)
 
-	// Check if it's the first data for this ProjectNodeSequence
-	shouldSampleFirst := s.isFirstSampleForProject(projectNodeSequence)
-
-	// Sampling decision: force collection of first data, or collect according to sampling rate
-	shouldSample := shouldSampleFirst || (total&SamplingMask == 0)
+	// Check if enough time has passed since last sample for this project sequence
+	now := time.Now()
+	lastSampleTimeInterface, exists := s.lastSampleTime.Load(projectNodeSequence)
+	
+	var shouldSample bool
+	if !exists {
+		// First sample for this project sequence
+		shouldSample = true
+	} else {
+		lastSampleTime := lastSampleTimeInterface.(time.Time)
+		// Sample if 3 minutes have passed since last sample
+		shouldSample = now.Sub(lastSampleTime) >= SamplingInterval
+	}
 
 	if !shouldSample {
 		return false
 	}
+
+	// Update last sample time
+	s.lastSampleTime.Store(projectNodeSequence, now)
 
 	// Increment sampling count
 	atomic.AddUint64(&s.sampledCount, 1)
@@ -109,24 +104,18 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Create sample data
 	sample := SampleData{
 		Data:                data,
-		Timestamp:           time.Now(),
+		Timestamp:           now,
 		ProjectNodeSequence: projectNodeSequence,
-		// ProjectID removed as it's redundant with PNS
 	}
 
-	// If there's a goroutine pool, process asynchronously; otherwise process synchronously
-	if s.pool != nil {
-		// Check if goroutine pool is closed
-		if s.pool.IsClosed() {
+	// Store sample asynchronously
+	if s.pool != nil && !s.pool.IsClosed() {
+		err := s.pool.Submit(func() {
 			s.storeSample(sample, projectNodeSequence)
-		} else {
-			err := s.pool.Submit(func() {
-				s.storeSample(sample, projectNodeSequence)
-			})
-			if err != nil {
-				// If submission fails, process synchronously
-				s.storeSample(sample, projectNodeSequence)
-			}
+		})
+		if err != nil {
+			// If submission fails, process synchronously
+			s.storeSample(sample, projectNodeSequence)
 		}
 	} else {
 		s.storeSample(sample, projectNodeSequence)
@@ -175,13 +164,19 @@ func (s *Sampler) GetStats() SamplerStats {
 		}
 	}
 
+	// Calculate actual sampling rate based on timer
+	samplingRate := 1.0 / (SamplingInterval.Seconds() / 60) // samples per minute
+	if samplingRate > 1.0 {
+		samplingRate = 1.0 // Cap at 100%
+	}
+
 	return SamplerStats{
 		Name:           s.name,
 		TotalCount:     int64(atomic.LoadUint64(&s.totalCount)),
 		SampledCount:   int64(atomic.LoadUint64(&s.sampledCount)),
 		CurrentSamples: totalSamples,
 		MaxSamples:     s.maxSamples,
-		SamplingRate:   0.015625, // 1/64 = 0.015625
+		SamplingRate:   samplingRate,
 		ProjectStats:   projectStats,
 	}
 }
@@ -191,6 +186,12 @@ func (s *Sampler) Reset() {
 	atomic.StoreUint64(&s.totalCount, 0)
 	atomic.StoreUint64(&s.sampledCount, 0)
 
+	// Clear timer cache
+	s.lastSampleTime.Range(func(key, value interface{}) bool {
+		s.lastSampleTime.Delete(key)
+		return true
+	})
+
 	// Clear Redis samples
 	redisSampleManager := GetRedisSampleManager()
 	if redisSampleManager != nil {
@@ -198,11 +199,11 @@ func (s *Sampler) Reset() {
 	}
 }
 
-// Close releases resources
+// Close closes the sampler and cleans up resources
 func (s *Sampler) Close() {
 	// Mark as closed
 	atomic.StoreInt32(&s.closed, 1)
-
+	
 	// Close goroutine pool
 	if s.pool != nil {
 		s.pool.Release()
