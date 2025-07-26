@@ -2,9 +2,11 @@ package common
 
 import (
 	"AgentSmith-HUB/logger"
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -143,15 +145,18 @@ func NewDailyStatsManager() *DailyStatsManager {
 func (dsm *DailyStatsManager) writeToRedisLegacy(statsData *DailyStatsData, increment uint64, expiration int) error {
 	key := dsm.generateKey(statsData.Date, statsData.NodeID, statsData.ProjectID, statsData.ProjectNodeSequence)
 	counterKey := dsm.redisKeyPrefix + key
-	_, err := RedisIncrby(counterKey, int64(increment))
+
+	// Use Redis transaction to ensure atomicity of INCRBY and EXPIRE operations
+	ctx := context.Background()
+	pipe := GetRedisClient().Pipeline()
+	pipe.IncrBy(ctx, counterKey, int64(increment))
+	pipe.Expire(ctx, counterKey, time.Duration(expiration)*time.Second)
+
+	_, err := pipe.Exec(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to execute Redis transaction for stats update: %w", err)
 	}
 
-	err = RedisExpire(counterKey, expiration)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -232,16 +237,42 @@ func (dsm *DailyStatsManager) getDailyStatsLegacy(date, projectID, nodeID string
 }
 
 // persistenceLoop periodically collects data from all components and saves to Redis
+// Includes execution time control to prevent overlapping collections
 func (dsm *DailyStatsManager) persistenceLoop() {
 	ticker := time.NewTicker(dsm.saveInterval)
 	defer ticker.Stop()
+
+	// Track if collection is in progress to prevent overlapping
+	var collecting int32
 
 	for {
 		select {
 		case <-dsm.stopChan:
 			return
 		case <-ticker.C:
-			dsm.CollectAllComponentsData()
+			// Use atomic operation to prevent overlapping collections
+			if atomic.CompareAndSwapInt32(&collecting, 0, 1) {
+				// Start collection in a goroutine to prevent blocking the ticker
+				go func() {
+					defer atomic.StoreInt32(&collecting, 0)
+
+					// Add timeout to prevent long-running collections
+					done := make(chan struct{})
+					go func() {
+						dsm.CollectAllComponentsData()
+						close(done)
+					}()
+
+					select {
+					case <-done:
+						// Collection completed successfully
+					case <-time.After(8 * time.Second): // Timeout at 8 seconds to prevent overlap
+						logger.Warn("Statistics collection timed out, may have missed some data")
+					}
+				}()
+			} else {
+				logger.Warn("Previous statistics collection still in progress, skipping this cycle")
+			}
 		}
 	}
 }

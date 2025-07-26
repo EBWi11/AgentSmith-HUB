@@ -140,6 +140,12 @@ func (r *Ruleset) Start() error {
 							}
 						}
 
+						// Check if there are any downstream channels
+						if len(r.DownStream) == 0 {
+							logger.Warn("No downstream channels available, skipping message processing", "ruleset", r.RulesetID)
+							return
+						}
+
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
 						// Send results to downstream channels with blocking writes to ensure no data loss
@@ -781,13 +787,18 @@ func (r *Ruleset) ResetProcessTotal() uint64 {
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
 // This method is thread-safe and designed for 10-second statistics collection.
+// Uses CAS operation to ensure atomicity and prevent race conditions.
 func (r *Ruleset) GetIncrementAndUpdate() uint64 {
-	current := atomic.LoadUint64(&r.processTotal)
-	last := atomic.SwapUint64(&r.lastReportedTotal, current)
+	for {
+		current := atomic.LoadUint64(&r.processTotal)
+		last := atomic.LoadUint64(&r.lastReportedTotal)
 
-	// Since counters are monotonically increasing and we don't consider overflow
-	// (uint64 is large enough), current should always be >= last
-	return current - last
+		// Use CAS to atomically update lastReportedTotal
+		if atomic.CompareAndSwapUint64(&r.lastReportedTotal, last, current) {
+			return current - last
+		}
+		// If CAS failed, retry
+	}
 }
 
 // GetRunningTaskCount returns the number of currently running tasks in the thread pool

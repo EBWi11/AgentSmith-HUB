@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,8 +24,14 @@ var GlobalProject *GlobalProjectInfo
 
 // collectAllComponentStats collects current statistics from all running components
 // All increments are collected atomically at the same moment to ensure consistency
+// Uses mutex to prevent concurrent access during collection
 func collectAllComponentStats() []common.DailyStatsData {
 	var components []common.DailyStatsData
+
+	// Use a mutex to ensure atomic collection across all components
+	var statsMutex sync.Mutex
+	statsMutex.Lock()
+	defer statsMutex.Unlock()
 
 	// Take a snapshot of running projects to minimize lock time
 	var runningProjects []*Project

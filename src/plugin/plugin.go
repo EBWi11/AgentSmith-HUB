@@ -780,17 +780,33 @@ func (p *Plugin) RecordInvocation(success bool) {
 }
 
 // GetSuccessIncrementAndUpdate returns the increment in success count since last call and updates the baseline
+// Uses CAS operation to ensure atomicity and prevent race conditions.
 func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
-	currentTotal := atomic.LoadUint64(&p.successTotal)
-	lastReported := atomic.SwapUint64(&p.lastReportedSuccessTotal, currentTotal)
-	return currentTotal - lastReported
+	for {
+		currentTotal := atomic.LoadUint64(&p.successTotal)
+		lastReported := atomic.LoadUint64(&p.lastReportedSuccessTotal)
+
+		// Use CAS to atomically update lastReportedSuccessTotal
+		if atomic.CompareAndSwapUint64(&p.lastReportedSuccessTotal, lastReported, currentTotal) {
+			return currentTotal - lastReported
+		}
+		// If CAS failed, retry
+	}
 }
 
 // GetFailureIncrementAndUpdate returns the increment in failure count since last call and updates the baseline
+// Uses CAS operation to ensure atomicity and prevent race conditions.
 func (p *Plugin) GetFailureIncrementAndUpdate() uint64 {
-	currentTotal := atomic.LoadUint64(&p.failureTotal)
-	lastReported := atomic.SwapUint64(&p.lastReportedFailureTotal, currentTotal)
-	return currentTotal - lastReported
+	for {
+		currentTotal := atomic.LoadUint64(&p.failureTotal)
+		lastReported := atomic.LoadUint64(&p.lastReportedFailureTotal)
+
+		// Use CAS to atomically update lastReportedFailureTotal
+		if atomic.CompareAndSwapUint64(&p.lastReportedFailureTotal, lastReported, currentTotal) {
+			return currentTotal - lastReported
+		}
+		// If CAS failed, retry
+	}
 }
 
 // ResetSuccessTotal resets the success counter and baseline (for restart scenarios)

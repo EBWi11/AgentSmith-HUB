@@ -699,13 +699,18 @@ func (out *Output) ResetProduceTotal() uint64 {
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
 // This method is thread-safe and designed for 10-second statistics collection.
+// Uses CAS operation to ensure atomicity and prevent race conditions.
 func (out *Output) GetIncrementAndUpdate() uint64 {
-	current := atomic.LoadUint64(&out.produceTotal)
-	last := atomic.SwapUint64(&out.lastReportedTotal, current)
+	for {
+		current := atomic.LoadUint64(&out.produceTotal)
+		last := atomic.LoadUint64(&out.lastReportedTotal)
 
-	// Since counters are monotonically increasing and we don't consider overflow
-	// (uint64 is large enough), current should always be >= last
-	return current - last
+		// Use CAS to atomically update lastReportedTotal
+		if atomic.CompareAndSwapUint64(&out.lastReportedTotal, last, current) {
+			return current - last
+		}
+		// If CAS failed, retry
+	}
 }
 
 // StopForTesting stops the output quickly for testing purposes without waiting for channel drainage

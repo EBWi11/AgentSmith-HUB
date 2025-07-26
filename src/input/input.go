@@ -323,6 +323,12 @@ func (in *Input) Start() error {
 						return
 					}
 
+					// Check if there are any downstream channels
+					if len(in.DownStream) == 0 {
+						logger.Warn("No downstream channels available, skipping message", "input", in.Id)
+						continue
+					}
+
 					// Only increment total count - QPS calculation removed
 					atomic.AddUint64(&in.consumeTotal, 1)
 
@@ -337,7 +343,8 @@ func (in *Input) Start() error {
 					}
 					msg["_hub_input"] = in.Id
 
-					// Forward to downstream
+					// Forward to downstream with blocking sends to ensure no data loss
+					// If any downstream channel is full, this will block and prevent further consumption
 					for _, ch := range in.DownStream {
 						*ch <- msg
 					}
@@ -400,6 +407,12 @@ func (in *Input) Start() error {
 						return
 					}
 
+					// Check if there are any downstream channels
+					if len(in.DownStream) == 0 {
+						logger.Warn("No downstream channels available, skipping message", "input", in.Id)
+						continue
+					}
+
 					atomic.AddUint64(&in.consumeTotal, 1)
 
 					// Sample the message
@@ -413,7 +426,8 @@ func (in *Input) Start() error {
 					}
 					msg["_hub_input"] = in.Id
 
-					// Forward to downstream
+					// Forward to downstream with blocking sends to ensure no data loss
+					// If any downstream channel is full, this will block and prevent further consumption
 					for _, ch := range in.DownStream {
 						*ch <- msg
 					}
@@ -445,6 +459,12 @@ func (in *Input) StartForTesting() error {
 // ProcessTestData processes test data through the input component's normal data flow
 // This ensures test data goes through the same processing as production data
 func (in *Input) ProcessTestData(data map[string]interface{}) {
+	// Check if there are any downstream channels
+	if len(in.DownStream) == 0 {
+		logger.Warn("No downstream channels available, skipping test message", "input", in.Id)
+		return
+	}
+
 	// Only increment total count - same as production logic
 	atomic.AddUint64(&in.consumeTotal, 1)
 
@@ -456,7 +476,8 @@ func (in *Input) ProcessTestData(data map[string]interface{}) {
 	}
 	data["_hub_input"] = in.Id
 
-	// Forward to downstream
+	// Forward to downstream with blocking sends to ensure no data loss
+	// If any downstream channel is full, this will block and prevent further processing
 	for _, ch := range in.DownStream {
 		*ch <- data
 	}
@@ -556,10 +577,18 @@ func (in *Input) ResetConsumeTotal() uint64 {
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
 // This method is thread-safe and designed for 10-second statistics collection.
+// Uses CAS operation to ensure atomicity and prevent race conditions.
 func (in *Input) GetIncrementAndUpdate() uint64 {
-	current := atomic.LoadUint64(&in.consumeTotal)
-	last := atomic.SwapUint64(&in.lastReportedTotal, current)
-	return current - last
+	for {
+		current := atomic.LoadUint64(&in.consumeTotal)
+		last := atomic.LoadUint64(&in.lastReportedTotal)
+
+		// Use CAS to atomically update lastReportedTotal
+		if atomic.CompareAndSwapUint64(&in.lastReportedTotal, last, current) {
+			return current - last
+		}
+		// If CAS failed, retry
+	}
 }
 
 // CheckConnectivity performs a real connectivity test for the input component
