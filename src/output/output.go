@@ -601,7 +601,7 @@ func (out *Output) Start() error {
 // Stop stops the output producer and waits for all routines to finish.
 // It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
-	if out.Status != common.StatusRunning {
+	if out.Status != common.StatusRunning && out.Status != common.StatusError {
 		return fmt.Errorf("output %s is not running", out.Id)
 	}
 	out.SetStatus(common.StatusStopping, nil)
