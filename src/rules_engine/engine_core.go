@@ -72,16 +72,21 @@ func (r *Ruleset) Start() error {
 				for _, upCh := range r.UpStream {
 					totalBacklog += len(*upCh)
 				}
+				// Calculate linear scaling between min and max pool size
+				// 4 levels: min -> level1 -> level2 -> max
+				level1 := minPoolSize + (maxPoolSize-minPoolSize)/3
+				level2 := minPoolSize + (maxPoolSize-minPoolSize)*2/3
+
 				targetSize := minPoolSize
 				switch {
-				case totalBacklog > 1000:
+				case totalBacklog > 500:
 					targetSize = maxPoolSize
-				case totalBacklog > 512:
-					targetSize = maxPoolSize * 3 / 4
 				case totalBacklog > 256:
-					targetSize = maxPoolSize / 2
-				case totalBacklog > 32:
-					targetSize = maxPoolSize / 4
+					targetSize = level2
+				case totalBacklog > 128:
+					targetSize = level1
+				case totalBacklog > 16:
+					targetSize = minPoolSize + (level1-minPoolSize)/2
 				default:
 					targetSize = minPoolSize
 				}

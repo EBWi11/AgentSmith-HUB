@@ -67,6 +67,8 @@ func (consumer *AliyunSLSConsumer) aliyunSLSConsumerProcess(shardId int, logGrou
 			for _, tmp := range log.GetContents() {
 				data[tmp.GetKey()] = tmp.GetValue()
 			}
+			// Blocking send to ensure no data loss
+			// If downstream is full, this will block and prevent further consumption
 			consumer.MsgChan <- data
 		}
 	}

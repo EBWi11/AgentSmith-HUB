@@ -324,7 +324,7 @@ func (c *KafkaConsumer) run() {
 					if err.Err.Error() == "client closed" {
 						return
 					}
-					logger.Error("[KafkaConsumer] fetch error", "error", err.Err)
+					logger.Warn("[KafkaConsumer] fetch error", "error", err.Err)
 				}
 				continue // skip errored fetches
 			}
@@ -335,13 +335,9 @@ func (c *KafkaConsumer) run() {
 					return
 				}
 
-				// Use non-blocking send to prevent hanging on closed channels
-				select {
-				case c.MsgChan <- m:
-					// Message sent successfully
-				default:
-					logger.Warn("[KafkaConsumer] message channel full or closed, dropping message")
-				}
+				// Blocking send to ensure no data loss
+				// If downstream is full, this will block and prevent further consumption
+				c.MsgChan <- m
 			})
 			// manual commit for batch performance
 			if err := c.Client.CommitUncommittedOffsets(context.Background()); err != nil {
