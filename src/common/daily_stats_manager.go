@@ -273,7 +273,7 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 			} else {
 				// Instead of skipping, wait a bit and try again to avoid data loss
 				logger.Debug("Previous statistics collection still in progress, waiting...")
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(10 * time.Millisecond) // Reduced from 100ms to 10ms
 			}
 		}
 	}
@@ -326,7 +326,7 @@ func (dsm *DailyStatsManager) ApplyBatchUpdates(dailyStatsData []DailyStatsData)
 						"sequence", data.ProjectNodeSequence,
 						"retry", retry+1,
 						"error", err)
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond) // Reduced from 100ms to 10ms
 				}
 			} else {
 				// Success, break retry loop

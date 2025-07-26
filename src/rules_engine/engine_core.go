@@ -171,8 +171,7 @@ func (r *Ruleset) Start() error {
 							task()
 							return
 						default:
-							// Wait a bit and retry - prioritize data integrity over latency
-							time.Sleep(10 * time.Millisecond)
+							time.Sleep(1 * time.Millisecond)
 						}
 					}
 				}
@@ -796,7 +795,7 @@ func (r *Ruleset) GetIncrementAndUpdate() uint64 {
 	if atomic.CompareAndSwapUint64(&r.lastReportedTotal, last, current) {
 		return current - last
 	}
-	
+
 	return 0
 }
 

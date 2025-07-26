@@ -791,7 +791,7 @@ func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
 	if atomic.CompareAndSwapUint64(&p.lastReportedSuccessTotal, lastReported, currentTotal) {
 		return currentTotal - lastReported
 	}
-	
+
 	return 0
 }
 
@@ -807,9 +807,9 @@ func (p *Plugin) GetFailureIncrementAndUpdate() uint64 {
 	if atomic.CompareAndSwapUint64(&p.lastReportedFailureTotal, lastReported, currentTotal) {
 		return currentTotal - lastReported
 	}
-	
+
 	return 0
-}// ResetSuccessTotal resets the success counter and baseline (for restart scenarios)
+} // ResetSuccessTotal resets the success counter and baseline (for restart scenarios)
 func (p *Plugin) ResetSuccessTotal() {
 	atomic.StoreUint64(&p.successTotal, 0)
 	atomic.StoreUint64(&p.lastReportedSuccessTotal, 0)

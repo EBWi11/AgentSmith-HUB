@@ -441,7 +441,7 @@ func (out *Output) Start() error {
 						// No message available from this channel, continue to next
 					}
 				}
-				// If no messages were processed, sleep briefly to avoid busy waiting
+				// If no messages were processed, use shorter sleep to reduce latency
 				if !processed {
 					time.Sleep(10 * time.Millisecond)
 				}
@@ -527,7 +527,7 @@ func (out *Output) Start() error {
 						// No message available from this channel, continue to next
 					}
 				}
-				// If no messages were processed, sleep briefly to avoid busy waiting
+				// If no messages were processed, use shorter sleep to reduce latency
 				if !processed {
 					time.Sleep(10 * time.Millisecond)
 				}
@@ -581,7 +581,7 @@ func (out *Output) Start() error {
 							// No message available from this channel, continue to next
 						}
 					}
-					// If no messages were processed, sleep briefly to avoid busy waiting
+					// If no messages were processed, use shorter sleep to reduce latency
 					if !processed {
 						time.Sleep(10 * time.Millisecond)
 					}
@@ -709,7 +709,6 @@ func (out *Output) GetIncrementAndUpdate() uint64 {
 	if atomic.CompareAndSwapUint64(&out.lastReportedTotal, last, current) {
 		return current - last
 	}
-	
 	return 0
 }
 

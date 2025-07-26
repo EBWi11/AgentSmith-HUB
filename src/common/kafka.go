@@ -260,6 +260,16 @@ func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCo
 		kgo.ConsumerGroup(group),
 		kgo.ConsumeTopics(topic),
 		kgo.DisableAutoCommit(), // manual commit for perf
+
+		// Performance optimizations
+		kgo.FetchMaxBytes(52428800),                  // 50MB fetch buffer
+		kgo.FetchMinBytes(1),                         // Start fetching immediately
+		kgo.FetchMaxWait(500 * time.Millisecond),     // Max wait time for batching
+		kgo.ConnIdleTimeout(9 * time.Minute),         // Keep connections alive
+		kgo.RequestTimeoutOverhead(10 * time.Second), // Network timeout
+		kgo.RetryBackoffFn(func(tries int) time.Duration {
+			return time.Duration(tries) * 100 * time.Millisecond // Exponential backoff
+		}),
 	}
 
 	// Add compression if specified

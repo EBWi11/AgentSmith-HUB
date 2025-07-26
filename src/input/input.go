@@ -568,7 +568,7 @@ func (in *Input) GetIncrementAndUpdate() uint64 {
 	if atomic.CompareAndSwapUint64(&in.lastReportedTotal, last, current) {
 		return current - last
 	}
-	
+
 	return 0
 }
 

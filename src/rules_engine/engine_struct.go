@@ -28,9 +28,14 @@ const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
 // getMinPoolSize returns the minimum pool size
-// Fixed at 2 for consistent baseline
+// Increased for better throughput on multi-core systems
 func getMinPoolSize() int {
-	return 2
+	cpuCount := runtime.NumCPU()
+	minSize := cpuCount / 2 // Use half CPU cores as minimum (7 threads for 14-core system)
+	if minSize < 4 {
+		minSize = 4
+	}
+	return minSize
 }
 
 // getMaxPoolSize returns the maximum pool size based on CPU count
