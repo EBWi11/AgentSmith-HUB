@@ -145,12 +145,6 @@ func (r *Ruleset) Start() error {
 							}
 						}
 
-						// Check if there are any downstream channels
-						if len(r.DownStream) == 0 {
-							logger.Warn("No downstream channels available, skipping message processing", "ruleset", r.RulesetID)
-							return
-						}
-
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
 						// Send results to downstream channels with blocking writes to ensure no data loss

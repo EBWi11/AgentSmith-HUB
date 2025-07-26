@@ -322,13 +322,6 @@ func (in *Input) Start() error {
 						logger.Info("Kafka message channel closed", "input", in.Id)
 						return
 					}
-
-					// Check if there are any downstream channels
-					if len(in.DownStream) == 0 {
-						logger.Warn("No downstream channels available, skipping message", "input", in.Id)
-						continue
-					}
-
 					// Only increment total count - QPS calculation removed
 					atomic.AddUint64(&in.consumeTotal, 1)
 
@@ -407,12 +400,6 @@ func (in *Input) Start() error {
 						return
 					}
 
-					// Check if there are any downstream channels
-					if len(in.DownStream) == 0 {
-						logger.Warn("No downstream channels available, skipping message", "input", in.Id)
-						continue
-					}
-
 					atomic.AddUint64(&in.consumeTotal, 1)
 
 					// Sample the message
@@ -459,12 +446,6 @@ func (in *Input) StartForTesting() error {
 // ProcessTestData processes test data through the input component's normal data flow
 // This ensures test data goes through the same processing as production data
 func (in *Input) ProcessTestData(data map[string]interface{}) {
-	// Check if there are any downstream channels
-	if len(in.DownStream) == 0 {
-		logger.Warn("No downstream channels available, skipping test message", "input", in.Id)
-		return
-	}
-
 	// Only increment total count - same as production logic
 	atomic.AddUint64(&in.consumeTotal, 1)
 
