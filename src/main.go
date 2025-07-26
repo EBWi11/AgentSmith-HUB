@@ -13,6 +13,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path"
@@ -151,6 +153,9 @@ func main() {
 	} else {
 		logger.Info("Component monitor started successfully")
 	}
+
+	// Start pprof server if enabled
+	startPprofServer()
 
 	if *isLeader {
 		common.InitClusterSystemManager()
@@ -495,4 +500,43 @@ func loadHubConfig(root string) error {
 	logger.Info("Final Redis configuration", "host", common.Config.Redis, "password_set", common.Config.RedisPassword != "")
 
 	return nil
+}
+
+// startPprofServer starts the pprof HTTP server if enabled in configuration
+func startPprofServer() {
+	if common.Config.Pprof == nil || !common.Config.Pprof.Enabled {
+		logger.Debug("pprof server disabled in configuration")
+		return
+	}
+
+	port := common.Config.Pprof.Port
+	if port <= 0 {
+		port = 6060 // Default pprof port
+	}
+
+	pprofAddr := fmt.Sprintf("localhost:%d", port)
+	
+	go func() {
+		logger.Info("Starting pprof server", "address", pprofAddr, 
+			"endpoints", []string{
+				fmt.Sprintf("http://%s/debug/pprof/", pprofAddr),
+				fmt.Sprintf("http://%s/debug/pprof/goroutine", pprofAddr),
+				fmt.Sprintf("http://%s/debug/pprof/heap", pprofAddr),
+				fmt.Sprintf("http://%s/debug/pprof/profile", pprofAddr),
+				fmt.Sprintf("http://%s/debug/pprof/trace", pprofAddr),
+			})
+		
+		// Create a simple HTTP server for pprof
+		server := &http.Server{
+			Addr: pprofAddr,
+			Handler: http.DefaultServeMux, // pprof handlers are registered to DefaultServeMux
+		}
+		
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("pprof server failed", "error", err, "address", pprofAddr)
+		}
+	}()
+	
+	logger.Info("pprof server enabled", "address", pprofAddr, 
+		"help", "Access performance profiles at http://"+pprofAddr+"/debug/pprof/")
 }

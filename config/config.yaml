@@ -1,2 +1,8 @@
-redis: 127.0.0.1:6379
-redis_password: ""
+redis: 192.168.124.12:6379
+redis_password: "toor"
+
+# Performance profiling configuration
+pprof:
+  enabled: true           # Enable/disable pprof endpoint
+  port: 6060             # pprof HTTP server port (default: 6060)
+  # Access pprof at: http://localhost:6060/debug/pprof/

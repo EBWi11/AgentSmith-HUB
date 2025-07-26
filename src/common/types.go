@@ -23,12 +23,19 @@ type CheckCoreCache struct {
 }
 
 type HubConfig struct {
-	Redis         string `yaml:"redis"`
-	RedisPassword string `yaml:"redis_password,omitempty"`
+	Redis         string       `yaml:"redis"`
+	RedisPassword string       `yaml:"redis_password,omitempty"`
+	Pprof         *PprofConfig `yaml:"pprof,omitempty"`
 	ConfigRoot    string
 	Leader        string
 	LocalIP       string
 	Token         string
+}
+
+// PprofConfig holds performance profiling configuration
+type PprofConfig struct {
+	Enabled bool `yaml:"enabled"`
+	Port    int  `yaml:"port"`
 }
 
 // Operation types for project operations
