@@ -1468,22 +1468,43 @@ func (p *Project) initComponents() error {
 				// Always try to establish connection
 				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
 					fromInput.DownStream[node.ToPNS] = toChannel
+					logger.Info("Input downstream connection established",
+						"project", p.Id,
+						"input", fromInput.Id,
+						"from_pns", node.FromPNS,
+						"to_pns", node.ToPNS,
+						"to_type", node.ToType)
 				} else {
 					// If no local channel, try to find existing channel in shared PNS component
 					if node.ToType == "OUTPUT" {
 						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
 							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
 								fromInput.DownStream[node.ToPNS] = sharedChannel
+								logger.Info("Input downstream connection established to shared output",
+									"project", p.Id,
+									"input", fromInput.Id,
+									"from_pns", node.FromPNS,
+									"to_pns", node.ToPNS)
 							}
 						}
 					} else if node.ToType == "RULESET" {
 						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
 							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
 								fromInput.DownStream[node.ToPNS] = sharedChannel
+								logger.Info("Input downstream connection established to shared ruleset",
+									"project", p.Id,
+									"input", fromInput.Id,
+									"from_pns", node.FromPNS,
+									"to_pns", node.ToPNS)
 							}
 						}
 					}
 				}
+			} else {
+				logger.Warn("Input component not found for connection",
+					"project", p.Id,
+					"from_pns", node.FromPNS,
+					"from_id", node.FromID)
 			}
 		}
 	}
@@ -1492,28 +1513,10 @@ func (p *Project) initComponents() error {
 }
 
 func (p *Project) runComponents() error {
-	inputs := p.GetProjectInputs()
-	for _, in := range inputs {
-		if p.Testing {
-			// In testing mode, use StartForTesting to avoid connecting to external data sources
-			if err := in.StartForTesting(); err != nil {
-				return fmt.Errorf("failed to start input component in testing mode %s: %w", in.Id, err)
-			}
-		} else {
-			// Production mode: normal start
-			if err := in.Start(); err != nil {
-				return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
-			}
-		}
-	}
+	// Start components in reverse dependency order: outputs -> rulesets -> inputs
+	// This ensures downstream components are ready before upstream starts producing data
 
-	rulesets := p.GetProjectRulesets()
-	for _, rs := range rulesets {
-		if err := rs.Start(); err != nil {
-			return fmt.Errorf("failed to start ruleset component %s: %w", rs.RulesetID, err)
-		}
-	}
-
+	// 1. Start output components first (they need to be ready to receive data)
 	outputs := p.GetProjectOutputs()
 	for _, out := range outputs {
 		if p.Testing {
@@ -1525,6 +1528,30 @@ func (p *Project) runComponents() error {
 			// Production mode: normal start
 			if err := out.Start(); err != nil {
 				return fmt.Errorf("failed to start output component %s: %w", out.Id, err)
+			}
+		}
+	}
+
+	// 2. Start ruleset components (middle components in the pipeline)
+	rulesets := p.GetProjectRulesets()
+	for _, rs := range rulesets {
+		if err := rs.Start(); err != nil {
+			return fmt.Errorf("failed to start ruleset component %s: %w", rs.RulesetID, err)
+		}
+	}
+
+	// 3. Start input components last (they will begin producing data immediately)
+	inputs := p.GetProjectInputs()
+	for _, in := range inputs {
+		if p.Testing {
+			// In testing mode, use StartForTesting to avoid connecting to external data sources
+			if err := in.StartForTesting(); err != nil {
+				return fmt.Errorf("failed to start input component in testing mode %s: %w", in.Id, err)
+			}
+		} else {
+			// Production mode: normal start
+			if err := in.Start(); err != nil {
+				return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
 			}
 		}
 	}

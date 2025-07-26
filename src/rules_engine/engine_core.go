@@ -139,31 +139,36 @@ func (r *Ruleset) Start() error {
 
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
-						// Send results to downstream channels with blocking writes to ensure no data loss
+						// PERFORMANCE FIX: Use non-blocking writes with buffered channels
+						// If downstream is full, drop the message to prevent blocking the entire pipeline
 						for _, res := range results {
 							for _, downCh := range r.DownStream {
-								*downCh <- res
+								select {
+								case *downCh <- res:
+									// Successfully sent
+								default:
+									// Channel full, log and continue to prevent blocking
+									logger.Warn("Downstream channel full, dropping message",
+										"ruleset", r.RulesetID, "channel_len", len(*downCh))
+								}
 							}
 						}
 					}
 
-					// Handle task submission with retry mechanism to ensure no data loss
-					for {
+					// PERFORMANCE FIX: Improved task submission with backpressure handling
+					select {
+					case <-r.stopChan:
+						// Ruleset is stopping, execute synchronously to not lose the message
+						logger.Info("Ruleset stopping, executing final task synchronously",
+							"ruleset", r.RulesetID)
+						task()
+						return
+					default:
 						err := r.antsPool.Submit(task)
-						if err == nil {
-							// Successfully submitted
-							break
-						}
-
-						select {
-						case <-r.stopChan:
-							// Ruleset is stopping, execute synchronously to not lose the message
-							logger.Info("Ruleset stopping, executing final task synchronously",
-								"ruleset", r.RulesetID)
+						if err != nil {
+							// Pool is full - execute synchronously to maintain throughput
+							// This prevents the busy-wait loop that was causing CPU waste
 							task()
-							return
-						default:
-							time.Sleep(1 * time.Millisecond)
 						}
 					}
 				}

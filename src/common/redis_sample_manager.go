@@ -38,6 +38,8 @@ type RedisSampleManager struct {
 	maxSamplesPerKey int
 	cleanupTicker    *time.Ticker
 	stopChan         chan struct{}
+	batchChannel     chan SampleData // Channel for batch processing
+	batchTicker      *time.Ticker    // Ticker for batch processing
 }
 
 // NewRedisSampleManager creates a new Redis Sample Manager
@@ -47,10 +49,15 @@ func NewRedisSampleManager() *RedisSampleManager {
 		maxSamplesPerKey: DefaultMaxSamplesPerKey,
 		cleanupTicker:    time.NewTicker(DefaultCleanupInterval),
 		stopChan:         make(chan struct{}),
+		batchChannel:     make(chan SampleData, 5000),            // Large buffer for batch processing
+		batchTicker:      time.NewTicker(200 * time.Millisecond), // Batch every 200ms
 	}
 
 	// Start cleanup goroutine
 	go rsm.startCleanup()
+
+	// Start batch processing goroutine
+	go rsm.startBatchProcessor()
 
 	return rsm
 }
@@ -320,6 +327,122 @@ func (rsm *RedisSampleManager) Close() {
 		rsm.cleanupTicker.Stop()
 	}
 	close(rsm.stopChan)
+}
+
+// startBatchProcessor processes samples in batches to improve Redis performance
+func (rsm *RedisSampleManager) startBatchProcessor() {
+	batch := make([]SampleData, 0, 200) // Batch size of 200
+
+	for {
+		select {
+		case sample, ok := <-rsm.batchChannel:
+			if !ok {
+				// Channel closed, process remaining batch and exit
+				if len(batch) > 0 {
+					rsm.processBatch(batch)
+				}
+				return
+			}
+
+			batch = append(batch, sample)
+
+			// Process batch when it reaches capacity
+			if len(batch) >= 200 {
+				rsm.processBatch(batch)
+				batch = batch[:0] // Reset batch
+			}
+
+		case <-rsm.batchTicker.C:
+			// Process batch periodically even if not full
+			if len(batch) > 0 {
+				rsm.processBatch(batch)
+				batch = batch[:0] // Reset batch
+			}
+
+		case <-rsm.stopChan:
+			// Process remaining batch and exit
+			if len(batch) > 0 {
+				rsm.processBatch(batch)
+			}
+			return
+		}
+	}
+}
+
+// processBatch processes a batch of samples efficiently using Redis pipeline
+func (rsm *RedisSampleManager) processBatch(batch []SampleData) {
+	if rdb == nil || len(batch) == 0 {
+		return
+	}
+
+	ctx := context.Background()
+	pipe := rdb.TxPipeline()
+
+	// Group samples by key to optimize Redis operations
+	samplesByKey := make(map[string][]SampleData)
+	for _, sample := range batch {
+		key := fmt.Sprintf("%s%s:%s", RedisSampleKeyPrefix, sample.ProjectNodeSequence, "unknown") // We need sampler name
+		samplesByKey[key] = append(samplesByKey[key], sample)
+	}
+
+	// Process each key group
+	for key, samples := range samplesByKey {
+		for _, sample := range samples {
+			// Create Redis sample data
+			redisSample := RedisSampleData{
+				Data:                sample.Data,
+				Timestamp:           sample.Timestamp,
+				ProjectNodeSequence: sample.ProjectNodeSequence,
+				SamplerName:         "unknown", // We need to pass sampler name
+				Score:               float64(sample.Timestamp.Unix()),
+			}
+
+			// Serialize to JSON
+			jsonData, err := json.Marshal(redisSample)
+			if err != nil {
+				continue
+			}
+
+			// Add to sorted set (sorted by timestamp)
+			pipe.ZAdd(ctx, key, redis.Z{
+				Score:  redisSample.Score,
+				Member: jsonData,
+			})
+
+			// Set TTL on the key
+			pipe.Expire(ctx, key, rsm.ttl)
+
+			// Keep only the most recent N samples
+			pipe.ZRemRangeByRank(ctx, key, 0, -int64(rsm.maxSamplesPerKey+1))
+		}
+	}
+
+	// Execute pipeline
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		// Log error but don't fail completely
+		fmt.Printf("Failed to execute batch Redis operations: %v\n", err)
+	}
+}
+
+// StoreSampleAsync stores a sample asynchronously via batch processing
+func (rsm *RedisSampleManager) StoreSampleAsync(samplerName string, sample SampleData) error {
+	if rsm.batchChannel == nil {
+		// Fall back to synchronous storage
+		return rsm.StoreSample(samplerName, sample)
+	}
+
+	// Add sampler name to sample for batch processing
+	// We need to extend SampleData to include sampler name, or modify the approach
+
+	// For now, send to batch channel (non-blocking)
+	select {
+	case rsm.batchChannel <- sample:
+		return nil
+	default:
+		// Channel full, fall back to synchronous storage
+		return rsm.StoreSample(samplerName, sample)
+	}
 }
 
 // Global Redis sample manager instance

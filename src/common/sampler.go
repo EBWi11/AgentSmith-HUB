@@ -35,13 +35,13 @@ type SamplerStats struct {
 
 // Sampler represents a sampling instance with timer-based sampling
 type Sampler struct {
-	name              string
-	totalCount        uint64
-	sampledCount      uint64
-	maxSamples        int
-	pool              *ants.Pool // Used for asynchronous processing of sampling data
-	closed            int32      // Mark whether it's closed
-	lastSampleTime    sync.Map   // Cache for last sample time per project sequence
+	name           string
+	totalCount     uint64
+	sampledCount   uint64
+	maxSamples     int
+	pool           *ants.Pool // Used for asynchronous processing of sampling data
+	closed         int32      // Mark whether it's closed
+	lastSampleTime sync.Map   // Cache for last sample time per project sequence
 }
 
 // NewSampler creates a new sampler instance
@@ -51,7 +51,7 @@ func NewSampler(name string) *Sampler {
 		// If creating goroutine pool fails, use default pool
 		pool = nil
 	}
-	
+
 	return &Sampler{
 		name:       name,
 		maxSamples: 100,
@@ -59,66 +59,68 @@ func NewSampler(name string) *Sampler {
 	}
 }
 
-// Sample attempts to sample the data based on timer (simplified version)
+// Sample attempts to sample the data based on timer (performance optimized version)
 func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
-	// Normalize ProjectNodeSequence to lower-case to avoid case-sensitivity issues downstream
-	projectNodeSequence = strings.ToLower(projectNodeSequence)
-
-	// Check if already closed
-	if atomic.LoadInt32(&s.closed) == 1 {
+	// Quick checks first to avoid expensive operations
+	if atomic.LoadInt32(&s.closed) == 1 || data == nil || projectNodeSequence == "" {
 		return false
 	}
 
-	// Check parameter validity
-	if data == nil || projectNodeSequence == "" {
-		return false
-	}
+	// Normalize ProjectNodeSequence to lower-case (only once)
+	normalizedKey := strings.ToLower(projectNodeSequence)
 
 	// Increment total counter using atomic operations
 	atomic.AddUint64(&s.totalCount, 1)
 
-	// Check if enough time has passed since last sample for this project sequence
+	// Get current time only once
 	now := time.Now()
-	lastSampleTimeInterface, exists := s.lastSampleTime.Load(projectNodeSequence)
-	
+
+	// Check if enough time has passed since last sample for this project sequence
+	lastSampleTimeInterface, exists := s.lastSampleTime.Load(normalizedKey)
+
 	var shouldSample bool
 	if !exists {
 		// First sample for this project sequence
 		shouldSample = true
 	} else {
-		lastSampleTime := lastSampleTimeInterface.(time.Time)
-		// Sample if 3 minutes have passed since last sample
-		shouldSample = now.Sub(lastSampleTime) >= SamplingInterval
+		// Use type assertion with ok pattern for safety and performance
+		if lastSampleTime, ok := lastSampleTimeInterface.(time.Time); ok {
+			// Sample if 3 minutes have passed since last sample
+			shouldSample = now.Sub(lastSampleTime) >= SamplingInterval
+		} else {
+			// Corrupted data, treat as first sample
+			shouldSample = true
+		}
 	}
 
 	if !shouldSample {
 		return false
 	}
 
-	// Update last sample time
-	s.lastSampleTime.Store(projectNodeSequence, now)
+	// Update last sample time with normalized key
+	s.lastSampleTime.Store(normalizedKey, now)
 
 	// Increment sampling count
 	atomic.AddUint64(&s.sampledCount, 1)
 
-	// Create sample data
+	// Create sample data (use original projectNodeSequence for data consistency)
 	sample := SampleData{
 		Data:                data,
 		Timestamp:           now,
-		ProjectNodeSequence: projectNodeSequence,
+		ProjectNodeSequence: projectNodeSequence, // Keep original case for downstream
 	}
 
-	// Store sample asynchronously
+	// Store sample asynchronously if pool is available
 	if s.pool != nil && !s.pool.IsClosed() {
 		err := s.pool.Submit(func() {
-			s.storeSample(sample, projectNodeSequence)
+			s.storeSample(sample, normalizedKey)
 		})
 		if err != nil {
 			// If submission fails, process synchronously
-			s.storeSample(sample, projectNodeSequence)
+			s.storeSample(sample, normalizedKey)
 		}
 	} else {
-		s.storeSample(sample, projectNodeSequence)
+		s.storeSample(sample, normalizedKey)
 	}
 
 	return true
@@ -203,7 +205,7 @@ func (s *Sampler) Reset() {
 func (s *Sampler) Close() {
 	// Mark as closed
 	atomic.StoreInt32(&s.closed, 1)
-	
+
 	// Close goroutine pool
 	if s.pool != nil {
 		s.pool.Release()
