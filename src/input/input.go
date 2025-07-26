@@ -557,19 +557,19 @@ func (in *Input) ResetConsumeTotal() uint64 {
 }
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
-// This method is thread-safe and designed for 5-second statistics collection.
-// Uses CAS operation to ensure atomicity and prevent race conditions.
+// This method is thread-safe and designed for statistics collection.
+// Uses CAS operation to ensure atomicity.
 func (in *Input) GetIncrementAndUpdate() uint64 {
-	for {
-		current := atomic.LoadUint64(&in.consumeTotal)
-		last := atomic.LoadUint64(&in.lastReportedTotal)
+	current := atomic.LoadUint64(&in.consumeTotal)
+	last := atomic.LoadUint64(&in.lastReportedTotal)
 
-		// Use CAS to atomically update lastReportedTotal
-		if atomic.CompareAndSwapUint64(&in.lastReportedTotal, last, current) {
-			return current - last
-		}
-		// If CAS failed, retry
+	// Use CAS to atomically update lastReportedTotal
+	// If CAS fails, we simply return 0 - one missed stat collection is not critical
+	if atomic.CompareAndSwapUint64(&in.lastReportedTotal, last, current) {
+		return current - last
 	}
+	
+	return 0
 }
 
 // CheckConnectivity performs a real connectivity test for the input component

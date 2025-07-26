@@ -785,19 +785,19 @@ func (r *Ruleset) ResetProcessTotal() uint64 {
 }
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
-// This method is thread-safe and designed for 5-second statistics collection.
-// Uses CAS operation to ensure atomicity and prevent race conditions.
+// This method is thread-safe and designed for statistics collection.
+// Uses CAS operation to ensure atomicity.
 func (r *Ruleset) GetIncrementAndUpdate() uint64 {
-	for {
-		current := atomic.LoadUint64(&r.processTotal)
-		last := atomic.LoadUint64(&r.lastReportedTotal)
+	current := atomic.LoadUint64(&r.processTotal)
+	last := atomic.LoadUint64(&r.lastReportedTotal)
 
-		// Use CAS to atomically update lastReportedTotal
-		if atomic.CompareAndSwapUint64(&r.lastReportedTotal, last, current) {
-			return current - last
-		}
-		// If CAS failed, retry
+	// Use CAS to atomically update lastReportedTotal
+	// If CAS fails, we simply return 0 - one missed stat collection is not critical
+	if atomic.CompareAndSwapUint64(&r.lastReportedTotal, last, current) {
+		return current - last
 	}
+	
+	return 0
 }
 
 // GetRunningTaskCount returns the number of currently running tasks in the thread pool

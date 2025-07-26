@@ -780,38 +780,36 @@ func (p *Plugin) RecordInvocation(success bool) {
 }
 
 // GetSuccessIncrementAndUpdate returns the increment in success count since last call and updates the baseline
-// This method is thread-safe and designed for 5-second statistics collection.
-// Uses CAS operation to ensure atomicity and prevent race conditions.
+// This method is thread-safe and designed for statistics collection.
+// Uses CAS operation to ensure atomicity.
 func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
-	for {
-		currentTotal := atomic.LoadUint64(&p.successTotal)
-		lastReported := atomic.LoadUint64(&p.lastReportedSuccessTotal)
+	currentTotal := atomic.LoadUint64(&p.successTotal)
+	lastReported := atomic.LoadUint64(&p.lastReportedSuccessTotal)
 
-		// Use CAS to atomically update lastReportedSuccessTotal
-		if atomic.CompareAndSwapUint64(&p.lastReportedSuccessTotal, lastReported, currentTotal) {
-			return currentTotal - lastReported
-		}
-		// If CAS failed, retry
+	// Use CAS to atomically update lastReportedSuccessTotal
+	// If CAS fails, we simply return 0 - one missed stat collection is not critical
+	if atomic.CompareAndSwapUint64(&p.lastReportedSuccessTotal, lastReported, currentTotal) {
+		return currentTotal - lastReported
 	}
+	
+	return 0
 }
 
 // GetFailureIncrementAndUpdate returns the increment in failure count since last call and updates the baseline
-// This method is thread-safe and designed for 5-second statistics collection.
-// Uses CAS operation to ensure atomicity and prevent race conditions.
+// This method is thread-safe and designed for statistics collection.
+// Uses CAS operation to ensure atomicity.
 func (p *Plugin) GetFailureIncrementAndUpdate() uint64 {
-	for {
-		currentTotal := atomic.LoadUint64(&p.failureTotal)
-		lastReported := atomic.LoadUint64(&p.lastReportedFailureTotal)
+	currentTotal := atomic.LoadUint64(&p.failureTotal)
+	lastReported := atomic.LoadUint64(&p.lastReportedFailureTotal)
 
-		// Use CAS to atomically update lastReportedFailureTotal
-		if atomic.CompareAndSwapUint64(&p.lastReportedFailureTotal, lastReported, currentTotal) {
-			return currentTotal - lastReported
-		}
-		// If CAS failed, retry
+	// Use CAS to atomically update lastReportedFailureTotal
+	// If CAS fails, we simply return 0 - one missed stat collection is not critical
+	if atomic.CompareAndSwapUint64(&p.lastReportedFailureTotal, lastReported, currentTotal) {
+		return currentTotal - lastReported
 	}
-}
-
-// ResetSuccessTotal resets the success counter and baseline (for restart scenarios)
+	
+	return 0
+}// ResetSuccessTotal resets the success counter and baseline (for restart scenarios)
 func (p *Plugin) ResetSuccessTotal() {
 	atomic.StoreUint64(&p.successTotal, 0)
 	atomic.StoreUint64(&p.lastReportedSuccessTotal, 0)
