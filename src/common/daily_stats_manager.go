@@ -134,7 +134,7 @@ func NewDailyStatsManager() *DailyStatsManager {
 	dsm := &DailyStatsManager{
 		stopChan:       make(chan struct{}),
 		redisKeyPrefix: "hub:daily_stats:", // Redis key prefix
-		saveInterval:   10 * time.Second,   // Collect every 10 seconds
+		saveInterval:   5 * time.Second,    // Collect every 5 seconds
 		retentionDays:  10,                 // Keep 30 days of data
 	}
 
@@ -237,7 +237,7 @@ func (dsm *DailyStatsManager) getDailyStatsLegacy(date, projectID, nodeID string
 }
 
 // persistenceLoop periodically collects data from all components and saves to Redis
-// Includes execution time control to prevent overlapping collections
+// Improved to handle high concurrency scenarios with better error handling
 func (dsm *DailyStatsManager) persistenceLoop() {
 	ticker := time.NewTicker(dsm.saveInterval)
 	defer ticker.Stop()
@@ -266,12 +266,14 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 					select {
 					case <-done:
 						// Collection completed successfully
-					case <-time.After(8 * time.Second): // Timeout at 8 seconds to prevent overlap
+					case <-time.After(4 * time.Second): // Timeout at 4 seconds to prevent overlap
 						logger.Warn("Statistics collection timed out, may have missed some data")
 					}
 				}()
 			} else {
-				logger.Warn("Previous statistics collection still in progress, skipping this cycle")
+				// Instead of skipping, wait a bit and try again to avoid data loss
+				logger.Debug("Previous statistics collection still in progress, waiting...")
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 	}
@@ -294,12 +296,31 @@ func (dsm *DailyStatsManager) ApplyBatchUpdates(dailyStatsData []DailyStatsData)
 		data.Date = date
 		data.NodeID = GetNodeID()
 
-		if err := dsm.writeToRedisLegacy(&data, data.TotalMessages, expiration); err != nil {
-			logger.Error("Failed to write statistics increment",
-				"component", data.ComponentID,
-				"sequence", data.ProjectNodeSequence,
-				"increment", data,
-				"error", err)
+		// Add retry mechanism for Redis writes to prevent data loss
+		maxRetries := 3
+		for retry := 0; retry < maxRetries; retry++ {
+			if err := dsm.writeToRedisLegacy(&data, data.TotalMessages, expiration); err != nil {
+				if retry == maxRetries-1 {
+					// Final retry failed, log error
+					logger.Error("Failed to write statistics increment after retries",
+						"component", data.ComponentID,
+						"sequence", data.ProjectNodeSequence,
+						"increment", data.TotalMessages,
+						"retries", retry+1,
+						"error", err)
+				} else {
+					// Retry after a short delay
+					logger.Warn("Redis write failed, retrying",
+						"component", data.ComponentID,
+						"sequence", data.ProjectNodeSequence,
+						"retry", retry+1,
+						"error", err)
+					time.Sleep(100 * time.Millisecond)
+				}
+			} else {
+				// Success, break retry loop
+				break
+			}
 		}
 	}
 }

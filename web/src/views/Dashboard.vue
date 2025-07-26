@@ -794,42 +794,23 @@ function getProjectMessageStats(projectId) {
         const componentType = componentData.component_type.toLowerCase()
         
         if (componentType === 'input') {
-          // Only count input if ProjectNodeSequence starts with "INPUT.componentId"
-          // This matches patterns like "INPUT.api_sec" (not "INPUT.api_sec.RULESET.test")
+          // Count input components - ProjectNodeSequence should start with "INPUT.componentId"
           if (keyParts.length === 2 && keyParts[0].toUpperCase() === 'INPUT') {
             input += dailyMessages
             debugInfo.breakdown.input.push({ sequence: key, messages: dailyMessages })
           }
         } else if (componentType === 'output') {
-          // Only count output if ProjectNodeSequence ends with "OUTPUT.componentId"
-          // This matches patterns like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
+          // Count output components - ProjectNodeSequence should end with "OUTPUT.componentId"
           if (keyParts.length >= 2 && 
               keyParts[keyParts.length - 2].toUpperCase() === 'OUTPUT') {
             output += dailyMessages
             debugInfo.breakdown.output.push({ sequence: key, messages: dailyMessages })
           }
         } else if (componentType === 'ruleset') {
-          // Count ruleset processing load - only count actual ruleset processing (not downstream flow)
-          // This represents the actual data volume processed by this specific ruleset
-          for (let i = 0; i < keyParts.length - 1; i++) {
-            if (keyParts[i].toUpperCase() === 'RULESET') {
-              // Only count if this is the RULESET's own ProjectNodeSequence
-              // Avoid counting downstream components like "INPUT.api_sec.RULESET.test.OUTPUT.print_demo"
-              
-              // Check if there are more components after this RULESET in the sequence
-              const hasDownstream = (i + 2) < keyParts.length;
-              
-              if (!hasDownstream) {
-                // This is the RULESET's own ProjectNodeSequence (ends with RULESET.componentId)
-                ruleset += dailyMessages;
-                debugInfo.breakdown.ruleset.push({ sequence: key, messages: dailyMessages })
-              }
-              // If hasDownstream is true, this means it's a downstream component's sequence
-              // that happens to contain this RULESET in its path - we don't count it
-              
-              break;
-            }
-          }
+          // Count ruleset components - each ProjectNodeSequence represents a unique ruleset
+          // The key itself is the ProjectNodeSequence for this specific ruleset
+          ruleset += dailyMessages
+          debugInfo.breakdown.ruleset.push({ sequence: key, messages: dailyMessages })
         }
       }
     }

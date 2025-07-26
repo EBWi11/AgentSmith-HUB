@@ -780,6 +780,7 @@ func (p *Plugin) RecordInvocation(success bool) {
 }
 
 // GetSuccessIncrementAndUpdate returns the increment in success count since last call and updates the baseline
+// This method is thread-safe and designed for 5-second statistics collection.
 // Uses CAS operation to ensure atomicity and prevent race conditions.
 func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
 	for {
@@ -795,6 +796,7 @@ func (p *Plugin) GetSuccessIncrementAndUpdate() uint64 {
 }
 
 // GetFailureIncrementAndUpdate returns the increment in failure count since last call and updates the baseline
+// This method is thread-safe and designed for 5-second statistics collection.
 // Uses CAS operation to ensure atomicity and prevent race conditions.
 func (p *Plugin) GetFailureIncrementAndUpdate() uint64 {
 	for {

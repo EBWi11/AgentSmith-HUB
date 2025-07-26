@@ -15,28 +15,18 @@ import (
 	"strings"
 	"time"
 
-	"sync"
-
 	"gopkg.in/yaml.v3"
 )
 
 var GlobalProject *GlobalProjectInfo
 
 // collectAllComponentStats collects current statistics from all running components
-// All increments are collected atomically at the same moment to ensure consistency
-// Uses mutex to prevent concurrent access during collection
+// Optimized for high concurrency with minimal lock time
 func collectAllComponentStats() []common.DailyStatsData {
 	var components []common.DailyStatsData
 
-	// Use a mutex to ensure atomic collection across all components
-	var statsMutex sync.Mutex
-	statsMutex.Lock()
-	defer statsMutex.Unlock()
-
-	// Take a snapshot of running projects to minimize lock time
+	// Take a snapshot of running projects first to minimize lock time
 	var runningProjects []*Project
-
-	//ProjectStatusRunning
 	ForEachProject(func(id string, proj *Project) bool {
 		if proj.Status == common.StatusRunning {
 			runningProjects = append(runningProjects, proj)
@@ -44,7 +34,9 @@ func collectAllComponentStats() []common.DailyStatsData {
 		return true
 	})
 
+	// Collect statistics from each project without global lock
 	for _, proj := range runningProjects {
+		// Collect input statistics
 		for _, i := range proj.Inputs {
 			increment := i.GetIncrementAndUpdate()
 			if increment > 0 {
@@ -58,6 +50,7 @@ func collectAllComponentStats() []common.DailyStatsData {
 			}
 		}
 
+		// Collect output statistics
 		for _, o := range proj.Outputs {
 			increment := o.GetIncrementAndUpdate()
 			if increment > 0 {
@@ -71,6 +64,7 @@ func collectAllComponentStats() []common.DailyStatsData {
 			}
 		}
 
+		// Collect ruleset statistics
 		for _, r := range proj.Rulesets {
 			increment := r.GetIncrementAndUpdate()
 			if increment > 0 {
@@ -85,6 +79,7 @@ func collectAllComponentStats() []common.DailyStatsData {
 		}
 	}
 
+	// Collect plugin statistics (plugins are global, no project lock needed)
 	for pluginName, p := range plugin.Plugins {
 		// Plugin success statistics - use increment method
 		successIncrement := p.GetSuccessIncrementAndUpdate()

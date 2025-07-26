@@ -353,9 +353,10 @@ func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine i
 					}
 
 					// Store parsed plugin info with negation flag
-					pluginCopy := *plugin.Plugins[pluginName]
-					pluginCopy.IsNegated = isNegated
-					checkNode.Plugin = &pluginCopy
+					// Use the original plugin instance to ensure statistics are recorded correctly
+					checkNode.Plugin = plugin.Plugins[pluginName]
+					// Store negation flag separately since we can't modify the original plugin
+					checkNode.IsNegated = isNegated
 					checkNode.PluginArgs = args
 				}
 

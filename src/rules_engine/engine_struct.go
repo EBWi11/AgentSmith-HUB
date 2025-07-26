@@ -139,6 +139,7 @@ type CheckNodes struct {
 
 	Plugin     *plugin.Plugin
 	PluginArgs []*PluginArg
+	IsNegated  bool // Whether the plugin result should be negated (for ! prefix)
 }
 
 type PluginArg struct {
@@ -2007,10 +2008,10 @@ func processCheckNode(node *CheckNodes, checklist *Checklist, ruleID string) err
 		}
 
 		if p, ok := plugin.Plugins[pluginName]; ok {
-			// Create a copy of the plugin with negation flag
-			pluginCopy := *p
-			pluginCopy.IsNegated = isNegated
-			node.Plugin = &pluginCopy
+			// Use the original plugin instance to ensure statistics are recorded correctly
+			node.Plugin = p
+			// Store negation flag separately since we can't modify the original plugin
+			node.IsNegated = isNegated
 		} else {
 			// Check if it's a temporary component, temporary components should not be referenced
 			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {

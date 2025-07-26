@@ -698,7 +698,7 @@ func (out *Output) ResetProduceTotal() uint64 {
 }
 
 // GetIncrementAndUpdate returns the increment since last call and updates the baseline.
-// This method is thread-safe and designed for 10-second statistics collection.
+// This method is thread-safe and designed for 5-second statistics collection.
 // Uses CAS operation to ensure atomicity and prevent race conditions.
 func (out *Output) GetIncrementAndUpdate() uint64 {
 	for {
