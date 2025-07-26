@@ -281,7 +281,13 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 
 func (dsm *DailyStatsManager) CollectAllComponentsData() {
 	if statsCollector != nil {
-		dsm.ApplyBatchUpdates(GetStatsCollector()())
+		// 检查是否有运行中的项目，如果没有则跳过收集
+		stats := GetStatsCollector()()
+		if len(stats) == 0 {
+			logger.Debug("No running components found, skipping stats collection")
+			return
+		}
+		dsm.ApplyBatchUpdates(stats)
 	}
 }
 
@@ -295,6 +301,11 @@ func (dsm *DailyStatsManager) ApplyBatchUpdates(dailyStatsData []DailyStatsData)
 		data := dailyStatsData[i]
 		data.Date = date
 		data.NodeID = GetNodeID()
+
+		// Skip writing to Redis if TotalMessages is 0
+		if data.TotalMessages == 0 {
+			continue
+		}
 
 		// Add retry mechanism for Redis writes to prevent data loss
 		maxRetries := 3

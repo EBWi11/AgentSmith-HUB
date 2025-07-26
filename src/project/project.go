@@ -80,26 +80,31 @@ func collectAllComponentStats() []common.DailyStatsData {
 	}
 
 	// Collect plugin statistics (plugins are global, no project lock needed)
+	// Only collect if there are running projects or if increments are greater than 0
 	for pluginName, p := range plugin.Plugins {
 		// Plugin success statistics - use increment method
 		successIncrement := p.GetSuccessIncrementAndUpdate()
-		components = append(components, common.DailyStatsData{
-			ProjectID:           "global", // Plugins are global across all projects
-			ComponentID:         pluginName,
-			ComponentType:       "plugin_success",
-			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.success", pluginName),
-			TotalMessages:       successIncrement, // Now this is the increment, not total
-		})
+		if successIncrement > 0 {
+			components = append(components, common.DailyStatsData{
+				ProjectID:           "global", // Plugins are global across all projects
+				ComponentID:         pluginName,
+				ComponentType:       "plugin_success",
+				ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.success", pluginName),
+				TotalMessages:       successIncrement, // Now this is the increment, not total
+			})
+		}
 
 		// Plugin failure statistics - use increment method
 		failureIncrement := p.GetFailureIncrementAndUpdate()
-		components = append(components, common.DailyStatsData{
-			ProjectID:           "global", // Plugins are global across all projects
-			ComponentID:         pluginName,
-			ComponentType:       "plugin_failure",
-			ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.failure", pluginName),
-			TotalMessages:       failureIncrement, // Now this is the increment, not total
-		})
+		if failureIncrement > 0 {
+			components = append(components, common.DailyStatsData{
+				ProjectID:           "global", // Plugins are global across all projects
+				ComponentID:         pluginName,
+				ComponentType:       "plugin_failure",
+				ProjectNodeSequence: fmt.Sprintf("PLUGIN.%s.failure", pluginName),
+				TotalMessages:       failureIncrement, // Now this is the increment, not total
+			})
+		}
 	}
 
 	return components

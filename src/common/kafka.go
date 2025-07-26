@@ -318,7 +318,10 @@ func (c *KafkaConsumer) run() {
 			c.drainRemainingMessages()
 			return
 		default:
+			// Use blocking poll without timeout to avoid busy waiting
+			// This will block until messages are available or client is closed
 			fetches := c.Client.PollFetches(context.Background())
+
 			if errs := fetches.Errors(); len(errs) > 0 {
 				for _, err := range errs {
 					if err.Err.Error() == "client closed" {
@@ -328,6 +331,8 @@ func (c *KafkaConsumer) run() {
 				}
 				continue // skip errored fetches
 			}
+
+			// Process messages immediately when available
 			fetches.EachRecord(func(rec *kgo.Record) {
 				var m map[string]interface{}
 				if err := sonic.Unmarshal(rec.Value, &m); err != nil {
