@@ -111,6 +111,9 @@ type Ruleset struct {
 	RawConfig string
 	sampler   *common.Sampler
 
+	// Performance optimization: pre-compute test mode flag
+	isTestMode bool // true if ProjectNodeSequence starts with "TEST."
+
 	// metrics - only total count is needed now
 	processTotal      uint64         // cumulative message processing total
 	lastReportedTotal uint64         // For calculating increments in 10-second intervals
@@ -1541,6 +1544,8 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		Status:              common.StatusStopped, // Initialize status to stopped
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
+		// Performance optimization: pre-compute test mode flag
+		isTestMode:          strings.HasPrefix(newProjectNodeSequence, "TEST."),
 		// Note: Cache and CacheForClassify are NOT shared to avoid concurrent access issues
 		// They will be created when needed during RulesetBuild if threshold operations exist
 		Cache:            nil,
@@ -1606,6 +1611,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 }
 
 // SetTestMode configures the ruleset for test mode by disabling sampling and other global state interactions
+// Note: isTestMode flag is automatically set during initialization based on ProjectNodeSequence
 func (r *Ruleset) SetTestMode() {
 	r.sampler = nil // Disable sampling for test instances
 }

@@ -129,17 +129,9 @@ func (r *Ruleset) Start() error {
 
 					task := func() {
 						// Only count and sample in production mode (not test mode)
-						// Test mode is identified by ProjectNodeSequence starting with "TEST."
-						isTestMode := strings.HasPrefix(r.ProjectNodeSequence, "TEST.")
-						if !isTestMode {
-							// IMPORTANT: Move counting AFTER successful task execution
-							// This ensures we only count messages that are actually processed
-							defer func() {
-								atomic.AddUint64(&r.processTotal, 1)
-							}()
-
-							// IMPORTANT: Sample the input data BEFORE rule checking starts
-							// This ensures we capture the raw data entering the ruleset for analysis
+						// Test mode flag is pre-computed during ruleset initialization for performance
+						if !r.isTestMode {
+							atomic.AddUint64(&r.processTotal, 1)
 							if r.sampler != nil {
 								_ = r.sampler.Sample(data, r.ProjectNodeSequence)
 							}
