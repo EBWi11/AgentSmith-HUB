@@ -1545,7 +1545,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
 		// Performance optimization: pre-compute test mode flag
-		isTestMode:          strings.HasPrefix(newProjectNodeSequence, "TEST."),
+		isTestMode: strings.HasPrefix(newProjectNodeSequence, "TEST."),
 		// Note: Cache and CacheForClassify are NOT shared to avoid concurrent access issues
 		// They will be created when needed during RulesetBuild if threshold operations exist
 		Cache:            nil,

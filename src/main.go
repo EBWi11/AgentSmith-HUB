@@ -514,10 +514,10 @@ func startPprofServer() {
 		port = 6060 // Default pprof port
 	}
 
-	pprofAddr := fmt.Sprintf("localhost:%d", port)
-	
+	pprofAddr := fmt.Sprintf("0.0.0.0:%d", port)
+
 	go func() {
-		logger.Info("Starting pprof server", "address", pprofAddr, 
+		logger.Info("Starting pprof server", "address", pprofAddr,
 			"endpoints", []string{
 				fmt.Sprintf("http://%s/debug/pprof/", pprofAddr),
 				fmt.Sprintf("http://%s/debug/pprof/goroutine", pprofAddr),
@@ -525,18 +525,18 @@ func startPprofServer() {
 				fmt.Sprintf("http://%s/debug/pprof/profile", pprofAddr),
 				fmt.Sprintf("http://%s/debug/pprof/trace", pprofAddr),
 			})
-		
+
 		// Create a simple HTTP server for pprof
 		server := &http.Server{
-			Addr: pprofAddr,
+			Addr:    pprofAddr,
 			Handler: http.DefaultServeMux, // pprof handlers are registered to DefaultServeMux
 		}
-		
+
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("pprof server failed", "error", err, "address", pprofAddr)
 		}
 	}()
-	
-	logger.Info("pprof server enabled", "address", pprofAddr, 
+
+	logger.Info("pprof server enabled", "address", pprofAddr,
 		"help", "Access performance profiles at http://"+pprofAddr+"/debug/pprof/")
 }
