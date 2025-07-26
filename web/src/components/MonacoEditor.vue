@@ -1543,6 +1543,42 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
+  // offset_reset属性值补全
+  else if (context.currentKey === 'offset_reset') {
+    const offsetResetTypes = [
+      { value: 'earliest', description: 'Start from the beginning of the topic when no committed offset exists (recommended)' },
+      { value: 'latest', description: 'Start from the end of the topic when no committed offset exists (only new messages)' },
+      { value: 'none', description: 'Fail if no committed offset exists' }
+    ];
+    // 获取当前已输入的部分，用于过滤
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    offsetResetTypes.forEach((type, index) => {
+      // 如果没有输入或者当前类型包含输入的文本
+      if (!currentValue || type.value.toLowerCase().includes(currentValue)) {
+        if (!suggestions.some(s => s.label === type.value)) {
+          // 计算排序权重：完全匹配 > 前缀匹配 > 包含匹配
+          let sortWeight = '2'; // 默认包含匹配
+          if (currentValue && type.value.toLowerCase() === currentValue) {
+            sortWeight = '0'; // 完全匹配
+          } else if (currentValue && type.value.toLowerCase().startsWith(currentValue)) {
+            sortWeight = '1'; // 前缀匹配
+          }
+          
+          suggestions.push({
+            label: type.value,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            documentation: type.description,
+            insertText: type.value,
+            range: range,
+            sortText: `${sortWeight}_${String(index).padStart(2, '0')}_${type.value}`,
+            detail: `Offset Reset Strategy: ${type.value}` // 添加详细信息以便区分
+          });
+        }
+      }
+    });
+  }
+  
   // enable属性值补全
   else if (context.currentKey === 'enable') {
     const enableValues = ['true', 'false'];

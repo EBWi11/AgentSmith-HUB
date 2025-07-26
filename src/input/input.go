@@ -35,12 +35,13 @@ type InputConfig struct {
 
 // KafkaInputConfig holds Kafka-specific config.
 type KafkaInputConfig struct {
-	Brokers     []string                    `yaml:"brokers"`
-	Group       string                      `yaml:"group"`
-	Topic       string                      `yaml:"topic"`
-	Compression common.KafkaCompressionType `yaml:"compression,omitempty"`
-	SASL        *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
-	TLS         *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
+	Brokers       []string                    `yaml:"brokers"`
+	Group         string                      `yaml:"group"`
+	Topic         string                      `yaml:"topic"`
+	Compression   common.KafkaCompressionType `yaml:"compression,omitempty"`
+	SASL          *common.KafkaSASLConfig     `yaml:"sasl,omitempty"`
+	TLS           *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
+	OffsetReset   string                      `yaml:"offset_reset,omitempty"` // earliest, latest, or none
 }
 
 // AliyunSLSInputConfig holds Aliyun SLS-specific config.
@@ -292,6 +293,7 @@ func (in *Input) Start() error {
 			in.kafkaCfg.Compression,
 			in.kafkaCfg.SASL,
 			in.kafkaCfg.TLS,
+			in.kafkaCfg.OffsetReset,
 			msgChan,
 		)
 		if err != nil {

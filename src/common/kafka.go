@@ -254,23 +254,41 @@ func getSASLMechanism(cfg *KafkaSASLConfig) (sasl.Mechanism, error) {
 }
 
 // NewKafkaConsumer creates a new high-performance Kafka consumer with compression and SASL support.
-func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCompressionType, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig, msgChan chan map[string]interface{}) (*KafkaConsumer, error) {
+func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCompressionType, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig, offsetReset string, msgChan chan map[string]interface{}) (*KafkaConsumer, error) {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumerGroup(group),
 		kgo.ConsumeTopics(topic),
 		kgo.DisableAutoCommit(), // manual commit for perf
+	}
 
-		// Performance optimizations
+	// Set offset reset strategy based on configuration
+	switch offsetReset {
+	case "latest":
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()))
+	case "none":
+		// Don't set any reset offset - will fail if no committed offset exists
+		// This is useful for strict consumption requirements
+	case "earliest", "":
+		// Default to earliest to ensure no message loss
+		// This ensures that when no committed offset exists, start from the earliest available message
+		// When committed offset exists, continue from where it left off
+		opts = append(opts, kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	default:
+		return nil, fmt.Errorf("invalid offset_reset value: %s (valid values: earliest, latest, none)", offsetReset)
+	}
+
+	// Add performance optimizations
+	opts = append(opts,
 		kgo.FetchMaxBytes(52428800),                  // 50MB fetch buffer
 		kgo.FetchMinBytes(1),                         // Start fetching immediately
-		kgo.FetchMaxWait(500 * time.Millisecond),     // Max wait time for batching
-		kgo.ConnIdleTimeout(9 * time.Minute),         // Keep connections alive
-		kgo.RequestTimeoutOverhead(10 * time.Second), // Network timeout
+		kgo.FetchMaxWait(500*time.Millisecond),       // Max wait time for batching
+		kgo.ConnIdleTimeout(9*time.Minute),           // Keep connections alive
+		kgo.RequestTimeoutOverhead(10*time.Second),   // Network timeout
 		kgo.RetryBackoffFn(func(tries int) time.Duration {
 			return time.Duration(tries) * 100 * time.Millisecond // Exponential backoff
 		}),
-	}
+	)
 
 	// Add compression if specified
 	if compression != KafkaCompressionNone {

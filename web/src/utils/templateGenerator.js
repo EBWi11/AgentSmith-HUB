@@ -45,15 +45,44 @@ export function generateRulesetTemplate(id) {
  * @returns {string} - YAML template for the input
  */
 export function generateInputTemplate(id) {
-  return `name: ${id}
-type: kafka
-config:
+  return `type: kafka
+kafka:
   brokers:
-    - localhost:9092
-  topics:
-    - test-topic
-  group_id: ${id}-consumer
-  auto_offset_reset: earliest`;
+    - "localhost:9092"
+  group: "${id}-consumer"
+  topic: "test-topic"
+  compression: "none"
+  # offset_reset controls where to start consuming when no committed offset exists
+  # earliest: start from the beginning of the topic (default, recommended)
+  # latest: start from the end of the topic (only new messages)
+  # none: fail if no committed offset exists
+  offset_reset: earliest
+  # Uncomment below for SASL authentication
+  # sasl:
+  #   enable: true
+  #   mechanism: "plain"  # plain, scram-sha256, scram-sha512
+  #   username: "your_username"
+  #   password: "your_password"
+  # Uncomment below for TLS configuration
+  # tls:
+  #   cert_path: "/path/to/client.crt"
+  #   key_path: "/path/to/client.key"
+  #   ca_file_path: "/path/to/ca.crt"
+  #   skip_verify: false
+
+# Alternative Aliyun SLS input example:
+# type: aliyun_sls
+# aliyun_sls:
+#   endpoint: "https://your-project.your-region.log.aliyuncs.com"
+#   access_key_id: "your_access_key_id"
+#   access_key_secret: "your_access_key_secret"
+#   project: "your_project"
+#   logstore: "your_logstore"
+#   consumer_group_name: "${id}-consumer"
+#   consumer_name: "${id}"
+#   cursor_position: "begin"  # begin, end, or specific timestamp
+#   # cursor_start_time: 1640995200000  # Unix timestamp in milliseconds
+#   # query: "*"  # Optional query for filtering logs`;
 }
 
 /**
