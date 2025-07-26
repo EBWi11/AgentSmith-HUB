@@ -312,7 +312,7 @@ func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectCom
 	}
 
 	// Set project to error status
-	err := fmt.Errorf(errorMsg.String())
+	err := fmt.Errorf("%s", errorMsg.String())
 	proj.SetProjectStatus(common.StatusStopped, err)
 
 	logger.Error("Project set to error status due to component failures",
@@ -335,7 +335,6 @@ func init() {
 	GlobalProject.InputsNew = make(map[string]string)
 	GlobalProject.OutputsNew = make(map[string]string)
 	GlobalProject.RulesetsNew = make(map[string]string)
-	GlobalProject.RefCount = make(map[string]int)
 
 	// AllProjectRawConfig is now managed through common.SetRawConfig functions
 	common.SetStatsCollector(collectAllComponentStats)
@@ -920,12 +919,10 @@ func (p *Project) Start(lock bool) error {
 		}
 	}()
 
-	// Check status - no need for additional locking as ProjectOperationMu ensures serialization
-	if p.Status != common.StatusStopped && p.Status != common.StatusError {
-		return fmt.Errorf("project is not stopped %s", p.Id)
+	// Atomic status check and transition
+	if !p.atomicStatusTransition([]common.Status{common.StatusStopped, common.StatusError}, common.StatusStarting) {
+		return fmt.Errorf("project is not in startable state, current status: %s", p.Status)
 	}
-	// Set to starting status
-	p.SetProjectStatus(common.StatusStarting, nil)
 
 	err = p.initComponents()
 	if err != nil {
@@ -971,11 +968,10 @@ func (p *Project) Stop(lock bool) error {
 		}
 	}()
 
-	if p.Status != common.StatusRunning && p.Status != common.StatusError {
-		return fmt.Errorf("project is not running %s", p.Id)
+	// Atomic status check and transition
+	if !p.atomicStatusTransition([]common.Status{common.StatusRunning, common.StatusError}, common.StatusStopping) {
+		return fmt.Errorf("project is not in stoppable state, current status: %s", p.Status)
 	}
-	// Set status to stopping immediately to prevent duplicate operations
-	p.SetProjectStatus(common.StatusStopping, nil)
 
 	// Overall timeout for the entire stop process
 	overallTimeout := time.After(2 * time.Minute)
@@ -1084,7 +1080,7 @@ func (p *Project) getPartner(t string, pns string) []string {
 
 func (p *Project) stopComponentsInternal() error {
 	var err error
-	logger.Info("Step 1: Stopping inputs", "project", p.Id, "count", len(p.Inputs))
+	logger.Info("Step 1: Stopping inputs", "project", p.Id)
 	p.cleanupInputChannel()
 
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
@@ -1094,10 +1090,11 @@ func (p *Project) stopComponentsInternal() error {
 		common.GlobalDailyStatsManager.CollectAllComponentsData()
 	}
 
-	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(p.Rulesets))
-	for id, rs := range p.Rulesets {
+	rulesets := p.GetProjectRulesets()
+	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(rulesets))
+	for id, rs := range rulesets {
 		DeletePNSRuleset(id)
-		if GetRefCount(id) == 1 {
+		if CalculateRefCount(id, p.Id) == 0 {
 			err = rs.Stop()
 			if err != nil {
 				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
@@ -1107,10 +1104,11 @@ func (p *Project) stopComponentsInternal() error {
 		}
 	}
 
-	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(p.Outputs))
-	for id, out := range p.Outputs {
+	outputs := p.GetProjectOutputs()
+	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(outputs))
+	for id, out := range outputs {
 		DeletePNSOutput(id)
-		if GetRefCount(id) == 1 {
+		if CalculateRefCount(id, p.Id) == 0 {
 			if p.Testing {
 				err = out.StopForTesting()
 			} else {
@@ -1165,14 +1163,14 @@ func (p *Project) cleanup() {
 	for i := range p.FlowNodes {
 		p.BackUpFlowNodes[i] = p.FlowNodes[i]
 
+		// Reset initialization flags without reducing ref count
+		// Ref count reduction is handled in stopComponentsInternal
 		if p.FlowNodes[i].FromInit {
 			p.FlowNodes[i].FromInit = false
-			ReduceRefCount(p.FlowNodes[i].FromPNS)
 		}
 
 		if p.FlowNodes[i].ToInit {
 			p.FlowNodes[i].ToInit = false
-			ReduceRefCount(p.FlowNodes[i].ToPNS)
 		}
 	}
 
@@ -1211,8 +1209,9 @@ func (p *Project) waitForCompleteDataProcessing() {
 				continue
 			}
 
-			for _, rs := range p.Rulesets {
-				if GetRefCount(rs.ProjectNodeSequence) == 1 {
+			rulesets := p.GetProjectRulesets()
+			for _, rs := range rulesets {
+				if CalculateRefCount(rs.ProjectNodeSequence, p.Id) == 0 {
 					runningTasks := rs.GetRunningTaskCount()
 					if runningTasks > 0 {
 						allProcessed = false
@@ -1231,7 +1230,8 @@ func (p *Project) waitForCompleteDataProcessing() {
 }
 
 func (p *Project) cleanupInputChannel() {
-	for id, in := range p.Inputs {
+	inputs := p.GetProjectInputs()
+	for id, in := range inputs {
 		rightNodes := p.getPartner("right", id)
 
 		for _, id2 := range rightNodes {
@@ -1239,8 +1239,8 @@ func (p *Project) cleanupInputChannel() {
 		}
 
 		// Input components need reference counting to determine if they should be stopped
-		// Only stop when this is the last project using this input
-		if GetRefCount(id) == 1 {
+		// Only stop when no other projects are using this input (excluding current project)
+		if CalculateRefCount(id, p.Id) == 0 {
 			// Use safe accessor to get global input
 			globalInput, exists := GetInput(in.Id)
 
@@ -1262,7 +1262,7 @@ func (p *Project) cleanupRulesetChannel() {
 		node := &p.FlowNodes[i]
 
 		if node.FromType == "RULESET" {
-			if GetRefCount(node.FromPNS) > 1 {
+			if CalculateRefCount(node.FromPNS, p.Id) > 0 {
 				if r, exist := GetRuleset(node.FromPNS); exist {
 					delete(r.DownStream, node.ToPNS)
 				}
@@ -1275,6 +1275,7 @@ func (p *Project) initComponents() error {
 	// Track which nodes need new channels created
 	nodeChannelStatus := make(map[string]bool) // key: ToPNS, value: whether channel was created
 
+	// Phase 1: Initialize all TO components and create channels
 	for i := range p.FlowNodes {
 		node := &p.FlowNodes[i]
 		switch node.ToType {
@@ -1365,10 +1366,12 @@ func (p *Project) initComponents() error {
 				}
 			}
 		}
-
 		node.ToInit = true
-		AddRefCount(node.ToPNS)
+	}
 
+	// Phase 2: Initialize all FROM components
+	for i := range p.FlowNodes {
+		node := &p.FlowNodes[i]
 		switch node.FromType {
 		case "RULESET":
 			// Use safe accessor to check PNS rulesets
@@ -1393,11 +1396,6 @@ func (p *Project) initComponents() error {
 				SetPNSRuleset(node.FromPNS, rs)
 
 				p.Rulesets[node.FromPNS] = rs
-			}
-
-			// Connect downstream only if channel was created for this specific ToPNS
-			if nodeChannelStatus[node.ToPNS] {
-				p.Rulesets[node.FromPNS].DownStream[node.ToPNS] = p.MsgChannels[node.ToPNS]
 			}
 		case "INPUT":
 			if p.Testing {
@@ -1427,21 +1425,70 @@ func (p *Project) initComponents() error {
 				}
 				p.Inputs[node.FromPNS] = originalInput
 			}
+		}
+		node.FromInit = true
+	}
 
-			// Connect downstream only if channel was created for this specific ToPNS
-			if nodeChannelStatus[node.ToPNS] {
-				p.Inputs[node.FromPNS].DownStream[node.ToPNS] = p.MsgChannels[node.ToPNS]
+	// Phase 3: Establish all connections after all components are initialized
+	for i := range p.FlowNodes {
+		node := &p.FlowNodes[i]
+
+		// Establish connections from FROM components to TO components
+		switch node.FromType {
+		case "RULESET":
+			if fromRs, exists := p.Rulesets[node.FromPNS]; exists {
+				// Always try to establish connection regardless of channel creation status
+				// This ensures shared PNS components get properly connected
+				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
+					fromRs.DownStream[node.ToPNS] = toChannel
+				} else {
+					// If no local channel, try to find existing channel in shared PNS component
+					if node.ToType == "OUTPUT" {
+						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
+							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
+								fromRs.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					} else if node.ToType == "RULESET" {
+						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
+							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
+								fromRs.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					}
+				}
+			}
+		case "INPUT":
+			if fromInput, exists := p.Inputs[node.FromPNS]; exists {
+				// Always try to establish connection
+				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
+					fromInput.DownStream[node.ToPNS] = toChannel
+				} else {
+					// If no local channel, try to find existing channel in shared PNS component
+					if node.ToType == "OUTPUT" {
+						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
+							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
+								fromInput.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					} else if node.ToType == "RULESET" {
+						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
+							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
+								fromInput.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					}
+				}
 			}
 		}
-
-		node.FromInit = true
-		AddRefCount(node.FromPNS)
 	}
+
 	return nil
 }
 
 func (p *Project) runComponents() error {
-	for _, in := range p.Inputs {
+	inputs := p.GetProjectInputs()
+	for _, in := range inputs {
 		if p.Testing {
 			// In testing mode, use StartForTesting to avoid connecting to external data sources
 			if err := in.StartForTesting(); err != nil {
@@ -1455,13 +1502,15 @@ func (p *Project) runComponents() error {
 		}
 	}
 
-	for _, rs := range p.Rulesets {
+	rulesets := p.GetProjectRulesets()
+	for _, rs := range rulesets {
 		if err := rs.Start(); err != nil {
 			return fmt.Errorf("failed to start ruleset component %s: %w", rs.RulesetID, err)
 		}
 	}
 
-	for _, out := range p.Outputs {
+	outputs := p.GetProjectOutputs()
+	for _, out := range outputs {
 		if p.Testing {
 			// In testing mode, use StartForTesting to avoid external connectivity checks
 			if err := out.StartForTesting(); err != nil {

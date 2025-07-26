@@ -36,32 +36,50 @@ type GlobalProjectInfo struct {
 	InputsNew   map[string]string
 	OutputsNew  map[string]string
 	RulesetsNew map[string]string
-
-	RefCount map[string]int
 }
 
-func GetRefCount(id string) int {
+// CalculateRefCount dynamically calculates how many running projects are using the given PNS
+// excludeProjectID allows excluding a specific project from the count (useful during stopping)
+func CalculateRefCount(pns string, excludeProjectID ...string) int {
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
-	return GlobalProject.RefCount[id]
+
+	return CalculateRefCountUnsafe(pns, excludeProjectID...)
 }
 
-func AddRefCount(id string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-	GlobalProject.RefCount[id] = GlobalProject.RefCount[id] + 1
-}
-
-func ReduceRefCount(id string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
-
-	if GlobalProject.RefCount[id] > 0 {
-		GlobalProject.RefCount[id] = GlobalProject.RefCount[id] - 1
-	} else {
-		// Log warning for debugging
-		logger.Warn("Attempting to reduce reference count when count is already 0", "id", id)
+// CalculateRefCountUnsafe performs the same calculation as CalculateRefCount but without acquiring locks
+// This version should only be called when the caller already holds the appropriate locks
+func CalculateRefCountUnsafe(pns string, excludeProjectID ...string) int {
+	var excludeID string
+	if len(excludeProjectID) > 0 {
+		excludeID = excludeProjectID[0]
 	}
+
+	count := 0
+	for projectID, proj := range GlobalProject.Projects {
+		// Skip excluded project
+		if projectID == excludeID {
+			continue
+		}
+
+		// Only count running projects
+		if proj.Status != common.StatusRunning {
+			continue
+		}
+
+		for _, node := range proj.FlowNodes {
+			if node.FromPNS == pns || node.ToPNS == pns {
+				count++
+				break // Each project should only be counted once per PNS
+			}
+		}
+	}
+	return count
+}
+
+// GetRefCount is kept for backward compatibility, now uses dynamic calculation
+func GetRefCount(id string) int {
+	return CalculateRefCount(id)
 }
 
 // ProjectConfig holds the configuration for a project
@@ -86,7 +104,8 @@ type Project struct {
 	FlowNodes       []FlowNode
 	BackUpFlowNodes []FlowNode
 
-	// Components
+	// Components - these are now treated as temporary caches during initialization/running
+	// They should not be relied upon for consistency checks - use the dynamic getters instead
 	Inputs   map[string]*input.Input          `json:"-"`
 	Outputs  map[string]*output.Output        `json:"-"`
 	Rulesets map[string]*rules_engine.Ruleset `json:"-"`
@@ -97,6 +116,18 @@ type Project struct {
 	// Restart cooldown
 	lastRestartTime time.Time
 	restartMu       sync.Mutex
+}
+
+// atomicStatusTransition performs atomic status checking and transition
+func (p *Project) atomicStatusTransition(allowedFrom []common.Status, newStatus common.Status) bool {
+	// Note: This function assumes the caller already holds appropriate locks
+	for _, allowed := range allowedFrom {
+		if p.Status == allowed {
+			p.SetProjectStatus(newStatus, nil)
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectMetrics holds runtime metrics for the project
@@ -113,6 +144,166 @@ type ProjectNode interface {
 }
 
 // ===== Thread-safe accessor functions for GlobalProject =====
+
+// Project dynamic component accessors - these replace the removed project-level component maps
+// GetProjectInputs returns all inputs used by this project, dynamically calculated from FlowNodes
+func (p *Project) GetProjectInputs() map[string]*input.Input {
+	inputs := make(map[string]*input.Input)
+
+	for _, node := range p.FlowNodes {
+		if node.FromType == "INPUT" && node.FromInit {
+			var inp *input.Input
+			if p.Testing {
+				// In testing mode, prioritize test-specific instances
+				// First try to get test instance with TEST_ prefix
+				if testInp, exists := GetInput("TEST_" + node.FromPNS); exists {
+					inp = testInp
+				} else if testInp, exists := GetInput(node.FromPNS); exists {
+					// Fallback: check if the PNS itself is a test instance
+					inp = testInp
+				}
+			} else {
+				// Production mode: get original input component
+				if originalInp, exists := GetInput(node.FromID); exists {
+					inp = originalInp
+				}
+			}
+			if inp != nil {
+				inputs[node.FromPNS] = inp
+			}
+		}
+	}
+	return inputs
+}
+
+// GetProjectOutputs returns all outputs used by this project, dynamically calculated from FlowNodes
+func (p *Project) GetProjectOutputs() map[string]*output.Output {
+	outputs := make(map[string]*output.Output)
+
+	for _, node := range p.FlowNodes {
+		if node.ToType == "OUTPUT" && node.ToInit {
+			var out *output.Output
+			if p.Testing {
+				// In testing mode, prioritize test-specific instances
+				// First try to get test instance from PNS (testing outputs are stored with their PNS)
+				if testOut, exists := GetPNSOutput(node.ToPNS); exists {
+					out = testOut
+				} else if testOut, exists := GetOutput("TEST_" + node.ToPNS); exists {
+					// Fallback: check for TEST_ prefixed output
+					out = testOut
+				}
+			} else {
+				// Production mode: get from PNS first, then original
+				if pnsOut, exists := GetPNSOutput(node.ToPNS); exists {
+					out = pnsOut
+				} else if originalOut, exists := GetOutput(node.ToID); exists {
+					out = originalOut
+				}
+			}
+			if out != nil {
+				outputs[node.ToPNS] = out
+			}
+		}
+	}
+	return outputs
+}
+
+// GetProjectRulesets returns all rulesets used by this project, dynamically calculated from FlowNodes
+func (p *Project) GetProjectRulesets() map[string]*rules_engine.Ruleset {
+	rulesets := make(map[string]*rules_engine.Ruleset)
+
+	for _, node := range p.FlowNodes {
+		if node.ToType == "RULESET" && node.ToInit {
+			if rs, exists := GetPNSRuleset(node.ToPNS); exists {
+				rulesets[node.ToPNS] = rs
+			}
+		}
+		if node.FromType == "RULESET" && node.FromInit {
+			if rs, exists := GetPNSRuleset(node.FromPNS); exists {
+				rulesets[node.FromPNS] = rs
+			}
+		}
+	}
+	return rulesets
+}
+
+// GetProjectRulesetsUnsafe returns all rulesets used by this project without acquiring locks
+// This version should only be called when the caller already holds the appropriate locks
+func (p *Project) GetProjectRulesetsUnsafe() map[string]*rules_engine.Ruleset {
+	rulesets := make(map[string]*rules_engine.Ruleset)
+
+	for _, node := range p.FlowNodes {
+		if node.ToType == "RULESET" && node.ToInit {
+			if rs, exists := GlobalProject.PNSRulesets[node.ToPNS]; exists {
+				rulesets[node.ToPNS] = rs
+			}
+		}
+		if node.FromType == "RULESET" && node.FromInit {
+			if rs, exists := GlobalProject.PNSRulesets[node.FromPNS]; exists {
+				rulesets[node.FromPNS] = rs
+			}
+		}
+	}
+	return rulesets
+}
+
+// GetProjectInputsUnsafe returns all inputs used by this project without acquiring locks
+func (p *Project) GetProjectInputsUnsafe() map[string]*input.Input {
+	inputs := make(map[string]*input.Input)
+
+	for _, node := range p.FlowNodes {
+		if node.FromType == "INPUT" && node.FromInit {
+			var inp *input.Input
+			if p.Testing {
+				// In testing mode, prioritize test-specific instances
+				if testInp, exists := GlobalProject.Inputs["TEST_"+node.FromPNS]; exists {
+					inp = testInp
+				} else if testInp, exists := GlobalProject.Inputs[node.FromPNS]; exists {
+					inp = testInp
+				}
+			} else {
+				// Production mode: get original input component
+				if originalInp, exists := GlobalProject.Inputs[node.FromID]; exists {
+					inp = originalInp
+				}
+			}
+			if inp != nil {
+				inputs[node.FromPNS] = inp
+			}
+		}
+	}
+	return inputs
+}
+
+// GetProjectOutputsUnsafe returns all outputs used by this project without acquiring locks
+func (p *Project) GetProjectOutputsUnsafe() map[string]*output.Output {
+	outputs := make(map[string]*output.Output)
+
+	for _, node := range p.FlowNodes {
+		if node.ToType == "OUTPUT" && node.ToInit {
+			var out *output.Output
+			if p.Testing {
+				// In testing mode, prioritize test-specific instances
+				if testOut, exists := GlobalProject.PNSOutputs[node.ToPNS]; exists {
+					out = testOut
+				} else if testOut, exists := GlobalProject.Outputs["TEST_"+node.ToPNS]; exists {
+					out = testOut
+				}
+			} else {
+				// Production mode: get from PNS first, then original
+				if pnsOut, exists := GlobalProject.PNSOutputs[node.ToPNS]; exists {
+					out = pnsOut
+				} else if originalOut, exists := GlobalProject.Outputs[node.ToID]; exists {
+					out = originalOut
+				}
+			}
+			if out != nil {
+				outputs[node.ToPNS] = out
+			}
+		}
+	}
+	return outputs
+}
 
 // Project accessors
 func GetProject(id string) (*Project, bool) {
@@ -554,147 +745,197 @@ func GetRulesetsCount() int {
 
 // SafeDeleteRuleset safely deletes a ruleset with all necessary validations and locking
 func SafeDeleteRuleset(id string) ([]string, error) {
+	// Phase 1: Perform all checks and prepare for deletion
+	var componentToStop *rules_engine.Ruleset
+	var shouldStop bool
+
 	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
 
 	// Check if component exists
 	_, componentExists := GlobalProject.Rulesets[id]
 	if !componentExists {
 		// Check if only exists in temporary storage
 		_, tempExists := GlobalProject.RulesetsNew[id]
+		common.GlobalMu.Unlock()
 		if !tempExists {
 			return nil, fmt.Errorf("ruleset not found: %s", id)
 		}
 		// Only exists in temp, just remove from temp
+		common.GlobalMu.Lock()
 		delete(GlobalProject.RulesetsNew, id)
+		common.GlobalMu.Unlock()
 		common.DeleteRawConfigUnsafe("ruleset", id)
 		return []string{}, nil
 	}
 
-	// Check if used by any project
-	affectedProjects := make([]string, 0)
+	// Check if used by any project - use unsafe accessors to avoid deadlock
 	for projectID, proj := range GlobalProject.Projects {
-		if _, inUse := proj.Rulesets[id]; inUse {
+		// Skip projects that are not running
+		if proj.Status != common.StatusRunning {
+			continue
+		}
+		rulesets := proj.GetProjectRulesetsUnsafe()
+		if _, inUse := rulesets[id]; inUse {
+			common.GlobalMu.Unlock()
 			return nil, fmt.Errorf("ruleset %s is currently in use by project %s", id, projectID)
 		}
 	}
 
-	// Stop the component if not in use
+	// Check if component should be stopped using unsafe version
 	if rs, exists := GlobalProject.Rulesets[id]; exists {
-		projectsUsingRuleset := UsageCounter.CountProjectsUsing("RULESET", id)
-		if projectsUsingRuleset == 0 {
-			logger.Info("Stopping ruleset component for deletion", "id", id)
-			// Temporarily release lock for stop operation to prevent deadlock
-			common.GlobalMu.Unlock()
-			_ = rs.Stop()
-			common.GlobalDailyStatsManager.CollectAllComponentsData()
-			common.GlobalMu.Lock()
+		if CalculateRefCountUnsafe(id) == 0 {
+			componentToStop = rs
+			shouldStop = true
+			logger.Info("Scheduling ruleset component for deletion", "id", id)
 		}
 	}
 
-	// Remove from global mappings
-	delete(GlobalProject.Rulesets, id)
-	delete(GlobalProject.RulesetsNew, id)
-	common.DeleteRawConfigUnsafe("ruleset", id)
+	// Remove from global mappings if stopping
+	if shouldStop {
+		delete(GlobalProject.Rulesets, id)
+		delete(GlobalProject.RulesetsNew, id)
+	}
 
-	return affectedProjects, nil
+	common.GlobalMu.Unlock()
+
+	// Phase 2: Execute stop operation outside of lock
+	if shouldStop && componentToStop != nil {
+		_ = componentToStop.Stop()
+		common.GlobalDailyStatsManager.CollectAllComponentsData()
+		common.DeleteRawConfigUnsafe("ruleset", id)
+	}
+
+	return []string{}, nil
 }
 
 // SafeDeleteInput safely deletes an input with all necessary validations and locking
 func SafeDeleteInput(id string) ([]string, error) {
+	// Phase 1: Perform all checks and prepare for deletion
+	var componentToStop *input.Input
+	var shouldStop bool
+
 	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
 
 	// Check if component exists
 	_, componentExists := GlobalProject.Inputs[id]
 	if !componentExists {
 		// Check if only exists in temporary storage
 		_, tempExists := GlobalProject.InputsNew[id]
+		common.GlobalMu.Unlock()
 		if !tempExists {
 			return nil, fmt.Errorf("input not found: %s", id)
 		}
 		// Only exists in temp, just remove from temp
+		common.GlobalMu.Lock()
 		delete(GlobalProject.InputsNew, id)
+		common.GlobalMu.Unlock()
 		common.DeleteRawConfigUnsafe("input", id)
 		return []string{}, nil
 	}
 
-	// Check if used by any project
-	affectedProjects := make([]string, 0)
+	// Check if used by any project - use unsafe accessors to avoid deadlock
 	for projectID, proj := range GlobalProject.Projects {
-		if _, inUse := proj.Inputs[id]; inUse {
+		// Skip projects that are not running
+		if proj.Status != common.StatusRunning {
+			continue
+		}
+		inputs := proj.GetProjectInputsUnsafe()
+		if _, inUse := inputs[id]; inUse {
+			common.GlobalMu.Unlock()
 			return nil, fmt.Errorf("input %s is currently in use by project %s", id, projectID)
 		}
 	}
 
-	// Stop the component if not in use
+	// Check if component should be stopped using unsafe version
 	if inp, exists := GlobalProject.Inputs[id]; exists {
-		projectsUsingInput := UsageCounter.CountProjectsUsing("INPUT", id)
-		if projectsUsingInput == 0 {
-			logger.Info("Stopping input component for deletion", "id", id)
-			// Temporarily release lock for stop operation to prevent deadlock
-			common.GlobalMu.Unlock()
-			_ = inp.Stop()
-			common.GlobalDailyStatsManager.CollectAllComponentsData()
-			common.GlobalMu.Lock()
+		if CalculateRefCountUnsafe(id) == 0 {
+			componentToStop = inp
+			shouldStop = true
+			logger.Info("Scheduling input component for deletion", "id", id)
 		}
 	}
 
-	// Remove from global mappings
-	delete(GlobalProject.Inputs, id)
-	delete(GlobalProject.InputsNew, id)
+	// Remove from global mappings if stopping
+	if shouldStop {
+		delete(GlobalProject.Inputs, id)
+		delete(GlobalProject.InputsNew, id)
+	}
 
-	common.DeleteRawConfigUnsafe("input", id)
+	common.GlobalMu.Unlock()
 
-	return affectedProjects, nil
+	// Phase 2: Execute stop operation outside of lock
+	if shouldStop && componentToStop != nil {
+		_ = componentToStop.Stop()
+		common.GlobalDailyStatsManager.CollectAllComponentsData()
+		common.DeleteRawConfigUnsafe("input", id)
+	}
+
+	return []string{}, nil
 }
 
 // SafeDeleteOutput safely deletes an output with all necessary validations and locking
 func SafeDeleteOutput(id string) ([]string, error) {
+	// Phase 1: Perform all checks and prepare for deletion
+	var componentToStop *output.Output
+	var shouldStop bool
+
 	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
 
 	// Check if component exists
 	_, componentExists := GlobalProject.Outputs[id]
 	if !componentExists {
 		// Check if only exists in temporary storage
 		_, tempExists := GlobalProject.OutputsNew[id]
+		common.GlobalMu.Unlock()
 		if !tempExists {
 			return nil, fmt.Errorf("output not found: %s", id)
 		}
 		// Only exists in temp, just remove from temp
+		common.GlobalMu.Lock()
 		delete(GlobalProject.OutputsNew, id)
+		common.GlobalMu.Unlock()
 		common.DeleteRawConfigUnsafe("output", id)
 		return []string{}, nil
 	}
 
-	// Check if used by any project
-	affectedProjects := make([]string, 0)
+	// Check if used by any project - use unsafe accessors to avoid deadlock
 	for projectID, proj := range GlobalProject.Projects {
-		if _, inUse := proj.Outputs[id]; inUse {
+		// Skip projects that are not running
+		if proj.Status != common.StatusRunning {
+			continue
+		}
+		outputs := proj.GetProjectOutputsUnsafe()
+		if _, inUse := outputs[id]; inUse {
+			common.GlobalMu.Unlock()
 			return nil, fmt.Errorf("output %s is currently in use by project %s", id, projectID)
 		}
 	}
 
-	// Stop the component if not in use
+	// Check if component should be stopped using unsafe version
 	if out, exists := GlobalProject.Outputs[id]; exists {
-		projectsUsingOutput := UsageCounter.CountProjectsUsing("OUTPUT", id)
-		if projectsUsingOutput == 0 {
-			logger.Info("Stopping output component for deletion", "id", id)
-			// Temporarily release lock for stop operation to prevent deadlock
-			common.GlobalMu.Unlock()
-			_ = out.Stop()
-			common.GlobalDailyStatsManager.CollectAllComponentsData()
-			common.GlobalMu.Lock()
+		if CalculateRefCountUnsafe(id) == 0 {
+			componentToStop = out
+			shouldStop = true
+			logger.Info("Scheduling output component for deletion", "id", id)
 		}
 	}
 
-	// Remove from global mappings
-	delete(GlobalProject.Outputs, id)
-	delete(GlobalProject.OutputsNew, id)
-	common.DeleteRawConfigUnsafe("output", id)
+	// Remove from global mappings if stopping
+	if shouldStop {
+		delete(GlobalProject.Outputs, id)
+		delete(GlobalProject.OutputsNew, id)
+	}
 
-	return affectedProjects, nil
+	common.GlobalMu.Unlock()
+
+	// Phase 2: Execute stop operation outside of lock
+	if shouldStop && componentToStop != nil {
+		_ = componentToStop.Stop()
+		common.GlobalDailyStatsManager.CollectAllComponentsData()
+		common.DeleteRawConfigUnsafe("output", id)
+	}
+
+	return []string{}, nil
 }
 
 // SafeDeleteProject safely deletes a project with all necessary validations and locking
