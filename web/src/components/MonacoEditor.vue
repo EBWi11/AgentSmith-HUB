@@ -1357,11 +1357,10 @@ function getInputCompletions(fullText, lineText, range, position) {
     if (prefix === 'INPUT') {
       
               if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, but filter out temporary components
+          // Suggest all INPUT components (including those with temporary versions)
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === input.id)) {
               suggestions.push({
                 label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -1987,11 +1986,10 @@ function getOutputCompletions(fullText, lineText, range, position) {
     const partialLower = (partial || '').toLowerCase();
     
     if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
-      // 提示所有OUTPUT组件，但过滤掉临时组件
+      // Suggest all OUTPUT components (including those with temporary versions)
       outputComponents.value.forEach(output => {
         if ((!partial || output.id.toLowerCase().includes(partialLower)) && 
-            !suggestions.some(s => s.label === output.id) &&
-            !output.hasTemp) {  // 过滤掉临时组件
+            !suggestions.some(s => s.label === output.id)) {
           suggestions.push({
             label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
@@ -2625,11 +2623,10 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         };
         
         if (inputComponents.value.length > 0) {
-          // Suggest all INPUT components, but filter out temporary ones
+          // Suggest all INPUT components (including those with temporary versions)
           inputComponents.value.forEach(input => {
             if ((!partial || input.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === input.id) &&
-                !input.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === input.id)) {
               suggestions.push({
                 label: input.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -2666,11 +2663,10 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
 
         
         if (rulesetComponents.value.length > 0) {
-          // Suggest all RULESET components, but filter out temporary ones
+          // Suggest all RULESET components (including those with temporary versions)
           rulesetComponents.value.forEach(ruleset => {
             if ((!partial || ruleset.id.toLowerCase().includes(partialLower)) && 
-                !suggestions.some(s => s.label === ruleset.id) &&
-                !ruleset.hasTemp) {  // Filter out temporary components
+                !suggestions.some(s => s.label === ruleset.id)) {
               suggestions.push({
                 label: ruleset.id,
                 kind: monaco.languages.CompletionItemKind.Reference,
@@ -2704,13 +2700,12 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // Suggest all OUTPUT components, but filter out temporary ones
+      // Suggest all OUTPUT components (including those with temporary versions)
       outputComponents.value.forEach(output => {
         const matches = !partial || output.id.toLowerCase().includes(partialLower);
         const alreadyExists = suggestions.some(s => s.label === output.id);
-        const isNotTemp = !output.hasTemp;  // Filter out temporary components
         
-        if (matches && !alreadyExists && isNotTemp) {
+        if (matches && !alreadyExists) {
           suggestions.push({
             label: output.id,
             kind: monaco.languages.CompletionItemKind.Reference,
@@ -3601,7 +3596,7 @@ let lastPluginDataHash = '';
 // 计算插件数据hash用于缓存失效检测
 const calculatePluginDataHash = () => {
   try {
-    const plugins = pluginComponents.value?.filter(p => !p.hasTemp) || [];
+    const plugins = pluginComponents.value || []; // Include all plugins for hash calculation
     const pluginIds = plugins.map(p => p.id).sort().join(',');
     const parameterKeys = Object.keys(pluginParametersCache.value || {}).sort().join(',');
     return `${pluginIds}:${parameterKeys}`;
@@ -3635,7 +3630,7 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
   
   // 构建新的补全建议
   const suggestions = [];
-  const validPlugins = (pluginComponents.value || []).filter(plugin => !plugin.hasTemp);
+  const validPlugins = (pluginComponents.value || []); // Include all plugins, including those with temporary versions
   
   validPlugins.forEach(plugin => {
     // For checknode, only show plugins with bool return type
