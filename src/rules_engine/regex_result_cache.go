@@ -155,24 +155,26 @@ func CachedRegexMatch(cache *RegexResultCache, regexPattern, inputValue string, 
 	return matched, nil
 }
 
-// CachedRegexMatchWithPrecompiled performs regex matching with caching using pre-compiled regex
+// CachedRegexMatchWithPrecompiled performs regex matching using pre-compiled regex
 // This is for static regex patterns that are already compiled
+// NOTE: Caching is disabled for performance reasons - direct regex matching is faster
 func CachedRegexMatchWithPrecompiled(cache *RegexResultCache, compiledRegex *regexp.Regex, regexPattern, inputValue string) bool {
+	// Disabled caching for static regex - direct matching is more efficient
 	// Try to get from cache first
-	if cache != nil {
-		if result, found := cache.Get(regexPattern, inputValue); found && result.error == nil {
-			return result.matched
-		}
-	}
+	// if cache != nil {
+	//     if result, found := cache.Get(regexPattern, inputValue); found && result.error == nil {
+	//         return result.matched
+	//     }
+	// }
 
 	// Use IsMatch() for better performance since we only need boolean result
 	matched := compiledRegex.IsMatch(inputValue)
 
-	// Cache the result
-	if cache != nil {
-		result := RegexMatchResult{matched: matched, error: nil}
-		cache.Put(regexPattern, inputValue, result)
-	}
+	// Disabled result caching - overhead outweighs benefits for pre-compiled regex
+	// if cache != nil {
+	//     result := RegexMatchResult{matched: matched, error: nil}
+	//     cache.Put(regexPattern, inputValue, result)
+	// }
 
 	return matched
 }
