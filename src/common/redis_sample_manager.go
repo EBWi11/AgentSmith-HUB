@@ -19,7 +19,7 @@ const (
 
 	// Configuration constants
 	DefaultSampleTTL        = 24 * time.Hour // 24 hours TTL
-	DefaultMaxSamplesPerKey = 1000           // Maximum 1000 samples per project-sampler combination
+	DefaultMaxSamplesPerKey = 100            // Maximum 100 samples per project-sampler combination
 	DefaultCleanupInterval  = 1 * time.Hour  // Cleanup expired data every hour
 )
 

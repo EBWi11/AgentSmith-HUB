@@ -11,7 +11,7 @@ import (
 
 const (
 	// Use timer-based sampling: sample once every 3 minutes
-	SamplingInterval = 3 * time.Minute // Sample once every 3 minutes
+	SamplingInterval = 15 * time.Minute // Sample once every 3 minutes
 )
 
 // SampleData represents a single sample with its metadata

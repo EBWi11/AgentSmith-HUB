@@ -48,6 +48,10 @@ type Plugin struct {
 	// Whether this plugin instance is in test mode (skip statistics recording)
 	IsTestMode bool `json:"is_test_mode"`
 
+	// Status and error handling (consistent with other components)
+	Status common.Status `json:"status"`
+	Err    error         `json:"-"`
+
 	// Plugin statistics (atomic counters)
 	successTotal uint64 // Total successful invocations
 	failureTotal uint64 // Total failed invocations
