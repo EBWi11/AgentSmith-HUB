@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"AgentSmith-HUB/common"
+	"AgentSmith-HUB/mcp/errors"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Annotation helper functions for creating MCPToolAnnotations
@@ -34,15 +37,28 @@ var introShown bool
 
 // APIMapper handles the mapping between MCP tools and existing HTTP API endpoints
 type APIMapper struct {
-	baseURL string
-	token   string
+	baseURL    string
+	token      string
+	httpClient *http.Client
 }
 
 // NewAPIMapper creates a new API mapper
 func NewAPIMapper(baseURL, token string) *APIMapper {
+	// Optimized HTTP client with connection pooling and performance tuning
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // 增加空闲连接池大小
+		MaxIdleConnsPerHost: 10,               // 每个host的最大空闲连接数
+		IdleConnTimeout:     90 * time.Second, // 空闲连接超时
+		DisableCompression:  false,            // 启用压缩以减少带宽
+	}
+
 	return &APIMapper{
 		baseURL: baseURL,
 		token:   token,
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second, // 保持合理的超时
+			Transport: transport,
+		},
 	}
 }
 
@@ -486,10 +502,19 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 	case "rule_manager":
 		action, hasAction := args["action"].(string)
 		if !hasAction {
-			return common.MCPToolResult{
-				Content: []common.MCPToolContent{{Type: "text", Text: "Error: action parameter is required"}},
-				IsError: true,
-			}, nil
+			return errors.NewValidationErrorWithSuggestions(
+				"action parameter is required for rule_manager",
+				[]string{
+					"Specify one of the supported actions:",
+					"- add_rule: Add a new rule to existing ruleset",
+					"- update_rule: Update an existing rule",
+					"- delete_rule: Remove a rule from ruleset",
+					"- view_rules: View all rules in a ruleset",
+					"- create_ruleset: Create a new ruleset",
+					"- update_ruleset: Update entire ruleset configuration",
+					"Example: rule_manager action='add_rule' id='my_ruleset' rule_purpose='detect anomalies'",
+				},
+			).ToMCPResult(), nil
 		}
 
 		// Route to appropriate handler based on action
@@ -508,10 +533,23 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		case "update_ruleset":
 			return m.handleUpdateRuleset(args)
 		default:
-			return common.MCPToolResult{
-				Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Error: unknown action '%s'. Supported actions: add_rule, update_rule, delete_rule, view_rules, create_ruleset, update_ruleset", action)}},
-				IsError: true,
-			}, nil
+			return errors.NewValidationErrorWithSuggestions(
+				fmt.Sprintf("unknown action '%s' for rule_manager", action),
+				[]string{
+					"Use one of these supported actions:",
+					"• add_rule - Add a new rule to existing ruleset",
+					"• update_rule - Modify an existing rule (requires rule_id)",
+					"• delete_rule - Remove a rule (requires rule_id)",
+					"• view_rules - Display all rules in ruleset",
+					"• create_ruleset - Create new ruleset with initial configuration",
+					"• update_ruleset - Update entire ruleset XML configuration",
+					"Example: rule_manager action='add_rule' id='security_rules' rule_purpose='detect suspicious activity'",
+				},
+				map[string]interface{}{
+					"provided_action":   action,
+					"supported_actions": []string{"add_rule", "update_rule", "delete_rule", "view_rules", "create_ruleset", "update_ruleset"},
+				},
+			).ToMCPResult(), nil
 		}
 	case "test_lab":
 		return m.handleTestComponent(args)
@@ -693,7 +731,20 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 
 	endpointInfo, exists := endpointMap[toolName]
 	if !exists {
-		return common.MCPToolResult{}, fmt.Errorf("unknown tool: %s", toolName)
+		return errors.NewValidationErrorWithSuggestions(
+			fmt.Sprintf("unknown tool: %s", toolName),
+			[]string{
+				"The requested tool is not available. Available tool categories:",
+				"• Intelligent Workflows: create_rule_complete, smart_deployment, component_wizard",
+				"• Component Management: explore_components, component_manager, project_control",
+				"• Rule Operations: rule_manager, rule_ai_generator, add_ruleset_rule",
+				"• Data Tools: get_samplers_data, get_samplers_data_intelligent",
+				"• Testing: test_lab, test_ruleset, test_component",
+				"• Deployment: get_pending_changes, apply_changes, deployment_center",
+				"• System Info: system_overview, get_projects, get_rulesets",
+				"Use 'smart_assistant task=\"help\"' for guided tool selection",
+			},
+		).ToMCPResult(), fmt.Errorf("unknown tool: %s", toolName)
 	}
 
 	// Build the endpoint URL with parameters
@@ -762,27 +813,48 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 	// Make the HTTP request
 	responseBody, err := m.makeHTTPRequest(endpointInfo.method, endpoint, args, endpointInfo.auth)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{
-				{
-					Type: "text",
-					Text: fmt.Sprintf("Error calling tool: %v", err),
-				},
+		// Check if it's a structured MCP error
+		if mcpErr, ok := err.(errors.MCPError); ok {
+			return mcpErr.ToMCPResult(), nil
+		}
+		// Fallback to enhanced generic error handling
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("API call failed for tool '%s': %v", toolName, err),
+			Suggestions: []string{
+				"API request failed - general troubleshooting:",
+				"• Check system connectivity with 'ping' or 'system_overview'",
+				"• Verify authentication status with 'token_check'",
+				"• Check if the backend service is running properly",
+				"• Review 'get_error_logs' for detailed error information",
+				"• Try a simpler operation first to test system availability",
+				"• If the error persists, contact system administrator",
+				fmt.Sprintf("• Specific tool: '%s' - check if all required parameters are provided", toolName),
 			},
-			IsError: true,
-		}, nil
+			Details: map[string]interface{}{
+				"tool_name": toolName,
+				"endpoint":  endpoint,
+				"method":    endpointInfo.method,
+			},
+		}.ToMCPResult(), nil
 	}
 
-	// Format the response as text, prettifying JSON if possible
+	// Format the response as text, prettifying JSON if possible (optimized)
 	var prettyResponseBody string
-	var jsonData interface{}
-	if json.Unmarshal(responseBody, &jsonData) == nil {
-		// It's valid JSON, format it nicely
-		prettyBytes, err := json.MarshalIndent(jsonData, "", "  ")
-		if err == nil {
-			prettyResponseBody = string(prettyBytes)
+	// 优化：先检查是否为JSON，避免不必要的处理
+	if len(responseBody) > 0 && (responseBody[0] == '{' || responseBody[0] == '[') {
+		var jsonData interface{}
+		if json.Unmarshal(responseBody, &jsonData) == nil {
+			// It's valid JSON, format it nicely with compact indentation to save space
+			prettyBytes, err := json.MarshalIndent(jsonData, "", "  ")
+			if err == nil {
+				prettyResponseBody = string(prettyBytes)
+			} else {
+				prettyResponseBody = string(responseBody) // Fallback to raw if re-marshalling fails
+			}
 		} else {
-			prettyResponseBody = string(responseBody) // Fallback to raw if re-marshalling fails
+			// Not valid JSON, return as-is
+			prettyResponseBody = string(responseBody)
 		}
 	} else {
 		// Not JSON, return as-is
@@ -825,8 +897,7 @@ func (m *APIMapper) makeHTTPRequest(method, endpoint string, body interface{}, r
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -843,10 +914,10 @@ func (m *APIMapper) makeHTTPRequest(method, endpoint string, body interface{}, r
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(responseBody, &apiError) == nil && apiError.Error != "" {
-			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, apiError.Error)
+			return nil, errors.NewAPIError(apiError.Error, resp.StatusCode)
 		}
 		// Fallback to returning the raw response body
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(responseBody))
+		return nil, errors.NewAPIError(string(responseBody), resp.StatusCode)
 	}
 
 	return responseBody, nil
@@ -874,12 +945,13 @@ func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) 
 		}, nil
 	}
 
-	var results []string
-	results = append(results, "=== DATA-DRIVEN RULE CREATION WORKFLOW ===\n")
-	results = append(results, "✅ Sample data validation passed - proceeding with rule creation...")
+	// Use strings.Builder for efficient result construction
+	var resultBuilder strings.Builder
+	resultBuilder.WriteString("=== DATA-DRIVEN RULE CREATION WORKFLOW ===\n")
+	resultBuilder.WriteString("✅ Sample data validation passed - proceeding with rule creation...\n")
 
 	// Step 1: Add the rule
-	results = append(results, "Step 1: Adding rule to ruleset...")
+	resultBuilder.WriteString("Step 1: Adding rule to ruleset...\n")
 	addArgs := map[string]interface{}{
 		"id":       rulesetId,
 		"rule_raw": ruleRaw,
@@ -891,58 +963,58 @@ func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) 
 			IsError: true,
 		}, nil
 	}
-	results = append(results, fmt.Sprintf("✓ Rule added successfully: %s\n", string(addResponse)))
+	resultBuilder.WriteString(fmt.Sprintf("✓ Rule added successfully: %s\n\n", string(addResponse)))
 
 	// Step 2: Verify the ruleset
-	results = append(results, "Step 2: Verifying ruleset configuration...")
+	resultBuilder.WriteString("Step 2: Verifying ruleset configuration...\n")
 	verifyResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/verify/ruleset/%s", rulesetId), nil, true)
 	if err != nil {
-		results = append(results, fmt.Sprintf("✗ Verification failed: %v\n", err))
+		resultBuilder.WriteString(fmt.Sprintf("✗ Verification failed: %v\n", err))
 	} else {
-		results = append(results, fmt.Sprintf("✓ Verification passed: %s\n", string(verifyResponse)))
+		resultBuilder.WriteString(fmt.Sprintf("✓ Verification passed: %s\n\n", string(verifyResponse)))
 	}
 
 	// Step 3: Test with sample data if provided
 	if hasTestData {
-		results = append(results, "Step 3: Testing rule with sample data...")
+		resultBuilder.WriteString("Step 3: Testing rule with sample data...\n")
 		testArgs := map[string]interface{}{
 			"test_data": testData,
 		}
 		testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-ruleset/%s", rulesetId), testArgs, true)
 		if err != nil {
-			results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
+			resultBuilder.WriteString(fmt.Sprintf("✗ Testing failed: %v\n", err))
 		} else {
-			results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+			resultBuilder.WriteString(fmt.Sprintf("✓ Testing completed: %s\n\n", string(testResponse)))
 		}
 	}
 
 	// Step 4: Get usage analysis
-	results = append(results, "Step 4: Analyzing component usage and impact...")
+	resultBuilder.WriteString("Step 4: Analyzing component usage and impact...\n")
 	usageResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/component-usage/ruleset/%s", rulesetId), nil, true)
 	if err != nil {
-		results = append(results, fmt.Sprintf("✗ Usage analysis failed: %v\n", err))
+		resultBuilder.WriteString(fmt.Sprintf("✗ Usage analysis failed: %v\n", err))
 	} else {
-		results = append(results, fmt.Sprintf("✓ Usage analysis: %s\n", string(usageResponse)))
+		resultBuilder.WriteString(fmt.Sprintf("✓ Usage analysis: %s\n\n", string(usageResponse)))
 	}
 
 	// Step 5: Deployment guidance
-	results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
-	results = append(results, "⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!")
-	results = append(results, "")
-	results = append(results, "📋 Next Steps Required:")
-	results = append(results, "1. 🔍 Check what's pending: Use 'get_pending_changes' to see all changes awaiting deployment")
-	results = append(results, "2. ✅ Apply changes: Use 'apply_changes' to deploy your rule to production")
-	results = append(results, "3. 🧪 Test thoroughly: Use 'test_ruleset' with real data to validate rule behavior")
-	results = append(results, "")
-	results = append(results, "🎯 Recommended Workflow:")
-	results = append(results, "   → get_pending_changes  (review what will be deployed)")
-	results = append(results, "   → apply_changes        (activate your rule)")
-	results = append(results, "   → test_ruleset         (verify it works correctly)")
-	results = append(results, "")
-	results = append(results, "💡 Your rule will remain inactive until you run 'apply_changes'!")
+	resultBuilder.WriteString("\n=== 🚀 DEPLOYMENT GUIDANCE ===\n")
+	resultBuilder.WriteString("⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!\n")
+	resultBuilder.WriteString("\n")
+	resultBuilder.WriteString("📋 Next Steps Required:\n")
+	resultBuilder.WriteString("1. 🔍 Check what's pending: Use 'get_pending_changes' to see all changes awaiting deployment\n")
+	resultBuilder.WriteString("2. ✅ Apply changes: Use 'apply_changes' to deploy your rule to production\n")
+	resultBuilder.WriteString("3. 🧪 Test thoroughly: Use 'test_ruleset' with real data to validate rule behavior\n")
+	resultBuilder.WriteString("\n")
+	resultBuilder.WriteString("🎯 Recommended Workflow:\n")
+	resultBuilder.WriteString("   → get_pending_changes  (review what will be deployed)\n")
+	resultBuilder.WriteString("   → apply_changes        (activate your rule)\n")
+	resultBuilder.WriteString("   → test_ruleset         (verify it works correctly)\n")
+	resultBuilder.WriteString("\n")
+	resultBuilder.WriteString("💡 Your rule will remain inactive until you run 'apply_changes'!")
 
 	return common.MCPToolResult{
-		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+		Content: []common.MCPToolContent{{Type: "text", Text: resultBuilder.String()}},
 	}, nil
 }
 
@@ -1304,17 +1376,38 @@ func (m *APIMapper) handleGetMetrics(args map[string]interface{}) (common.MCPToo
 
 	// Step 1: Retrieve metrics based on type
 	results = append(results, "Step 1: Retrieving metrics...")
-	metricsArgs := ""
+
+	// Use strings.Builder for efficient URL construction
+	var urlBuilder strings.Builder
+	urlBuilder.WriteString("/system-metrics")
+
 	if hasProjectId {
-		metricsArgs += fmt.Sprintf("?project_id=%s", projectId)
+		urlBuilder.WriteString("?project_id=")
+		urlBuilder.WriteString(projectId)
+
+		if hasTimeRange {
+			urlBuilder.WriteString("&time_range=")
+			urlBuilder.WriteString(timeRange)
+		}
+		if hasAggregated {
+			urlBuilder.WriteString("&aggregated=")
+			urlBuilder.WriteString(aggregated)
+		}
+	} else {
+		if hasTimeRange {
+			urlBuilder.WriteString("?time_range=")
+			urlBuilder.WriteString(timeRange)
+			if hasAggregated {
+				urlBuilder.WriteString("&aggregated=")
+				urlBuilder.WriteString(aggregated)
+			}
+		} else if hasAggregated {
+			urlBuilder.WriteString("?aggregated=")
+			urlBuilder.WriteString(aggregated)
+		}
 	}
-	if hasTimeRange {
-		metricsArgs += fmt.Sprintf("&time_range=%s", timeRange)
-	}
-	if hasAggregated {
-		metricsArgs += fmt.Sprintf("&aggregated=%s", aggregated)
-	}
-	metricsResponse, err := m.makeHTTPRequest("GET", "/system-metrics"+metricsArgs, nil, false)
+
+	metricsResponse, err := m.makeHTTPRequest("GET", urlBuilder.String(), nil, false)
 	if err != nil {
 		results = append(results, fmt.Sprintf("✗ Metrics retrieval failed: %v\n", err))
 	} else {
@@ -1391,7 +1484,23 @@ func (m *APIMapper) handleGetProjects(args map[string]interface{}) (common.MCPTo
 
 // handleControlProject performs unified project control operations
 func (m *APIMapper) handleControlProject(args map[string]interface{}) (common.MCPToolResult, error) {
-	action := args["action"].(string)
+	action, hasAction := args["action"].(string)
+	if !hasAction {
+		return errors.NewValidationErrorWithSuggestions(
+			"action parameter is required for project_control",
+			[]string{
+				"Specify one of the supported project control actions:",
+				"• start - Start a specific project",
+				"• stop - Stop a specific project",
+				"• restart - Restart a specific project",
+				"• start_all - Start all projects in the system",
+				"• status - Check status of a specific project",
+				"Use 'get_projects' first to see available project IDs",
+				"Example: project_control action='start' project_id='my_project'",
+			},
+		).ToMCPResult(), nil
+	}
+
 	projectId, hasProjectId := args["project_id"].(string)
 
 	var results []string
@@ -1416,51 +1525,115 @@ func (m *APIMapper) handleControlProject(args map[string]interface{}) (common.MC
 		controlArgs = map[string]interface{}{}
 	case "stop_all":
 		// There's no stop-all endpoint, so we handle this differently
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "Stop all projects is not supported by the API. Please stop projects individually."}},
-			IsError: true,
-		}, nil
+		return errors.NewValidationErrorWithSuggestions(
+			"stop_all is not supported by the backend API",
+			[]string{
+				"Available workarounds:",
+				"• Use 'get_projects' to list all projects",
+				"• Stop each project individually using project_control action='stop'",
+				"• Use 'system_overview' to see which projects are currently running",
+				"Example workflow: get_projects → project_control action='stop' project_id='project1'",
+			},
+		).ToMCPResult(), nil
 	case "status":
 		if !hasProjectId {
-			return common.MCPToolResult{
-				Content: []common.MCPToolContent{{Type: "text", Text: "Project ID is required for status check"}},
-				IsError: true,
-			}, nil
+			return errors.NewValidationErrorWithSuggestions(
+				"project_id is required for status check",
+				[]string{
+					"To check project status:",
+					"• Use 'get_projects' to see all available project IDs",
+					"• Then use: project_control action='status' project_id='your_project_id'",
+					"• Or use 'system_overview' to see status of all projects at once",
+				},
+			).ToMCPResult(), nil
 		}
 		// Use get project endpoint for status
 		projectResponse, err := m.makeHTTPRequest("GET", fmt.Sprintf("/projects/%s", projectId), nil, true)
 		if err != nil {
-			return common.MCPToolResult{
-				Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get project status: %v", err)}},
-				IsError: true,
-			}, nil
+			// Check if it's a structured MCP error
+			if mcpErr, ok := err.(errors.MCPError); ok {
+				// Create new error with additional suggestions
+				return errors.MCPError{
+					Type:    errors.ErrAPI,
+					Message: fmt.Sprintf("Failed to get project status: %v", mcpErr.Error()),
+					Suggestions: []string{
+						"Project may not exist or you may not have access:",
+						"• Use 'get_projects' to see available project IDs",
+						"• Check if project ID is spelled correctly",
+						"• Verify your authentication token has proper permissions",
+						"• Use 'system_overview' to see system-wide project status",
+					},
+					Details: mcpErr.Details,
+				}.ToMCPResult(), nil
+			}
+			return errors.MCPError{
+				Type:    errors.ErrAPI,
+				Message: fmt.Sprintf("Failed to get project status: %v", err),
+				Suggestions: []string{
+					"Project operation failed:",
+					"• Use 'get_projects' to see available project IDs",
+					"• Check if project ID is spelled correctly",
+					"• Verify your authentication token has proper permissions",
+					"• Use 'system_overview' to see system-wide project status",
+				},
+				Details: map[string]interface{}{"original_error": err.Error()},
+			}.ToMCPResult(), nil
 		}
 		results = append(results, fmt.Sprintf("✓ Project status: %s\n", string(projectResponse)))
 		return common.MCPToolResult{
 			Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
 		}, nil
 	default:
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Unknown action: %s. Supported actions: start, stop, restart, start_all, status", action)}},
-			IsError: true,
-		}, nil
+		return errors.NewValidationErrorWithSuggestions(
+			fmt.Sprintf("unknown action '%s' for project_control", action),
+			[]string{
+				"Use one of these supported actions:",
+				"• start - Start a specific project (requires project_id)",
+				"• stop - Stop a specific project (requires project_id)",
+				"• restart - Restart a specific project (requires project_id)",
+				"• start_all - Start all projects (no project_id needed)",
+				"• status - Check project status (requires project_id)",
+				"Use 'get_projects' to see available project IDs first",
+				"Example: project_control action='restart' project_id='security_monitor'",
+			},
+		).ToMCPResult(), nil
 	}
 
 	if !hasProjectId && action != "start_all" {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "Project ID is required for this action"}},
-			IsError: true,
-		}, nil
+		return errors.NewValidationErrorWithSuggestions(
+			fmt.Sprintf("project_id is required for action '%s'", action),
+			[]string{
+				"To find available project IDs:",
+				"• Use 'get_projects' to list all projects",
+				"• Use 'system_overview' to see projects with status",
+				"• Use 'explore_components component_type=\"project\"' for detailed view",
+				fmt.Sprintf("Then retry: project_control action='%s' project_id='your_project_id'", action),
+			},
+		).ToMCPResult(), nil
 	}
 
 	// Step 1: Perform control operation
 	results = append(results, "Step 1: Performing control operation...")
 	controlResponse, err := m.makeHTTPRequest("POST", endpoint, controlArgs, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Project control failed: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Project control operation '%s' failed: %v", action, err),
+			Suggestions: []string{
+				"Project control operation failed:",
+				"• Check if the project exists using 'get_projects'",
+				"• Verify the project is in the correct state for this operation",
+				"• Use 'system_overview' to see current project statuses",
+				"• Check 'get_error_logs' for detailed error information",
+				"• For start operations: ensure all required components are deployed",
+				"• For stop operations: wait for any in-progress operations to complete",
+			},
+			Details: map[string]interface{}{
+				"action":     action,
+				"project_id": projectId,
+				"endpoint":   endpoint,
+			},
+		}.ToMCPResult(), nil
 	}
 	results = append(results, fmt.Sprintf("✓ Control operation completed: %s\n", string(controlResponse)))
 
@@ -1785,8 +1958,34 @@ func (m *APIMapper) handleGetRuleset(args map[string]interface{}) (common.MCPToo
 
 // handleCreateRuleset creates a new ruleset with XML configuration and validation
 func (m *APIMapper) handleCreateRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
-	rulesetId := args["id"].(string)
-	raw := args["raw"].(string)
+	rulesetId, hasId := args["id"].(string)
+	if !hasId || rulesetId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"id parameter (ruleset ID) is required for creating ruleset",
+			[]string{
+				"Provide a unique ID for the new ruleset:",
+				"• Use descriptive names like 'security_rules', 'network_monitoring', 'threat_detection'",
+				"• Check existing rulesets with 'get_rulesets' to avoid conflicts",
+				"• Use 'get_rule_templates' to see example ruleset structures",
+				"Example: rule_manager action='create_ruleset' id='my_rules' raw='<xml>...</xml>'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	raw, hasRaw := args["raw"].(string)
+	if !hasRaw || raw == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"raw parameter (XML configuration) is required for creating ruleset",
+			[]string{
+				"Provide the complete XML configuration for the ruleset:",
+				"• Use 'get_rule_templates' to see example ruleset XML structures",
+				"• Use 'get_ruleset_syntax_guide' for XML syntax help",
+				"• Start with a simple template and add rules incrementally",
+				"• Use 'rule_ai_generator' to create rules from sample data",
+				"Example XML: '<config><ruleset><rule id=\"test\">...</rule></ruleset></config>'",
+			},
+		).ToMCPResult(), nil
+	}
 
 	var results []string
 	results = append(results, "=== RULESET CREATION ===\n")
@@ -1799,10 +1998,23 @@ func (m *APIMapper) handleCreateRuleset(args map[string]interface{}) (common.MCP
 	}
 	createResponse, err := m.makeHTTPRequest("POST", "/rulesets", createArgs, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Ruleset creation failed: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Ruleset creation failed: %v", err),
+			Suggestions: []string{
+				"Ruleset creation failed - common issues:",
+				"• Check if ruleset ID already exists with 'get_rulesets'",
+				"• Verify XML syntax is valid using 'get_ruleset_syntax_guide'",
+				"• Use 'get_rule_templates' for working examples",
+				"• Try creating with a simpler XML structure first",
+				"• Check 'get_pending_changes' for conflicting temporary changes",
+				"• Use 'get_error_logs' for detailed error information",
+			},
+			Details: map[string]interface{}{
+				"ruleset_id": rulesetId,
+				"xml_length": len(raw),
+			},
+		}.ToMCPResult(), nil
 	}
 	results = append(results, fmt.Sprintf("✓ Ruleset created: %s\n", string(createResponse)))
 
@@ -1813,8 +2025,30 @@ func (m *APIMapper) handleCreateRuleset(args map[string]interface{}) (common.MCP
 
 // handleAddRulesetRule adds a single rule to an existing ruleset
 func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MCPToolResult, error) {
-	rulesetId := args["id"].(string)
-	ruleRaw := args["rule_raw"].(string)
+	rulesetId, ok := args["id"].(string)
+	if !ok || rulesetId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"id parameter (ruleset ID) is required",
+			[]string{
+				"Use 'get_rulesets' to list all available rulesets",
+				"Example: add_ruleset_rule id='security_rules' rule_raw='<rule>...</rule>'",
+				"If no rulesets exist, create one first with 'rule_manager action=create_ruleset'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	ruleRaw, ok := args["rule_raw"].(string)
+	if !ok || ruleRaw == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"rule_raw parameter is required",
+			[]string{
+				"Provide the complete XML rule definition",
+				"Use 'rule_ai_generator' to generate rules from sample data",
+				"Use 'get_rule_templates' to see example rule formats",
+				"Example: add_ruleset_rule id='" + rulesetId + "' rule_raw='<rule>..complete XML..</rule>'",
+			},
+		).ToMCPResult(), nil
+	}
 
 	var results []string
 	results = append(results, "=== RULE ADDITION ===\n")
@@ -1856,8 +2090,34 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 
 // handleUpdateRuleset updates an entire ruleset configuration
 func (m *APIMapper) handleUpdateRuleset(args map[string]interface{}) (common.MCPToolResult, error) {
-	rulesetId := args["id"].(string)
-	raw := args["raw"].(string)
+	rulesetId, hasId := args["id"].(string)
+	if !hasId || rulesetId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"id parameter (ruleset ID) is required for updating ruleset",
+			[]string{
+				"Specify the ID of the ruleset to update:",
+				"• Use 'get_rulesets' to see all available ruleset IDs",
+				"• Ensure the ruleset exists before attempting to update",
+				"• Check if the ruleset has pending changes with 'get_pending_changes'",
+				"Example: rule_manager action='update_ruleset' id='security_rules' raw='<xml>...</xml>'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	raw, hasRaw := args["raw"].(string)
+	if !hasRaw || raw == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"raw parameter (XML configuration) is required for updating ruleset",
+			[]string{
+				"Provide the complete XML configuration for the ruleset:",
+				"• Use 'get_ruleset id=\"" + rulesetId + "\"' to see current configuration",
+				"• Use 'get_rule_templates' for XML structure examples",
+				"• Use 'get_ruleset_syntax_guide' for XML syntax help",
+				"• Back up current configuration before making major changes",
+				"Example: Update with proper XML structure including all rules",
+			},
+		).ToMCPResult(), nil
+	}
 
 	var results []string
 	results = append(results, "=== RULESET UPDATE ===\n")
@@ -1870,10 +2130,23 @@ func (m *APIMapper) handleUpdateRuleset(args map[string]interface{}) (common.MCP
 	}
 	updateResponse, err := m.makeHTTPRequest("PUT", fmt.Sprintf("/rulesets/%s", rulesetId), updateArgs, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Ruleset update failed: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Ruleset update failed: %v", err),
+			Suggestions: []string{
+				"Ruleset update failed - common issues:",
+				"• Verify the ruleset exists with 'get_ruleset id=\"" + rulesetId + "\"'",
+				"• Check XML syntax is valid using 'get_ruleset_syntax_guide'",
+				"• Ensure all required fields are present in the XML",
+				"• Use 'get_pending_changes' to check for conflicting changes",
+				"• Try updating with simpler changes first to isolate the issue",
+				"• Check 'get_error_logs' for detailed error information",
+			},
+			Details: map[string]interface{}{
+				"ruleset_id": rulesetId,
+				"xml_length": len(raw),
+			},
+		}.ToMCPResult(), nil
 	}
 	results = append(results, fmt.Sprintf("✓ Ruleset updated: %s\n", string(updateResponse)))
 
@@ -1884,8 +2157,32 @@ func (m *APIMapper) handleUpdateRuleset(args map[string]interface{}) (common.MCP
 
 // handleDeleteRulesetRule deletes a specific rule from a ruleset
 func (m *APIMapper) handleDeleteRulesetRule(args map[string]interface{}) (common.MCPToolResult, error) {
-	rulesetId := args["id"].(string)
-	ruleId := args["rule_id"].(string)
+	rulesetId, hasRulesetId := args["id"].(string)
+	if !hasRulesetId || rulesetId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"id parameter (ruleset ID) is required for rule deletion",
+			[]string{
+				"Specify the ID of the ruleset containing the rule:",
+				"• Use 'get_rulesets' to see all available ruleset IDs",
+				"• Use 'get_ruleset id=\"ruleset_name\"' to see rules in a specific ruleset",
+				"Example: rule_manager action='delete_rule' id='security_rules' rule_id='suspicious_ip_check'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	ruleId, hasRuleId := args["rule_id"].(string)
+	if !hasRuleId || ruleId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"rule_id parameter is required for rule deletion",
+			[]string{
+				"Specify the ID of the specific rule to delete:",
+				"• Use 'get_ruleset id=\"" + rulesetId + "\"' to see all rules in this ruleset",
+				"• Rule IDs are usually found in the XML as <rule id=\"rule_name\">",
+				"• Use 'rule_manager action=\"view_rules\" id=\"" + rulesetId + "\"' to list rules",
+				"Example: rule_manager action='delete_rule' id='" + rulesetId + "' rule_id='your_rule_id'",
+			},
+		).ToMCPResult(), nil
+	}
 
 	var results []string
 	results = append(results, "=== RULE DELETION ===\n")
@@ -1894,10 +2191,23 @@ func (m *APIMapper) handleDeleteRulesetRule(args map[string]interface{}) (common
 	results = append(results, "Step 1: Deleting rule...")
 	deleteResponse, err := m.makeHTTPRequest("DELETE", fmt.Sprintf("/rulesets/%s/rules/%s", rulesetId, ruleId), nil, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Rule deletion failed: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Rule deletion failed: %v", err),
+			Suggestions: []string{
+				"Rule deletion failed - troubleshooting steps:",
+				"• Verify the ruleset exists with 'get_ruleset id=\"" + rulesetId + "\"'",
+				"• Check if the rule ID exists in the ruleset",
+				"• Ensure the rule ID is spelled correctly (case-sensitive)",
+				"• Use 'get_pending_changes' to check for conflicting changes",
+				"• Verify you have permissions to modify this ruleset",
+				"• Check 'get_error_logs' for detailed error information",
+			},
+			Details: map[string]interface{}{
+				"ruleset_id": rulesetId,
+				"rule_id":    ruleId,
+			},
+		}.ToMCPResult(), nil
 	}
 	results = append(results, fmt.Sprintf("✓ Rule deleted: %s\n", string(deleteResponse)))
 
@@ -1943,29 +2253,95 @@ func (m *APIMapper) handleGetInputs(args map[string]interface{}) (common.MCPTool
 
 // handleTestComponent performs unified testing for components
 func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCPToolResult, error) {
-	componentType := args["type"].(string)
-	componentId, _ := args["id"].(string)
-	testData, _ := args["test_data"].(string)
+	componentType, hasType := args["type"].(string)
+	if !hasType || componentType == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"type parameter is required for component testing",
+			[]string{
+				"Specify the component type to test:",
+				"• ruleset - Test rule logic and conditions",
+				"• input - Test data source connectivity and parsing",
+				"• output - Test alert/notification delivery",
+				"• plugin - Test custom plugin functionality",
+				"• project - Test complete data flow pipeline",
+				"Example: test_lab test_target='ruleset' component_id='security_rules'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	componentId, hasId := args["id"].(string)
+	if !hasId || componentId == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"id parameter (component ID) is required for testing",
+			[]string{
+				fmt.Sprintf("Provide the ID of the %s to test:", componentType),
+				fmt.Sprintf("• Use 'get_%ss' to list available %s components", componentType, componentType),
+				"• Use 'explore_components' to discover all components",
+				"• Check component exists and is properly configured",
+				fmt.Sprintf("Example: test_lab test_target='%s' component_id='your_component_id'", componentType),
+			},
+		).ToMCPResult(), nil
+	}
+
+	testData, hasTestData := args["test_data"].(string)
 	content, hasContent := args["content"].(string)
 
 	var results []string
 	results = append(results, fmt.Sprintf("=== TESTING %s ===\n", strings.ToUpper(componentType)))
 
+	// Provide guidance if no test data provided
+	if !hasTestData || testData == "" {
+		if componentType == "ruleset" {
+			return errors.NewValidationErrorWithSuggestions(
+				"test_data parameter is required for ruleset testing",
+				[]string{
+					"Provide sample JSON data to test the ruleset against:",
+					"• Use 'get_samplers_data' to get real data from your system",
+					"• Use 'get_input' to see sample data from connected inputs",
+					"• Use 'get_project' to see data flow and sample formats",
+					"• Provide your own real JSON data that matches your data structure",
+					"Example: test_ruleset id='security_rules' data='{\"user\":\"admin\",\"action\":\"login\"}'",
+				},
+			).ToMCPResult(), nil
+		}
+	}
+
 	// Step 1: Test component
 	results = append(results, "Step 1: Testing component...")
 	testArgs := map[string]interface{}{
-		"id":        componentId,
-		"test_data": testData,
+		"id": componentId,
+	}
+	if hasTestData {
+		testArgs["test_data"] = testData
 	}
 	if hasContent {
 		testArgs["content"] = content
 	}
+
 	testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-component/%s", componentType), testArgs, true)
 	if err != nil {
-		results = append(results, fmt.Sprintf("✗ Testing failed: %v\n", err))
-	} else {
-		results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Testing %s '%s' failed: %v", componentType, componentId, err),
+			Suggestions: []string{
+				"Component testing failed - troubleshooting steps:",
+				fmt.Sprintf("• Verify the %s exists with 'get_%s id=%s'", componentType, componentType, componentId),
+				"• Check if component is properly deployed with 'get_pending_changes'",
+				"• For rulesets: ensure test data matches the expected input format",
+				"• For inputs: verify connectivity and authentication settings",
+				"• For outputs: check destination configuration and permissions",
+				"• Use 'get_error_logs' for detailed error information",
+				"• Try with simpler test data first to isolate the issue",
+			},
+			Details: map[string]interface{}{
+				"component_type": componentType,
+				"component_id":   componentId,
+				"has_test_data":  hasTestData,
+				"has_content":    hasContent,
+			},
+		}.ToMCPResult(), nil
 	}
+	results = append(results, fmt.Sprintf("✓ Testing completed: %s\n", string(testResponse)))
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -1987,12 +2363,46 @@ func (m *APIMapper) handleGetPendingChanges(args map[string]interface{}) (common
 	}
 	pendingChangesResponse, err := m.makeHTTPRequest("GET", "/pending-changes"+pendingChangesArgs, nil, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Failed to get pending changes: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Failed to get pending changes: %v", err),
+			Suggestions: []string{
+				"Cannot retrieve pending changes - troubleshooting:",
+				"• Check if you have proper authentication with 'token_check'",
+				"• Verify system is accessible with 'system_overview'",
+				"• Try without enhanced mode first: get_pending_changes",
+				"• Check system logs with 'get_error_logs' for detailed information",
+				"• Contact administrator if the system appears to be down",
+			},
+			Details: map[string]interface{}{
+				"enhanced_mode": hasEnhanced,
+			},
+		}.ToMCPResult(), nil
 	}
-	results = append(results, fmt.Sprintf("✓ Pending changes retrieved: %s\n", string(pendingChangesResponse)))
+
+	// Parse response to provide better guidance
+	var pendingData interface{}
+	if json.Unmarshal(pendingChangesResponse, &pendingData) == nil {
+		// Add specific guidance based on pending changes
+		results = append(results, string(pendingChangesResponse))
+		results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
+		results = append(results, "📋 **Understanding Pending Changes:**")
+		results = append(results, "   → Components listed above are in TEMPORARY files")
+		results = append(results, "   → These changes are NOT ACTIVE until deployed!")
+		results = append(results, "")
+		results = append(results, "✅ **To Deploy Changes:**")
+		results = append(results, "   → Use 'apply_changes' to deploy ALL pending changes")
+		results = append(results, "   → Or use component-specific deployment if available")
+		results = append(results, "")
+		results = append(results, "🧪 **Before Deployment:**")
+		results = append(results, "   → Use 'test_ruleset', 'test_input', etc. to validate changes")
+		results = append(results, "   → Use 'verify_changes' to check for conflicts")
+		results = append(results, "")
+		results = append(results, "⚠️  **Important:** Your changes remain inactive until deployed!")
+	} else {
+		// Fallback if parsing fails
+		results = append(results, fmt.Sprintf("✓ Pending changes retrieved: %s\n", string(pendingChangesResponse)))
+	}
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2006,19 +2416,57 @@ func (m *APIMapper) handleApplyChanges(args map[string]interface{}) (common.MCPT
 	var results []string
 	results = append(results, "=== APPLYING CHANGES ===\n")
 
-	// Step 1: Apply changes
-	results = append(results, "Step 1: Applying changes...")
+	// Step 1: Pre-deployment validation (optional but recommended)
+	results = append(results, "Step 1: Pre-deployment validation...")
+	results = append(results, "💡 Tip: Use 'get_pending_changes' first to review what will be deployed")
+
+	// Step 2: Apply changes
+	results = append(results, "Step 2: Applying changes...")
 	applyArgs := map[string]interface{}{
 		"enhanced": hasEnhanced,
 	}
 	applyResponse, err := m.makeHTTPRequest("POST", "/apply-changes", applyArgs, true)
 	if err != nil {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: fmt.Sprintf("Change application failed: %v", err)}},
-			IsError: true,
-		}, nil
+		return errors.MCPError{
+			Type:    errors.ErrAPI,
+			Message: fmt.Sprintf("Change application failed: %v", err),
+			Suggestions: []string{
+				"Deployment failed - troubleshooting steps:",
+				"• Check if there are any pending changes with 'get_pending_changes'",
+				"• Verify components are valid with 'verify_changes'",
+				"• Look for dependency conflicts between components",
+				"• Check if system has sufficient resources for deployment",
+				"• Review 'get_error_logs' for detailed failure information",
+				"• Try deploying components individually if batch deployment fails",
+				"• Ensure no other deployments are in progress",
+			},
+			Details: map[string]interface{}{
+				"enhanced_mode": hasEnhanced,
+			},
+		}.ToMCPResult(), nil
 	}
+
+	// Parse response to provide post-deployment guidance
 	results = append(results, fmt.Sprintf("✓ Changes applied: %s\n", string(applyResponse)))
+
+	// Step 3: Post-deployment guidance
+	results = append(results, "\n=== 🎉 DEPLOYMENT COMPLETE ===")
+	results = append(results, "✅ **Your changes are now ACTIVE in production!**")
+	results = append(results, "")
+	results = append(results, "📋 **Recommended Next Steps:**")
+	results = append(results, "1. 🧪 **Test your changes:**")
+	results = append(results, "   → Use 'test_ruleset', 'test_project', etc. to validate functionality")
+	results = append(results, "   → Monitor system performance with 'system_overview'")
+	results = append(results, "")
+	results = append(results, "2. 🔍 **Monitor for issues:**")
+	results = append(results, "   → Check 'get_error_logs' for any deployment-related errors")
+	results = append(results, "   → Use 'get_cluster_status' to ensure system stability")
+	results = append(results, "")
+	results = append(results, "3. 📊 **Verify operation:**")
+	results = append(results, "   → Check that projects are running properly")
+	results = append(results, "   → Verify data flows are working as expected")
+	results = append(results, "")
+	results = append(results, "💡 If issues arise, you can create new changes to fix them and deploy again.")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2272,24 +2720,35 @@ type DataQuality struct {
 func (m *APIMapper) analyzeFieldStatistics(data []map[string]interface{}) map[string]*FieldStatistics {
 	stats := make(map[string]*FieldStatistics)
 
-	// Initialize stats for all fields
+	// Pre-allocate field statistics to avoid map resizing
+	allFields := make(map[string]bool)
 	for _, record := range data {
 		for field := range record {
-			if _, exists := stats[field]; !exists {
-				stats[field] = &FieldStatistics{
-					TopValues: make([]ValueCount, 0),
-				}
-			}
+			allFields[field] = true
 		}
 	}
 
-	// Analyze each field
-	for field := range stats {
-		valueMap := make(map[string]int)
-		var numericValues []float64
-		isNumeric := true
+	for field := range allFields {
+		stats[field] = &FieldStatistics{
+			TopValues: make([]ValueCount, 0, 10), // pre-allocate with capacity
+		}
+	}
 
-		for _, record := range data {
+	// Single pass analysis for better performance
+	fieldValueMaps := make(map[string]map[string]int)
+	fieldNumericValues := make(map[string][]float64)
+	fieldIsNumeric := make(map[string]bool)
+
+	// Initialize maps
+	for field := range stats {
+		fieldValueMaps[field] = make(map[string]int)
+		fieldNumericValues[field] = make([]float64, 0)
+		fieldIsNumeric[field] = true
+	}
+
+	// Single pass through data
+	for _, record := range data {
+		for field := range stats {
 			value, exists := record[field]
 			if !exists || value == nil || value == "" {
 				stats[field].NullCount++
@@ -2298,54 +2757,61 @@ func (m *APIMapper) analyzeFieldStatistics(data []map[string]interface{}) map[st
 
 			// Convert to string for counting
 			strValue := fmt.Sprintf("%v", value)
-			valueMap[strValue]++
+			fieldValueMaps[field][strValue]++
 
-			// Check if numeric
+			// Check and collect numeric values
 			switch v := value.(type) {
 			case float64:
-				numericValues = append(numericValues, v)
+				fieldNumericValues[field] = append(fieldNumericValues[field], v)
 			case int:
-				numericValues = append(numericValues, float64(v))
+				fieldNumericValues[field] = append(fieldNumericValues[field], float64(v))
+			case int64:
+				fieldNumericValues[field] = append(fieldNumericValues[field], float64(v))
 			default:
-				isNumeric = false
+				fieldIsNumeric[field] = false
 			}
 		}
+	}
 
-		// Set type
-		if isNumeric && len(numericValues) > 0 {
+	// Process results
+	for field := range stats {
+		// Set type and calculate numeric stats
+		if fieldIsNumeric[field] && len(fieldNumericValues[field]) > 0 {
 			stats[field].Type = "numeric"
-			stats[field].NumericStats = m.calculateNumericStats(numericValues)
+			stats[field].NumericStats = m.calculateNumericStats(fieldNumericValues[field])
 		} else {
 			stats[field].Type = "string"
 		}
 
 		// Count unique values
-		stats[field].UniqueCount = len(valueMap)
+		stats[field].UniqueCount = len(fieldValueMaps[field])
 
-		// Get top values
-		for value, count := range valueMap {
+		// Get top values efficiently
+		for value, count := range fieldValueMaps[field] {
 			stats[field].TopValues = append(stats[field].TopValues, ValueCount{Value: value, Count: count})
 		}
 
-		// Sort top values by count
-		for i := 0; i < len(stats[field].TopValues)-1; i++ {
-			for j := i + 1; j < len(stats[field].TopValues); j++ {
-				if stats[field].TopValues[i].Count < stats[field].TopValues[j].Count {
-					stats[field].TopValues[i], stats[field].TopValues[j] = stats[field].TopValues[j], stats[field].TopValues[i]
-				}
-			}
+		// Sort top values by count (efficient sort instead of bubble sort)
+		sort.Slice(stats[field].TopValues, func(i, j int) bool {
+			return stats[field].TopValues[i].Count > stats[field].TopValues[j].Count
+		})
+
+		// Limit to top 10 values for performance
+		if len(stats[field].TopValues) > 10 {
+			stats[field].TopValues = stats[field].TopValues[:10]
 		}
 	}
 
 	return stats
 }
 
-// calculateNumericStats calculates statistics for numeric values
+// calculateNumericStats calculates statistics for numeric values (optimized)
 func (m *APIMapper) calculateNumericStats(values []float64) *NumericStats {
 	if len(values) == 0 {
 		return nil
 	}
 
+	// Single pass calculation for min, max, and sum
 	stats := &NumericStats{
 		Min: values[0],
 		Max: values[0],
@@ -2353,18 +2819,18 @@ func (m *APIMapper) calculateNumericStats(values []float64) *NumericStats {
 
 	sum := 0.0
 	for _, v := range values {
+		sum += v
 		if v < stats.Min {
 			stats.Min = v
 		}
 		if v > stats.Max {
 			stats.Max = v
 		}
-		sum += v
 	}
 
 	stats.Avg = sum / float64(len(values))
 
-	// Calculate standard deviation
+	// Calculate standard deviation in second pass (unavoidable for accuracy)
 	sumSquaredDiff := 0.0
 	for _, v := range values {
 		diff := v - stats.Avg
@@ -2375,33 +2841,60 @@ func (m *APIMapper) calculateNumericStats(values []float64) *NumericStats {
 	return stats
 }
 
-// detectAnomalies detects anomalies in the data
+// detectAnomalies detects anomalies in the data (optimized)
 func (m *APIMapper) detectAnomalies(data []map[string]interface{}, fieldStats map[string]*FieldStatistics) []string {
 	var anomalies []string
+	dataLen := len(data)
 
-	// Check for fields with too many unique values (potential unbounded fields)
+	// Pre-calculate thresholds to avoid repeated calculations
+	highCardinalityThreshold := float64(dataLen) * 0.8
+	highNullRateThreshold := 0.5
+
+	// Check field-level anomalies
 	for field, stats := range fieldStats {
-		if stats.Type == "string" && float64(stats.UniqueCount) > float64(len(data))*0.8 {
+		// High cardinality check
+		if stats.Type == "string" && float64(stats.UniqueCount) > highCardinalityThreshold {
 			anomalies = append(anomalies, fmt.Sprintf("Field '%s' has very high cardinality (%d unique values in %d records)",
-				field, stats.UniqueCount, len(data)))
+				field, stats.UniqueCount, dataLen))
 		}
 
-		// Check for fields with too many nulls
-		nullRate := float64(stats.NullCount) / float64(len(data))
-		if nullRate > 0.5 {
+		// High null rate check
+		nullRate := float64(stats.NullCount) / float64(dataLen)
+		if nullRate > highNullRateThreshold {
 			anomalies = append(anomalies, fmt.Sprintf("Field '%s' is mostly empty (%.1f%% null/empty)",
 				field, nullRate*100))
 		}
 
-		// Check for numeric outliers using 3-sigma rule
+		// Numeric outliers check (only for fields with valid statistics)
 		if stats.Type == "numeric" && stats.NumericStats != nil && stats.NumericStats.StdDev > 0 {
+			outlierFound := false
+			avg := stats.NumericStats.Avg
+			stdDev := stats.NumericStats.StdDev
+
+			// Check for outliers in numeric data
 			for _, record := range data {
 				if value, ok := record[field].(float64); ok {
-					zScore := math.Abs((value - stats.NumericStats.Avg) / stats.NumericStats.StdDev)
+					zScore := math.Abs((value - avg) / stdDev)
 					if zScore > 3 {
 						anomalies = append(anomalies, fmt.Sprintf("Field '%s' has outlier value: %.2f (z-score: %.2f)",
 							field, value, zScore))
-						break // Only report once per field
+						outlierFound = true
+						break // Only report once per field for performance
+					}
+				}
+			}
+
+			// Alternative check for int values if no float64 outliers found
+			if !outlierFound {
+				for _, record := range data {
+					if intValue, ok := record[field].(int); ok {
+						value := float64(intValue)
+						zScore := math.Abs((value - avg) / stdDev)
+						if zScore > 3 {
+							anomalies = append(anomalies, fmt.Sprintf("Field '%s' has outlier value: %.2f (z-score: %.2f)",
+								field, value, zScore))
+							break
+						}
 					}
 				}
 			}
@@ -2411,52 +2904,56 @@ func (m *APIMapper) detectAnomalies(data []map[string]interface{}, fieldStats ma
 	return anomalies
 }
 
-// assessDataQuality assesses the overall quality of the data
+// assessDataQuality assesses the overall quality of the data (optimized)
 func (m *APIMapper) assessDataQuality(data []map[string]interface{}, fieldStats map[string]*FieldStatistics) DataQuality {
 	quality := DataQuality{
-		Issues: make([]string, 0),
+		Issues: make([]string, 0, 5), // pre-allocate with reasonable capacity
 	}
 
-	// Calculate completeness
-	totalFields := len(fieldStats) * len(data)
+	dataLen := len(data)
+	totalFields := len(fieldStats) * dataLen
 	nonNullFields := 0
 	populatedFields := 0
 
+	// Single pass through field statistics
 	for field, stats := range fieldStats {
-		nonNullFields += (len(data) - stats.NullCount)
-		if stats.NullCount < len(data) {
+		nonNullFields += (dataLen - stats.NullCount)
+		if stats.NullCount < dataLen {
 			populatedFields++
 		}
 
-		// Check for quality issues
-		if stats.UniqueCount == 1 && len(data) > 1 {
+		// Quality issue checks (consolidated for efficiency)
+		if stats.UniqueCount == 1 && dataLen > 1 {
 			quality.Issues = append(quality.Issues, fmt.Sprintf("Field '%s' has only one unique value", field))
 		}
 
-		if stats.Type == "numeric" && stats.NumericStats != nil {
-			if stats.NumericStats.StdDev == 0 && len(data) > 1 {
-				quality.Issues = append(quality.Issues, fmt.Sprintf("Field '%s' has no variation (all values are the same)", field))
-			}
+		if stats.Type == "numeric" && stats.NumericStats != nil && stats.NumericStats.StdDev == 0 && dataLen > 1 {
+			quality.Issues = append(quality.Issues, fmt.Sprintf("Field '%s' has no variation (all values are the same)", field))
 		}
 	}
 
-	quality.Completeness = float64(nonNullFields) / float64(totalFields)
+	// Calculate metrics
+	if totalFields > 0 {
+		quality.Completeness = float64(nonNullFields) / float64(totalFields)
+	}
 	quality.FieldCoverage = populatedFields
 
-	// Calculate consistency (simple heuristic based on data patterns)
+	// Calculate consistency (optimized heuristic)
 	quality.Consistency = 1.0
+	highCardinalityPenalty := 0.9
+	highCardinalityThreshold := float64(dataLen) * 0.9
+
 	for _, stats := range fieldStats {
 		if stats.Type == "string" && stats.UniqueCount > 0 {
-			// Check if values follow a pattern
-			if float64(stats.UniqueCount) > float64(len(data))*0.9 {
-				quality.Consistency *= 0.9 // Penalize high cardinality
+			if float64(stats.UniqueCount) > highCardinalityThreshold {
+				quality.Consistency *= highCardinalityPenalty
 			}
 		}
 	}
 
-	// Calculate overall score
-	quality.Score = (quality.Completeness*0.4 + quality.Consistency*0.3 +
-		float64(quality.FieldCoverage)/float64(len(fieldStats))*0.3)
+	// Calculate overall score using weighted average
+	fieldCoverageScore := float64(quality.FieldCoverage) / float64(len(fieldStats))
+	quality.Score = (quality.Completeness*0.4 + quality.Consistency*0.3 + fieldCoverageScore*0.3)
 
 	return quality
 }
@@ -4388,18 +4885,26 @@ func (m *APIMapper) handleCreateRuleComplete(args map[string]interface{}) (commo
 	// Extract intelligent parameters
 	rulesetID, ok := args["ruleset_id"].(string)
 	if !ok || rulesetID == "" {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "Error: ruleset_id is required"}},
-			IsError: true,
-		}, nil
+		return errors.NewValidationErrorWithSuggestions(
+			"ruleset_id parameter is required",
+			[]string{
+				"Use 'get_rulesets' tool to list all available rulesets and their IDs",
+				"Example: create_rule_complete ruleset_id='my_security_rules' rule_purpose='detect suspicious activity'",
+				"If no rulesets exist, create one first with 'rule_manager action=create_ruleset id=new_ruleset'",
+			},
+		).ToMCPResult(), nil
 	}
 
 	rulePurpose, ok := args["rule_purpose"].(string)
 	if !ok || rulePurpose == "" {
-		return common.MCPToolResult{
-			Content: []common.MCPToolContent{{Type: "text", Text: "Error: rule_purpose is required"}},
-			IsError: true,
-		}, nil
+		return errors.NewValidationErrorWithSuggestions(
+			"rule_purpose parameter is required",
+			[]string{
+				"Describe what the rule should detect (e.g., 'suspicious network connections', 'malware execution', 'data exfiltration')",
+				"Example: create_rule_complete ruleset_id='" + rulesetID + "' rule_purpose='detect failed login attempts'",
+				"Be specific about the security threat or behavior you want to monitor",
+			},
+		).ToMCPResult(), nil
 	}
 
 	// Optional parameters

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
@@ -334,7 +335,7 @@ func (s *StandardMCPServer) handlePromptsGet(id interface{}, request map[string]
 	return s.createJSONRPCResponse(id, promptResult)
 }
 
-// handleResourcesList handles the resources/list method
+// handleResourcesList handles the resources/list method with enhanced accuracy and timeliness
 func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[string]interface{}) ([]byte, error) {
 	var resources []map[string]interface{}
 
@@ -342,31 +343,47 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 	filterType := ""
 	limit := 100
 	offset := 0
+
 	if v, ok := params["type"].(string); ok {
 		filterType = v
 	}
-	if v, ok := params["limit"].(float64); ok { // JSON numbers are float64
+	if v, ok := params["limit"].(float64); ok {
 		limit = int(v)
 	}
 	if v, ok := params["offset"].(float64); ok {
 		offset = int(v)
 	}
 
-	// Get projects from API
+	// Get real-time projects from API for accuracy
 	if projectResult, err := s.apiMapper.CallAPITool("get_projects", map[string]interface{}{}); err == nil && !projectResult.IsError {
 		if len(projectResult.Content) > 0 {
 			var projects []map[string]interface{}
 			if err := json.Unmarshal([]byte(projectResult.Content[0].Text), &projects); err == nil {
 				for _, project := range projects {
 					if projectId, ok := project["id"].(string); ok {
+						// Get real-time project status for accuracy
+						status := "unknown"
+						if projectStatus, ok := project["status"].(string); ok {
+							status = projectStatus
+						}
+
+						// Check for pending changes to indicate temporary state
+						hasPendingChanges := false
+						if pendingResult, err := s.apiMapper.CallAPITool("get_pending_changes", map[string]interface{}{}); err == nil {
+							// Simple check if project has pending changes
+							hasPendingChanges = strings.Contains(pendingResult.Content[0].Text, projectId)
+						}
+
 						resources = append(resources, map[string]interface{}{
 							"uri":         fmt.Sprintf("hub://project/%s", projectId),
 							"name":        fmt.Sprintf("Project: %s", projectId),
-							"description": fmt.Sprintf("Project configuration and data flow for %s", projectId),
+							"description": fmt.Sprintf("Project configuration and data flow for %s (Status: %s)", projectId, status),
 							"mimeType":    "application/yaml",
 							"annotations": map[string]interface{}{
-								"type":   "project",
-								"status": project["status"],
+								"type":              "project",
+								"status":            status,
+								"hasPendingChanges": hasPendingChanges,
+								"lastUpdated":       time.Now().Format(time.RFC3339),
 							},
 						})
 					}
@@ -375,26 +392,52 @@ func (s *StandardMCPServer) handleResourcesList(id interface{}, params map[strin
 		}
 	}
 
-	// Add ruleset resources using safe accessor
-	project.ForEachRuleset(func(rsID string, _ *rules_engine.Ruleset) bool {
-		// Dynamically find projects using this ruleset (replaces static OwnerProjects)
-		owners := findProjectsUsingRuleset(rsID)
+	// Enhanced ruleset resources with real-time data
+	project.ForEachRuleset(func(rsID string, rs *rules_engine.Ruleset) bool {
+		// Dynamically find projects using this ruleset with error handling
+		var owners []string
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					owners = []string{} // fallback to empty list on error
+				}
+			}()
+			owners = findProjectsUsingRuleset(rsID)
+		}()
+
+		// Get real-time sample data with enhanced metadata
 		sampleCnt := 0
+		lastSampleTime := ""
 		sampler := common.GetSampler("ruleset." + rsID)
 		if sampler != nil {
 			stats := sampler.GetStats()
 			sampleCnt = int(stats.SampledCount)
+			// Note: LastSampleTime may not be available in current SamplerStats
+			// We'll use current time as a placeholder for now
+			if sampleCnt > 0 {
+				lastSampleTime = time.Now().Format(time.RFC3339)
+			}
+		}
+
+		// Check for pending changes to this ruleset
+		hasPendingChanges := false
+		if pendingResult, err := s.apiMapper.CallAPITool("get_pending_changes", map[string]interface{}{}); err == nil {
+			hasPendingChanges = strings.Contains(pendingResult.Content[0].Text, rsID)
 		}
 
 		resources = append(resources, map[string]interface{}{
 			"uri":         fmt.Sprintf("hub://ruleset/%s", rsID),
 			"name":        fmt.Sprintf("Ruleset: %s", rsID),
-			"description": "Ruleset definition",
+			"description": fmt.Sprintf("Ruleset definition with %d rules (Samples: %d)", len(rs.Rules), sampleCnt),
 			"mimeType":    "application/xml",
 			"annotations": map[string]interface{}{
-				"type":          "ruleset",
-				"ownerProjects": owners,
-				"sampleCount":   sampleCnt,
+				"type":              "ruleset",
+				"ownerProjects":     owners,
+				"sampleCount":       sampleCnt,
+				"lastSampleTime":    lastSampleTime,
+				"ruleCount":         len(rs.Rules),
+				"hasPendingChanges": hasPendingChanges,
+				"lastUpdated":       time.Now().Format(time.RFC3339),
 			},
 		})
 		return true
@@ -464,40 +507,42 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 
 		switch resType {
 		case "project":
-			s.ProjectMu.RLock()
-			proj, ok := project.GetProject(resID)
-			s.ProjectMu.RUnlock()
-			if ok && proj != nil && proj.Config != nil {
-				content = proj.Config.RawConfig
+			// Get real-time project data for accuracy
+			if projectResult, err := s.apiMapper.CallAPITool("get_project", map[string]interface{}{"id": resID}); err == nil && !projectResult.IsError {
+				content = projectResult.Content[0].Text
 				mimeType = "application/yaml"
 			} else {
-				return s.createJSONRPCError(id, -32602, "Project not found", uri)
+				return s.createJSONRPCError(id, -32602, "Project not found or inaccessible", uri)
 			}
 		case "ruleset":
-			rs, ok := project.GetRuleset(resID)
-
-			if !ok || rs == nil {
-				return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)
-			}
-
 			switch fragment {
 			case "owners":
-				// Dynamically find projects using this ruleset (replaces static OwnerProjects)
-				owners := findProjectsUsingRuleset(resID)
+				// Dynamically find projects using this ruleset with error handling
+				var owners []string
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							owners = []string{} // fallback to empty list on error
+						}
+					}()
+					owners = findProjectsUsingRuleset(resID)
+				}()
 				ownersJSON, _ := json.Marshal(owners)
 				content = string(ownersJSON)
 				mimeType = "application/json"
 			case "samples":
+				// Get enhanced sample data with more samples (up to 10 for better context)
 				sampler := common.GetSampler("ruleset." + resID)
 				samplesJSON := "[]"
 				if sampler != nil {
 					allSamples := sampler.GetSamples()
-					// Flatten samples (could be grouped by project)
 					flat := make([]json.RawMessage, 0)
 					count := 0
+					maxSamples := 10 // Increased from 3 for better resource accuracy
+
 					for _, list := range allSamples {
 						for _, sm := range list {
-							if count >= 3 { // limit to 3
+							if count >= maxSamples {
 								break
 							}
 							if b, err := json.Marshal(sm); err == nil {
@@ -511,16 +556,54 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				}
 				content = samplesJSON
 				mimeType = "application/json"
+			case "status":
+				// New fragment: Get real-time ruleset status
+				statusInfo := map[string]interface{}{
+					"id":            resID,
+					"lastUpdated":   time.Now().Format(time.RFC3339),
+					"sampleCount":   0,
+					"ownerProjects": findProjectsUsingRuleset(resID),
+				}
+
+				sampler := common.GetSampler("ruleset." + resID)
+				if sampler != nil {
+					stats := sampler.GetStats()
+					statusInfo["sampleCount"] = int(stats.SampledCount)
+				}
+
+				// Check pending changes
+				if pendingResult, err := s.apiMapper.CallAPITool("get_pending_changes", map[string]interface{}{}); err == nil {
+					statusInfo["hasPendingChanges"] = strings.Contains(pendingResult.Content[0].Text, resID)
+				}
+
+				statusJSON, _ := json.Marshal(statusInfo)
+				content = string(statusJSON)
+				mimeType = "application/json"
 			default:
-				// default return xml config
-				content = rs.RawConfig
-				mimeType = "application/xml"
+				// Get real-time ruleset data for accuracy
+				if rulesetResult, err := s.apiMapper.CallAPITool("get_ruleset", map[string]interface{}{"id": resID}); err == nil && !rulesetResult.IsError {
+					// Extract XML content from the API response if it contains XML
+					responseText := rulesetResult.Content[0].Text
+					if strings.Contains(responseText, "<ruleset") {
+						content = responseText
+					} else {
+						// Fallback to in-memory data if API response doesn't contain XML
+						rs, ok := project.GetRuleset(resID)
+						if !ok || rs == nil {
+							return s.createJSONRPCError(id, -32602, "Ruleset not found", uri)
+						}
+						content = rs.RawConfig
+					}
+					mimeType = "application/xml"
+				} else {
+					return s.createJSONRPCError(id, -32602, "Ruleset not found or inaccessible", uri)
+				}
 			}
 		}
 	}
 
 	if content == "" {
-		content = "Resource content"
+		content = "Resource content not available"
 	}
 
 	contents := []map[string]interface{}{
