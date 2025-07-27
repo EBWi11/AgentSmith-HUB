@@ -21,6 +21,28 @@ var ruleCachePool = sync.Pool{
 	New: func() interface{} { return make(map[string]common.CheckCoreCache, 8) },
 }
 
+// stringBuilderPool reuses strings.Builder objects to reduce allocations
+var stringBuilderPool = sync.Pool{
+	New: func() interface{} {
+		sb := &strings.Builder{}
+		sb.Grow(64) // Pre-allocate 64 bytes capacity
+		return sb
+	},
+}
+
+// slicePool reuses small slices to reduce allocations for delimiter operations
+var slicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]string, 0, 8)
+		return &s
+	},
+}
+
+// Optimized prefix checking - avoid strings.HasPrefix overhead
+func hasFromRawPrefix(s string) bool {
+	return len(s) >= 2 && s[0] == '_' && s[1] == '$'
+}
+
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
 	// Add panic recovery for critical state changes
@@ -139,18 +161,10 @@ func (r *Ruleset) Start() error {
 
 						// Now perform rule checking on the input data
 						results := r.EngineCheck(data)
-						// PERFORMANCE FIX: Use non-blocking writes with buffered channels
-						// If downstream is full, drop the message to prevent blocking the entire pipeline
+						// Send results to downstream channels - blocking to ensure no data loss
 						for _, res := range results {
 							for _, downCh := range r.DownStream {
-								select {
-								case *downCh <- res:
-									// Successfully sent
-								default:
-									// Channel full, log and continue to prevent blocking
-									logger.Warn("Downstream channel full, dropping message",
-										"ruleset", r.RulesetID, "channel_len", len(*downCh))
-								}
+								*downCh <- res // Blocking write to ensure data integrity
 							}
 						}
 					}
@@ -311,11 +325,27 @@ func (r *Ruleset) Stop() error {
 
 // EngineCheck executes all rules in the ruleset on the provided data using the new flexible syntax.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
-	finalRes := make([]map[string]interface{}, 0)
+	// Pre-allocate result slice with better capacity estimation
+	var initialCap int
+	if r.IsDetection {
+		// For detection rules, estimate that 10-20% of rules might hit
+		initialCap = len(r.Rules) / 5
+		if initialCap < 1 {
+			initialCap = 1
+		}
+	} else {
+		// For whitelist rules, usually only 1 result
+		initialCap = 1
+	}
+	finalRes := make([]map[string]interface{}, 0, initialCap)
 	ruleCache := ruleCachePool.Get().(map[string]common.CheckCoreCache)
-	// clean previous entries
-	for k := range ruleCache {
-		delete(ruleCache, k)
+
+	// More efficient cache clearing - only clear if not empty
+	if len(ruleCache) > 0 {
+		// Faster map clearing for Go 1.11+
+		for k := range ruleCache {
+			delete(ruleCache, k)
+		}
 	}
 
 	// For whitelist, keep track of the last modified data
@@ -325,28 +355,40 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	if !r.IsDetection && len(r.Rules) == 0 {
 		// Empty whitelist means all data passes through
 		ruleCachePool.Put(ruleCache)
-		return []map[string]interface{}{data}
+		// Reuse the same slice pattern for consistency
+		result := make([]map[string]interface{}, 1)
+		result[0] = data
+		return result
 	}
 
 	// Process each rule in the ruleset
-	for _, rule := range r.Rules {
-		// Create data copy for this rule execution
-		dataCopy := common.MapDeepCopy(data)
+	for ruleIndex := range r.Rules {
+		rule := &r.Rules[ruleIndex] // Use pointer to avoid copying
+
+		// Create data copy for this rule execution only if rule modifies data
+		var dataCopy map[string]interface{}
+		if r.ruleModifiesData(rule) {
+			dataCopy = common.MapDeepCopy(data)
+		} else {
+			dataCopy = data // Use original data if rule doesn't modify it
+		}
 
 		// Execute all operations in the order specified by the Queue
-		ruleCheckRes := r.executeRuleOperations(&rule, dataCopy, ruleCache)
+		ruleCheckRes := r.executeRuleOperations(rule, dataCopy, ruleCache)
 
 		// Handle rule result based on ruleset type
 		if r.IsDetection {
 			// For detection rules, if rule passes, add to results
 			if ruleCheckRes {
 				// Add rule info
-				// Build hit rule ID efficiently
-				var hitRuleIDSb strings.Builder
-				hitRuleIDSb.WriteString(r.RulesetID)
-				hitRuleIDSb.WriteString(".")
-				hitRuleIDSb.WriteString(rule.ID)
-				addHitRuleID(dataCopy, hitRuleIDSb.String())
+				// Build hit rule ID efficiently using string builder pool
+				sb := stringBuilderPool.Get().(*strings.Builder)
+				sb.Reset()
+				sb.WriteString(r.RulesetID)
+				sb.WriteString(".")
+				sb.WriteString(rule.ID)
+				addHitRuleID(dataCopy, sb.String())
+				stringBuilderPool.Put(sb)
 				// Add to final result
 				finalRes = append(finalRes, dataCopy)
 			}
@@ -371,7 +413,11 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	// put back to pool
 	ruleCachePool.Put(ruleCache)
 	ruleCache = nil
-	return finalRes
+
+	// Create a copy of the result to return, since we're using a pooled slice
+	result := make([]map[string]interface{}, len(finalRes))
+	copy(result, finalRes)
+	return result
 }
 
 // executeRuleOperations executes all operations in a rule according to the Queue order
@@ -439,8 +485,8 @@ func (r *Ruleset) executeCheckList(rule *Rule, operationID int, data map[string]
 		return true
 	}
 
+	// Pre-allocate conditionMap only if needed
 	var conditionMap map[string]bool
-
 	if checklist.ConditionFlag {
 		conditionMap = make(map[string]bool, len(checklist.CheckNodes))
 	}
@@ -479,34 +525,42 @@ func (r *Ruleset) executeCheck(rule *Rule, operationID int, data map[string]inte
 
 // executeCheckNode executes a single check node
 func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
-	var checkNodeValue = checkNode.Value
-	var checkNodeValueFromRaw = false
+	var checkNodeValue string
+	var checkNodeValueFromRaw bool
 
 	switch checkNode.Logic {
 	case "":
-		if strings.HasPrefix(checkNode.Value, FromRawSymbol) {
+		if hasFromRawPrefix(checkNode.Value) {
 			checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, checkNode.Value, data)
 			checkNodeValueFromRaw = true
+		} else {
+			checkNodeValue = checkNode.Value
 		}
 		return checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
 	case "AND":
 		for _, v := range checkNode.DelimiterFieldList {
-			if strings.HasPrefix(v, FromRawSymbol) {
+			if hasFromRawPrefix(v) {
 				checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
 				checkNodeValueFromRaw = true
+			} else {
+				checkNodeValue = v
+				checkNodeValueFromRaw = false
 			}
-			if !checkNodeLogic(checkNode, data, v, checkNodeValueFromRaw, ruleCache) {
+			if !checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache) {
 				return false
 			}
 		}
 		return true
 	case "OR":
 		for _, v := range checkNode.DelimiterFieldList {
-			if strings.HasPrefix(v, FromRawSymbol) {
+			if hasFromRawPrefix(v) {
 				checkNodeValue = GetRuleValueFromRawFromCache(ruleCache, v, data)
 				checkNodeValueFromRaw = true
+			} else {
+				checkNodeValue = v
+				checkNodeValueFromRaw = false
 			}
-			if checkNodeLogic(checkNode, data, v, checkNodeValueFromRaw, ruleCache) {
+			if checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache) {
 				return true
 			}
 		}
@@ -524,8 +578,9 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 	}
 
 	// Isolate by ruleset ID and rule ID
-	// Use strings.Builder for better performance
-	var sb strings.Builder
+	// Use strings.Builder pool for better performance
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
 	sb.WriteString(threshold.GroupByID)
 
 	for k, v := range threshold.GroupByList {
@@ -533,22 +588,35 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 		sb.WriteString(tmpData)
 	}
 	groupByKey := common.XXHash64(sb.String())
+	stringBuilderPool.Put(sb)
 
 	var ruleCheckRes bool
 	var err error
 
 	switch threshold.CountType {
 	case "":
-		groupByKey = "F_" + groupByKey
+		// Use builder pool for prefix concatenation
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("F_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+		stringBuilderPool.Put(sb)
 
 		if threshold.LocalCache {
-			ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, 1, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = r.LocalCacheFRQSum(prefixedKey, 1, threshold.RangeInt, threshold.Value)
 		} else {
-			ruleCheckRes, err = RedisFRQSum(groupByKey, 1, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = RedisFRQSum(prefixedKey, 1, threshold.RangeInt, threshold.Value)
 		}
 
 	case "SUM":
-		groupByKey = "FS_" + groupByKey
+		// Use builder pool for prefix concatenation
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("FS_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+		stringBuilderPool.Put(sb)
 
 		sumDataStr, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
 		if !ok {
@@ -561,29 +629,35 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 		}
 
 		if threshold.LocalCache {
-			ruleCheckRes, err = r.LocalCacheFRQSum(groupByKey, sumData, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = r.LocalCacheFRQSum(prefixedKey, sumData, threshold.RangeInt, threshold.Value)
 		} else {
-			ruleCheckRes, err = RedisFRQSum(groupByKey, sumData, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = RedisFRQSum(prefixedKey, sumData, threshold.RangeInt, threshold.Value)
 		}
 
 	case "CLASSIFY":
-		groupByKey = "FC_" + groupByKey
+		// Use builder pool for prefix concatenation
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("FC_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+
 		classifyData, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
 		if !ok {
+			stringBuilderPool.Put(sb)
 			return false
 		}
 
-		// Use strings.Builder for consistency
-		var tmpKeySb strings.Builder
-		tmpKeySb.WriteString(groupByKey)
-		tmpKeySb.WriteString("_")
-		tmpKeySb.WriteString(common.XXHash64(classifyData))
-		tmpKey := tmpKeySb.String()
+		// Continue building the final key
+		sb.WriteString("_")
+		sb.WriteString(common.XXHash64(classifyData))
+		tmpKey := sb.String()
+		stringBuilderPool.Put(sb)
 
 		if threshold.LocalCache {
-			ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, groupByKey, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, prefixedKey, threshold.RangeInt, threshold.Value)
 		} else {
-			ruleCheckRes, err = RedisFRQClassify(tmpKey, groupByKey, threshold.RangeInt, threshold.Value)
+			ruleCheckRes, err = RedisFRQClassify(tmpKey, prefixedKey, threshold.RangeInt, threshold.Value)
 		}
 	}
 
@@ -604,7 +678,7 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string
 
 	if appendOp.Type == "" {
 		appendData := appendOp.Value
-		if strings.HasPrefix(appendOp.Value, FromRawSymbol) {
+		if hasFromRawPrefix(appendOp.Value) {
 			appendData = GetRuleValueFromRawFromCache(ruleCache, appendOp.Value, dataCopy)
 		}
 
@@ -696,7 +770,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 
 	// CRITICAL FIX: Handle field existence properly for ISNULL and NOTNULL checks
 	if checkNode.Type == "ISNULL" {
-		// For ISNULL: field doesn't exist OR field exists but is empty
+		// For ISNULL: field doesn't exist OR field exists but is empty (including whitespace-only)
 		if !exist || strings.TrimSpace(needCheckData) == "" {
 			return true
 		} else {
@@ -705,7 +779,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 	}
 
 	if checkNode.Type == "NOTNULL" {
-		// For NOTNULL: field must exist AND not be empty
+		// For NOTNULL: field must exist AND not be empty (including whitespace-only)
 		if !exist || strings.TrimSpace(needCheckData) == "" {
 			return false
 		} else {
@@ -752,19 +826,18 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 
 // addHitRuleID appends the hit rule ID to the data map.
 func addHitRuleID(data map[string]interface{}, ruleID string) {
-	if data == nil {
-		data = make(map[string]interface{})
-	}
-
+	// data is guaranteed to be non-nil when called from EngineCheck
 	if existingID, ok := data[HitRuleIdFieldName]; !ok {
 		data[HitRuleIdFieldName] = ruleID
 	} else {
-		// Use strings.Builder for efficient string concatenation
-		var sb strings.Builder
+		// Use strings.Builder pool for efficient string concatenation
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
 		sb.WriteString(existingID.(string))
 		sb.WriteString(",")
 		sb.WriteString(ruleID)
 		data[HitRuleIdFieldName] = sb.String()
+		stringBuilderPool.Put(sb)
 	}
 }
 
@@ -794,6 +867,21 @@ func (r *Ruleset) GetIncrementAndUpdate() uint64 {
 	}
 
 	return 0
+}
+
+// ruleModifiesData checks if a rule contains operations that modify the input data
+func (r *Ruleset) ruleModifiesData(rule *Rule) bool {
+	if rule.Queue == nil {
+		return false
+	}
+
+	for _, op := range *rule.Queue {
+		switch op.Type {
+		case T_Append, T_Del, T_Plugin:
+			return true // These operations modify data
+		}
+	}
+	return false
 }
 
 // GetRunningTaskCount returns the number of currently running tasks in the thread pool
