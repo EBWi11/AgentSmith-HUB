@@ -511,13 +511,13 @@
           
           <!-- Starting status display -->
           <div v-if="detail.status === 'starting'" class="flex items-center text-blue-600 bg-blue-50 px-3 py-1 rounded-md">
-            <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+            <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
             <span class="text-sm font-medium">Starting...</span>
           </div>
           
           <!-- Stopping status display -->
           <div v-if="detail.status === 'stopping'" class="flex items-center text-orange-600 bg-orange-50 px-3 py-1 rounded-md">
-            <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+            <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
             <span class="text-sm font-medium">Stopping...</span>
           </div>
         </div>
@@ -1471,6 +1471,18 @@ defineExpose({
 
 <style scoped>
 
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
 
 /* Test Ruleset Button - Minimal Style */
 .btn.btn-test-ruleset {

@@ -161,6 +161,7 @@ func ServerStart(listener string) error {
 	auth.GET("/pending-changes", GetPendingChanges)                  // Legacy endpoint
 	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges) // Enhanced endpoint with status info
 	auth.POST("/apply-single-change", ApplySingleChange)             // Legacy endpoint
+	auth.POST("/apply-changes", ApplyAllChanges)                     // Apply all pending changes
 	auth.POST("/verify-changes", VerifyPendingChanges)               // Verify all changes
 	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange) // Verify single change
 	auth.DELETE("/cancel-change/:type/:id", CancelPendingChange)     // Cancel single change

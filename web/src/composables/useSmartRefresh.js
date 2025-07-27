@@ -339,7 +339,7 @@ export function useSmartRefresh(refreshFunction, options = {}) {
 export function useDashboardSmartRefresh(refreshFunction, options = {}) {
   return useSmartRefresh(refreshFunction, {
     baseInterval: 60000,    // 1分钟
-    fastInterval: 2000,     // 2秒
+    fastInterval: 500,      // 0.5秒 (过渡状态快速刷新)
     slowInterval: 300000,   // 5分钟
     debug: true,
     ...options

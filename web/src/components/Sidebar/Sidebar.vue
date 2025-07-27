@@ -541,13 +541,13 @@
                         
                         <!-- Starting status display -->
                         <div v-if="item.status === 'starting'" class="flex items-center px-4 py-2 text-sm text-blue-600">
-                          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                          <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
                           Starting...
                         </div>
                         
                         <!-- Stopping status display -->
                         <div v-if="item.status === 'stopping'" class="flex items-center px-4 py-2 text-sm text-orange-600">
-                          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                          <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
                           Stopping...
                         </div>
                         
@@ -1109,8 +1109,8 @@
                         :class="{
                           'bg-green-500': project.status === 'running',
                           'bg-gray-500': project.status === 'stopped',
-                          'bg-blue-500': project.status === 'starting',
-                          'bg-orange-500': project.status === 'stopping',
+                          'bg-blue-500 animate-pulse': project.status === 'starting',
+                          'bg-orange-500 animate-pulse': project.status === 'stopping',
                           'bg-red-500': project.status === 'error'
                         }"></span>
                   <span>{{ project.id }}</span>
@@ -1120,8 +1120,8 @@
                         :class="{
                           'bg-green-100 text-green-800': project.status === 'running',
                           'bg-gray-100 text-gray-800': project.status === 'stopped',
-                          'bg-blue-100 text-blue-800': project.status === 'starting',
-                          'bg-orange-100 text-orange-800': project.status === 'stopping',
+                          'bg-blue-100 text-blue-800 animate-pulse': project.status === 'starting',
+                          'bg-orange-100 text-orange-800 animate-pulse': project.status === 'stopping',
                           'bg-red-100 text-red-800': project.status === 'error'
                         }">
                     {{ project.status }}
@@ -1725,7 +1725,7 @@ const activeProjectPollers = new Map()
 
 // Refresh intervals constants
 const REFRESH_INTERVALS = {
-  POLLING_INTERVAL: 2000, // 2 seconds for polling project status
+  POLLING_INTERVAL: 500, // 0.5 seconds for polling project status
   NORMAL_INTERVAL: 60000, // 60 seconds for normal refresh
   FAST_INTERVAL: 5000    // 5 seconds for fast refresh
 }
@@ -3671,5 +3671,19 @@ function getRulesetTypeInfo(item) {
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #d1d5db transparent;
+}
+
+/* Breathing light effect for starting/stopping states */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
 }
 </style> 

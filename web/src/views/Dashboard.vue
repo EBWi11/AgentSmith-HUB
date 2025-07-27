@@ -213,11 +213,11 @@
               <span class="w-3 h-3 rounded-full mr-3 transition-colors duration-300" 
                     :class="{
                       'bg-red-500': project.status === 'error',
-                      'bg-yellow-500': project.mismatch && project.status !== 'error',
+                      'bg-yellow-500 animate-pulse': project.mismatch && project.status !== 'error',
                       'bg-green-500': !project.mismatch && project.status === 'running',
                       'bg-gray-400': !project.mismatch && project.status === 'stopped',
-                      'bg-blue-500': !project.mismatch && project.status === 'starting',
-                      'bg-orange-500': !project.mismatch && project.status === 'stopping'
+                      'bg-blue-500 animate-pulse': !project.mismatch && project.status === 'starting',
+                      'bg-orange-500 animate-pulse': !project.mismatch && project.status === 'stopping'
                     }"></span>
               <div>
                 <p class="font-medium text-gray-900">{{ project.id }}</p>
@@ -1269,7 +1269,7 @@ const transitionStates = computed(() => {
 const smartRefresh = useDashboardSmartRefresh(refreshStats, {
   debug: true,
   baseInterval: 60000,    // 1 minute base interval
-  fastInterval: 2000,     // 2 second fast interval
+  fastInterval: 500,      // 0.5 second fast interval for transition states
   slowInterval: 300000    // 5 minute slow interval
 })
 
@@ -1347,4 +1347,16 @@ onUnmounted(() => {
 
 <style scoped>
 /* 自定义样式 */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
 </style> 

@@ -39,8 +39,8 @@ const badgeClass = computed(() => {
     temp: 'bg-blue-100 text-blue-800',
     running: 'bg-green-100 text-green-800',
     stopped: 'bg-gray-100 text-gray-800',
-    starting: 'bg-blue-100 text-blue-800',
-    stopping: 'bg-orange-100 text-orange-800',
+    starting: 'bg-blue-100 text-blue-800 animate-pulse',
+    stopping: 'bg-orange-100 text-orange-800 animate-pulse',
     error: 'bg-red-100 text-red-800'
   }
   return classes[props.type] || 'bg-gray-100 text-gray-800'
@@ -60,4 +60,19 @@ function showTooltip(event) {
 function hideTooltip() {
   // Could implement custom tooltip here if needed
 }
-</script> 
+</script>
+
+<style scoped>
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
+</style> 

@@ -694,6 +694,16 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
     },
     
+    // Update component cache
+    updateComponentCache(type, data) {
+      if (!this.components[type]) {
+        this.components[type] = { data: [], timestamp: 0, loading: false }
+      }
+      this.components[type].data = data
+      this.components[type].timestamp = Date.now()
+      this.components[type].loading = false
+    },
+    
     // Clear all cache (but preserve UI states)
     clearAllCache() {
       // Clear component cache

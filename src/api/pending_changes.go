@@ -1029,6 +1029,96 @@ func ApplySingleChange(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Change applied successfully"})
 }
 
+// ApplyAllChanges applies all pending changes and returns affected projects
+func ApplyAllChanges(c echo.Context) error {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in ApplyAllChanges", "panic", r)
+		}
+	}()
+
+	logger.Info("ApplyAllChanges request")
+
+	// Sync from legacy storage first
+	syncLegacyToEnhancedManager()
+
+	changes := globalPendingChangeManager.GetAllChanges()
+	if len(changes) == 0 {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message":             "No pending changes to apply",
+			"total_changes":       0,
+			"applied_changes":     0,
+			"projects_to_restart": []string{},
+		})
+	}
+
+	successCount := 0
+	failedChanges := []FailedChangeInfo{}
+	allAffectedProjects := make(map[string]bool) // Use map to avoid duplicates
+
+	// Apply each change
+	for _, change := range changes {
+		reloadReq := &ComponentReloadRequest{
+			Type:        change.Type,
+			ID:          change.ID,
+			NewContent:  change.NewContent,
+			OldContent:  change.OldContent,
+			Source:      SourceChangePush,
+			SkipVerify:  false, // Always verify
+			WriteToFile: true,  // Always write to file for persistence
+		}
+
+		affectedProjects, err := reloadComponentUnified(reloadReq)
+		if err != nil {
+			logger.Error("Failed to apply change", "type", change.Type, "id", change.ID, "error", err)
+			failedChanges = append(failedChanges, FailedChangeInfo{
+				Type:  change.Type,
+				ID:    change.ID,
+				Error: err.Error(),
+			})
+			continue
+		}
+
+		// Mark as successful
+		successCount++
+
+		// Collect affected projects
+		for _, projectID := range affectedProjects {
+			allAffectedProjects[projectID] = true
+		}
+	}
+
+	// Convert projects map to slice
+	projectsToRestart := make([]string, 0, len(allAffectedProjects))
+	for projectID := range allAffectedProjects {
+		projectsToRestart = append(projectsToRestart, projectID)
+	}
+
+	// Start restarting affected projects asynchronously
+	if len(projectsToRestart) > 0 {
+		logger.Info("Restarting affected projects asynchronously", "count", len(projectsToRestart))
+		go func() {
+			for _, id := range projectsToRestart {
+				// Use safe accessor without additional locking
+				if p, ok := project.GetProject(id); ok {
+					// Restart and record the operation
+					p.Restart(true, "batch_change_push")
+				}
+			}
+		}()
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message":               fmt.Sprintf("Applied %d/%d changes successfully", successCount, len(changes)),
+		"total_changes":         len(changes),
+		"applied_changes":       successCount,
+		"failed_changes":        len(failedChanges),
+		"failed_change_details": failedChanges,
+		"projects_to_restart":   projectsToRestart,
+	})
+}
+
 // CreateTempFile creates a temporary file for editing
 func CreateTempFile(c echo.Context) error {
 	componentType := c.Param("type")

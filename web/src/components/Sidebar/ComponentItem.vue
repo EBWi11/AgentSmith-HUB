@@ -107,8 +107,8 @@ function getStatusLabel(status) {
   const labels = {
     running: 'R',
     stopped: 'S',
-    starting: '◐',  // 使用半圆符号表示启动中
-    stopping: '●',  // 使用圆点符号表示正在停止中
+    starting: '●',  // 使用圆点符号表示启动中，配合呼吸灯效果
+    stopping: '●',  // 使用圆点符号表示正在停止中，配合呼吸灯效果
     error: 'E'
   }
   return labels[status] || '?'

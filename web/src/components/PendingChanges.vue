@@ -18,6 +18,14 @@
           Verify
         </button>
         <button 
+          @click="applyAllChanges" 
+          class="btn btn-primary btn-sm"
+          :disabled="applying || !changes.length"
+        >
+          <span v-if="applying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
+          Apply All
+        </button>
+        <button 
           @click="cancelAllChanges" 
           class="btn btn-danger btn-sm"
           :disabled="cancelling || !changes.length"
@@ -468,6 +476,153 @@ async function cancelUpgrade(change) {
   } finally {
     cancelling.value = false
   }
+}
+
+// Apply all pending changes
+async function applyAllChanges() {
+  if (!changes.value.length) return
+  
+  // Confirm the action
+  const confirmed = confirm(`Are you sure you want to apply ALL pending changes?\n\nThis will make all changes active and restart affected projects.`)
+  if (!confirmed) {
+    return
+  }
+  
+  applying.value = true
+  
+  try {
+    // Get current project states before applying changes
+    const currentProjects = await dataCache.fetchComponents('projects')
+    const runningProjects = currentProjects
+      .filter(p => p.status === 'running')
+      .map(p => p.id)
+    
+    // Call apply all changes API
+    const result = await hubApi.applyAllChanges()
+    
+    $message?.success?.(result.message || 'All changes applied successfully!')
+    
+    // Get projects that need to restart from the API response
+    const projectsToRestart = result.projects_to_restart || []
+    
+    // Immediately set running projects that will be restarted to 'stopping' status
+    if (projectsToRestart.length > 0) {
+      // Find projects that were running and will be restarted
+      const restartingProjects = projectsToRestart.filter(projectId => 
+        runningProjects.includes(projectId)
+      )
+      
+      if (restartingProjects.length > 0) {
+        // Update UI immediately to show stopping status
+        const updatedProjects = currentProjects.map(project => {
+          if (restartingProjects.includes(project.id)) {
+            return { ...project, status: 'stopping' }
+          }
+          return project
+        })
+        
+        // Update cache with new status for immediate UI feedback
+        dataCache.updateComponentCache('projects', updatedProjects)
+        
+        // Emit refresh event to update sidebar
+        emit('refresh-list', 'projects')
+        
+        $message?.info?.(`${restartingProjects.length} running projects are restarting...`)
+        
+        // Start accelerated polling for the restarting projects
+        startAcceleratedProjectPolling(restartingProjects)
+      }
+    }
+    
+    // Show failed changes if any
+    if (result.failed_changes > 0) {
+      const failedDetails = result.failed_change_details || []
+      let errorMsg = `${result.failed_changes} changes failed to apply:`
+      failedDetails.forEach(failed => {
+        errorMsg += `\n- ${failed.type}/${failed.id}: ${failed.error}`
+      })
+      $message?.warning?.(errorMsg)
+    }
+    
+    // Clear all caches to ensure fresh data
+    dataCache.clearCache('pendingChanges')
+    ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
+      dataCache.clearComponentCache(type)
+    })
+    
+    // Force refresh all component lists
+    await Promise.all([
+      dataCache.fetchComponents('inputs', true),
+      dataCache.fetchComponents('outputs', true),
+      dataCache.fetchComponents('rulesets', true),
+      dataCache.fetchComponents('projects', true),
+      dataCache.fetchComponents('plugins', true)
+    ])
+    
+    // Refresh the pending changes list
+    await refreshChanges()
+    
+    // Emit refresh events for all component types
+    ['inputs', 'outputs', 'rulesets', 'projects', 'plugins'].forEach(type => {
+      emit('refresh-list', type)
+    })
+    
+    // Ensure editor layout is correct
+    refreshEditorsLayout()
+  } catch (e) {
+    $message?.error?.('Failed to apply all changes: ' + (e?.message || 'Unknown error'))
+    
+    // Even if failed, clear cache and refresh to ensure latest status
+    dataCache.clearCache('pendingChanges')
+    await refreshChanges()
+  } finally {
+    applying.value = false
+  }
+}
+
+// Start accelerated polling for restarting projects
+function startAcceleratedProjectPolling(projectIds) {
+  if (!projectIds || projectIds.length === 0) return
+  
+  const pollInterval = 1000 // Poll every 1 second for faster updates
+  const maxPollTime = 30000 // Stop polling after 30 seconds
+  const startTime = Date.now()
+  
+  const poll = async () => {
+    try {
+      // Check if we've exceeded max poll time
+      if (Date.now() - startTime > maxPollTime) {
+        console.log('Accelerated project polling timeout')
+        return
+      }
+      
+      // Fetch latest project data
+      const projects = await dataCache.fetchComponents('projects', true)
+      
+      // Check if any projects are still in transition
+      const stillTransitioning = projectIds.some(projectId => {
+        const project = projects.find(p => p.id === projectId)
+        return project && (project.status === 'stopping' || project.status === 'starting')
+      })
+      
+      // Update UI with latest status
+      emit('refresh-list', 'projects')
+      
+      // Continue polling if projects are still transitioning
+      if (stillTransitioning) {
+        setTimeout(poll, pollInterval)
+      } else {
+        console.log('All projects finished transitioning')
+      }
+    } catch (error) {
+      console.error('Error during accelerated project polling:', error)
+      // Continue polling on error, but log it
+      setTimeout(poll, pollInterval)
+    }
+  }
+  
+  // Start polling
+  setTimeout(poll, pollInterval)
 }
 
 // Cancel all pending changes

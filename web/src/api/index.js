@@ -457,6 +457,17 @@ export const hubApi = {
     }
   },
   
+  // Apply all pending changes
+  async applyAllChanges() {
+    try {
+      const response = await api.post('/apply-changes');
+      return response.data;
+    } catch (error) {
+      console.error('Error applying all changes:', error);
+      throw error;
+    }
+  },
+  
   // Restart a specific project
   async restartProject(id) {
     try {

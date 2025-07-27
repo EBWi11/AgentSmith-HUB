@@ -38,13 +38,13 @@
         
         <!-- Starting status display in menu -->
         <div v-if="item.status === 'starting'" class="flex items-center px-4 py-2 text-sm text-blue-600">
-          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+          <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
           Starting...
         </div>
         
         <!-- Stopping status display in menu -->
         <div v-if="item.status === 'stopping'" class="flex items-center px-4 py-2 text-sm text-orange-600">
-          <div class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+          <div class="w-3 h-3 rounded-full bg-current animate-pulse mr-2"></div>
           Stopping...
         </div>
 
@@ -178,4 +178,19 @@ const showSampleData = computed(() => {
 const showUsage = computed(() => {
   return ['inputs', 'outputs', 'rulesets'].includes(props.type)
 })
-</script> 
+</script>
+
+<style scoped>
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
+</style> 
