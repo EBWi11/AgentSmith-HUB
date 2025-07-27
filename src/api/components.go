@@ -270,6 +270,7 @@ func getProjects(c echo.Context) error {
 		// Include error message if project status is error
 		if proj.Status == common.StatusError && proj.Err != nil {
 			projectData["error"] = proj.Err.Error()
+			projectData["errorMessage"] = proj.Err.Error() // Add for consistency with other components
 		}
 
 		result = append(result, projectData)
@@ -426,6 +427,12 @@ func getRulesets(c echo.Context) error {
 			"rule_count":       ruleCount,
 			"used_by_projects": usedByProjects,
 			"project_count":    len(usedByProjects),
+			"status":           string(r.Status),
+		}
+
+		// Include error information if component has errors
+		if r.Status == common.StatusError && r.Err != nil {
+			rulesetData["errorMessage"] = r.Err.Error()
 		}
 
 		// Include path information if available
@@ -561,6 +568,12 @@ func getInputs(c echo.Context) error {
 			"type":             inputType,
 			"used_by_projects": usedByProjects,
 			"project_count":    len(usedByProjects),
+			"status":           string(in.Status),
+		}
+
+		// Include error information if component has errors
+		if in.Status == common.StatusError && in.Err != nil {
+			inputData["errorMessage"] = in.Err.Error()
 		}
 
 		// Include path information if available
@@ -783,6 +796,17 @@ func getPlugins(c echo.Context) error {
 				"parameters":       p.Parameters, // Include parameter information
 				"used_by_rulesets": usedByRulesets,
 				"ruleset_count":    len(usedByRulesets),
+				"status":           string(p.Status), // Add status for error handling
+			}
+
+			// Include error information if plugin has errors
+			if p.Status == common.StatusError && p.Err != nil {
+				pluginData["errorMessage"] = p.Err.Error()
+			}
+
+			// Include path information if available
+			if p.Path != "" {
+				pluginData["path"] = p.Path
 			}
 		} else {
 			// Simple format for basic usage
@@ -970,6 +994,12 @@ func getOutputs(c echo.Context) error {
 			"type":             outputType,
 			"used_by_projects": usedByProjects,
 			"project_count":    len(usedByProjects),
+			"status":           string(out.Status),
+		}
+
+		// Include error information if component has errors
+		if out.Status == common.StatusError && out.Err != nil {
+			outputData["errorMessage"] = out.Err.Error()
 		}
 
 		// Include path information if available

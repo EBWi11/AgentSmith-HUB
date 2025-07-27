@@ -288,6 +288,22 @@ func loadLocalComponents() {
 		err = plugin.NewPlugin(f, "", name, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			logger.Error("Failed to load plugin", "file", f, "error", err)
+			// Create an error placeholder plugin to show in list
+			errorPlugin := &plugin.Plugin{
+				Name:   name,
+				Path:   f,
+				Type:   plugin.YAEGI_PLUGIN,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			// Read raw config for display purposes
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				errorPlugin.Payload = content
+			}
+			// Add to global plugin map with mutex protection
+			common.GlobalMu.Lock()
+			plugin.Plugins[name] = errorPlugin
+			common.GlobalMu.Unlock()
 		}
 	}
 	// Load plugin .new files
@@ -311,6 +327,19 @@ func loadLocalComponents() {
 		}
 		if inp, err := input.NewInput(f, "", id); err != nil {
 			logger.Error("Failed to load new input", "file", f, "error", err)
+			// Create an error placeholder input to show in list
+			errorInput := &input.Input{
+				Id:     id,
+				Path:   f,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			// Read raw config for display purposes
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				cfg := &input.InputConfig{RawConfig: string(content)}
+				errorInput.Config = cfg
+			}
+			project.SetInput(id, errorInput)
 		} else {
 			project.SetInput(id, inp)
 		}
@@ -334,6 +363,19 @@ func loadLocalComponents() {
 		}
 		if out, err := output.NewOutput(f, "", id); err != nil {
 			logger.Error("Failed to load output", "file", f, "error", err)
+			// Create an error placeholder output to show in list
+			errorOutput := &output.Output{
+				Id:     id,
+				Path:   f,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			// Read raw config for display purposes
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				cfg := &output.OutputConfig{RawConfig: string(content)}
+				errorOutput.Config = cfg
+			}
+			project.SetOutput(id, errorOutput)
 		} else {
 			project.SetOutput(id, out)
 		}
@@ -357,6 +399,18 @@ func loadLocalComponents() {
 		}
 		if rs, err := rules_engine.NewRuleset(f, "", id); err != nil {
 			logger.Error("Failed to load ruleset", "file", f, "error", err)
+			// Create an error placeholder ruleset to show in list
+			errorRuleset := &rules_engine.Ruleset{
+				RulesetID: id,
+				Path:      f,
+				Status:    common.StatusError,
+				Err:       err,
+			}
+			// Read raw config for display purposes
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				errorRuleset.RawConfig = string(content)
+			}
+			project.SetRuleset(id, errorRuleset)
 		} else {
 			project.SetRuleset(id, rs)
 		}
@@ -412,6 +466,21 @@ func loadLocalProjects() {
 			}
 		} else {
 			logger.Error("Failed to create project", "project", id, "error", err)
+			// Create an error placeholder project to show in list
+			errorProject := &project.Project{
+				Id:     id,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			// Read raw config for display purposes
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				cfg := &project.ProjectConfig{
+					RawConfig: string(content),
+					Path:      f,
+				}
+				errorProject.Config = cfg
+			}
+			project.SetProject(id, errorProject)
 		}
 	}
 
