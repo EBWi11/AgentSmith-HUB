@@ -4,7 +4,3 @@ kafka:
     - 192.168.124.12:9092
   topic: test
   group: test
-  # offset_reset: earliest (default) - start from earliest available message if no committed offset
-  # offset_reset: latest - start from latest message (only consume new messages)
-  # offset_reset: none - fail if no committed offset exists
-  offset_reset: earliest

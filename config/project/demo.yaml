@@ -1,3 +1,2 @@
 content: |
   INPUT.kafka -> RULESET.test
-  RULESET.test -> OUTPUT.print_demo

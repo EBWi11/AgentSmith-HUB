@@ -1,0 +1,10 @@
+<root author="will" type="WHITELIST">
+    <rule id="rule_01" name="name">
+        <check type="INCL" field="city">new</check>
+        <check type="INCL" field="city">york</check>
+    </rule>
+
+    <rule id="rule_02" name="name">
+        <check type="INCL" field="data.sub_01" logic="OR" delimiter="|">Python|world|people|China|Java|one|two|three|innovation|language|cloud|futudre|digital|learn|create|sun|moon|star|river|mountain|forest|ocean|city|village|school|book|pen|music|art|love|peace|hope|dream|success|failure|time|space|energy|light|dark|science|technology|history|culture|travel|adventure|food|water|fire|earth|air|animal|plant|tree|flower|bird|fish|dog|cat|friend|family|teacher|student|idea|thought|question|answer|problem|solution|change|growth|beginning|end|today|tomorrow|yesterday|moment|memory|future|past|secret|truth|lie|story|journey|path|road|door|window|house|room|garden|field|sky|weather|rain|snow|wind|hot|cold|warm|cool|color|sound|silence|voice|laugh|smile|producer</check>
+    </rule>
+</root>

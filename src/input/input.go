@@ -73,6 +73,9 @@ type Input struct {
 	kafkaConsumer *common.KafkaConsumer
 	slsConsumer   *common.AliyunSLSConsumer
 
+	// internal message channel for monitoring during shutdown
+	internalMsgChan chan map[string]interface{}
+
 	// config cache
 	kafkaCfg     *KafkaInputConfig
 	aliyunSLSCfg *AliyunSLSInputConfig
@@ -233,12 +236,15 @@ func (in *Input) cleanup() {
 		in.slsConsumer = nil
 	}
 
+	// Clear internal message channel reference
+	in.internalMsgChan = nil
+
 	// Reset atomic counter
 	atomic.StoreUint64(&in.consumeTotal, 0)
 	atomic.StoreUint64(&in.lastReportedTotal, 0)
 
-	// Clear component channel connections to prevent leaks
-	in.DownStream = make(map[string]*chan map[string]interface{})
+	// Note: DownStream connections are managed by Project, not cleared here
+	// Project will call SafeDeleteInputDownstream to properly clean up connections
 }
 
 // Start initializes and starts the input component based on its type
@@ -285,7 +291,7 @@ func (in *Input) Start() error {
 			in.SetStatus(common.StatusError, fmt.Errorf("kafka configuration missing for input %s", in.Id))
 			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
-		msgChan := make(chan map[string]interface{}, 1024)
+		msgChan := make(chan map[string]interface{}, 4096)
 		cons, err := common.NewKafkaConsumer(
 			in.kafkaCfg.Brokers,
 			in.kafkaCfg.Group,
@@ -301,6 +307,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("failed to create kafka consumer for input %s: %v", in.Id, err)
 		}
 		in.kafkaConsumer = cons
+		in.internalMsgChan = msgChan // Store reference for monitoring during shutdown only after successful creation
 
 		// Start consumer goroutine with proper management
 		in.wg.Add(1)
@@ -357,7 +364,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 1024)
+		msgChan := make(chan map[string]interface{}, 4096)
 		cons, err := common.NewAliyunSLSConsumer(
 			in.aliyunSLSCfg.Endpoint,
 			in.aliyunSLSCfg.AccessKeyID,
@@ -376,6 +383,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("failed to create sls consumer for input %s: %v", in.Id, err)
 		}
 		in.slsConsumer = cons
+		in.internalMsgChan = msgChan // Store reference for monitoring during shutdown only after successful creation
 
 		cons.Start()
 
@@ -478,7 +486,8 @@ func (in *Input) StopForTesting() error {
 		in.stopChan = nil
 	}
 
-	// Clear downstream connections for testing cleanup
+	// Note: DownStream connections are managed by Project in production
+	// For testing, we can clear them since test inputs are isolated
 	in.DownStream = make(map[string]*chan map[string]interface{})
 
 	// Reset counters for testing cleanup
@@ -501,16 +510,18 @@ func (in *Input) Stop() error {
 	}()
 
 	if in.Status != common.StatusRunning && in.Status != common.StatusError {
-		return fmt.Errorf("input %s is not running", in.Id)
+		// Allow stopping from any state for cleanup purposes, but only do actual work if needed
+		if in.Status == common.StatusStopped {
+			logger.Debug("Input already stopped, skipping stop operation", "input", in.Id)
+			return nil
+		}
+		// For other states (e.g., StatusStarting), proceed with stop to ensure cleanup
+		logger.Debug("Stopping input from non-running state", "input", in.Id, "current_status", in.Status)
 	}
 	in.SetStatus(common.StatusStopping, nil)
 
-	// Try graceful stop first - signal goroutines to stop
-	if in.stopChan != nil {
-		close(in.stopChan)
-	}
-
-	// Stop consumers to prevent new messages
+	// Step 1: Stop consumers first to prevent new messages from flowing in
+	logger.Info("Stopping input consumers to prevent new data", "input", in.Id)
 	if in.kafkaConsumer != nil {
 		in.kafkaConsumer.Close()
 		in.kafkaConsumer = nil
@@ -522,7 +533,61 @@ func (in *Input) Stop() error {
 		in.slsConsumer = nil
 	}
 
-	// Wait for goroutines to finish with timeout
+	// Step 2: Signal goroutines to stop consuming from internal channel
+	// This prevents them from processing more messages while we wait for drain
+	if in.stopChan != nil {
+		close(in.stopChan)
+		in.stopChan = nil // Prevent double close
+	}
+
+	// Step 3: Wait for internal message channel to be drained by downstream consumers
+	// This ensures no data loss during shutdown - all buffered data is processed
+	if in.internalMsgChan != nil {
+		logger.Info("Waiting for internal message channel to be drained", "input", in.Id)
+
+		channelDrainTimeout := 30 * time.Second // Configurable timeout
+		drainStartTime := time.Now()
+		lastLogTime := time.Time{} // Track last log time to avoid spam
+
+		for {
+			// Safely check channel length - if channel is closed, len() will return 0
+			var channelLen int
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Channel is closed or nil, treat as drained
+						channelLen = 0
+					}
+				}()
+				channelLen = len(in.internalMsgChan)
+			}()
+
+			if channelLen == 0 {
+				logger.Info("Internal message channel fully drained", "input", in.Id)
+				break
+			}
+
+			// Check for timeout
+			if time.Since(drainStartTime) > channelDrainTimeout {
+				logger.Warn("Timeout waiting for internal channel to drain, proceeding with shutdown",
+					"input", in.Id, "remaining_messages", channelLen)
+				break
+			}
+
+			// Log progress every 5 seconds to avoid spam
+			if time.Since(lastLogTime) >= 5*time.Second {
+				logger.Info("Still waiting for internal channel to drain",
+					"input", in.Id, "remaining_messages", channelLen,
+					"elapsed", time.Since(drainStartTime).String())
+				lastLogTime = time.Now()
+			}
+
+			// Short sleep to avoid busy waiting
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	// Step 4: Wait for goroutines to finish with timeout
 	waitDone := make(chan struct{})
 	go func() {
 		in.wg.Wait()

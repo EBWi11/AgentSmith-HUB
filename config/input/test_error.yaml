@@ -1,0 +1,12 @@
+# This is a test file with syntax errors
+type: kafka
+kafka:
+  brokers:
+    - 192.168.124.12:9092
+  topic: test
+  group: test
+# Missing proper YAML syntax below
+invalid_yaml_syntax:
+  - item1
+    missing_dash: value
+  unclosed_bracket: [

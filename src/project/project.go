@@ -931,15 +931,15 @@ func (p *Project) Start(lock bool) error {
 
 	err = p.initComponents()
 	if err != nil {
-		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		_ = p.stopComponentsInternal()
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		return fmt.Errorf("failed to initialize project components: %w", err)
 	}
 
 	err = p.runComponents()
 	if err != nil {
-		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
 		_ = p.stopComponentsInternal()
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
 		return fmt.Errorf("failed to run project components: %w", err)
 	}
 
@@ -1085,18 +1085,21 @@ func (p *Project) getPartner(t string, pns string) []string {
 
 func (p *Project) stopComponentsInternal() error {
 	var err error
-	logger.Info("Step 1: Stopping inputs", "project", p.Id)
-	p.cleanupInputChannel()
+	logger.Info("Step 1: Disconnecting inputs from downstream", "project", p.Id)
+	p.disconnectInputsFromDownstream()
 
 	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
 	p.waitForCompleteDataProcessing()
+
+	logger.Info("Step 3: Stopping input components", "project", p.Id)
+	p.stopInputComponents()
 
 	if !p.Testing {
 		common.GlobalDailyStatsManager.CollectAllComponentsData()
 	}
 
 	rulesets := p.GetProjectRulesets()
-	logger.Info("Step 3: Stopping rulesets", "project", p.Id, "count", len(rulesets))
+	logger.Info("Step 4: Stopping rulesets", "project", p.Id, "count", len(rulesets))
 	for id, rs := range rulesets {
 		DeletePNSRuleset(id)
 		if CalculateRefCount(id, p.Id) == 0 {
@@ -1105,7 +1108,7 @@ func (p *Project) stopComponentsInternal() error {
 	}
 
 	outputs := p.GetProjectOutputs()
-	logger.Info("Step 4: Stopping outputs", "project", p.Id, "count", len(outputs))
+	logger.Info("Step 5: Stopping outputs", "project", p.Id, "count", len(outputs))
 	for id, out := range outputs {
 		DeletePNSOutput(id)
 		if CalculateRefCount(id, p.Id) == 0 {
@@ -1181,6 +1184,60 @@ func (p *Project) cleanup() {
 	p.MsgChannels = make(map[string]*chan map[string]interface{}, 0)
 }
 
+// disconnectInputsFromDownstream safely disconnects all input components from their downstream channels
+// This should be called before waiting for data processing to complete
+func (p *Project) disconnectInputsFromDownstream() {
+	inputs := p.GetProjectInputs()
+	for id, in := range inputs {
+		rightNodes := p.getPartner("right", id)
+
+		for _, downstreamID := range rightNodes {
+			// Use the safe deletion function to properly clean up downstream connections
+			SafeDeleteInputDownstream(in.Id, downstreamID)
+			logger.Debug("Disconnected input from downstream",
+				"project", p.Id, "input", in.Id, "downstream", downstreamID)
+		}
+	}
+	logger.Info("All inputs disconnected from downstream", "project", p.Id)
+}
+
+// stopInputComponents stops all input components used by this project
+// This should be called after data processing is complete
+func (p *Project) stopInputComponents() {
+	inputs := p.GetProjectInputs()
+	for id, in := range inputs {
+		// Input components need reference counting to determine if they should be stopped
+		// Only stop when no other projects are using this input (excluding current project)
+		if CalculateRefCount(id, p.Id) == 0 {
+			// Use safe accessor to get global input
+			globalInput, exists := GetInput(in.Id)
+
+			if exists {
+				if p.Testing {
+					err := globalInput.StopForTesting()
+					if err != nil {
+						logger.Error("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
+					} else {
+						logger.Info("Stopped test input", "project", p.Id, "input", in.Id)
+					}
+				} else {
+					err := globalInput.Stop()
+					if err != nil {
+						logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+					} else {
+						logger.Info("Stopped input", "project", p.Id, "input", in.Id)
+					}
+				}
+			} else {
+				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
+			}
+		} else {
+			logger.Debug("Input still in use by other projects, not stopping",
+				"project", p.Id, "input", in.Id, "ref_count", CalculateRefCount(id, p.Id))
+		}
+	}
+}
+
 // waitForCompleteDataProcessing waits for all data to be fully processed through the pipeline
 // This includes waiting for channels to empty AND thread pools to complete all tasks
 func (p *Project) waitForCompleteDataProcessing() {
@@ -1230,6 +1287,8 @@ func (p *Project) waitForCompleteDataProcessing() {
 }
 
 func (p *Project) cleanupInputChannel() {
+	// This method is called during cleanup phase to ensure any remaining connections are cleaned up
+	// The actual disconnection should already be done in disconnectInputsFromDownstream
 	inputs := p.GetProjectInputs()
 	for id, in := range inputs {
 		rightNodes := p.getPartner("right", id)
@@ -1237,24 +1296,8 @@ func (p *Project) cleanupInputChannel() {
 		for _, id2 := range rightNodes {
 			SafeDeleteInputDownstream(in.Id, id2)
 		}
-
-		// Input components need reference counting to determine if they should be stopped
-		// Only stop when no other projects are using this input (excluding current project)
-		if CalculateRefCount(id, p.Id) == 0 {
-			// Use safe accessor to get global input
-			globalInput, exists := GetInput(in.Id)
-
-			if exists {
-				if p.Testing {
-					_ = globalInput.StopForTesting()
-				} else {
-					_ = globalInput.Stop()
-				}
-			} else {
-				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
-			}
-		}
 	}
+	logger.Debug("Input channel cleanup completed", "project", p.Id)
 }
 
 func (p *Project) cleanupRulesetChannel() {
@@ -1305,7 +1348,7 @@ func (p *Project) initComponents() error {
 				p.Rulesets[node.ToPNS] = rs
 
 				nodeChannelStatus[node.ToPNS] = true
-				c := make(chan map[string]interface{}, 1024)
+				c := make(chan map[string]interface{}, 4096)
 				p.MsgChannels[node.ToPNS] = &c
 				rs.UpStream[node.ToPNS] = &c
 			}
