@@ -192,7 +192,7 @@ func (r *Ruleset) Stop() error {
 		}
 	}()
 
-	if r.Status != common.StatusRunning {
+	if r.Status != common.StatusRunning && r.Status != common.StatusError {
 		return fmt.Errorf("cannot stop ruleset engine, current status: %s", r.Status)
 	}
 	r.SetStatus(common.StatusStopping, nil)

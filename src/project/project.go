@@ -1100,12 +1100,7 @@ func (p *Project) stopComponentsInternal() error {
 	for id, rs := range rulesets {
 		DeletePNSRuleset(id)
 		if CalculateRefCount(id, p.Id) == 0 {
-			err = rs.Stop()
-			if err != nil {
-				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", err)
-			} else {
-				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID, "sequence", id)
-			}
+			_ = rs.Stop()
 		}
 	}
 
