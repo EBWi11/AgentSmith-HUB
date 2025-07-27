@@ -108,6 +108,9 @@ type Ruleset struct {
 	// only for classify local cache
 	CacheMu sync.RWMutex
 
+	// Regex result cache for this ruleset instance
+	RegexResultCache *RegexResultCache
+
 	RawConfig string
 	sampler   *common.Sampler
 
@@ -1507,6 +1510,12 @@ func (r *Ruleset) cleanup() {
 		r.CacheForClassify = nil
 	}
 
+	// Clear regex result cache
+	if r.RegexResultCache != nil {
+		r.RegexResultCache.Clear()
+		r.RegexResultCache = nil
+	}
+
 	// Reset atomic counter
 	atomic.StoreUint64(&r.processTotal, 0)
 	atomic.StoreUint64(&r.lastReportedTotal, 0)
@@ -1606,6 +1615,9 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 			return nil, fmt.Errorf("failed to create classify cache: %w", err)
 		}
 	}
+
+	// Initialize regex result cache
+	newRuleset.RegexResultCache = NewRegexResultCache(1000) // Default capacity: 1000 entries
 
 	return newRuleset, nil
 }
@@ -1989,6 +2001,12 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 		// Process del operations in DelMap (no additional processing needed as DelMap already contains parsed field paths)
 	}
+
+	// Initialize regex result cache
+	if ruleset.RegexResultCache == nil {
+		ruleset.RegexResultCache = NewRegexResultCache(1000) // Default capacity: 1000 entries
+	}
+
 	return nil
 }
 

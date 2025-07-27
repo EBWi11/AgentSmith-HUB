@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	regexp "github.com/BurntSushi/rure-go"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -64,6 +63,11 @@ func (r *Ruleset) Start() error {
 	r.Err = nil
 	r.SetStatus(common.StatusStarting, nil)
 
+	// Initialize regex result cache if not already initialized
+	if r.RegexResultCache == nil {
+		r.RegexResultCache = NewRegexResultCache(1000) // Default capacity: 1000 entries
+	}
+
 	r.ResetProcessTotal()
 	if r.stopChan != nil {
 		r.SetStatus(common.StatusError, fmt.Errorf("already started: %v", r.RulesetID))
@@ -101,13 +105,13 @@ func (r *Ruleset) Start() error {
 
 				targetSize := minPoolSize
 				switch {
-				case totalBacklog > 500:
+				case totalBacklog > 2048:
 					targetSize = maxPoolSize
-				case totalBacklog > 256:
+				case totalBacklog > 1024:
 					targetSize = level2
-				case totalBacklog > 128:
+				case totalBacklog > 512:
 					targetSize = level1
-				case totalBacklog > 16:
+				case totalBacklog > 128:
 					targetSize = minPoolSize + (level1-minPoolSize)/2
 				default:
 					targetSize = minPoolSize
@@ -536,7 +540,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 		} else {
 			checkNodeValue = checkNode.Value
 		}
-		return checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache)
+		return checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache)
 	case "AND":
 		for _, v := range checkNode.DelimiterFieldList {
 			if hasFromRawPrefix(v) {
@@ -546,7 +550,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 				checkNodeValue = v
 				checkNodeValueFromRaw = false
 			}
-			if !checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache) {
+			if !checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
 				return false
 			}
 		}
@@ -560,7 +564,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 				checkNodeValue = v
 				checkNodeValueFromRaw = false
 			}
-			if checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache) {
+			if checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
 				return true
 			}
 		}
@@ -763,7 +767,7 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 }
 
 // checkNodeLogic executes the check logic for a single check node.
-func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache) bool {
+func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache, regexResultCache *RegexResultCache) bool {
 	var checkListFlag = false
 
 	needCheckData, exist := common.GetCheckData(data, checkNode.FieldList)
@@ -795,9 +799,13 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 	switch checkNode.Type {
 	case "REGEX":
 		if !checkNodeValueFromRaw {
-			checkListFlag, _ = REGEX(needCheckData, checkNode.Regex)
+			// Static regex value - use result cache with pre-compiled regex for better performance
+			// This maintains the same behavior as original: REGEX(needCheckData, checkNode.Regex)
+			checkListFlag = CachedRegexMatchWithPrecompiled(regexResultCache, checkNode.Regex, checkNodeValue, needCheckData)
 		} else {
-			regex, err := regexp.Compile(checkNodeValue)
+			// Dynamic regex from raw data - use compiled regex cache (no result caching)
+			// This maintains the same behavior as original
+			regex, err := GetCompiledRegex(checkNodeValue)
 			if err != nil {
 				break
 			}
