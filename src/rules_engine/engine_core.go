@@ -105,13 +105,13 @@ func (r *Ruleset) Start() error {
 
 				targetSize := minPoolSize
 				switch {
-				case totalBacklog > 2048:
+				case totalBacklog > 256:
 					targetSize = maxPoolSize
-				case totalBacklog > 1024:
-					targetSize = level2
-				case totalBacklog > 512:
-					targetSize = level1
 				case totalBacklog > 128:
+					targetSize = level2
+				case totalBacklog > 64:
+					targetSize = level1
+				case totalBacklog > 32:
 					targetSize = minPoolSize + (level1-minPoolSize)/2
 				default:
 					targetSize = minPoolSize

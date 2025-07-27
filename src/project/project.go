@@ -1348,7 +1348,7 @@ func (p *Project) initComponents() error {
 				p.Rulesets[node.ToPNS] = rs
 
 				nodeChannelStatus[node.ToPNS] = true
-				c := make(chan map[string]interface{}, 4096)
+				c := make(chan map[string]interface{}, 512)
 				p.MsgChannels[node.ToPNS] = &c
 				rs.UpStream[node.ToPNS] = &c
 			}

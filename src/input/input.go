@@ -364,7 +364,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 4096)
+		msgChan := make(chan map[string]interface{}, 512)
 		cons, err := common.NewAliyunSLSConsumer(
 			in.aliyunSLSCfg.Endpoint,
 			in.aliyunSLSCfg.AccessKeyID,

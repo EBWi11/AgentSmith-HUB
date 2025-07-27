@@ -134,8 +134,8 @@ func NewDailyStatsManager() *DailyStatsManager {
 	dsm := &DailyStatsManager{
 		stopChan:       make(chan struct{}),
 		redisKeyPrefix: "hub:daily_stats:", // Redis key prefix
-		saveInterval:   15 * time.Second,   // Collect every 15 seconds
-		retentionDays:  10,                 // Keep 30 days of data
+		saveInterval:   30 * time.Second,
+		retentionDays:  10,
 	}
 
 	go dsm.persistenceLoop()
