@@ -29,7 +29,7 @@ func NewStandardMCPServer() *StandardMCPServer {
 	// Create mcp-go server
 	s := server.NewMCPServer(
 		"AgentSmith-HUB",
-		"v0.1.6",
+		"v0.1.7",
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(true, true),
 		server.WithPromptCapabilities(true),
@@ -137,7 +137,7 @@ func (s *StandardMCPServer) handleInitialize(id interface{}) ([]byte, error) {
 		},
 		"serverInfo": map[string]interface{}{
 			"name":         "AgentSmith-HUB",
-			"version":      "v0.1.6",
+			"version":      "v0.1.7",
 			"instructions": instructions,
 		},
 	}
