@@ -1789,13 +1789,17 @@ func GetSamplerData(c echo.Context) error {
 	}
 
 	if !componentExists {
-		logger.Warn("Component not found for sample data request",
+		logger.Info("Component not found for sample data request, returning empty data",
 			"componentType", componentType,
 			"componentId", componentId,
-			"nodeSequence", nodeSequence)
-		return c.JSON(http.StatusNotFound, map[string]string{
-			"error": fmt.Sprintf("Component '%s' of type '%s' not found", componentId, componentType),
-		})
+			"nodeSequence", nodeSequence,
+			"message", "This is normal for new components that haven't been saved yet")
+
+		// Return empty data instead of 404 error for new components
+		response := map[string]interface{}{
+			componentName: map[string][]interface{}{},
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 
 	// Collect samples from all samplers that contain this component in their flow path

@@ -570,8 +570,8 @@
                         Connect Check
                       </a>
                       
-                      <!-- View Sample Data for inputs -->
-                      <a v-if="type === 'inputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- View Sample Data for inputs (only for saved components) -->
+                      <a v-if="type === 'inputs' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openSampleDataModal(item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -580,8 +580,8 @@
                         View Sample Data
                       </a>
                       
-                      <!-- View Sample Data for rulesets -->
-                      <a v-if="type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- View Sample Data for rulesets (only for saved components) -->
+                      <a v-if="type === 'rulesets' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openSampleDataModal(item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -590,8 +590,8 @@
                         View Sample Data
                       </a>
                       
-                      <!-- View Sample Data for outputs -->
-                      <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- View Sample Data for outputs (only for saved components) -->
+                      <a v-if="type === 'outputs' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openSampleDataModal(item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -600,8 +600,8 @@
                         View Sample Data
                       </a>
                       
-                      <!-- 添加查看使用情况选项，仅对input、output和ruleset类型显示 -->
-                      <a v-if="type === 'inputs' || type === 'outputs' || type === 'rulesets'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- 添加查看使用情况选项，仅对已保存的input、output和ruleset类型显示 -->
+                      <a v-if="(type === 'inputs' || type === 'outputs' || type === 'rulesets') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openUsageModal(type, item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -3638,8 +3638,7 @@ function getRulesetTypeInfo(item) {
   const type = item.type?.toLowerCase() || 'unknown'
   const typeMap = {
     'detection': { icon: 'D', color: 'bg-purple-100 text-purple-800', tooltip: 'Detection Ruleset' },
-    'exclude': { icon: 'E', color: 'bg-red-100 text-red-800', tooltip: 'Exclude Ruleset' },
-    'whitelist': { icon: 'W', color: 'bg-green-100 text-green-800', tooltip: 'Whitelist Ruleset' },
+    'exclude': { icon: 'F', color: 'bg-orange-100 text-orange-800', tooltip: 'Exclude Ruleset' },
     'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Ruleset Type' }
   }
   return typeMap[type] || typeMap['unknown']

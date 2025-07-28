@@ -80,6 +80,7 @@ api.interceptors.response.use(
     }
     if (typeof window !== 'undefined' && window.$toast) {
       let msg = error.response?.data?.error || error.message || 'Unknown error';
+      
       window.$toast.show(msg, 'error');
     }
     return Promise.reject(error);
