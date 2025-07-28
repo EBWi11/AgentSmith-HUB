@@ -23,7 +23,7 @@
       </div>
     </div>
     <!-- Default full-screen editor for other component types -->
-          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" @test="handleTestShortcut" :component-id="props.item?.id" :component-type="props.item?.type" />
+          <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3 button-group-container">
       <!-- Test Buttons -->
       <button 
@@ -286,6 +286,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Ruleset
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
       <button 
         v-if="isProject"
@@ -296,6 +297,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Project
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
       <button 
         v-if="isPlugin"
@@ -306,6 +308,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Plugin
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
       <button 
         v-if="isOutput"
@@ -316,6 +319,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Output
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
       
       <!-- Verify Buttons -->
@@ -405,6 +409,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.71,7.71,11,5.41V15a1,1,0,0,0,2,0V5.41l2.29,2.3a1,1,0,0,0,1.42,0,1,1,0,0,0,0-1.42l-4-4a1,1,0,0,0-.33-.21,1,1,0,0,0-.76,0,1,1,0,0,0-.33.21l-4,4A1,1,0,1,0,8.71,7.71ZM21,12a1,1,0,0,0-1,1v6a1,1,0,0,1-1,1H5a1,1,0,0,1-1-1V13a1,1,0,0,0-2,0v6a3,3,0,0,0,3,3H19a3,3,0,0,0,3-3V13A1,1,0,0,0,21,12Z" />
         </svg>
         {{ saving ? 'Saving...' : 'Save' }}
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘S' : 'Ctrl+S' }}</span>
       </button>
     </div>
     <div v-if="saveError" class="text-xs text-red-500 mt-2 px-4 mb-3">{{ saveError }}</div>
@@ -607,7 +612,7 @@
 </template>
 
 <script setup>
-import { ref, watch, inject, computed, onMounted, onBeforeUnmount, watchEffect } from 'vue'
+import { ref, watch, inject, computed, onMounted, onBeforeUnmount, onUnmounted, watchEffect, nextTick } from 'vue'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
 // Cache management integrated into DataCache
@@ -677,6 +682,11 @@ const isProject = computed(() => {
 })
 const isInput = computed(() => {
   return props.item?.type === 'inputs'
+})
+
+// Platform detection for shortcut display
+const isMac = computed(() => {
+  return navigator.platform.toUpperCase().indexOf('MAC') >= 0
 })
 
 // Check if component supports connect check (excludes print output)
@@ -907,6 +917,10 @@ function handleTestShortcut() {
   else if (isProject.value) {
     showProjectTestModal.value = true;
   }
+  // Test plugin if it's a plugin
+  else if (isPlugin.value) {
+    showPluginTestModal.value = true;
+  }
   // Test output if it's an output
   else if (isOutput.value) {
     showOutputTestModal.value = true;
@@ -1033,6 +1047,61 @@ onMounted(async () => {
     onBeforeUnmount(() => {
       clearInterval(periodicValidation);
     });
+  }
+
+  // Add keyboard shortcuts
+  const handleKeyDown = (event) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmdKey = isMac ? event.metaKey : event.ctrlKey;
+    
+    // Cmd+S (Mac) or Ctrl+S (Windows/Linux) for save
+    if (cmdKey && event.code === 'KeyS') {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Save based on current mode
+      if (props.item?.isNew) {
+        saveNew();
+      } else if (props.item?.isEdit) {
+        saveEdit();
+      }
+    }
+    
+    // Cmd+D (Mac) or Ctrl+D (Windows/Linux) for test
+    if (cmdKey && event.code === 'KeyD') {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Use handleTestShortcut function
+      handleTestShortcut();
+    }
+  };
+  
+  // Add event listener with capture phase to intercept before Monaco Editor
+  window.addEventListener('keydown', handleKeyDown, true);
+  
+  // Store cleanup function
+  const cleanup = () => {
+    window.removeEventListener('keydown', handleKeyDown, true);
+  };
+  
+  // Clean up on unmount
+  onBeforeUnmount(cleanup);
+  
+  if (props.item) {
+    if (props.item.isNew) {
+      detail.value = null;
+      editorValue.value = getTemplateForComponent(props.item.type, props.item.id);
+    } else if (props.item.isEdit || !props.item.isEdit) {
+      await fetchDetail(props.item, props.item.isEdit);
+      
+      if (isRuleset.value && editorValue.value) {
+        await validateRealtime(props.item.type, props.item.id, editorValue.value)
+      }
+    }
+    
+    // Project status refresh is now handled by the unified cache system
+    // No manual setup needed
   }
 })
 
@@ -1411,52 +1480,6 @@ onBeforeUnmount(() => {
 
 
 
-// Mount hook for initial setup
-onMounted(async () => {
-  // Add keyboard shortcuts
-  const handleKeyDown = (event) => {
-    // Cmd+D (Mac) or Ctrl+D (Windows/Linux) for test
-    if ((event.metaKey || event.ctrlKey) && event.key === 'd') {
-      event.preventDefault();
-      
-      // Test ruleset if it's a ruleset
-      if (isRuleset.value) {
-        showTestModal.value = true;
-      }
-      // Test project if it's a project
-      else if (isProject.value) {
-        showProjectTestModal.value = true;
-      }
-    }
-  };
-  
-  // Add event listener
-  document.addEventListener('keydown', handleKeyDown);
-  
-  // Store cleanup function
-  const cleanup = () => {
-    document.removeEventListener('keydown', handleKeyDown);
-  };
-  
-  // Clean up on unmount
-  onBeforeUnmount(cleanup);
-  
-  if (props.item) {
-    if (props.item.isNew) {
-      detail.value = null;
-      editorValue.value = getTemplateForComponent(props.item.type, props.item.id);
-    } else if (props.item.isEdit || !props.item.isEdit) {
-      await fetchDetail(props.item, props.item.isEdit);
-      
-      if (isRuleset.value && editorValue.value) {
-        await validateRulesetRealtime()
-      }
-    }
-    
-    // Project status refresh is now handled by the unified cache system
-    // No manual setup needed
-  }
-});
 
 // Expose method to get editor content (for parent component access)
 function getEditorContent() {
@@ -1535,6 +1558,24 @@ defineExpose({
   border-color: #6366f1 !important;
   color: #6366f1 !important;
   background: rgba(238, 242, 255, 0.3) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Test Output Button - Minimal Style (same as ruleset) */
+.btn.btn-test-output {
+  background: transparent !important;
+  border: 1px solid #d1d5db !important;
+  color: #6b7280 !important;
+  transition: all 0.15s ease !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.btn.btn-test-output:hover:not(:disabled) {
+  border-color: #9ca3af !important;
+  color: #374151 !important;
+  background: rgba(249, 250, 251, 0.5) !important;
   box-shadow: none !important;
   transform: none !important;
 }

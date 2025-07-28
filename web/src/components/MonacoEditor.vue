@@ -851,7 +851,7 @@ function initializeEditor() {
   try {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD, function() {
       // Emit a custom event for test action
-      emit('test', editor.getValue());
+      emit('test');
     });
   } catch (error) {
     console.warn('Failed to add test command:', error);
