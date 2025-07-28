@@ -3638,6 +3638,7 @@ function getRulesetTypeInfo(item) {
   const type = item.type?.toLowerCase() || 'unknown'
   const typeMap = {
     'detection': { icon: 'D', color: 'bg-purple-100 text-purple-800', tooltip: 'Detection Ruleset' },
+    'exclude': { icon: 'E', color: 'bg-red-100 text-red-800', tooltip: 'Exclude Ruleset' },
     'whitelist': { icon: 'W', color: 'bg-green-100 text-green-800', tooltip: 'Whitelist Ruleset' },
     'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Ruleset Type' }
   }
