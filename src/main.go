@@ -558,6 +558,13 @@ func loadHubConfig(root string) error {
 		logger.Info("Using Redis password from environment variable")
 	}
 
+	// Override SIMD configuration with environment variable if set
+	if envSIMDEnabled := os.Getenv("SIMD_ENABLED"); envSIMDEnabled != "" {
+		simdEnabled := strings.ToLower(envSIMDEnabled) == "true" || envSIMDEnabled == "1"
+		common.Config.SIMDEnabled = simdEnabled
+		logger.Info("Using SIMD enabled from environment variable", "enabled", simdEnabled)
+	}
+
 	// Set config root
 	common.Config.ConfigRoot = root
 
@@ -567,6 +574,7 @@ func loadHubConfig(root string) error {
 	}
 
 	logger.Info("Final Redis configuration", "host", common.Config.Redis, "password_set", common.Config.RedisPassword != "")
+	logger.Info("SIMD configuration", "enabled", common.Config.SIMDEnabled)
 
 	return nil
 }

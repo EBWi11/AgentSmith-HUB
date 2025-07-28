@@ -1,2 +1,5 @@
 redis: 192.168.124.12:6379
 redis_password: "toor"
+
+# SIMD optimization configuration
+simd_enabled: false  # Set to true to enable SIMD optimizations

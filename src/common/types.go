@@ -26,6 +26,7 @@ type HubConfig struct {
 	Redis         string       `yaml:"redis"`
 	RedisPassword string       `yaml:"redis_password,omitempty"`
 	Pprof         *PprofConfig `yaml:"pprof,omitempty"`
+	SIMDEnabled   bool         `yaml:"simd_enabled"`
 	ConfigRoot    string
 	Leader        string
 	LocalIP       string

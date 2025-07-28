@@ -17,9 +17,7 @@ const HitRuleIdFieldName = "_hub_hit_rule_id"
 
 // SIMD statistics variables
 var (
-	simdOperationsCount     uint64        // SIMD operations count
-	fallbackOperationsCount uint64        // Fallback operations count
-	simdEnabled             bool   = true // SIMD enable flag, enabled by default
+	simdEnabled bool = false // SIMD enable flag, will be set from config
 )
 
 // ruleCachePool reuses map objects to reduce allocations
@@ -49,8 +47,22 @@ func hasFromRawPrefix(s string) bool {
 	return len(s) >= 2 && s[0] == '_' && s[1] == '$'
 }
 
+// InitSIMDConfig initializes SIMD configuration from global config
+func InitSIMDConfig() {
+	if common.Config != nil {
+		simdEnabled = common.Config.SIMDEnabled
+		logger.Info("SIMD configuration initialized", "enabled", simdEnabled)
+	} else {
+		simdEnabled = false
+		logger.Info("SIMD configuration not found, defaulting to disabled")
+	}
+}
+
 // Start the ruleset engine, consuming data from upstream and writing checked data to downstream.
 func (r *Ruleset) Start() error {
+	// Initialize SIMD configuration
+	InitSIMDConfig()
+
 	// Add panic recovery for critical state changes
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
@@ -934,7 +946,6 @@ func (r *Ruleset) GetRunningTaskCount() int {
 func shouldUseSIMD(operationType, data, pattern string) bool {
 	// First check if SIMD is globally enabled
 	if !simdEnabled {
-		atomic.AddUint64(&fallbackOperationsCount, 1)
 		return false
 	}
 
@@ -947,7 +958,6 @@ func shouldUseSIMD(operationType, data, pattern string) bool {
 
 		// Empty data or empty pattern not suitable for SIMD
 		if dataLen == 0 || patternLen == 0 {
-			atomic.AddUint64(&fallbackOperationsCount, 1)
 			return false
 		}
 
@@ -960,16 +970,9 @@ func shouldUseSIMD(operationType, data, pattern string) bool {
 			useSIMD = dataLen >= 16
 		}
 
-		if useSIMD {
-			atomic.AddUint64(&simdOperationsCount, 1)
-		} else {
-			atomic.AddUint64(&fallbackOperationsCount, 1)
-		}
-
 		return useSIMD
 
 	default:
-		atomic.AddUint64(&fallbackOperationsCount, 1)
 		return false
 	}
 }
