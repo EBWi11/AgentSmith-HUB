@@ -93,8 +93,8 @@ type Output struct {
 	// sampler
 	sampler *common.Sampler
 
-	// for print output
-	printStop chan struct{}
+	// for stopping goroutines - unified stop signal for all output types
+	stopChan chan struct{}
 
 	// for testing
 	TestCollectionChan *chan map[string]interface{}
@@ -233,15 +233,15 @@ func (out *Output) SetStatus(status common.Status, err error) {
 
 // cleanup performs cleanup when normal stop fails or panic occurs
 func (out *Output) cleanup() {
-	// Close print stop channel if it exists and not already closed
-	if out.printStop != nil {
+	// Close stop channel if it exists and not already closed
+	if out.stopChan != nil {
 		select {
-		case <-out.printStop:
+		case <-out.stopChan:
 			// Already closed
 		default:
-			close(out.printStop)
+			close(out.stopChan)
 		}
-		out.printStop = nil
+		out.stopChan = nil
 	}
 
 	// Stop producers
@@ -291,37 +291,45 @@ func (out *Output) StartForTesting() error {
 	out.ResetProduceTotal()
 	out.SetStatus(common.StatusStarting, nil)
 
+	// Initialize stop channel for testing
+	out.stopChan = make(chan struct{})
+
 	// Start single goroutine to read from UpStream and send to TestCollectionChan only
 	out.wg.Add(1)
 	go func() {
 		defer out.wg.Done()
 
 		for {
-			// Non-blocking check for messages from any upstream channel
-			processed := false
-			for _, up := range out.UpStream {
-				select {
-				case msg := <-*up:
-					atomic.AddUint64(&out.produceTotal, 1)
+			select {
+			case <-out.stopChan:
+				return
+			default:
+				// Non-blocking check for messages from any upstream channel
+				processed := false
+				for _, up := range out.UpStream {
+					select {
+					case msg := <-*up:
+						atomic.AddUint64(&out.produceTotal, 1)
 
-					// Skip sampling in testing mode (handled by SetTestMode)
-					if out.sampler != nil {
-						out.sampler.Sample(msg, out.ProjectNodeSequence)
+						// Skip sampling in testing mode (handled by SetTestMode)
+						if out.sampler != nil {
+							out.sampler.Sample(msg, out.ProjectNodeSequence)
+						}
+
+						// Enhance message with ProjectNodeSequence information
+						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+						if out.TestCollectionChan != nil {
+							*out.TestCollectionChan <- enhancedMsg
+						}
+
+						processed = true
+					default:
 					}
-
-					// Enhance message with ProjectNodeSequence information
-					enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-					if out.TestCollectionChan != nil {
-						*out.TestCollectionChan <- enhancedMsg
-					}
-
-					processed = true
-				default:
 				}
-			}
-			if !processed {
-				time.Sleep(10 * time.Millisecond)
+				if !processed {
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
 		}
 	}()
@@ -396,6 +404,9 @@ func (out *Output) Start() error {
 		}
 		out.kafkaProducer = producer
 
+		// Initialize stop channel for this output
+		out.stopChan = make(chan struct{})
+
 		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Kafka producer
 		out.wg.Add(1)
 		go func() {
@@ -403,47 +414,52 @@ func (out *Output) Start() error {
 			defer close(msgChan) // Close msgChan when UpStream processing is done
 
 			for {
-				// Non-blocking check for messages from any upstream channel
-				processed := false
-				for _, up := range out.UpStream {
-					select {
-					case msg, ok := <-*up:
-						if !ok {
-							// Channel is closed, skip this channel
-							continue
-						}
-
-						// Always count/sample; duplication handled below
-						// Count immediately at upstream read to ensure all messages are counted
-						atomic.AddUint64(&out.produceTotal, 1)
-
-						// Sample the message
-						if out.sampler != nil {
-							out.sampler.Sample(msg, out.ProjectNodeSequence)
-						}
-
-						// Enhance message with ProjectNodeSequence information before sending
-						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-						// Duplicate to TestCollectionChan if present (non-blocking)
-						if hasTestCollector {
-							select {
-							case *out.TestCollectionChan <- enhancedMsg:
-							default:
-								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+				select {
+				case <-out.stopChan:
+					return
+				default:
+					// Non-blocking check for messages from any upstream channel
+					processed := false
+					for _, up := range out.UpStream {
+						select {
+						case msg, ok := <-*up:
+							if !ok {
+								// Channel is closed, skip this channel
+								continue
 							}
-						}
 
-						// Send enhanced message to msgChan for Kafka producer
-						msgChan <- enhancedMsg
-						processed = true
-					default:
-						// No message available from this channel, continue to next
+							// Always count/sample; duplication handled below
+							// Count immediately at upstream read to ensure all messages are counted
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
+							}
+
+							// Enhance message with ProjectNodeSequence information before sending
+							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+							// Duplicate to TestCollectionChan if present (non-blocking)
+							if hasTestCollector {
+								select {
+								case *out.TestCollectionChan <- enhancedMsg:
+								default:
+									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+								}
+							}
+
+							// Send enhanced message to msgChan for Kafka producer
+							msgChan <- enhancedMsg
+							processed = true
+						default:
+							// No message available from this channel, continue to next
+						}
 					}
-				}
-				// If no messages were processed, use shorter sleep to reduce latency
-				if !processed {
-					time.Sleep(10 * time.Millisecond)
+					// If no messages were processed, use shorter sleep to reduce latency
+					if !processed {
+						time.Sleep(10 * time.Millisecond)
+					}
 				}
 			}
 		}()
@@ -483,6 +499,11 @@ func (out *Output) Start() error {
 		}
 		out.elasticsearchProducer = producer
 
+		// Initialize stop channel for this output (if not already initialized)
+		if out.stopChan == nil {
+			out.stopChan = make(chan struct{})
+		}
+
 		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
 		out.wg.Add(1)
 		go func() {
@@ -490,58 +511,66 @@ func (out *Output) Start() error {
 			defer close(msgChan) // Close msgChan when UpStream processing is done
 
 			for {
-				// Non-blocking check for messages from any upstream channel
-				processed := false
-				for _, up := range out.UpStream {
-					select {
-					case msg, ok := <-*up:
-						if !ok {
-							// Channel is closed, skip this channel
-							continue
-						}
-
-						// Always count/sample; duplication handled separately
-						// Count immediately at upstream read to ensure all messages are counted
-						atomic.AddUint64(&out.produceTotal, 1)
-
-						// Sample the message
-						if out.sampler != nil {
-							out.sampler.Sample(msg, out.ProjectNodeSequence)
-						}
-
-						// Enhance message with ProjectNodeSequence information before sending
-						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-						if hasTestCollector {
-							select {
-							case *out.TestCollectionChan <- enhancedMsg:
-							default:
-								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+				select {
+				case <-out.stopChan:
+					return
+				default:
+					// Non-blocking check for messages from any upstream channel
+					processed := false
+					for _, up := range out.UpStream {
+						select {
+						case msg, ok := <-*up:
+							if !ok {
+								// Channel is closed, skip this channel
+								continue
 							}
-						}
 
-						// Send enhanced message to msgChan for Elasticsearch producer
-						msgChan <- enhancedMsg
-						processed = true
-					default:
-						// No message available from this channel, continue to next
+							// Always count/sample; duplication handled separately
+							// Count immediately at upstream read to ensure all messages are counted
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							// Sample the message
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
+							}
+
+							// Enhance message with ProjectNodeSequence information before sending
+							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+							if hasTestCollector {
+								select {
+								case *out.TestCollectionChan <- enhancedMsg:
+								default:
+									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+								}
+							}
+
+							// Send enhanced message to msgChan for Elasticsearch producer
+							msgChan <- enhancedMsg
+							processed = true
+						default:
+							// No message available from this channel, continue to next
+						}
 					}
-				}
-				// If no messages were processed, use shorter sleep to reduce latency
-				if !processed {
-					time.Sleep(10 * time.Millisecond)
+					// If no messages were processed, use shorter sleep to reduce latency
+					if !processed {
+						time.Sleep(10 * time.Millisecond)
+					}
 				}
 			}
 		}()
 
 	case OutputTypePrint:
-		out.printStop = make(chan struct{})
+		// Initialize stop channel for this output (if not already initialized)
+		if out.stopChan == nil {
+			out.stopChan = make(chan struct{})
+		}
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
 			for {
 				select {
-				case <-out.printStop:
+				case <-out.stopChan:
 					return
 				default:
 					// Non-blocking check for messages from any upstream channel
@@ -611,6 +640,12 @@ func (out *Output) Stop() error {
 		logger.Debug("Stopping output from non-running state", "output", out.Id, "current_status", out.Status)
 	}
 	out.SetStatus(common.StatusStopping, nil)
+
+	// Signal all output goroutines to stop by closing stopChan channel
+	if out.stopChan != nil {
+		close(out.stopChan)
+		out.stopChan = nil
+	}
 
 	// Overall timeout for output stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s

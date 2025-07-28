@@ -79,8 +79,7 @@ kafka:
   topic: test-topic
   group: test`
 
-const NewOutputData = `name: kafka_output_demo
-type: kafka
+const NewOutputData = `type: kafka
 kafka:
   brokers:
     - "192.168.27.130:9092"

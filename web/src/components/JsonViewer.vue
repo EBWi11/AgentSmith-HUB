@@ -57,12 +57,23 @@ const initializeEditor = () => {
     lineDecorationsWidth: 0,
     lineNumbersMinChars: 0,
     renderLineHighlight: 'none',
+    // Fix selection display issues
+    selectionHighlight: true,
+    selectOnLineNumbers: false,
+    roundedSelection: false,
+    renderSelectionBorder: false,
+    cursorBlinking: 'solid',
+    cursorSmoothCaretAnimation: false,
+    // Ensure proper scrollbar behavior
     scrollbar: {
       vertical: props.height === 'auto' ? 'hidden' : 'auto',
       horizontal: 'auto',
       verticalScrollbarSize: 8,
-      horizontalScrollbarSize: 8
-    }
+      horizontalScrollbarSize: 8,
+      alwaysConsumeMouseWheel: false
+    },
+    // Fix layering issues
+    fixedOverflowWidgets: true
   })
 
   // Set height
@@ -71,10 +82,18 @@ const initializeEditor = () => {
     const lineCount = editor.getModel().getLineCount()
     const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight)
     const contentHeight = lineCount * lineHeight + 20 // Add some padding
-    container.value.style.height = `${Math.max(contentHeight, 60)}px`
-    editor.layout()
+    const finalHeight = Math.max(contentHeight, 60)
+    container.value.style.height = `${finalHeight}px`
+    
+    // Force layout after height setting
+    setTimeout(() => {
+      editor.layout({ width: container.value.clientWidth, height: finalHeight })
+    }, 10)
   } else {
     container.value.style.height = props.height
+    setTimeout(() => {
+      editor.layout()
+    }, 10)
   }
 }
 
@@ -89,9 +108,16 @@ watch(() => props.value, (newValue) => {
         const lineCount = editor.getModel().getLineCount()
         const lineHeight = editor.getOption(monaco.editor.EditorOption.lineHeight)
         const contentHeight = lineCount * lineHeight + 20 // Add some padding
-        container.value.style.height = `${Math.max(contentHeight, 60)}px`
+        const finalHeight = Math.max(contentHeight, 60)
+        container.value.style.height = `${finalHeight}px`
+        
+        // Force proper layout after content change
+        editor.layout({ width: container.value.clientWidth, height: finalHeight })
+      }, 10)
+    } else {
+      setTimeout(() => {
         editor.layout()
-      }, 0)
+      }, 10)
     }
   }
 }, { deep: true })
@@ -112,10 +138,53 @@ onBeforeUnmount(() => {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   overflow: hidden;
+  /* Ensure proper stacking context */
+  position: relative;
+  z-index: 1;
 }
 
 .json-container {
   width: 100%;
   min-height: 100px;
+  /* Fix potential positioning issues */
+  position: relative;
+}
+
+/* Ensure Monaco editor selection is visible */
+.json-container :deep(.monaco-editor) {
+  /* Fix selection rendering */
+  .view-line {
+    position: relative;
+  }
+  
+  .selected-text,
+  .current-line,
+  .selection-highlight {
+    position: relative;
+    z-index: 1;
+  }
+  
+  /* Fix cursor positioning */
+  .cursor {
+    position: absolute;
+    z-index: 2;
+  }
+  
+  /* Ensure text selection is properly layered */
+  .monaco-editor-background,
+  .inputarea,
+  .margin,
+  .margin-view-overlays {
+    position: relative;
+  }
+}
+
+/* Fix any potential overlay issues */
+.json-viewer :deep(.monaco-scrollable-element) {
+  position: relative;
+}
+
+.json-viewer :deep(.overflow-guard) {
+  position: relative;
 }
 </style> 
