@@ -999,19 +999,14 @@ func (m *APIMapper) handleCreateRuleWithValidation(args map[string]interface{}) 
 
 	// Step 5: Deployment guidance
 	resultBuilder.WriteString("\n=== 🚀 DEPLOYMENT GUIDANCE ===\n")
-	resultBuilder.WriteString("⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!\n")
+	resultBuilder.WriteString("⚠️  Rule created in TEMPORARY file - NOT ACTIVE\n")
 	resultBuilder.WriteString("\n")
-	resultBuilder.WriteString("📋 Next Steps Required:\n")
-	resultBuilder.WriteString("1. 🔍 Check what's pending: Use 'get_pending_changes' to see all changes awaiting deployment\n")
-	resultBuilder.WriteString("2. ✅ Apply changes: Use 'apply_changes' to deploy your rule to production\n")
-	resultBuilder.WriteString("3. 🧪 Test thoroughly: Use 'test_ruleset' with real data to validate rule behavior\n")
+	resultBuilder.WriteString("📋 Next Steps:\n")
+	resultBuilder.WriteString("1. Review: `get_pending_changes`\n")
+	resultBuilder.WriteString("2. Deploy: `apply_changes`\n")
+	resultBuilder.WriteString("3. Test: `test_ruleset id='" + rulesetId + "' data='<sample_json>'`\n")
 	resultBuilder.WriteString("\n")
-	resultBuilder.WriteString("🎯 Recommended Workflow:\n")
-	resultBuilder.WriteString("   → get_pending_changes  (review what will be deployed)\n")
-	resultBuilder.WriteString("   → apply_changes        (activate your rule)\n")
-	resultBuilder.WriteString("   → test_ruleset         (verify it works correctly)\n")
-	resultBuilder.WriteString("\n")
-	resultBuilder.WriteString("💡 Your rule will remain inactive until you run 'apply_changes'!")
+	resultBuilder.WriteString("💡 Rule inactive until `apply_changes` executed")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: resultBuilder.String()}},
@@ -1200,23 +1195,25 @@ func (m *APIMapper) handleManageComponent(args map[string]interface{}) (common.M
 
 		// Add deployment guidance
 		results = append(results, "\n=== 🚀 DEPLOYMENT GUIDANCE ===")
-		results = append(results, fmt.Sprintf("⚠️  IMPORTANT: Your %s has been created in a TEMPORARY file and is NOT YET ACTIVE!", strings.ToUpper(componentType)))
+		results = append(results, fmt.Sprintf("⚠️  %s created in TEMPORARY file - NOT ACTIVE", strings.ToUpper(componentType)))
 		results = append(results, "")
-		results = append(results, "📋 Next Steps Required:")
-		results = append(results, "1. 🔍 Review changes: Use 'get_pending_changes' to see all components awaiting deployment")
-		results = append(results, "2. ✅ Deploy component: Use 'apply_changes' to activate your component in production")
-		if componentType == "input" || componentType == "output" {
-			results = append(results, "3. 🔗 Test connectivity: Use 'connect_check' to verify connection to external systems")
+		results = append(results, "📋 Next Steps:")
+		if componentType == "ruleset" {
+			results = append(results, "1. 🧪 Test rule: `test_ruleset id='"+componentId+"' data='<real_sample_data>'`")
+			results = append(results, "2. 📖 View syntax: `get_ruleset_syntax_guide`")
+			results = append(results, "3. 📋 Review changes: `get_pending_changes`")
+			results = append(results, "4. ✅ Deploy: `apply_changes`")
+		} else if componentType == "input" || componentType == "output" {
+			results = append(results, "1. 🔗 Test connection: `connect_check type='"+componentType+"' id='"+componentId+"'`")
+			results = append(results, "2. 📋 Review changes: `get_pending_changes`")
+			results = append(results, "3. ✅ Deploy: `apply_changes`")
+		} else if componentType == "plugin" {
+			results = append(results, "1. 🧪 Test plugin: `test_plugin id='"+componentId+"'`")
+			results = append(results, "2. 📋 Review changes: `get_pending_changes`")
+			results = append(results, "3. ✅ Deploy: `apply_changes`")
 		}
-		if componentType == "plugin" {
-			results = append(results, "3. 🧪 Test plugin: Use 'test_plugin' to verify plugin functionality")
-		}
 		results = append(results, "")
-		results = append(results, "🎯 Deployment Workflow:")
-		results = append(results, "   → get_pending_changes  (review what will be deployed)")
-		results = append(results, "   → apply_changes        (activate your component)")
-		results = append(results, "")
-		results = append(results, "💡 Your component will remain inactive until you run 'apply_changes'!")
+		results = append(results, "💡 Component inactive until `apply_changes` executed")
 	}
 
 	return common.MCPToolResult{
@@ -1660,17 +1657,17 @@ func (m *APIMapper) handleGetRulesets(args map[string]interface{}) (common.MCPTo
 
 	// Step 2: Add critical guidance
 	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
-	results = append(results, "📋 **Check Deployment Status:**")
-	results = append(results, "   → Use 'get_pending_changes' to see which rulesets have unpublished changes")
-	results = append(results, "   → Rulesets with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "📋 **Deployment Status:**")
+	results = append(results, "   → `get_pending_changes` - Check unpublished changes")
+	results = append(results, "   → Rulesets with pending changes are NOT ACTIVE")
 	results = append(results, "")
-	results = append(results, "🔗 **Check Project Dependencies:**")
-	results = append(results, "   → Use 'get_component_usage' with type='ruleset' and id='<ruleset_name>'")
-	results = append(results, "   → This shows which projects depend on each ruleset")
+	results = append(results, "🔗 **Dependencies:**")
+	results = append(results, "   → `get_component_usage type='ruleset' id='<name>'`")
+	results = append(results, "   → Shows project dependencies")
 	results = append(results, "")
-	results = append(results, "🚀 **If you see pending changes:**")
-	results = append(results, "   → Review them with 'get_pending_changes'")
-	results = append(results, "   → Deploy them with 'apply_changes' to make them active")
+	results = append(results, "🚀 **Deploy:**")
+	results = append(results, "   → `get_pending_changes` - Review")
+	results = append(results, "   → `apply_changes` - Deploy")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2079,9 +2076,10 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 	results = append(results, "⚠️  IMPORTANT: Your rule has been created in a TEMPORARY file and is NOT YET ACTIVE!")
 	results = append(results, "")
 	results = append(results, "📋 Next Steps Required:")
-	results = append(results, "1. 🔍 Check what's pending: Use 'get_pending_changes'")
-	results = append(results, "2. ✅ Apply changes: Use 'apply_changes' to deploy your rule")
-	results = append(results, "3. 🧪 Test thoroughly: Use 'test_ruleset' with real data")
+	results = append(results, "1. 🧪 Test rule: `test_ruleset id='"+rulesetId+"' data='<real_sample_data>'`")
+	results = append(results, "2. 📖 View syntax: `get_ruleset_syntax_guide`")
+	results = append(results, "3. 📋 Review changes: `get_pending_changes`")
+	results = append(results, "4. ✅ Deploy: `apply_changes`")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2234,17 +2232,17 @@ func (m *APIMapper) handleGetInputs(args map[string]interface{}) (common.MCPTool
 
 	// Step 2: Add critical guidance
 	results = append(results, "\n=== ⚠️  IMPORTANT NEXT STEPS ===")
-	results = append(results, "📋 **Check Deployment Status:**")
-	results = append(results, "   → Use 'get_pending_changes' to see which inputs have unpublished changes")
-	results = append(results, "   → Inputs with pending changes are NOT ACTIVE until deployed!")
+	results = append(results, "📋 **Deployment Status:**")
+	results = append(results, "   → `get_pending_changes` - Check unpublished changes")
+	results = append(results, "   → Inputs with pending changes are NOT ACTIVE")
 	results = append(results, "")
-	results = append(results, "🔗 **Check Project Dependencies:**")
-	results = append(results, "   → Use 'get_component_usage' with type='input' and id='<input_name>'")
-	results = append(results, "   → This shows which projects depend on each input")
+	results = append(results, "🔗 **Dependencies:**")
+	results = append(results, "   → `get_component_usage type='input' id='<name>'`")
+	results = append(results, "   → Shows project dependencies")
 	results = append(results, "")
-	results = append(results, "⚡ **Common Actions:**")
-	results = append(results, "   → 'connect_check' - Test input connectivity")
-	results = append(results, "   → 'apply_changes' - Deploy pending changes")
+	results = append(results, "⚡ **Actions:**")
+	results = append(results, "   → `connect_check` - Test connectivity")
+	results = append(results, "   → `apply_changes` - Deploy changes")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2325,7 +2323,7 @@ func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCP
 			Message: fmt.Sprintf("Testing %s '%s' failed: %v", componentType, componentId, err),
 			Suggestions: []string{
 				"Component testing failed - troubleshooting steps:",
-				fmt.Sprintf("• Verify the %s exists with 'get_%s id=%s'", componentType, componentType, componentId),
+				fmt.Sprintf("• Verify the %s exists with 'get_%s id=\""+componentId+"\"'", componentType, componentType),
 				"• Check if component is properly deployed with 'get_pending_changes'",
 				"• For rulesets: ensure test data matches the expected input format",
 				"• For inputs: verify connectivity and authentication settings",
@@ -2455,16 +2453,17 @@ func (m *APIMapper) handleApplyChanges(args map[string]interface{}) (common.MCPT
 	results = append(results, "")
 	results = append(results, "📋 **Recommended Next Steps:**")
 	results = append(results, "1. 🧪 **Test your changes:**")
-	results = append(results, "   → Use 'test_ruleset', 'test_project', etc. to validate functionality")
-	results = append(results, "   → Monitor system performance with 'system_overview'")
+	results = append(results, "   → `test_ruleset id='<id>' data='<sample_data>'` - Validate rule logic")
+	results = append(results, "   → `test_project id='<id>'` - Test complete data flow")
+	results = append(results, "   → `system_overview` - Monitor system performance")
 	results = append(results, "")
 	results = append(results, "2. 🔍 **Monitor for issues:**")
-	results = append(results, "   → Check 'get_error_logs' for any deployment-related errors")
-	results = append(results, "   → Use 'get_cluster_status' to ensure system stability")
+	results = append(results, "   → `get_error_logs` - Check for deployment errors")
+	results = append(results, "   → `get_cluster_status` - Ensure system stability")
 	results = append(results, "")
 	results = append(results, "3. 📊 **Verify operation:**")
-	results = append(results, "   → Check that projects are running properly")
-	results = append(results, "   → Verify data flows are working as expected")
+	results = append(results, "   → `get_projects` - Check project status")
+	results = append(results, "   → `get_metrics` - Monitor data flow performance")
 	results = append(results, "")
 	results = append(results, "💡 If issues arise, you can create new changes to fix them and deploy again.")
 
@@ -3195,9 +3194,9 @@ func (m *APIMapper) handleProjectWizard(args map[string]interface{}) (common.MCP
 		results = append(results, fmt.Sprintf("You can now start the project with: `project_control action='start' project_id='%s'`", projectID))
 	} else {
 		results = append(results, "\n💡 **Next Steps:**")
-		results = append(results, "1. Review the generated configurations above")
-		results = append(results, "2. Set `auto_create='true'` to automatically create all components")
-		results = append(results, "3. Or manually create each component using the configurations provided")
+		results = append(results, "1. 📋 Review configurations above")
+		results = append(results, "2. 🚀 Auto-create: Set `auto_create='true'` to create all components")
+		results = append(results, "3. 🔧 Manual create: `component_wizard component_type='<type>' component_id='<id>'`")
 	}
 
 	return common.MCPToolResult{
@@ -5045,9 +5044,10 @@ func (m *APIMapper) handleCreateRuleComplete(args map[string]interface{}) (commo
 		}
 	} else {
 		results = append(results, "\n💡 **Next Steps:**")
-		results = append(results, "- Review the rule above")
-		results = append(results, "- Test with: `test_ruleset id='"+rulesetID+"' data='<test_data>'`")
-		results = append(results, "- Deploy with: `apply_changes`")
+		results = append(results, "1. 🧪 Test rule: `test_ruleset id='"+rulesetID+"' data='<real_sample_data>'`")
+		results = append(results, "2. 📖 View syntax: `get_ruleset_syntax_guide`")
+		results = append(results, "3. 📋 Review changes: `get_pending_changes`")
+		results = append(results, "4. ✅ Deploy: `apply_changes`")
 	}
 
 	return common.MCPToolResult{
@@ -5311,9 +5311,10 @@ func (m *APIMapper) handleComponentWizard(args map[string]interface{}) (common.M
 		}
 	} else {
 		results = append(results, "\n💡 **Next Steps:**")
-		results = append(results, "- Review the configuration above")
-		results = append(results, "- Test the component thoroughly")
-		results = append(results, "- Deploy with: `apply_changes`")
+		results = append(results, "1. 📋 Review configuration above")
+		results = append(results, "2. 🧪 Test component: `test_lab test_target='"+componentType+"' component_id='"+componentID+"'`")
+		results = append(results, "3. 📋 Review changes: `get_pending_changes`")
+		results = append(results, "4. ✅ Deploy: `apply_changes`")
 	}
 
 	return common.MCPToolResult{
@@ -5438,20 +5439,20 @@ func (m *APIMapper) handleSystemOverview(args map[string]interface{}) (common.MC
 
 	// Step 6: Quick actions
 	results = append(results, "\n## ⚡ Quick Actions")
-	results = append(results, "🔧 **System Management:**")
-	results = append(results, "  - `apply_changes` - Deploy pending changes")
-	results = append(results, "  - `project_control action='start_all'` - Start all projects")
-	results = append(results, "  - `get_error_logs` - Check for issues")
+	results = append(results, "🔧 **System:**")
+	results = append(results, "  - `apply_changes` - Deploy changes")
+	results = append(results, "  - `project_control action='start_all'` - Start projects")
+	results = append(results, "  - `get_error_logs` - Check errors")
 
 	results = append(results, "\n🛠️ **Development:**")
-	results = append(results, "  - `project_wizard` - Create new detection project")
-	results = append(results, "  - `rule_ai_generator` - Generate intelligent rules")
+	results = append(results, "  - `project_wizard` - Create project")
+	results = append(results, "  - `rule_ai_generator` - Generate rules")
 	results = append(results, "  - `test_lab` - Test components")
 
 	results = append(results, "\n📊 **Monitoring:**")
-	results = append(results, "  - `get_metrics` - System performance")
+	results = append(results, "  - `get_metrics` - Performance")
 	results = append(results, "  - `get_cluster_status` - Cluster health")
-	results = append(results, "  - `system_overview include_metrics='true'` - Detailed dashboard")
+	results = append(results, "  - `system_overview` - Dashboard")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -5557,14 +5558,14 @@ func (m *APIMapper) handleExploreComponents(args map[string]interface{}) (common
 
 	// Step 7: Smart suggestions
 	results = append(results, "\n## 💡 Next Steps")
-	results = append(results, "🔧 **Component Actions:**")
-	results = append(results, "  - View details: `get_<type> id='<component_id>'`")
-	results = append(results, "  - Create new: `component_wizard component_type='<type>' component_id='<id>'`")
-	results = append(results, "  - Batch operations: `batch_operation_manager`")
+	results = append(results, "🔧 **Actions:**")
+	results = append(results, "  - 📖 View: `get_<type> id='<id>'`")
+	results = append(results, "  - 🔧 Create: `component_wizard component_type='<type>' component_id='<id>'`")
+	results = append(results, "  - Batch: `batch_operation_manager`")
 
-	results = append(results, "\n🧪 **Testing & Validation:**")
-	results = append(results, "  - Test component: `test_lab test_target='component' component_id='<id>'`")
-	results = append(results, "  - Test ruleset: `test_ruleset id='<ruleset_id>' data='<json_data>'`")
+	results = append(results, "\n🧪 **Testing:**")
+	results = append(results, "  - Component: `test_lab test_target='component' component_id='<id>'`")
+	results = append(results, "  - Ruleset: `test_ruleset id='<id>' data='<json_data>'`")
 
 	if includeDetails {
 		results = append(results, "\n📋 **Detailed View:** Use specific component viewers for full configuration details")
