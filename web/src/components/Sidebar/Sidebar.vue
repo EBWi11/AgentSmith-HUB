@@ -1733,8 +1733,6 @@ const REFRESH_INTERVALS = {
 // Settings menu badges - computed from dataCache
 const settingsBadges = computed(() => dataCache.settingsBadges.data)
 
-// Use smart refresh system instead of manual intervals
-
 // Project status refresh functions
 function setupProjectStatusRefresh() {
   // This function is no longer needed with the unified cache system
@@ -1883,15 +1881,12 @@ onMounted(async () => {
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
-  // 初始化设置菜单标识
+  // Initialize settings menu badges
   await dataCache.fetchSettingsBadges()
   
   // Add click event listener to close menus when clicking outside
   document.addEventListener('click', handleOutsideClick)
   
-  // Removed redundant event listeners - DataCache handles unified event management
-  
-  // 自动保存UI状态（当状态发生变化时）
   watch(collapsed, (newCollapsed) => {
     dataCache.saveSidebarState(newCollapsed, search.value)
   }, { deep: true })
@@ -1900,7 +1895,6 @@ onMounted(async () => {
     dataCache.saveSidebarState(collapsed, newSearch)
   })
   
-  // 尝试恢复之前的UI状态
   const restoredState = dataCache.restoreSidebarState()
   if (restoredState) {
     Object.assign(collapsed, restoredState.collapsed)
@@ -1934,8 +1928,8 @@ onMounted(async () => {
   window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
   window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
   
-  // 设置定时刷新设置菜单标识（每5分钟刷新一次）
-  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 60 * 1000)
+  // Set periodic refresh for settings menu badges (every 6 seconds)
+  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 6 * 1000)
   window._settingsBadgeInterval = settingsBadgeInterval
   
   // Store event handler for cleanup
@@ -2015,7 +2009,7 @@ async function toggleCollapse(type) {
     const section = sections[type]
     if (section && !section.children) {
       if (type === 'projects') {
-        // 对于projects，先使用惰性刷新，如果列表为空则进行完整刷新
+        // For projects, use lazy refresh first, if list is empty then do a full refresh
         await refreshProjectStatus()
       } else {
         await fetchItems(type)
@@ -2669,7 +2663,7 @@ function getArgumentTypeHint() {
   
   const refreshSidebar = async () => {
     try {
-      // 刷新展开的组件类型（包含项目状态）
+      // Refresh expanded component types (including project status)
       const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
       const promises = []
       
@@ -2683,7 +2677,7 @@ function getArgumentTypeHint() {
         }
       })
       
-      // 并行执行组件刷新和集群数据更新
+      // Execute component refresh and cluster data update in parallel
       await Promise.all([
         ...promises,
         loadClusterConsistencyData(),
@@ -2747,12 +2741,12 @@ function handleItemDoubleClick(type, item) {
   emit('open-editor', { type, id, isEdit: true });
 }
 
-// 发送全局项目操作事件
+// Send global project operation event
 function emitSidebarProjectOperation(operationType, projectId) {
   const timestamp = Date.now()
   lastSidebarOperation.value = timestamp
   
-  // 发送全局事件通知其他组件
+  // Send global project operation event
   window.dispatchEvent(new CustomEvent('projectOperation', {
     detail: {
       projectId,
@@ -3115,8 +3109,6 @@ function handleOutsideClick(event) {
   // Close all menus
   closeAllMenus()
 }
-
-// 这些函数现在从 utils/common.js 导入
 
 // Show tooltip
 function showTooltip(event, text) {
@@ -3503,10 +3495,6 @@ async function handlePendingChangesApplied(event) {
     return
   }
   
-      // console.log('Pending changes applied, refreshing affected types:', types)
-  
-  // 移除立即刷新，依赖dataCache的事件处理
-  // 只在500ms后进行一次全量刷新以确保最终一致性
   debouncedFullRefresh()
 }
 
@@ -3518,27 +3506,23 @@ async function handleLocalChangesLoaded(event) {
     return
   }
   
-      // console.log('Local changes loaded, refreshing affected types:', types)
-  
-  // 移除立即刷新，依赖dataCache的事件处理
-  // 只在500ms后进行一次全量刷新以确保最终一致性
   debouncedFullRefresh()
 }
 
-// 防抖的全量刷新函数
+// Debounced full refresh function
 const debouncedFullRefresh = debounce(async () => {
   try {
-    // 全量刷新所有组件列表
+    // Refresh all component lists
     await fetchAllItems()
     
-    // 刷新项目状态和集群数据
+    // Refresh project status and cluster data
     await refreshProjectStatus()
     await loadClusterConsistencyData()
     if (showClusterStatusModal.value) {
       await loadClusterProjectStates()
     }
     
-    // 刷新设置菜单标识
+    // Refresh settings menu badges
     await dataCache.fetchSettingsBadges()
   } catch (error) {
     console.error('Failed to refresh after changes:', error)
@@ -3546,10 +3530,8 @@ const debouncedFullRefresh = debounce(async () => {
 }, 500)
 
 
-
-// 优化项目状态刷新，避免与轮询冲突
 async function refreshProjectStatus() {
-  // 如果正在轮询中，跳过此次刷新
+  // Skip refresh if polling is in progress
   if (isPollingProject.value) {
     return
   }
