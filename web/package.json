@@ -34,6 +34,7 @@
     "markdown-it": "^14.1.0",
     "monaco-editor": "^0.52.2",
     "pinia": "^3.0.3",
+    "prismjs": "^1.30.0",
     "vue": "^3.3.0",
     "vue-router": "^4.0.0",
     "vuex": "^4.1.0"

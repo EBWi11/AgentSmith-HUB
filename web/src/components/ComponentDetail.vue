@@ -1126,8 +1126,8 @@ async function saveEdit(content) {
     onSuccess: (item) => {
       // Test cache is now cleared automatically when component cache is updated
       
-      // Emit to parent component
-      emit('updated', item)
+      // Emit to parent component with exitToViewMode flag
+      emit('updated', { ...item, exitToViewMode: true })
       
       // Also trigger global event for immediate cache refresh
       window.dispatchEvent(new CustomEvent('componentChanged', {
@@ -1158,7 +1158,18 @@ async function saveEdit(content) {
 async function saveNew(content) {
   // If called directly from MonacoEditor's @save event, content will have a value
   // If called from button click, content will be undefined
-  const contentToSave = content !== undefined ? content : editorValue.value
+  let contentToSave = content !== undefined ? content : editorValue.value
+  
+  console.log('saveNew: Initial values', {
+    content: content,
+    contentLength: content?.length,
+    editorValue: editorValue.value,
+    editorValueLength: editorValue.value?.length,
+    contentToSave: contentToSave,
+    contentToSaveLength: contentToSave?.length,
+    contentToSaveTrimmed: contentToSave?.trim(),
+    contentToSaveTrimmedLength: contentToSave?.trim()?.length
+  })
   
   // Preserve the current item reference
   const currentItem = props.item
@@ -1168,15 +1179,47 @@ async function saveNew(content) {
     return
   }
   
+  // Special handling for new components: if content is empty or only contains template,
+  // use the default template from backend
+  if (!contentToSave || contentToSave.trim() === '') {
+    // Get the default template for this component type
+    contentToSave = getTemplateForComponent(currentItem.type, currentItem.id)
+    console.log(`Using default template for new ${currentItem.type} component:`, {
+      template: contentToSave,
+      templateLength: contentToSave?.length,
+      templateType: typeof contentToSave,
+      isNull: contentToSave === null,
+      isUndefined: contentToSave === undefined
+    })
+  }
+  
+  // Ensure we have valid content before saving
+  if (!contentToSave || contentToSave.trim() === '') {
+    console.error('saveNew: No valid content to save', { contentToSave, editorValue: editorValue.value })
+    saveError.value = 'Component content cannot be empty'
+    return
+  }
+  
+
+  
   // Use the new composable for save operation
-  await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
+  console.log('saveNew: About to call saveNewComponent', {
+    type: currentItem.type,
+    id: currentItem.id,
+    contentLength: contentToSave.length
+  })
+  
+  const success = await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
     validateBeforeSave,
     verifyAfterSave,
+    // Don't fetch detail for new components since they're in temporary state
+    fetchDetail: null,
     onSuccess: (item) => {
+      console.log('saveNew: Component created successfully', item)
       // Test cache is now cleared automatically when component cache is updated
       
-      // Emit to parent component
-      emit('created', item)
+      // Emit to parent component with exitToViewMode flag
+      emit('created', { ...item, exitToViewMode: true })
       
       // Also trigger global event for immediate cache refresh
       window.dispatchEvent(new CustomEvent('componentChanged', {
@@ -1184,6 +1227,8 @@ async function saveNew(content) {
       }))
     }
   })
+  
+  console.log('saveNew: saveNewComponent result', { success })
 }
 
 function cancelEdit() {
@@ -1219,7 +1264,20 @@ function getTemplateForComponent(type, id) {
     ...store,
     $dataCache: dataCache
   };
-  return getDefaultTemplate(type, id, storeWithDataCache);
+  
+  console.log('getTemplateForComponent: Called with', { type, id, store: !!store, dataCache: !!dataCache })
+  
+  const template = getDefaultTemplate(type, id, storeWithDataCache);
+  
+  console.log('getTemplateForComponent: Generated template', {
+    template: template,
+    templateLength: template?.length,
+    templateType: typeof template,
+    isNull: template === null,
+    isUndefined: template === undefined
+  })
+  
+  return template;
 }
 
 // 发送全局项目操作事件

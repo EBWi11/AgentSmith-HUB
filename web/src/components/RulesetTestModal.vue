@@ -55,21 +55,18 @@
               </p>
             </div>
             
-            <div v-else>
-              <div v-for="(result, index) in testResults" :key="index" class="p-3">
-                <div class="bg-white border border-gray-200 rounded-md">
-                  <div class="px-3 py-2 border-b border-gray-100 flex justify-between items-center">
-                    <span class="text-sm font-medium text-gray-700">
-                      Result {{ index + 1 }}
-                    </span>
-                    <span v-if="result._HUB_HIT_RULE_ID" class="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">
-                      Rule: {{ result._HUB_HIT_RULE_ID }}
-                    </span>
+            <div v-else class="space-y-4">
+              <div v-for="(result, index) in testResults" :key="index" class="bg-gray-50 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center space-x-2">
+                    <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span class="text-sm font-medium text-gray-900">Result {{ index + 1 }}</span>
                   </div>
-                  <div class="p-3">
-                    <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap break-all">{{ formatJson(result) }}</pre>
-                  </div>
+                  <span v-if="result._HUB_HIT_RULE_ID" class="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-md border border-blue-200">
+                    {{ result._HUB_HIT_RULE_ID }}
+                  </span>
                 </div>
+                <JsonViewer :value="result" height="auto" />
               </div>
             </div>
           </div>
@@ -272,14 +269,7 @@ function onInputDataChange(newValue) {
   }
 }
 
-// Format JSON for display
-function formatJson(obj) {
-  try {
-    return JSON.stringify(obj, null, 2);
-  } catch (e) {
-    return String(obj);
-  }
-}
+
 
 // Load test data for the current ruleset
 async function loadTestData() {

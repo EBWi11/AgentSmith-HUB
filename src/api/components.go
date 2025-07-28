@@ -1109,8 +1109,8 @@ func createComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
 	}
 
-	// Only use default templates if no raw content is provided
-	if request.Raw == "" {
+	// Only use default templates if no raw content is provided or content is effectively empty
+	if request.Raw == "" || strings.TrimSpace(request.Raw) == "" {
 		switch componentType {
 		case "plugin":
 			request.Raw = NewPluginData
@@ -1411,25 +1411,6 @@ func updateComponent(componentType string, c echo.Context) error {
 	originalContentTrimmed := strings.TrimSpace(originalContent)
 
 	if newContent == originalContentTrimmed {
-		// Content is identical, no need to create temporary file
-		// If temporary file exists, delete it
-		tempPath, tempExists := GetComponentPath(componentType, id, true)
-		if tempExists {
-			_ = os.Remove(tempPath)
-			// Also remove from memory using safe accessors
-			switch componentType {
-			case "input":
-				project.DeleteInputNew(id)
-			case "output":
-				project.DeleteOutputNew(id)
-			case "ruleset":
-				project.DeleteRulesetNew(id)
-			case "project":
-				project.DeleteProjectNew(id)
-			case "plugin":
-				plugin.DeletePluginNew(id)
-			}
-		}
 		return c.JSON(http.StatusOK, map[string]string{"message": "content identical to original file, no changes needed"})
 	}
 
@@ -1472,11 +1453,11 @@ func updateComponent(componentType string, c echo.Context) error {
 			"2": "deploy with 'apply_changes'",
 			"3": fmt.Sprintf("test updated %s functionality", componentType),
 		},
-		"important_note": fmt.Sprintf("⚠️ %s update is in temporary file, not yet active", componentType),
+		"important_note": fmt.Sprintf("⚠️ %s is in temporary file, not yet active", componentType),
 		"helpful_commands": []string{
 			"get_pending_changes - View all changes waiting for deployment",
 			"apply_changes - Deploy all pending changes to production",
-			fmt.Sprintf("verify_component - Validate updated %s configuration", componentType),
+			fmt.Sprintf("verify_component - Validate %s configuration", componentType),
 		},
 		"deployment_required": true,
 	})

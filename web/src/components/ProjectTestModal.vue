@@ -86,9 +86,14 @@
                   No messages received yet. Output components send data to external systems in test mode.
                 </div>
                 
-                <div v-else class="space-y-3">
-                  <div v-for="(result, index) in results" :key="index" class="bg-gray-50 rounded p-3">
-                    <div v-if="results.length > 1" class="text-xs text-gray-500 mb-2">Message {{ index + 1 }}</div>
+                <div v-else class="space-y-4">
+                  <div v-for="(result, index) in results" :key="index" class="bg-gray-50 rounded-lg p-4">
+                    <div class="flex items-center space-x-2 mb-3">
+                      <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span class="text-sm font-medium text-gray-900">
+                        {{ results.length > 1 ? `Message ${index + 1}` : 'Result' }}
+                      </span>
+                    </div>
                     <JsonViewer :value="cleanResult(result)" height="auto" />
                   </div>
                 </div>

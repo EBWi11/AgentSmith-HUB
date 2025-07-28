@@ -261,13 +261,25 @@ function handleCancelEdit(item) {
 }
 
 function handleUpdated(item) {
-  // Keep edit mode, don't switch to view mode
-  selected.value = {
-    type: item.type,
-    id: item.id,
-    isEdit: true,
-    // Add timestamp to trigger data refresh
-    _timestamp: Date.now()
+  // Check if we should exit to view mode after save
+  if (item.exitToViewMode) {
+    // Exit to view mode
+    selected.value = {
+      type: item.type,
+      id: item.id,
+      isEdit: false,
+      // Add timestamp to trigger data refresh
+      _timestamp: Date.now()
+    }
+  } else {
+    // Keep edit mode, don't switch to view mode
+    selected.value = {
+      type: item.type,
+      id: item.id,
+      isEdit: true,
+      // Add timestamp to trigger data refresh
+      _timestamp: Date.now()
+    }
   }
   
   // Refresh sidebar list
@@ -276,13 +288,25 @@ function handleUpdated(item) {
 
 // Handle component creation completed event
 function handleCreated(item) {
-  // Keep edit mode for newly created components
-  selected.value = {
-    type: item.type,
-    id: item.id,
-    isEdit: true,
-    // Add timestamp to trigger data refresh
-    _timestamp: Date.now()
+  // Check if we should exit to view mode after save
+  if (item.exitToViewMode) {
+    // Exit to view mode
+    selected.value = {
+      type: item.type,
+      id: item.id,
+      isEdit: false,
+      // Add timestamp to trigger data refresh
+      _timestamp: Date.now()
+    }
+  } else {
+    // Keep edit mode for newly created components
+    selected.value = {
+      type: item.type,
+      id: item.id,
+      isEdit: true,
+      // Add timestamp to trigger data refresh
+      _timestamp: Date.now()
+    }
   }
   
   // Refresh sidebar list

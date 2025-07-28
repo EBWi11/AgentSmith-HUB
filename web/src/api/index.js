@@ -226,7 +226,16 @@ export const hubApi = {
   },
 
   async createRuleset(id, raw) {
+    console.log('hubApi.createRuleset: Making API call', { 
+      id, 
+      rawLength: raw?.length, 
+      rawType: typeof raw,
+      rawIsNull: raw === null,
+      rawIsUndefined: raw === undefined,
+      rawPreview: raw?.substring(0, 100) + '...'
+    })
     const response = await api.post('/rulesets', { id, raw });
+    console.log('hubApi.createRuleset: API response', { status: response.status, data: response.data })
     return response.data;
   },
 

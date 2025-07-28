@@ -935,8 +935,11 @@
             </div>
             
             <div v-if="testPluginResult.result !== null && testPluginResult.result !== undefined">
-              <div class="text-sm font-medium text-gray-700 mb-2">Result:</div>
-              <div class="bg-white border border-gray-200 rounded overflow-hidden">
+              <div class="bg-gray-50 rounded-lg p-4">
+                <div class="flex items-center space-x-2 mb-3">
+                  <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <span class="text-sm font-medium text-gray-900">Result</span>
+                </div>
                 <JsonViewer :value="testPluginResult.result" height="auto" />
               </div>
             </div>
@@ -1168,32 +1171,32 @@
           <div v-else-if="!sampleData || Object.keys(sampleData).length === 0" class="text-center text-gray-500 py-8">
             No sample data available
           </div>
-          <div v-else class="space-y-6">
-            <!-- Grouped by ProjectNodeSequence -->
-            <div v-for="(samples, projectNodeSequence) in sampleData" :key="projectNodeSequence" class="border border-gray-200 rounded-lg p-4">
-              <div class="mb-3 flex items-center justify-between">
+          <div v-else>
+            <!-- Simplified structure with less nesting -->
+            <div v-for="(samples, projectNodeSequence) in sampleData" :key="projectNodeSequence" class="mb-6">
+              <div class="mb-2 flex items-center justify-between">
                 <h4 class="text-sm font-medium text-gray-700">Project Node Sequence: {{ projectNodeSequence }}</h4>
                 <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{{ samples.length }} samples</span>
               </div>
-              <div class="space-y-3">
-                <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="bg-gray-50 rounded p-3">
-                  <div class="text-xs text-gray-500 mb-2 flex justify-between">
-                    <span>Sample {{ index + 1 }}</span>
-                    <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString('en-US', {
-                      year: 'numeric',
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                      hour12: false
-                    }) }}</span>
-                  </div>
-                  <JsonViewer :value="sample.data || sample" height="auto" />
+              
+              <div v-for="(sample, index) in samples.slice(0, 5)" :key="index" class="mb-3">
+                <div class="text-xs text-gray-500 mb-1 flex justify-between">
+                  <span>Sample {{ index + 1 }}</span>
+                  <span v-if="sample.timestamp">{{ new Date(sample.timestamp).toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  }) }}</span>
                 </div>
-                <div v-if="samples.length > 5" class="text-center">
-                  <span class="text-xs text-gray-500">... and {{ samples.length - 5 }} more samples</span>
-                </div>
+                <JsonViewer :value="sample.data || sample" height="auto" />
+              </div>
+              
+              <div v-if="samples.length > 5" class="text-center text-xs text-gray-500 mb-4">
+                ... and {{ samples.length - 5 }} more samples
               </div>
             </div>
           </div>

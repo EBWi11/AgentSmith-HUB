@@ -29,11 +29,18 @@ export function useComponentSave() {
       validateBeforeSave,
       verifyAfterSave,
       onSuccess,
-      fetchDetail
+      fetchDetail,
+      exitToViewMode = true // New option to control whether to exit to view mode
     } = options
     
     if (!componentType || !componentId) {
       saveError.value = 'Invalid component information'
+      return false
+    }
+    
+    // Special handling for new components: ensure content is not empty
+    if (isNewComponent && (!content || content.trim() === '')) {
+      saveError.value = 'Component content cannot be empty'
       return false
     }
     
@@ -56,13 +63,15 @@ export function useComponentSave() {
       // Perform the save operation
       let response
       if (isNewComponent) {
+        console.log('useComponentSave: Calling hubApi.saveNew', { componentType, componentId, contentLength: content.length })
         response = await hubApi.saveNew(componentType, componentId, content)
+        console.log('useComponentSave: hubApi.saveNew response', response)
       } else {
         response = await hubApi.saveEdit(componentType, componentId, content)
       }
       
-      // Add a small delay to ensure backend has processed the save
-      await new Promise(resolve => setTimeout(resolve, 200))
+      // Add a delay to ensure backend has processed the save and we can read the saved value
+      await new Promise(resolve => setTimeout(resolve, 500))
       
       // Handle post-save operations
       if (fetchDetail) {
@@ -70,6 +79,8 @@ export function useComponentSave() {
         if (!isNewComponent) {
           await fetchDetail({ type: componentType, id: componentId }, true)
         }
+        // For new components, we don't need to fetch detail since the component
+        // is still in temporary state and will be available after deployment
       }
       
       // Post-save verification with messages
@@ -88,7 +99,7 @@ export function useComponentSave() {
       if (onSuccess) {
         // Use setTimeout to avoid re-render issues
         setTimeout(() => {
-          onSuccess({ type: componentType, id: componentId })
+          onSuccess({ type: componentType, id: componentId, exitToViewMode })
           // Clear the prevent refetch flag after a delay  
           setTimeout(() => {
             preventRefetch.value = false
