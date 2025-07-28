@@ -261,12 +261,12 @@ function handleCancelEdit(item) {
 }
 
 function handleUpdated(item) {
-  // 直接更新状态，不要先设置为null
+  // Keep edit mode, don't switch to view mode
   selected.value = {
     type: item.type,
     id: item.id,
-    isEdit: false,
-    // 添加时间戳触发重新获取数据
+    isEdit: true,
+    // Add timestamp to trigger data refresh
     _timestamp: Date.now()
   }
   
@@ -276,12 +276,12 @@ function handleUpdated(item) {
 
 // Handle component creation completed event
 function handleCreated(item) {
-  // 直接更新状态，不要先设置为null
+  // Keep edit mode for newly created components
   selected.value = {
     type: item.type,
     id: item.id,
-    isEdit: false,
-    // 添加时间戳触发重新获取数据
+    isEdit: true,
+    // Add timestamp to trigger data refresh
     _timestamp: Date.now()
   }
   
