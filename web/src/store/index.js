@@ -39,7 +39,7 @@ const store = createStore({
     ],
     rootTypes: [
       { value: 'DETECTION', detail: 'Detection rule type' },
-      { value: 'WHITELIST', detail: 'Whitelist rule type' }
+      		{ value: 'EXCLUDE', detail: 'Exclude rule type' }
     ],
     commonFields: [
       { value: 'data', detail: 'Data field' },

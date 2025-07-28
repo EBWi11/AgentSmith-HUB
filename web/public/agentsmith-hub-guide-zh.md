@@ -19,7 +19,7 @@ INPUT 定义了数据输入源，支持多种数据源类型。
 
 #### 支持的数据源类型
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
@@ -43,7 +43,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### 阿里云SLS 
+##### 阿里云SLS
 ```yaml
 type: aliyun_sls
 aliyun_sls:
@@ -59,7 +59,7 @@ aliyun_sls:
   query: "* | where attack_type_name != 'null'"  # 可选的查询过滤条件
 ```
 
-##### Kafka Azure 
+##### Kafka Azure
 ```yaml
 type: kafka_azure
 kafka:
@@ -76,7 +76,7 @@ kafka:
     enable: true
 ```
 
-##### Kafka AWS 
+##### Kafka AWS
 ```yaml
 type: kafka_aws
 kafka:
@@ -103,7 +103,7 @@ OUTPUT 定义了数据处理结果的输出目标。
 type: print
 ```
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
@@ -127,7 +127,7 @@ kafka:
     key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch 
+##### Elasticsearch
 ```yaml
 type: elasticsearch
 elasticsearch:
@@ -173,8 +173,8 @@ content: |
 ```yaml
 content: |
   # 主数据流
-  INPUT.kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
+  INPUT.kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
   RULESET.threat_detection -> RULESET.compliance_check
   RULESET.compliance_check -> OUTPUT.elasticsearch
   
@@ -207,8 +207,8 @@ content: |
   # 网络安全监控项目
   # 数据从Kafka流入，经过多层规则处理，最终输出到不同目标
   
-  INPUT.security_kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
+  INPUT.security_kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
   RULESET.threat_detection -> RULESET.behavior_analysis
   RULESET.behavior_analysis -> OUTPUT.security_es
   
@@ -226,10 +226,10 @@ content: |
 假设我们有这样的数据流入：
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999
 }
 ```
 
@@ -338,7 +338,7 @@ content: |
 - 这种设计提高了性能：尽早失败，避免不必要的检查
 
 在上面的例子中，三个检查条件必须**全部满足**：
-1. username 等于 "admin" 
+1. username 等于 "admin"
 2. login_time 大于 22（晚上10点后）
 3. failed_attempts 大于 3
 
@@ -882,11 +882,11 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
     <!-- 使用checklist组合多个条件 -->
-    <checklist condition="(private_ip or suspicious_country) and not whitelisted">
-        <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
-        <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
-        <check id="whitelisted" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
-    </checklist>
+    <checklist condition="(private_ip or suspicious_country) and not excluded">
+  <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
+  <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
+  <check id="excluded" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
+</checklist>
     
     <!-- 数据富化 -->
     <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
@@ -1140,32 +1140,32 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 5.4 白名单规则集
+### 5.4 排除规则集
 
-白名单用于过滤掉不需要处理的数据（ruleset type 为 WHITELIST）。白名单的特殊行为：
-- 当白名单规则匹配时，数据被"不允许通过"（即被过滤掉，不再继续处理，数据将被丢弃）
-- 当所有白名单规则都不匹配时，数据继续传递给后续处理
+排除用于过滤掉不需要处理的数据（ruleset type 为 EXCLUDE）。排除的特殊行为：
+- 当排除规则匹配时，数据被"不允许通过"（即被过滤掉，不再继续处理，数据将被丢弃）
+- 当所有排除规则都不匹配时，数据继续传递给后续处理
 
 ```xml
-<root type="WHITELIST" name="security_whitelist" author="security_team">
-    <!-- 白名单规则1：信任的IP -->
+<root type="EXCLUDE" name="security_exclude" author="security_team">
+    <!-- 排除规则1：信任的IP -->
     <rule id="trusted_ips">
         <check type="INCL" field="source_ip" logic="OR" delimiter="|">
             10.0.0.1|10.0.0.2|10.0.0.3
         </check>
-        <append field="whitelisted">true</append>
+        <append field="excluded">true</append>
     </rule>
     
-    <!-- 白名单规则2：已知的良性进程 -->
+    <!-- 排除规则2：已知的良性进程 -->
     <rule id="benign_processes">
         <check type="INCL" field="process_name" logic="OR" delimiter="|">
             chrome.exe|firefox.exe|explorer.exe
         </check>
-        <!-- 可以添加多个检查条件，全部满足才会被白名单过滤 -->
+        <!-- 可以添加多个检查条件，全部满足才会被排除过滤 -->
         <check type="PLUGIN">isPrivateIP(source_ip)</check>
-</rule>
+    </rule>
     
-    <!-- 白名单规则3：内部测试流量 -->
+    <!-- 排除规则3：内部测试流量 -->
     <rule id="test_traffic">
         <check type="INCL" field="user_agent">internal-testing-bot</check>
         <check type="PLUGIN">cidrMatch(source_ip, "192.168.100.0/24")</check>
@@ -1438,14 +1438,14 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 
 #### 根元素 `<root>`
 ```xml
-<root type="DETECTION|WHITELIST" name="规则集名称" author="作者">
+<root type="DETECTION|EXCLUDE" name="规则集名称" author="作者">
     <!-- 规则列表 -->
 </root>
 ```
 
 | 属性 | 必需 | 说明                                           | 默认值 |
 |------|------|----------------------------------------------|--------|
-| type | 否 | 规则集类型，DETECTION 类型为命中向后传递，WHITELIST 为命中不向后传递 | DETECTION |
+| type | 否 | 规则集类型，DETECTION 类型为命中向后传递，EXCLUDE 为命中不向后传递 | DETECTION |
 | name | 否 | 规则集名称                                        | - |
 | author | 否 | 作者信息                                         | - |
 

@@ -418,11 +418,11 @@ func findThresholdElementLine(xmlContent, ruleID string, ruleIndex int) int {
 // validateRulesetStructure performs detailed validation of ruleset structure
 func validateRulesetStructure(ruleset *Ruleset, xmlContent string, result *ValidationResult) {
 	// Validate root element type
-	if ruleset.Type != "" && ruleset.Type != "DETECTION" && ruleset.Type != "WHITELIST" {
+	if ruleset.Type != "" && ruleset.Type != "DETECTION" && ruleset.Type != "EXCLUDE" {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    getLineNumber(xmlContent, "<root", 0),
-			Message: "Root type must be 'DETECTION' or 'WHITELIST'",
+			Message: "Root type must be 'DETECTION' or 'EXCLUDE'",
 		})
 	}
 
@@ -1797,10 +1797,10 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 	if strings.TrimSpace(ruleset.Type) == "" || strings.TrimSpace(ruleset.Type) == "DETECTION" {
 		ruleset.IsDetection = true
-	} else if strings.TrimSpace(ruleset.Type) == "WHITELIST" {
+	} else if strings.TrimSpace(ruleset.Type) == "EXCLUDE" {
 		ruleset.IsDetection = false
 	} else {
-		return errors.New("resource type only support whitelist or detection")
+		return errors.New("resource type only support exclude or detection")
 	}
 
 	for i := range ruleset.Rules {

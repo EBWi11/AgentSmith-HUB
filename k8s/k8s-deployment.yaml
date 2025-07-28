@@ -166,6 +166,8 @@ spec:
           value: "/opt/config"
         - name: AGENTSMITH_TOKEN
           value: "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+        - name: SIMD_ENABLED
+          value: "false"  # Set to "true" to enable SIMD optimizations
         volumeMounts:
         - name: config
           mountPath: /opt/config
@@ -282,6 +284,8 @@ spec:
           value: "/opt/config"
         - name: AGENTSMITH_TOKEN
           value: "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+        - name: SIMD_ENABLED
+          value: "false"  # Set to "true" to enable SIMD optimizations
         volumeMounts:
         - name: config
           mountPath: /opt/config

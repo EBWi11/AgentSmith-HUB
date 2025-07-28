@@ -1,4 +1,4 @@
-<root type="detection">
+<root>
     <rule id="reverse_shell_01" name="反弹shell检测">
         <checklist condition="a and (b or c) ">
             <check id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</check>

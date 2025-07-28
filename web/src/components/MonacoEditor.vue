@@ -3015,7 +3015,7 @@ function getXmlAttributeValueCompletions(context, range) {
     } else if (context.currentAttribute === 'type') {
       suggestions.push(
         { label: 'DETECTION', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Detection ruleset type', insertText: 'DETECTION', range: range },
-        { label: 'WHITELIST', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Whitelist ruleset type', insertText: 'WHITELIST', range: range }
+        			{ label: 'EXCLUDE', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Exclude ruleset type', insertText: 'EXCLUDE', range: range }
       );
     }
   }

@@ -393,8 +393,8 @@ func getRulesets(c echo.Context) error {
 				lowerLine := strings.ToLower(line)
 				if strings.Contains(lowerLine, `type="detection"`) || strings.Contains(lowerLine, `type='detection'`) {
 					return "detection"
-				} else if strings.Contains(lowerLine, `type="whitelist"`) || strings.Contains(lowerLine, `type='whitelist'`) {
-					return "whitelist"
+				} else if strings.Contains(lowerLine, `type="exclude"`) || strings.Contains(lowerLine, `type='exclude'`) {
+					return "exclude"
 				}
 			}
 		}
@@ -1164,11 +1164,11 @@ func createComponent(componentType string, c echo.Context) error {
 		"status":       "pending",
 		"file_type":    "temporary",
 		"next_steps": map[string]interface{}{
-			"1": "Review changes: Use 'get_pending_changes' to see all components awaiting deployment",
-			"2": "Deploy component: Use 'apply_changes' to activate the component in production",
-			"3": fmt.Sprintf("Test component: Use appropriate test tools to verify %s functionality", componentType),
+			"1": "review changes with 'get_pending_changes'",
+			"2": "deploy with 'apply_changes'",
+			"3": fmt.Sprintf("test %s functionality", componentType),
 		},
-		"important_note": fmt.Sprintf("⚠️ This %s is currently in a TEMPORARY file and is NOT ACTIVE in production yet. You must apply changes to activate it.", componentType),
+		"important_note": fmt.Sprintf("⚠️ %s is in temporary file, not yet active", componentType),
 		"helpful_commands": []string{
 			"get_pending_changes - View all changes waiting for deployment",
 			"apply_changes - Deploy all pending changes to production",
@@ -1469,11 +1469,11 @@ func updateComponent(componentType string, c echo.Context) error {
 		"file_type":    "temporary",
 		"changes":      "saved to temporary file",
 		"next_steps": map[string]interface{}{
-			"1": "Review changes: Use 'get_pending_changes' to see all modifications awaiting deployment",
-			"2": "Deploy changes: Use 'apply_changes' to activate the updated component in production",
-			"3": fmt.Sprintf("Test changes: Use appropriate test tools to verify updated %s functionality", componentType),
+			"1": "review changes with 'get_pending_changes'",
+			"2": "deploy with 'apply_changes'",
+			"3": fmt.Sprintf("test updated %s functionality", componentType),
 		},
-		"important_note": fmt.Sprintf("⚠️ Your %s update is in a TEMPORARY file and is NOT YET ACTIVE in production. The original version is still running until you apply changes.", componentType),
+		"important_note": fmt.Sprintf("⚠️ %s update is in temporary file, not yet active", componentType),
 		"helpful_commands": []string{
 			"get_pending_changes - View all changes waiting for deployment",
 			"apply_changes - Deploy all pending changes to production",
@@ -2447,11 +2447,11 @@ func deleteRulesetRule(c echo.Context) error {
 		"was_temp": isTemp,
 		"status":   "pending",
 		"next_steps": map[string]interface{}{
-			"1": "Review changes: Use 'get_pending_changes' to see all modifications awaiting deployment",
-			"2": "Deploy changes: Use 'apply_changes' to activate the rule deletion in production",
-			"3": "Test ruleset: Use 'test_ruleset' to verify the ruleset works correctly without this rule",
+			"1": "review changes with 'get_pending_changes'",
+			"2": "deploy with 'apply_changes'",
+			"3": "test ruleset functionality",
 		},
-		"important_note": "⚠️ The rule deletion is saved in a TEMPORARY file and is NOT YET ACTIVE in production. The rule is still active until you apply changes.",
+		"important_note": "⚠️ Rule deletion is in temporary file, not yet active",
 		"helpful_commands": []string{
 			"get_pending_changes - View all changes waiting for deployment",
 			"apply_changes - Deploy all pending changes to production",
@@ -2475,18 +2475,15 @@ func addRulesetRule(c echo.Context) error {
 
 	if rulesetId == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error":            "❌ REQUEST VALIDATION FAILED: Missing ruleset ID.\n\n🔧 HOW TO FIX: Specify the ruleset ID where you want to add the rule.\n\n📋 To find available rulesets, use 'get_rulesets'.",
-			"helpful_commands": []string{"get_rulesets - View all available rulesets"},
+			"error":      "missing ruleset ID",
+			"suggestion": "use 'get_rulesets' to find available rulesets",
 		})
 	}
 
 	if request.RuleRaw == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error": "❌ REQUEST VALIDATION FAILED: Missing rule content.\n\n🔧 HOW TO FIX: Provide the complete rule XML in the 'rule_raw' field.\n\n📝 REQUIRED FORMAT:\n<rule id=\"unique_id\" name=\"Detailed description\">\n    <check type=\"EQU\" field=\"field_name\">value</check>\n    <threshold group_by=\"field\" range=\"5m\" value=\"10\"/>\n    <append field=\"alert_type\">threat_detected</append>\n</rule>",
-			"helpful_commands": []string{
-				"get_rule_templates - View example rules",
-				"get_ruleset_syntax_guide - Learn proper syntax",
-			},
+			"error":      "missing rule content",
+			"suggestion": "provide complete rule XML in 'rule_raw' field",
 		})
 	}
 
@@ -2494,13 +2491,8 @@ func addRulesetRule(c echo.Context) error {
 	ruleId, ruleName, err := validateAndExtractRuleId(request.RuleRaw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error": err.Error(),
-			"helpful_commands": []string{
-				"get_ruleset_syntax_guide - Learn proper rule syntax and best practices",
-				"get_rule_templates - View example rules for common patterns",
-				"get_ruleset_templates - See complete ruleset examples",
-			},
-			"suggestion": "Review the syntax guide and templates to understand the correct rule format",
+			"error":      err.Error(),
+			"suggestion": "use 'get_ruleset_syntax_guide' for syntax reference",
 		})
 	}
 
@@ -2522,13 +2514,9 @@ func addRulesetRule(c echo.Context) error {
 	// Check if rule ID already exists in current ruleset
 	if ruleExistsInXML(currentRawConfig, ruleId) {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error":       fmt.Sprintf("❌ RULE ADDITION FAILED: Rule ID conflict detected.\n\n🔧 HOW TO FIX: A rule with ID '%s' already exists in this ruleset. Choose a different, unique ID.\n\n💡 SUGGESTED ALTERNATIVES:\n- %s_v2\n- %s_enhanced\n- %s_updated\n- Add date/time: %s_2024\n\n📋 To view existing rules, use 'get_ruleset' to see all current rule IDs.", ruleId, ruleId, ruleId, ruleId, ruleId),
+			"error":       fmt.Sprintf("rule ID '%s' already exists", ruleId),
 			"conflict_id": ruleId,
-			"suggestion":  "Use a unique rule ID that doesn't exist in the ruleset",
-			"helpful_commands": []string{
-				"get_ruleset - View all existing rules and their IDs",
-				"search_components - Search for existing rule patterns",
-			},
+			"suggestion":  fmt.Sprintf("try: %s_v2, %s_enhanced, or add timestamp", ruleId, ruleId),
 		})
 	}
 
@@ -2552,15 +2540,8 @@ func addRulesetRule(c echo.Context) error {
 	tempRuleset, err := rules_engine.NewRuleset("", updatedXML, "temp_validation_"+rulesetId)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error":            fmt.Sprintf("❌ RULE VALIDATION FAILED: Advanced validation check failed.\n\n🔧 VALIDATION ERROR DETAILS:\n%s\n\n📋 COMMON ISSUES TO CHECK:\n- Plugin references: Ensure all referenced plugins exist\n- Field names: Verify field names match your data schema\n- Node types: Use valid node types (EQU, INCL, REGEX, etc.)\n- Threshold syntax: Check group_by fields and time ranges\n- Logic operators: Verify condition expressions use correct syntax\n\n💡 DEBUGGING STEPS:\n1. Use 'get_ruleset_syntax_guide' for syntax reference\n2. Use 'get_samplers_data' to verify available fields\n3. Test individual components with simpler rules first", err.Error()),
-			"validation_stage": "complete_ruleset_check",
-			"helpful_commands": []string{
-				"get_ruleset_syntax_guide - Complete syntax reference and best practices",
-				"get_samplers_data - View available data fields and formats",
-				"get_rule_templates - See working examples of different rule types",
-				"test_ruleset_content - Test your rule with sample data",
-			},
-			"suggestion": "Review the detailed error above and consult the syntax guide for proper formatting",
+			"error":      err.Error(),
+			"suggestion": "check plugin references, field names, and syntax",
 		})
 	}
 
@@ -2684,67 +2665,18 @@ func validateAndExtractRuleId(ruleRaw string) (string, string, error) {
 	}
 
 	if err := xml.Unmarshal([]byte(tempXML), &tempRuleset); err != nil {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: XML syntax error.\n\n🔧 HOW TO FIX: Check your XML structure for common issues:\n- Missing closing tags\n- Unescaped special characters (< > & \" ')\n- Incorrect attribute quotes\n- Malformed tag structure\n\n🐛 XML ERROR: %v\n\n📝 VALID EXAMPLE:\n<rule id=\"example_rule\" name=\"Detailed description here\">\n    <check type=\"EQU\" field=\"event_type\">security</check>\n    <threshold group_by=\"source_ip\" range=\"5m\" value=\"5\"/>\n    <append field=\"alert_type\">suspicious_activity</append>\n</rule>\n\n💡 Use an XML validator to check your syntax before submitting!", err)
+		return "", "", fmt.Errorf("XML syntax error: %v", err)
 	}
 
 	if len(tempRuleset.Rules) != 1 {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Expected exactly one rule, got %d.\n\n🔧 HOW TO FIX: When adding a single rule, provide exactly one <rule> element.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_id\" name=\"Descriptive name\">\n    <!-- rule content -->\n</rule>\n\n❌ AVOID: Multiple <rule> elements or no <rule> elements in a single addition.", len(tempRuleset.Rules))
+		return "", "", fmt.Errorf("expected exactly one rule, got %d", len(tempRuleset.Rules))
 	}
 
 	ruleId := strings.TrimSpace(tempRuleset.Rules[0].ID)
 	ruleName := strings.TrimSpace(tempRuleset.Rules[0].Name)
+
 	if ruleId == "" {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing rule ID.\n\n🔧 HOW TO FIX: Add a unique 'id' attribute to your rule.\n\n📝 CORRECT FORMAT:\n<rule id=\"unique_descriptive_id\" name=\"Detailed description\">\n\n�� GOOD ID EXAMPLES:\n- \"detect_ssh_brute_force\"\n- \"monitor_privilege_escalation\"\n- \"alert_sql_injection_attempts\"\n\n⚠️ The ID must be unique within the ruleset and descriptive of the rule's purpose.")
-	}
-
-	// Validate rule name (description) for LLM compliance
-	if ruleName == "" {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Missing 'name' attribute. \n\n🔧 HOW TO FIX: Add a detailed 'name' attribute to your rule that explains what it detects and why it's important.\n\n📝 EXAMPLE: <rule id=\"%s\" name=\"Detect suspicious bash reverse shell execution patterns from compromised accounts\">\n\n💡 The 'name' should be descriptive enough for team members to understand the rule's purpose without reading the technical details.", ruleId)
-	}
-
-	// Check for meaningful description (not just simple words)
-	if len(ruleName) < 10 {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name too short.\n\n🔧 HOW TO FIX: The 'name' attribute should contain a comprehensive description (at least 10 characters). Current name: '%s'\n\n📝 GOOD EXAMPLES:\n- \"Detect SQL injection attempts in web application logs\"\n- \"Monitor for suspicious PowerShell execution patterns\"\n- \"Alert on unusual network connections from endpoints\"\n\n💡 Make it descriptive so others understand what the rule does!", ruleName)
-	}
-
-	// Check for common non-descriptive patterns
-	lowercaseName := strings.ToLower(ruleName)
-	nonDescriptivePatterns := []string{
-		"test", "rule", "check", "detect", "monitor", "alert", "filter",
-		"validation", "basic", "simple", "default", "example", "demo",
-	}
-
-	for _, pattern := range nonDescriptivePatterns {
-		if lowercaseName == pattern || lowercaseName == pattern+" rule" {
-			return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Generic rule name detected.\n\n🔧 HOW TO FIX: Instead of using generic terms like '%s', provide a specific description of what the rule detects.\n\n📝 GOOD EXAMPLES:\n- Instead of 'test rule' → 'Test for unauthorized SSH key installation attempts'\n- Instead of 'detection' → 'Detect cryptocurrency mining processes on endpoints'\n- Instead of 'alert' → 'Alert on failed authentication patterns indicating brute force attacks'\n\n💡 Be specific about the security threat or behavior being monitored!", ruleName)
-		}
-	}
-
-	// Check for reasonable content (should contain some explanation words)
-	meaningfulWords := []string{"detect", "monitor", "identify", "prevent", "block", "alert", "track", "analyze", "security", "threat", "suspicious", "malicious", "unauthorized", "anomaly", "intrusion", "attack", "vulnerability", "compliance", "policy", "behavior", "pattern", "activity", "event", "access", "authentication", "authorization", "login", "failure", "success", "error", "warning", "critical", "high", "risk", "dangerous", "forbidden", "restricted", "allowed", "permitted", "denied", "blocked", "filtered", "whitelist", "blacklist", "system", "network", "endpoint", "server", "client", "user", "admin", "privilege", "escalation", "injection", "overflow", "exploit", "malware", "virus", "ransomware", "phishing", "fraud", "breach", "incident", "response"}
-
-	hasmeaningfulContent := false
-	for _, word := range meaningfulWords {
-		if strings.Contains(lowercaseName, word) {
-			hasmeaningfulContent = true
-			break
-		}
-	}
-
-	// Also check for common describing words like "when", "if", "for", "that", "which", etc.
-	describingWords := []string{"when", "if", "for", "that", "which", "where", "how", "what", "why", "during", "after", "before", "while", "upon", "attempts", "tries", "executes", "performs", "contains", "includes", "matches", "exceeds", "violates", "indicates", "suggests", "shows", "reveals", "from", "to", "in", "on", "at", "with", "by", "through", "via", "using", "based", "related", "associated", "connected", "linked", "involving", "regarding", "concerning", "about"}
-
-	if !hasmeaningfulContent {
-		for _, word := range describingWords {
-			if strings.Contains(lowercaseName, word) {
-				hasmeaningfulContent = true
-				break
-			}
-		}
-	}
-
-	if !hasmeaningfulContent {
-		return "", "", fmt.Errorf("❌ RULE VALIDATION FAILED: Rule name lacks meaningful security context.\n\n🔧 HOW TO FIX: Your rule name '%s' should explain the specific security purpose and detection logic.\n\n📝 IMPROVED EXAMPLES:\n- Add security keywords: 'intrusion', 'malicious', 'unauthorized', 'suspicious'\n- Specify what you're detecting: 'failed logins', 'code injection', 'privilege escalation'\n- Include the context: 'from external IPs', 'on critical systems', 'during off-hours'\n\n💡 GOOD PATTERN: 'Detect [specific threat] when [condition] indicates [security concern]'\n\n🎯 EXAMPLE: 'Detect reverse shell connections when bash processes contain suspicious command line patterns indicating potential compromise'", ruleName)
+		return "", "", fmt.Errorf("missing rule ID")
 	}
 
 	return ruleId, ruleName, nil

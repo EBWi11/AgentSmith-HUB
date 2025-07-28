@@ -68,6 +68,7 @@ ENV CONFIG_ROOT=/opt/agentsmith-hub/config
 ENV LOG_LEVEL=info
 ENV NODE_ID=default
 ENV MODE=leader
+ENV SIMD_ENABLED=false
 
 # Expose ports
 EXPOSE 8080 80

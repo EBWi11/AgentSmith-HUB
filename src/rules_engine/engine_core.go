@@ -357,7 +357,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 			initialCap = 1
 		}
 	} else {
-		// For whitelist rules, usually only 1 result
+		// For exclude rules, usually only 1 result
 		initialCap = 1
 	}
 	finalRes := make([]map[string]interface{}, 0, initialCap)
@@ -371,12 +371,12 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 		}
 	}
 
-	// For whitelist, keep track of the last modified data
+	// For exclude, keep track of the last modified data
 	var lastModifiedData map[string]interface{}
 
-	// For empty whitelist, data should pass through
+	// For empty exclude, data should pass through
 	if !r.IsDetection && len(r.Rules) == 0 {
-		// Empty whitelist means all data passes through
+		// Empty exclude means all data passes through
 		ruleCachePool.Put(ruleCache)
 		// Reuse the same slice pattern for consistency
 		result := make([]map[string]interface{}, 1)
@@ -416,19 +416,19 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				finalRes = append(finalRes, dataCopy)
 			}
 		} else {
-			// For whitelist rules
+			// For exclude rules
 			// Always update lastModifiedData with the result of rule execution
 			lastModifiedData = dataCopy
 
 			if ruleCheckRes {
-				// If whitelist rule passes, data is whitelisted (allowed) - don't pass forward (return empty)
+				// If exclude rule passes, data is excluded (filtered) - don't pass forward (return empty)
 				ruleCachePool.Put(ruleCache)
 				return make([]map[string]interface{}, 0)
 			}
 		}
 	}
 
-	// For whitelist: if no rule passed, data needs processing - pass forward the last modified data
+	// For exclude: if no rule passed, data needs processing - pass forward the last modified data
 	if !r.IsDetection && len(finalRes) == 0 && lastModifiedData != nil {
 		finalRes = append(finalRes, lastModifiedData)
 	}
@@ -448,7 +448,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 	if rule.Queue == nil || len(*rule.Queue) == 0 {
 		// No operations to execute
 		// For detection rules, empty rule means no match (false)
-		// For whitelist rules, empty rule also means no match (false), allowing data to pass
+		// For exclude rules, empty rule also means no match (false), allowing data to pass
 		return false
 	}
 
@@ -464,7 +464,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				if r.IsDetection {
 					return false
 				}
-				// For whitelist rules, continue executing other operations
+				// For exclude rules, continue executing other operations
 			}
 		case T_Check:
 			checkResult := r.executeCheck(rule, op.ID, data, ruleCache)
@@ -474,7 +474,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				if r.IsDetection {
 					return false
 				}
-				// For whitelist rules, continue executing other operations
+				// For exclude rules, continue executing other operations
 			}
 		case T_Threshold:
 			thresholdResult := r.executeThreshold(rule, op.ID, data, ruleCache)
@@ -484,7 +484,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				if r.IsDetection {
 					return false
 				}
-				// For whitelist rules, continue executing other operations
+				// For exclude rules, continue executing other operations
 			}
 		case T_Append:
 			// Execute append operation according to user-defined order

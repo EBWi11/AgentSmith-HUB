@@ -19,77 +19,77 @@ INPUT defines data input sources and supports multiple data source types.
 
 #### Supported Data Source Types
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
-  brokers:
-    - "localhost:9092"
-    - "localhost:9093"
-  topic: "security_events"
-  group: "agentsmith_consumer"
-  compression: "snappy"  # Optional: none, snappy, gzip
-  # SASL Authentication (optional)
-  sasl:
-    enable: true
-    mechanism: "plain"
-    username: "your_username"
-    password: "your_password"
-  # TLS Configuration (optional)
-  tls:
-    enable: true
-    ca_file: "/path/to/ca.pem"
-    cert_file: "/path/to/cert.pem"
-    key_file: "/path/to/key.pem"
+   brokers:
+      - "localhost:9092"
+      - "localhost:9093"
+   topic: "security_events"
+   group: "agentsmith_consumer"
+   compression: "snappy"  # Optional: none, snappy, gzip
+   # SASL Authentication (optional)
+   sasl:
+      enable: true
+      mechanism: "plain"
+      username: "your_username"
+      password: "your_password"
+   # TLS Configuration (optional)
+   tls:
+      enable: true
+      ca_file: "/path/to/ca.pem"
+      cert_file: "/path/to/cert.pem"
+      key_file: "/path/to/key.pem"
 ```
 
-##### Alibaba Cloud SLS 
+##### Alibaba Cloud SLS
 ```yaml
 type: aliyun_sls
 aliyun_sls:
-  endpoint: "cn-hangzhou.log.aliyuncs.com"
-  access_key_id: "YOUR_ACCESS_KEY_ID"
-  access_key_secret: "YOUR_ACCESS_KEY_SECRET"
-  project: "your_project_name"
-  logstore: "your_logstore_name"
-  consumer_group_name: "your_consumer_group"
-  consumer_name: "your_consumer_name"
-  cursor_position: "end"  # begin, end, or specific timestamp
-  cursor_start_time: 1640995200000  # Unix timestamp (milliseconds)
-  query: "* | where attack_type_name != 'null'"  # Optional query filter conditions
+   endpoint: "cn-hangzhou.log.aliyuncs.com"
+   access_key_id: "YOUR_ACCESS_KEY_ID"
+   access_key_secret: "YOUR_ACCESS_KEY_SECRET"
+   project: "your_project_name"
+   logstore: "your_logstore_name"
+   consumer_group_name: "your_consumer_group"
+   consumer_name: "your_consumer_name"
+   cursor_position: "end"  # begin, end, or specific timestamp
+   cursor_start_time: 1640995200000  # Unix timestamp (milliseconds)
+   query: "* | where attack_type_name != 'null'"  # Optional query filter conditions
 ```
 
-##### Kafka Azure 
+##### Kafka Azure
 ```yaml
 type: kafka_azure
 kafka:
-  brokers:
-    - "your-namespace.servicebus.windows.net:9093"
-  topic: "your_topic"
-  group: "your_consumer_group"
-  sasl:
-    enable: true
-    mechanism: "plain"
-    username: "$ConnectionString"
-    password: "your_connection_string"
-  tls:
-    enable: true
+   brokers:
+      - "your-namespace.servicebus.windows.net:9093"
+   topic: "your_topic"
+   group: "your_consumer_group"
+   sasl:
+      enable: true
+      mechanism: "plain"
+      username: "$ConnectionString"
+      password: "your_connection_string"
+   tls:
+      enable: true
 ```
 
-##### Kafka AWS 
+##### Kafka AWS
 ```yaml
 type: kafka_aws
 kafka:
-  brokers:
-    - "your-cluster.amazonaws.com:9092"
-  topic: "your_topic"
-  group: "your_consumer_group"
-  sasl:
-    enable: true
-    mechanism: "aws_msk_iam"
-    aws_region: "us-east-1"
-  tls:
-    enable: true
+   brokers:
+      - "your-cluster.amazonaws.com:9092"
+   topic: "your_topic"
+   group: "your_consumer_group"
+   sasl:
+      enable: true
+      mechanism: "aws_msk_iam"
+      aws_region: "us-east-1"
+   tls:
+      enable: true
 ```
 
 ### 1.2 OUTPUT Syntax Description
@@ -103,49 +103,49 @@ OUTPUT defines the output target for data processing results.
 type: print
 ```
 
-##### Kafka 
+##### Kafka
 ```yaml
 type: kafka
 kafka:
-  brokers:
-    - "localhost:9092"
-    - "localhost:9093"
-  topic: "processed_events"
-  key: "user_id"  # Optional: specify message key field
-  compression: "snappy"  # Optional: none, snappy, gzip
-  # SASL Authentication (optional)
-  sasl:
-    enable: true
-    mechanism: "plain"
-    username: "your_username"
-    password: "your_password"
-  # TLS Configuration (optional)
-  tls:
-    enable: true
-    ca_file: "/path/to/ca.pem"
-    cert_file: "/path/to/cert.pem"
-    key_file: "/path/to/key.pem"
+   brokers:
+      - "localhost:9092"
+      - "localhost:9093"
+   topic: "processed_events"
+   key: "user_id"  # Optional: specify message key field
+   compression: "snappy"  # Optional: none, snappy, gzip
+   # SASL Authentication (optional)
+   sasl:
+      enable: true
+      mechanism: "plain"
+      username: "your_username"
+      password: "your_password"
+   # TLS Configuration (optional)
+   tls:
+      enable: true
+      ca_file: "/path/to/ca.pem"
+      cert_file: "/path/to/cert.pem"
+      key_file: "/path/to/key.pem"
 ```
 
-##### Elasticsearch 
+##### Elasticsearch
 ```yaml
 type: elasticsearch
 elasticsearch:
-  hosts:
-    - "http://localhost:9200"
-    - "https://localhost:9201"
-  index: "security-events-{YYYY.MM.DD}"  # Supports time patterns
-  batch_size: 1000  # Batch write size
-  flush_dur: "5s"   # Flush interval
-  # Authentication configuration (optional)
-  auth:
-    type: basic  # basic, api_key, bearer
-    username: "elastic"
-    password: "password"
-    # Or use API Key
-    # api_key: "your-api-key"
-    # Or use Bearer Token
-    # token: "your-bearer-token"
+   hosts:
+      - "http://localhost:9200"
+      - "https://localhost:9201"
+   index: "security-events-{YYYY.MM.DD}"  # Supports time patterns
+   batch_size: 1000  # Batch write size
+   flush_dur: "5s"   # Flush interval
+   # Authentication configuration (optional)
+   auth:
+      type: basic  # basic, api_key, bearer
+      username: "elastic"
+      password: "password"
+      # Or use API Key
+      # api_key: "your-api-key"
+      # Or use Bearer Token
+      # token: "your-bearer-token"
 ```
 
 ### 1.3 PROJECT Syntax Description
@@ -155,33 +155,33 @@ PROJECT defines the overall configuration of a project using simple arrow syntax
 #### Basic Syntax
 ```yaml
 content: |
-  INPUT.input_component_name -> RULESET.ruleset_name
-  RULESET.ruleset_name -> OUTPUT.output_component_name
+   INPUT.input_component_name -> RULESET.ruleset_name
+   RULESET.ruleset_name -> OUTPUT.output_component_name
 ```
 
 #### Project Configuration Example
 
 ```yaml
 content: |
-  INPUT.kafka -> RULESET.security_rules
-  RULESET.security_rules -> OUTPUT.elasticsearch
+   INPUT.kafka -> RULESET.security_rules
+   RULESET.security_rules -> OUTPUT.elasticsearch
 ```
 
 #### Complex Data Flow Example
 
 ```yaml
 content: |
-  # Main data flow
-  INPUT.kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
-  RULESET.threat_detection -> RULESET.compliance_check
-  RULESET.compliance_check -> OUTPUT.elasticsearch
-  
-  # Alert flow
-  RULESET.threat_detection -> OUTPUT.alert_kafka
-  
-  # Log flow
-  RULESET.compliance_check -> OUTPUT.print
+   # Main data flow
+     INPUT.kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
+   RULESET.threat_detection -> RULESET.compliance_check
+   RULESET.compliance_check -> OUTPUT.elasticsearch
+
+   # Alert flow
+   RULESET.threat_detection -> OUTPUT.alert_kafka
+
+   # Log flow
+   RULESET.compliance_check -> OUTPUT.print
 ```
 
 #### Data Flow Rules Description
@@ -197,25 +197,25 @@ content: |
 - Data flows in the direction of arrows
 - One component can have multiple downstream components
 - Support branching and merging
-- Whitelist rulesets are usually placed at the front
+- Exclude rulesets are usually placed at the front
 
 **Real Project Example**:
 
 ```yaml
 content: |
-  # Network Security Monitoring Project
-  # Data flows from Kafka, goes through multi-layer rule processing, and finally outputs to different targets
-  
-  INPUT.security_kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
-  RULESET.threat_detection -> RULESET.behavior_analysis
-  RULESET.behavior_analysis -> OUTPUT.security_es
-  
-  # High-threat events alert separately
-  RULESET.threat_detection -> OUTPUT.alert_kafka
-  
-  # Debug information printing
-  RULESET.behavior_analysis -> OUTPUT.debug_print
+   # Network Security Monitoring Project
+   # Data flows from Kafka, goes through multi-layer rule processing, and finally outputs to different targets
+
+     INPUT.security_kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
+   RULESET.threat_detection -> RULESET.behavior_analysis
+   RULESET.behavior_analysis -> OUTPUT.security_es
+
+   # High-threat events alert separately
+   RULESET.threat_detection -> OUTPUT.alert_kafka
+
+   # Debug information printing
+   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
 ## 📚 Part Two: RULESET Syntax Detailed Explanation
@@ -225,23 +225,23 @@ content: |
 Assuming we have such incoming data:
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999
 }
 ```
 
 Simplest rule: Detect admin login
 ```xml
 <root author="beginner">
-    <rule id="detect_admin_login" name="Detect Admin Login">
-        <!-- Independent check, no need for checklist wrapper -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- Add marker -->
-        <append field="alert">admin login detected</append>
-    </rule>
+   <rule id="detect_admin_login" name="Detect Admin Login">
+      <!-- Independent check, no need for checklist wrapper -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- Add marker -->
+      <append field="alert">admin login detected</append>
+   </rule>
 </root>
 ```
 
@@ -283,11 +283,11 @@ When a rule matches successfully, the `<append>` operation executes, adding the 
 The output data will become:
 ```json
 {
-  "event_type": "login",
-  "username": "admin", 
-  "source_ip": "192.168.1.100",
-  "timestamp": 1699999999,
-  "alert": "admin login detected"  // Newly added field
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "timestamp": 1699999999,
+   "alert": "admin login detected"  // Newly added field
 }
 ```
 
@@ -296,36 +296,36 @@ The output data will become:
 Input data:
 ```json
 {
-  "event_type": "login",
-  "username": "admin",
-  "source_ip": "192.168.1.100",
-  "login_time": 23,  // 23:00 (11 PM)
-  "failed_attempts": 5
+   "event_type": "login",
+   "username": "admin",
+   "source_ip": "192.168.1.100",
+   "login_time": 23,  // 23:00 (11 PM)
+   "failed_attempts": 5
 }
 ```
 
 Detect admin login at unusual time:
 ```xml
 <root author="learner">
-    <rule id="suspicious_admin_login" name="Suspicious Admin Login">
-        <!-- Flexible order: check username first -->
-        <check type="EQU" field="username">admin</check>
-        
-        <!-- Then check time (late night) -->
-        <check type="MT" field="login_time">22</check>  <!-- Greater than 22:00 -->
-        
-        <!-- Or check failed attempts -->
-        <check type="MT" field="failed_attempts">3</check>
-        
-        <!-- All checks default to AND relationship, all must be satisfied to continue -->
-        
-        <!-- Add alert information -->
-        <append field="risk_level">high</append>
-        <append field="alert_reason">admin login at unusual time</append>
-        
-        <!-- Trigger alert plugin (assuming already configured) -->
-        <plugin>send_security_alert(_$ORIDATA)</plugin>
-    </rule>
+   <rule id="suspicious_admin_login" name="Suspicious Admin Login">
+      <!-- Flexible order: check username first -->
+      <check type="EQU" field="username">admin</check>
+
+      <!-- Then check time (late night) -->
+      <check type="MT" field="login_time">22</check>  <!-- Greater than 22:00 -->
+
+      <!-- Or check failed attempts -->
+      <check type="MT" field="failed_attempts">3</check>
+
+      <!-- All checks default to AND relationship, all must be satisfied to continue -->
+
+      <!-- Add alert information -->
+      <append field="risk_level">high</append>
+      <append field="alert_reason">admin login at unusual time</append>
+
+      <!-- Trigger alert plugin (assuming already configured) -->
+      <plugin>send_security_alert(_$ORIDATA)</plugin>
+   </rule>
 </root>
 ```
 
@@ -337,7 +337,7 @@ When there are multiple `<check>` tags in a rule:
 - This design improves performance: Fail early, avoid unnecessary checks
 
 In the above example, all three check conditions must be **fully satisfied**:
-1. username equals "admin" 
+1. username equals "admin"
 2. login_time greater than 22 (after 10 PM)
 3. failed_attempts greater than 3
 
@@ -364,32 +364,32 @@ In the above example, all three check conditions must be **fully satisfied**:
 Input data:
 ```json
 {
-  "event_type": "transaction",
-  "amount": 10000,
-  "user": {
-    "id": "user123",
-    "daily_limit": 5000,
-    "vip_level": "gold"
-  }
+   "event_type": "transaction",
+   "amount": 10000,
+   "user": {
+      "id": "user123",
+      "daily_limit": 5000,
+      "vip_level": "gold"
+   }
 }
 ```
 
 Detect transactions exceeding user limit:
 ```xml
 <root author="dynamic_learner">
-    <rule id="over_limit_transaction" name="Over Limit Transaction Detection">
-        <!-- Dynamic comparison: transaction amount > user daily limit -->
-        <check type="MT" field="amount">_$user.daily_limit</check>
-        
-        <!-- Use plugin to calculate over ratio (assuming custom plugin) -->
-        <append type="PLUGIN" field="over_ratio">
-            calculate_ratio(amount, user.daily_limit)
-        </append>
-        
-        <!-- Add different processing based on VIP level -->
-        <check type="EQU" field="user.vip_level">gold</check>
-        <append field="action">notify_vip_service</append>
-    </rule>
+   <rule id="over_limit_transaction" name="Over Limit Transaction Detection">
+      <!-- Dynamic comparison: transaction amount > user daily limit -->
+      <check type="MT" field="amount">_$user.daily_limit</check>
+
+      <!-- Use plugin to calculate over ratio (assuming custom plugin) -->
+      <append type="PLUGIN" field="over_ratio">
+         calculate_ratio(amount, user.daily_limit)
+      </append>
+
+      <!-- Add different processing based on VIP level -->
+      <check type="EQU" field="user.vip_level">gold</check>
+      <append field="action">notify_vip_service</append>
+   </rule>
 </root>
 ```
 
@@ -417,10 +417,10 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 <!-- Dynamic comparison of two fields -->
 <check type="NEQ" field="current_user">login_user</check>
 
-<!-- Use dynamic values in append -->
+        <!-- Use dynamic values in append -->
 <append field="username">_$username</append>
 
-<!-- Use in plugin parameters -->
+        <!-- Use in plugin parameters -->
 <plugin>blockIP(malicious_ip, block_duration)</plugin>
 ```
 
@@ -434,7 +434,7 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 <!-- Send entire data object to analysis plugin -->
 <append type="PLUGIN" field="risk_analysis">analyzeFullData(_$ORIDATA)</append>
 
-<!-- Generate complete alert -->
+        <!-- Generate complete alert -->
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ```
 
@@ -446,20 +446,20 @@ One of the major features of the rules engine is flexible execution order:
 
 ```xml
 <rule id="flexible_way" name="Flexible Processing Example">
-    <!-- Can add timestamp first -->
-    <append type="PLUGIN" field="check_time">now()</append>
-    
-    <!-- Then perform checks -->
-    <check type="EQU" field="event_type">security_event</check>
-    
-    <!-- Statistical thresholds can be placed anywhere -->
+   <!-- Can add timestamp first -->
+   <append type="PLUGIN" field="check_time">now()</append>
+
+   <!-- Then perform checks -->
+   <check type="EQU" field="event_type">security_event</check>
+
+   <!-- Statistical thresholds can be placed anywhere -->
    <threshold group_by="source_ip" range="5m">10</threshold>
-    
-    <!-- Continue other checks (assuming custom plugins) -->
-    <check type="PLUGIN">is_working_hours(check_time)</check>
-    
-    <!-- Final processing -->
-    <append field="processed">true</append>
+
+   <!-- Continue other checks (assuming custom plugins) -->
+   <check type="PLUGIN">is_working_hours(check_time)</check>
+
+   <!-- Final processing -->
+   <append field="processed">true</append>
 </rule>
 ```
 
@@ -505,57 +505,57 @@ One of the major features of the rules engine is flexible execution order:
 Input data:
 ```json
 {
-  "request": {
-    "method": "POST",
-    "url": "https://api.example.com/transfer",
-    "headers": {
-      "user-agent": "Mozilla/5.0...",
-      "authorization": "Bearer token123"
-    },
-    "body": {
-      "from_account": "ACC001",
-      "to_account": "ACC999",
-      "amount": 50000,
-      "metadata": {
-        "source": "mobile_app",
-        "geo": {
-          "country": "CN",
-          "city": "Shanghai"
-        }
+   "request": {
+      "method": "POST",
+      "url": "https://api.example.com/transfer",
+      "headers": {
+         "user-agent": "Mozilla/5.0...",
+         "authorization": "Bearer token123"
+      },
+      "body": {
+         "from_account": "ACC001",
+         "to_account": "ACC999",
+         "amount": 50000,
+         "metadata": {
+            "source": "mobile_app",
+            "geo": {
+               "country": "CN",
+               "city": "Shanghai"
+            }
+         }
       }
-    }
-  },
-  "timestamp": 1700000000
+   },
+   "timestamp": 1700000000
 }
 ```
 
 Rule for processing nested data:
 ```xml
 <root type="DETECTION" author="advanced">
-    <rule id="complex_transaction_check" name="Complex Transaction Check">
-        <!-- Check basic conditions -->
-        <check type="EQU" field="request.method">POST</check>
-        <check type="INCL" field="request.url">transfer</check>
-        
-        <!-- Check amount -->
-        <check type="MT" field="request.body.amount">10000</check>
-        
-        <!-- Add geographic location marker -->
-        <append field="geo_risk">_$request.body.metadata.geo.country</append>
-        
-        <!-- Threshold detection based on geographic location -->
-        <threshold group_by="request.body.from_account,request.body.metadata.geo.country" 
-                   range="1h">3</threshold>
-        
-        <!-- Use plugin for deep analysis (assuming custom plugin) -->
-        <check type="PLUGIN">analyze_transfer_risk(request.body)</check>
-        
-        <!-- Extract and process user-agent -->
-        <append type="PLUGIN" field="client_info">parseUA(request.headers.user-agent)</append>
-        
-        <!-- Clean sensitive information -->
-        <del>request.headers.authorization</del>
-    </rule>
+   <rule id="complex_transaction_check" name="Complex Transaction Check">
+      <!-- Check basic conditions -->
+      <check type="EQU" field="request.method">POST</check>
+      <check type="INCL" field="request.url">transfer</check>
+
+      <!-- Check amount -->
+      <check type="MT" field="request.body.amount">10000</check>
+
+      <!-- Add geographic location marker -->
+      <append field="geo_risk">_$request.body.metadata.geo.country</append>
+
+      <!-- Threshold detection based on geographic location -->
+      <threshold group_by="request.body.from_account,request.body.metadata.geo.country"
+                 range="1h">3</threshold>
+
+      <!-- Use plugin for deep analysis (assuming custom plugin) -->
+      <check type="PLUGIN">analyze_transfer_risk(request.body)</check>
+
+      <!-- Extract and process user-agent -->
+      <append type="PLUGIN" field="client_info">parseUA(request.headers.user-agent)</append>
+
+      <!-- Clean sensitive information -->
+      <del>request.headers.authorization</del>
+   </rule>
 </root>
 ```
 
@@ -589,42 +589,42 @@ Rule for processing nested data:
 Input data:
 ```json
 {
-  "event_type": "file_upload",
-  "filename": "document.exe",
-  "size": 1048576,
-  "source": "email_attachment",
-  "sender": "unknown@suspicious.com",
-  "hash": "a1b2c3d4..."
+   "event_type": "file_upload",
+   "filename": "document.exe",
+   "size": 1048576,
+   "source": "email_attachment",
+   "sender": "unknown@suspicious.com",
+   "hash": "a1b2c3d4..."
 }
 ```
 
 Rule using conditional combinations:
 ```xml
 <root author="logic_master">
-    <rule id="malware_detection" name="Malware Detection">
-        <!-- Method 1: Use independent checks (default AND relationship) -->
-        <check type="END" field="filename">.exe</check>
-        <check type="MT" field="size">1000000</check>  <!-- Greater than 1MB -->
-        
-        <!-- Method 2: Use checklist for complex logic combinations -->
-        <checklist condition="suspicious_file and (email_threat or unknown_hash)">
-            <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
-                .exe|.dll|.scr|.bat
-            </check>
-            <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
-            <check id="unknown_hash" type="PLUGIN">
-                is_known_malware(hash)
-            </check>
-        </checklist>
-        
-        <!-- Enrich data -->
-        <append type="PLUGIN" field="virus_scan">virusTotal(hash)</append>
-        <append field="threat_level">high</append>
-        
-        <!-- Automatic response (assuming custom plugin) -->
-        <plugin>quarantine_file(filename)</plugin>
-        <plugin>notify_security_team(_$ORIDATA)</plugin>
-    </rule>
+   <rule id="malware_detection" name="Malware Detection">
+      <!-- Method 1: Use independent checks (default AND relationship) -->
+      <check type="END" field="filename">.exe</check>
+      <check type="MT" field="size">1000000</check>  <!-- Greater than 1MB -->
+
+      <!-- Method 2: Use checklist for complex logic combinations -->
+      <checklist condition="suspicious_file and (email_threat or unknown_hash)">
+         <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
+            .exe|.dll|.scr|.bat
+         </check>
+         <check id="email_threat" type="INCL" field="sender">suspicious.com</check>
+         <check id="unknown_hash" type="PLUGIN">
+            is_known_malware(hash)
+         </check>
+      </checklist>
+
+      <!-- Enrich data -->
+      <append type="PLUGIN" field="virus_scan">virusTotal(hash)</append>
+      <append field="threat_level">high</append>
+
+      <!-- Automatic response (assuming custom plugin) -->
+      <plugin>quarantine_file(filename)</plugin>
+      <plugin>notify_security_team(_$ORIDATA)</plugin>
+   </rule>
 </root>
 ```
 
@@ -635,9 +635,9 @@ Rule using conditional combinations:
 **Basic Syntax:**
 ```xml
 <checklist condition="logical_expression">
-    <check id="identifier1" ...>...</check>
-    <check id="identifier2" ...>...</check>
-</checklist>
+   <check id="identifier1" ...>...</check>
+<check id="identifier2" ...>...</check>
+        </checklist>
 ```
 
 **Attribute Description:**
@@ -667,7 +667,7 @@ When you need to check if a field matches multiple values, you can use multi-val
 **Basic Syntax:**
 ```xml
 <check type="type" field="field" logic="OR|AND" delimiter="separator">
-    value1separatorvalue2separatorvalue3
+   value1separatorvalue2separatorvalue3
 </check>
 ```
 
@@ -685,7 +685,7 @@ When you need to check if a field matches multiple values, you can use multi-val
 **In the above example:**
 ```xml
 <check id="suspicious_file" type="INCL" field="filename" logic="OR" delimiter="|">
-    .exe|.dll|.scr|.bat
+   .exe|.dll|.scr|.bat
 </check>
 ```
 - Check if filename contains .exe, .dll, .scr, or .bat
@@ -721,13 +721,13 @@ Input data stream:
 Rule:
 ```xml
 <rule id="brute_force_detection" name="Brute Force Detection">
-    <check type="EQU" field="event">login_failed</check>
-    
-    <!-- 5 failures for same user and IP within 5 minutes -->
+   <check type="EQU" field="event">login_failed</check>
+
+   <!-- 5 failures for same user and IP within 5 minutes -->
    <threshold group_by="user,ip" range="5m">5</threshold>
-    
-    <append field="alert_type">brute_force_attempt</append>
-    <plugin>block_ip(ip, 3600)</plugin>  <!-- Block for 1 hour -->
+
+   <append field="alert_type">brute_force_attempt</append>
+   <plugin>block_ip(ip, 3600)</plugin>  <!-- Block for 1 hour -->
 </rule>
 ```
 
@@ -744,13 +744,13 @@ Input data stream:
 Rule:
 ```xml
 <rule id="daily_limit_check" name="Daily Limit Check">
-    <check type="EQU" field="event">transfer</check>
-    
-    <!-- Cumulative amount exceeds 50000 within 24 hours -->
-    <threshold group_by="user" range="24h" count_type="SUM" 
-               count_field="amount">50000</threshold>
-    
-    <append field="action">freeze_account</append>
+   <check type="EQU" field="event">transfer</check>
+
+   <!-- Cumulative amount exceeds 50000 within 24 hours -->
+   <threshold group_by="user" range="24h" count_type="SUM"
+              count_field="amount">50000</threshold>
+
+   <append field="action">freeze_account</append>
 </rule>
 ```
 
@@ -779,14 +779,14 @@ Input data stream:
 Rule:
 ```xml
 <rule id="data_exfiltration_check" name="Data Exfiltration Check">
-    <check type="EQU" field="action">download</check>
-    
-    <!-- Access more than 25 different files within 1 hour -->
-    <threshold group_by="user" range="1h" count_type="CLASSIFY" 
-               count_field="file_id">25</threshold>
-    
-    <append field="risk_score">high</append>
-    <plugin>alert_dlp_team(_$ORIDATA)</plugin>
+   <check type="EQU" field="action">download</check>
+
+   <!-- Access more than 25 different files within 1 hour -->
+   <threshold group_by="user" range="1h" count_type="CLASSIFY"
+              count_field="file_id">25</threshold>
+
+   <append field="risk_score">high</append>
+   <plugin>alert_dlp_team(_$ORIDATA)</plugin>
 </rule>
 ```
 
@@ -880,20 +880,20 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
-    <!-- Use checklist to combine multiple conditions -->
-    <checklist condition="(private_ip or suspicious_country) and not whitelisted">
-        <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
-        <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
-        <check id="whitelisted" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
-    </checklist>
-    
-    <!-- Data enrichment -->
-    <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
-    <append type="PLUGIN" field="geo_info">shodan(source_ip)</append>
-    
-    <!-- Time-related processing -->
-    <append type="PLUGIN" field="hour">hourOfDay()</append>
-    <check type="PLUGIN">hourOfDay() > 22</check>
+   <!-- Use checklist to combine multiple conditions -->
+   <checklist condition="(private_ip or suspicious_country) and not excluded">
+  <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
+  <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
+  <check id="excluded" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
+</checklist>
+
+   <!-- Data enrichment -->
+   <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
+   <append type="PLUGIN" field="geo_info">shodan(source_ip)</append>
+
+   <!-- Time-related processing -->
+   <append type="PLUGIN" field="hour">hourOfDay()</append>
+   <check type="PLUGIN">hourOfDay() > 22</check>
 </rule>
 ```
 
@@ -901,9 +901,9 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 ```xml
 <rule id="suppression_example" name="Alert Suppression">
-    <check type="EQU" field="event_type">login_failed</check>
-    <check type="PLUGIN">suppressOnce(source_ip, 300, "login_brute_force")</check>
-    <append field="alert_type">brute_force</append>
+   <check type="EQU" field="event_type">login_failed</check>
+   <check type="PLUGIN">suppressOnce(source_ip, 300, "login_brute_force")</check>
+   <append field="alert_type">brute_force</append>
 </rule>
 ```
 
@@ -911,17 +911,17 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 
 ```xml
 <rule id="data_transformation" name="Data Transformation">
-    <check type="EQU" field="content_type">json</check>
-    
-    <!-- Parse JSON and extract fields -->
-    <append type="PLUGIN" field="parsed_data">parseJSON(raw_content)</append>
-    <append field="user_id">parsed_data.user.id</append>
-    
-    <!-- Encoding processing -->
-    <append type="PLUGIN" field="encoded">base64Encode(sensitive_data)</append>
-    
-    <!-- Hash calculation -->
-    <append type="PLUGIN" field="content_hash">hashSHA256(raw_content)</append>
+   <check type="EQU" field="content_type">json</check>
+
+   <!-- Parse JSON and extract fields -->
+   <append type="PLUGIN" field="parsed_data">parseJSON(raw_content)</append>
+   <append field="user_id">parsed_data.user.id</append>
+
+   <!-- Encoding processing -->
+   <append type="PLUGIN" field="encoded">base64Encode(sensitive_data)</append>
+
+   <!-- Hash calculation -->
+   <append type="PLUGIN" field="content_hash">hashSHA256(raw_content)</append>
 </rule>
 ```
 
@@ -932,37 +932,37 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 Input data:
 ```json
 {
-  "event_type": "network_connection",
-  "source_ip": "10.0.0.100",
-  "dest_ip": "185.220.101.45",
-  "dest_port": 443,
-  "bytes_sent": 1024000,
-  "connection_duration": 3600
+   "event_type": "network_connection",
+   "source_ip": "10.0.0.100",
+   "dest_ip": "185.220.101.45",
+   "dest_port": 443,
+   "bytes_sent": 1024000,
+   "connection_duration": 3600
 }
 ```
 
 Rule using built-in plugins:
 ```xml
 <rule id="suspicious_connection" name="Suspicious Connection Detection">
-    <!-- Check if it's external connection -->
-    <check type="PLUGIN">isPrivateIP(source_ip)</check>  <!-- Source is internal -->
-    <check type="PLUGIN">!isPrivateIP(dest_ip)</check>  <!-- Target is external -->
-    
-    <!-- Check geographic location -->
-    <append type="PLUGIN" field="dest_country">geoMatch(dest_ip)</append>
-    
-    <!-- Add timestamp -->
-    <append type="PLUGIN" field="detection_time">now()</append>
-    <append type="PLUGIN" field="detection_hour">hourOfDay()</append>
-    
-    <!-- Calculate data exfiltration risk -->
-    <check type="MT" field="bytes_sent">1000000</check>  <!-- Greater than 1MB -->
-    
-    <!-- Generate alert -->
-    <append field="alert_type">potential_data_exfiltration</append>
-    
-    <!-- Query threat intelligence (if configured) -->
-    <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
+   <!-- Check if it's external connection -->
+   <check type="PLUGIN">isPrivateIP(source_ip)</check>  <!-- Source is internal -->
+   <check type="PLUGIN">!isPrivateIP(dest_ip)</check>  <!-- Target is external -->
+
+   <!-- Check geographic location -->
+   <append type="PLUGIN" field="dest_country">geoMatch(dest_ip)</append>
+
+   <!-- Add timestamp -->
+   <append type="PLUGIN" field="detection_time">now()</append>
+   <append type="PLUGIN" field="detection_hour">hourOfDay()</append>
+
+   <!-- Calculate data exfiltration risk -->
+   <check type="MT" field="bytes_sent">1000000</check>  <!-- Greater than 1MB -->
+
+   <!-- Generate alert -->
+   <append field="alert_type">potential_data_exfiltration</append>
+
+   <!-- Query threat intelligence (if configured) -->
+   <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
 </rule>
 ```
 
@@ -973,52 +973,52 @@ Demonstrating the advantages of flexible execution order: check basic conditions
 Input data:
 ```json
 {
-  "event_type": "network_traffic",
-  "datatype": "external_connection",
-  "source_ip": "192.168.1.100",
-  "dest_ip": "45.142.120.181",
-  "dest_port": 443,
-  "protocol": "tcp",
-  "bytes_sent": 5000,
-  "timestamp": 1700000000
+   "event_type": "network_traffic",
+   "datatype": "external_connection",
+   "source_ip": "192.168.1.100",
+   "dest_ip": "45.142.120.181",
+   "dest_port": 443,
+   "protocol": "tcp",
+   "bytes_sent": 5000,
+   "timestamp": 1700000000
 }
 ```
 
 Threat intelligence detection rule:
 ```xml
 <rule id="threat_intel_detection" name="Threat Intelligence Detection">
-    <!-- Step 1: Check data type, quick filtering -->
-    <check type="EQU" field="datatype">external_connection</check>
-   
-    <!-- Step 2: Confirm target IP is public address -->
-    <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
+   <!-- Step 1: Check data type, quick filtering -->
+   <check type="EQU" field="datatype">external_connection</check>
 
-    <!-- Step 3: Query threat intelligence, enrich data -->
-    <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
-    
-    <!-- Step 4: Parse threat intelligence results -->
-    <append type="PLUGIN" field="threat_level">
-        parseJSON(threat_intel)
-    </append>
-    
-    <!-- Step 5: Make judgments based on threat level -->
-    <checklist condition="high_threat or (medium_threat and has_data_transfer)">
-        <check id="high_threat" type="EQU" field="threat_level">high</check>
-        <check id="medium_threat" type="EQU" field="threat_level">medium</check>
-        <check id="has_data_transfer" type="MT" field="bytes_sent">1000</check>
-    </checklist>
-    
-    <!-- Step 6: Enrich alert information -->
-    <append field="alert_title">Malicious IP Communication Detected</append>
-    <append type="PLUGIN" field="ip_reputation">
-        parseJSON(threat_intel.reputation_score)
-    </append>
-    <append type="PLUGIN" field="threat_tags">
-        parseJSON(threat_intel.tags)
-    </append>
-    
-    <!-- Step 7: Generate detailed alert (assuming custom plugin) -->
-    <plugin>generateThreatAlert(_$ORIDATA, threat_intel)</plugin>
+   <!-- Step 2: Confirm target IP is public address -->
+   <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
+
+   <!-- Step 3: Query threat intelligence, enrich data -->
+   <append type="PLUGIN" field="threat_intel">threatBook(dest_ip, "ip")</append>
+
+   <!-- Step 4: Parse threat intelligence results -->
+   <append type="PLUGIN" field="threat_level">
+      parseJSON(threat_intel)
+   </append>
+
+   <!-- Step 5: Make judgments based on threat level -->
+   <checklist condition="high_threat or (medium_threat and has_data_transfer)">
+      <check id="high_threat" type="EQU" field="threat_level">high</check>
+      <check id="medium_threat" type="EQU" field="threat_level">medium</check>
+      <check id="has_data_transfer" type="MT" field="bytes_sent">1000</check>
+   </checklist>
+
+   <!-- Step 6: Enrich alert information -->
+   <append field="alert_title">Malicious IP Communication Detected</append>
+   <append type="PLUGIN" field="ip_reputation">
+      parseJSON(threat_intel.reputation_score)
+   </append>
+   <append type="PLUGIN" field="threat_tags">
+      parseJSON(threat_intel.tags)
+   </append>
+
+   <!-- Step 7: Generate detailed alert (assuming custom plugin) -->
+   <plugin>generateThreatAlert(_$ORIDATA, threat_intel)</plugin>
 </rule>
 ```
 
@@ -1039,45 +1039,45 @@ If using fixed execution order, you cannot implement this flexible processing me
 Input data:
 ```json
 {
-  "timestamp": 1700000000,
-  "log_level": "ERROR",
-  "message": "Failed login attempt",
-  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
-  "request_body": "{\"username\":\"admin\",\"password\":\"***\"}",
-  "stack_trace": "java.lang.Exception: Authentication failed\n\tat com.example..."
+   "timestamp": 1700000000,
+   "log_level": "ERROR",
+   "message": "Failed login attempt",
+   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+   "request_body": "{\"username\":\"admin\",\"password\":\"***\"}",
+   "stack_trace": "java.lang.Exception: Authentication failed\n\tat com.example..."
 }
 ```
 
 Log processing rule:
 ```xml
 <rule id="log_analysis" name="Error Log Analysis">
-    <check type="EQU" field="log_level">ERROR</check>
-    
-    <!-- Parse JSON data -->
-    <append type="PLUGIN" field="parsed_body">parseJSON(request_body)</append>
-    
-    <!-- Parse User-Agent -->
-    <append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>
-    
-    <!-- Extract error information -->
-    <append type="PLUGIN" field="error_type">
-        regexExtract(stack_trace, "([A-Za-z.]+Exception)")
-    </append>
-    
-    <!-- Time processing -->
-    <append type="PLUGIN" field="readable_time">tsToDate(timestamp)</append>
-    <append type="PLUGIN" field="hour">hourOfDay(timestamp)</append>
-    
-    <!-- Data masking -->
-    <append type="PLUGIN" field="sanitized_message">
-        regexReplace(message, "password\":\"[^\"]+", "password\":\"***")
-    </append>
-    
-    <!-- Alert suppression: same type error only alert once in 5 minutes -->
-    <check type="PLUGIN">suppressOnce(error_type, 300, "error_log_analysis")</check>
-    
-    <!-- Generate alert (assuming custom plugin) -->
-    <plugin>sendToElasticsearch(_$ORIDATA)</plugin>
+   <check type="EQU" field="log_level">ERROR</check>
+
+   <!-- Parse JSON data -->
+   <append type="PLUGIN" field="parsed_body">parseJSON(request_body)</append>
+
+   <!-- Parse User-Agent -->
+   <append type="PLUGIN" field="browser_info">parseUA(user_agent)</append>
+
+   <!-- Extract error information -->
+   <append type="PLUGIN" field="error_type">
+      regexExtract(stack_trace, "([A-Za-z.]+Exception)")
+   </append>
+
+   <!-- Time processing -->
+   <append type="PLUGIN" field="readable_time">tsToDate(timestamp)</append>
+   <append type="PLUGIN" field="hour">hourOfDay(timestamp)</append>
+
+   <!-- Data masking -->
+   <append type="PLUGIN" field="sanitized_message">
+      regexReplace(message, "password\":\"[^\"]+", "password\":\"***")
+   </append>
+
+   <!-- Alert suppression: same type error only alert once in 5 minutes -->
+   <check type="PLUGIN">suppressOnce(error_type, 300, "error_log_analysis")</check>
+
+   <!-- Generate alert (assuming custom plugin) -->
+   <plugin>sendToElasticsearch(_$ORIDATA)</plugin>
 </rule>
 ```
 
@@ -1085,21 +1085,21 @@ Log processing rule:
 
 ```xml
 <rule id="data_masking" name="Data Masking Processing">
-    <check type="EQU" field="contains_sensitive_data">true</check>
-    
-    <!-- Data hashing -->
-    <append type="PLUGIN" field="user_id_hash">hashSHA256(user_id)</append>
-    <append type="PLUGIN" field="session_hash">hashMD5(session_id)</append>
-    
-    <!-- Sensitive information encoding -->
-    <append type="PLUGIN" field="encoded_payload">base64Encode(sensitive_payload)</append>
-    
-    <!-- Clean and replace -->
-    <append type="PLUGIN" field="cleaned_log">replace(raw_log, user_password, "***")</append>
-    <append type="PLUGIN" field="masked_phone">regexReplace(phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
-    
-    <!-- Delete original sensitive data -->
-    <del>user_password,raw_sensitive_data,unencrypted_payload</del>
+   <check type="EQU" field="contains_sensitive_data">true</check>
+
+   <!-- Data hashing -->
+   <append type="PLUGIN" field="user_id_hash">hashSHA256(user_id)</append>
+   <append type="PLUGIN" field="session_hash">hashMD5(session_id)</append>
+
+   <!-- Sensitive information encoding -->
+   <append type="PLUGIN" field="encoded_payload">base64Encode(sensitive_payload)</append>
+
+   <!-- Clean and replace -->
+   <append type="PLUGIN" field="cleaned_log">replace(raw_log, user_password, "***")</append>
+   <append type="PLUGIN" field="masked_phone">regexReplace(phone_number, "(\\d{3})\\d{4}(\\d{4})", "$1****$2")</append>
+
+   <!-- Delete original sensitive data -->
+   <del>user_password,raw_sensitive_data,unencrypted_payload</del>
 </rule>
 ```
 
@@ -1114,12 +1114,12 @@ If you don't use the `ruleid` parameter, suppression of the same key by differen
 ```xml
 <!-- Rule A: Network threat detection -->
 <rule id="network_threat">
-    <check type="PLUGIN">suppressOnce(source_ip, 300)</check>
+   <check type="PLUGIN">suppressOnce(source_ip, 300)</check>
 </rule>
 
-<!-- Rule B: Login anomaly detection -->  
+        <!-- Rule B: Login anomaly detection -->
 <rule id="login_anomaly">
-    <check type="PLUGIN">suppressOnce(source_ip, 300)</check>
+<check type="PLUGIN">suppressOnce(source_ip, 300)</check>
 </rule>
 ```
 
@@ -1130,41 +1130,41 @@ If you don't use the `ruleid` parameter, suppression of the same key by differen
 ```xml
 <!-- Rule A: Network threat detection -->
 <rule id="network_threat">
-    <check type="PLUGIN">suppressOnce(source_ip, 300, "network_threat")</check>
+   <check type="PLUGIN">suppressOnce(source_ip, 300, "network_threat")</check>
 </rule>
 
-<!-- Rule B: Login anomaly detection -->  
+        <!-- Rule B: Login anomaly detection -->
 <rule id="login_anomaly">
-    <check type="PLUGIN">suppressOnce(source_ip, 300, "login_anomaly")</check>
+<check type="PLUGIN">suppressOnce(source_ip, 300, "login_anomaly")</check>
 </rule>
 ```
 
-### 5.4 Whitelist Ruleset
+### 5.4 Exclude Ruleset
 
-Whitelist is used to filter out data that doesn't need processing (ruleset type is WHITELIST). Special behavior of whitelist:
-- When whitelist rule matches, data is "not allowed to pass" (i.e., filtered out, no longer continue processing, data will be discarded)
-- When all whitelist rules don't match, data continues to be passed to subsequent processing
+Exclude is used to filter out data that doesn't need processing (ruleset type is EXCLUDE). Special behavior of exclude:
+- When exclude rule matches, data is "not allowed to pass" (i.e., filtered out, no longer continue processing, data will be discarded)
+- When all exclude rules don't match, data continues to be passed to subsequent processing
 
 ```xml
-<root type="WHITELIST" name="security_whitelist" author="security_team">
-    <!-- Whitelist rule 1: Trusted IPs -->
+<root type="EXCLUDE" name="security_exclude" author="security_team">
+    <!-- Exclude rule 1: Trusted IPs -->
     <rule id="trusted_ips">
         <check type="INCL" field="source_ip" logic="OR" delimiter="|">
             10.0.0.1|10.0.0.2|10.0.0.3
         </check>
-        <append field="whitelisted">true</append>
+        <append field="excluded">true</append>
     </rule>
     
-    <!-- Whitelist rule 2: Known benign processes -->
+    <!-- Exclude rule 2: Known benign processes -->
     <rule id="benign_processes">
         <check type="INCL" field="process_name" logic="OR" delimiter="|">
             chrome.exe|firefox.exe|explorer.exe
         </check>
-        <!-- Can add multiple check conditions, all must be satisfied to be whitelist filtered -->
+        <!-- Can add multiple check conditions, all must be satisfied to be exclude filtered -->
         <check type="PLUGIN">isPrivateIP(source_ip)</check>
     </rule>
     
-    <!-- Whitelist rule 3: Internal test traffic -->
+    <!-- Exclude rule 3: Internal test traffic -->
     <rule id="test_traffic">
         <check type="INCL" field="user_agent">internal-testing-bot</check>
         <check type="PLUGIN">cidrMatch(source_ip, "192.168.100.0/24")</check>
@@ -1178,21 +1178,21 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 
 #### Root Element `<root>`
 ```xml
-<root type="DETECTION|WHITELIST" name="ruleset_name" author="author">
-    <!-- Rule list -->
+<root type="DETECTION|EXCLUDE" name="ruleset_name" author="author">
+   <!-- Rule list -->
 </root>
 ```
 
 | Attribute | Required | Description | Default |
 |-----------|----------|-------------|---------|
-| type | No | Ruleset type, DETECTION type passes through after match, WHITELIST doesn't pass through after match | DETECTION |
+| type | No | Ruleset type, DETECTION type passes through after match, EXCLUDE doesn't pass through after match | DETECTION |
 | name | No | Ruleset name | - |
 | author | No | Author information | - |
 
 #### Rule Element `<rule>`
 ```xml
 <rule id="unique_identifier" name="rule_description">
-    <!-- Operation list: execute in order of appearance -->
+   <!-- Operation list: execute in order of appearance -->
 </rule>
 ```
 
@@ -1206,7 +1206,7 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 #### Independent Check `<check>`
 ```xml
 <check type="type" field="field_name" logic="OR|AND" delimiter="separator">
-    value
+   value
 </check>
 ```
 
@@ -1221,9 +1221,9 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 #### Check List `<checklist>`
 ```xml
 <checklist condition="logical_expression">
-    <check id="a" ...>...</check>
-    <check id="b" ...>...</check>
-</checklist>
+   <check id="a" ...>...</check>
+<check id="b" ...>...</check>
+        </checklist>
 ```
 
 | Attribute | Required | Description |
@@ -1330,13 +1330,13 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 <!-- Static value -->
 <check type="EQU" field="status">active</check>
 
-<!-- Dynamic value -->
+        <!-- Dynamic value -->
 <check type="EQU" field="status">_$expected_status</check>
 
-<!-- Nested field -->
+        <!-- Nested field -->
 <check type="EQU" field="user.profile.role">admin</check>
 
-<!-- Dynamic nested -->
+        <!-- Dynamic nested -->
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
@@ -1346,11 +1346,11 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 ```xml
 <!-- Recommended: High-performance operations first -->
 <rule id="optimized">
-    <check type="NOTNULL" field="required"></check>     <!-- Fastest -->
-    <check type="EQU" field="type">target</check>       <!-- Fast -->
-    <check type="INCL" field="message">keyword</check>  <!-- Medium -->
-    <check type="REGEX" field="data">pattern</check>    <!-- Slow -->
-    <check type="PLUGIN">complex_check()</check>        <!-- Slowest -->
+   <check type="NOTNULL" field="required"></check>     <!-- Fastest -->
+   <check type="EQU" field="type">target</check>       <!-- Fast -->
+   <check type="INCL" field="message">keyword</check>  <!-- Medium -->
+   <check type="REGEX" field="data">pattern</check>    <!-- Slow -->
+   <check type="PLUGIN">complex_check()</check>        <!-- Slowest -->
 </rule>
 ```
 
@@ -1359,7 +1359,7 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 <!-- Use local cache to improve performance -->
 <threshold group_by="user_id" range="5m" local_cache="true">10</threshold>
 
-<!-- Avoid overly large time windows -->
+        <!-- Avoid overly large time windows -->
 <threshold group_by="ip" range="1h">1000</threshold>  <!-- Don't exceed 24h -->
 ```
 
@@ -1370,7 +1370,7 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 <!-- Error: Special characters not escaped -->
 <check type="INCL" field="xml"><tag>value</tag></check>
 
-<!-- Correct: Use CDATA -->
+        <!-- Correct: Use CDATA -->
 <check type="INCL" field="xml"><![CDATA[<tag>value</tag>]]></check>
 ```
 
@@ -1378,13 +1378,13 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 ```xml
 <!-- Error: Reference non-existent id in condition -->
 <checklist condition="a and b">
-    <check type="EQU" field="status">active</check>  <!-- Missing id -->
+   <check type="EQU" field="status">active</check>  <!-- Missing id -->
 </checklist>
 
-<!-- Correct -->
+        <!-- Correct -->
 <checklist condition="a and b">
-    <check id="a" type="EQU" field="status">active</check>
-    <check id="b" type="NOTNULL" field="user"></check>
+<check id="a" type="EQU" field="status">active</check>
+<check id="b" type="NOTNULL" field="user"></check>
 </checklist>
 ```
 
@@ -1392,13 +1392,13 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 ```xml
 <!-- Problem: Directly use plugin on large amounts of data -->
 <rule id="slow">
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+   <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 
-<!-- Optimization: Filter first, then process -->
+        <!-- Optimization: Filter first, then process -->
 <rule id="fast">
-    <check type="EQU" field="type">target</check>
-    <check type="PLUGIN">expensive_check(_$ORIDATA)</check>
+<check type="EQU" field="type">target</check>
+<check type="PLUGIN">expensive_check(_$ORIDATA)</check>
 </rule>
 ```
 
@@ -1407,14 +1407,14 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 #### 1. Use append to track execution flow
 ```xml
 <rule id="debug_flow">
-    <append field="_debug_step1">check started</append>
-    <check type="EQU" field="type">target</check>
-    
-    <append field="_debug_step2">check passed</append>
+   <append field="_debug_step1">check started</append>
+   <check type="EQU" field="type">target</check>
+
+   <append field="_debug_step2">check passed</append>
    <threshold group_by="user" range="5m">10</threshold>
-    
-    <append field="_debug_step3">threshold passed</append>
-    <!-- Final data will contain all debug fields, showing execution flow -->
+
+   <append field="_debug_step3">threshold passed</append>
+   <!-- Final data will contain all debug fields, showing execution flow -->
 </rule>
 ```
 
@@ -1422,9 +1422,9 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 Create a ruleset containing only the rule to be tested:
 ```xml
 <root type="DETECTION" name="test_single_rule">
-    <rule id="test_rule">
-        <!-- Your test rule -->
-    </rule>
+   <rule id="test_rule">
+      <!-- Your test rule -->
+   </rule>
 </root>
 ```
 
@@ -1432,9 +1432,9 @@ Create a ruleset containing only the rule to be tested:
 Use append to verify if fields are correctly obtained:
 ```xml
 <rule id="verify_fields">
-    <append field="debug_nested">_$user.profile.settings.theme</append>
-    <append field="debug_array">_$items.0.name</append>
-    <!-- Check debug field values in output -->
+   <append field="debug_nested">_$user.profile.settings.theme</append>
+   <append field="debug_array">_$items.0.name</append>
+   <!-- Check debug field values in output -->
 </rule>
 ```
 
@@ -1457,10 +1457,10 @@ Use append to verify if fields are correctly obtained:
 <!-- Check type plugin -->
 <check type="PLUGIN">pluginName(param1, param2, ...)</check>
 
-<!-- Data processing plugin -->
+        <!-- Data processing plugin -->
 <append type="PLUGIN" field="field_name">pluginName(param1, param2, ...)</append>
 
-<!-- Execute operation plugin -->
+        <!-- Execute operation plugin -->
 <plugin>pluginName(param1, param2, ...)</plugin>
 ```
 
@@ -1484,25 +1484,25 @@ Check type plugins support negation prefix:
 package plugin
 
 import (
-    "errors"
-    "fmt"
+   "errors"
+   "fmt"
 )
 
 // Eval function must return (bool, error)
 func Eval(args ...interface{}) (bool, error) {
-    if len(args) == 0 {
-        return false, errors.New("plugin requires at least one argument")
-    }
-    
-    // Parameter processing
-    data := args[0]
-    
-    // Plugin logic
-    if someCondition {
-        return true, nil
-    }
-    
-    return false, nil
+   if len(args) == 0 {
+      return false, errors.New("plugin requires at least one argument")
+   }
+
+   // Parameter processing
+   data := args[0]
+
+   // Plugin logic
+   if someCondition {
+      return true, nil
+   }
+
+   return false, nil
 }
 ```
 
@@ -1511,23 +1511,23 @@ func Eval(args ...interface{}) (bool, error) {
 package plugin
 
 import (
-    "errors"
-    "fmt"
+   "errors"
+   "fmt"
 )
 
 // Eval function must return (interface{}, bool, error)
 func Eval(args ...interface{}) (interface{}, bool, error) {
-    if len(args) == 0 {
-        return nil, false, errors.New("plugin requires at least one argument")
-    }
-    
-    // Parameter processing
-    input := args[0]
-    
-    // Data processing logic
-    result := processData(input)
-    
-    return result, true, nil
+   if len(args) == 0 {
+      return nil, false, errors.New("plugin requires at least one argument")
+   }
+
+   // Parameter processing
+   input := args[0]
+
+   // Data processing logic
+   result := processData(input)
+
+   return result, true, nil
 }
 ```
 
@@ -1537,33 +1537,33 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 ```go
 // Yaegi plugins support global variables and init functions
 var (
-    cache = make(map[string]interface{})
-    cacheMutex sync.RWMutex
-    lastUpdate time.Time
+cache = make(map[string]interface{})
+cacheMutex sync.RWMutex
+lastUpdate time.Time
 )
 
 // init function executes when plugin loads
 func init() {
-    // Initialize cache
-    refreshCache()
+// Initialize cache
+refreshCache()
 }
 
 // Stateful Eval function
 func Eval(key string) (interface{}, bool, error) {
-    cacheMutex.RLock()
-    if value, exists := cache[key]; exists {
-        cacheMutex.RUnlock()
-        return value, true, nil
-    }
-    cacheMutex.RUnlock()
-    
-    // Calculate and cache result
-    result := computeResult(key)
-    cacheMutex.Lock()
-    cache[key] = result
-    cacheMutex.Unlock()
-    
-    return result, true, nil
+cacheMutex.RLock()
+if value, exists := cache[key]; exists {
+cacheMutex.RUnlock()
+return value, true, nil
+}
+cacheMutex.RUnlock()
+
+// Calculate and cache result
+result := computeResult(key)
+cacheMutex.Lock()
+cache[key] = result
+cacheMutex.Unlock()
+
+return result, true, nil
 }
 ```
 
@@ -1587,262 +1587,3 @@ func Eval(key string) (interface{}, bool, error) {
 Remember the core philosophy: **Combine as needed, arrange flexibly**. Based on your specific requirements, freely combine various operations to create the most suitable rules.
 
 Happy using! 🚀
-
-## 🚨 Part Six: Practical Case Studies
-
-### 6.1 Case 1: APT Attack Detection
-
-Complete APT attack detection ruleset (using built-in plugins and assumed custom plugins):
-
-```xml
-<root type="DETECTION" name="apt_detection_suite" author="threat_hunting_team">
-    <!-- Rule 1: PowerShell Empire Detection -->
-    <rule id="powershell_empire" name="PowerShell Empire C2 Detection">
-        <!-- Flexible order: enrichment first, then detection -->
-        <append type="PLUGIN" field="decoded_cmd">base64Decode(command_line)</append>
-        
-        <!-- Check process name -->
-        <check type="INCL" field="process_name">powershell</check>
-        
-        <!-- Detect Empire characteristics -->
-        <check type="INCL" field="decoded_cmd" logic="OR" delimiter="|">
-            System.Net.WebClient|DownloadString|IEX|Invoke-Expression
-        </check>
-        
-        <!-- Detect encoded commands -->
-        <check type="INCL" field="command_line">-EncodedCommand</check>
-        
-        <!-- Network connection detection -->
-       <threshold group_by="hostname" range="10m">3</threshold>
-        
-        <!-- Threat intelligence query -->
-        <append type="PLUGIN" field="c2_url">
-            regexExtract(decoded_cmd, "https?://[^\\s]+")
-        </append>
-        
-        <!-- Generate IoC -->
-        <append field="ioc_type">powershell_empire_c2</append>
-        <append type="PLUGIN" field="ioc_hash">hashSHA256(decoded_cmd)</append>
-        
-        <!-- Automatic response (assuming custom plugin) -->
-        <plugin>isolateHost(hostname)</plugin>
-        <plugin>extractAndShareIoCs(_$ORIDATA)</plugin>
-    </rule>
-    
-    <!-- Rule 2: Lateral Movement Detection -->
-    <rule id="lateral_movement" name="Lateral Movement Detection">
-        <!-- Multiple lateral movement technique detection -->
-        <checklist condition="(wmi_exec or psexec or rdp_brute) and not internal_scan">
-            <!-- WMI execution -->
-            <check id="wmi_exec" type="INCL" field="process_name">wmic.exe</check>
-            <!-- PsExec -->
-            <check id="psexec" type="INCL" field="service_name">PSEXESVC</check>
-            <!-- RDP brute force -->
-            <check id="rdp_brute" type="EQU" field="event_id">4625</check>
-            <!-- Exclude internal scanning -->
-            <check id="internal_scan" type="PLUGIN">
-                isPrivateIP(source_ip)
-            </check>
-        </checklist>
-        
-        <!-- Time window detection -->
-       <threshold group_by="source_ip,dest_ip" range="30m">5</threshold>
-        
-        <!-- Risk scoring (assuming custom plugin) -->
-        <append type="PLUGIN" field="risk_score">
-            calculateLateralMovementRisk(ORIDATA)
-        </append>
-        
-        <plugin>updateAttackGraph(source_ip, dest_ip)</plugin>
-    </rule>
-    
-    <!-- Rule 3: Data Exfiltration Detection -->
-    <rule id="data_exfiltration" name="Data Exfiltration Detection">
-        <!-- First check if it's sensitive data access -->
-        <check type="INCL" field="file_path" logic="OR" delimiter="|">
-            /etc/passwd|/etc/shadow|.ssh/|.aws/credentials
-        </check>
-
-        <!-- Check external connection behavior -->
-        <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
-       
-        <!-- Anomalous transmission detection -->
-        <threshold group_by="source_ip" range="1h" count_type="SUM" 
-                   count_field="bytes_sent">1073741824</threshold>  <!-- 1GB -->
-        
-        <!-- DNS tunnel detection (assuming custom plugin) -->
-        <checklist condition="dns_tunnel_check">
-            <check id="dns_tunnel_check" type="PLUGIN">
-                detectDNSTunnel(dns_queries)
-            </check>
-        </checklist>
-        
-        <!-- Generate alert -->
-        <append field="alert_severity">critical</append>
-        <append type="PLUGIN" field="data_classification">
-            classifyData(file_path)
-        </append>
-        
-        <plugin>blockDataTransfer(source_ip, dest_ip)</plugin>
-        <plugin>triggerIncidentResponse(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 6.2 Case 2: Real-time Financial Fraud Detection
-
-```xml
-<root type="DETECTION" name="fraud_detection_system" author="risk_team">
-    <!-- Rule 1: Account Takeover Detection -->
-    <rule id="account_takeover" name="Account Takeover Detection">
-        <!-- Real-time device fingerprinting (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_fingerprint">
-            generateFingerprint(user_agent, screen_resolution, timezone)
-        </append>
-        
-        <!-- Check device change (assuming custom plugin) -->
-        <check type="PLUGIN">
-            isNewDevice(user_id, device_fingerprint)
-        </check>
-        
-        <!-- Geographic location anomaly (assuming custom plugin) -->
-        <append type="PLUGIN" field="geo_distance">
-            calculateGeoDistance(user_id, current_ip, last_ip)
-        </append>
-        <check type="MT" field="geo_distance">500</check>  <!-- 500km -->
-        
-        <!-- Behavior pattern analysis (assuming custom plugin) -->
-        <append type="PLUGIN" field="behavior_score">
-            analyzeBehaviorPattern(user_id, recent_actions)
-        </append>
-        
-        <!-- Transaction speed detection -->
-       <threshold group_by="user_id" range="10m">5</threshold>
-        
-        <!-- Risk decision (assuming custom plugin) -->
-        <append type="PLUGIN" field="risk_decision">
-            makeRiskDecision(behavior_score, geo_distance, device_fingerprint)
-        </append>
-        
-        <!-- Real-time intervention (assuming custom plugin) -->
-        <plugin>requireMFA(user_id, transaction_id)</plugin>
-        <plugin>notifyUser(user_id, "suspicious_activity")</plugin>
-    </rule>
-    
-    <!-- Rule 2: Money Laundering Behavior Detection -->
-    <rule id="money_laundering" name="Money Laundering Behavior Detection">
-        <!-- Structuring-Layering-Integration pattern (assuming custom plugin) -->
-        <checklist condition="structuring or layering or integration">
-            <!-- Structuring -->
-            <check id="structuring" type="PLUGIN">
-                detectStructuring(user_id, transaction_history)
-            </check>
-            <!-- Layering -->
-            <check id="layering" type="PLUGIN">
-                detectLayering(account_network, transaction_flow)
-            </check>
-            <!-- Integration phase -->
-            <check id="integration" type="PLUGIN">
-                detectIntegration(merchant_category, transaction_pattern)
-            </check>
-        </checklist>
-        
-        <!-- Correlation analysis (assuming custom plugin) -->
-        <append type="PLUGIN" field="network_risk">
-            analyzeAccountNetwork(user_id, connected_accounts)
-        </append>
-        
-        <!-- Cumulative amount monitoring -->
-        <threshold group_by="account_cluster" range="7d" count_type="SUM"
-                   count_field="amount">1000000</threshold>
-        
-        <!-- Compliance reporting (assuming custom plugin) -->
-        <append type="PLUGIN" field="sar_report">
-            generateSAR(_$ORIDATA)  <!-- Suspicious Activity Report -->
-        </append>
-        
-        <plugin>freezeAccountCluster(account_cluster)</plugin>
-        <plugin>notifyCompliance(sar_report)</plugin>
-    </rule>
-</root>
-```
-
-### 6.3 Case 3: Zero Trust Security Architecture
-
-```xml
-<root type="DETECTION" name="zero_trust_security" author="security_architect">
-    <!-- Rule 1: Continuous Authentication -->
-    <rule id="continuous_auth" name="Continuous Authentication">
-        <!-- Verify every request -->
-        <check type="NOTNULL" field="auth_token"></check>
-        
-        <!-- Verify token validity (assuming custom plugin) -->
-        <check type="PLUGIN">validateToken(auth_token)</check>
-        
-        <!-- Context awareness (assuming custom plugin) -->
-        <append type="PLUGIN" field="trust_score">
-            calculateTrustScore(
-                user_id,
-                device_trust,
-                network_location,
-                behavior_baseline,
-                time_of_access
-            )
-        </append>
-        
-        <!-- Dynamic permission adjustment -->
-        <checklist condition="low_trust or anomaly_detected">
-            <check id="low_trust" type="LT" field="trust_score">0.7</check>
-            <check id="anomaly_detected" type="PLUGIN">
-                detectAnomaly(current_behavior, baseline_behavior)
-            </check>
-        </checklist>
-        
-        <!-- Micro-segmentation strategy (assuming custom plugin) -->
-        <append type="PLUGIN" field="allowed_resources">
-            applyMicroSegmentation(trust_score, requested_resource)
-        </append>
-        
-        <!-- Real-time policy enforcement (assuming custom plugin) -->
-        <plugin>enforcePolicy(user_id, allowed_resources)</plugin>
-        <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
-    </rule>
-    
-    <!-- Rule 2: Device Trust Assessment -->
-    <rule id="device_trust" name="Device Trust Assessment">
-        <!-- Device health check (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_health">
-            checkDeviceHealth(device_id)
-        </append>
-        
-        <!-- Compliance verification (assuming custom plugin) -->
-        <checklist condition="patch_level and antivirus and encryption and mdm_enrolled">
-            <check id="patch_level" type="PLUGIN">
-                isPatchCurrent(os_version, patch_level)
-            </check>
-            <check id="antivirus" type="PLUGIN">
-                isAntivirusActive(av_status)
-            </check>
-            <check id="encryption" type="PLUGIN">
-                isDiskEncrypted(device_id)
-            </check>
-            <check id="mdm_enrolled" type="PLUGIN">
-                isMDMEnrolled(device_id)
-            </check>
-        </checklist>
-        
-        <!-- Certificate verification (assuming custom plugin) -->
-        <check type="PLUGIN">
-            validateDeviceCertificate(device_cert)
-        </check>
-        
-        <!-- Trust scoring (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_trust_score">
-            calculateDeviceTrust(_$ORIDATA)
-        </append>
-        
-        <!-- Access decision (assuming custom plugin) -->
-        <plugin>applyDevicePolicy(device_id, device_trust_score)</plugin>
-    </rule>
-</root>
-```

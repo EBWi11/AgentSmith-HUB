@@ -77,8 +77,8 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 				for _, attr := range element.Attr {
 					switch attr.Name.Local {
 					case "type":
-						if attr.Value != "DETECTION" && attr.Value != "WHITELIST" {
-							return nil, fmt.Errorf("root type must be 'DETECTION' or 'WHITELIST', got '%s' at line %d", attr.Value, elementLine)
+						if attr.Value != "DETECTION" && attr.Value != "EXCLUDE" {
+							return nil, fmt.Errorf("root type must be 'DETECTION' or 'EXCLUDE', got '%s' at line %d", attr.Value, elementLine)
 						}
 						ruleset.Type = attr.Value
 						ruleset.IsDetection = strings.ToUpper(attr.Value) == "DETECTION"

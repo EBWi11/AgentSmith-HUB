@@ -7,7 +7,7 @@ This document presents the performance testing results for AgentSmith-HUB, a hig
 ## Test Environment
 
 ### System Configuration
-- **OS**: Debian 12.10 (Linux) VM
+- **OS**: Debian 12.10 VM
 - **CPU**: 2 vCPUs (allocated from M3 cores)
 - **Memory**: 4GB RAM
 - **Storage**: Virtual disk on SSD
@@ -43,7 +43,7 @@ This document presents the performance testing results for AgentSmith-HUB, a hig
 #### Project Flow
 ```
 INPUT.test -> RULESET.test
-RULESET.test -> RULESET.test_whitelist
+RULESET.test -> RULESET.test_exclude
 ```
 
 #### Primary Ruleset (test)
@@ -96,9 +96,9 @@ RULESET.test -> RULESET.test_whitelist
 </root>
 ```
 
-#### Whitelist Ruleset (test_whitelist)
+#### Exclude Ruleset (test_exclude)
 ```xml
-<root author="will" type="WHITELIST">
+<root author="will" type="EXCLUDE">
     <rule id="rule_01" name="name">
         <check type="INCL" field="city">new</check>
         <check type="INCL" field="city">york</check>

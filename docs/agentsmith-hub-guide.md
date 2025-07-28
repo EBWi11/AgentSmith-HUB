@@ -172,8 +172,8 @@ content: |
 ```yaml
 content: |
   # Main data flow
-  INPUT.kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
+  INPUT.kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
   RULESET.threat_detection -> RULESET.compliance_check
   RULESET.compliance_check -> OUTPUT.elasticsearch
   
@@ -197,7 +197,7 @@ content: |
 - Data flows in the direction of arrows
 - One component can have multiple downstream components
 - Support branching and merging
-- Whitelist rulesets are usually placed at the front
+- Exclude rulesets are usually placed at the front
 
 **Real Project Example**:
 
@@ -206,8 +206,8 @@ content: |
   # Network Security Monitoring Project
   # Data flows from Kafka, goes through multi-layer rule processing, and finally outputs to different targets
   
-  INPUT.security_kafka -> RULESET.whitelist
-  RULESET.whitelist -> RULESET.threat_detection
+  INPUT.security_kafka -> RULESET.exclude
+  RULESET.exclude -> RULESET.threat_detection
   RULESET.threat_detection -> RULESET.behavior_analysis
   RULESET.behavior_analysis -> OUTPUT.security_es
   
@@ -881,11 +881,11 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
     <!-- Use checklist to combine multiple conditions -->
-    <checklist condition="(private_ip or suspicious_country) and not whitelisted">
-        <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
-        <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
-        <check id="whitelisted" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
-    </checklist>
+    <checklist condition="(private_ip or suspicious_country) and not excluded">
+  <check id="private_ip" type="PLUGIN">isPrivateIP(source_ip)</check>
+  <check id="suspicious_country" type="PLUGIN">geoMatch(source_ip, "CN")</check>
+  <check id="excluded" type="PLUGIN">cidrMatch(source_ip, "10.0.0.0/8")</check>
+</checklist>
     
     <!-- Data enrichment -->
     <append type="PLUGIN" field="threat_intel">virusTotal(file_hash)</append>
@@ -1139,32 +1139,32 @@ If you don't use the `ruleid` parameter, suppression of the same key by differen
 </rule>
 ```
 
-### 5.4 Whitelist Ruleset
+### 5.4 Exclude Ruleset
 
-Whitelist is used to filter out data that doesn't need processing (ruleset type is WHITELIST). Special behavior of whitelist:
-- When whitelist rule matches, data is "not allowed to pass" (i.e., filtered out, no longer continue processing, data will be discarded)
-- When all whitelist rules don't match, data continues to be passed to subsequent processing
+Exclude is used to filter out data that doesn't need processing (ruleset type is EXCLUDE). Special behavior of exclude:
+- When exclude rule matches, data is "not allowed to pass" (i.e., filtered out, no longer continue processing, data will be discarded)
+- When all exclude rules don't match, data continues to be passed to subsequent processing
 
 ```xml
-<root type="WHITELIST" name="security_whitelist" author="security_team">
-    <!-- Whitelist rule 1: Trusted IPs -->
+<root type="EXCLUDE" name="security_exclude" author="security_team">
+    <!-- Exclude rule 1: Trusted IPs -->
     <rule id="trusted_ips">
         <check type="INCL" field="source_ip" logic="OR" delimiter="|">
             10.0.0.1|10.0.0.2|10.0.0.3
         </check>
-        <append field="whitelisted">true</append>
+        <append field="excluded">true</append>
     </rule>
     
-    <!-- Whitelist rule 2: Known benign processes -->
+    <!-- Exclude rule 2: Known benign processes -->
     <rule id="benign_processes">
         <check type="INCL" field="process_name" logic="OR" delimiter="|">
             chrome.exe|firefox.exe|explorer.exe
         </check>
-        <!-- Can add multiple check conditions, all must be satisfied to be whitelist filtered -->
+        <!-- Can add multiple check conditions, all must be satisfied to be exclude filtered -->
         <check type="PLUGIN">isPrivateIP(source_ip)</check>
     </rule>
     
-    <!-- Whitelist rule 3: Internal test traffic -->
+    <!-- Exclude rule 3: Internal test traffic -->
     <rule id="test_traffic">
         <check type="INCL" field="user_agent">internal-testing-bot</check>
         <check type="PLUGIN">cidrMatch(source_ip, "192.168.100.0/24")</check>
@@ -1178,14 +1178,14 @@ Whitelist is used to filter out data that doesn't need processing (ruleset type 
 
 #### Root Element `<root>`
 ```xml
-<root type="DETECTION|WHITELIST" name="ruleset_name" author="author">
+<root type="DETECTION|EXCLUDE" name="ruleset_name" author="author">
     <!-- Rule list -->
 </root>
 ```
 
 | Attribute | Required | Description | Default |
 |-----------|----------|-------------|---------|
-| type | No | Ruleset type, DETECTION type passes through after match, WHITELIST doesn't pass through after match | DETECTION |
+| type | No | Ruleset type, DETECTION type passes through after match, EXCLUDE doesn't pass through after match | DETECTION |
 | name | No | Ruleset name | - |
 | author | No | Author information | - |
 
@@ -1587,262 +1587,3 @@ func Eval(key string) (interface{}, bool, error) {
 Remember the core philosophy: **Combine as needed, arrange flexibly**. Based on your specific requirements, freely combine various operations to create the most suitable rules.
 
 Happy using! 🚀
-
-## 🚨 Part Six: Practical Case Studies
-
-### 6.1 Case 1: APT Attack Detection
-
-Complete APT attack detection ruleset (using built-in plugins and assumed custom plugins):
-
-```xml
-<root type="DETECTION" name="apt_detection_suite" author="threat_hunting_team">
-    <!-- Rule 1: PowerShell Empire Detection -->
-    <rule id="powershell_empire" name="PowerShell Empire C2 Detection">
-        <!-- Flexible order: enrichment first, then detection -->
-        <append type="PLUGIN" field="decoded_cmd">base64Decode(command_line)</append>
-        
-        <!-- Check process name -->
-        <check type="INCL" field="process_name">powershell</check>
-        
-        <!-- Detect Empire characteristics -->
-        <check type="INCL" field="decoded_cmd" logic="OR" delimiter="|">
-            System.Net.WebClient|DownloadString|IEX|Invoke-Expression
-        </check>
-        
-        <!-- Detect encoded commands -->
-        <check type="INCL" field="command_line">-EncodedCommand</check>
-        
-        <!-- Network connection detection -->
-       <threshold group_by="hostname" range="10m">3</threshold>
-        
-        <!-- Threat intelligence query -->
-        <append type="PLUGIN" field="c2_url">
-            regexExtract(decoded_cmd, "https?://[^\\s]+")
-        </append>
-        
-        <!-- Generate IoC -->
-        <append field="ioc_type">powershell_empire_c2</append>
-        <append type="PLUGIN" field="ioc_hash">hashSHA256(decoded_cmd)</append>
-        
-        <!-- Automatic response (assuming custom plugin) -->
-        <plugin>isolateHost(hostname)</plugin>
-        <plugin>extractAndShareIoCs(_$ORIDATA)</plugin>
-    </rule>
-    
-    <!-- Rule 2: Lateral Movement Detection -->
-    <rule id="lateral_movement" name="Lateral Movement Detection">
-        <!-- Multiple lateral movement technique detection -->
-        <checklist condition="(wmi_exec or psexec or rdp_brute) and not internal_scan">
-            <!-- WMI execution -->
-            <check id="wmi_exec" type="INCL" field="process_name">wmic.exe</check>
-            <!-- PsExec -->
-            <check id="psexec" type="INCL" field="service_name">PSEXESVC</check>
-            <!-- RDP brute force -->
-            <check id="rdp_brute" type="EQU" field="event_id">4625</check>
-            <!-- Exclude internal scanning -->
-            <check id="internal_scan" type="PLUGIN">
-                isPrivateIP(source_ip)
-            </check>
-        </checklist>
-        
-        <!-- Time window detection -->
-       <threshold group_by="source_ip,dest_ip" range="30m">5</threshold>
-        
-        <!-- Risk scoring (assuming custom plugin) -->
-        <append type="PLUGIN" field="risk_score">
-            calculateLateralMovementRisk(ORIDATA)
-        </append>
-        
-        <plugin>updateAttackGraph(source_ip, dest_ip)</plugin>
-    </rule>
-    
-    <!-- Rule 3: Data Exfiltration Detection -->
-    <rule id="data_exfiltration" name="Data Exfiltration Detection">
-        <!-- First check if it's sensitive data access -->
-        <check type="INCL" field="file_path" logic="OR" delimiter="|">
-            /etc/passwd|/etc/shadow|.ssh/|.aws/credentials
-        </check>
-
-        <!-- Check external connection behavior -->
-        <check type="PLUGIN">!isPrivateIP(dest_ip)</check>
-       
-        <!-- Anomalous transmission detection -->
-        <threshold group_by="source_ip" range="1h" count_type="SUM" 
-                   count_field="bytes_sent">1073741824</threshold>  <!-- 1GB -->
-        
-        <!-- DNS tunnel detection (assuming custom plugin) -->
-        <checklist condition="dns_tunnel_check">
-            <check id="dns_tunnel_check" type="PLUGIN">
-                detectDNSTunnel(dns_queries)
-            </check>
-        </checklist>
-        
-        <!-- Generate alert -->
-        <append field="alert_severity">critical</append>
-        <append type="PLUGIN" field="data_classification">
-            classifyData(file_path)
-        </append>
-        
-        <plugin>blockDataTransfer(source_ip, dest_ip)</plugin>
-        <plugin>triggerIncidentResponse(_$ORIDATA)</plugin>
-    </rule>
-</root>
-```
-
-### 6.2 Case 2: Real-time Financial Fraud Detection
-
-```xml
-<root type="DETECTION" name="fraud_detection_system" author="risk_team">
-    <!-- Rule 1: Account Takeover Detection -->
-    <rule id="account_takeover" name="Account Takeover Detection">
-        <!-- Real-time device fingerprinting (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_fingerprint">
-            generateFingerprint(user_agent, screen_resolution, timezone)
-        </append>
-        
-        <!-- Check device change (assuming custom plugin) -->
-        <check type="PLUGIN">
-            isNewDevice(user_id, device_fingerprint)
-        </check>
-        
-        <!-- Geographic location anomaly (assuming custom plugin) -->
-        <append type="PLUGIN" field="geo_distance">
-            calculateGeoDistance(user_id, current_ip, last_ip)
-        </append>
-        <check type="MT" field="geo_distance">500</check>  <!-- 500km -->
-        
-        <!-- Behavior pattern analysis (assuming custom plugin) -->
-        <append type="PLUGIN" field="behavior_score">
-            analyzeBehaviorPattern(user_id, recent_actions)
-        </append>
-        
-        <!-- Transaction speed detection -->
-       <threshold group_by="user_id" range="10m">5</threshold>
-        
-        <!-- Risk decision (assuming custom plugin) -->
-        <append type="PLUGIN" field="risk_decision">
-            makeRiskDecision(behavior_score, geo_distance, device_fingerprint)
-        </append>
-        
-        <!-- Real-time intervention (assuming custom plugin) -->
-        <plugin>requireMFA(user_id, transaction_id)</plugin>
-        <plugin>notifyUser(user_id, "suspicious_activity")</plugin>
-    </rule>
-    
-    <!-- Rule 2: Money Laundering Behavior Detection -->
-    <rule id="money_laundering" name="Money Laundering Behavior Detection">
-        <!-- Structuring-Layering-Integration pattern (assuming custom plugin) -->
-        <checklist condition="structuring or layering or integration">
-            <!-- Structuring -->
-            <check id="structuring" type="PLUGIN">
-                detectStructuring(user_id, transaction_history)
-            </check>
-            <!-- Layering -->
-            <check id="layering" type="PLUGIN">
-                detectLayering(account_network, transaction_flow)
-            </check>
-            <!-- Integration phase -->
-            <check id="integration" type="PLUGIN">
-                detectIntegration(merchant_category, transaction_pattern)
-            </check>
-        </checklist>
-        
-        <!-- Correlation analysis (assuming custom plugin) -->
-        <append type="PLUGIN" field="network_risk">
-            analyzeAccountNetwork(user_id, connected_accounts)
-        </append>
-        
-        <!-- Cumulative amount monitoring -->
-        <threshold group_by="account_cluster" range="7d" count_type="SUM"
-                   count_field="amount">1000000</threshold>
-        
-        <!-- Compliance reporting (assuming custom plugin) -->
-        <append type="PLUGIN" field="sar_report">
-            generateSAR(_$ORIDATA)  <!-- Suspicious Activity Report -->
-        </append>
-        
-        <plugin>freezeAccountCluster(account_cluster)</plugin>
-        <plugin>notifyCompliance(sar_report)</plugin>
-    </rule>
-</root>
-```
-
-### 6.3 Case 3: Zero Trust Security Architecture
-
-```xml
-<root type="DETECTION" name="zero_trust_security" author="security_architect">
-    <!-- Rule 1: Continuous Authentication -->
-    <rule id="continuous_auth" name="Continuous Authentication">
-        <!-- Verify every request -->
-        <check type="NOTNULL" field="auth_token"></check>
-        
-        <!-- Verify token validity (assuming custom plugin) -->
-        <check type="PLUGIN">validateToken(auth_token)</check>
-        
-        <!-- Context awareness (assuming custom plugin) -->
-        <append type="PLUGIN" field="trust_score">
-            calculateTrustScore(
-                user_id,
-                device_trust,
-                network_location,
-                behavior_baseline,
-                time_of_access
-            )
-        </append>
-        
-        <!-- Dynamic permission adjustment -->
-        <checklist condition="low_trust or anomaly_detected">
-            <check id="low_trust" type="LT" field="trust_score">0.7</check>
-            <check id="anomaly_detected" type="PLUGIN">
-                detectAnomaly(current_behavior, baseline_behavior)
-            </check>
-        </checklist>
-        
-        <!-- Micro-segmentation strategy (assuming custom plugin) -->
-        <append type="PLUGIN" field="allowed_resources">
-            applyMicroSegmentation(trust_score, requested_resource)
-        </append>
-        
-        <!-- Real-time policy enforcement (assuming custom plugin) -->
-        <plugin>enforcePolicy(user_id, allowed_resources)</plugin>
-        <plugin>logZeroTrustDecision(_$ORIDATA)</plugin>
-    </rule>
-    
-    <!-- Rule 2: Device Trust Assessment -->
-    <rule id="device_trust" name="Device Trust Assessment">
-        <!-- Device health check (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_health">
-            checkDeviceHealth(device_id)
-        </append>
-        
-        <!-- Compliance verification (assuming custom plugin) -->
-        <checklist condition="patch_level and antivirus and encryption and mdm_enrolled">
-            <check id="patch_level" type="PLUGIN">
-                isPatchCurrent(os_version, patch_level)
-            </check>
-            <check id="antivirus" type="PLUGIN">
-                isAntivirusActive(av_status)
-            </check>
-            <check id="encryption" type="PLUGIN">
-                isDiskEncrypted(device_id)
-            </check>
-            <check id="mdm_enrolled" type="PLUGIN">
-                isMDMEnrolled(device_id)
-            </check>
-        </checklist>
-        
-        <!-- Certificate verification (assuming custom plugin) -->
-        <check type="PLUGIN">
-            validateDeviceCertificate(device_cert)
-        </check>
-        
-        <!-- Trust scoring (assuming custom plugin) -->
-        <append type="PLUGIN" field="device_trust_score">
-            calculateDeviceTrust(_$ORIDATA)
-        </append>
-        
-        <!-- Access decision (assuming custom plugin) -->
-        <plugin>applyDevicePolicy(device_id, device_trust_score)</plugin>
-    </rule>
-</root>
-```
