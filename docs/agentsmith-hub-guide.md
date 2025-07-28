@@ -1201,6 +1201,63 @@ Exclude is used to filter out data that doesn't need processing (ruleset type is
 | id | Yes | Unique rule identifier |
 | name | No | Human-readable rule description |
 
+#### Multiple Rules Relationship
+
+When a ruleset contains multiple `<rule>` elements, they have an **OR relationship**:
+
+**Core Concept:**
+- **Independent Evaluation**: Each rule is evaluated independently against the input data
+- **OR Logic**: If ANY rule matches, a data record is generated and passed downstream
+- **Multiple Matches**: Multiple rules can match the same data, generating multiple records
+- **No Sequential Dependencies**: Rules do not depend on each other's processing results
+
+**Execution Flow:**
+1. **Parallel Evaluation**: All rules in the ruleset are evaluated against the same input data
+2. **Match Detection**: Each rule that matches generates a separate data record
+3. **Data Generation**: Each matched rule creates its own output with its specific enrichments
+4. **Downstream Flow**: All generated records are passed to the next component in the data flow
+
+**Example:**
+```xml
+<root type="DETECTION" name="multi_rule_example">
+    <!-- Rule 1: Detects admin logins -->
+    <rule id="admin_login">
+        <check type="EQU" field="username">admin</check>
+        <append field="alert_type">admin_login</append>
+        <append field="severity">high</append>
+    </rule>
+    
+    <!-- Rule 2: Detects failed logins -->
+    <rule id="failed_login">
+        <check type="EQU" field="result">failure</check>
+        <append field="alert_type">failed_login</append>
+        <append field="severity">medium</append>
+    </rule>
+    
+    <!-- Rule 3: Detects unusual time access -->
+    <rule id="unusual_time">
+        <check type="MT" field="hour">22</check>
+        <append field="alert_type">unusual_time</append>
+        <append field="severity">low</append>
+    </rule>
+</root>
+```
+
+**Input Data:**
+```json
+{"username": "admin", "result": "success", "hour": 23}
+```
+
+**Output:**
+- Rule 1 matches → generates: `{"username": "admin", "result": "success", "hour": 23, "alert_type": "admin_login", "severity": "high"}`
+- Rule 3 matches → generates: `{"username": "admin", "result": "success", "hour": 23, "alert_type": "unusual_time", "severity": "low"}`
+
+**Key Points:**
+- **Independent Processing**: Each rule processes the original input data independently
+- **Multiple Outputs**: One input can generate multiple output records
+- **No Data Sharing**: Rules cannot share data modifications with each other
+- **Performance**: All rules are evaluated, so rule order doesn't affect performance
+
 ### 7.2 Check Operations
 
 #### Independent Check `<check>`

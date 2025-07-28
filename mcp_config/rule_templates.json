@@ -3,6 +3,13 @@
     "description": "Comprehensive rule templates for AgentSmith-HUB with intelligent data-driven design",
     "version": "3.0.0",
     
+    "EXECUTION_MODEL": {
+      "RULE_INTERNAL": "Within a single rule: operations execute in order (sequential processing)",
+      "RULESET_INTERNAL": "Within a ruleset: rules are evaluated independently (OR relationship)",
+      "DATA_FLOW": "Each matching rule generates its own output record",
+      "INDEPENDENCE": "Rules cannot share data modifications - each processes original input"
+    },
+    
     "BASIC_TEMPLATES": {
       "minimal_rule": {
         "name": "Minimal Rule Template",
@@ -17,7 +24,7 @@
       "sequential_detection": {
         "name": "Sequential Detection Rule",
         "description": "Rule with multiple checks and threshold - NEW flexible execution order",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"{check_field}\">{check_value}</check>\n  <!-- Threshold placed strategically in the execution order -->\n  <threshold group_by=\"{group_field}\" range=\"{time_range}\" value=\"{threshold_count}\"/>\n  <append field=\"processed_by\">rule_engine</append>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"{check_field}\">{check_value}</check>\n  <!-- Threshold placed strategically in the execution order -->\n  <threshold group_by=\"{group_field}\" range=\"{time_range}\">{threshold_count}</threshold>\n  <append field=\"processed_by\">rule_engine</append>\n</rule>",
         "required_fields": ["rule_id", "rule_name", "check_field", "check_value", "group_field", "time_range", "threshold_count"],
         "use_case": "Time-based frequency detection with data enrichment",
         "performance": "Optimized by placing selective checks first"
@@ -26,7 +33,7 @@
       "flexible_operations": {
         "name": "Flexible Operations Order",
         "description": "NEW: Operations execute in the order they appear in XML",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Example: enrichment before checking for better context -->\n  <append field=\"processed_by\">rule_engine</append>\n  <check type=\"EQU\" field=\"{field_name}\">{field_value}</check>\n  <!-- Or: check first then enrich for efficiency -->\n  <append field=\"timestamp\">_$TIMESTAMP</append>\n  <del field=\"{sensitive_field}\"/>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Example: enrichment before checking for better context -->\n  <append field=\"processed_by\">rule_engine</append>\n  <check type=\"EQU\" field=\"{field_name}\">{field_value}</check>\n  <!-- Or: check first then enrich for efficiency -->\n  <append field=\"timestamp\">_$TIMESTAMP</append>\n  <del>{sensitive_field}</del>\n</rule>",
         "required_fields": ["rule_id", "rule_name", "field_name", "field_value", "sensitive_field"],
         "use_case": "Demonstrates flexible operation ordering",
         "performance": "Order operations based on your specific needs"
@@ -37,7 +44,7 @@
       "complex_detection_logic": {
         "name": "Complex Detection with Boolean Logic",
         "description": "Using checklist for OR/NOT logic when needed",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist logic=\"OR\">\n    <check type=\"EQU\" field=\"source\">A</check>\n    <check type=\"EQU\" field=\"source\">B</check>\n  </checklist>\n  <check type=\"GT\" field=\"severity\">7</check>\n  <threshold group_by=\"user\" range=\"1h\" value=\"10\"/>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"source_a or source_b\">\n    <check id=\"source_a\" type=\"EQU\" field=\"source\">A</check>\n    <check id=\"source_b\" type=\"EQU\" field=\"source\">B</check>\n  </checklist>\n  <check type=\"MT\" field=\"severity\">7</check>\n  <threshold group_by=\"user\" range=\"1h\">10</threshold>\n</rule>",
         "required_fields": ["rule_id", "rule_name"],
         "use_case": "Complex conditions requiring OR logic",
         "performance": "Use checklist only when boolean logic is needed"
@@ -46,7 +53,7 @@
       "multi_stage_detection": {
         "name": "Multi-Stage Detection Pattern",
         "description": "Layered detection with progressive specificity",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Stage 1: Broad initial check (most selective first) -->\n  <check type=\"IN\" field=\"event_type\">login_fail,auth_error</check>\n  \n  <!-- Stage 2: Context check -->\n  <checklist logic=\"OR\">\n    <check type=\"EQU\" field=\"user_type\">admin</check>\n    <check type=\"EQU\" field=\"user_type\">root</check>\n  </checklist>\n  \n  <!-- Stage 3: Threshold analysis -->\n  <threshold group_by=\"source_ip\" range=\"5m\" value=\"3\"/>\n  \n  <!-- Stage 4: Data enrichment -->\n  <append field=\"alert_level\">high</append>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Stage 1: Broad initial check (most selective first) -->\n  <check type=\"INCL\" field=\"event_type\" logic=\"OR\" delimiter=\",\">login_fail,auth_error</check>\n  \n  <!-- Stage 2: Context check -->\n  <checklist condition=\"admin_user or root_user\">\n    <check id=\"admin_user\" type=\"EQU\" field=\"user_type\">admin</check>\n    <check id=\"root_user\" type=\"EQU\" field=\"user_type\">root</check>\n  </checklist>\n  \n  <!-- Stage 3: Threshold analysis -->\n  <threshold group_by=\"source_ip\" range=\"5m\">3</threshold>\n  \n  <!-- Stage 4: Data enrichment -->\n  <append field=\"alert_level\">high</append>\n</rule>",
         "use_case": "Complex multi-stage threat detection",
         "performance": "Most selective checks first for efficiency",
         "optimization_tips": ["Order checks by selectivity", "Use early filtering to reduce processing"]
@@ -57,7 +64,7 @@
       "enrichment_first_pattern": {
         "name": "Enrichment Before Detection",
         "description": "Demonstrates enriching data before checking for better context",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Enrich first to have full context for checking -->\n  <plugin field=\"geo_country\">geoLookup(ip_address)</plugin>\n  <append field=\"enriched_at\">_$TIMESTAMP</append>\n  \n  <!-- Now check with enriched data -->\n  <check type=\"IN\" field=\"geo_country\">CN,RU,KP</check>\n  <check type=\"GT\" field=\"risk_score\">70</check>\n  \n  <!-- Final processing -->\n  <threshold group_by=\"source_ip\" range=\"1h\" value=\"5\"/>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Enrich first to have full context for checking -->\n  <append type=\"PLUGIN\" field=\"geo_country\">geoMatch(ip_address)</append>\n  <append field=\"enriched_at\">_$TIMESTAMP</append>\n  \n  <!-- Now check with enriched data -->\n  <check type=\"INCL\" field=\"geo_country\" logic=\"OR\" delimiter=\",\">CN,RU,KP</check>\n  <check type=\"MT\" field=\"risk_score\">70</check>\n  \n  <!-- Final processing -->\n  <threshold group_by=\"source_ip\" range=\"1h\">5</threshold>\n</rule>",
         "use_case": "When enrichment provides data needed for detection",
         "performance": "Higher memory usage but better detection accuracy"
       },
@@ -65,7 +72,7 @@
       "progressive_check_pattern": {
         "name": "Progressive Check Pattern",
         "description": "Efficient detection with early exits",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Most selective check first (eliminates 99% of events) -->\n  <check type=\"REGEX\" field=\"exe\">^(cmd|powershell|wscript)\\.exe$</check>\n  \n  <!-- Second level check (eliminates 90% of remaining) -->\n  <check type=\"EQU\" field=\"is_admin\">true</check>\n  \n  <!-- Third level check (specific patterns) -->\n  <check type=\"INCL\" field=\"command_line\">-EncodedCommand</check>\n  \n  <!-- Threshold and enrichment after all checks pass -->\n  <threshold group_by=\"workstation\" range=\"10m\" value=\"5\"/>\n  <append field=\"alert_type\">admin_brute_force</append>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Most selective check first (eliminates 99% of events) -->\n  <check type=\"REGEX\" field=\"exe\">^(cmd|powershell|wscript)\\.exe$</check>\n  \n  <!-- Second level check (eliminates 90% of remaining) -->\n  <check type=\"EQU\" field=\"is_admin\">true</check>\n  \n  <!-- Third level check (specific patterns) -->\n  <check type=\"INCL\" field=\"command_line\">-EncodedCommand</check>\n  \n  <!-- Threshold and enrichment after all checks pass -->\n  <threshold group_by=\"workstation\" range=\"10m\">5</threshold>\n  <append field=\"alert_type\">admin_brute_force</append>\n</rule>",
         "use_case": "High-performance detection with minimal processing",
         "performance": "Optimized for high-volume event streams",
         "metrics": {
@@ -79,7 +86,7 @@
       "data_aggregation_rule": {
         "name": "Data Aggregation Rule",
         "description": "Using different threshold modes for analytics",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"metric_type\">bandwidth</check>\n  \n  <!-- COUNT mode (default) -->\n  <threshold group_by=\"interface\" range=\"5m\" value=\"100\"/>\n  \n  <!-- SUM mode for total calculation -->\n  <!-- <threshold group_by=\"interface\" range=\"5m\" count_type=\"SUM\" count_field=\"bytes\" value=\"1000000\"/> -->\n  \n  <!-- CLASSIFY mode for unique value counting -->\n  <!-- <threshold group_by=\"interface\" range=\"5m\" count_type=\"CLASSIFY\" count_field=\"source_ip\" value=\"50\"/> -->\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"metric_type\">bandwidth</check>\n  \n  <!-- COUNT mode (default) -->\n  <threshold group_by=\"interface\" range=\"5m\">100</threshold>\n  \n  <!-- SUM mode for total calculation -->\n  <!-- <threshold group_by=\"interface\" range=\"5m\" count_type=\"SUM\" count_field=\"bytes\">1000000</threshold> -->\n  \n  <!-- CLASSIFY mode for unique value counting -->\n  <!-- <threshold group_by=\"interface\" range=\"5m\" count_type=\"CLASSIFY\" count_field=\"source_ip\">50</threshold> -->\n</rule>",
         "use_case": "Network monitoring, performance analytics",
         "advanced_features": ["SUM aggregation", "CLASSIFY for cardinality"]
       },
@@ -87,7 +94,7 @@
       "plugin_enrichment_rule": {
         "name": "Plugin-Based Enrichment",
         "description": "Using plugins for dynamic data enrichment",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"event_type\">new_connection</check>\n  \n  <!-- Check plugins for condition evaluation -->\n  <check type=\"PLUGIN\" field=\"ip_address\">isPrivateIP(ip_address)</check>\n  \n  <!-- Append plugins for data enrichment -->\n  <append type=\"PLUGIN\" field=\"geo_info\">geoLookup(ip_address)</append>\n  \n  <!-- Regular plugin operations -->\n  <plugin>threatIntel(ip_address, \"reputation\")</plugin>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <check type=\"EQU\" field=\"event_type\">new_connection</check>\n  \n  <!-- Check plugins for condition evaluation -->\n  <check type=\"PLUGIN\">isPrivateIP(ip_address)</check>\n  \n  <!-- Append plugins for data enrichment -->\n  <append type=\"PLUGIN\" field=\"geo_info\">geoMatch(ip_address)</append>\n  \n  <!-- Regular plugin operations -->\n  <plugin>threatIntel(ip_address, \"reputation\")</plugin>\n</rule>",
         "use_case": "Advanced threat detection with external intelligence",
         "plugin_types": ["Check plugins (return bool)", "Append plugins (return data)", "Action plugins"]
       }
@@ -97,7 +104,7 @@
       "high_volume_optimization": {
         "name": "High Volume Event Processing",
         "description": "Optimized for millions of events per second",
-        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Use exact match for speed -->\n  <check type=\"EQU\" field=\"event_id\">4625</check>\n  \n  <!-- Use local cache for threshold -->\n  <threshold group_by=\"source_ip\" range=\"1m\" value=\"10\" local_cache=\"true\"/>\n  \n  <!-- Minimal enrichment -->\n  <append field=\"alert\">brute_force</append>\n</rule>",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <!-- Use exact match for speed -->\n  <check type=\"EQU\" field=\"event_id\">4625</check>\n  \n  <!-- Use local cache for threshold -->\n  <threshold group_by=\"source_ip\" range=\"1m\" local_cache=\"true\">10</threshold>\n  \n  <!-- Minimal enrichment -->\n  <append field=\"alert\">brute_force</append>\n</rule>",
         "optimization_techniques": [
           "EQU is faster than REGEX",
           "Local cache reduces Redis load",
@@ -117,12 +124,20 @@
         "NI": "String does not contain",
         "START": "String starts with",
         "END": "String ends with",
-          "REGEX": "Regular expression match",
+        "NSTART": "String doesn't start with",
+        "NEND": "String doesn't end with",
+        "REGEX": "Regular expression match",
         "PLUGIN": "Plugin-based check",
         "ISNULL": "Field is null/missing",
         "NOTNULL": "Field exists",
-        "IN": "Value in list (use with logic=\"OR\")",
-        "NCS_*": "Case-insensitive versions"
+        "NCS_EQU": "Case-insensitive exact match",
+        "NCS_NEQ": "Case-insensitive not equal",
+        "NCS_INCL": "Case-insensitive contains",
+        "NCS_NI": "Case-insensitive doesn't contain",
+        "NCS_START": "Case-insensitive starts with",
+        "NCS_END": "Case-insensitive ends with",
+        "NCS_NSTART": "Case-insensitive doesn't start with",
+        "NCS_NEND": "Case-insensitive doesn't end with"
       },
       
       "operation_types": {
@@ -137,7 +152,7 @@
       "deprecated_tags": {
         "filter": "Use <check> instead",
         "node": "Use <check> instead"
-    },
+      },
 
       "removed_concepts": {
         "fixed_order": "Operations now execute in XML declaration order",

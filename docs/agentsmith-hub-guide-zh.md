@@ -1461,6 +1461,63 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | id | 是 | 规则唯一标识符 |
 | name | 否 | 规则可读描述 |
 
+#### 多个规则的关系
+
+当一个规则集包含多个 `<rule>` 元素时，它们具有 **OR关系**：
+
+**核心概念：**
+- **独立评估**：每个规则都独立地对输入数据进行评估
+- **OR逻辑**：如果任何一个规则匹配，就会生成一条数据记录并向下游传递
+- **多重匹配**：多个规则可以匹配同一条数据，生成多条记录
+- **无顺序依赖**：规则之间不依赖彼此的处理结果
+
+**执行流程：**
+1. **并行评估**：规则集中的所有规则都对相同的输入数据进行评估
+2. **匹配检测**：每个匹配的规则都会生成一条独立的数据记录
+3. **数据生成**：每个匹配的规则都会创建自己的输出，包含特定的数据增强
+4. **下游流动**：所有生成的记录都会传递给数据流中的下一个组件
+
+**示例：**
+```xml
+<root type="DETECTION" name="多规则示例">
+    <!-- 规则1：检测管理员登录 -->
+    <rule id="admin_login">
+        <check type="EQU" field="username">admin</check>
+        <append field="alert_type">admin_login</append>
+        <append field="severity">high</append>
+    </rule>
+    
+    <!-- 规则2：检测登录失败 -->
+    <rule id="failed_login">
+        <check type="EQU" field="result">failure</check>
+        <append field="alert_type">failed_login</append>
+        <append field="severity">medium</append>
+    </rule>
+    
+    <!-- 规则3：检测异常时间访问 -->
+    <rule id="unusual_time">
+        <check type="MT" field="hour">22</check>
+        <append field="alert_type">unusual_time</append>
+        <append field="severity">low</append>
+    </rule>
+</root>
+```
+
+**输入数据：**
+```json
+{"username": "admin", "result": "success", "hour": 23}
+```
+
+**输出：**
+- 规则1匹配 → 生成：`{"username": "admin", "result": "success", "hour": 23, "alert_type": "admin_login", "severity": "high"}`
+- 规则3匹配 → 生成：`{"username": "admin", "result": "success", "hour": 23, "alert_type": "unusual_time", "severity": "low"}`
+
+**关键要点：**
+- **独立处理**：每个规则都独立处理原始输入数据
+- **多重输出**：一条输入可以生成多条输出记录
+- **无数据共享**：规则之间无法共享数据修改
+- **性能**：所有规则都会被评估，因此规则顺序不影响性能
+
 ### 7.2 检查操作
 
 #### 独立检查 `<check>`
