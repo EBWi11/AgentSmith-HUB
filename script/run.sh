@@ -262,27 +262,102 @@ check_config() {
     # Check for absolute config path first (preferred)
     if [ -d "$CONFIG_ROOT" ]; then
         print_info "Using config directory: $CONFIG_ROOT"
-    # Check for config directory relative to binary (backward compatibility)
-    elif [ -d "$binary_dir/config" ]; then
-        CONFIG_ROOT="$binary_dir/config"
-        print_info "Using config directory: $CONFIG_ROOT (relative to binary)"
-    # Check for config directory in current working directory (backward compatibility)
-    elif [ -d "config" ]; then
-        CONFIG_ROOT="$(pwd)/config"
-        print_info "Using config directory: $CONFIG_ROOT (current directory)"
     else
-        print_error "Config directory not found!"
-        print_error "Please ensure the config directory is present with proper configuration files."
-        echo ""
-        echo "Expected locations (in order of preference):"
-        echo "  - $CONFIG_ROOT (preferred)"
-        echo "  - $binary_dir/config (relative to binary)"
-        echo "  - $(pwd)/config (current directory)"
-        echo ""
-        echo "To create the default config directory:"
-        echo "  sudo mkdir -p $CONFIG_ROOT"
-        echo "  sudo chown \$(whoami):\$(whoami) $CONFIG_ROOT"
-        exit 1
+        # CONFIG_ROOT doesn't exist, try to create it from available config
+        print_info "Preferred config directory not found: $CONFIG_ROOT"
+        
+        # Check if we have config in binary directory
+        if [ -d "$binary_dir/config" ]; then
+            print_info "Found config in binary directory: $binary_dir/config"
+            print_info "Copying config to preferred location: $CONFIG_ROOT"
+            
+            # Create the directory
+            if sudo mkdir -p "$CONFIG_ROOT" 2>/dev/null; then
+                print_info "Created directory: $CONFIG_ROOT"
+            else
+                print_warn "Failed to create directory with sudo, trying without sudo..."
+                if mkdir -p "$CONFIG_ROOT" 2>/dev/null; then
+                    print_info "Created directory: $CONFIG_ROOT"
+                else
+                    print_error "Failed to create directory: $CONFIG_ROOT"
+                    print_error "Please run: sudo mkdir -p $CONFIG_ROOT"
+                    exit 1
+                fi
+            fi
+            
+            # Copy config files
+            if sudo cp -r "$binary_dir/config"/* "$CONFIG_ROOT/" 2>/dev/null; then
+                print_info "Successfully copied config files to: $CONFIG_ROOT"
+                # Set proper ownership
+                if sudo chown -R $(whoami):$(whoami) "$CONFIG_ROOT" 2>/dev/null; then
+                    print_info "Set proper ownership for config directory"
+                else
+                    print_warn "Failed to set ownership, but config files are copied"
+                fi
+            else
+                print_warn "Failed to copy with sudo, trying without sudo..."
+                if cp -r "$binary_dir/config"/* "$CONFIG_ROOT/" 2>/dev/null; then
+                    print_info "Successfully copied config files to: $CONFIG_ROOT"
+                else
+                    print_error "Failed to copy config files to: $CONFIG_ROOT"
+                    print_error "Please check permissions and try again"
+                    exit 1
+                fi
+            fi
+            
+        # Check for config directory in current working directory (backward compatibility)
+        elif [ -d "config" ]; then
+            print_info "Found config in current directory: $(pwd)/config"
+            print_info "Copying config to preferred location: $CONFIG_ROOT"
+            
+            # Create the directory
+            if sudo mkdir -p "$CONFIG_ROOT" 2>/dev/null; then
+                print_info "Created directory: $CONFIG_ROOT"
+            else
+                print_warn "Failed to create directory with sudo, trying without sudo..."
+                if mkdir -p "$CONFIG_ROOT" 2>/dev/null; then
+                    print_info "Created directory: $CONFIG_ROOT"
+                else
+                    print_error "Failed to create directory: $CONFIG_ROOT"
+                    print_error "Please run: sudo mkdir -p $CONFIG_ROOT"
+                    exit 1
+                fi
+            fi
+            
+            # Copy config files
+            if sudo cp -r "config"/* "$CONFIG_ROOT/" 2>/dev/null; then
+                print_info "Successfully copied config files to: $CONFIG_ROOT"
+                # Set proper ownership
+                if sudo chown -R $(whoami):$(whoami) "$CONFIG_ROOT" 2>/dev/null; then
+                    print_info "Set proper ownership for config directory"
+                else
+                    print_warn "Failed to set ownership, but config files are copied"
+                fi
+            else
+                print_warn "Failed to copy with sudo, trying without sudo..."
+                if cp -r "config"/* "$CONFIG_ROOT/" 2>/dev/null; then
+                    print_info "Successfully copied config files to: $CONFIG_ROOT"
+                else
+                    print_error "Failed to copy config files to: $CONFIG_ROOT"
+                    print_error "Please check permissions and try again"
+                    exit 1
+                fi
+            fi
+            
+        else
+            print_error "No config directory found!"
+            print_error "Please ensure the config directory is present with proper configuration files."
+            echo ""
+            echo "Expected locations (in order of preference):"
+            echo "  - $CONFIG_ROOT (preferred)"
+            echo "  - $binary_dir/config (relative to binary)"
+            echo "  - $(pwd)/config (current directory)"
+            echo ""
+            echo "To create the default config directory:"
+            echo "  sudo mkdir -p $CONFIG_ROOT"
+            echo "  sudo chown \$(whoami):\$(whoami) $CONFIG_ROOT"
+            exit 1
+        fi
     fi
 }
 

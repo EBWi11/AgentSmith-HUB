@@ -291,7 +291,7 @@ func (in *Input) Start() error {
 			in.SetStatus(common.StatusError, fmt.Errorf("kafka configuration missing for input %s", in.Id))
 			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
-		msgChan := make(chan map[string]interface{}, 4096)
+		msgChan := make(chan map[string]interface{}, 512)
 		cons, err := common.NewKafkaConsumer(
 			in.kafkaCfg.Brokers,
 			in.kafkaCfg.Group,
