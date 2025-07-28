@@ -11,6 +11,18 @@ metadata:
     name: agentsmith-hub
 
 ---
+# Secret for Redis password
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentsmith-hub-redis-secret
+  namespace: agentsmith-hub
+type: Opaque
+data:
+  # Base64 encoded password: "Ag3ntSm1th-Hub-2024!@#"
+  password: "QWczbnRTbTF0aC1IdWItMjAyNCFAIw=="
+
+---
 # Persistent Volume Claim for Leader Config
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -40,7 +52,7 @@ data:
     
     # Redis configuration (can be overridden by environment variables)
     redis: "agentsmith-hub-redis:6379"
-    redis_password: "toor"
+    redis_password: "Ag3ntSm1th-Hub-2024!@#"
     
     # Logging
     logging:
@@ -55,7 +67,16 @@ data:
       enabled: true
       config_path: "/opt/mcp_config"
 
+  # MCP configuration
+  mcp_config.json: |
+    {
+      "mcp_settings": {
+        "enabled": true,
+        "config_path": "/opt/mcp_config"
+      }
+    }
 
+---
 # Redis Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -81,7 +102,10 @@ spec:
         - containerPort: 6379
         env:
         - name: REDIS_PASSWORD
-          value: "toor"
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret
+              key: password
         command:
         - sh
         - -c
@@ -143,7 +167,6 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/ebwi11/agentsmith-hub:latest
         imagePullPolicy: Always
-        # Use the new docker-entrypoint.sh which will start leader mode based on MODE env var
         ports:
         - containerPort: 8080
           name: backend
@@ -157,7 +180,10 @@ spec:
         - name: REDIS_PORT
           value: "6379"
         - name: REDIS_PASSWORD
-          value: "toor"
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret
+              key: password
         - name: NODE_ID
           value: "leader"
         - name: LOG_LEVEL
@@ -165,7 +191,10 @@ spec:
         - name: CONFIG_ROOT
           value: "/opt/config"
         - name: AGENTSMITH_TOKEN
-          value: "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token-secret
+              key: token
         - name: SIMD_ENABLED
           value: "false"  # Set to "true" to enable SIMD optimizations
         volumeMounts:
@@ -210,7 +239,7 @@ spec:
         configMap:
           name: agentsmith-hub-config
           items:
-          - key: config.yaml
+          - key: mcp_config.json
             path: mcp_config.json
 
 ---
@@ -261,7 +290,6 @@ spec:
       - name: agentsmith-hub
         image: ghcr.io/ebwi11/agentsmith-hub:latest
         imagePullPolicy: Always
-        # Use the new docker-entrypoint.sh which will start follower mode based on MODE env var
         ports:
         - containerPort: 8080
           name: backend
@@ -273,7 +301,10 @@ spec:
         - name: REDIS_PORT
           value: "6379"
         - name: REDIS_PASSWORD
-          value: "toor"
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-redis-secret
+              key: password
         - name: NODE_ID
           valueFrom:
             fieldRef:
@@ -283,7 +314,10 @@ spec:
         - name: CONFIG_ROOT
           value: "/opt/config"
         - name: AGENTSMITH_TOKEN
-          value: "9ef0c170-069e-44dd-a406-2d85eca0a0b2"
+          valueFrom:
+            secretKeyRef:
+              name: agentsmith-hub-token-secret
+              key: token
         - name: SIMD_ENABLED
           value: "false"  # Set to "true" to enable SIMD optimizations
         volumeMounts:
@@ -327,6 +361,9 @@ spec:
       - name: mcp-config
         configMap:
           name: agentsmith-hub-config
+          items:
+          - key: mcp_config.json
+            path: mcp_config.json
 
 ---
 # Follower Service

@@ -61,3 +61,6 @@ src/config/config.local.js
 bin/
 src/.project_status
 src/.token
+
+# Kubernetes secrets
+k8s/secrets.yaml

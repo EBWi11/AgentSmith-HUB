@@ -38,7 +38,20 @@ fi
 
 print_status "Starting AgentSmith-HUB unified deployment..."
 
-# Step 1: Deploy all components (Redis, Leader, Follower)
+# Step 0: Check if secrets file exists, if not generate it
+if [ ! -f "secrets.yaml" ]; then
+    print_warning "secrets.yaml not found. Generating new secrets..."
+    ./generate-secrets.sh
+    print_warning "Please review the generated secrets and update k8s-deployment.yaml if needed."
+    print_warning "Then run this script again."
+    exit 1
+fi
+
+# Step 1: Deploy secrets first
+print_status "Deploying secrets..."
+kubectl apply -f secrets.yaml
+
+# Step 2: Deploy all components (Redis, Leader, Follower)
 print_status "Deploying AgentSmith-HUB components..."
 kubectl apply -f k8s-deployment.yaml
 
