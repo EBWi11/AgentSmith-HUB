@@ -542,6 +542,7 @@ func (in *Input) Stop() error {
 
 	// Step 3: Wait for internal message channel to be drained by downstream consumers
 	// This ensures no data loss during shutdown - all buffered data is processed
+	var stopError error
 	if in.internalMsgChan != nil {
 		logger.Info("Waiting for internal message channel to be drained", "input", in.Id)
 
@@ -571,6 +572,7 @@ func (in *Input) Stop() error {
 			if time.Since(drainStartTime) > channelDrainTimeout {
 				logger.Warn("Timeout waiting for internal channel to drain, proceeding with shutdown",
 					"input", in.Id, "remaining_messages", channelLen)
+				stopError = fmt.Errorf("timeout waiting for internal channel to drain")
 				break
 			}
 
@@ -599,13 +601,22 @@ func (in *Input) Stop() error {
 		logger.Info("Input stopped gracefully", "id", in.Id)
 	case <-time.After(10 * time.Second):
 		logger.Warn("Input stop timeout, forcing cleanup", "id", in.Id)
+		if stopError == nil {
+			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
+		}
 	}
 
 	// Use cleanup to ensure all resources are properly released
 	in.cleanup()
 
-	in.SetStatus(common.StatusStopped, nil)
-	return nil
+	// Set final status based on whether there were any errors during stop
+	if stopError != nil {
+		in.SetStatus(common.StatusError, fmt.Errorf("stop operation failed: %w", stopError))
+		return stopError
+	} else {
+		in.SetStatus(common.StatusStopped, nil)
+		return nil
+	}
 }
 
 // QPS calculation and GetConsumeQPS method removed

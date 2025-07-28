@@ -602,13 +602,20 @@ func (out *Output) Start() error {
 // It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
 	if out.Status != common.StatusRunning && out.Status != common.StatusError {
-		return fmt.Errorf("output %s is not running", out.Id)
+		// Allow stopping from any state for cleanup purposes, but only do actual work if needed
+		if out.Status == common.StatusStopped {
+			logger.Debug("Output already stopped, skipping stop operation", "output", out.Id)
+			return nil
+		}
+		// For other states (e.g., StatusStarting), proceed with stop to ensure cleanup
+		logger.Debug("Stopping output from non-running state", "output", out.Id, "current_status", out.Status)
 	}
 	out.SetStatus(common.StatusStopping, nil)
 
 	// Overall timeout for output stop
 	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
 	stopCompleted := make(chan struct{})
+	var stopError error
 
 	go func() {
 		defer close(stopCompleted)
@@ -623,6 +630,7 @@ func (out *Output) Stop() error {
 			select {
 			case <-upstreamTimeout:
 				logger.Warn("Timeout waiting for upstream channels, forcing shutdown", "output", out.Id)
+				stopError = fmt.Errorf("timeout waiting for upstream channels to drain")
 				break waitUpstream
 			default:
 				allEmpty := true
@@ -661,6 +669,9 @@ func (out *Output) Stop() error {
 		logger.Info("Output channels drained successfully", "output", out.Id)
 	case <-overallTimeout:
 		logger.Warn("Output stop timeout exceeded, forcing cleanup", "output", out.Id)
+		if stopError == nil {
+			stopError = fmt.Errorf("overall stop operation timeout")
+		}
 	}
 
 	// Wait for goroutines to finish with timeout
@@ -676,13 +687,22 @@ func (out *Output) Stop() error {
 		logger.Info("Output stopped gracefully", "id", out.Id)
 	case <-time.After(5 * time.Second):
 		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
+		if stopError == nil {
+			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
+		}
 	}
 
 	// Use cleanup to ensure all resources are properly released
 	out.cleanup()
 
-	out.SetStatus(common.StatusStopped, nil)
-	return nil
+	// Set final status based on whether there were any errors during stop
+	if stopError != nil {
+		out.SetStatus(common.StatusError, fmt.Errorf("stop operation failed: %w", stopError))
+		return stopError
+	} else {
+		out.SetStatus(common.StatusStopped, nil)
+		return nil
+	}
 }
 
 // GetProduceTotal returns the total produced count.

@@ -1015,7 +1015,10 @@ func ApplySingleChange(c echo.Context) error {
 				// Use safe accessor without additional locking
 				if p, ok := project.GetProject(id); ok {
 					// Restart and record the operation
-					p.Restart(true, "change_push")
+					err := p.Restart(true, "change_push")
+					if err != nil {
+						logger.Error("Failed to restart project after single change apply", "project_id", id, "error", err)
+					}
 				}
 			}
 		}()
@@ -1103,7 +1106,10 @@ func ApplyAllChanges(c echo.Context) error {
 				// Use safe accessor without additional locking
 				if p, ok := project.GetProject(id); ok {
 					// Restart and record the operation
-					p.Restart(true, "batch_change_push")
+					err := p.Restart(true, "batch_change_push")
+					if err != nil {
+						logger.Error("Failed to restart project after batch change apply", "project_id", id, "error", err)
+					}
 				}
 			}
 		}()

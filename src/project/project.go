@@ -1055,18 +1055,96 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 
 	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu
 	if p.Status == common.StatusRunning || p.Status == common.StatusError {
-		_ = p.Stop(false)
+		stopErr := p.Stop(false)
+		if stopErr != nil {
+			err = fmt.Errorf("failed to stop project during restart: %w", stopErr)
+			return err
+		}
 	}
 
-	// Start the project again
-	err = p.Start(false)
+	// Start the project again with retry mechanism
+	err = p.startWithRetry(false)
 	if err != nil {
-		err = fmt.Errorf("failed to start project after restart: %w", err)
+		err = fmt.Errorf("failed to start project after restart (exhausted all retries): %w", err)
 		return err
 	}
 
 	logger.Info("Project restarted successfully", "project", p.Id)
 	return nil
+}
+
+// startWithRetry starts the project with retry mechanism for components that fail to reach running status
+func (p *Project) startWithRetry(recordOperation bool) error {
+	maxRetries := 3
+	retryDelays := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		logger.Info("Starting project", "project", p.Id, "attempt", attempt+1, "max_attempts", maxRetries+1)
+
+		// Attempt to start the project
+		err := p.Start(recordOperation)
+		if err != nil {
+			if attempt == maxRetries {
+				logger.Error("Failed to start project after all retry attempts", "project", p.Id, "final_error", err)
+				return fmt.Errorf("failed to start project after %d attempts: %w", maxRetries+1, err)
+			}
+
+			logger.Warn("Project start failed, will retry", "project", p.Id, "attempt", attempt+1, "error", err, "retry_delay", retryDelays[attempt])
+			time.Sleep(retryDelays[attempt])
+			continue
+		}
+
+		// Start succeeded, now check if all components are actually running
+		if p.areAllComponentsRunning() {
+			logger.Info("Project started successfully with all components running", "project", p.Id, "attempt", attempt+1)
+			return nil
+		}
+
+		// Some components are not running, retry if we have attempts left
+		if attempt == maxRetries {
+			return fmt.Errorf("project started but some components are not in running state after %d attempts", maxRetries+1)
+		}
+
+		logger.Warn("Project started but some components are not running, will retry", "project", p.Id, "attempt", attempt+1, "retry_delay", retryDelays[attempt])
+
+		// Stop the project before retrying
+		_ = p.Stop(false)
+		time.Sleep(retryDelays[attempt])
+	}
+
+	return fmt.Errorf("unexpected end of retry loop")
+}
+
+// areAllComponentsRunning checks if all project components are in running state
+func (p *Project) areAllComponentsRunning() bool {
+	// Check input components
+	inputs := p.GetProjectInputs()
+	for _, in := range inputs {
+		if in.Status != common.StatusRunning {
+			logger.Warn("Input component not running", "project", p.Id, "input", in.Id, "status", in.Status)
+			return false
+		}
+	}
+
+	// Check output components
+	outputs := p.GetProjectOutputs()
+	for _, out := range outputs {
+		if out.Status != common.StatusRunning {
+			logger.Warn("Output component not running", "project", p.Id, "output", out.Id, "status", out.Status)
+			return false
+		}
+	}
+
+	// Check ruleset components
+	rulesets := p.GetProjectRulesets()
+	for _, rs := range rulesets {
+		if rs.Status != common.StatusRunning {
+			logger.Warn("Ruleset component not running", "project", p.Id, "ruleset", rs.RulesetID, "status", rs.Status)
+			return false
+		}
+	}
+
+	return true
 }
 
 func (p *Project) getPartner(t string, pns string) []string {
@@ -1084,7 +1162,7 @@ func (p *Project) getPartner(t string, pns string) []string {
 }
 
 func (p *Project) stopComponentsInternal() error {
-	var err error
+	var stopErrors []error
 	logger.Info("Step 1: Disconnecting inputs from downstream", "project", p.Id)
 	p.disconnectInputsFromDownstream()
 
@@ -1092,7 +1170,10 @@ func (p *Project) stopComponentsInternal() error {
 	p.waitForCompleteDataProcessing()
 
 	logger.Info("Step 3: Stopping input components", "project", p.Id)
-	p.stopInputComponents()
+	inputErrors := p.stopInputComponents()
+	if len(inputErrors) > 0 {
+		stopErrors = append(stopErrors, inputErrors...)
+	}
 
 	if !p.Testing {
 		common.GlobalDailyStatsManager.CollectAllComponentsData()
@@ -1103,7 +1184,13 @@ func (p *Project) stopComponentsInternal() error {
 	for id, rs := range rulesets {
 		DeletePNSRuleset(id)
 		if CalculateRefCount(id, p.Id) == 0 {
-			_ = rs.Stop()
+			stopErr := rs.Stop()
+			if stopErr != nil {
+				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", stopErr)
+				stopErrors = append(stopErrors, fmt.Errorf("ruleset %s: %w", rs.RulesetID, stopErr))
+			} else {
+				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID)
+			}
 		}
 	}
 
@@ -1112,13 +1199,15 @@ func (p *Project) stopComponentsInternal() error {
 	for id, out := range outputs {
 		DeletePNSOutput(id)
 		if CalculateRefCount(id, p.Id) == 0 {
+			var stopErr error
 			if p.Testing {
-				err = out.StopForTesting()
+				stopErr = out.StopForTesting()
 			} else {
-				err = out.Stop()
+				stopErr = out.Stop()
 			}
-			if err != nil {
-				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", err)
+			if stopErr != nil {
+				logger.Error("Failed to stop output", "project", p.Id, "output", out.Id, "error", stopErr)
+				stopErrors = append(stopErrors, fmt.Errorf("output %s: %w", out.Id, stopErr))
 			} else {
 				logger.Info("Stopped output", "project", p.Id, "output", out.Id, "sequence", out.ProjectNodeSequence)
 			}
@@ -1127,6 +1216,16 @@ func (p *Project) stopComponentsInternal() error {
 
 	p.cleanup()
 	logger.Info("Finished stopping project components", "project", p.Id)
+
+	// Return aggregated errors if any
+	if len(stopErrors) > 0 {
+		var errorMessages []string
+		for _, err := range stopErrors {
+			errorMessages = append(errorMessages, err.Error())
+		}
+		return fmt.Errorf("failed to stop some components: %s", strings.Join(errorMessages, "; "))
+	}
+
 	return nil
 }
 
@@ -1203,7 +1302,9 @@ func (p *Project) disconnectInputsFromDownstream() {
 
 // stopInputComponents stops all input components used by this project
 // This should be called after data processing is complete
-func (p *Project) stopInputComponents() {
+// Returns a list of errors encountered during stopping, but continues to stop all components
+func (p *Project) stopInputComponents() []error {
+	var stopErrors []error
 	inputs := p.GetProjectInputs()
 	for id, in := range inputs {
 		// Input components need reference counting to determine if they should be stopped
@@ -1213,29 +1314,34 @@ func (p *Project) stopInputComponents() {
 			globalInput, exists := GetInput(in.Id)
 
 			if exists {
+				var err error
 				if p.Testing {
-					err := globalInput.StopForTesting()
+					err = globalInput.StopForTesting()
 					if err != nil {
 						logger.Error("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
+						stopErrors = append(stopErrors, fmt.Errorf("test input %s: %w", in.Id, err))
 					} else {
 						logger.Info("Stopped test input", "project", p.Id, "input", in.Id)
 					}
 				} else {
-					err := globalInput.Stop()
+					err = globalInput.Stop()
 					if err != nil {
 						logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+						stopErrors = append(stopErrors, fmt.Errorf("input %s: %w", in.Id, err))
 					} else {
 						logger.Info("Stopped input", "project", p.Id, "input", in.Id)
 					}
 				}
 			} else {
 				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
+				stopErrors = append(stopErrors, fmt.Errorf("input %s: global input not found", in.Id))
 			}
 		} else {
 			logger.Debug("Input still in use by other projects, not stopping",
 				"project", p.Id, "input", in.Id, "ref_count", CalculateRefCount(id, p.Id))
 		}
 	}
+	return stopErrors
 }
 
 // waitForCompleteDataProcessing waits for all data to be fully processed through the pipeline
