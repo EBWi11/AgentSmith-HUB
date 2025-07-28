@@ -15,6 +15,13 @@ import (
 
 const HitRuleIdFieldName = "_hub_hit_rule_id"
 
+// SIMD statistics variables
+var (
+	simdOperationsCount     uint64        // SIMD operations count
+	fallbackOperationsCount uint64        // Fallback operations count
+	simdEnabled             bool   = true // SIMD enable flag, enabled by default
+)
+
 // ruleCachePool reuses map objects to reduce allocations
 var ruleCachePool = sync.Pool{
 	New: func() interface{} { return make(map[string]common.CheckCoreCache, 8) },
@@ -826,7 +833,29 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		return result
 
 	default:
-		checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+		// SIMD optimization path: intelligently choose whether to use SIMD
+		if shouldUseSIMD(checkNode.Type, needCheckData, checkNodeValue) {
+			switch checkNode.Type {
+			case "INCL":
+				checkListFlag, _ = SIMDEnhancedINCL(needCheckData, checkNodeValue)
+			case "NCS_INCL":
+				checkListFlag, _ = SIMDEnhancedNCS_INCL(needCheckData, checkNodeValue)
+			case "START":
+				checkListFlag, _ = SIMDEnhancedSTART(needCheckData, checkNodeValue)
+			case "NCS_START":
+				checkListFlag, _ = SIMDEnhancedNCS_START(needCheckData, checkNodeValue)
+			case "END":
+				checkListFlag, _ = SIMDEnhancedEND(needCheckData, checkNodeValue)
+			case "NCS_END":
+				checkListFlag, _ = SIMDEnhancedNCS_END(needCheckData, checkNodeValue)
+			default:
+				// Fallback to standard implementation
+				checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+			}
+		} else {
+			// Use standard implementation
+			checkListFlag, _ = checkNode.CheckFunc(needCheckData, checkNodeValue)
+		}
 	}
 
 	return checkListFlag
@@ -899,4 +928,48 @@ func (r *Ruleset) GetRunningTaskCount() int {
 		return r.antsPool.Running()
 	}
 	return 0
+}
+
+// shouldUseSIMD determines whether to use SIMD optimization based on operation type and data characteristics
+func shouldUseSIMD(operationType, data, pattern string) bool {
+	// First check if SIMD is globally enabled
+	if !simdEnabled {
+		atomic.AddUint64(&fallbackOperationsCount, 1)
+		return false
+	}
+
+	// Only enable SIMD for supported operation types
+	switch operationType {
+	case "INCL", "NCS_INCL", "START", "NCS_START", "END", "NCS_END":
+		// Intelligent thresholds based on data and pattern length
+		dataLen := len(data)
+		patternLen := len(pattern)
+
+		// Empty data or empty pattern not suitable for SIMD
+		if dataLen == 0 || patternLen == 0 {
+			atomic.AddUint64(&fallbackOperationsCount, 1)
+			return false
+		}
+
+		var useSIMD bool
+		// For contains operations, data length should be at least twice the pattern length and >=16 bytes
+		if operationType == "INCL" || operationType == "NCS_INCL" {
+			useSIMD = dataLen >= 16 && dataLen >= patternLen*2
+		} else {
+			// For prefix/suffix operations, data length >=16 bytes is sufficient
+			useSIMD = dataLen >= 16
+		}
+
+		if useSIMD {
+			atomic.AddUint64(&simdOperationsCount, 1)
+		} else {
+			atomic.AddUint64(&fallbackOperationsCount, 1)
+		}
+
+		return useSIMD
+
+	default:
+		atomic.AddUint64(&fallbackOperationsCount, 1)
+		return false
+	}
 }
