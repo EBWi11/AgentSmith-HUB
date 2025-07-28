@@ -1,6 +1,7 @@
 package common
 
 import (
+	"AgentSmith-HUB/logger"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,8 +11,8 @@ import (
 )
 
 const (
-	// Use timer-based sampling: sample once every 3 minutes
-	SamplingInterval = 15 * time.Minute // Sample once every 3 minutes
+	// Use timer-based sampling: sample once every 15 minutes
+	SamplingInterval = 6 * time.Minute
 )
 
 // SampleData represents a single sample with its metadata
@@ -19,7 +20,6 @@ type SampleData struct {
 	Data                interface{} `json:"data"`
 	Timestamp           time.Time   `json:"timestamp"`
 	ProjectNodeSequence string      `json:"project_node_sequence"`
-	// Removed SamplerName as it's not needed for simplified approach
 }
 
 // SamplerStats represents statistics about sampling
@@ -35,27 +35,55 @@ type SamplerStats struct {
 
 // Sampler represents a sampling instance with timer-based sampling
 type Sampler struct {
-	name           string
-	totalCount     uint64
-	sampledCount   uint64
-	maxSamples     int
-	pool           *ants.Pool // Used for asynchronous processing of sampling data
-	closed         int32      // Mark whether it's closed
-	lastSampleTime sync.Map   // Cache for last sample time per project sequence
+	name          string
+	sampledCount  uint64
+	maxSamples    int
+	pool          *ants.Pool
+	closed        int32
+	samplingFlags sync.Map // Cache for sampling flags per project sequence
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
 }
 
 // NewSampler creates a new sampler instance
 func NewSampler(name string) *Sampler {
-	pool, err := ants.NewPool(8, ants.WithPreAlloc(true))
+	pool, err := ants.NewPool(2, ants.WithPreAlloc(true))
 	if err != nil {
-		// If creating goroutine pool fails, use default pool
 		pool = nil
 	}
 
-	return &Sampler{
+	sampler := &Sampler{
 		name:       name,
 		maxSamples: 100,
 		pool:       pool,
+		stopChan:   make(chan struct{}),
+	}
+
+	// Start the sampling control goroutine
+	sampler.wg.Add(1)
+	go sampler.samplingController()
+
+	return sampler
+}
+
+// samplingController runs in a separate goroutine to control sampling flags
+func (s *Sampler) samplingController() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(SamplingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Enable sampling for all project sequences
+			s.samplingFlags.Range(func(key, value interface{}) bool {
+				s.samplingFlags.Store(key, true)
+				return true
+			})
+		case <-s.stopChan:
+			return
+		}
 	}
 }
 
@@ -69,27 +97,21 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 	// Normalize ProjectNodeSequence to lower-case (only once)
 	normalizedKey := strings.ToLower(projectNodeSequence)
 
-	// Increment total counter using atomic operations
-	atomic.AddUint64(&s.totalCount, 1)
-
-	// Get current time only once
-	now := time.Now()
-
-	// Check if enough time has passed since last sample for this project sequence
-	lastSampleTimeInterface, exists := s.lastSampleTime.Load(normalizedKey)
+	// Check sampling flag
+	samplingFlagInterface, exists := s.samplingFlags.Load(normalizedKey)
 
 	var shouldSample bool
 	if !exists {
-		// First sample for this project sequence
+		// First sample for this project sequence - enable sampling
 		shouldSample = true
+		s.samplingFlags.Store(normalizedKey, false) // Disable after first sample
 	} else {
-		// Use type assertion with ok pattern for safety and performance
-		if lastSampleTime, ok := lastSampleTimeInterface.(time.Time); ok {
-			// Sample if 3 minutes have passed since last sample
-			shouldSample = now.Sub(lastSampleTime) >= SamplingInterval
-		} else {
-			// Corrupted data, treat as first sample
+		// Check if sampling is enabled
+		if flag, ok := samplingFlagInterface.(bool); ok && flag {
 			shouldSample = true
+			s.samplingFlags.Store(normalizedKey, false) // Disable after sampling
+		} else {
+			shouldSample = false
 		}
 	}
 
@@ -97,13 +119,11 @@ func (s *Sampler) Sample(data interface{}, projectNodeSequence string) bool {
 		return false
 	}
 
-	// Update last sample time with normalized key
-	s.lastSampleTime.Store(normalizedKey, now)
-
 	// Increment sampling count
 	atomic.AddUint64(&s.sampledCount, 1)
 
-	// Create sample data (use original projectNodeSequence for data consistency)
+	// Create sample data
+	now := time.Now()
 	sample := SampleData{
 		Data:                data,
 		Timestamp:           now,
@@ -174,7 +194,6 @@ func (s *Sampler) GetStats() SamplerStats {
 
 	return SamplerStats{
 		Name:           s.name,
-		TotalCount:     int64(atomic.LoadUint64(&s.totalCount)),
 		SampledCount:   int64(atomic.LoadUint64(&s.sampledCount)),
 		CurrentSamples: totalSamples,
 		MaxSamples:     s.maxSamples,
@@ -185,12 +204,11 @@ func (s *Sampler) GetStats() SamplerStats {
 
 // Reset resets all samples and counters
 func (s *Sampler) Reset() {
-	atomic.StoreUint64(&s.totalCount, 0)
 	atomic.StoreUint64(&s.sampledCount, 0)
 
-	// Clear timer cache
-	s.lastSampleTime.Range(func(key, value interface{}) bool {
-		s.lastSampleTime.Delete(key)
+	// Clear sampling flags cache
+	s.samplingFlags.Range(func(key, value interface{}) bool {
+		s.samplingFlags.Delete(key)
 		return true
 	})
 
@@ -205,6 +223,10 @@ func (s *Sampler) Reset() {
 func (s *Sampler) Close() {
 	// Mark as closed
 	atomic.StoreInt32(&s.closed, 1)
+
+	// Stop the sampling controller goroutine
+	close(s.stopChan)
+	s.wg.Wait()
 
 	// Close goroutine pool
 	if s.pool != nil {
@@ -238,4 +260,21 @@ func GetSampler(name string) *Sampler {
 	sampler := NewSampler(name)
 	samplers[name] = sampler
 	return sampler
+}
+
+// CloseAllSamplers closes all sampler instances and cleans up resources
+func CloseAllSamplers() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	logger.Info("Closing all sampler instances", "count", len(samplers))
+
+	for name, sampler := range samplers {
+		logger.Debug("Closing sampler", "name", name)
+		sampler.Close()
+	}
+
+	// Clear the samplers map
+	samplers = make(map[string]*Sampler)
+	logger.Info("All samplers closed successfully")
 }

@@ -237,6 +237,8 @@ func main() {
 			if rsm := common.GetRedisSampleManager(); rsm != nil {
 				rsm.Close()
 			}
+			// Close all samplers to clean up goroutines and resources
+			common.CloseAllSamplers()
 		}()
 
 		// Wait for shutdown completion or timeout
