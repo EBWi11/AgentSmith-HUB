@@ -26,6 +26,6 @@ fi
 echo "Starting backend in follower mode..."
 exec ./agentsmith-hub \
     --config_root "$CONFIG_ROOT" \
-    --port 8080 \
+    --api_listen "0.0.0.0:8080" \
     --log_level "$LOG_LEVEL" \
     --node_id "$NODE_ID"

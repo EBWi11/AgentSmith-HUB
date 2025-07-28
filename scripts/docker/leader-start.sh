@@ -32,7 +32,7 @@ nginx -c /tmp/nginx/default.conf
 echo "Starting backend in leader mode..."
 exec ./agentsmith-hub \
     --config_root "$CONFIG_ROOT" \
-    --port 8080 \
+    --api_listen "0.0.0.0:8080" \
     --leader \
     --log_level "$LOG_LEVEL" \
     --node_id "$NODE_ID"

@@ -30,7 +30,7 @@ func main() {
 	var (
 		cfgRoot   = flag.String("config_root", "", "directory containing config.yaml and component sub dirs (required)")
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
-		port      = flag.Int("port", 8080, "HTTP listen port")
+		apiListen = flag.String("api_listen", "0.0.0.0:8080", "API server listen address")
 		showVer   = flag.Bool("version", false, "show version")
 		buildVers = "v0.1.7"
 	)
@@ -165,16 +165,14 @@ func main() {
 			return
 		}
 
-		listenAddr := fmt.Sprintf("0.0.0.0:%d", *port)
-		go api.ServerStart(listenAddr) // start Echo API on specified port
+		go api.ServerStart(*apiListen) // start Echo API on specified address
 	} else {
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
 
 		// Start follower API server (read-only endpoints)
-		followerAddr := fmt.Sprintf("0.0.0.0:%d", *port)
-		go api.ServerStartFollower(followerAddr) // start follower API server
-		logger.Info("Follower API server starting", "address", followerAddr)
+		go api.ServerStartFollower(*apiListen) // start follower API server
+		logger.Info("Follower API server starting", "address", *apiListen)
 	}
 
 	// ========== Graceful shutdown handling ==========
@@ -583,17 +581,20 @@ func loadHubConfig(root string) error {
 
 // startPprofServer starts the pprof HTTP server if enabled in configuration
 func startPprofServer() {
-	if common.Config.Pprof == nil || !common.Config.Pprof.Enabled {
+	if !common.Config.PprofEnable {
 		logger.Debug("pprof server disabled in configuration")
 		return
 	}
 
-	port := common.Config.Pprof.Port
-	if port <= 0 {
-		port = 6060 // Default pprof port
+	port := common.Config.PprofPort
+	if port == "" {
+		port = "0.0.0.0:6060" // Default pprof address
+	} else if !strings.Contains(port, ":") {
+		// If only port number is provided, prepend 0.0.0.0:
+		port = "0.0.0.0:" + port
 	}
 
-	pprofAddr := fmt.Sprintf("0.0.0.0:%d", port)
+	pprofAddr := port
 
 	go func() {
 		logger.Info("Starting pprof server", "address", pprofAddr,
