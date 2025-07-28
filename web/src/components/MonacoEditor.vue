@@ -3117,7 +3117,7 @@ function getXmlAttributeNameCompletions(context, range) {
   switch (context.currentTag) {
     case 'root':
       suggestions.push(
-        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Ruleset type', insertText: 'type="WHITELIST"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Ruleset type', insertText: 'type="EXCLUDE"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'name', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Ruleset name', insertText: 'name="ruleset-name"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
         { label: 'author', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Ruleset author', insertText: 'author="name"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
       );

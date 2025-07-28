@@ -911,6 +911,7 @@ func (p *Project) Start(lock bool) error {
 
 	err := p.parseContent()
 	if err != nil {
+		p.SetProjectStatus(common.StatusError, fmt.Errorf("project parse error: %s", err.Error()))
 		return fmt.Errorf("project parse error: %s", err.Error())
 	}
 
@@ -931,6 +932,7 @@ func (p *Project) Start(lock bool) error {
 
 	err = p.initComponents()
 	if err != nil {
+		// Stop all components that may have been partially initialized
 		_ = p.stopComponentsInternal()
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		return fmt.Errorf("failed to initialize project components: %w", err)
@@ -938,12 +940,13 @@ func (p *Project) Start(lock bool) error {
 
 	err = p.runComponents()
 	if err != nil {
+		// Stop all components that were initialized and may have been started
 		_ = p.stopComponentsInternal()
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
 		return fmt.Errorf("failed to run project components: %w", err)
 	}
 
-	// Fix: Always use SetProjectStatus for consistent state management
+	// All components started successfully, set project to running
 	p.SetProjectStatus(common.StatusRunning, nil)
 
 	logger.Info("Project started successfully", "project", p.Id)
@@ -1086,6 +1089,7 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 		if err != nil {
 			if attempt == maxRetries {
 				logger.Error("Failed to start project after all retry attempts", "project", p.Id, "final_error", err)
+				p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to start project after %d attempts: %w", maxRetries+1, err))
 				return fmt.Errorf("failed to start project after %d attempts: %w", maxRetries+1, err)
 			}
 
@@ -1102,7 +1106,9 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 
 		// Some components are not running, retry if we have attempts left
 		if attempt == maxRetries {
-			return fmt.Errorf("project started but some components are not in running state after %d attempts", maxRetries+1)
+			err := fmt.Errorf("project started but some components are not in running state after %d attempts", maxRetries+1)
+			p.SetProjectStatus(common.StatusError, err)
+			return err
 		}
 
 		logger.Warn("Project started but some components are not running, will retry", "project", p.Id, "attempt", attempt+1, "retry_delay", retryDelays[attempt])
@@ -1424,6 +1430,35 @@ func (p *Project) initComponents() error {
 	// Track which nodes need new channels created
 	nodeChannelStatus := make(map[string]bool) // key: ToPNS, value: whether channel was created
 
+	// Cleanup function to remove any partially initialized components on error
+	cleanup := func() {
+		logger.Info("Cleaning up partially initialized components due to error", "project", p.Id)
+
+		// Clean up created PNS rulesets
+		for pns := range p.Rulesets {
+			DeletePNSRuleset(pns)
+		}
+
+		// Clean up created PNS outputs (only if not in testing mode)
+		if !p.Testing {
+			for pns := range p.Outputs {
+				DeletePNSOutput(pns)
+			}
+		}
+
+		// Clear project maps
+		p.Inputs = make(map[string]*input.Input)
+		p.Outputs = make(map[string]*output.Output)
+		p.Rulesets = make(map[string]*rules_engine.Ruleset)
+		p.MsgChannels = make(map[string]*chan map[string]interface{}, 0)
+
+		// Reset node initialization flags
+		for i := range p.FlowNodes {
+			p.FlowNodes[i].FromInit = false
+			p.FlowNodes[i].ToInit = false
+		}
+	}
+
 	// Phase 1: Initialize all TO components and create channels
 	for i := range p.FlowNodes {
 		node := &p.FlowNodes[i]
@@ -1440,11 +1475,17 @@ func (p *Project) initComponents() error {
 				originalRuleset, exists := GetRuleset(node.ToID)
 
 				if !exists {
+					cleanup()
 					return fmt.Errorf("ruleset component not found: %s", node.ToID)
 				}
 
 				rs, err := rules_engine.NewFromExisting(originalRuleset, node.ToPNS)
 				if err != nil {
+					// Set the original ruleset to error state
+					if originalRuleset != nil {
+						originalRuleset.SetStatus(common.StatusError, fmt.Errorf("failed to create PNS instance: %w", err))
+					}
+					cleanup()
 					return fmt.Errorf("failed to create ruleset from existing: %s %w", node.ToPNS, err)
 				}
 
@@ -1465,12 +1506,18 @@ func (p *Project) initComponents() error {
 				originalOutput, ok := GetOutput(node.ToID)
 
 				if !ok {
+					cleanup()
 					return fmt.Errorf("output component not found for testing: %s", node.ToID)
 				}
 
 				// Create a new output instance for testing based on the original config
 				testOutput, err := output.NewFromExisting(originalOutput, node.ToPNS)
 				if err != nil {
+					// Set the original output to error state
+					if originalOutput != nil {
+						originalOutput.SetStatus(common.StatusError, fmt.Errorf("failed to create test instance: %w", err))
+					}
+					cleanup()
 					return fmt.Errorf("failed to create test output component: %s %w", node.ToPNS, err)
 				}
 
@@ -1495,11 +1542,17 @@ func (p *Project) initComponents() error {
 					originalOutput, exists := GetOutput(node.ToID)
 
 					if !exists {
+						cleanup()
 						return fmt.Errorf("output component not found: %s", node.ToID)
 					}
 
 					o, err := output.NewFromExisting(originalOutput, node.ToPNS)
 					if err != nil {
+						// Set the original output to error state
+						if originalOutput != nil {
+							originalOutput.SetStatus(common.StatusError, fmt.Errorf("failed to create PNS instance: %w", err))
+						}
+						cleanup()
 						return fmt.Errorf("failed to create output from existing: %s %w", node.ToPNS, err)
 					}
 
@@ -1533,11 +1586,17 @@ func (p *Project) initComponents() error {
 				originalRuleset, exists := GetRuleset(node.FromID)
 
 				if !exists {
+					cleanup()
 					return fmt.Errorf("ruleset component not found: %s", node.FromID)
 				}
 
 				rs, err := rules_engine.NewFromExisting(originalRuleset, node.FromPNS)
 				if err != nil {
+					// Set the original ruleset to error state
+					if originalRuleset != nil {
+						originalRuleset.SetStatus(common.StatusError, fmt.Errorf("failed to create PNS instance: %w", err))
+					}
+					cleanup()
 					return fmt.Errorf("failed to create ruleset from existing: %s %w", node.FromPNS, err)
 				}
 
@@ -1553,12 +1612,18 @@ func (p *Project) initComponents() error {
 				originalInput, ok := GetInput(node.FromID)
 
 				if !ok {
+					cleanup()
 					return fmt.Errorf("input component not found for testing: %s", node.FromID)
 				}
 
 				// Create a new input instance for testing based on the original config
 				testInput, err := input.NewFromExisting(originalInput, node.FromPNS)
 				if err != nil {
+					// Set the original input to error state
+					if originalInput != nil {
+						originalInput.SetStatus(common.StatusError, fmt.Errorf("failed to create test instance: %w", err))
+					}
+					cleanup()
 					return fmt.Errorf("failed to create test input component: %s %w", node.FromPNS, err)
 				}
 
@@ -1570,6 +1635,7 @@ func (p *Project) initComponents() error {
 				// Production mode: create input instance with correct ProjectNodeSequence
 				originalInput, exists := GetInput(node.FromID)
 				if !exists {
+					cleanup()
 					return fmt.Errorf("input component not found: %s", node.FromID)
 				}
 				p.Inputs[node.FromPNS] = originalInput
@@ -1653,6 +1719,11 @@ func (p *Project) initComponents() error {
 		}
 	}
 
+	logger.Info("Components initialized successfully", "project", p.Id,
+		"inputs", len(p.Inputs),
+		"outputs", len(p.Outputs),
+		"rulesets", len(p.Rulesets))
+
 	return nil
 }
 
@@ -1660,45 +1731,93 @@ func (p *Project) runComponents() error {
 	// Start components in reverse dependency order: outputs -> rulesets -> inputs
 	// This ensures downstream components are ready before upstream starts producing data
 
+	// Track started components for cleanup on failure
+	var startedOutputs []*output.Output
+	var startedRulesets []*rules_engine.Ruleset
+	var startedInputs []*input.Input
+
+	// Cleanup function to stop all started components on error
+	cleanup := func() {
+		logger.Info("Cleaning up started components due to error", "project", p.Id)
+
+		// Stop inputs first (stop data flow)
+		for _, in := range startedInputs {
+			if p.Testing {
+				_ = in.StopForTesting()
+			} else {
+				_ = in.Stop()
+			}
+		}
+
+		// Stop rulesets
+		for _, rs := range startedRulesets {
+			_ = rs.Stop()
+		}
+
+		// Stop outputs last
+		for _, out := range startedOutputs {
+			if p.Testing {
+				_ = out.StopForTesting()
+			} else {
+				_ = out.Stop()
+			}
+		}
+	}
+
 	// 1. Start output components first (they need to be ready to receive data)
 	outputs := p.GetProjectOutputs()
 	for _, out := range outputs {
+		var err error
 		if p.Testing {
 			// In testing mode, use StartForTesting to avoid external connectivity checks
-			if err := out.StartForTesting(); err != nil {
-				return fmt.Errorf("failed to start output component in testing mode %s: %w", out.Id, err)
-			}
+			err = out.StartForTesting()
 		} else {
 			// Production mode: normal start
-			if err := out.Start(); err != nil {
-				return fmt.Errorf("failed to start output component %s: %w", out.Id, err)
-			}
+			err = out.Start()
 		}
+
+		if err != nil {
+			cleanup() // Stop all previously started components
+			return fmt.Errorf("failed to start output component %s: %w", out.Id, err)
+		}
+		startedOutputs = append(startedOutputs, out)
 	}
 
 	// 2. Start ruleset components (middle components in the pipeline)
 	rulesets := p.GetProjectRulesets()
 	for _, rs := range rulesets {
-		if err := rs.Start(); err != nil {
+		err := rs.Start()
+		if err != nil {
+			cleanup() // Stop all previously started components
 			return fmt.Errorf("failed to start ruleset component %s: %w", rs.RulesetID, err)
 		}
+		startedRulesets = append(startedRulesets, rs)
 	}
 
 	// 3. Start input components last (they will begin producing data immediately)
 	inputs := p.GetProjectInputs()
 	for _, in := range inputs {
+		var err error
 		if p.Testing {
 			// In testing mode, use StartForTesting to avoid connecting to external data sources
-			if err := in.StartForTesting(); err != nil {
-				return fmt.Errorf("failed to start input component in testing mode %s: %w", in.Id, err)
-			}
+			err = in.StartForTesting()
 		} else {
 			// Production mode: normal start
-			if err := in.Start(); err != nil {
-				return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
-			}
+			err = in.Start()
 		}
+
+		if err != nil {
+			cleanup() // Stop all previously started components
+			return fmt.Errorf("failed to start input component %s: %w", in.Id, err)
+		}
+		startedInputs = append(startedInputs, in)
 	}
+
+	logger.Info("All components started successfully", "project", p.Id,
+		"outputs", len(startedOutputs),
+		"rulesets", len(startedRulesets),
+		"inputs", len(startedInputs))
+
 	return nil
 }
 
