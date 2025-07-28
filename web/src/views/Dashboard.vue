@@ -413,7 +413,8 @@
         <!-- Individual Plugin Stats -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div v-for="(stats, pluginName) in sortedPluginStats" :key="pluginName" 
-               class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+               class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+               @click="navigateToPlugin(pluginName)">
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center">
                 <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
@@ -1006,6 +1007,10 @@ function navigateToPendingChanges() {
 
 function navigateToLocalChanges() {
   router.push('/app/load-local-components')
+}
+
+function navigateToPlugin(pluginName) {
+  router.push(`/app/plugins/${pluginName}`)
 }
 
 // Version-related helper functions (same as ClusterStatus.vue)
