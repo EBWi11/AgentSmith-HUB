@@ -102,7 +102,22 @@ setup_library_path() {
 
 # Function to check for running processes
 check_processes() {
-    local pids=$(pgrep -f "agentsmith-hub" 2>/dev/null)
+    # Try multiple methods to find processes
+    local pids=""
+    
+    # Method 1: pgrep with full command line
+    pids=$(pgrep -f "agentsmith-hub" 2>/dev/null)
+    
+    # Method 2: if pgrep fails, try ps + grep
+    if [ -z "$pids" ]; then
+        pids=$(ps aux 2>/dev/null | grep -v grep | grep "agentsmith-hub" | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//')
+    fi
+    
+    # Method 3: check for binary name in process list
+    if [ -z "$pids" ]; then
+        pids=$(ps aux 2>/dev/null | grep -v grep | grep "$BINARY_NAME" | awk '{print $2}' | tr '\n' ' ' | sed 's/ $//')
+    fi
+    
     if [ -n "$pids" ]; then
         echo "$pids"
         return 0
@@ -131,14 +146,26 @@ graceful_stop() {
         print_info "Sending TERM signal to processes..."
         echo "$pids" | xargs kill -TERM 2>/dev/null || true
         
-        # Wait for graceful shutdown
+        # Wait for graceful shutdown with progress indication
         local wait_time=20
         print_info "Waiting ${wait_time} seconds for graceful shutdown..."
-        sleep $wait_time
+        for i in $(seq 1 $wait_time); do
+            local remaining_pids=$(check_processes)
+            if [ -z "$remaining_pids" ]; then
+                print_info "All processes stopped gracefully after ${i} seconds"
+                return 0
+            fi
+            if [ $((i % 5)) -eq 0 ]; then
+                print_info "Still waiting... (${i}/${wait_time}s)"
+            fi
+            sleep 1
+        done
         
-        # Check if processes are still running
+        # Final check
         local remaining_pids=$(check_processes)
         if [ -n "$remaining_pids" ]; then
+            print_warn "Some processes still running after ${wait_time} seconds:"
+            show_process_info "$remaining_pids"
             return 1
         else
             return 0
@@ -186,6 +213,7 @@ stop_existing_processes() {
     
     if [ "$force_mode" = "true" ]; then
         # Force mode: kill immediately
+        print_info "Using force mode - killing processes immediately"
         if force_stop "$pids"; then
             print_info "All processes stopped successfully."
         else
@@ -194,18 +222,34 @@ stop_existing_processes() {
         fi
     else
         # Normal mode: try graceful first, then force
+        print_info "Using graceful mode - attempting graceful shutdown first"
         if graceful_stop "$pids"; then
             print_info "All processes stopped gracefully."
         else
             print_warn "Graceful shutdown failed, attempting force stop..."
             local remaining_pids=$(check_processes)
-            if force_stop "$remaining_pids"; then
-                print_info "All processes stopped successfully."
+            if [ -n "$remaining_pids" ]; then
+                print_info "Force stopping remaining processes: $remaining_pids"
+                if force_stop "$remaining_pids"; then
+                    print_info "All processes stopped successfully."
+                else
+                    print_error "Failed to stop some processes."
+                    return 1
+                fi
             else
-                print_error "Failed to stop some processes."
-                return 1
+                print_info "No remaining processes to force stop."
             fi
         fi
+    fi
+    
+    # Final verification
+    local final_check=$(check_processes)
+    if [ -n "$final_check" ]; then
+        print_error "Final check failed - some processes are still running:"
+        show_process_info "$final_check"
+        return 1
+    else
+        print_info "Final verification passed - all processes stopped."
     fi
     
     return 0
@@ -300,9 +344,20 @@ main() {
     
     # Stop existing processes if requested
     if [ "$STOP_EXISTING" = "true" ]; then
+        print_info "Restart mode enabled - stopping existing processes first..."
         if ! stop_existing_processes "$FORCE_STOP"; then
             print_error "Failed to stop existing processes. Exiting."
             exit 1
+        fi
+        
+        # Additional verification after stopping
+        print_info "Verifying all processes are stopped..."
+        local verification_pids=$(check_processes)
+        if [ -n "$verification_pids" ]; then
+            print_error "Verification failed - processes still running: $verification_pids"
+            exit 1
+        else
+            print_info "Verification passed - all processes stopped successfully."
         fi
         echo ""
     fi
@@ -328,6 +383,16 @@ main() {
     
     # Start the application based on mode
     cd "$(dirname "$BINARY_PATH")"
+    
+    # Final verification before starting
+    print_info "Final verification before starting new process..."
+    local final_pids=$(check_processes)
+    if [ -n "$final_pids" ]; then
+        print_warn "Warning: Found processes before starting: $final_pids"
+    else
+        print_info "No existing processes found - ready to start new process."
+    fi
+    
     if [ "$RUN_MODE" = "follower" ]; then
         print_info "Starting AgentSmith-HUB in FOLLOWER mode..."
         print_info "Will auto-discover cluster via Redis"
@@ -335,6 +400,7 @@ main() {
         echo ""
         
         # Start as follower (no -leader flag)
+        print_info "Executing: ./$BINARY_NAME -config_root $CONFIG_ARG"
         exec "./$BINARY_NAME" -config_root "$CONFIG_ARG"
     else
         print_info "Starting AgentSmith-HUB in LEADER mode..."
@@ -343,6 +409,7 @@ main() {
         echo ""
         
         # Start as leader (with -leader flag)
+        print_info "Executing: ./$BINARY_NAME -config_root $CONFIG_ARG -leader"
         exec "./$BINARY_NAME" -config_root "$CONFIG_ARG" -leader
     fi
 }
