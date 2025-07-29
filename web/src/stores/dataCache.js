@@ -809,9 +809,9 @@ export const useDataCacheStore = defineStore('dataCache', {
         return ongoingRequests.get(cacheKey)
       }
       
-      // Check if cache exists and is not expired
+      // Check if cache exists and is not expired (reduced TTL to 1 minute for better responsiveness)
       const cache = this.rulesetFields.get(rulesetId)
-      if (!forceRefresh && cache && (Date.now() - cache.timestamp) <= 300000) {
+      if (!forceRefresh && cache && cache.data && (Date.now() - cache.timestamp) <= 60000) {
         // Move to end (LRU)
         this.rulesetFields.delete(rulesetId)
         this.rulesetFields.set(rulesetId, cache)
@@ -827,9 +827,17 @@ export const useDataCacheStore = defineStore('dataCache', {
         
         try {
           const data = await hubApi.getRulesetFields(rulesetId)
+          
           cacheEntry.data = data || { fieldKeys: [], sampleCount: 0 }
           cacheEntry.timestamp = Date.now()
           cacheEntry.loading = false
+          
+          // If no field keys returned, schedule a retry after 10 minutes
+          if (cacheEntry.data.fieldKeys && cacheEntry.data.fieldKeys.length === 0) {
+            setTimeout(() => {
+              this.fetchRulesetFields(rulesetId, true) // Force refresh
+            }, 600000)
+          }
           
           // LRU cleanup: keep only last 20 entries
           if (this.rulesetFields.size > 20) {

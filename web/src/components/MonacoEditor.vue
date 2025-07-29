@@ -140,7 +140,15 @@ const pluginParametersCache = computed(() => globalPluginParametersCache.value);
 const dynamicFieldKeys = computed(() => {
   if ((props.componentType === 'ruleset' || props.componentType === 'rulesets') && props.componentId) {
     const rulesetFields = dataCache.rulesetFields.get(props.componentId);
-    return rulesetFields?.data?.fieldKeys || [];
+    
+    // If no cached data, trigger fetch immediately
+    if (!rulesetFields || !rulesetFields.data) {
+      dataCache.fetchRulesetFields(props.componentId);
+      return [];
+    }
+    
+    const fieldKeys = rulesetFields.data.fieldKeys || [];
+    return fieldKeys;
   }
   return [];
 });

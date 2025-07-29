@@ -1997,16 +1997,6 @@ func GetSamplerData(c echo.Context) error {
 
 // GetRulesetFields extracts field keys from sample data for intelligent completion in ruleset editing
 func GetRulesetFields(c echo.Context) error {
-	// Only leader nodes collect sample data for performance reasons
-	if !common.IsCurrentNodeLeader() {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"componentId": c.Param("id"),
-			"fieldKeys":   []string{},
-			"sampleCount": 0,
-			"message":     "Sample data collection is only available on leader node",
-		})
-	}
-
 	componentId := c.Param("id")
 	if componentId == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
@@ -2017,55 +2007,43 @@ func GetRulesetFields(c echo.Context) error {
 	logger.Info("GetRulesetFields request",
 		"componentId", componentId)
 
-	nodeSequence := strings.ToLower(fmt.Sprintf("ruleset.%s", componentId))
-	var allSampleData []map[string]interface{}
+	// Use the same logic as GetRulesetFieldsForID to get field keys directly from sampler
+	fieldSet := make(map[string]bool)
 
-	// Get potential sampler names based on component types and IDs
-	samplerNames := []string{}
-	project.ForEachInput(func(inputId string, _ *input.Input) bool {
-		samplerNames = append(samplerNames, "input."+inputId)
-		return true
-	})
-	project.ForEachRuleset(func(rulesetId string, _ *rules_engine.Ruleset) bool {
-		samplerNames = append(samplerNames, "ruleset."+rulesetId)
-		return true
-	})
-	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
-		samplerNames = append(samplerNames, "output."+outputId)
-		return true
-	})
-
-	// Collect sample data from all potential sources
-	for _, samplerName := range samplerNames {
-		sampler := common.GetSampler(samplerName)
-		if sampler != nil {
-			samples := sampler.GetSamples()
-			for projectNodeSequence, sampleDataList := range samples {
-				// Match samples that flow into this ruleset
-				if strings.HasSuffix(strings.ToLower(projectNodeSequence), strings.ToLower(nodeSequence)) {
-					for _, sample := range sampleDataList {
-						if sampleMap, ok := sample.Data.(map[string]interface{}); ok {
-							allSampleData = append(allSampleData, sampleMap)
-						}
+	// Try to get sampler data for this ruleset
+	samplerName := "ruleset." + componentId
+	sampler := common.GetSampler(samplerName)
+	if sampler != nil {
+		samples := sampler.GetSamples()
+		// Extract field keys from all samples
+		for _, sampleList := range samples {
+			for _, sample := range sampleList {
+				if sample.Data != nil {
+					if dataMap, ok := sample.Data.(map[string]interface{}); ok {
+						extractKeysFromMap(dataMap, "", fieldSet)
 					}
 				}
 			}
 		}
 	}
 
-	// Extract all possible field keys from the sample data
-	fieldKeys := extractFieldKeys(allSampleData)
+	// Convert to sorted slice
+	fieldKeys := make([]string, 0, len(fieldSet))
+	for field := range fieldSet {
+		fieldKeys = append(fieldKeys, field)
+	}
+	sort.Strings(fieldKeys)
 
 	response := map[string]interface{}{
 		"componentId": componentId,
 		"fieldKeys":   fieldKeys,
-		"sampleCount": len(allSampleData),
+		"sampleCount": len(fieldKeys),
 	}
 
 	logger.Info("GetRulesetFields response ready",
 		"componentId", componentId,
 		"fieldCount", len(fieldKeys),
-		"sampleCount", len(allSampleData))
+		"sampleCount", len(fieldKeys))
 
 	return c.JSON(http.StatusOK, response)
 }
