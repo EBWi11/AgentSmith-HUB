@@ -65,7 +65,7 @@ type KafkaTLSConfig struct {
 	SkipVerify bool   `yaml:"skip_verify"`
 }
 
-// KafkaProducer wraps a franz-go producer with a channel-based interface.
+// KafkaProducer wraps the franz-go producer with a channel-based interface
 type KafkaProducer struct {
 	Client       *kgo.Client
 	MsgChan      chan map[string]interface{}
@@ -74,6 +74,7 @@ type KafkaProducer struct {
 	KeyFieldList []string // List of fields to use as keys
 	BatchSize    int
 	BatchTimeout time.Duration
+	stopChan     chan struct{} // Add stop channel for graceful shutdown
 }
 
 func EnsureTopicExists(cl *kgo.Client, topic string) (bool, error) {
@@ -148,6 +149,7 @@ func NewKafkaProducer(
 		KeyFieldList: StringToList(keyField),
 		BatchSize:    1000,
 		BatchTimeout: 100 * time.Millisecond,
+		stopChan:     make(chan struct{}),
 	}
 
 	_, err = EnsureTopicExists(cl, topic)
@@ -162,34 +164,98 @@ func NewKafkaProducer(
 // run processes messages from the input channel and sends them to Kafka
 // It handles message serialization and error reporting
 func (p *KafkaProducer) run() {
-	for msg := range p.MsgChan {
-		value, err := sonic.Marshal(msg)
-		if err != nil {
-			logger.Error("[KafkaProducer] failed to serialize message", "error", err.Error())
-			continue // skip invalid message
-		}
-
-		rec := &kgo.Record{
-			Topic: p.Topic,
-			Value: value,
-		}
-
-		if p.KeyField != "" {
-			if tmp, ok := GetCheckData(msg, p.KeyFieldList); ok {
-				rec.Key = []byte(tmp)
+	for {
+		select {
+		case <-p.stopChan:
+			logger.Info("[KafkaProducer] Stop signal received, draining remaining messages")
+			// Process any remaining messages before exiting
+			p.drainRemainingMessages()
+			return
+		case msg, ok := <-p.MsgChan:
+			if !ok {
+				// Channel is closed
+				logger.Info("[KafkaProducer] Message channel closed")
+				return
 			}
-		}
 
-		p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
+			value, err := sonic.Marshal(msg)
 			if err != nil {
-				logger.Error("[KafkaProducer] failed to produce message to topic", "topic", p.Topic, "error", err)
+				logger.Error("[KafkaProducer] failed to serialize message", "error", err.Error())
+				continue // skip invalid message
 			}
-		})
+
+			rec := &kgo.Record{
+				Topic: p.Topic,
+				Value: value,
+			}
+
+			if p.KeyField != "" {
+				if tmp, ok := GetCheckData(msg, p.KeyFieldList); ok {
+					rec.Key = []byte(tmp)
+				}
+			}
+
+			p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
+				if err != nil {
+					logger.Error("[KafkaProducer] failed to produce message to topic", "topic", p.Topic, "error", err)
+				}
+			})
+		}
+	}
+}
+
+// drainRemainingMessages processes any remaining messages in the message channel
+func (p *KafkaProducer) drainRemainingMessages() {
+	// Set a timeout for draining
+	timeout := time.After(5 * time.Second)
+	drainCount := 0
+
+	for {
+		select {
+		case <-timeout:
+			if drainCount > 0 {
+				logger.Info("[KafkaProducer] Drain timeout reached", "processed_messages", drainCount)
+			}
+			return
+		case msg, ok := <-p.MsgChan:
+			if !ok {
+				// Channel is closed
+				if drainCount > 0 {
+					logger.Info("[KafkaProducer] Finished draining messages", "processed_messages", drainCount)
+				}
+				return
+			}
+
+			value, err := sonic.Marshal(msg)
+			if err != nil {
+				logger.Error("[KafkaProducer] failed to serialize message during drain", "error", err.Error())
+				continue
+			}
+
+			rec := &kgo.Record{
+				Topic: p.Topic,
+				Value: value,
+			}
+
+			if p.KeyField != "" {
+				if tmp, ok := GetCheckData(msg, p.KeyFieldList); ok {
+					rec.Key = []byte(tmp)
+				}
+			}
+
+			p.Client.Produce(context.Background(), rec, func(r *kgo.Record, err error) {
+				if err != nil {
+					logger.Error("[KafkaProducer] failed to produce message to topic during drain", "topic", p.Topic, "error", err)
+				}
+			})
+			drainCount++
+		}
 	}
 }
 
 // Close gracefully shuts down the Kafka producer
 func (p *KafkaProducer) Close() {
+	close(p.stopChan)
 	p.Client.Close()
 }
 
@@ -280,11 +346,11 @@ func NewKafkaConsumer(brokers []string, group, topic string, compression KafkaCo
 
 	// Add performance optimizations
 	opts = append(opts,
-		kgo.FetchMaxBytes(52428800),                  // 50MB fetch buffer
-		kgo.FetchMinBytes(1),                         // Start fetching immediately
-		kgo.FetchMaxWait(500*time.Millisecond),       // Max wait time for batching
-		kgo.ConnIdleTimeout(9*time.Minute),           // Keep connections alive
-		kgo.RequestTimeoutOverhead(10*time.Second),   // Network timeout
+		kgo.FetchMaxBytes(52428800),                // 50MB fetch buffer
+		kgo.FetchMinBytes(1),                       // Start fetching immediately
+		kgo.FetchMaxWait(500*time.Millisecond),     // Max wait time for batching
+		kgo.ConnIdleTimeout(9*time.Minute),         // Keep connections alive
+		kgo.RequestTimeoutOverhead(10*time.Second), // Network timeout
 		kgo.RetryBackoffFn(func(tries int) time.Duration {
 			return time.Duration(tries) * 100 * time.Millisecond // Exponential backoff
 		}),

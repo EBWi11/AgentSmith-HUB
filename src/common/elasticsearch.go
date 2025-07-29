@@ -30,6 +30,7 @@ type ElasticsearchProducer struct {
 	flushDur   time.Duration
 	maxRetries int
 	retryDelay time.Duration
+	stopChan   chan struct{} // Add stop channel for graceful shutdown
 }
 
 // NewElasticsearchProducer creates a new Elasticsearch producer
@@ -79,6 +80,7 @@ func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[str
 		flushDur:   flushDur,
 		maxRetries: 3,
 		retryDelay: 1 * time.Second,
+		stopChan:   make(chan struct{}),
 	}
 
 	go prod.run()
@@ -92,9 +94,18 @@ func (p *ElasticsearchProducer) run() {
 
 	for {
 		select {
+		case <-p.stopChan:
+			// Flush any remaining batch before stopping
+			if len(batch) > 0 {
+				p.flush(batch)
+			}
+			return
 		case msg, ok := <-p.MsgChan:
 			if !ok {
-				p.flush(batch)
+				// Channel is closed, flush any remaining batch
+				if len(batch) > 0 {
+					p.flush(batch)
+				}
 				return
 			}
 			batch = append(batch, msg)
@@ -176,6 +187,10 @@ func (p *ElasticsearchProducer) flush(batch []map[string]interface{}) {
 // Close closes the producer
 // Note: We don't close MsgChan here because it's owned by the caller
 func (p *ElasticsearchProducer) Close() {
+	// Signal the goroutine to stop
+	if p.stopChan != nil {
+		close(p.stopChan)
+	}
 	// The channel will be closed by the owner (output component)
 	// We just need to ensure any pending operations are completed
 }
