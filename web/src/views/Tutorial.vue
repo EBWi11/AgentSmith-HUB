@@ -165,6 +165,7 @@ const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
+  breaks: true, // 添加换行支持
   highlight: function (str, lang) {
     if (lang && hljs.getLanguage(lang)) {
       try {
@@ -176,6 +177,15 @@ const md = new MarkdownIt({
     return hljs.highlightAuto(str).value
   }
 })
+
+// 确保列表项正确渲染
+md.renderer.rules.list_item_open = function() {
+  return '<li>';
+};
+
+md.renderer.rules.list_item_close = function() {
+  return '</li>';
+};
 
 // 获取教程内容
 async function loadTutorialContent() {
@@ -805,6 +815,53 @@ onBeforeUnmount(() => {
 
 :deep(.markdown-body a:hover) {
   text-decoration: underline;
+}
+
+/* 列表样式 - 确保星号正确显示 */
+:deep(.markdown-body ul) {
+  list-style-type: disc;
+  padding-left: 2em;
+  margin: 1rem 0;
+}
+
+:deep(.markdown-body ol) {
+  list-style-type: decimal;
+  padding-left: 2em;
+  margin: 1rem 0;
+}
+
+:deep(.markdown-body li) {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
+:deep(.markdown-body ul li) {
+  list-style-type: disc;
+}
+
+:deep(.markdown-body ol li) {
+  list-style-type: decimal;
+}
+
+/* 嵌套列表样式 */
+:deep(.markdown-body ul ul) {
+  list-style-type: circle;
+  margin: 0.5rem 0;
+}
+
+:deep(.markdown-body ul ul ul) {
+  list-style-type: square;
+  margin: 0.5rem 0;
+}
+
+:deep(.markdown-body ol ol) {
+  list-style-type: lower-alpha;
+  margin: 0.5rem 0;
+}
+
+:deep(.markdown-body ol ol ol) {
+  list-style-type: lower-roman;
+  margin: 0.5rem 0;
 }
 
 /* 自定义滚动条 */
