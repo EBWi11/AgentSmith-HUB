@@ -193,6 +193,7 @@ func ServerStart(listener string) error {
 
 	// Load local components routes - REQUIRE AUTH
 	auth.GET("/local-changes", getLocalChanges)
+	auth.GET("/local-changes/count", getLocalChangesCount) // Lightweight count endpoint
 	auth.POST("/load-local-changes", loadLocalChanges)
 	auth.POST("/load-single-local-change", loadSingleLocalChange)
 

@@ -944,12 +944,7 @@ export const useDataCacheStore = defineStore('dataCache', {
 
     // Fetch settings badges data
     async fetchSettingsBadges(force = false) {
-      const TTL = 5 * 60 * 1000 // 5 minutes
-      
-      if (!force && !this.isExpired('settingsBadges', TTL) && !this.settingsBadges.loading) {
-        return this.settingsBadges.data
-      }
-
+      // No caching for badges - always fetch fresh data
       if (this.settingsBadges.loading) {
         return this.settingsBadges.data
       }
@@ -970,13 +965,12 @@ export const useDataCacheStore = defineStore('dataCache', {
           }
         }
 
-        // Get local changes count from API (always fresh data for badges)
+        // Get local changes count from lightweight API (always fresh data for badges)
         let localCount = 0
         try {
-          const localData = await hubApi.fetchLocalChanges()
-          localCount = Array.isArray(localData) ? localData.length : 0
+          localCount = await hubApi.fetchLocalChangesCount()
         } catch (e) {
-          console.warn('Failed to fetch local changes for badge:', e)
+          console.warn('Failed to fetch local changes count for badge:', e)
           // Fallback to cache if API fails
           if (this.localChanges.data && Array.isArray(this.localChanges.data)) {
             localCount = this.localChanges.data.length

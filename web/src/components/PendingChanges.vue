@@ -166,6 +166,9 @@ const sortedChanges = computed(() => {
 // Lifecycle hooks
 onMounted(() => {
   refreshChanges()
+  // Force refresh settings badges to ensure accurate count
+  const dataCache = useDataCacheStore()
+  dataCache.fetchSettingsBadges(true)
 })
 
 // Methods
@@ -207,6 +210,10 @@ async function refreshChanges() {
     // Wait for DOM update then refresh editor layout
     await nextTick()
     refreshEditorsLayout()
+    
+    // Update settings badges after fetching changes
+    const dataCache = useDataCacheStore()
+    dataCache.fetchSettingsBadges(true)
   } catch (e) {
     console.error('Error fetching pending changes:', e)
     error.value = 'Failed to fetch pending changes: ' + (e?.message || 'Unknown error')

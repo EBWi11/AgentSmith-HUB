@@ -1144,6 +1144,17 @@ export const hubApi = {
     }
   },
 
+  // Lightweight local changes count for badges
+  async fetchLocalChangesCount() {
+    try {
+      const response = await api.get('/local-changes/count');
+      return response.data?.count || 0;
+    } catch (error) {
+      console.error('Error fetching local changes count:', error);
+      return 0;
+    }
+  },
+
   async loadLocalChanges() {
     try {
       const response = await api.post('/load-local-changes');

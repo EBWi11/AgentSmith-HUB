@@ -1931,8 +1931,8 @@ onMounted(async () => {
   window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
   window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
   
-  // Set periodic refresh for settings menu badges (every 6 seconds)
-  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 6 * 1000)
+  // Set periodic refresh for settings menu badges (every 5 seconds)
+  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 1000)
   window._settingsBadgeInterval = settingsBadgeInterval
   
   // Store event handler for cleanup

@@ -20,6 +20,215 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// getLocalChangesCount returns only the count of local changes (lightweight)
+func getLocalChangesCount(c echo.Context) error {
+	count := 0
+	configRoot := common.Config.ConfigRoot
+
+	// Check inputs
+	inputDir := filepath.Join(configRoot, "input")
+	if _, err := os.Stat(inputDir); err == nil {
+		if err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			// Check if exists in memory (lightweight check)
+			_, exists := project.GetInput(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			// For existing components, do a quick content check
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryInput, _ := project.GetInput(id)
+			memoryContent := memoryInput.Config.RawConfig
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	// Check outputs
+	outputDir := filepath.Join(configRoot, "output")
+	if _, err := os.Stat(outputDir); err == nil {
+		if err := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			_, exists := project.GetOutput(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryOutput, _ := project.GetOutput(id)
+			memoryContent := memoryOutput.Config.RawConfig
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	// Check rulesets
+	rulesetDir := filepath.Join(configRoot, "ruleset")
+	if _, err := os.Stat(rulesetDir); err == nil {
+		if err := filepath.WalkDir(rulesetDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".xml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".xml")
+
+			_, exists := project.GetRuleset(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryRuleset, _ := project.GetRuleset(id)
+			memoryContent := memoryRuleset.RawConfig
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	// Check projects
+	projectDir := filepath.Join(configRoot, "project")
+	if _, err := os.Stat(projectDir); err == nil {
+		if err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			_, exists := project.GetProject(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryProject, _ := project.GetProject(id)
+			memoryContent := memoryProject.Config.RawConfig
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	// Check plugins
+	pluginDir := filepath.Join(configRoot, "plugin")
+	if _, err := os.Stat(pluginDir); err == nil {
+		if err := filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".go")
+
+			memoryPlugin, exists := plugin.Plugins[id]
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			var memoryContent string
+			if memoryPlugin.Type == plugin.YAEGI_PLUGIN {
+				memoryContent = string(memoryPlugin.Payload)
+			}
+
+			// Also check if there's content in temporary memory (PluginsNew)
+			if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+				memoryContent = tempContent
+			}
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"count": count,
+	})
+}
+
 // getLocalChanges returns a list of local changes compared to memory
 func getLocalChanges(c echo.Context) error {
 	changes := make([]map[string]interface{}, 0)
