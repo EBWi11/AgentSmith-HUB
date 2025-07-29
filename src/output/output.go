@@ -450,7 +450,13 @@ func (out *Output) Start() error {
 							}
 
 							// Send enhanced message to msgChan for Kafka producer
-							msgChan <- enhancedMsg
+							select {
+							case msgChan <- enhancedMsg:
+								// Message sent successfully
+							default:
+								// Channel is full, log warning and continue
+								logger.Warn("Kafka producer channel full, dropping message", "id", out.Id)
+							}
 							processed = true
 						default:
 							// No message available from this channel, continue to next
@@ -546,7 +552,13 @@ func (out *Output) Start() error {
 							}
 
 							// Send enhanced message to msgChan for Elasticsearch producer
-							msgChan <- enhancedMsg
+							select {
+							case msgChan <- enhancedMsg:
+								// Message sent successfully
+							default:
+								// Channel is full, log warning and continue
+								logger.Warn("Elasticsearch producer channel full, dropping message", "id", out.Id)
+							}
 							processed = true
 						default:
 							// No message available from this channel, continue to next
@@ -628,7 +640,6 @@ func (out *Output) Start() error {
 }
 
 // Stop stops the output producer and waits for all routines to finish.
-// It waits until all upstream channels are empty and all pending data is written.
 func (out *Output) Stop() error {
 	if out.Status != common.StatusRunning && out.Status != common.StatusError {
 		// Allow stopping from any state for cleanup purposes, but only do actual work if needed
@@ -647,68 +658,6 @@ func (out *Output) Stop() error {
 		out.stopChan = nil
 	}
 
-	// Overall timeout for output stop
-	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
-	stopCompleted := make(chan struct{})
-	var stopError error
-
-	go func() {
-		defer close(stopCompleted)
-
-		// Wait for all upstream channels to be empty before closing producers
-		logger.Info("Waiting for upstream channels to empty", "output", out.Id)
-		upstreamTimeout := time.After(10 * time.Second) // 10 second timeout for upstream
-		waitCount := 0
-
-	waitUpstream:
-		for {
-			select {
-			case <-upstreamTimeout:
-				logger.Warn("Timeout waiting for upstream channels, forcing shutdown", "output", out.Id)
-				stopError = fmt.Errorf("timeout waiting for upstream channels to drain")
-				break waitUpstream
-			default:
-				allEmpty := true
-				totalMessages := 0
-				for i, up := range out.UpStream {
-					chLen := len(*up)
-					if chLen > 0 {
-						allEmpty = false
-						totalMessages += chLen
-						if waitCount%20 == 0 { // Log every second (20 * 50ms)
-							logger.Info("Output upstream channel not empty", "output", out.Id, "channel", i, "length", chLen)
-						}
-					}
-				}
-				if allEmpty {
-					logger.Info("All output upstream channels empty", "output", out.Id)
-					break waitUpstream
-				}
-				waitCount++
-				if waitCount%20 == 0 { // Log every second (20 * 50ms)
-					logger.Info("Still waiting for output upstream channels", "output", out.Id, "total_messages", totalMessages, "wait_cycles", waitCount)
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-
-		// Brief wait for internal channels to drain
-		logger.Info("Waiting for output internal channels to empty", "output", out.Id)
-		time.Sleep(1 * time.Second)
-
-		// Metrics stop removed
-	}()
-
-	select {
-	case <-stopCompleted:
-		logger.Info("Output channels drained successfully", "output", out.Id)
-	case <-overallTimeout:
-		logger.Warn("Output stop timeout exceeded, forcing cleanup", "output", out.Id)
-		if stopError == nil {
-			stopError = fmt.Errorf("overall stop operation timeout")
-		}
-	}
-
 	// Wait for goroutines to finish with timeout
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
 	waitDone := make(chan struct{})
@@ -717,14 +666,13 @@ func (out *Output) Stop() error {
 		close(waitDone)
 	}()
 
+	var stopError error
 	select {
 	case <-waitDone:
 		logger.Info("Output stopped gracefully", "id", out.Id)
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second): // 10 second timeout
 		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
-		if stopError == nil {
-			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
-		}
+		stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 	}
 
 	// Use cleanup to ensure all resources are properly released
