@@ -11,6 +11,7 @@ import * as monaco from 'monaco-editor';
 import { hubApi } from '@/api';
 import { useDataCacheStore } from '@/stores/dataCache';
 import eventManager from '@/utils/eventManager';
+import { saveAntiDuplicate } from '@/utils/debounce';
 
 const props = defineProps({
   value: String,
@@ -840,8 +841,14 @@ function initializeEditor() {
   // Add save shortcut (Cmd+S on Mac, Ctrl+S on Windows/Linux)
   try {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
-      const content = editor.getValue();
-      emit('save', content);
+      // Create a unique key for this editor shortcut
+      const shortcutKey = `shortcut:${props.componentType}:${props.componentId || 'unknown'}`
+      
+      // Use anti-duplicate trigger for shortcut saves
+      saveAntiDuplicate.execute(shortcutKey, () => {
+        const content = editor.getValue();
+        emit('save', content);
+      })
     });
   } catch (error) {
     console.warn('Failed to add save command:', error);
