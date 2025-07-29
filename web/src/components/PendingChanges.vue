@@ -9,31 +9,6 @@
         >
           Refresh
         </button>
-        <button 
-          @click="verifyChanges" 
-          class="btn btn-verify btn-sm"
-          :disabled="verifying || !changes.length"
-        >
-          <span v-if="verifying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
-          Verify
-        </button>
-        <button 
-          @click="applyAllChanges" 
-          class="btn btn-primary btn-sm"
-          :disabled="applying || !changes.length"
-        >
-          <span v-if="applying" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
-          Apply All
-        </button>
-        <button 
-          @click="cancelAllChanges" 
-          class="btn btn-danger btn-sm"
-          :disabled="cancelling || !changes.length"
-        >
-          <span v-if="cancelling" class="w-3 h-3 border-1.5 border-current border-t-transparent rounded-full animate-spin mr-1"></span>
-          Cancel All
-        </button>
-
       </div>
     </div>
 

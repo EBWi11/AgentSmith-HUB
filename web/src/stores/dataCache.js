@@ -957,29 +957,29 @@ export const useDataCacheStore = defineStore('dataCache', {
       this.settingsBadges.loading = true
 
       try {
-        // Get pending changes count from cache or API
+        // Get pending changes count from API (always fresh data for badges)
         let pendingCount = 0
-        if (this.pendingChanges.data && Array.isArray(this.pendingChanges.data)) {
-          pendingCount = this.pendingChanges.data.length
-        } else {
-          try {
-            const pendingData = await hubApi.fetchEnhancedPendingChanges()
-            pendingCount = Array.isArray(pendingData) ? pendingData.length : 0
-          } catch (e) {
-            console.warn('Failed to fetch pending changes for badge:', e)
+        try {
+          const pendingData = await hubApi.fetchEnhancedPendingChanges()
+          pendingCount = Array.isArray(pendingData) ? pendingData.length : 0
+        } catch (e) {
+          console.warn('Failed to fetch pending changes for badge:', e)
+          // Fallback to cache if API fails
+          if (this.pendingChanges.data && Array.isArray(this.pendingChanges.data)) {
+            pendingCount = this.pendingChanges.data.length
           }
         }
 
-        // Get local changes count from cache or API
+        // Get local changes count from API (always fresh data for badges)
         let localCount = 0
-        if (this.localChanges.data && Array.isArray(this.localChanges.data)) {
-          localCount = this.localChanges.data.length
-        } else {
-          try {
-            const localData = await hubApi.fetchLocalChanges()
-            localCount = Array.isArray(localData) ? localData.length : 0
-          } catch (e) {
-            console.warn('Failed to fetch local changes for badge:', e)
+        try {
+          const localData = await hubApi.fetchLocalChanges()
+          localCount = Array.isArray(localData) ? localData.length : 0
+        } catch (e) {
+          console.warn('Failed to fetch local changes for badge:', e)
+          // Fallback to cache if API fails
+          if (this.localChanges.data && Array.isArray(this.localChanges.data)) {
+            localCount = this.localChanges.data.length
           }
         }
 

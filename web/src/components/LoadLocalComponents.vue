@@ -10,13 +10,6 @@
         >
           Refresh
         </button>
-        <button 
-          @click="verifyChanges" 
-          :disabled="!changes.length || verifying"
-          class="btn btn-verify btn-sm"
-        >
-          {{ verifying ? 'Verifying...' : 'Verify' }}
-        </button>
       </div>
     </div>
 

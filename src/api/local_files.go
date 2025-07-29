@@ -29,257 +29,267 @@ func getLocalChanges(c echo.Context) error {
 
 	// Check inputs
 	inputDir := filepath.Join(configRoot, "input")
-	if err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // Skip errors
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-			return nil
-		}
-
-		filename := d.Name()
-		id := strings.TrimSuffix(filename, ".yaml")
-
-		// Read file content
-		fileContent, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		// Check if exists in memory
-		memoryInput, exists := project.GetInput(id)
-		var memoryContent string
-		if exists {
-			memoryContent = memoryInput.Config.RawConfig
-		}
-
-		// Compare content
-		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-			changeType := "modified"
-			if !exists {
-				changeType = "new"
+	if _, err := os.Stat(inputDir); err == nil {
+		if err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil // Skip errors
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
 			}
 
-			changes = append(changes, map[string]interface{}{
-				"type":           "input",
-				"id":             id,
-				"change_type":    changeType,
-				"file_path":      path,
-				"file_size":      len(fileContent),
-				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
-				"local_content":  string(fileContent),
-				"memory_content": memoryContent,
-				"has_local":      true,
-				"has_memory":     exists,
-			})
-		}
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
 
-		return nil
-	}); err != nil {
-		// Continue even if there's an error
+			// Read file content
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			// Check if exists in memory
+			memoryInput, exists := project.GetInput(id)
+			var memoryContent string
+			if exists {
+				memoryContent = memoryInput.Config.RawConfig
+			}
+
+			// Compare content
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "input",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
 	}
 
 	// Check outputs
 	outputDir := filepath.Join(configRoot, "output")
-	if err := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-			return nil
-		}
-
-		filename := d.Name()
-		id := strings.TrimSuffix(filename, ".yaml")
-
-		fileContent, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		memoryOutput, exists := project.GetOutput(id)
-		var memoryContent string
-		if exists {
-			memoryContent = memoryOutput.Config.RawConfig
-		}
-
-		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-			changeType := "modified"
-			if !exists {
-				changeType = "new"
+	if _, err := os.Stat(outputDir); err == nil {
+		if err := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
 			}
 
-			changes = append(changes, map[string]interface{}{
-				"type":           "output",
-				"id":             id,
-				"change_type":    changeType,
-				"file_path":      path,
-				"file_size":      len(fileContent),
-				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
-				"local_content":  string(fileContent),
-				"memory_content": memoryContent,
-				"has_local":      true,
-				"has_memory":     exists,
-			})
-		}
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
 
-		return nil
-	}); err != nil {
-		// Continue
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryOutput, exists := project.GetOutput(id)
+			var memoryContent string
+			if exists {
+				memoryContent = memoryOutput.Config.RawConfig
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "output",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
 	}
 
 	// Check rulesets
 	rulesetDir := filepath.Join(configRoot, "ruleset")
-	if err := filepath.WalkDir(rulesetDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".xml") {
-			return nil
-		}
-
-		filename := d.Name()
-		id := strings.TrimSuffix(filename, ".xml")
-
-		fileContent, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		memoryRuleset, exists := project.GetRuleset(id)
-		var memoryContent string
-		if exists {
-			memoryContent = memoryRuleset.RawConfig
-		}
-
-		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-			changeType := "modified"
-			if !exists {
-				changeType = "new"
+	if _, err := os.Stat(rulesetDir); err == nil {
+		if err := filepath.WalkDir(rulesetDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".xml") {
+				return nil
 			}
 
-			changes = append(changes, map[string]interface{}{
-				"type":           "ruleset",
-				"id":             id,
-				"change_type":    changeType,
-				"file_path":      path,
-				"file_size":      len(fileContent),
-				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
-				"local_content":  string(fileContent),
-				"memory_content": memoryContent,
-				"has_local":      true,
-				"has_memory":     exists,
-			})
-		}
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".xml")
 
-		return nil
-	}); err != nil {
-		// Continue
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryRuleset, exists := project.GetRuleset(id)
+			var memoryContent string
+			if exists {
+				memoryContent = memoryRuleset.RawConfig
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "ruleset",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
 	}
 
 	// Check projects
 	projectDir := filepath.Join(configRoot, "project")
-	if err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-			return nil
-		}
-
-		filename := d.Name()
-		id := strings.TrimSuffix(filename, ".yaml")
-
-		fileContent, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		memoryProject, exists := project.GetProject(id)
-		var memoryContent string
-		if exists {
-			memoryContent = memoryProject.Config.RawConfig
-		}
-
-		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-			changeType := "modified"
-			if !exists {
-				changeType = "new"
+	if _, err := os.Stat(projectDir); err == nil {
+		if err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
 			}
 
-			changes = append(changes, map[string]interface{}{
-				"type":           "project",
-				"id":             id,
-				"change_type":    changeType,
-				"file_path":      path,
-				"file_size":      len(fileContent),
-				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
-				"local_content":  string(fileContent),
-				"memory_content": memoryContent,
-				"has_local":      true,
-				"has_memory":     exists,
-			})
-		}
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
 
-		return nil
-	}); err != nil {
-		// Continue
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryProject, exists := project.GetProject(id)
+			var memoryContent string
+			if exists {
+				memoryContent = memoryProject.Config.RawConfig
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "project",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
 	}
 
 	// Check plugins
 	pluginDir := filepath.Join(configRoot, "plugin")
-	if err := filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-
-		filename := d.Name()
-		id := strings.TrimSuffix(filename, ".go")
-
-		fileContent, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		memoryPlugin, exists := plugin.Plugins[id]
-		var memoryContent string
-		if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
-			memoryContent = string(memoryPlugin.Payload)
-		}
-
-		// Also check if there's content in temporary memory (PluginsNew)
-		// If plugin was loaded but not yet applied, use temporary content for comparison
-		if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
-			memoryContent = tempContent
-			exists = true // Treat as existing if it's in temporary memory
-		}
-
-		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-			changeType := "modified"
-			if !exists {
-				changeType = "new"
+	if _, err := os.Stat(pluginDir); err == nil {
+		if err := filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") {
+				return nil
 			}
 
-			changes = append(changes, map[string]interface{}{
-				"type":           "plugin",
-				"id":             id,
-				"change_type":    changeType,
-				"file_path":      path,
-				"file_size":      len(fileContent),
-				"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
-				"local_content":  string(fileContent),
-				"memory_content": memoryContent,
-				"has_local":      true,
-				"has_memory":     exists,
-			})
-		}
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".go")
 
-		return nil
-	}); err != nil {
-		// Continue
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			memoryPlugin, exists := plugin.Plugins[id]
+			var memoryContent string
+			if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
+				memoryContent = string(memoryPlugin.Payload)
+			}
+
+			// Also check if there's content in temporary memory (PluginsNew)
+			// If plugin was loaded but not yet applied, use temporary content for comparison
+			if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+				memoryContent = tempContent
+				exists = true // Treat as existing if it's in temporary memory
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "plugin",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
 	}
 
 	// Check for components that exist in memory but not in local files (deleted locally)

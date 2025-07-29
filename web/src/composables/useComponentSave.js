@@ -70,10 +70,6 @@ export function useComponentSave() {
         response = await hubApi.saveEdit(componentType, componentId, content)
       }
       
-      // Show success message
-      const action = isNewComponent ? 'created' : 'saved'
-      $message?.success?.(`Component ${action} successfully`)
-      
       // Call success callback immediately to switch to view mode
       if (onSuccess) {
         onSuccess({ type: componentType, id: componentId, exitToViewMode })
@@ -94,6 +90,7 @@ export function useComponentSave() {
       
       // Post-save verification with messages (after view mode switch)
       if (verifyAfterSave) {
+        const action = isNewComponent ? 'created' : 'saved'
         await verifyAfterSave(componentType, componentId, action)
       }
       
