@@ -289,9 +289,9 @@ Simplest rule: Detect admin login
 - Tag content: Value used for comparison
 
 **Working Principle:**
-1. The rules engine extracts the field value specified by `field` from the input data
-2. Uses the comparison method specified by `type` to compare the field value with the tag content
-3. Returns a check result of true or false
+- The rules engine extracts the field value specified by `field` from the input data
+- Uses the comparison method specified by `type` to compare the field value with the tag content
+- Returns a check result of true or false
 
 #### 🔍 Syntax Details: `<append>` Tag
 
@@ -366,9 +366,9 @@ When there are multiple `<check>` tags in a rule:
 - This design improves performance: Fail early, avoid unnecessary checks
 
 In the above example, all three check conditions must be **fully satisfied**:
-1. username equals "admin" 
-2. login_time greater than 22 (after 10 PM)
-3. failed_attempts greater than 3
+- username equals "admin"
+- login_time greater than 22 (after 10 PM)
+- failed_attempts greater than 3
 
 #### 🔍 Syntax Details: `<plugin>` Tag
 
@@ -432,9 +432,9 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 - `_$ORIDATA`: Reference the entire original data object (must follow this syntax even when used inside plugins).
 
 **Working Principle:**
-1. When the rules engine encounters the `_$` prefix, it recognizes it as a dynamic reference; but when applying detection data within plugins, you don't need to use this prefix, just use the field directly.
-2. Extract the corresponding field value from the currently processed data
-3. Use the extracted value for comparison or processing
+- When the rules engine encounters the `_$` prefix, it recognizes it as a dynamic reference; but when applying detection data within plugins, you don't need to use this prefix, just use the field directly.
+- Extract the corresponding field value from the currently processed data
+- Use the extracted value for comparison or processing
 
 **In the above example:**
 - In check, `_$user.daily_limit` extracts the value of `user.daily_limit` from the data (5000);
@@ -496,14 +496,14 @@ One of the major features of the rules engine is flexible execution order:
 
 **Why is execution order important?**
 
-1. **Data Enhancement**: Can add fields first, then perform checks based on new fields
-2. **Performance Optimization**: Put fast checks in front, complex operations in back
-3. **Conditional Processing**: Some operations may depend on results from previous operations
+- **Data Enhancement**: Can add fields first, then perform checks based on new fields
+- **Performance Optimization**: Put fast checks in front, complex operations in back
+- **Conditional Processing**: Some operations may depend on results from previous operations
 
 **Execution Flow:**
-1. The rules engine executes operations according to the appearance order of tags in XML
-2. If check operations (check, threshold) fail, the rule ends immediately
-3. Processing operations (append, del, plugin) only execute after all checks pass
+- The rules engine executes operations according to the appearance order of tags in XML
+- If check operations (check, threshold) fail, the rule ends immediately
+- Processing operations (append, del, plugin) only execute after all checks pass
 
 #### 🔍 Syntax Details: `<threshold>` Tag
 
@@ -520,9 +520,9 @@ One of the major features of the rules engine is flexible execution order:
 - `value` (required): Trigger threshold, when this quantity is reached the check passes
 
 **Working Principle:**
-1. Group events by the `group_by` field (e.g., group by source_ip)
-2. Count events for each group within the sliding time window specified by `range`
-3. When the statistical value for a group reaches `value`, that threshold check passes
+- Group events by the `group_by` field (e.g., group by source_ip)
+- Count events for each group within the sliding time window specified by `range`
+- When the statistical value for a group reaches `value`, that threshold check passes
 
 **In the above example:**
 - Group by source_ip
@@ -685,9 +685,9 @@ Rule using conditional combinations:
 - `a and (b or (c and d))`: Complex nested conditions
 
 **Working Principle:**
-1. Execute all check nodes with `id`, record the result of each node (true/false)
-2. Substitute results into the `condition` expression to calculate final result
-3. If final result is true, checklist passes
+- Execute all check nodes with `id`, record the result of each node (true/false)
+- Substitute results into the `condition` expression to calculate final result
+- If final result is true, checklist passes
 
 #### 🔍 Syntax Details: Multi-value Matching (logic and delimiter)
 
@@ -705,9 +705,9 @@ When you need to check if a field matches multiple values, you can use multi-val
 - `delimiter`: Separator, used to split multiple values
 
 **Working Principle:**
-1. Use `delimiter` to split tag content into multiple values
-2. Check each value separately
-3. Determine final result based on `logic`:
+- Use `delimiter` to split tag content into multiple values
+- Check each value separately
+- Determine final result based on `logic`:
    - `logic="OR"`: Any value matches returns true
    - `logic="AND"`: All values must match to return true
 
@@ -727,9 +727,9 @@ When you need to check if a field matches multiple values, you can use multi-val
 
 The `<threshold>` tag can not only perform simple counting, but also supports three powerful statistical modes:
 
-1. **Default Mode (Counting)**: Count event occurrences
-2. **SUM Mode**: Sum specified fields
-3. **CLASSIFY Mode**: Count different values (deduplication counting)
+- **Default Mode (Counting)**: Count event occurrences
+- **SUM Mode**: Sum specified fields
+- **CLASSIFY Mode**: Count different values (deduplication counting)
 
 #### Scenario 1: Login Failure Count Statistics (Default Counting)
 
@@ -791,9 +791,9 @@ Rule:
 - `value`: Trigger when cumulative sum reaches this value
 
 **Working Principle:**
-1. Group by `group_by`
-2. Accumulate values of `count_field` within time window
-3. Trigger when cumulative value reaches `value`
+- Group by `group_by`
+- Accumulate values of `count_field` within time window
+- Trigger when cumulative value reaches `value`
 
 #### Scenario 3: Resource Access Statistics (CLASSIFY Mode)
 
@@ -827,9 +827,9 @@ Rule:
 - `value`: Trigger when number of different values reaches this value
 
 **Working Principle:**
-1. Group by `group_by`
-2. Collect all different values of `count_field` within time window
-3. Trigger when number of different values reaches `value`
+- Group by `group_by`
+- Collect all different values of `count_field` within time window
+- Trigger when number of different values reaches `value`
 
 **Use Cases:**
 - Detect scanning behavior (access multiple different ports/IPs)
