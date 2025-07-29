@@ -1382,27 +1382,140 @@ func updateComponent(componentType string, c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body: " + err.Error()})
 	}
 
-	// Check if formal file exists, if not check if temporary file exists
-	formalPath, formalExists := GetComponentPath(componentType, id, false)
-	tempPath, tempExists := GetComponentPath(componentType, id, true)
-
+	// First check memory (like getProject and getPlugin functions)
 	var originalContent string
 	var err error
+	var tempPath string
+	var tempExists bool
 
-	if formalExists {
-		// Read original formal file content to compare
-		originalContent, err = ReadComponent(formalPath)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+	// Check memory first, then fall back to file system
+	switch componentType {
+	case "plugin":
+		// Check if plugin exists in memory
+		if p, ok := plugin.Plugins[id]; ok {
+			originalContent = string(p.Payload)
+		} else if p_raw, ok := plugin.PluginsNew[id]; ok {
+			originalContent = p_raw
+		} else {
+			// Fall back to file system check
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
 		}
-	} else if tempExists {
-		// If no formal file but temp file exists, read temp file content
-		originalContent, err = ReadComponent(tempPath)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+	case "project":
+		// Check if project exists in memory
+		if p, exists := project.GetProject(id); exists {
+			originalContent = p.Config.RawConfig
+		} else if p_raw, ok := project.GetProjectNew(id); ok {
+			originalContent = p_raw
+		} else {
+			// Fall back to file system check
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
 		}
-	} else {
-		// Neither formal nor temp file exists
+	case "input":
+		// Check if input exists in memory
+		if i, exists := project.GetInput(id); exists {
+			originalContent = i.Config.RawConfig
+		} else if i_raw, ok := project.GetInputNew(id); ok {
+			originalContent = i_raw
+		} else {
+			// Fall back to file system check
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
+		}
+	case "output":
+		// Check if output exists in memory
+		if o, exists := project.GetOutput(id); exists {
+			originalContent = o.Config.RawConfig
+		} else if o_raw, ok := project.GetOutputNew(id); ok {
+			originalContent = o_raw
+		} else {
+			// Fall back to file system check
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
+		}
+	case "ruleset":
+		// Check if ruleset exists in memory
+		if r, exists := project.GetRuleset(id); exists {
+			originalContent = r.RawConfig
+		} else if r_raw, ok := project.GetRulesetNew(id); ok {
+			originalContent = r_raw
+		} else {
+			// Fall back to file system check
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
+		}
+	default:
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 	}
 
