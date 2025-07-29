@@ -81,7 +81,14 @@ api.interceptors.response.use(
     if (typeof window !== 'undefined' && window.$toast) {
       let msg = error.response?.data?.error || error.message || 'Unknown error';
       
-      window.$toast.show(msg, 'error');
+      try {
+        if (typeof window.$toast.show === 'function') {
+          window.$toast.show(msg, 'error');
+        }
+      } catch (error) {
+        // Silently ignore toast errors to prevent breaking the API functionality
+        console.warn('Toast notification failed:', error)
+      }
     }
     return Promise.reject(error);
   }

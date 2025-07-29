@@ -1136,23 +1136,8 @@ async function saveEdit(content) {
     }
   })
   
-  if (success) {
-    // Force refresh by clearing current detail first and reloading
-    detail.value = null
-    editorValue.value = ''
-    
-    // Refresh component content after successful save but stay in edit mode
-    await fetchDetail(currentItem, true)
-    
-    // If still no content, try fetching the original file
-    if (!detail.value || !detail.value.raw) {
-      await fetchDetail(currentItem, false)
-      if (detail.value && detail.value.raw) {
-        editorValue.value = detail.value.raw
-        originalContent.value = detail.value.raw
-      }
-    }
-  }
+  // Success is handled by the onSuccess callback which switches to view mode
+  // No need to manually refresh here as it will be done after switching to view mode
 }
 
 async function saveNew(content) {
