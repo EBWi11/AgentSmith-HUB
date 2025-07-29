@@ -921,10 +921,40 @@ export const useDataCacheStore = defineStore('dataCache', {
         this.uiStates.sidebarSearch = search
       }
       this.uiStates.lastUpdate = Date.now()
+      
+      // Save to localStorage for persistence across page refreshes
+      try {
+        const stateToSave = {
+          collapsed: { ...this.uiStates.sidebarCollapsed },
+          search: this.uiStates.sidebarSearch,
+          timestamp: Date.now()
+        }
+        localStorage.setItem('agentsmith_sidebar_state', JSON.stringify(stateToSave))
+      } catch (error) {
+        console.warn('Failed to save sidebar state to localStorage:', error)
+      }
     },
     
     restoreSidebarState() {
-      // Only restore if saved within last 5 minutes
+      // First try to restore from localStorage (persistent across refreshes)
+      try {
+        const savedState = localStorage.getItem('agentsmith_sidebar_state')
+        if (savedState) {
+          const parsedState = JSON.parse(savedState)
+          // Check if saved state is not too old (24 hours)
+          const maxAge = 24 * 60 * 60 * 1000 // 24 hours
+          if (Date.now() - parsedState.timestamp < maxAge) {
+            return {
+              collapsed: parsedState.collapsed || { ...this.uiStates.sidebarCollapsed },
+              search: parsedState.search || ''
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to restore sidebar state from localStorage:', error)
+      }
+      
+      // Fallback to memory state (only if saved within last 5 minutes)
       const maxAge = 5 * 60 * 1000 // 5 minutes
       if (Date.now() - this.uiStates.lastUpdate > maxAge) {
         return null
@@ -948,6 +978,13 @@ export const useDataCacheStore = defineStore('dataCache', {
       }
       this.uiStates.sidebarSearch = ''
       this.uiStates.lastUpdate = 0
+      
+      // Also clear localStorage state
+      try {
+        localStorage.removeItem('agentsmith_sidebar_state')
+      } catch (error) {
+        console.warn('Failed to clear sidebar state from localStorage:', error)
+      }
     },
 
     // Fetch settings badges data
