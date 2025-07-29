@@ -219,9 +219,38 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
-## 📚 第二部分：RULESET 语法详解
+## 🔧 第二部分：基本操作指南
 
-### 2.1 你的第一个规则
+### 2.1 临时文件和正式文件
+
+当点击+（新建组件）或者双击组件后（编辑已有组件）会进入针对组件的编辑模式，需要注意在编辑模式下保存（点击 Save 或者使用 Cmd+S 快捷键），都不会直接保存为正式组件，而是会通过临时文件的方式进行保存，如果需要成为真正可以被使用的组件，需要在 Setting -> Push Changes 进行配置 Review 后进行 Apply。
+
+提交变更后 HUB 会自动重启受影响的 Project。
+
+### 2.2 从本地文件读取配置
+
+组件配置也可以直接放置到 HUB 的 Config 文件夹内，放置后也需要在 Setting -> Load Local Components 进行配置 Review 后进行 Load。
+
+提交变更后 HUB 会自动重启受影响的 Project。
+
+
+### 2.3 灵活使用测试和查看 Sample Data
+
+Output、Ruleset、Plugin、Project 均支持测试，其中Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
+
+每个运行的组件会采集 Sample Data，我们可以通过组件菜单选择 “View Sample Data” 或者在 Project 流转图中对组件进行右键点击查看 Sample Data。Sample Data 每6分钟采样一条，一共保存100条数据。
+
+
+### 2.4 其他功能
+
+* 所有组件编辑的时候都支持语法的 Verify，在 Save 按钮左侧；Input 和 Output 组件支持 Connect Check；
+* 搜索框不仅支持搜索配置名，也支持搜索配置内具体配置；
+* Setting 支持查看 HUB 和 Pluin 的报错，在Error Logs 内查看；Setting 的 Operations History 支持查看历史的配置提交、Project 操作、集群内部指令下发等。
+
+
+## 📚 第三部分：RULESET 语法详解
+
+### 3.1 你的第一个规则
 
 假设我们有这样的数据流入：
 ```json
@@ -292,7 +321,7 @@ content: |
 }
 ```
 
-### 2.2 添加更多检查条件
+### 3.2 添加更多检查条件
 
 输入数据：
 ```json
@@ -360,7 +389,7 @@ content: |
 - `<plugin>`：执行操作，不返回值
 - `<append type="PLUGIN">`：执行插件并将返回值添加到数据中
 
-### 2.3 使用动态值
+### 3.3 使用动态值
 
 输入数据：
 ```json
@@ -439,9 +468,9 @@ content: |
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ```
 
-## 📊 第三部分：数据处理进阶
+## 📊 第四部分：数据处理进阶
 
-### 3.1 灵活的执行顺序
+### 4.1 灵活的执行顺序
 
 规则引擎的一大特点是灵活的执行顺序：
 
@@ -501,7 +530,7 @@ content: |
 - 统计 5 分钟内的事件数
 - 如果某个 IP 在 5 分钟内触发 10 次，则阈值检查通过
 
-### 3.2 复杂的嵌套数据处理
+### 4.2 复杂的嵌套数据处理
 
 输入数据：
 ```json
@@ -585,7 +614,7 @@ content: |
 - 使用 `<del>` 在数据处理后删除该字段
 - 确保敏感信息不会被存储或传输
 
-### 3.3 条件组合逻辑（checklist）
+### 4.3 条件组合逻辑（checklist）
 
 输入数据：
 ```json
@@ -693,9 +722,9 @@ content: |
 - 使用 OR 逻辑：任一扩展名匹配即可
 - 使用 | 作为分隔符
 
-## 🔧 第四部分：高级特性详解
+## 🔧 第五部分：高级特性详解
 
-### 4.1 阈值检测的三种模式
+### 5.1 阈值检测的三种模式
 
 `<threshold>` 标签不仅可以简单计数，还支持三种强大的统计模式：
 
@@ -808,7 +837,7 @@ content: |
 - 数据外泄检测（访问多个不同文件）
 - 异常行为检测（使用多个不同账号）
 
-### 4.2 内置插件系统
+### 5.2 内置插件系统
 
 AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用。
 
@@ -875,9 +904,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - 当使用静态值时，直接使用字符串（带引号）：`"192.168.1.0/24"`
 - 当使用数字时，不需要引号：`300`
 
-## 第五部分：Ruleset 最佳实践
+## 第六部分：Ruleset 最佳实践
 
-### 5.1 复杂逻辑组合
+### 6.1 复杂逻辑组合
 
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
@@ -898,7 +927,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 5.2 告警抑制示例
+### 6.2 告警抑制示例
 
 ```xml
 <rule id="suppression_example" name="Alert Suppression">
@@ -908,7 +937,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 5.3 数据转换示例
+### 6.3 数据转换示例
 
 ```xml
 <rule id="data_transformation" name="Data Transformation">
@@ -1140,7 +1169,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 5.4 排除规则集
+### 6.4 排除规则集
 
 排除用于过滤掉不需要处理的数据（ruleset type 为 EXCLUDE）。排除的特殊行为：
 - 当排除规则匹配时，数据被"不允许通过"（即被过滤掉，不再继续处理，数据将被丢弃）
@@ -1173,9 +1202,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 🚨 第六部分：实战案例集
+## 🚨 第七部分：实战案例集
 
-### 6.1 案例1：APT攻击检测
+### 7.1 案例1：APT攻击检测
 
 完整的APT攻击检测规则集（使用内置插件和假设的自定义插件）：
 
@@ -1274,7 +1303,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-### 6.2 案例2：金融欺诈实时检测
+### 7.2 案例2：金融欺诈实时检测
 
 ```xml
 <root type="DETECTION" name="fraud_detection_system" author="risk_team">
@@ -1352,7 +1381,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-### 6.3 案例3：零信任安全架构
+### 7.3 案例3：零信任安全架构
 
 ```xml
 <root type="DETECTION" name="zero_trust_security" author="security_architect">
@@ -1432,9 +1461,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </root>
 ```
 
-## 📖 第七部分：语法参考手册
+## 📖 第八部分：语法参考手册
 
-### 7.1 规则集结构
+### 8.1 规则集结构
 
 #### 根元素 `<root>`
 ```xml
@@ -1518,7 +1547,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - **无数据共享**：规则之间无法共享数据修改
 - **性能**：所有规则都会被评估，因此规则顺序不影响性能
 
-### 7.2 检查操作
+### 8.2 检查操作
 
 #### 独立检查 `<check>`
 ```xml
@@ -1547,7 +1576,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 |------|------|------|
 | condition | 否 | 逻辑表达式（如：`a and (b or c)`） |
 
-### 7.3 检查类型完整列表
+### 8.3 检查类型完整列表
 
 #### 字符串匹配类
 | 类型 | 说明 | 大小写 | 示例 |
@@ -1591,7 +1620,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | REGEX | 正则表达式 | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
 | PLUGIN | 插件函数（支持 `!` 取反） | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
-### 7.4 频率检测
+### 8.4 频率检测
 
 #### 阈值检测 `<threshold>`
 ```xml
@@ -1608,7 +1637,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | count_field | 条件 | 统计字段 | 使用SUM/CLASSIFY时必需 |
 | local_cache | 否 | 使用本地缓存 | `true` 或 `false` |
 
-### 7.5 数据处理操作
+### 8.5 数据处理操作
 
 #### 字段追加 `<append>`
 ```xml
@@ -1630,7 +1659,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <plugin>插件函数(参数1, 参数2)</plugin>
 ```
 
-### 7.6 字段访问语法
+### 8.6 字段访问语法
 
 #### 基本访问
 - **直接字段**：`field_name`
@@ -1657,7 +1686,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
-### 7.8 性能优化建议
+### 8.7 性能优化建议
 
 #### 操作顺序优化
 ```xml
@@ -1680,7 +1709,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <threshold group_by="ip" range="1h">1000</threshold>  <!-- 不要超过24h -->
 ```
 
-### 7.9 常见错误和解决方案
+### 8.8 常见错误和解决方案
 
 #### XML语法错误
 ```xml
@@ -1719,7 +1748,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-### 7.10 调试技巧
+### 8.9 调试技巧
 
 #### 1. 使用append跟踪执行流程
 ```xml
@@ -1755,9 +1784,9 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 </rule>
 ```
 
-## 第八部分：自定义插件开发
+## 第九部分：自定义插件开发
 
-### 8.1 插件分类
+### 9.1 插件分类
 
 #### 按运行方式分类
 - **本地插件（Local Plugin）**：编译到程序中的内置插件，性能最高
@@ -1767,7 +1796,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
 - **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
 
-### 8.2 插件语法
+### 9.2 插件语法
 
 #### 基本语法
 ```xml
@@ -1794,7 +1823,7 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 <check type="PLUGIN">!isPrivateIP(source_ip)</check>
 ```
 
-### 8.3 插件函数签名
+### 9.3 插件函数签名
 
 #### 检查类插件
 ```go
@@ -1848,7 +1877,7 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 }
 ```
 
-### 8.4 Yaegi插件的有状态特性
+### 9.4 Yaegi插件的有状态特性
 
 #### 状态保持机制
 ```go
@@ -1884,13 +1913,13 @@ func Eval(key string) (interface{}, bool, error) {
 }
 ```
 
-### 8.5 插件限制
+### 9.5 插件限制
 - 只能使用Go标准库
 - 不能使用第三方包
 - 必须定义名为`Eval`的函数
 - 函数签名必须严格匹配
 
-### 8.6 常用标准库
+### 9.6 常用标准库
 - 基础：`fmt`, `strings`, `strconv`, `errors`
 - 编码：`encoding/json`, `encoding/base64`, `encoding/hex`
 - 加密：`crypto/md5`, `crypto/sha256`, `crypto/rand`

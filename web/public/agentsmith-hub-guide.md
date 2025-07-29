@@ -11,7 +11,7 @@ AgentSmith-HUB Rules Engine is a powerful real-time data processing engine that 
 
 The rules engine adopts a **flexible execution order**, where operations are executed according to their appearance order in XML, allowing you to freely combine various operations based on specific requirements.
 
-## 📋 Part One: Core Component Syntax
+## 📋 Part 1: Core Component Syntax
 
 ### 1.1 INPUT Syntax Description
 
@@ -218,9 +218,38 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
-## 📚 Part Two: RULESET Syntax Detailed Explanation
+## 🔧 Part 2: Basic Operating Instructions
 
-### 2.1 Your First Rule
+### 2.1 Temporary and Official Files
+
+When you click + (New Component) or double-click a component (Edit Existing Component), it will enter the editing mode of the component, you need to pay attention to the fact that when you save in the editing mode (click Save or use Cmd+S shortcut), it will not be directly saved as an official component, it will be saved as a temporary file, and if you need to make it a component that can be used, you need to do Apply after configuration review in Setting -> Push Changes. If you want to become a real component that can be used, you need to review the configuration in Setting -> Push Changes and then Apply.
+
+The HUB will automatically restart the affected projects after the changes are committed.
+
+### 2.2 Reading Configuration from Local Files
+
+Component configurations can also be placed directly into the Config folder of the HUB. After placing the configurations, you need to perform a configuration review in Setting -> Load Local Components and then perform a Load.
+
+The HUB will automatically restart the affected projects after the changes are committed.
+
+
+### 2.3 Flexible Use of Tests and Viewing Sample Data
+
+Output, Ruleset, Plugin, and Project all support testing. For Project testing, you can select Input data input to display the data that needs to be output through Output (it will not really flow into Output component), and Cmd+D is the test shortcut key to quickly wake up the test.
+
+Each running component will collect Sample Data, we can select “View Sample Data” through the component menu or right-click on the component in the Project flow chart to view the Sample Data. Sample Data is sampled every 6 minutes, and a total of 100 pieces of data are saved.
+
+
+### 2.4 Other Features
+
+* All components support Verify syntax when editing, on the left side of Save button; Input and Output components support Connect Check;
+* Search box supports not only searching configuration name, but also searching specific configurations within the configuration;
+* Setting supports checking the error reports of HUB and Pluin in Error Logs; Setting's Operations History supports checking the history of configuration commits, project operations, and internal commands issued by the cluster.
+
+
+## 📚 Part 3: RULESET Syntax Detailed Explanation
+
+### 3.1 Your First Rule
 
 Assuming we have such incoming data:
 ```json
@@ -291,7 +320,7 @@ The output data will become:
 }
 ```
 
-### 2.2 Adding More Check Conditions
+### 3.2 Adding More Check Conditions
 
 Input data:
 ```json
@@ -359,7 +388,7 @@ In the above example, all three check conditions must be **fully satisfied**:
 - `<plugin>`: Execute operation, don't return value
 - `<append type="PLUGIN">`: Execute plugin and add return value to data
 
-### 2.3 Using Dynamic Values
+### 3.3 Using Dynamic Values
 
 Input data:
 ```json
@@ -438,9 +467,9 @@ The `_$` prefix is used to dynamically reference other field values in the data,
 <plugin>sendAlert(_$ORIDATA, "HIGH_RISK")</plugin>
 ```
 
-## 📊 Part Three: Advanced Data Processing
+## 📊 Part 4: Advanced Data Processing
 
-### 3.1 Flexible Execution Order
+### 4.1 Flexible Execution Order
 
 One of the major features of the rules engine is flexible execution order:
 
@@ -500,7 +529,7 @@ One of the major features of the rules engine is flexible execution order:
 - Count events within 5 minutes
 - If an IP triggers 10 times within 5 minutes, the threshold check passes
 
-### 3.2 Complex Nested Data Processing
+### 4.2 Complex Nested Data Processing
 
 Input data:
 ```json
@@ -584,7 +613,7 @@ Rule for processing nested data:
 - Use `<del>` to delete this field after data processing
 - Ensure sensitive information won't be stored or transmitted
 
-### 3.3 Conditional Combination Logic (checklist)
+### 4.3 Conditional Combination Logic (checklist)
 
 Input data:
 ```json
@@ -692,9 +721,9 @@ When you need to check if a field matches multiple values, you can use multi-val
 - Use OR logic: Any extension matches is sufficient
 - Use | as separator
 
-## 🔧 Part Four: Advanced Features Detailed Explanation
+## 🔧 Part 5: Advanced Features Detailed Explanation
 
-### 4.1 Three Modes of Threshold Detection
+### 5.1 Three Modes of Threshold Detection
 
 The `<threshold>` tag can not only perform simple counting, but also supports three powerful statistical modes:
 
@@ -807,7 +836,7 @@ Rule:
 - Data exfiltration detection (access multiple different files)
 - Anomaly behavior detection (use multiple different accounts)
 
-### 4.2 Built-in Plugin System
+### 5.2 Built-in Plugin System
 
 AgentSmith-HUB provides rich built-in plugins that can be used without additional development.
 
@@ -874,9 +903,9 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 - When using static values, use strings directly (with quotes): `"192.168.1.0/24"`
 - When using numbers, no quotes needed: `300`
 
-## Part Five: Ruleset Best Practices
+## Part 6: Ruleset Best Practices
 
-### 5.1 Complex Logic Combinations
+### 6.1 Complex Logic Combinations
 
 ```xml
 <rule id="complex_plugin_usage" name="Complex Plugin Usage">
@@ -897,7 +926,7 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 </rule>
 ```
 
-### 5.2 Alert Suppression Example
+### 6.2 Alert Suppression Example
 
 ```xml
 <rule id="suppression_example" name="Alert Suppression">
@@ -907,7 +936,7 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 </rule>
 ```
 
-### 5.3 Data Transformation Example
+### 6.3 Data Transformation Example
 
 ```xml
 <rule id="data_transformation" name="Data Transformation">
@@ -1139,7 +1168,7 @@ If you don't use the `ruleid` parameter, suppression of the same key by differen
 </rule>
 ```
 
-### 5.4 Exclude Ruleset
+### 6.4 Exclude Ruleset
 
 Exclude is used to filter out data that doesn't need processing (ruleset type is EXCLUDE). Special behavior of exclude:
 - When exclude rule matches, data is "not allowed to pass" (i.e., filtered out, no longer continue processing, data will be discarded)
@@ -1172,9 +1201,9 @@ Exclude is used to filter out data that doesn't need processing (ruleset type is
 </root>
 ```
 
-## 🚨 Part Six: Real-World Case Studies
+## 🚨 Part 7: Real-World Case Studies
 
-### 6.1 Case Study 1: APT Attack Detection
+### 7.1 Case Study 1: APT Attack Detection
 
 Complete APT attack detection ruleset (using built-in plugins and hypothetical custom plugins):
 
@@ -1273,7 +1302,7 @@ Complete APT attack detection ruleset (using built-in plugins and hypothetical c
 </root>
 ```
 
-### 6.2 Case Study 2: Real-Time Financial Fraud Detection
+### 7.2 Case Study 2: Real-Time Financial Fraud Detection
 
 ```xml
 <root type="DETECTION" name="fraud_detection_system" author="risk_team">
@@ -1351,7 +1380,7 @@ Complete APT attack detection ruleset (using built-in plugins and hypothetical c
 </root>
 ```
 
-### 6.3 Case Study 3: Zero Trust Security Architecture
+### 7.3 Case Study 3: Zero Trust Security Architecture
 
 ```xml
 <root type="DETECTION" name="zero_trust_security" author="security_architect">
@@ -1431,9 +1460,9 @@ Complete APT attack detection ruleset (using built-in plugins and hypothetical c
 </root>
 ```
 
-## 📖 Part Seven: Syntax Reference Manual
+## 📖 Part 8: Syntax Reference Manual
 
-### 7.1 Ruleset Structure
+### 8.1 Ruleset Structure
 
 #### Root Element `<root>`
 ```xml
@@ -1517,7 +1546,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 - **No Data Sharing**: Rules cannot share data modifications with each other
 - **Performance**: All rules are evaluated, so rule order doesn't affect performance
 
-### 7.2 Check Operations
+### 8.2 Check Operations
 
 #### Independent Check `<check>`
 ```xml
@@ -1546,7 +1575,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 |-----------|----------|-------------|
 | condition | No | Logical expression (e.g., `a and (b or c)`) |
 
-### 7.3 Complete List of Check Types
+### 8.3 Complete List of Check Types
 
 #### String Matching Types
 | Type | Description | Case Sensitive | Example |
@@ -1590,7 +1619,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 | REGEX | Regular expression | `<check type="REGEX" field="ip">^\d+\.\d+\.\d+\.\d+$</check>` |
 | PLUGIN | Plugin function (supports `!` negation) | `<check type="PLUGIN">isValidEmail(email)</check>` |
 
-### 7.4 Frequency Detection
+### 8.4 Frequency Detection
 
 #### Threshold Detection `<threshold>`
 ```xml
@@ -1607,7 +1636,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 | count_field | Conditional | Statistical field | Required when using SUM/CLASSIFY |
 | local_cache | No | Use local cache | `true` or `false` |
 
-### 7.5 Data Processing Operations
+### 8.5 Data Processing Operations
 
 #### Field Append `<append>`
 ```xml
@@ -1629,7 +1658,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 <plugin>plugin_function(parameter1, parameter2)</plugin>
 ```
 
-### 7.6 Field Access Syntax
+### 8.6 Field Access Syntax
 
 #### Basic Access
 - **Direct field**: `field_name`
@@ -1656,7 +1685,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 <check type="EQU" field="current_level">_$config.min_level</check>
 ```
 
-### 7.8 Performance Optimization Recommendations
+### 8.7 Performance Optimization Recommendations
 
 #### Operation Order Optimization
 ```xml
@@ -1679,7 +1708,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 <threshold group_by="ip" range="1h">1000</threshold>  <!-- Don't exceed 24h -->
 ```
 
-### 7.9 Common Errors and Solutions
+### 8.8 Common Errors and Solutions
 
 #### XML Syntax Errors
 ```xml
@@ -1718,7 +1747,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 </rule>
 ```
 
-### 7.10 Debugging Tips
+### 8.9 Debugging Tips
 
 #### 1. Use append to track execution flow
 ```xml
@@ -1754,9 +1783,9 @@ Use append to verify if fields are correctly obtained:
 </rule>
 ```
 
-## Part Eight: Custom Plugin Development
+## Part 9: Custom Plugin Development
 
-### 8.1 Plugin Classification
+### 9.1 Plugin Classification
 
 #### By Runtime Method
 - **Local Plugin**: Built-in plugins compiled into the program, highest performance
@@ -1766,7 +1795,7 @@ Use append to verify if fields are correctly obtained:
 - **Check Node Plugin**: Returns `(bool, error)`, used in `<check type="PLUGIN">`
 - **Other Plugin**: Returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`
 
-### 8.2 Plugin Syntax
+### 9.2 Plugin Syntax
 
 #### Basic Syntax
 ```xml
@@ -1793,7 +1822,7 @@ Check type plugins support negation prefix:
 <check type="PLUGIN">!isPrivateIP(source_ip)</check>
 ```
 
-### 8.3 Plugin Function Signatures
+### 9.3 Plugin Function Signatures
 
 #### Check Type Plugin
 ```go
@@ -1847,7 +1876,7 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 }
 ```
 
-### 8.4 Stateful Features of Yaegi Plugins
+### 9.4 Stateful Features of Yaegi Plugins
 
 #### State Maintenance Mechanism
 ```go
@@ -1883,13 +1912,13 @@ func Eval(key string) (interface{}, bool, error) {
 }
 ```
 
-### 8.5 Plugin Limitations
+### 9.5 Plugin Limitations
 - Can only use Go standard library
 - Cannot use third-party packages
 - Must define function named `Eval`
 - Function signature must strictly match
 
-### 8.6 Common Standard Libraries
+### 9.6 Common Standard Libraries
 - Basic: `fmt`, `strings`, `strconv`, `errors`
 - Encoding: `encoding/json`, `encoding/base64`, `encoding/hex`
 - Crypto: `crypto/md5`, `crypto/sha256`, `crypto/rand`
