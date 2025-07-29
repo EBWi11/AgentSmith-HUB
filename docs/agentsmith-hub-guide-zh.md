@@ -1,5 +1,9 @@
 # 🛡️ AgentSmith-HUB 完整指南
 
+简体中文 | [English](agentsmith-hub-guide.md)
+
+---
+
 AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
  - 🔍 **实时检测**：从数据流中识别威胁和异常
  - 🔄 **数据转换**：对数据进行加工和丰富化
@@ -259,6 +263,30 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 - Setting 支持查看 HUB 和 Pluin 的报错，在Error Logs 内查看；Setting 的 Operations History 支持查看历史的配置提交、Project 操作、集群内部指令下发等。
 ![Errors.png](png/Errors.png)
 ![OperationsHistory.png](png/OperationsHistory.png)
+
+### 2.5 MCP
+
+AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
+
+```json
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "streamableHttp",
+      "url": "http://192.168.124.5:8080/mcp",
+      "headers": {
+         "token": "your-hub-token"
+      }
+    }
+  }
+}
+```
+
+目前可以通过 MCP 覆盖了大部分使用场景，包括策略编辑等。
+![MCP1.png](png/MCP1.png)
+![MCP2.png](png/MCP2.png)
 
 ## 📚 第三部分：RULESET 语法详解
 

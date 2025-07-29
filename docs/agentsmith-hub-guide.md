@@ -1,5 +1,9 @@
 # 🛡️ AgentSmith-HUB Complete Guide
 
+English | [简体中文](agentsmith-hub-guide-zh.md)
+
+---
+
 AgentSmith-HUB Rules Engine is a powerful real-time data processing engine that can:
 - 🔍 **Real-time Detection**: Identify threats and anomalies from data streams
 - 🔄 **Data Transformation**: Process and enrich data
@@ -260,6 +264,31 @@ Each running component will collect Sample Data, we can select “View Sample Da
 * Setting supports checking the error reports of HUB and Pluin in Error Logs; Setting's Operations History supports checking the history of configuration commits, project operations, and internal commands issued by the cluster.
   ![Errors.png](png/Errors.png)
   ![OperationsHistory.png](png/OperationsHistory.png)
+
+
+### 2.5 MCP
+
+AgentSmith-HUB supports MCP, with tokens shared on the server. The following is the Cline configuration:
+
+```json
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "streamableHttp",
+      "url": "http://192.168.124.5:8080/mcp",
+      "headers": {
+        "token": "your-hub-token"
+      }
+    }
+  }
+}
+```
+
+Currently, MCP covers most use cases, including policy editing, etc.
+![MCP1.png](png/MCP1.png)
+![MCP2.png](png/MCP2.png)
 
 ## 📚 Part 3: RULESET Syntax Detailed Explanation
 

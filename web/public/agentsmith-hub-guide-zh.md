@@ -260,6 +260,30 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 ![Errors.png](/png/Errors.png)
 ![OperationsHistory.png](/png/OperationsHistory.png)
 
+### 2.5 MCP
+
+AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
+
+```json
+{
+  "mcpServers": {
+    "agentsmith-hub": {
+      "disabled": false,
+      "timeout": 60,
+      "type": "streamableHttp",
+      "url": "http://192.168.124.5:8080/mcp",
+      "headers": {
+         "token": "your-hub-token"
+      }
+    }
+  }
+}
+```
+
+目前可以通过 MCP 覆盖了大部分使用场景，包括策略编辑等。
+![MCP1.png](/png/MCP1.png)
+![MCP2.png](/png/MCP2.png)
+
 ## 📚 第三部分：RULESET 语法详解
 
 ### 3.1 你的第一个规则
@@ -317,7 +341,7 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 
 **属性说明：**
 - `field`（必需）：要添加或修改的字段名;
-- `type`（可选）：当值为 "PLUGIN" 时，表示使用插件生成值.
+- `type`（可选）：当值为 "PLUGIN" 时，表示使用插件生成值。
 
 **工作原理：**
 当规则匹配成功后，`<append>` 操作会执行，向数据中添加指定的字段和值。
@@ -376,12 +400,12 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 当一个规则中有多个 `<check>` 标签时：
 - 默认使用 **AND** 逻辑：所有检查都必须通过，规则才匹配;
 - 检查按顺序执行：如果某个检查失败，后续检查不会执行（短路求值）;
-- 这种设计提高了性能：尽早失败，避免不必要的检查.
+- 这种设计提高了性能：尽早失败，避免不必要的检查。
 
 在上面的例子中，三个检查条件必须**全部满足**：
 - username 等于 "admin" ;
 - login_time 大于 22（晚上10点后）;
-- failed_attempts 大于 3.
+- failed_attempts 大于 3。
 
 #### 🔍 语法详解：`<plugin>` 标签
 
@@ -395,11 +419,11 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 **特点：**
 - 执行操作但不返回值到数据中;
 - 通常用于外部动作：发送告警、执行阻断、记录日志等;
-- 只在规则匹配成功后执行.
+- 只在规则匹配成功后执行。
 
 **与 `<append type="PLUGIN">` 的区别：**
 - `<plugin>`：执行操作，不返回值;
-- `<append type="PLUGIN">`：执行插件并将返回值添加到数据中.
+- `<append type="PLUGIN">`：执行插件并将返回值添加到数据中。
 
 ### 3.3 使用动态值
 
