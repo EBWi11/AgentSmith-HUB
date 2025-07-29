@@ -2737,14 +2737,15 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
     const suggestionsMap = new Map();
 
     // Manage all prefix suggestions uniformly, ensure no duplicates
-    const addSuggestion = (label, kind, doc, insertText) => {
+    const addSuggestion = (label, kind, doc, insertText, sortText = null) => {
       if (!suggestionsMap.has(label)) {
         suggestionsMap.set(label, {
           label,
           kind,
           documentation: doc,
           insertText,
-          range
+          range,
+          sortText
         });
       }
     };
@@ -2752,33 +2753,31 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
     // Determine which suggestions to provide based on context
     const arrowIndex = lineText.lastIndexOf('->');
     const isAfterArrow = arrowIndex !== -1 && position.column > arrowIndex + 2;
+    const hasCompleteComponentRef = /\b(INPUT|RULESET|OUTPUT)\.\w+/.test(lineText);
+    const isLineBeginning = lineText.trim() === '';
 
     if (isAfterArrow) {
       // After arrow: can only be RULESET or OUTPUT
-      addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET');
-      addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT');
-    } else {
-      // Before arrow or new line: can be INPUT, RULESET, OUTPUT
-      addSuggestion('INPUT', monaco.languages.CompletionItemKind.Module, 'Input component reference', 'INPUT');
-      addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET');
-      addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT');
+      addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET', '1_ruleset');
+      addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT', '2_output');
+    } else if (hasCompleteComponentRef) {
+      // After complete component reference: should be arrow operator
+      addSuggestion('->', monaco.languages.CompletionItemKind.Operator, 'Flow operator', '-> ', '0_arrow');
+    } else if (isLineBeginning) {
+      // Line beginning: can be INPUT or RULESET
+      addSuggestion('INPUT', monaco.languages.CompletionItemKind.Module, 'Input component reference', 'INPUT', '1_input');
+      addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET', '2_ruleset');
     }
 
-    // Convert Map suggestions to array
-    suggestions.push(...Array.from(suggestionsMap.values()));
+    // Convert Map suggestions to array and sort by sortText
+    const suggestionsArray = Array.from(suggestionsMap.values());
+    suggestionsArray.sort((a, b) => {
+      const sortA = a.sortText || '9_' + a.label;
+      const sortB = b.sortText || '9_' + b.label;
+      return sortA.localeCompare(sortB);
+    });
     
-    // Check if arrow operator should be suggested
-    // Only when line has complete component reference (like INPUT.demo, RULESET.test) and not after arrow
-    const hasCompleteComponentRef = /\b(INPUT|RULESET|OUTPUT)\.\w+/.test(lineText);
-    if (!isAfterArrow && hasCompleteComponentRef) {
-      suggestions.push({
-        label: '->',
-        kind: monaco.languages.CompletionItemKind.Operator,
-        documentation: 'Flow operator',
-        insertText: '-> ',
-        range: range
-      });
-    }
+    suggestions.push(...suggestionsArray);
   }
   
   // Final deduplication
