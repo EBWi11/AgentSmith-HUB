@@ -227,26 +227,38 @@ content: |
 
 提交变更后 HUB 会自动重启受影响的 Project。
 
+![PushChanges](/png/PushChanges.png)
+
 ### 2.2 从本地文件读取配置
 
 组件配置也可以直接放置到 HUB 的 Config 文件夹内，放置后也需要在 Setting -> Load Local Components 进行配置 Review 后进行 Load。
 
 提交变更后 HUB 会自动重启受影响的 Project。
 
+![LoadLocalComponents](/png/LoadLocalComponents.png)
 
 ### 2.3 灵活使用测试和查看 Sample Data
 
 Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
+![PluginTest.png](/png/PluginTest.png)
+![RulesetTest.png](/png/RulesetTest.png)
+![ProjectTest.png](/png/ProjectTest.png)
 
 每个运行的组件会采集 Sample Data，我们可以通过组件菜单选择 “View Sample Data” 或者在 Project 流转图中对组件进行右键点击查看 Sample Data。Sample Data 每6分钟采样一条，一共保存100条数据。
+![SampleData](/png/SampleData.png)
 
 
 ### 2.4 其他功能
 
+- 所有组件编辑都支持智能补全、提示；
+![EditRuleset.png](/png/EditRuleset.png)
 - 所有组件编辑的时候都支持语法的 Verify，在 Save 按钮左侧；Input 和 Output 组件支持 Connect Check；
+![ConnectCheck.png](/png/ConnectCheck.png)
 - 搜索框不仅支持搜索配置名，也支持搜索配置内具体配置；
+![Search.png](/png/Search.png)
 - Setting 支持查看 HUB 和 Pluin 的报错，在Error Logs 内查看；Setting 的 Operations History 支持查看历史的配置提交、Project 操作、集群内部指令下发等。
-
+![Errors.png](/png/Errors.png)
+![OperationsHistory.png](/png/OperationsHistory.png)
 
 ## 📚 第三部分：RULESET 语法详解
 

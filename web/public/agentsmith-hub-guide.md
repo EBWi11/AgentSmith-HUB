@@ -226,26 +226,40 @@ When you click + (New Component) or double-click a component (Edit Existing Comp
 
 The HUB will automatically restart the affected projects after the changes are committed.
 
+![PushChanges](/png/PushChanges.png)
+
+
 ### 2.2 Reading Configuration from Local Files
 
 Component configurations can also be placed directly into the Config folder of the HUB. After placing the configurations, you need to perform a configuration review in Setting -> Load Local Components and then perform a Load.
 
 The HUB will automatically restart the affected projects after the changes are committed.
 
+![LoadLocalComponents](/png/LoadLocalComponents.png)
+
 
 ### 2.3 Flexible Use of Tests and Viewing Sample Data
 
 Output, Ruleset, Plugin, and Project all support testing. For Project testing, you can select Input data input to display the data that needs to be output through Output (it will not really flow into Output component), and Cmd+D is the test shortcut key to quickly wake up the test.
+![PluginTest.png](/png/PluginTest.png)
+![RulesetTest.png](/png/RulesetTest.png)
+![ProjectTest.png](/png/ProjectTest.png)
 
 Each running component will collect Sample Data, we can select “View Sample Data” through the component menu or right-click on the component in the Project flow chart to view the Sample Data. Sample Data is sampled every 6 minutes, and a total of 100 pieces of data are saved.
+![SampleData](/png/SampleData.png)
 
 
 ### 2.4 Other Features
 
+* All component editing supports smart completions and hints;
+  ![EditRuleset.png](/png/EditRuleset.png)
 * All components support Verify syntax when editing, on the left side of Save button; Input and Output components support Connect Check;
+  ![ConnectCheck.png](/png/ConnectCheck.png)
 * Search box supports not only searching configuration name, but also searching specific configurations within the configuration;
+  ![Search.png](/png/Search.png)
 * Setting supports checking the error reports of HUB and Pluin in Error Logs; Setting's Operations History supports checking the history of configuration commits, project operations, and internal commands issued by the cluster.
-
+  ![Errors.png](/png/Errors.png)
+  ![OperationsHistory.png](/png/OperationsHistory.png)
 
 ## 📚 Part 3: RULESET Syntax Detailed Explanation
 
