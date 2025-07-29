@@ -2919,9 +2919,17 @@ function parseXmlContext(fullText, lineNumber, column) {
     }
   }
   
-  // 获取父标签
+  // Get parent tags - improved version, more accurately identify current context
   const beforeLines = lines.slice(0, lineNumber - 1).join('\n') + '\n' + beforeCursor;
   context.parentTags = getParentTags(beforeLines);
+  
+  // Special handling: if user is typing tag name (like <c), we need to determine parent tag
+  if (context.isInTagName && beforeCursor.match(/<[a-zA-Z]*$/)) {
+    // User is typing tag name, we need to find the nearest unclosed tag as parent
+    const beforeCurrentLine = lines.slice(0, lineNumber - 1).join('\n');
+    const parentTagsBeforeLine = getParentTags(beforeCurrentLine);
+    context.parentTags = parentTagsBeforeLine;
+  }
   
   return context;
 }
@@ -3208,6 +3216,8 @@ function getXmlTagNameCompletions(context, range, fullText) {
   const suggestions = [];
   const parentTag = context.parentTags[context.parentTags.length - 1];
   
+
+  
   // 根据父标签提供精确的子标签建议
   if (!parentTag) {
     // 根级别 - 只能有root标签
@@ -3315,6 +3325,60 @@ function getXmlTagNameCompletions(context, range, fullText) {
         range: range
       });
     }
+  }
+  
+  // If user is typing tag name but no parent tag found, provide all possible tags
+  if (context.isInTagName && suggestions.length === 0) {
+    suggestions.push(
+      {
+        label: 'check',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Check condition (can be used in rule or checklist)',
+        insertText: 'check type="EQU" field="field">value</check',
+        range: range,
+        sortText: '1_check'
+      },
+      {
+        label: 'checklist',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'Checklist with conditional logic',
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
+        range: range,
+        sortText: '2_checklist'
+      },
+      {
+        label: 'threshold',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Threshold configuration',
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
+        range: range,
+        sortText: '3_threshold'
+      },
+      {
+        label: 'append',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Append field to result',
+        insertText: 'append field="field_name">value</append',
+        range: range,
+        sortText: '4_append'
+      },
+      {
+        label: 'plugin',
+        kind: monaco.languages.CompletionItemKind.Function,
+        documentation: 'Plugin execution',
+        insertText: 'plugin>plugin_name()</plugin',
+        range: range,
+        sortText: '5_plugin'
+      },
+      {
+        label: 'del',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Delete fields from result',
+        insertText: 'del>field</del',
+        range: range,
+        sortText: '6_del'
+      }
+    );
   }
   
   return { suggestions };
