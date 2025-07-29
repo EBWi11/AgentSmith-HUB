@@ -233,18 +233,9 @@ func (out *Output) SetStatus(status common.Status, err error) {
 
 // cleanup performs cleanup when normal stop fails or panic occurs
 func (out *Output) cleanup() {
-	// Close stop channel if it exists and not already closed
-	if out.stopChan != nil {
-		select {
-		case <-out.stopChan:
-			// Already closed
-		default:
-			close(out.stopChan)
-		}
-		out.stopChan = nil
-	}
+	// Note: stopChan is already closed in Stop() method, so we don't close it here
 
-	// Stop producers
+	// Stop producers (idempotent operations)
 	if out.kafkaProducer != nil {
 		out.kafkaProducer.Close()
 		out.kafkaProducer = nil
@@ -298,17 +289,47 @@ func (out *Output) StartForTesting() error {
 	out.wg.Add(1)
 	go func() {
 		defer out.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Panic in testing output goroutine", "output", out.Id, "panic", r)
+				// Don't change status here as it's handled by the caller
+			}
+		}()
+
+		// Use ticker for more predictable exit timing
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
 
 		for {
 			select {
 			case <-out.stopChan:
+				logger.Debug("Testing output goroutine received stop signal", "id", out.Id)
 				return
-			default:
+			case <-ticker.C:
+				// Check for stop signal before processing
+				select {
+				case <-out.stopChan:
+					logger.Debug("Testing output goroutine received stop signal before processing", "id", out.Id)
+					return
+				default:
+				}
+
 				// Non-blocking check for messages from any upstream channel
-				processed := false
 				for _, up := range out.UpStream {
+					// Check stop signal again during loop iteration
 					select {
-					case msg := <-*up:
+					case <-out.stopChan:
+						logger.Debug("Testing output goroutine received stop signal during upstream processing", "id", out.Id)
+						return
+					default:
+					}
+
+					select {
+					case msg, ok := <-*up:
+						if !ok {
+							// Channel is closed, skip this channel
+							continue
+						}
 						atomic.AddUint64(&out.produceTotal, 1)
 
 						// Skip sampling in testing mode (handled by SetTestMode)
@@ -320,15 +341,23 @@ func (out *Output) StartForTesting() error {
 						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
 
 						if out.TestCollectionChan != nil {
-							*out.TestCollectionChan <- enhancedMsg
+							select {
+							case *out.TestCollectionChan <- enhancedMsg:
+								// Message sent successfully
+							default:
+								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
+							}
 						}
-
-						processed = true
 					default:
 					}
 				}
-				if !processed {
-					time.Sleep(10 * time.Millisecond)
+
+				// Final check for stop signal after processing
+				select {
+				case <-out.stopChan:
+					logger.Debug("Testing output goroutine received stop signal after processing", "id", out.Id)
+					return
+				default:
 				}
 			}
 		}
@@ -412,15 +441,41 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			defer close(msgChan) // Close msgChan when UpStream processing is done
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in kafka output goroutine", "output", out.Id, "panic", r)
+					// Don't change status here as it may conflict with stop process
+				}
+			}()
+
+			// Use ticker for more predictable exit timing
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
 
 			for {
 				select {
 				case <-out.stopChan:
+					logger.Debug("Kafka output goroutine received stop signal", "id", out.Id)
 					return
-				default:
+				case <-ticker.C:
+					// Check for stop signal before processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Kafka output goroutine received stop signal before processing", "id", out.Id)
+						return
+					default:
+					}
+
 					// Non-blocking check for messages from any upstream channel
-					processed := false
 					for _, up := range out.UpStream {
+						// Check stop signal again during loop iteration
+						select {
+						case <-out.stopChan:
+							logger.Debug("Kafka output goroutine received stop signal during upstream processing", "id", out.Id)
+							return
+						default:
+						}
+
 						select {
 						case msg, ok := <-*up:
 							if !ok {
@@ -449,7 +504,7 @@ func (out *Output) Start() error {
 								}
 							}
 
-							// Send enhanced message to msgChan for Kafka producer
+							// Send enhanced message to msgChan for Kafka producer (non-blocking during shutdown)
 							select {
 							case msgChan <- enhancedMsg:
 								// Message sent successfully
@@ -457,14 +512,17 @@ func (out *Output) Start() error {
 								// Channel is full, log warning and continue
 								logger.Warn("Kafka producer channel full, dropping message", "id", out.Id)
 							}
-							processed = true
 						default:
 							// No message available from this channel, continue to next
 						}
 					}
-					// If no messages were processed, use shorter sleep to reduce latency
-					if !processed {
-						time.Sleep(10 * time.Millisecond)
+
+					// Final check for stop signal after processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Kafka output goroutine received stop signal after processing", "id", out.Id)
+						return
+					default:
 					}
 				}
 			}
@@ -515,15 +573,41 @@ func (out *Output) Start() error {
 		go func() {
 			defer out.wg.Done()
 			defer close(msgChan) // Close msgChan when UpStream processing is done
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in elasticsearch output goroutine", "output", out.Id, "panic", r)
+					// Don't change status here as it may conflict with stop process
+				}
+			}()
+
+			// Use ticker for more predictable exit timing
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
 
 			for {
 				select {
 				case <-out.stopChan:
+					logger.Debug("Elasticsearch output goroutine received stop signal", "id", out.Id)
 					return
-				default:
+				case <-ticker.C:
+					// Check for stop signal before processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Elasticsearch output goroutine received stop signal before processing", "id", out.Id)
+						return
+					default:
+					}
+
 					// Non-blocking check for messages from any upstream channel
-					processed := false
 					for _, up := range out.UpStream {
+						// Check stop signal again during loop iteration
+						select {
+						case <-out.stopChan:
+							logger.Debug("Elasticsearch output goroutine received stop signal during upstream processing", "id", out.Id)
+							return
+						default:
+						}
+
 						select {
 						case msg, ok := <-*up:
 							if !ok {
@@ -551,7 +635,7 @@ func (out *Output) Start() error {
 								}
 							}
 
-							// Send enhanced message to msgChan for Elasticsearch producer
+							// Send enhanced message to msgChan for Elasticsearch producer (non-blocking during shutdown)
 							select {
 							case msgChan <- enhancedMsg:
 								// Message sent successfully
@@ -559,14 +643,17 @@ func (out *Output) Start() error {
 								// Channel is full, log warning and continue
 								logger.Warn("Elasticsearch producer channel full, dropping message", "id", out.Id)
 							}
-							processed = true
 						default:
 							// No message available from this channel, continue to next
 						}
 					}
-					// If no messages were processed, use shorter sleep to reduce latency
-					if !processed {
-						time.Sleep(10 * time.Millisecond)
+
+					// Final check for stop signal after processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Elasticsearch output goroutine received stop signal after processing", "id", out.Id)
+						return
+					default:
 					}
 				}
 			}
@@ -580,14 +667,41 @@ func (out *Output) Start() error {
 		out.wg.Add(1)
 		go func() {
 			defer out.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in print output goroutine", "output", out.Id, "panic", r)
+					// Don't change status here as it may conflict with stop process
+				}
+			}()
+
+			// Use ticker for more predictable exit timing
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+
 			for {
 				select {
 				case <-out.stopChan:
+					logger.Debug("Print output goroutine received stop signal", "id", out.Id)
 					return
-				default:
+				case <-ticker.C:
+					// Check for stop signal before processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Print output goroutine received stop signal before processing", "id", out.Id)
+						return
+					default:
+					}
+
 					// Non-blocking check for messages from any upstream channel
-					processed := false
 					for _, up := range out.UpStream {
+						// Check stop signal again during loop iteration
+						select {
+						case <-out.stopChan:
+							logger.Debug("Print output goroutine received stop signal during upstream processing", "id", out.Id)
+							return
+						default:
+						}
+
 						select {
 						case msg, ok := <-*up:
 							if !ok {
@@ -617,14 +731,17 @@ func (out *Output) Start() error {
 							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
 							data, _ := json.Marshal(enhancedMsg)
 							logger.Info("[Print Output]", "data", string(data))
-							processed = true
 						default:
 							// No message available from this channel, continue to next
 						}
 					}
-					// If no messages were processed, use shorter sleep to reduce latency
-					if !processed {
-						time.Sleep(10 * time.Millisecond)
+
+					// Final check for stop signal after processing
+					select {
+					case <-out.stopChan:
+						logger.Debug("Print output goroutine received stop signal after processing", "id", out.Id)
+						return
+					default:
 					}
 				}
 			}
@@ -651,14 +768,31 @@ func (out *Output) Stop() error {
 		logger.Debug("Stopping output from non-running state", "output", out.Id, "current_status", out.Status)
 	}
 	out.SetStatus(common.StatusStopping, nil)
+	logger.Info("Starting output stop process", "id", out.Id, "type", out.Type, "current_status", out.Status)
 
-	// Signal all output goroutines to stop by closing stopChan channel
+	// Step 1: Signal all output goroutines to stop first
 	if out.stopChan != nil {
+		logger.Debug("Closing stopChan", "id", out.Id)
 		close(out.stopChan)
 		out.stopChan = nil
+	} else {
+		logger.Warn("stopChan is nil during stop", "id", out.Id)
 	}
 
-	// Wait for goroutines to finish with timeout
+	// Step 2: Stop producers after signaling goroutines to prevent them from receiving new messages
+	logger.Info("Stopping output producers", "id", out.Id)
+	if out.kafkaProducer != nil {
+		logger.Debug("Closing kafka producer", "id", out.Id)
+		out.kafkaProducer.Close()
+		out.kafkaProducer = nil
+	}
+	if out.elasticsearchProducer != nil {
+		logger.Debug("Closing elasticsearch producer", "id", out.Id)
+		out.elasticsearchProducer.Close()
+		out.elasticsearchProducer = nil
+	}
+
+	// Step 3: Wait for goroutines to finish with timeout and force cleanup if needed
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
 	waitDone := make(chan struct{})
 	go func() {
@@ -670,12 +804,17 @@ func (out *Output) Stop() error {
 	select {
 	case <-waitDone:
 		logger.Info("Output stopped gracefully", "id", out.Id)
-	case <-time.After(10 * time.Second): // 10 second timeout
+	case <-time.After(3 * time.Second): // Further reduced timeout
 		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
+
+		// Try to get more information about pending messages for debugging
+		pendingCount := out.GetPendingMessageCount()
+		logger.Warn("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
+
 		stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 	}
 
-	// Use cleanup to ensure all resources are properly released
+	// Step 4: Final cleanup to ensure all resources are properly released
 	out.cleanup()
 
 	// Set final status based on whether there were any errors during stop
@@ -719,13 +858,16 @@ func (out *Output) GetIncrementAndUpdate() uint64 {
 func (out *Output) StopForTesting() error {
 	logger.Info("Quick stopping test output", "id", out.Id, "type", out.Type)
 
-	// Clear test collection channel
+	// Step 1: Signal goroutines to stop by closing stopChan channel
+	if out.stopChan != nil {
+		close(out.stopChan)
+		out.stopChan = nil
+	}
+
+	// Step 2: Clear test collection channel
 	out.TestCollectionChan = nil
 
-	// In testing mode, there are no special channels or producers to close
-	// Just wait for the single goroutine to finish
-
-	// Wait for goroutines with very short timeout
+	// Step 3: Wait for goroutines with very short timeout
 	waitDone := make(chan struct{})
 	go func() {
 		out.wg.Wait()
@@ -739,13 +881,13 @@ func (out *Output) StopForTesting() error {
 		logger.Warn("Timeout waiting for test output goroutines, proceeding anyway", "id", out.Id)
 	}
 
-	// Reset atomic counter for testing cleanup
+	// Step 4: Reset atomic counter for testing cleanup
 	previousTotal := atomic.LoadUint64(&out.produceTotal)
 	atomic.StoreUint64(&out.produceTotal, 0)
 	atomic.StoreUint64(&out.lastReportedTotal, 0)
 	logger.Debug("Reset atomic counter for test output component", "output", out.Id, "previous_total", previousTotal)
 
-	// Clear component channel connections to prevent leaks
+	// Step 5: Clear component channel connections to prevent leaks
 	out.UpStream = make(map[string]*chan map[string]interface{})
 
 	out.SetStatus(common.StatusStopped, nil)

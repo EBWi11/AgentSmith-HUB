@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -930,6 +931,10 @@ func (p *Project) Start(lock bool) error {
 		return fmt.Errorf("project is not in startable state, current status: %s", p.Status)
 	}
 
+	// Initialize or reset the stop channel for this start session
+	p.stopOnce = sync.Once{}
+	p.stopChan = make(chan struct{})
+
 	err = p.initComponents()
 	if err != nil {
 		// Stop all components that may have been partially initialized
@@ -980,6 +985,13 @@ func (p *Project) Stop(lock bool) error {
 	if !p.atomicStatusTransition([]common.Status{common.StatusRunning, common.StatusError}, common.StatusStopping) {
 		return fmt.Errorf("project is not in stoppable state, current status: %s", p.Status)
 	}
+
+	// Signal all components to stop by closing the stop channel
+	p.stopOnce.Do(func() {
+		if p.stopChan != nil {
+			close(p.stopChan)
+		}
+	})
 
 	// Overall timeout for the entire stop process
 	overallTimeout := time.After(2 * time.Minute)
@@ -1168,12 +1180,16 @@ func (p *Project) getPartner(t string, pns string) []string {
 }
 
 func (p *Project) stopComponentsInternal() error {
+	return p.stopComponentsInternalWithTimeout(45 * time.Second) // Leave 75 seconds for overall timeout margin
+}
+
+func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.Duration) error {
 	var stopErrors []error
 	logger.Info("Step 1: Disconnecting inputs from downstream", "project", p.Id)
 	p.disconnectInputsFromDownstream()
 
-	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id)
-	p.waitForCompleteDataProcessing()
+	logger.Info("Step 2: Waiting for data to be fully processed through pipeline", "project", p.Id, "timeout", dataProcessingTimeout)
+	p.waitForCompleteDataProcessingWithTimeout(dataProcessingTimeout)
 
 	logger.Info("Step 3: Stopping input components", "project", p.Id)
 	inputErrors := p.stopInputComponents()
@@ -1287,6 +1303,10 @@ func (p *Project) cleanup() {
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
 	p.MsgChannels = make(map[string]*chan map[string]interface{}, 0)
+
+	// Reset stop channel state for next start/stop cycle
+	p.stopOnce = sync.Once{}
+	p.stopChan = nil
 }
 
 // disconnectInputsFromDownstream safely disconnects all input components from their downstream channels
@@ -1353,44 +1373,69 @@ func (p *Project) stopInputComponents() []error {
 // waitForCompleteDataProcessing waits for all data to be fully processed through the pipeline
 // This includes waiting for channels to empty AND thread pools to complete all tasks
 func (p *Project) waitForCompleteDataProcessing() {
-	overallTimeout := time.After(60 * time.Second) // 60 second overall timeout
+	p.waitForCompleteDataProcessingWithTimeout(60 * time.Second)
+}
+
+// waitForCompleteDataProcessingWithTimeout waits for all data to be fully processed with a given timeout
+func (p *Project) waitForCompleteDataProcessingWithTimeout(timeout time.Duration) {
+	overallTimeout := time.After(timeout)
 	checkInterval := 100 * time.Millisecond
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
+	logger.Info("Waiting for complete data processing", "project", p.Id, "timeout", timeout)
+
 	for {
 		select {
 		case <-overallTimeout:
+			logger.Info("Data processing wait timeout reached", "project", p.Id)
 			return
 		case <-ticker.C:
 			allProcessed := true
 
 			// Check all channels for remaining messages
+			channelCount := 0
+			messagesRemaining := 0
 			for _, ch := range p.MsgChannels {
+				channelCount++
 				chLen := len(*ch)
 				if chLen > 0 {
+					messagesRemaining += chLen
 					allProcessed = false
-					break
 				}
 			}
 
 			if !allProcessed {
+				logger.Debug("Still processing channel messages",
+					"project", p.Id,
+					"channels", channelCount,
+					"pending_messages", messagesRemaining)
 				continue
 			}
 
+			// Check ruleset running tasks
 			rulesets := p.GetProjectRulesets()
+			totalRunningTasks := 0
 			for _, rs := range rulesets {
 				if CalculateRefCount(rs.ProjectNodeSequence, p.Id) == 0 {
 					runningTasks := rs.GetRunningTaskCount()
 					if runningTasks > 0 {
+						totalRunningTasks += runningTasks
 						allProcessed = false
-						break
 					}
 				}
 			}
 
+			if !allProcessed {
+				logger.Debug("Still processing ruleset tasks",
+					"project", p.Id,
+					"running_tasks", totalRunningTasks)
+				continue
+			}
+
 			if allProcessed {
 				logger.Info("All data processing completed", "project", p.Id)
+				// Simple final grace period
 				time.Sleep(1 * time.Second)
 				return
 			}

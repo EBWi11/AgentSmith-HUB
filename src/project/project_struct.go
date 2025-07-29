@@ -116,6 +116,10 @@ type Project struct {
 	// Restart cooldown
 	lastRestartTime time.Time
 	restartMu       sync.Mutex
+
+	// Stop signal for graceful shutdown coordination
+	stopChan chan struct{} `json:"-"`
+	stopOnce sync.Once     `json:"-"`
 }
 
 // atomicStatusTransition performs atomic status checking and transition

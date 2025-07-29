@@ -95,10 +95,15 @@ func (p *ElasticsearchProducer) run() {
 	for {
 		select {
 		case <-p.stopChan:
-			// Flush any remaining batch before stopping
-			if len(batch) > 0 {
-				p.flush(batch)
+			// Stop timer to prevent any further timer events
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
+			// Don't flush remaining batch during shutdown to avoid blocking
+			// Just return immediately to ensure fast shutdown
 			return
 		case msg, ok := <-p.MsgChan:
 			if !ok {
@@ -152,9 +157,16 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 		}
 	}
 
-	// Try to send with retries
+	// Try to send with retries and timeout control
 	for i := 0; i <= p.maxRetries; i++ {
-		res, err := p.Client.Bulk(bytes.NewReader(buf.Bytes()))
+		// Create context with timeout for each retry
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		// Use context for bulk request
+		res, err := p.Client.Bulk(bytes.NewReader(buf.Bytes()), p.Client.Bulk.WithContext(ctx))
+
+		cancel() // Always cancel context
+
 		if err != nil {
 			if i == p.maxRetries {
 				fmt.Printf("Failed to send batch to ES after %d retries: %v\n", p.maxRetries, err)
