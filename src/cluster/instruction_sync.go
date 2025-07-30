@@ -543,11 +543,18 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 }
 
 func (im *InstructionManager) Stop() {
-	is, _ := im.loadAllInstructions(im.maxInstructions)
-	for i := range is {
-		key := fmt.Sprintf("cluster:instruction:%d", i)
-		_ = common.RedisDel(key)
+	// Only leader should clean up cluster instructions
+	// Followers should not delete instructions as they are managed by leader
+	if common.IsCurrentNodeLeader() {
+		logger.Info("Leader cleaning up cluster instructions during shutdown")
+		is, _ := im.loadAllInstructions(im.maxInstructions)
+		for i := range is {
+			key := fmt.Sprintf("cluster:instruction:%d", i)
+			_ = common.RedisDel(key)
+		}
+		_ = common.RedisDel(fmt.Sprintf("cluster:instruction:%d", len(is)))
+		_ = common.RedisDel("cluster:leader_version")
+	} else {
+		logger.Info("Follower stopping instruction manager (not cleaning up cluster instructions)")
 	}
-	_ = common.RedisDel(fmt.Sprintf("cluster:instruction:%d", len(is)))
-	_ = common.RedisDel("cluster:leader_version")
 }
