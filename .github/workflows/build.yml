@@ -288,6 +288,17 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ github.ref_name }},enable={{is_tag}}
+
+      - name: Debug metadata
+        run: |
+          echo "Meta tags: ${{ steps.meta.outputs.tags }}"
+          echo "Meta labels: ${{ steps.meta.outputs.labels }}"
+          echo "GitHub ref: ${{ github.ref }}"
+          echo "GitHub ref name: ${{ github.ref_name }}"
+          echo "Is tag: ${{ startsWith(github.ref, 'refs/tags/') }}"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
