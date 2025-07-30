@@ -6,50 +6,50 @@ AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comp
 
 ![Dashboard.png](docs/png/Dashboard.png)
 
-* If you have a lot of raw logs, security alarms that need to be processed, enriched, and linked with other systems, then the HUB will be your best tool to help you get the job done efficiently, standardized, and with very low learning costs.
+If you have a lot of raw logs, security alarms that need to be processed, enriched, and linked with other systems, then the HUB will be your best tool to help you get the job done efficiently, standardized, and with very low learning costs.
 ![ExampleRule01.png](docs/png/ExampleRule01.png)
 
-* If you have an intrusion detection scenario, then the HUB can also support complex intrusion detection syntax, and the HUB has extremely high performance, which can easily and efficiently handle large amounts of data.
+If you have an intrusion detection scenario, then the HUB can also support complex intrusion detection syntax, and the HUB has extremely high performance, which can easily and efficiently handle large amounts of data.
 ![ExampleRule02.png](docs/png/ExampleRule02.png)
 
-* The HUB not only has a powerful rules engine and plug-in mechanism, but also has a very flexible data orchestration mechanism, which can easily meet various needs in the workplace.
+The HUB not only has a powerful rules engine and plug-in mechanism, but also has a very flexible data orchestration mechanism, which can easily meet various needs in the workplace.
 ![ExampleProject.png](docs/png/ExampleProject.png)
 
-## Function Show
-* InputEdit&ConnectCheck
+### Function Show
+InputEdit&ConnectCheck
 ![InputEditConnectCheck.gif](docs/GIF/InputEditConnectCheck.gif)
 
-* RuleEdit
+RuleEdit
 ![RuleEdit.gif](docs/GIF/RuleEdit.gif)
 
-* RuleTest
+RuleTest
 ![RuleTest.gif](docs/GIF/RuleTest.gif)
 
-* ProjectEdit
+ProjectEdit
 ![ProjectEdit.gif](docs/GIF/ProjectEdit.gif)
 
-* PluginTest
+PluginTest
 ![Plugintest.gif](docs/GIF/Plugintest.gif)
 
-* Search
+Search
 ![Search.gif](docs/GIF/Search.gif)
 
-* Errlog&Operations
+Errlog&Operations
 ![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
 
-* MCP
+MCP
 ![MCP2.png](docs/png/MCP2.png)
 
 
-## Guide
+### Guide
 * [Agentsmith-HUB Guide](docs/agentsmith-hub-guide.md)
 
 
-## Performance Testing Report
+### Performance Testing Report
 * [Performance Testing Report](docs/performance-testing-report.md)
 
 
-## Deployment Tutorial
+### Deployment Tutorial
 
 1. unzip and tar -xf AgentSmith-HUB, And make sure the hub folder is under /opt/: `/opt/agentsmith-hub`
 2. Copy hub config folder to /opt/, `cp -r /opt/agentsmith-hub/config/ /opt/`
@@ -59,7 +59,7 @@ AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comp
 6. The backend logs are located in `/var/log/hub_logs/`
 7. Install Nginx, and `sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/`(This will overwrite your previous nginx.conf. Please back it up in advance if necessary), and run `sudo nginx -t reload`, the frontend will work on port 80 and a token is required for access.
 
-## License
+### License
 
 AgentSmith-HUB is licensed under the Apache License 2.0 with the Commons Clause restriction. This means:
 
