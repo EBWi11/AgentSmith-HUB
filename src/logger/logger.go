@@ -202,7 +202,9 @@ func initPluginLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry Re
 					handler = NewRedisErrorLogHandler(fileHandler, "plugin", nodeID, redisWriter)
 				}
 
-				return slog.New(handler)
+				logger := slog.New(handler)
+				pluginLogger = logger // Set global plugin logger variable
+				return logger
 			}
 		}
 		pluginLogPath = "./logs/plugin.log"
@@ -225,7 +227,11 @@ func initPluginLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry Re
 		handler = NewRedisErrorLogHandler(fileHandler, "plugin", nodeID, redisWriter)
 	}
 
-	logger := slog.New(handler)
+	base := slog.New(handler)
+	logger := base.With("node_ip", nodeID) // Add node_ip field like hub logger
+
+	// Set global plugin logger variable
+	pluginLogger = logger
 
 	// Log successful initialization
 	if l != nil {
@@ -237,6 +243,8 @@ func initPluginLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry Re
 
 // GetPluginLogger returns the plugin logger instance
 func GetPluginLogger() *slog.Logger {
+	// If pluginLogger is nil, it means InitPluginLoggerWithRedisAndNodeID hasn't been called yet
+	// In this case, we should use the basic InitPluginLogger to avoid nil pointer
 	if pluginLogger == nil {
 		pluginLogger = InitPluginLogger()
 	}
