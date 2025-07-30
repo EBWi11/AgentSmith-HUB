@@ -148,6 +148,33 @@ elasticsearch:
     # token: "your-bearer-token"
 ```
 
+**Supported Time Patterns for Index Names:**
+- `{YYYY}` - Full year (e.g., 2024)
+- `{YY}` - Short year (e.g., 24)
+- `{MM}` - Month (e.g., 01-12)
+- `{DD}` - Day (e.g., 01-31)
+- `{HH}` - Hour (e.g., 00-23)
+- `{mm}` - Minute (e.g., 00-59)
+- `{ss}` - Second (e.g., 00-59)
+- `{YYYY.MM.DD}` - Date with dots (e.g., 2024.01.15)
+- `{YYYY-MM-DD}` - Date with dashes (e.g., 2024-01-15)
+- `{YYYY/MM/DD}` - Date with slashes (e.g., 2024/01/15)
+- `{YYYY_MM_DD}` - Date with underscores (e.g., 2024_01_15)
+- `{YYYY.MM}` - Year and month with dots (e.g., 2024.01)
+- `{YYYY-MM}` - Year and month with dashes (e.g., 2024-01)
+- `{YYYY/MM}` - Year and month with slashes (e.g., 2024/01)
+- `{YYYY_MM}` - Year and month with underscores (e.g., 2024_01)
+
+**Examples:**
+```yaml
+index: "logs-{YYYY.MM.DD}"        # logs-2024.01.15
+index: "events-{YYYY-MM-DD}"      # events-2024-01-15
+index: "alerts-{YYYY_MM_DD}"      # alerts-2024_01_15
+index: "metrics-{YYYY.MM}"        # metrics-2024.01
+index: "hourly-{YYYY.MM.DD}-{HH}" # hourly-2024.01.15-14
+```
+
+
 ### 1.3 PROJECT Syntax Description
 
 PROJECT defines the overall configuration of a project using simple arrow syntax to describe data flow.

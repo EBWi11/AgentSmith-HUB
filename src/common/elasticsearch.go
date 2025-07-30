@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v8"
@@ -23,14 +24,46 @@ type ElasticsearchAuthConfig struct {
 
 // ElasticsearchProducer wraps the Elasticsearch client with a channel-based interface
 type ElasticsearchProducer struct {
-	Client     *elasticsearch.Client
-	MsgChan    chan map[string]interface{}
-	Index      string
-	batchSize  int
-	flushDur   time.Duration
-	maxRetries int
-	retryDelay time.Duration
-	stopChan   chan struct{} // Add stop channel for graceful shutdown
+	Client        *elasticsearch.Client
+	MsgChan       chan map[string]interface{}
+	Index         string
+	IndexTemplate string // Store the original index template for time pattern replacement
+	batchSize     int
+	flushDur      time.Duration
+	maxRetries    int
+	retryDelay    time.Duration
+	stopChan      chan struct{} // Add stop channel for graceful shutdown
+}
+
+// replaceTimePatterns replaces time patterns in index name with actual values
+func replaceTimePatterns(indexTemplate string) string {
+	now := time.Now()
+
+	// Replace various time patterns
+	replacements := map[string]string{
+		"{YYYY}":       now.Format("2006"),
+		"{YY}":         now.Format("06"),
+		"{MM}":         now.Format("01"),
+		"{DD}":         now.Format("02"),
+		"{HH}":         now.Format("15"),
+		"{mm}":         now.Format("04"),
+		"{ss}":         now.Format("05"),
+		"{YYYY.MM.DD}": now.Format("2006.01.02"),
+		"{YYYY-MM-DD}": now.Format("2006-01-02"),
+		"{YYYY/MM/DD}": now.Format("2006/01/02"),
+		"{YYYY_MM_DD}": now.Format("2006_01_02"),
+		"{YYYY.MM}":    now.Format("2006.01"),
+		"{YYYY-MM}":    now.Format("2006-01"),
+		"{YYYY/MM}":    now.Format("2006/01"),
+		"{YYYY_MM}":    now.Format("2006_01"),
+	}
+
+	result := indexTemplate
+	for pattern, replacement := range replacements {
+		result = strings.ReplaceAll(result, pattern, replacement)
+	}
+
+	return result
 }
 
 // NewElasticsearchProducer creates a new Elasticsearch producer
@@ -72,15 +105,19 @@ func NewElasticsearchProducer(hosts []string, index string, msgChan chan map[str
 		return nil, fmt.Errorf("failed to create ES client: %v", err)
 	}
 
+	// Replace time patterns in index name
+	resolvedIndex := replaceTimePatterns(index)
+
 	prod := &ElasticsearchProducer{
-		Client:     client,
-		MsgChan:    msgChan,
-		Index:      index,
-		batchSize:  batchSize,
-		flushDur:   flushDur,
-		maxRetries: 3,
-		retryDelay: 1 * time.Second,
-		stopChan:   make(chan struct{}),
+		Client:        client,
+		MsgChan:       msgChan,
+		Index:         resolvedIndex,
+		IndexTemplate: index, // Store original template for potential future use
+		batchSize:     batchSize,
+		flushDur:      flushDur,
+		maxRetries:    3,
+		retryDelay:    1 * time.Second,
+		stopChan:      make(chan struct{}),
 	}
 
 	go prod.run()

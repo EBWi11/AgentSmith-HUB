@@ -528,59 +528,11 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 }
 
 // validateRuleDuplicateElements checks for duplicate elements within a rule
+// Since all elements now support multiple instances, this function is kept for future validation needs
 func validateRuleDuplicateElements(xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
-	// Extract the rule content
-	lines := strings.Split(xmlContent, "\n")
-	var ruleStartLine, ruleEndLine int
-
-	// Find rule start and end lines
-	for i, line := range lines {
-		if strings.Contains(line, "<rule") && (ruleID == "" || strings.Contains(line, fmt.Sprintf(`id="%s"`, ruleID))) {
-			ruleStartLine = i
-		}
-		if ruleStartLine > 0 && strings.Contains(line, "</rule>") {
-			ruleEndLine = i
-			break
-		}
-	}
-
-	if ruleStartLine == 0 || ruleEndLine == 0 {
-		return // Could not find rule boundaries
-	}
-
-	// Count occurrences of each element type within the rule
-	elementCounts := make(map[string][]int) // element type -> line numbers
-
-	for i := ruleStartLine; i <= ruleEndLine; i++ {
-		line := strings.TrimSpace(lines[i])
-
-		// Check for filter elements
-		if strings.Contains(line, "<filter") {
-			elementCounts["filter"] = append(elementCounts["filter"], i+1)
-		}
-
-		// Check for checklist elements
-		if strings.Contains(line, "<checklist") {
-			elementCounts["checklist"] = append(elementCounts["checklist"], i+1)
-		}
-
-		// Check for del elements
-		if strings.Contains(line, "<del>") || (strings.Contains(line, "<del") && strings.Contains(line, ">")) {
-			elementCounts["del"] = append(elementCounts["del"], i+1)
-		}
-	}
-
-	// Report errors for duplicate elements
-	for elementType, lineNumbers := range elementCounts {
-		if len(lineNumbers) > 1 {
-			result.IsValid = false
-			result.Errors = append(result.Errors, ValidationError{
-				Line:    lineNumbers[1], // Report error on second occurrence
-				Message: fmt.Sprintf("Duplicate <%s> element found in rule", elementType),
-				Detail:  fmt.Sprintf("Rule ID: %s, Only one <%s> element is allowed per rule. First occurrence at line %d", ruleID, elementType, lineNumbers[0]),
-			})
-		}
-	}
+	// All elements (check, del, append, checklist, plugin, threshold) now support multiple instances
+	// No duplicate element validation is needed
+	// This function is kept for potential future validation requirements
 }
 
 // validateStandaloneCheck validates standalone check elements

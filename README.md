@@ -16,7 +16,7 @@ The HUB not only has a powerful rules engine and plug-in mechanism, but also has
 ![ExampleProject.png](docs/png/ExampleProject.png)
 
 ### Function Show
-InputEdit&ConnectCheck
+Input Connect Check
 ![InputEditConnectCheck.gif](docs/GIF/InputEditConnectCheck.gif)
 
 RuleEdit
@@ -38,15 +38,15 @@ Errlog&Operations
 ![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
 
 MCP
-![MCP2.png](docs/png/MCP2.png)
+![MCP4.png](docs/png/MCP4.png)
 
 
 ### Guide
-* [Agentsmith-HUB Guide](docs/agentsmith-hub-guide.md)
+[Agentsmith-HUB Guide](docs/agentsmith-hub-guide.md)
 
 
 ### Performance Testing Report
-* [Performance Testing Report](docs/performance-testing-report.md)
+[Performance Testing Report](docs/performance-testing-report.md)
 
 
 ### Deployment Tutorial
