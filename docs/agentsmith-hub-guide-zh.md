@@ -275,7 +275,7 @@ AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
       "disabled": false,
       "timeout": 60,
       "type": "streamableHttp",
-      "url": "http://192.168.124.5:8080/mcp",
+      "url": "http://192.168.124.5/mcp",
       "headers": {
          "token": "your-hub-token"
       }

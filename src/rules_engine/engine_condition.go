@@ -55,6 +55,11 @@ type BinaryExprAST struct {
 	Rhs ExprAST
 }
 
+type UnaryExprAST struct {
+	Op      string
+	Operand ExprAST
+}
+
 func (n NumberExprAST) toStr() string {
 	return fmt.Sprintf("NumberExprAST:%s", n.Val)
 }
@@ -65,6 +70,14 @@ func (b BinaryExprAST) toStr() string {
 		b.Op,
 		b.Lhs.toStr(),
 		b.Rhs.toStr(),
+	)
+}
+
+func (u UnaryExprAST) toStr() string {
+	return fmt.Sprintf(
+		"UnaryExprAST: (%s %s)",
+		u.Op,
+		u.Operand.toStr(),
 	)
 }
 
@@ -117,6 +130,17 @@ func (a *ReCepAST) parsePrimary() ExprAST {
 			}
 			a.getNextToken()
 			return e
+		} else if a.currTok.Data == "!" {
+			// Handle NOT operator
+			a.getNextToken()
+			operand := a.parsePrimary()
+			if operand == nil {
+				return nil
+			}
+			return UnaryExprAST{
+				Op:      "!",
+				Operand: operand,
+			}
 		} else {
 			return a.parseNumber()
 		}
@@ -158,6 +182,7 @@ func (a *ReCepAST) TokenParser(ori string) []ReCepToken {
 	res := make([]ReCepToken, 0, 10)
 	ori = strings.ReplaceAll(ori, "(", " ( ")
 	ori = strings.ReplaceAll(ori, ")", " ) ")
+	ori = strings.ReplaceAll(ori, "not", " not ")
 	tokenList := SRegex.Split(ori, -1)
 
 	for i, v := range tokenList {
@@ -168,6 +193,11 @@ func (a *ReCepAST) TokenParser(ori string) []ReCepToken {
 
 		if strings.ToLower(v) == "or" {
 			res = append(res, ReCepToken{Data: "|", Type: Operator, Index: i})
+			continue
+		}
+
+		if strings.ToLower(v) == "not" {
+			res = append(res, ReCepToken{Data: "!", Type: Operator, Index: i})
 			continue
 		}
 
@@ -196,6 +226,12 @@ func (a *ReCepAST) ExprASTResult(e ExprAST, tokenVal map[string]bool) bool {
 			return l && r
 		case "|":
 			return l || r
+		}
+	case UnaryExprAST:
+		operand := a.ExprASTResult(ast.Operand, tokenVal)
+		switch ast.Op {
+		case "!":
+			return !operand
 		}
 	case NumberExprAST:
 		return tokenVal[ast.Val]

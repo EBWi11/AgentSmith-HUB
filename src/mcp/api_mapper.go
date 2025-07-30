@@ -861,6 +861,14 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 		prettyResponseBody = string(responseBody)
 	}
 
+	// Special handling for sample data APIs: limit to 3 samples for MCP efficiency
+	if toolName == "get_samplers_data" ||
+		toolName == "get_input" ||
+		toolName == "get_output" ||
+		toolName == "get_ruleset" {
+		prettyResponseBody = m.limitSampleDataForMCP(prettyResponseBody)
+	}
+
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{
 			{
@@ -2661,8 +2669,8 @@ func (m *APIMapper) handleGetSamplersDataIntelligent(args map[string]interface{}
 		results = append(results, fmt.Sprintf("- %s", rec))
 	}
 
-	// Include sample data at the end
-	results = append(results, "\n## Sample Data (First 3)")
+	// Include sample data at the end (MCP optimized)
+	results = append(results, "\n## Sample Data (MCP Optimized)")
 	results = append(results, "```json")
 	displayCount := 3
 	if len(sampleData) < displayCount {
@@ -5939,4 +5947,38 @@ func (m *APIMapper) filterAndFormatComponents(content, searchTerm string, showSt
 	}
 
 	return strings.Join(filtered, "\n")
+}
+
+// limitSampleDataForMCP limits sample data to 3 samples for MCP efficiency
+func (m *APIMapper) limitSampleDataForMCP(responseBody string) string {
+	// Try to parse as JSON
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(responseBody), &data); err != nil {
+		// Not valid JSON, return as-is
+		return responseBody
+	}
+
+	// Look for sample data in the response
+	for _, componentData := range data {
+		if componentMap, ok := componentData.(map[string]interface{}); ok {
+			// This is a component's data structure
+			for projectNodeSequence, samples := range componentMap {
+				if sampleList, ok := samples.([]interface{}); ok {
+					// Limit to 3 samples
+					if len(sampleList) > 3 {
+						componentMap[projectNodeSequence] = sampleList[:3]
+					}
+				}
+			}
+		}
+	}
+
+	// Convert back to JSON
+	limitedBytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		// If marshalling fails, return original
+		return responseBody
+	}
+
+	return string(limitedBytes)
 }

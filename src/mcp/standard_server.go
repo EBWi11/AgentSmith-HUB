@@ -531,14 +531,14 @@ func (s *StandardMCPServer) handleResourcesRead(id interface{}, request map[stri
 				content = string(ownersJSON)
 				mimeType = "application/json"
 			case "samples":
-				// Get enhanced sample data with more samples (up to 10 for better context)
+				// Get sample data with MCP optimization (limited to 3 samples)
 				sampler := common.GetSampler("ruleset." + resID)
 				samplesJSON := "[]"
 				if sampler != nil {
 					allSamples := sampler.GetSamples()
 					flat := make([]json.RawMessage, 0)
 					count := 0
-					maxSamples := 10 // Increased from 3 for better resource accuracy
+					maxSamples := 3 // MCP optimization: limit to 3 samples
 
 					for _, list := range allSamples {
 						for _, sm := range list {

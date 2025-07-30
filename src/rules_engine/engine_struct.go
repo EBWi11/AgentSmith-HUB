@@ -49,7 +49,7 @@ func getMaxPoolSize() int {
 	return maxSize
 }
 
-var ConditionRegex = regexp.MustCompile("^([a-zA-Z0-9]+|\\(|\\)|\\s)+$")
+var ConditionRegex = regexp.MustCompile("^([a-zA-Z0-9_-]+|\\(|\\)|\\s|not)+$")
 
 type OperatorType int
 

@@ -277,7 +277,7 @@ AgentSmith-HUB supports MCP, with tokens shared on the server. The following is 
       "disabled": false,
       "timeout": 60,
       "type": "streamableHttp",
-      "url": "http://192.168.124.5:8080/mcp",
+      "url": "http://192.168.124.5/mcp",
       "headers": {
         "token": "your-hub-token"
       }

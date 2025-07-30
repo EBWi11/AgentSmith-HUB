@@ -6,8 +6,14 @@ AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comp
 
 ![Dashboard.png](docs/png/Dashboard.png)
 
-## Guide
-[agentsmith-hub-guide.md](docs/agentsmith-hub-guide.md)
+* If you have a lot of raw logs, security alarms that need to be processed, enriched, and linked with other systems, then the HUB will be your best tool to help you get the job done efficiently, standardized, and with very low learning costs.
+![ExampleRule01.png](docs/png/ExampleRule01.png)
+
+* If you have an intrusion detection scenario, then the HUB can also support complex intrusion detection syntax, and the HUB has extremely high performance, which can easily and efficiently handle large amounts of data.
+![ExampleRule02.png](docs/png/ExampleRule02.png)
+
+* The HUB not only has a powerful rules engine and plug-in mechanism, but also has a very flexible data orchestration mechanism, which can easily meet various needs in the workplace.
+![ExampleProject.png](docs/png/ExampleProject.png)
 
 ## Function Show
 * InputEdit&ConnectCheck
@@ -32,7 +38,16 @@ AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comp
 ![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
 
 * MCP
-![MCP3.png](docs/png/MCP3.png)
+![MCP2.png](docs/png/MCP2.png)
+
+
+## Guide
+* [Agentsmith-HUB Guide](docs/agentsmith-hub-guide.md)
+
+
+## Performance Testing Report
+* [Performance Testing Report](docs/performance-testing-report.md)
+
 
 ## Deployment Tutorial
 
