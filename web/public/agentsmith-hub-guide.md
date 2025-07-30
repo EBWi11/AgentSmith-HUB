@@ -1857,8 +1857,8 @@ Use append to verify if fields are correctly obtained:
 - **Yaegi Plugin**: Dynamic plugins running with Yaegi interpreter, **supports stateful and init functions**
 
 #### By Return Type
-- **Check Node Plugin**: Returns `(bool, error)`, used in `<check type="PLUGIN">`
-- **Other Plugin**: Returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`
+- **Check Node Plugin**: returns `(bool, error)` for use in `<check type="PLUGIN">`, `<append type="PLUGIN">` and `<plugin>`.
+- **Other Plugin**: returns `(interface{}, bool, error)`, used in `<append type="PLUGIN">` and `<plugin>`, if the second parameter returns false, then the Append action will not be executed.
 
 ### 9.2 Plugin Syntax
 
@@ -1978,19 +1978,10 @@ func Eval(key string) (interface{}, bool, error) {
 ```
 
 ### 9.5 Plugin Limitations
-- Can only use Go standard library
-- Cannot use third-party packages
-- Must define function named `Eval`
-- Function signature must strictly match
+- Only the Go standard library can be used, no third-party packages;
+- A function named `Eval` must be defined, and the package must be a plugin;
+- The function return value must strictly match the requirements.
 
-### 9.6 Common Standard Libraries
-- Basic: `fmt`, `strings`, `strconv`, `errors`
-- Encoding: `encoding/json`, `encoding/base64`, `encoding/hex`
-- Crypto: `crypto/md5`, `crypto/sha256`, `crypto/rand`
-- Time: `time`
-- Regex: `regexp`
-- Network: `net`, `net/url`
-- Concurrency: `sync`
 
 ## Summary
 

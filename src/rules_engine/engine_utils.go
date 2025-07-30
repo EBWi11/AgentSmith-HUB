@@ -128,24 +128,15 @@ func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeI
 	}
 }
 
-// convertPluginArgument converts complex objects to strings for plugin consumption
-// while preserving simple types
+// convertPluginArgument preserves all types for plugin consumption
+// This allows plugins to work with original data types instead of strings
 func convertPluginArgument(value interface{}) interface{} {
 	if value == nil {
 		return nil
 	}
 
-	switch v := value.(type) {
-	case string, int, int64, float64, bool:
-		// Keep simple types as is
-		return v
-	case map[string]interface{}, []interface{}, []map[string]interface{}:
-		// Convert complex objects to JSON string
-		return common.AnyToString(v)
-	default:
-		// For any other types, convert to string
-		return common.AnyToString(v)
-	}
+	// Keep all types as is, including complex objects
+	return value
 }
 
 func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map[string]common.CheckCoreCache) []interface{} {

@@ -1858,8 +1858,8 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 - **Yaegi插件（Yaegi Plugin）**：使用Yaegi解释器运行的动态插件，**支持有状态和init函数**
 
 #### 按返回类型分类
-- **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">` 中
-- **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中
+- **检查类插件（Check Node Plugin）**：返回 `(bool, error)`，用于 `<check type="PLUGIN">`、`<append type="PLUGIN">` 和 `<plugin>` 中
+- **数据处理插件（Other Plugin）**：返回 `(interface{}, bool, error)`，用于 `<append type="PLUGIN">` 和 `<plugin>` 中，如果第二个参数返回false，那么将不会执行 Append 动作
 
 ### 9.2 插件语法
 
@@ -1979,19 +1979,9 @@ func Eval(key string) (interface{}, bool, error) {
 ```
 
 ### 9.5 插件限制
-- 只能使用Go标准库；
-- 不能使用第三方包；
-- 必须定义名为`Eval`的函数；
-- 函数签名必须严格匹配。
-
-### 9.6 常用标准库
-- 基础：`fmt`, `strings`, `strconv`, `errors`
-- 编码：`encoding/json`, `encoding/base64`, `encoding/hex`
-- 加密：`crypto/md5`, `crypto/sha256`, `crypto/rand`
-- 时间：`time`
-- 正则：`regexp`
-- 网络：`net`, `net/url`
-- 并发：`sync`
+- 只能使用Go标准库，不能使用第三方包；
+- 必须定义名为`Eval`的函数，package 必须为 plugin；
+- 函数返回值必须严格匹配要求。
 
 ## 总结
 

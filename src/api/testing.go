@@ -367,14 +367,30 @@ func testPlugin(c echo.Context) error {
 			}
 		}
 
-		// Execute plugin (panic is already handled inside plugin functions)
-		boolResult, err := pluginToTest.FuncEvalCheckNode(args...)
-		result = boolResult
-		if err != nil {
-			success = false
-			errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+		// Execute plugin based on return type
+		if pluginToTest.ReturnType == "bool" {
+			// For check-type plugins (bool return type), use FuncEvalCheckNode
+			boolResult, err := pluginToTest.FuncEvalCheckNode(args...)
+			result = boolResult
+			if err != nil {
+				success = false
+				errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+			} else {
+				success = true
+			}
 		} else {
-			success = true
+			// For interface{} type plugins, use FuncEvalOther
+			interfaceResult, boolResult, err := pluginToTest.FuncEvalOther(args...)
+			result = map[string]interface{}{
+				"result":  interfaceResult,
+				"success": boolResult,
+			}
+			if err != nil {
+				success = false
+				errMsg = fmt.Sprintf("Plugin execution failed: %v", err)
+			} else {
+				success = boolResult
+			}
 		}
 	default:
 		return c.JSON(http.StatusOK, map[string]interface{}{
