@@ -19,22 +19,22 @@ The HUB not only has a powerful rules engine and plug-in mechanism, but also has
 Input Connect Check
 ![InputEditConnectCheck.gif](docs/GIF/InputEditConnectCheck.gif)
 
-RuleEdit
+Rule Edit
 ![RuleEdit.gif](docs/GIF/RuleEdit.gif)
 
-RuleTest
+Rule Test
 ![RuleTest.gif](docs/GIF/RuleTest.gif)
 
-ProjectEdit
+Project Edit
 ![ProjectEdit.gif](docs/GIF/ProjectEdit.gif)
 
-PluginTest
+Plugin Test
 ![Plugintest.gif](docs/GIF/Plugintest.gif)
 
 Search
 ![Search.gif](docs/GIF/Search.gif)
 
-Errlog&Operations
+Errlog & Operations
 ![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
 
 MCP
