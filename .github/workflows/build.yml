@@ -234,26 +234,6 @@ jobs:
             - Architecture-aware start and stop scripts
             - Deployment documentation
             
-            ### Quick Start
-            
-            1. Download the appropriate archive for your architecture:
-               - For AMD64: `agentsmith-hub-amd64.tar.gz`
-               - For ARM64: `agentsmith-hub-arm64.tar.gz`
-            
-            2. Extract and deploy:
-               ```bash
-               tar -xzf agentsmith-hub-[architecture].tar.gz
-               cd agentsmith-hub
-               ```
-            
-            3. Configure your settings in `config/config.yaml`
-            
-            4. Run `./start.sh` to start the application
-            
-            5. Access the web interface:
-               - With nginx: http://localhost
-               - Direct backend: http://localhost:8080
-            
             ### Architecture Support
             
             - **AMD64**: Standard x86_64 architecture (Intel/AMD processors)
@@ -263,7 +243,6 @@ jobs:
             
             - Version: ${{ steps.version.outputs.version }}
             - Git Commit: ${{ github.sha }}
-            - Build Date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
             
             See README.md in the package for detailed deployment instructions.
           draft: false
