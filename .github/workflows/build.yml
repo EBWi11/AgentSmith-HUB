@@ -234,11 +234,6 @@ jobs:
             - Architecture-aware start and stop scripts
             - Deployment documentation
             
-            ### Architecture Support
-            
-            - **AMD64**: Standard x86_64 architecture (Intel/AMD processors)
-            - **ARM64**: ARM 64-bit architecture (Apple Silicon, ARM servers)
-            
             ### Version Information
             
             - Version: ${{ steps.version.outputs.version }}
