@@ -313,8 +313,7 @@ AgentSmith-HUB supports MCP, with tokens shared on the server. The following is 
 ```
 
 Currently, MCP covers most use cases, including policy editing, etc.
-![MCP1.png](png/MCP1.png)
-![MCP2.png](png/MCP2.png)
+![MCP.png](png/MCP.png)
 
 ## 📚 Part 3: RULESET Syntax Detailed Explanation
 

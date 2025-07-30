@@ -308,8 +308,7 @@ AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
 ```
 
 目前可以通过 MCP 覆盖了大部分使用场景，包括策略编辑等。
-![MCP1.png](/png/MCP1.png)
-![MCP2.png](/png/MCP2.png)
+![MCP.png](/png/MCP.png)
 
 ## 📚 第三部分：RULESET 语法详解
 

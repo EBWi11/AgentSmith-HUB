@@ -38,7 +38,7 @@ Errlog&Operations
 ![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
 
 MCP
-![MCP4.png](docs/png/MCP4.png)
+![MCP.png](docs/png/MCP.png)
 
 
 ### Guide

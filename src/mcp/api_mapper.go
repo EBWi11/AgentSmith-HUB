@@ -71,10 +71,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// Primary Workflow - Rule Management
 		{
 			Name:        "create_rule_complete",
-			Description: "INTELLIGENT RULE CREATION: Smart workflow - identify target projects, get relevant sample data, analyze data structure, design rule based on user needs + real data. Automatically finds appropriate sample data for rule context.",
+			Description: "INTELLIGENT RULE CREATION: Smart workflow - identify target projects, get relevant sample data, analyze data structure, design rule based on user needs + real data. Automatically finds appropriate sample data for rule context. RECOMMENDED: Use 'rule_manager action=syntax_help' first to understand rule syntax.",
 			InputSchema: map[string]common.MCPToolArg{
-				"ruleset_id":      {Type: "string", Description: "Target ruleset ID", Required: true},
-				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (e.g., 'suspicious network connections', 'malware execution')", Required: true},
+				"ruleset_id":      {Type: "string", Description: "Target ruleset ID (e.g., 'dlp_exclude', 'security_rules')", Required: true},
+				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (e.g., 'suspicious network connections', 'malware execution', 'exclude test department data')", Required: true},
 				"target_projects": {Type: "string", Description: "Which projects will use this rule? (comma-separated IDs or 'auto' to detect)", Required: false},
 				"sample_data":     {Type: "string", Description: "Sample data (optional - will auto-fetch from target projects if not provided)", Required: false},
 				"rule_name":       {Type: "string", Description: "Human-readable rule name", Required: false},
@@ -100,7 +100,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Description: "COMPONENT CREATION WIZARD: Guided component creation with templates, validation, and testing. Supports all component types with intelligent defaults and best practices.",
 			InputSchema: map[string]common.MCPToolArg{
 				"component_type": {Type: "string", Description: "Component type: input/output/plugin/project/ruleset", Required: true},
-				"component_id":   {Type: "string", Description: "Component identifier", Required: true},
+				"component_id":   {Type: "string", Description: "Component identifier (e.g., 'dlp_exclude', 'security_input')", Required: true},
 				"use_template":   {Type: "string", Description: "Use template (true/false) - recommended for beginners", Required: false},
 				"config_content": {Type: "string", Description: "Component configuration (optional if using template)", Required: false},
 				"test_data":      {Type: "string", Description: "Test data for validation", Required: false},
@@ -143,7 +143,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			InputSchema: map[string]common.MCPToolArg{
 				"action":         {Type: "string", Description: "Action: view/create/update/delete", Required: true},
 				"component_type": {Type: "string", Description: "Component type: project/ruleset/input/output/plugin", Required: true},
-				"component_id":   {Type: "string", Description: "Component ID", Required: true},
+				"component_id":   {Type: "string", Description: "Component ID (e.g., 'dlp_exclude', 'security_input')", Required: true},
 				"config_content": {Type: "string", Description: "Configuration content (for create/update actions)", Required: false},
 				"auto_deploy":    {Type: "string", Description: "Auto-deploy after changes (true/false)", Required: false},
 				"backup_first":   {Type: "string", Description: "Create backup before destructive operations (true/false)", Required: false},
@@ -169,7 +169,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Description: "PROJECT CONTROLLER: Start, stop, restart projects with health monitoring and automatic recovery. Includes batch operations and smart status tracking.",
 			InputSchema: map[string]common.MCPToolArg{
 				"action":     {Type: "string", Description: "Action: start/stop/restart/status/start_all/stop_all", Required: true},
-				"project_id": {Type: "string", Description: "Specific project ID (optional for batch operations)", Required: false},
+				"project_id": {Type: "string", Description: "Specific project ID (e.g., 'security_project', 'dlp_project') (optional for batch operations)", Required: false},
 				"force":      {Type: "string", Description: "Force operation even if warnings (true/false)", Required: false},
 				"wait_ready": {Type: "string", Description: "Wait for project to be fully ready (true/false)", Required: false},
 			},
@@ -192,18 +192,13 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		},
 		{
 			Name:        "rule_manager",
-			Description: "INTELLIGENT RULE MANAGER: Smart context-aware rule management - auto-discovers target projects, fetches relevant sample data, analyzes data structure, creates rules based on user intent + real data patterns. CRITICAL: NEVER uses imagined data! All rules must be based on REAL sample data only! IMPORTANT: Always provide 'human_readable' parameter with clear rule description for better user understanding!",
+			Description: "RULE MANAGER: Create and manage rules. BLOCKED: You MUST use 'syntax_help' FIRST to learn rule syntax. This tool will reject rule creation without proper syntax knowledge.",
 			InputSchema: map[string]common.MCPToolArg{
-				"action":          {Type: "string", Description: "Action: add_rule/update_rule/delete_rule/view_rules/create_ruleset/update_ruleset", Required: true},
-				"id":              {Type: "string", Description: "Target ruleset ID", Required: true},
-				"rule_purpose":    {Type: "string", Description: "What should this rule detect? (for add_rule action)", Required: false},
-				"target_projects": {Type: "string", Description: "Projects that will use this rule (for context-aware data fetching)", Required: false},
-				"rule_id":         {Type: "string", Description: "Specific rule ID (for update/delete actions)", Required: false},
-				"rule_raw":        {Type: "string", Description: "Complete rule XML (generated after data analysis)", Required: false},
-				"raw":             {Type: "string", Description: "Complete ruleset XML (for create/update ruleset actions)", Required: false},
-				"data":            {Type: "string", Description: "MANDATORY: REAL sample data ONLY! Use get_samplers_data API OR user-provided actual JSON. NEVER use imagined data like 'data_type=59'!", Required: false},
-				"auto_deploy":     {Type: "string", Description: "Auto-deploy if validation passes (true/false)", Required: false},
-				"human_readable":  {Type: "string", Description: "HUMAN-READABLE RULE DESCRIPTION: Provide a clear, structured description of what the rule does, its conditions, and expected behavior. This helps users understand the rule without reading XML. Format: 'Rule Purpose: [what it detects] | Conditions: [list of conditions] | Actions: [what happens when triggered] | Examples: [sample scenarios]'. Example: 'Rule Purpose: Detect suspicious login attempts | Conditions: source IP is from high-risk countries, login time is outside business hours, failed attempts > 3 | Actions: Block IP for 24 hours, send alert to security team | Examples: Multiple failed logins from Russia at 3 AM'", Required: false},
+				"action":         {Type: "string", Description: "Action: syntax_help/guided_create/add_rule/update_rule/delete_rule/view_rules", Required: true},
+				"id":             {Type: "string", Description: "Ruleset ID (e.g., 'dlp_exclude')", Required: false},
+				"rule_purpose":   {Type: "string", Description: "What to detect (e.g., 'exclude test department data')", Required: false},
+				"rule_raw":       {Type: "string", Description: "Rule XML - BLOCKED: Must use 'syntax_help' first", Required: false},
+				"human_readable": {Type: "string", Description: "Rule description", Required: false},
 			},
 			Annotations: createAnnotations("Rule Manager", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -229,7 +224,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Description: "COMPREHENSIVE TESTING LAB: Test any component with intelligent data samples, validation reports, and performance metrics. Supports batch testing and automated test suites.",
 			InputSchema: map[string]common.MCPToolArg{
 				"test_target":    {Type: "string", Description: "What to test: component/ruleset/project/workflow", Required: true},
-				"component_id":   {Type: "string", Description: "Component ID or 'all' for batch testing", Required: true},
+				"component_id":   {Type: "string", Description: "Component ID (e.g., 'dlp_exclude', 'security_rules') or 'all' for batch testing", Required: true},
 				"test_mode":      {Type: "string", Description: "Test mode: quick/thorough/performance/security", Required: false},
 				"custom_data":    {Type: "string", Description: "Custom test data (JSON) - optional, auto-generates if not provided", Required: false},
 				"include_report": {Type: "string", Description: "Generate detailed test report (true/false)", Required: false},
@@ -256,7 +251,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "plugin_test",
 			Description: "PLUGIN TESTING: Test plugins with sample data, performance analysis, and debugging. Comprehensive testing for plugin functionality.",
 			InputSchema: map[string]common.MCPToolArg{
-				"component_id":     {Type: "string", Description: "Plugin component ID to test", Required: true},
+				"component_id":     {Type: "string", Description: "Plugin component ID to test (e.g., 'ip_reputation', 'risk_score')", Required: true},
 				"test_data":        {Type: "string", Description: "JSON array of test parameters", Required: true},
 				"performance_mode": {Type: "string", Description: "Run performance tests (true/false)", Required: false},
 			},
@@ -267,7 +262,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "plugin_debug",
 			Description: "PLUGIN DEBUGGING: Debug plugins with detailed logging, error analysis, and troubleshooting. Advanced debugging for plugin development.",
 			InputSchema: map[string]common.MCPToolArg{
-				"component_id": {Type: "string", Description: "Plugin component ID to debug", Required: true},
+				"component_id": {Type: "string", Description: "Plugin component ID to debug (e.g., 'ip_reputation', 'risk_score')", Required: true},
 				"test_data":    {Type: "string", Description: "JSON array of test parameters", Required: true},
 				"verbose":      {Type: "string", Description: "Enable verbose logging (true/false)", Required: false},
 			},
@@ -287,7 +282,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 			Name:        "plugin_info",
 			Description: "PLUGIN INFORMATION: Get detailed information about a specific plugin including usage, parameters, and examples.",
 			InputSchema: map[string]common.MCPToolArg{
-				"component_id": {Type: "string", Description: "Plugin component ID", Required: true},
+				"component_id": {Type: "string", Description: "Plugin component ID (e.g., 'ip_reputation', 'risk_score')", Required: true},
 			},
 			Annotations: createAnnotations("Plugin Information", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -343,7 +338,7 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 
 		{
 			Name:        "get_samplers_data_intelligent",
-			Description: "INTELLIGENT SAMPLE DATA ANALYZER: Advanced data retrieval with pattern analysis, anomaly detection, quality assessment, and distribution insights. CRITICAL: Real data only! NEVER generate fake data!",
+			Description: "INTELLIGENT SAMPLE DATA ANALYZER: Advanced data retrieval with pattern analysis, anomaly detection, quality assessment, and distribution insights. CRITICAL: Real data only! NEVER generate fake data! IMPORTANT: For simple data retrieval, use 'get_samplers_data' instead.",
 			InputSchema: map[string]common.MCPToolArg{
 				"target_projects":    {Type: "string", Description: "Target projects (comma-separated IDs) for context-aware data fetching", Required: false},
 				"rule_purpose":       {Type: "string", Description: "What will this rule detect? (e.g., 'network security', 'error monitoring')", Required: false},
@@ -376,10 +371,10 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// Essential Data Tools
 		{
 			Name:        "get_samplers_data",
-			Description: "GET SAMPLE DATA: Try to get real sample data from backend. CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. NEVER create fake data yourself!",
+			Description: "GET SAMPLE DATA: Try to get real sample data from backend. CRITICAL: If this FAILS or returns empty, you MUST ask user to provide their own REAL JSON data. NEVER create fake data yourself! RECOMMENDED: Use this for simple data retrieval instead of get_samplers_data_intelligent.",
 			InputSchema: map[string]common.MCPToolArg{
 				"name":                {Type: "string", Description: "Component type: 'input', 'output', or 'ruleset'", Required: true},
-				"projectNodeSequence": {Type: "string", Description: "Component ID (e.g. 'test') or full sequence (e.g. 'ruleset.test'). Simple ID is usually sufficient.", Required: true},
+				"projectNodeSequence": {Type: "string", Description: "Component ID (e.g. 'dlp_exclude') or full sequence (e.g. 'ruleset.dlp_exclude'). Simple ID is usually sufficient.", Required: true},
 			},
 			Annotations: createAnnotations("Get Sample Data", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -387,11 +382,11 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// Direct Rule Operations
 		{
 			Name:        "add_ruleset_rule",
-			Description: "ADD RULE TO RULESET: Add a single rule to an existing ruleset. CRITICAL: Requires REAL sample data! Use get_samplers_data first OR provide actual JSON from user's system. NEVER use imagined data like 'data_type=59' or fake field names! IMPORTANT: Always provide 'human_readable' parameter with clear rule description for better user understanding!",
+			Description: "ADD RULE TO RULESET: Add a single rule to an existing ruleset. BLOCKED: You MUST use 'rule_manager action=syntax_help' FIRST to learn rule syntax. This tool will reject requests without proper syntax knowledge.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id":             {Type: "string", Description: "Ruleset ID", Required: true},
-				"rule_raw":       {Type: "string", Description: "Complete rule XML content", Required: true},
-				"human_readable": {Type: "string", Description: "HUMAN-READABLE RULE DESCRIPTION: Provide a clear, structured description of what the rule does, its conditions, and expected behavior. This helps users understand the rule without reading XML. Format: 'Rule Purpose: [what it detects] | Conditions: [list of conditions] | Actions: [what happens when triggered] | Examples: [sample scenarios]'. Example: 'Rule Purpose: Detect suspicious login attempts | Conditions: source IP is from high-risk countries, login time is outside business hours, failed attempts > 3 | Actions: Block IP for 24 hours, send alert to security team | Examples: Multiple failed logins from Russia at 3 AM'", Required: false},
+				"id":             {Type: "string", Description: "Ruleset ID (e.g., 'dlp_exclude')", Required: true},
+				"rule_raw":       {Type: "string", Description: "Rule XML - BLOCKED: Must use 'rule_manager action=syntax_help' first", Required: true},
+				"human_readable": {Type: "string", Description: "Rule description", Required: false},
 			},
 			Annotations: createAnnotations("Add Rule", boolPtr(false), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -408,15 +403,15 @@ func (m *APIMapper) GetAllAPITools() []common.MCPTool {
 		// Component Viewing
 		{
 			Name:        "get_rulesets",
-			Description: "LIST ALL RULESETS: View all rulesets with rule counts and usage info. IMPORTANT: Check deployment status! Use 'get_pending_changes' to see if rulesets are temporary/unpublished. Use 'get_component_usage' to see project dependencies.",
+			Description: "LIST ALL RULESETS: View all rulesets with rule counts and usage info. IMPORTANT: Check deployment status! Use 'get_pending_changes' to see if rulesets are temporary/unpublished. Use 'get_component_usage' to see project dependencies. RECOMMENDED: Use 'rule_manager action=syntax_help' first to understand rule syntax before working with rulesets.",
 			InputSchema: map[string]common.MCPToolArg{},
 			Annotations: createAnnotations("List Rulesets", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
 		{
 			Name:        "get_ruleset",
-			Description: "VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. NEW: Automatically includes relevant sample data from upstream input components! Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status.",
+			Description: "VIEW RULESET DETAILS: Get detailed information about a specific ruleset including all rules and configuration. NEW: Automatically includes relevant sample data from upstream input components! Note: If you see temporary changes, they are NOT ACTIVE! Check 'get_pending_changes' for deployment status. RECOMMENDED: Use 'rule_manager action=syntax_help' first to understand rule syntax before viewing rules.",
 			InputSchema: map[string]common.MCPToolArg{
-				"id": {Type: "string", Description: "Ruleset ID", Required: true},
+				"id": {Type: "string", Description: "Ruleset ID (e.g., 'dlp_exclude')", Required: true},
 			},
 			Annotations: createAnnotations("View Ruleset", boolPtr(true), boolPtr(false), boolPtr(false), boolPtr(false)),
 		},
@@ -519,6 +514,10 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 
 		// Route to appropriate handler based on action
 		switch action {
+		case "syntax_help":
+			return m.handleRuleSyntaxHelp(args)
+		case "guided_create":
+			return m.handleGuidedRuleCreation(args)
 		case "add_rule":
 			return m.handleAddRulesetRule(args)
 		case "update_rule":
@@ -536,18 +535,13 @@ func (m *APIMapper) CallAPITool(toolName string, args map[string]interface{}) (c
 			return errors.NewValidationErrorWithSuggestions(
 				fmt.Sprintf("unknown action '%s' for rule_manager", action),
 				[]string{
-					"Use one of these supported actions:",
-					"• add_rule - Add a new rule to existing ruleset",
-					"• update_rule - Modify an existing rule (requires rule_id)",
-					"• delete_rule - Remove a rule (requires rule_id)",
-					"• view_rules - Display all rules in ruleset",
-					"• create_ruleset - Create new ruleset with initial configuration",
-					"• update_ruleset - Update entire ruleset XML configuration",
-					"Example: rule_manager action='add_rule' id='security_rules' rule_purpose='detect suspicious activity'",
+					"IMPORTANT: Use 'syntax_help' FIRST to understand rule syntax",
+					"Then use: guided_create, add_rule, update_rule, delete_rule, view_rules",
+					"Example: rule_manager action='syntax_help'",
 				},
 				map[string]interface{}{
 					"provided_action":   action,
-					"supported_actions": []string{"add_rule", "update_rule", "delete_rule", "view_rules", "create_ruleset", "update_ruleset"},
+					"supported_actions": []string{"syntax_help", "guided_create", "add_rule", "update_rule", "delete_rule", "view_rules"},
 				},
 			).ToMCPResult(), nil
 		}
@@ -1676,6 +1670,10 @@ func (m *APIMapper) handleGetRulesets(args map[string]interface{}) (common.MCPTo
 	results = append(results, "🚀 **Deploy:**")
 	results = append(results, "   → `get_pending_changes` - Review")
 	results = append(results, "   → `apply_changes` - Deploy")
+	results = append(results, "")
+	results = append(results, "📚 **Rule Syntax Learning:**")
+	results = append(results, "   → 'rule_manager action=syntax_help' - Learn complete rule syntax")
+	results = append(results, "   → Essential before creating or modifying rules!")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -1955,6 +1953,11 @@ func (m *APIMapper) handleGetRuleset(args map[string]interface{}) (common.MCPToo
 	results = append(results, "   → 'test_ruleset' - Test this ruleset with sample data")
 	results = append(results, "   → 'apply_changes' - Deploy any pending changes")
 	results = append(results, "   → 'rule_manager' with action='add_rule' - Add new rules")
+	results = append(results, "")
+	results = append(results, "📚 **Rule Syntax Learning:**")
+	results = append(results, "   → 'rule_manager action=syntax_help' - Learn complete rule syntax")
+	results = append(results, "   → This helps you understand the XML structure you see above")
+	results = append(results, "   → Essential before creating or modifying rules!")
 
 	return common.MCPToolResult{
 		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
@@ -2036,8 +2039,8 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 			"id parameter (ruleset ID) is required",
 			[]string{
 				"Use 'get_rulesets' to list all available rulesets",
-				"Example: add_ruleset_rule id='security_rules' rule_raw='<rule>...</rule>'",
-				"If no rulesets exist, create one first with 'rule_manager action=create_ruleset'",
+				"Example: rule_manager action='add_rule' id='dlp_exclude' rule_raw='<rule>...</rule>'",
+				"BLOCKED: You MUST use 'rule_manager action=syntax_help' first to learn rule syntax",
 			},
 		).ToMCPResult(), nil
 	}
@@ -2048,9 +2051,35 @@ func (m *APIMapper) handleAddRulesetRule(args map[string]interface{}) (common.MC
 			"rule_raw parameter is required",
 			[]string{
 				"Provide the complete XML rule definition",
-				"Use 'rule_ai_generator' to generate rules from sample data",
-				"Use 'get_rule_templates' to see example rule formats",
-				"Example: add_ruleset_rule id='" + rulesetId + "' rule_raw='<rule>..complete XML..</rule>'",
+				"BLOCKED: You MUST use 'rule_manager action=syntax_help' first to learn rule syntax",
+				"Example: rule_manager action='add_rule' id='" + rulesetId + "' rule_raw='<rule>...</rule>'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	// BLOCK: Check for common syntax errors that indicate lack of syntax knowledge
+	if strings.Contains(ruleRaw, "type=\"EQ\"") || strings.Contains(ruleRaw, "type=\"eq\"") {
+		return errors.NewValidationErrorWithSuggestions(
+			"SYNTAX ERROR: Invalid check type 'EQ'. Use 'EQU' instead.",
+			[]string{
+				"❌ BLOCKED: You used 'EQ' which is incorrect syntax",
+				"✅ CORRECT: Use 'EQU' for equality checks",
+				"🔧 SOLUTION: Use 'rule_manager action=syntax_help' to learn correct syntax",
+				"📖 Example: <check type=\"EQU\" field=\"department\">test</check>",
+				"💡 Other valid types: EQU, NEQ, INCL, NI, START, END, REGEX, PLUGIN",
+			},
+		).ToMCPResult(), nil
+	}
+
+	// Check for other common syntax errors
+	if strings.Contains(ruleRaw, "<conditions>") || strings.Contains(ruleRaw, "<actions>") {
+		return errors.NewValidationErrorWithSuggestions(
+			"SYNTAX ERROR: Invalid XML tags '<conditions>' or '<actions>'",
+			[]string{
+				"❌ BLOCKED: You used incorrect XML structure",
+				"✅ CORRECT: Use <check>, <threshold>, <append>, <del>, <plugin> tags",
+				"🔧 SOLUTION: Use 'rule_manager action=syntax_help' to learn correct XML structure",
+				"📖 Example: <rule id=\"test\"><check type=\"EQU\" field=\"dept\">test</check></rule>",
 			},
 		).ToMCPResult(), nil
 	}
@@ -2259,10 +2288,10 @@ func (m *APIMapper) handleGetInputs(args map[string]interface{}) (common.MCPTool
 
 // handleTestComponent performs unified testing for components
 func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCPToolResult, error) {
-	componentType, hasType := args["type"].(string)
+	componentType, hasType := args["test_target"].(string)
 	if !hasType || componentType == "" {
 		return errors.NewValidationErrorWithSuggestions(
-			"type parameter is required for component testing",
+			"test_target parameter is required for component testing",
 			[]string{
 				"Specify the component type to test:",
 				"• ruleset - Test rule logic and conditions",
@@ -2270,12 +2299,12 @@ func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCP
 				"• output - Test alert/notification delivery",
 				"• plugin - Test custom plugin functionality",
 				"• project - Test complete data flow pipeline",
-				"Example: test_lab test_target='ruleset' component_id='security_rules'",
+				"Example: test_lab test_target='ruleset' component_id='dlp_exclude'",
 			},
 		).ToMCPResult(), nil
 	}
 
-	componentId, hasId := args["id"].(string)
+	componentId, hasId := args["component_id"].(string)
 	if !hasId || componentId == "" {
 		return errors.NewValidationErrorWithSuggestions(
 			"id parameter (component ID) is required for testing",
@@ -2289,8 +2318,7 @@ func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCP
 		).ToMCPResult(), nil
 	}
 
-	testData, hasTestData := args["test_data"].(string)
-	content, hasContent := args["content"].(string)
+	testData, hasTestData := args["custom_data"].(string)
 
 	var results []string
 	results = append(results, fmt.Sprintf("=== TESTING %s ===\n", strings.ToUpper(componentType)))
@@ -2320,9 +2348,6 @@ func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCP
 	if hasTestData {
 		testArgs["test_data"] = testData
 	}
-	if hasContent {
-		testArgs["content"] = content
-	}
 
 	testResponse, err := m.makeHTTPRequest("POST", fmt.Sprintf("/test-component/%s", componentType), testArgs, true)
 	if err != nil {
@@ -2343,7 +2368,6 @@ func (m *APIMapper) handleTestComponent(args map[string]interface{}) (common.MCP
 				"component_type": componentType,
 				"component_id":   componentId,
 				"has_test_data":  hasTestData,
-				"has_content":    hasContent,
 			},
 		}.ToMCPResult(), nil
 	}
@@ -5981,4 +6005,405 @@ func (m *APIMapper) limitSampleDataForMCP(responseBody string) string {
 	}
 
 	return string(limitedBytes)
+}
+
+// handleGuidedRuleCreation provides step-by-step assistance for rule creation
+func (m *APIMapper) handleGuidedRuleCreation(args map[string]interface{}) (common.MCPToolResult, error) {
+	rulePurpose, ok := args["rule_purpose"].(string)
+	if !ok || rulePurpose == "" {
+		return errors.NewValidationErrorWithSuggestions(
+			"rule_purpose parameter is required",
+			[]string{
+				"Example: rule_manager action='guided_create' rule_purpose='exclude test department data'",
+			},
+		).ToMCPResult(), nil
+	}
+
+	// BLOCK: Force syntax learning first
+	var results []string
+	results = append(results, "🚫 BLOCKED: You must learn rule syntax first!")
+	results = append(results, "")
+	results = append(results, "📚 STEP 1: Learn Rule Syntax")
+	results = append(results, "Use this command to learn complete rule syntax:")
+	results = append(results, "```bash")
+	results = append(results, "rule_manager action='syntax_help'")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "🎯 STEP 2: After learning syntax, create your rule")
+	results = append(results, "Your rule purpose: "+rulePurpose)
+	results = append(results, "")
+	results = append(results, "📋 RECOMMENDED WORKFLOW:")
+	results = append(results, "1. rule_manager action='syntax_help' ← Learn syntax first")
+	results = append(results, "2. get_samplers_data name='ruleset' projectNodeSequence='dlp_exclude' ← Get sample data")
+	results = append(results, "3. rule_manager action='add_rule' id='dlp_exclude' rule_raw='<rule>...</rule>' ← Create rule")
+	results = append(results, "4. test_lab test_target='ruleset' component_id='dlp_exclude' ← Test rule")
+	results = append(results, "")
+	results = append(results, "⚠️  IMPORTANT: This tool will reject rule creation without proper syntax knowledge!")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
+
+}
+
+// handleRuleSyntaxHelp provides comprehensive rule syntax guidance
+func (m *APIMapper) handleRuleSyntaxHelp(args map[string]interface{}) (common.MCPToolResult, error) {
+	var results []string
+	results = append(results, "=== COMPLETE RULE SYNTAX GUIDE ===")
+	results = append(results, "")
+
+	results = append(results, "**CORE CONCEPTS:**")
+	results = append(results, "- Operations execute in the order they appear in XML")
+	results = append(results, "- This allows data enrichment before checks, performance optimization")
+	results = append(results, "- Example: Add timestamp first, then check based on that timestamp")
+	results = append(results, "")
+
+	results = append(results, "**BASIC RULE STRUCTURE:**")
+	results = append(results, "```xml")
+	results = append(results, "<rule id=\"unique_id\" name=\"Rule Description\">")
+	results = append(results, "  <!-- Operations in execution order -->")
+	results = append(results, "  <check type=\"EQU\" field=\"field_name\">value</check>")
+	results = append(results, "  <threshold group_by=\"field\" range=\"5m\" value=\"10\"/>")
+	results = append(results, "  <append field=\"new_field\">value</append>")
+	results = append(results, "</rule>")
+	results = append(results, "```")
+	results = append(results, "")
+
+	results = append(results, "**CHECK OPERATIONS:**")
+	results = append(results, "")
+	results = append(results, "**String Matching (Case Insensitive):**")
+	results = append(results, "- EQU: Exact match (case insensitive) - `<check type=\"EQU\" field=\"status\">active</check>`")
+	results = append(results, "- NEQ: Not equal (case insensitive) - `<check type=\"NEQ\" field=\"status\">inactive</check>`")
+	results = append(results, "- INCL: Contains - `<check type=\"INCL\" field=\"message\">error</check>`")
+	results = append(results, "- NI: Not contains - `<check type=\"NI\" field=\"message\">success</check>`")
+	results = append(results, "- START: Starts with - `<check type=\"START\" field=\"path\">/admin</check>`")
+	results = append(results, "- END: Ends with - `<check type=\"END\" field=\"file\">.exe</check>`")
+	results = append(results, "- NSTART: Not starts with - `<check type=\"NSTART\" field=\"path\">/public</check>`")
+	results = append(results, "- NEND: Not ends with - `<check type=\"NEND\" field=\"file\">.txt</check>`")
+	results = append(results, "")
+	results = append(results, "**Case Insensitive Matching:**")
+	results = append(results, "- NCS_EQU: Case insensitive equal - `<check type=\"NCS_EQU\" field=\"protocol\">HTTP</check>`")
+	results = append(results, "- NCS_NEQ: Case insensitive not equal - `<check type=\"NCS_NEQ\" field=\"method\">get</check>`")
+	results = append(results, "- NCS_INCL: Case insensitive contains - `<check type=\"NCS_INCL\" field=\"header\">content-type</check>`")
+	results = append(results, "- NCS_NI: Case insensitive not contains - `<check type=\"NCS_NI\" field=\"useragent\">bot</check>`")
+	results = append(results, "- NCS_START: Case insensitive starts - `<check type=\"NCS_START\" field=\"domain\">www.</check>`")
+	results = append(results, "- NCS_END: Case insensitive ends - `<check type=\"NCS_END\" field=\"email\">.com</check>`")
+	results = append(results, "- NCS_NSTART: Case insensitive not starts - `<check type=\"NCS_NSTART\" field=\"url\">http://</check>`")
+	results = append(results, "- NCS_NEND: Case insensitive not ends - `<check type=\"NCS_NEND\" field=\"filename\">.exe</check>`")
+	results = append(results, "")
+	results = append(results, "**Numeric Comparison:**")
+	results = append(results, "- MT: Greater than - `<check type=\"MT\" field=\"score\">80</check>`")
+	results = append(results, "- LT: Less than - `<check type=\"LT\" field=\"age\">18</check>`")
+	results = append(results, "")
+	results = append(results, "**Null Checks:**")
+	results = append(results, "- ISNULL: Field is null - `<check type=\"ISNULL\" field=\"optional\"></check>`")
+	results = append(results, "- NOTNULL: Field not null - `<check type=\"NOTNULL\" field=\"required\"></check>`")
+	results = append(results, "")
+	results = append(results, "**Advanced Checks:**")
+	results = append(results, "- REGEX: Regular expression - `<check type=\"REGEX\" field=\"ip\">^\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+$</check>`")
+	results = append(results, "- PLUGIN: Plugin function - `<check type=\"PLUGIN\">isPrivateIP(_$source_ip)</check>`")
+	results = append(results, "")
+	results = append(results, "**Multi-value Matching:**")
+	results = append(results, "```xml")
+	results = append(results, "<check type=\"INCL\" field=\"filename\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "  .exe|.dll|.scr|.bat")
+	results = append(results, "</check>")
+	results = append(results, "<check type=\"EQU\" field=\"status\" logic=\"AND\" delimiter=\",\">")
+	results = append(results, "  active,verified,approved")
+	results = append(results, "</check>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**Plugin Negation:**")
+	results = append(results, "```xml")
+	results = append(results, "<check type=\"PLUGIN\">!isPrivateIP(_$dest_ip)</check>")
+	results = append(results, "```")
+	results = append(results, "")
+
+	results = append(results, "**THRESHOLD OPERATIONS:**")
+	results = append(results, "")
+	results = append(results, "**Basic Threshold:**")
+	results = append(results, "```xml")
+	results = append(results, "<threshold group_by=\"source_ip\" range=\"5m\" value=\"10\"/>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**SUM Mode - Aggregate Values:**")
+	results = append(results, "```xml")
+	results = append(results, "<threshold group_by=\"user_id\" range=\"1h\" count_type=\"SUM\" count_field=\"amount\" value=\"1000\"/>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**CLASSIFY Mode - Count Unique Values:**")
+	results = append(results, "```xml")
+	results = append(results, "<threshold group_by=\"user_id\" range=\"30m\" count_type=\"CLASSIFY\" count_field=\"accessed_file\" value=\"25\"/>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**Performance Optimization:**")
+	results = append(results, "```xml")
+	results = append(results, "<threshold group_by=\"user_id\" range=\"5m\" value=\"10\" local_cache=\"true\"/>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**Time Ranges**: s (seconds), m (minutes), h (hours), d (days)")
+	results = append(results, "**Grouping**: Single field or comma-separated multiple fields")
+	results = append(results, "")
+
+	results = append(results, "**DATA PROCESSING:**")
+	results = append(results, "")
+	results = append(results, "**APPEND - Add/Modify Fields:**")
+	results = append(results, "```xml")
+	results = append(results, "<append field=\"alert_type\">suspicious_activity</append>")
+	results = append(results, "<append field=\"message\">User _$username from _$source_ip</append>")
+	results = append(results, "<append type=\"PLUGIN\" field=\"timestamp\">now()</append>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**DEL - Remove Fields:**")
+	results = append(results, "```xml")
+	results = append(results, "<del>password</del>")
+	results = append(results, "<del>password,secret_key,auth_token</del>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**PLUGIN - Execute Actions:**")
+	results = append(results, "```xml")
+	results = append(results, "<plugin>sendAlert(_$ORIDATA)</plugin>")
+	results = append(results, "<plugin>blockIP(_$source_ip, 3600)</plugin>")
+	results = append(results, "```")
+	results = append(results, "")
+
+	results = append(results, "**COMPLEX LOGIC WITH CHECKLIST:**")
+	results = append(results, "```xml")
+	results = append(results, "<checklist condition=\"(a or b) and not c\">")
+	results = append(results, "  <check id=\"a\" type=\"EQU\" field=\"status\">active</check>")
+	results = append(results, "  <check id=\"b\" type=\"EQU\" field=\"status\">pending</check>")
+	results = append(results, "  <check id=\"c\" type=\"EQU\" field=\"blocked\">true</check>")
+	results = append(results, "</checklist>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**IMPORTANT**: Every checklist MUST contain at least one check node. Empty checklists are not allowed.")
+	results = append(results, "**Logical Operators**: and, or, not (lowercase only)")
+	results = append(results, "**Grouping**: Use parentheses for precedence")
+	results = append(results, "")
+
+	results = append(results, "**DYNAMIC REFERENCES:**")
+	results = append(results, "- _$field_name - Reference field value")
+	results = append(results, "- _$parent.child - Nested field access")
+	results = append(results, "- _$ORIDATA - Complete data object")
+	results = append(results, "")
+	results = append(results, "**Examples**:")
+	results = append(results, "```xml")
+	results = append(results, "<check type=\"MT\" field=\"amount\">_$user.daily_limit</check>")
+	results = append(results, "<append field=\"summary\">Alert for _$username from _$source_ip</append>")
+	results = append(results, "<plugin>sendAlert(_$ORIDATA)</plugin>")
+	results = append(results, "```")
+	results = append(results, "")
+
+	results = append(results, "**PERFORMANCE OPTIMIZATION:**")
+	results = append(results, "**Operation Performance Ranking (Fast to Slow)**:")
+	results = append(results, "1. NOTNULL, ISNULL, EQU, NEQ")
+	results = append(results, "2. INCL, NI, START, END")
+	results = append(results, "3. MT, LT")
+	results = append(results, "4. REGEX")
+	results = append(results, "5. PLUGIN")
+	results = append(results, "6. External API plugins")
+	results = append(results, "")
+	results = append(results, "**Optimization Strategies**:")
+	results = append(results, "- Order checks by performance (fast first)")
+	results = append(results, "- Use early filtering with high-selectivity checks")
+	results = append(results, "- Place threshold operations after initial filtering")
+	results = append(results, "- Use local_cache=\"true\" for frequently accessed thresholds")
+	results = append(results, "- Avoid overly large time windows in thresholds")
+	results = append(results, "")
+
+	results = append(results, "**COMPREHENSIVE EXAMPLES:**")
+	results = append(results, "")
+	results = append(results, "**Example 1: Advanced APT Detection (Complex Logic + Multiple Operations)**")
+	results = append(results, "```xml")
+	results = append(results, "<rule id=\"apt_detection\" name=\"Advanced APT Activity Detection\">")
+	results = append(results, "  <!-- String matching with case insensitive options -->")
+	results = append(results, "  <check type=\"NCS_EQU\" field=\"protocol\">HTTP</check>")
+	results = append(results, "  <check type=\"NCS_INCL\" field=\"user_agent\">powershell</check>")
+	results = append(results, "  <check type=\"START\" field=\"url_path\">/admin</check>")
+	results = append(results, "  <check type=\"END\" field=\"filename\">.exe</check>")
+	results = append(results, "  <check type=\"NSTART\" field=\"source_ip\">192.168</check>")
+	results = append(results, "  <check type=\"NEND\" field=\"file_extension\">.txt</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Multi-value matching with different logic -->")
+	results = append(results, "  <check type=\"INCL\" field=\"process_name\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "    psexec|wmic|powershell|cmd.exe")
+	results = append(results, "  </check>")
+	results = append(results, "  <check type=\"EQU\" field=\"status\" logic=\"AND\" delimiter=\",\">")
+	results = append(results, "    active,verified,approved")
+	results = append(results, "  </check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Numeric comparisons -->")
+	results = append(results, "  <check type=\"MT\" field=\"risk_score\">80</check>")
+	results = append(results, "  <check type=\"LT\" field=\"age\">18</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Null checks -->")
+	results = append(results, "  <check type=\"NOTNULL\" field=\"user_id\"></check>")
+	results = append(results, "  <check type=\"ISNULL\" field=\"optional_field\"></check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Regex and plugin checks -->")
+	results = append(results, "  <check type=\"REGEX\" field=\"ip_address\">^\\\\d+\\\\.\\\\d+\\\\.\\\\d+\\\\.\\\\d+$</check>")
+	results = append(results, "  <check type=\"PLUGIN\">isPrivateIP(_$source_ip)</check>")
+	results = append(results, "  <check type=\"PLUGIN\">!cidrMatch(_$dest_ip, \"10.0.0.0/8\")</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Complex logic with checklist -->")
+	results = append(results, "  <checklist condition=\"(lateral_movement or persistence) and not admin_activity\">")
+	results = append(results, "    <check id=\"lateral_movement\" type=\"INCL\" field=\"command\">net use|psexec|wmic</check>")
+	results = append(results, "    <check id=\"persistence\" type=\"INCL\" field=\"registry_key\">Run|RunOnce|Services</check>")
+	results = append(results, "    <check id=\"admin_activity\" type=\"EQU\" field=\"user_role\">admin</check>")
+	results = append(results, "  </checklist>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Multiple thresholds with different modes -->")
+	results = append(results, "  <threshold group_by=\"source_ip\" range=\"5m\" value=\"10\" local_cache=\"true\"/>")
+	results = append(results, "  <threshold group_by=\"user_id\" range=\"1h\" count_type=\"SUM\" count_field=\"data_transferred\" value=\"1073741824\"/>")
+	results = append(results, "  <threshold group_by=\"dest_host\" range=\"30m\" count_type=\"CLASSIFY\" count_field=\"accessed_port\" value=\"25\"/>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Data processing operations -->")
+	results = append(results, "  <append field=\"alert_type\">apt_detection</append>")
+	results = append(results, "  <append field=\"message\">APT activity detected from _$source_ip to _$dest_ip</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"timestamp\">now()</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"geo_info\">geoMatch(_$source_ip)</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"threat_score\">calculateThreatScore(_$ORIDATA)</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Remove sensitive fields -->")
+	results = append(results, "  <del>password,secret_key,auth_token</del>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Execute actions -->")
+	results = append(results, "  <plugin>sendAlert(_$ORIDATA)</plugin>")
+	results = append(results, "  <plugin>blockIP(_$source_ip, 3600)</plugin>")
+	results = append(results, "  <plugin>suppressOnce(_$source_ip, 300, \"apt_detection\")</plugin>")
+	results = append(results, "</rule>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**Example 2: Network Security Monitoring (Performance Optimized)**")
+	results = append(results, "```xml")
+	results = append(results, "<rule id=\"network_security\" name=\"Network Security Monitoring\">")
+	results = append(results, "  <!-- Fast checks first for performance -->")
+	results = append(results, "  <check type=\"NOTNULL\" field=\"source_ip\"></check>")
+	results = append(results, "  <check type=\"NOTNULL\" field=\"dest_ip\"></check>")
+	results = append(results, "  <check type=\"EQU\" field=\"protocol\">TCP</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- String matching with negation -->")
+	results = append(results, "  <check type=\"NEQ\" field=\"status\">established</check>")
+	results = append(results, "  <check type=\"NI\" field=\"flags\">ACK</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Multiple checklists for complex scenarios -->")
+	results = append(results, "  <checklist condition=\"port_scan or service_enum\">")
+	results = append(results, "    <check id=\"port_scan\" type=\"MT\" field=\"dest_port\">1024</check>")
+	results = append(results, "    <check id=\"service_enum\" type=\"INCL\" field=\"dest_port\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "      21|22|23|25|53|80|110|143|443|993|995")
+	results = append(results, "    </check>")
+	results = append(results, "  </checklist>")
+	results = append(results, "  ")
+	results = append(results, "  <checklist condition=\"high_risk or medium_risk\">")
+	results = append(results, "    <check id=\"high_risk\" type=\"MT\" field=\"risk_score\">80</check>")
+	results = append(results, "    <check id=\"medium_risk\" type=\"MT\" field=\"risk_score\">50</check>")
+	results = append(results, "  </checklist>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Plugin checks with dynamic references -->")
+	results = append(results, "  <check type=\"PLUGIN\">!isPrivateIP(_$dest_ip)</check>")
+	results = append(results, "  <check type=\"PLUGIN\">geoMatch(_$source_ip, \"CN,RU,IR\")</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Optimized thresholds with local cache -->")
+	results = append(results, "  <threshold group_by=\"source_ip\" range=\"1m\" value=\"20\" local_cache=\"true\"/>")
+	results = append(results, "  <threshold group_by=\"source_ip,dest_ip\" range=\"5m\" value=\"5\"/>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Data enrichment with plugins -->")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"detection_time\">now()</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"day_of_week\">dayOfWeek()</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"hour_of_day\">hourOfDay()</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"domain_info\">extractDomain(_$dest_ip)</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"hash_value\">hashSHA256(_$source_ip)</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Dynamic field references -->")
+	results = append(results, "  <append field=\"summary\">Suspicious connection from _$source_ip to _$dest_ip on port _$dest_port</append>")
+	results = append(results, "  <append field=\"alert_type\">network_anomaly</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- External threat intelligence -->")
+	results = append(results, "  <plugin>virusTotal(_$hash_value, \"api_key\")</plugin>")
+	results = append(results, "  <plugin>shodan(_$dest_ip, \"api_key\")</plugin>")
+	results = append(results, "  <plugin>threatBook(_$source_ip, \"ip\", \"api_key\")</plugin>")
+	results = append(results, "</rule>")
+	results = append(results, "```")
+	results = append(results, "")
+	results = append(results, "**Example 3: Application Security (Data Processing + Validation)**")
+	results = append(results, "```xml")
+	results = append(results, "<rule id=\"app_security\" name=\"Application Security Monitoring\">")
+	results = append(results, "  <!-- Input validation checks -->")
+	results = append(results, "  <check type=\"EQU\" field=\"request_method\">POST</check>")
+	results = append(results, "  <check type=\"INCL\" field=\"content_type\">application/json</check>")
+	results = append(results, "  <check type=\"NOTNULL\" field=\"request_body\"></check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- SQL Injection detection with regex -->")
+	results = append(results, "  <check type=\"REGEX\" field=\"request_body\">(?i)(union|select|insert|update|delete|drop|create|alter|exec|execute)</check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- XSS detection with multiple patterns -->")
+	results = append(results, "  <check type=\"INCL\" field=\"request_body\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "    <script>|javascript:|onload=|onerror=|onclick=|alert(|confirm(|prompt(")
+	results = append(results, "  </check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Path traversal detection -->")
+	results = append(results, "  <check type=\"INCL\" field=\"request_path\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "    ..%2f|..%5c|..\\\\|../|..\\\\")
+	results = append(results, "  </check>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Complex logic for authentication bypass -->")
+	results = append(results, "  <checklist condition=\"(bypass_attempt or privilege_escalation) and not authorized\">")
+	results = append(results, "    <check id=\"bypass_attempt\" type=\"INCL\" field=\"request_headers\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "      admin:true|role:admin|auth:bypass|token:null")
+	results = append(results, "    </check>")
+	results = append(results, "    <check id=\"privilege_escalation\" type=\"INCL\" field=\"user_agent\" logic=\"OR\" delimiter=\"|\">")
+	results = append(results, "      sqlmap|nikto|nmap|burp|zap")
+	results = append(results, "    </check>")
+	results = append(results, "    <check id=\"authorized\" type=\"EQU\" field=\"user_role\">admin</check>")
+	results = append(results, "  </checklist>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Rate limiting with different time windows -->")
+	results = append(results, "  <threshold group_by=\"source_ip\" range=\"1m\" value=\"100\"/>")
+	results = append(results, "  <threshold group_by=\"user_id\" range=\"5m\" value=\"50\"/>")
+	results = append(results, "  <threshold group_by=\"api_endpoint\" range=\"1h\" count_type=\"SUM\" count_field=\"request_size\" value=\"10485760\"/>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Data processing and normalization -->")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"timestamp\">now()</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"request_hash\">hashMD5(_$request_body)</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"decoded_path\">base64Decode(_$request_path)</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"parsed_ua\">parseUA(_$user_agent)</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- String manipulation -->")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"cleaned_body\">replace(_$request_body, \"password\", \"***\")</append>")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"extracted_domain\">extractDomain(_$request_url)</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- JSON processing -->")
+	results = append(results, "  <append type=\"PLUGIN\" field=\"parsed_json\">parseJSON(_$request_body)</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Alert information -->")
+	results = append(results, "  <append field=\"alert_type\">application_attack</append>")
+	results = append(results, "  <append field=\"severity\">high</append>")
+	results = append(results, "  <append field=\"description\">Application attack detected from _$source_ip to _$dest_ip</append>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Remove sensitive data -->")
+	results = append(results, "  <del>password,credit_card,ssn,auth_token</del>")
+	results = append(results, "  ")
+	results = append(results, "  <!-- Security actions -->")
+	results = append(results, "  <plugin>isolate_host(_$source_ip)</plugin>")
+	results = append(results, "  <plugin>pushMsgToTeams(\"webhook_url\", _$ORIDATA)</plugin>")
+	results = append(results, "  <plugin>alert_soc_team(_$ORIDATA)</plugin>")
+	results = append(results, "</rule>")
+	results = append(results, "```")
+	results = append(results, "")
+
+	results = append(results, "**MANDATORY REQUIREMENTS:**")
+	results = append(results, "⚠️ **CRITICAL VALIDATION RULES**:")
+	results = append(results, "- Every rule MUST have at least one: <check>, <threshold>, or <checklist>")
+	results = append(results, "- Every <checklist> MUST contain at least one <check> node")
+	results = append(results, "- All check nodes in checklist must have unique 'id' attributes")
+	results = append(results, "- Condition expressions can only reference declared 'id' values")
+	results = append(results, "- Use lowercase logical operators: and, or, not")
+	results = append(results, "")
+	results = append(results, "**NEXT STEPS:**")
+	results = append(results, "1. Create rule: rule_manager action='add_rule' id='ruleset_id' rule_raw='<rule>...</rule>'")
+	results = append(results, "2. Test rule: test_ruleset id='ruleset_id' data='sample_data'")
+
+	return common.MCPToolResult{
+		Content: []common.MCPToolContent{{Type: "text", Text: strings.Join(results, "\n")}},
+	}, nil
 }
