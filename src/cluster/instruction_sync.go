@@ -173,7 +173,9 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 						delInstructions[i] = true
 						break
 					} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
-						delInstructions[i] = true
+						if i < i2 {
+							delInstructions[i] = true
+						}
 						break
 					}
 				}

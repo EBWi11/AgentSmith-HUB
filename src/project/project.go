@@ -927,7 +927,8 @@ func (p *Project) Start(lock bool) error {
 	}()
 
 	// Atomic status check and transition
-	if !p.atomicStatusTransition([]common.Status{common.StatusStopped, common.StatusError}, common.StatusStarting) {
+	// Allow starting from stopped, error, or already running states
+	if !p.atomicStatusTransition([]common.Status{common.StatusStopped, common.StatusError, common.StatusRunning}, common.StatusStarting) {
 		return fmt.Errorf("project is not in startable state, current status: %s", p.Status)
 	}
 
