@@ -166,18 +166,15 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 			continue
 		}
 
-		for i2, ii2 := range instructions {
-			if i != i2 {
-				if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
-					if CUD_OPERATION[ii.Operation] && CUD_OPERATION[ii2.Operation] {
-						delInstructions[i] = true
-						break
-					} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
-						if i < i2 {
-							delInstructions[i] = true
-						}
-						break
-					}
+		for i2 := i + 1; i2 < len(instructions); i2++ {
+			ii2 := instructions[i2]
+			if (ii.ComponentType == ii2.ComponentType) && (ii.ComponentName == ii2.ComponentName) {
+				if CUD_OPERATION[ii.Operation] && CUD_OPERATION[ii2.Operation] {
+					delInstructions[i] = true
+					break
+				} else if PROJECT_OPERATION[ii.Operation] && PROJECT_OPERATION[ii2.Operation] {
+					delInstructions[i] = true
+					break
 				}
 			}
 		}
