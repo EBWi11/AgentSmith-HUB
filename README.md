@@ -12,6 +12,23 @@ If you have a lot of raw logs, security alarms that need to be processed, enrich
 If you have an intrusion detection scenario, then the HUB can also support complex intrusion detection syntax, and the HUB has extremely high performance, which can easily and efficiently handle large amounts of data. And the HUB supports cluster mode, so you can easily expand capacity.
 ![ExampleRule02.png](docs/png/ExampleRule02.png)
 
+From this, we can see that HUB's Ruleset syntax is actually very simple, using the following combinations for detection and data operations:
+* **\<check\>**: Used for detection, supporting common operations like regex matching, string matching, numeric comparisons, custom plugins, etc.
+* **\<checklist\>**: Used for detection, supporting logical operator combinations of <check> with and, or, not, and parentheses.
+* **\<threshold\>**: Used for detection, supporting frequency statistics and threshold judgment of data.
+* **\<append\>**: Used for data operations, supporting data appending, modification, and other operations, with support for custom plugins.
+* **\<del\>**: Used for data operations, for deleting data.
+* **\<plugin\>**: Calls custom plugins, commonly used for calling external APIs and other operations.
+
+The execution order of the rules engine follows the order written by the user, for example:
+* First use **\<append\>** to append threat intelligence data to the original data, then use **\<check\>** to evaluate the threat intelligence content;
+* First use **\<check\>** to detect the original data, and after passing, use **\<append\>** to enrich the data.
+
+In summary, HUB provides simple and flexible syntax that can well support various security scenarios for detection, data processing, alert handling, and other requirements.
+
+
+<br>
+
 The HUB not only has a powerful rules engine and plug-in mechanism, but also has a very flexible data orchestration mechanism, which can easily meet various needs in the workplace.
 ![ExampleProject.png](docs/png/ExampleProject.png)
 
