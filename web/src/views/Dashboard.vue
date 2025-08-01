@@ -260,121 +260,25 @@
       </div>
 
       <!-- Cluster Nodes Status -->
-      <div class="bg-white rounded-lg shadow-sm p-6">
-        <h3 class="text-lg font-medium text-gray-900 mb-4">Cluster Nodes</h3>
-        
-        <!-- Leader Node Section -->
-        <div v-if="leaderNode" class="mb-6">
-          <h4 class="text-sm font-semibold text-blue-700 mb-2 flex items-center">
-            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3l14 0 0 14-14 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 12 2 2 4-4" />
-            </svg>
-            Leader Node
-          </h4>
-          <div class="p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center">
-                <span class="w-3 h-3 rounded-full mr-3 bg-blue-500"></span>
-                <div>
-                  <p class="font-medium text-blue-900">{{ leaderNode.address }}</p>
-                  <p class="text-sm text-blue-600">{{ leaderNode.role }} - {{ leaderNode.status }}</p>
-                </div>
-              </div>
-              <div class="flex items-center space-x-4">
-                <!-- Version -->
-                <div class="text-center">
-                  <p class="text-xs text-purple-600 font-medium mb-1">Version</p>
-                  <div 
-                    class="text-xs font-mono px-2 py-1 rounded bg-green-100 text-green-800"
-                    :title="getVersionTooltip(leaderNode)"
-                  >
-                    {{ formatVersion(leaderNode.version) }}
-                  </div>
-                </div>
-                <!-- System Stats -->
-                <div class="text-right">
-                  <p class="text-sm font-medium text-blue-900 transition-all duration-300" 
-                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                    <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.cpu_usage || 0) }}</span>% CPU
-                  </p>
-                  <p class="text-xs text-blue-600 transition-all duration-300" 
-                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                    <span class="inline-block min-w-[3ch]">{{ formatPercent(leaderNode.memory_usage || 0) }}</span>% Memory
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Follower Nodes Section -->
-        <div v-if="followerNodes.length > 0">
-          <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center">
-            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-            Follower Nodes ({{ followerNodes.length }})
-          </h4>
-          <div class="space-y-2">
-            <div v-for="node in followerNodes" :key="node.id" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div class="flex items-center">
-                <span class="w-3 h-3 rounded-full mr-3"
-                      :class="{
-                        'bg-green-500': node.status === 'active',
-                        'bg-gray-400': node.status !== 'active'
-                      }"></span>
-                <div>
-                  <p class="font-medium text-gray-900">{{ node.address }}</p>
-                  <p class="text-sm text-gray-500">{{ node.role }} - {{ node.status }}</p>
-                </div>
-              </div>
-              <div class="flex items-center space-x-4">
-                <!-- Version -->
-                <div class="text-center">
-                  <p class="text-xs text-purple-600 font-medium mb-1">Version</p>
-                  <div 
-                    class="text-xs font-mono px-2 py-1 rounded"
-                    :class="getVersionDisplayClass(node)"
-                    :title="getVersionTooltip(node)"
-                  >
-                    {{ formatVersion(node.version) }}
-                  </div>
-                </div>
-                <!-- System Stats -->
-                <div class="text-right">
-                  <p class="text-sm font-medium text-gray-900 transition-all duration-300" 
-                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                    <span class="inline-block min-w-[3ch]">{{ formatPercent(node.cpu_usage || 0) }}</span>% CPU
-                  </p>
-                  <p class="text-xs text-gray-500 transition-all duration-300" 
-                     :class="{ 'opacity-75': loading.stats || loading.cluster }">
-                    <span class="inline-block min-w-[3ch]">{{ formatPercent(node.memory_usage || 0) }}</span>% Memory
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Loading Overlay for No Nodes -->
+      <div class="bg-white rounded-lg shadow-sm p-6 relative">
+        <!-- Loading Overlay -->
         <div v-if="loading.cluster && clusterNodes.length === 0" 
              class="absolute inset-0 bg-white bg-opacity-75 flex justify-center items-center rounded-lg z-10">
           <div class="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 border-t-blue-500"></div>
         </div>
         
-        <!-- No Nodes Available Message -->
-        <div v-if="clusterNodes.length === 0" 
-             class="flex-1 flex items-center justify-center text-gray-500"
-             :class="{ 'opacity-50': loading.cluster }">
-          No cluster nodes available
-        </div>
+        <!-- Heatmap Component -->
+        <ClusterHeatmap 
+          :nodes="clusterNodes" 
+          :leader-version="leaderVersion"
+          :class="{ 'opacity-50': loading.cluster }"
+        />
       </div>
     </div>
 
     <!-- Plugin Call Overview - Only show if there are plugin calls -->
-    <div v-if="Object.keys(sortedPluginStats).length > 0" class="bg-white rounded-lg shadow-sm p-6 relative">
-      <h3 class="text-lg font-medium text-gray-900 mb-4">Plugin Call Overview</h3>
+    <div v-if="Object.keys(sortedPluginStats).length > 0" class="bg-white rounded-lg shadow-sm p-4 relative">
+      <h3 class="text-lg font-medium text-gray-900 mb-3">Plugin Call Overview</h3>
       
       <!-- Loading Overlay -->
       <div v-if="loading.stats && Object.keys(sortedPluginStats).length === 0" 
@@ -386,83 +290,83 @@
       <div class="space-y-4 relative transition-opacity duration-200" 
            :class="{ 'opacity-50': loading.stats && Object.keys(sortedPluginStats).length === 0 }">
         <!-- Summary Stats -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
           <div class="text-center">
-            <p class="text-sm text-gray-600">Total Plugins Used</p>
-            <p class="text-2xl font-bold text-blue-600 transition-all duration-300" 
+            <p class="text-xs text-gray-600">Total Plugins Used</p>
+            <p class="text-lg font-bold text-blue-600 transition-all duration-300" 
                :class="{ 'opacity-75': loading.stats }">
-              <span class="inline-block min-w-[2ch]">{{ Object.keys(sortedPluginStats).length }}</span>
+              {{ Object.keys(sortedPluginStats).length }}
             </p>
           </div>
           <div class="text-center">
-            <p class="text-sm text-gray-600">Total Success Calls</p>
-            <p class="text-2xl font-bold text-green-600 transition-all duration-300" 
+            <p class="text-xs text-gray-600">Total Success Calls</p>
+            <p class="text-lg font-bold text-green-600 transition-all duration-300" 
                :class="{ 'opacity-75': loading.stats }">
-              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalSuccess) }}</span>
+              {{ formatNumber(pluginStats.totalSuccess) }}
             </p>
           </div>
           <div class="text-center">
-            <p class="text-sm text-gray-600">Total Failed Calls</p>
-            <p class="text-2xl font-bold text-red-600 transition-all duration-300" 
+            <p class="text-xs text-gray-600">Total Failed Calls</p>
+            <p class="text-lg font-bold text-red-600 transition-all duration-300" 
                :class="{ 'opacity-75': loading.stats }">
-              <span class="inline-block min-w-[3ch]">{{ formatNumber(pluginStats.totalFailure) }}</span>
+              {{ formatNumber(pluginStats.totalFailure) }}
             </p>
           </div>
         </div>
 
         <!-- Individual Plugin Stats -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           <div v-for="(stats, pluginName) in sortedPluginStats" :key="pluginName" 
-               class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+               class="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
                @click="navigateToPlugin(pluginName)">
-            <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center justify-between mb-2">
               <div class="flex items-center">
-                <div class="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
+                <div class="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
                 <div>
-                  <p class="font-medium text-gray-900">{{ pluginName }}</p>
+                  <p class="font-medium text-gray-900 text-sm">{{ pluginName }}</p>
                   <p class="text-xs text-gray-500 transition-all duration-300" 
                      :class="{ 'opacity-75': loading.stats }">
-                    <span class="inline-block min-w-[3ch]">{{ formatNumber((stats.success || 0) + (stats.failure || 0)) }}</span> total calls today
+                    {{ formatNumber((stats.success || 0) + (stats.failure || 0)) }} calls
                   </p>
                 </div>
               </div>
               <div class="text-right">
-                <div class="text-sm font-medium transition-all duration-300" 
+                <div class="text-xs font-medium transition-all duration-300" 
                      :class="{
                        'text-green-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 95,
                        'text-yellow-600': getSuccessRate(stats.success || 0, stats.failure || 0) >= 80,
                        'text-red-600': getSuccessRate(stats.success || 0, stats.failure || 0) < 80,
                        'opacity-75': loading.stats
                      }">
-                  <span class="inline-block min-w-[3ch]">{{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}</span>% success
+                  {{ formatPercent(getSuccessRate(stats.success || 0, stats.failure || 0)) }}%
                 </div>
               </div>
             </div>
             
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-2">
               <!-- Success Count -->
-              <div class="text-center p-3 bg-green-50 rounded-lg">
-                <p class="text-xs text-green-600 font-medium mb-1">Success</p>
-                <p class="text-lg font-bold text-green-800 transition-all duration-300" 
+              <div class="text-center p-2 bg-green-50 rounded">
+                <p class="text-xs text-green-600 font-medium">Success</p>
+                <p class="text-sm font-bold text-green-800 transition-all duration-300" 
                    :class="{ 'opacity-75': loading.stats }">
-                  <span class="inline-block min-w-[3ch]">{{ formatNumber(stats.success || 0) }}</span>
+                  {{ formatNumber(stats.success || 0) }}
                 </p>
               </div>
               
               <!-- Failure Count -->
-              <div class="text-center p-3 bg-red-50 rounded-lg">
-                <p class="text-xs text-red-600 font-medium mb-1">Failure</p>
-                <p class="text-lg font-bold text-red-800 transition-all duration-300" 
+              <div class="text-center p-2 bg-red-50 rounded">
+                <p class="text-xs text-red-600 font-medium">Failure</p>
+                <p class="text-sm font-bold text-red-800 transition-all duration-300" 
                    :class="{ 'opacity-75': loading.stats }">
-                  <span class="inline-block min-w-[3ch]">{{ formatNumber(stats.failure || 0) }}</span>
+                  {{ formatNumber(stats.failure || 0) }}
                 </p>
               </div>
             </div>
 
             <!-- Progress Bar -->
-            <div class="mt-3">
-              <div class="w-full bg-gray-200 rounded-full h-2">
-                <div class="bg-green-600 h-2 rounded-full transition-all duration-300" 
+            <div class="mt-2">
+              <div class="w-full bg-gray-200 rounded-full h-1.5">
+                <div class="bg-green-600 h-1.5 rounded-full transition-all duration-300" 
                      :style="{ width: getSuccessRate(stats.success || 0, stats.failure || 0) + '%' }"></div>
               </div>
             </div>
@@ -491,6 +395,7 @@ import { formatNumber, formatPercent, formatMessagesPerDay, formatTimeAgo } from
 import { useDataCacheStore } from '../stores/dataCache'
 import { useDashboardSmartRefresh } from '../composables/useSmartRefresh'
 import { debounce } from '../utils/performance'
+import ClusterHeatmap from '../components/ClusterHeatmap.vue'
 
 // Router
 const router = useRouter()
@@ -619,6 +524,10 @@ const leaderNode = computed(() => {
 
 const followerNodes = computed(() => {
   return clusterNodes.value.filter(node => node.role === 'follower')
+})
+
+const leaderVersion = computed(() => {
+  return leaderNode.value?.version || ''
 })
 
 // Sorted projects list (running first, then others)
@@ -1013,62 +922,7 @@ function navigateToPlugin(pluginName) {
   router.push(`/app/plugins/${pluginName}`)
 }
 
-// Version-related helper functions (same as ClusterStatus.vue)
-function formatVersion(version) {
-  if (!version || version === 'unknown') {
-    return 'N/A'
-  }
-  
-  // Return full version string
-  return version
-}
-
-function getVersionDisplayClass(node) {
-  if (!node.version || node.version === 'unknown') {
-    return 'bg-gray-100 text-gray-600'
-  }
-  
-  // Get leader version for comparison
-  const leaderVersion = getLeaderVersion()
-  if (!leaderVersion) {
-    return 'bg-gray-100 text-gray-700'
-  }
-  
-  // If this is the leader node or versions match, show normal style
-  if (node.isLeader || node.version === leaderVersion) {
-    return 'bg-green-100 text-green-800'
-  }
-  
-  // Version mismatch - show red background
-  return 'bg-red-100 text-red-800'
-}
-
-function getVersionTooltip(node) {
-  if (!node.version || node.version === 'unknown') {
-    return 'Version information not available'
-  }
-  
-  const leaderVersion = getLeaderVersion()
-  if (node.isLeader) {
-    return `Leader version: ${node.version}`
-  }
-  
-  if (!leaderVersion) {
-    return `Node version: ${node.version}`
-  }
-  
-  if (node.version === leaderVersion) {
-    return `Version: ${node.version} (up to date)`
-  }
-  
-  return `Version: ${node.version}\nLeader version: ${leaderVersion}\n⚠️ Configuration out of sync`
-}
-
-function getLeaderVersion() {
-  // Find leader node and return its version
-  const leaderNode = clusterNodes.value.find(node => node.isLeader)
-  return leaderNode?.version || clusterInfo.value.version
-}
+// Version-related helper functions moved to ClusterHeatmap component
 
 // Fast refresh for stats and numbers only - now uses caching
 async function refreshStats() {
