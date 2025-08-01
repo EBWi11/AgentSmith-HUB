@@ -122,27 +122,6 @@ func main() {
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
 
-	if *isLeader {
-		// Leader mode
-		common.Config.Leader = ip
-		token, err := readToken(true)
-		if err != nil {
-			logger.Error("Failed to read or create leader token", "error", err)
-			return
-		}
-		common.Config.Token = token
-
-		// Store leader token in Redis for followers to use (no TTL)
-		if err := api.WriteTokenToRedis(token); err != nil {
-			logger.Warn("Failed to store leader token in Redis", "error", err)
-		}
-
-		loadLocalComponents()
-		loadLocalProjects()
-	} else {
-		logger.Info("Follower mode initialized")
-	}
-
 	// Init monitors
 	common.InitSystemMonitor(ip)
 
@@ -158,14 +137,38 @@ func main() {
 	startPprofServer()
 
 	if *isLeader {
+		// Leader mode
+		err := cluster.GlobalClusterManager.ObtainLeaderLocker()
+		if err != nil {
+			logger.Error("Failed to obtain leader locker", "error", err)
+			return
+		}
+
+		common.Config.Leader = ip
+		token, err := readToken(true)
+		if err != nil {
+			logger.Error("Failed to read or create leader token", "error", err)
+			return
+		}
+		common.Config.Token = token
+
+		// Store leader token in Redis for followers to use (no TTL)
+		if err := api.WriteTokenToRedis(token); err != nil {
+			logger.Warn("Failed to store leader token in Redis", "error", err)
+		}
+
+		loadLocalComponents()
+		loadLocalProjects()
+
 		common.InitClusterSystemManager()
-		err := cluster.GlobalClusterManager.Start()
+		err = cluster.GlobalClusterManager.Start()
 		if err != nil {
 			logger.Error("InitClusterSystemManager Error", "error", err)
 			return
 		}
 
 		go api.ServerStart(*apiListen) // start Echo API on specified address
+		logger.Info("Leader API server starting", "address", *apiListen)
 	} else {
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
