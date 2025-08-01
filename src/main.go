@@ -168,6 +168,7 @@ func main() {
 		}
 
 		go api.ServerStart(*apiListen) // start Echo API on specified address
+		logger.Info("Leader API server starting", "address", *apiListen)
 	} else {
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
