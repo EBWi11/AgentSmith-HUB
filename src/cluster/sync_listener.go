@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,6 +152,8 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	// Track instruction execution details
 	var processedInstructions []string
 	var failedInstructions []string
+	var instructions []Instruction
+	var compacted uint64
 
 	// Process instructions from startVersion+1 to endVersion
 	// Instructions are numbered from 1 onwards (version 0 is temporary state)
@@ -177,8 +180,23 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 			logger.Error("Failed to unmarshal instruction", "version", version, "error", err)
 			failedInstructions = append(failedInstructions, fmt.Sprintf("v%d: unmarshal error", version))
 			continue // Continue processing other instructions
+		} else if instruction.ComponentType != "DELETE" {
+			instructions = append(instructions, instruction)
+		} else {
+			compacted++
 		}
-
+	}
+	slices.SortStableFunc(instructions, func(a, b Instruction) int {
+		if a.ComponentType == "project" && b.ComponentType != "project" {
+			return 1
+		} else if a.ComponentType != "project" && b.ComponentType == "project" {
+			return -1
+		} else {
+			return 0
+		}
+	})
+	for _, instruction := range instructions {
+		version := instruction.Version
 		// Apply instruction - execute once regardless of success/failure
 		if err := sl.applyInstruction(version); err != nil {
 			logger.Error("Failed to apply instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation, "error", err)
@@ -199,6 +217,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		logger.Error("Instructions synced with some failures",
 			"from", sl.GetCurrentVersion(),
 			"to", toVersion,
+			"compacted", compacted,
 			"processed", len(processedInstructions),
 			"failed", len(failedInstructions),
 			"successful_instructions", strings.Join(processedInstructions, "; "),

@@ -378,7 +378,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 
 	_, err := im.setCurrentVersion(0)
 	if err != nil {
-		err = fmt.Errorf("Failed to write leader version to Redis during initialization", "error", err)
+		err = fmt.Errorf("failed to write leader version to Redis during initialization: %w", err)
 		return err
 	}
 
