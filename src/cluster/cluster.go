@@ -14,6 +14,7 @@ type ClusterManager struct {
 	instructionManager *InstructionManager
 	heartbeatManager   *HeartbeatManager
 	syncListener       *SyncListener
+	leaderLocker       *LeaderLocker
 }
 
 var GlobalClusterManager *ClusterManager
@@ -33,6 +34,14 @@ func InitCluster(nodeID string, isLeader bool) {
 	}
 
 	logger.Info("Cluster initialized", "node_id", nodeID, "is_leader", isLeader)
+}
+func (cm *ClusterManager) ObtainLeaderLocker() error {
+	locker, err := ObtainLeaderLocker()
+	if err != nil {
+		return err
+	}
+	cm.leaderLocker = locker
+	return nil
 }
 
 // Start starts the cluster system
@@ -70,6 +79,10 @@ func (cm *ClusterManager) Stop() {
 
 	if cm.instructionManager != nil {
 		cm.instructionManager.Stop()
+	}
+
+	if cm.leaderLocker != nil {
+		cm.leaderLocker.Release()
 	}
 
 	logger.Info("Cluster stopped")
