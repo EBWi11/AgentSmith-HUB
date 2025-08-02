@@ -96,6 +96,52 @@ kafka:
     enable: true
 ```
 
+#### Grok 模式支持
+
+INPUT 组件支持 Grok 模式解析日志数据。如果配置了 `grok_pattern`，输入组件将使用指定模式解析 `message` 字段。如果未配置，数据将按 JSON 格式处理。
+
+##### Grok 模式配置
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "log-topic"
+  group: "grok-test-group"
+  offset_reset: "earliest"
+
+# Grok 模式解析日志数据
+grok_pattern: "%{COMBINEDAPACHELOG}"
+```
+
+##### 常用 Grok 模式
+
+**预定义模式：**
+- `%{COMBINEDAPACHELOG}` - Apache 组合日志格式
+- `%{IP:client} %{WORD:method} %{URIPATHPARAM:request} %{NUMBER:bytes} %{NUMBER:duration}` - 简单 HTTP 日志格式
+- `%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}` - 带 ISO8601 时间戳的标准日志格式
+
+**自定义正则表达式：**
+```yaml
+# 自定义时间戳格式
+grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z) (?<client_ip>\\d+\\.\\d+\\.\\d+\\.\\d+) (?<method>GET|POST|PUT|DELETE) (?<path>/[a-zA-Z0-9/_-]*)"
+
+# 自定义日志格式
+grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?<level>\\w+) (?<message>.*)"
+```
+
+**数据流程：**
+```
+输入数据 (map[string]interface{})
+↓
+检查是否配置了 grok_pattern
+↓
+如果配置了：解析 message 字段并将结果合并到原始数据中
+如果未配置：保持原始数据不变
+↓
+传递给下游（JSON 格式）
+```
+
 ### 1.2 OUTPUT 语法说明
 
 OUTPUT 定义了数据处理结果的输出目标。
