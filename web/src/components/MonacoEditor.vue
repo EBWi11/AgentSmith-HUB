@@ -568,7 +568,8 @@ function registerLanguageProviders() {
     triggerCharacters: [' ', ':', '\n', '\t', '-', '|', '.',
       'I','i','O','o','R','r',  // component prefixes
       'C','c',                  // content
-      'T','t'                   // type
+      'T','t',                  // type
+      'G','g'                   // grok_pattern
     ]
   });
   
@@ -1676,6 +1677,57 @@ function getInputValueCompletions(context, range, fullText) {
     });
   }
   
+  // grok_pattern value completion
+  else if (context.currentKey === 'grok_pattern') {
+    const grokPatterns = [
+      { 
+        value: '%{COMBINEDAPACHELOG}', 
+        description: 'Apache combined log format (IP, user, timestamp, request, status, bytes, referer, user-agent)' 
+      },
+      { 
+        value: '%{IP:client} %{WORD:method} %{URIPATHPARAM:request} %{NUMBER:bytes} %{NUMBER:duration}', 
+        description: 'Simple HTTP log format with IP, method, request, bytes, and duration' 
+      },
+      { 
+        value: '%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}', 
+        description: 'Standard log format with ISO8601 timestamp, log level, and message' 
+      },
+      { 
+        value: '%{IP:source_ip} - %{USER:user} [%{HTTPDATE:timestamp}] "%{WORD:method} %{URIPATHPARAM:request} %{WORD:protocol}/%{NUMBER:version}" %{NUMBER:status} %{NUMBER:bytes}', 
+        description: 'Extended HTTP log format with user, protocol version, and status' 
+      },
+      { 
+        value: '(?<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z) (?<client_ip>\\d+\\.\\d+\\.\\d+\\.\\d+) (?<method>GET|POST|PUT|DELETE) (?<path>/[a-zA-Z0-9/_-]*)', 
+        description: 'Custom regex pattern for timestamp, IP, HTTP method, and path' 
+      },
+      { 
+        value: '(?<timestamp>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?<level>\\w+) (?<message>.*)', 
+        description: 'Custom regex pattern for timestamp, log level, and message' 
+      },
+      { 
+        value: '(?<ip>\\d+\\.\\d+\\.\\d+\\.\\d+):(?<port>\\d+) (?<action>\\w+)', 
+        description: 'Custom regex pattern for IP with port and action' 
+      }
+    ];
+    
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+    
+    grokPatterns.forEach((pattern, index) => {
+      if (!currentValue || pattern.value.toLowerCase().includes(currentValue) || 
+          pattern.description.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: pattern.value,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          documentation: pattern.description,
+          insertText: pattern.value,
+          range: range,
+          sortText: `${pattern.value.toLowerCase().startsWith(currentValue) ? '0' : '1'}_${String(index).padStart(2, '0')}_${pattern.value}`,
+          detail: `Grok Pattern: ${pattern.description.split(' ')[0]}...`
+        });
+      }
+    });
+  }
+  
   // Array item suggestion - only provides formatting hints
   else if (context.currentKey === 'brokers' || context.beforeCursor.includes('- ')) {
     suggestions.push({
@@ -1884,6 +1936,18 @@ function getInputKeyCompletions(context, range, fullText) {
           range: range
         });
       }
+    });
+  }
+  
+  // Root-level grok_pattern suggestion
+  if (context.indentLevel === 0 && !fullText.includes('grok_pattern:')) {
+    suggestions.push({
+      label: 'grok_pattern',
+      kind: monaco.languages.CompletionItemKind.Property,
+      documentation: 'Grok pattern for parsing log data. If configured, input will parse message field using this pattern. If not configured, data will be treated as JSON by default.',
+      insertText: 'grok_pattern:',
+      range: range,
+      sortText: '001_grok_pattern'
     });
   }
   

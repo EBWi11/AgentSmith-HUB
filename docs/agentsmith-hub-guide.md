@@ -96,6 +96,52 @@ kafka:
     enable: true
 ```
 
+#### Grok Pattern Support
+
+INPUT components support Grok pattern parsing for log data. If `grok_pattern` is configured, the input will parse the `message` field using the specified pattern. If not configured, data will be treated as JSON by default.
+
+##### Grok Pattern Configuration
+```yaml
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "log-topic"
+  group: "grok-test-group"
+  offset_reset: "earliest"
+
+# Grok pattern for parsing log data
+grok_pattern: "%{COMBINEDAPACHELOG}"
+```
+
+##### Common Grok Patterns
+
+**Predefined Patterns:**
+- `%{COMBINEDAPACHELOG}` - Apache combined log format
+- `%{IP:client} %{WORD:method} %{URIPATHPARAM:request} %{NUMBER:bytes} %{NUMBER:duration}` - Simple HTTP log format
+- `%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}` - Standard log format with ISO8601 timestamp
+
+**Custom Regex Patterns:**
+```yaml
+# Custom timestamp format
+grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z) (?<client_ip>\\d+\\.\\d+\\.\\d+\\.\\d+) (?<method>GET|POST|PUT|DELETE) (?<path>/[a-zA-Z0-9/_-]*)"
+
+# Custom log format
+grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?<level>\\w+) (?<message>.*)"
+```
+
+**Data Flow:**
+```
+Input Data (map[string]interface{})
+↓
+Check if grok_pattern is configured
+↓
+If configured: Parse message field and merge results into original data
+If not configured: Keep original data unchanged
+↓
+Pass to downstream (JSON format)
+```
+
 ### 1.2 OUTPUT Syntax Description
 
 OUTPUT defines the output target for data processing results.

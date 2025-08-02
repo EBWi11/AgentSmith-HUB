@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vjeantet/grok"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,11 +27,12 @@ const (
 
 // InputConfig is the YAML config for an input.
 type InputConfig struct {
-	Id        string
-	Type      InputType             `yaml:"type"`
-	Kafka     *KafkaInputConfig     `yaml:"kafka,omitempty"`
-	AliyunSLS *AliyunSLSInputConfig `yaml:"aliyun_sls,omitempty"`
-	RawConfig string
+	Id          string
+	Type        InputType             `yaml:"type"`
+	Kafka       *KafkaInputConfig     `yaml:"kafka,omitempty"`
+	AliyunSLS   *AliyunSLSInputConfig `yaml:"aliyun_sls,omitempty"`
+	GrokPattern string                `yaml:"grok_pattern,omitempty"`
+	RawConfig   string
 }
 
 // KafkaInputConfig holds Kafka-specific config.
@@ -88,6 +90,9 @@ type Input struct {
 
 	// raw config
 	Config *InputConfig
+
+	// grok parser
+	grokParser *grok.Grok
 
 	// goroutine management
 	wg       sync.WaitGroup
@@ -196,7 +201,52 @@ func NewInput(path string, raw string, id string) (*Input, error) {
 	if common.IsLeader {
 		in.sampler = common.GetSampler("input." + id)
 	}
+
+	// Initialize grok parser if configured
+	if cfg.GrokPattern != "" {
+		g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize grok parser: %w", err)
+		}
+		in.grokParser = g
+	}
+
 	return in, nil
+}
+
+// parseWithGrok parses the input data using grok pattern if configured
+func (in *Input) parseWithGrok(data map[string]interface{}) map[string]interface{} {
+	if in.grokParser == nil || in.Config.GrokPattern == "" {
+		return data
+	}
+
+	// Try to find a message field to parse
+	var message string
+	if msg, ok := data["message"].(string); ok {
+		message = msg
+	} else if msg, ok := data["msg"].(string); ok {
+		message = msg
+	} else if msg, ok := data["log"].(string); ok {
+		message = msg
+	} else {
+		// If no message field found, try to parse the entire data as string
+		// This is a fallback for cases where the data might be a raw string
+		return data
+	}
+
+	// Parse with grok
+	values, err := in.grokParser.Parse(in.Config.GrokPattern, message)
+	if err != nil {
+		logger.Warn("Failed to parse message with grok", "input", in.Id, "error", err, "message", message)
+		return data
+	}
+
+	// Merge parsed values into the original data
+	for key, value := range values {
+		data[key] = value
+	}
+
+	return data
 }
 
 // SetStatus sets the input status and error information
@@ -238,6 +288,9 @@ func (in *Input) cleanup() {
 
 	// Clear internal message channel reference
 	in.internalMsgChan = nil
+
+	// Clear grok parser
+	in.grokParser = nil
 
 	// Reset atomic counter
 	atomic.StoreUint64(&in.consumeTotal, 0)
@@ -345,6 +398,9 @@ func (in *Input) Start() error {
 					}
 					msg["_hub_input"] = in.Id
 
+					// Parse with grok if configured
+					msg = in.parseWithGrok(msg)
+
 					// Forward to downstream with blocking sends to ensure no data loss
 					// If any downstream channel is full, this will block and prevent further consumption
 					for _, ch := range in.DownStream {
@@ -423,6 +479,9 @@ func (in *Input) Start() error {
 					}
 					msg["_hub_input"] = in.Id
 
+					// Parse with grok if configured
+					msg = in.parseWithGrok(msg)
+
 					// Forward to downstream with blocking sends to ensure no data loss
 					// If any downstream channel is full, this will block and prevent further consumption
 					for _, ch := range in.DownStream {
@@ -466,6 +525,9 @@ func (in *Input) ProcessTestData(data map[string]interface{}) {
 		data = make(map[string]interface{})
 	}
 	data["_hub_input"] = in.Id
+
+	// Parse with grok if configured - same as production logic
+	data = in.parseWithGrok(data)
 
 	// Forward to downstream with blocking sends to ensure no data loss
 	// If any downstream channel is full, this will block and prevent further processing
@@ -878,6 +940,15 @@ func NewFromExisting(existing *Input, newProjectNodeSequence string) (*Input, er
 	// Only create sampler on leader node for performance
 	if common.IsLeader {
 		newInput.sampler = common.GetSampler("input." + existing.Id)
+	}
+
+	// Initialize grok parser if configured
+	if newInput.Config.GrokPattern != "" {
+		g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize grok parser: %w", err)
+		}
+		newInput.grokParser = g
 	}
 
 	return newInput, nil

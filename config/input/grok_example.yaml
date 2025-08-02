@@ -1,0 +1,22 @@
+type: kafka
+kafka:
+  brokers:
+    - "localhost:9092"
+  group: "grok-test-group"
+  topic: "log-topic"
+  offset_reset: "earliest"
+
+# Grok pattern for parsing log data
+# If grok_pattern is configured, the input will parse the message field using the specified pattern
+# If grok_pattern is not configured, the input will treat data as JSON by default
+
+# Example pattern for parsing Apache access logs
+grok_pattern: "%{COMBINEDAPACHELOG}"
+
+# Other example patterns:
+# grok_pattern: "%{IP:client} %{WORD:method} %{URIPATHPARAM:request} %{NUMBER:bytes} %{NUMBER:duration}"
+# grok_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}"
+# grok_pattern: "%{IP:source_ip} - %{USER:user} \[%{HTTPDATE:timestamp}\] \"%{WORD:method} %{URIPATHPARAM:request} %{WORD:protocol}/%{NUMBER:version}\" %{NUMBER:status} %{NUMBER:bytes}"
+
+# Custom regex patterns (write directly in grok_pattern):
+# grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z) (?<client_ip>\\d+\\.\\d+\\.\\d+\\.\\d+) (?<method>GET|POST|PUT|DELETE) (?<path>/[a-zA-Z0-9/_-]*)" 
