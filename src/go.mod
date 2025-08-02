@@ -19,6 +19,7 @@ require (
 	github.com/traefik/yaegi v0.16.1
 	github.com/twmb/franz-go v1.19.5
 	github.com/twmb/franz-go/pkg/kadm v1.16.0
+	github.com/vjeantet/grok v1.0.1
 	golang.org/x/net v0.42.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v2 v2.4.0

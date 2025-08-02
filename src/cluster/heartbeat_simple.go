@@ -24,22 +24,35 @@ type HeartbeatData struct {
 
 // HeartbeatManager manages heartbeat and version sync
 type HeartbeatManager struct {
-	nodeID   string
-	isLeader bool
-	nodes    map[string]HeartbeatData
-	mu       sync.RWMutex
-	stopChan chan struct{}
+	nodeID           string
+	isLeader         bool
+	nodes            map[string]HeartbeatData
+	mu               sync.RWMutex
+	stopChan         chan struct{}
+	heartbeatInterval time.Duration // Randomized heartbeat interval for followers
 }
 
 var GlobalHeartbeatManager *HeartbeatManager
 
 // InitHeartbeatManager initializes the heartbeat manager
 func InitHeartbeatManager(nodeID string, isLeader bool) {
+	// Calculate randomized heartbeat interval for followers
+	// Base interval: 5 seconds, random jitter: ±2 seconds (3-7 seconds total)
+	baseInterval := 5 * time.Second
+	jitter := time.Duration((time.Now().UnixNano() % 4000)) * time.Millisecond // 0-4 seconds
+	heartbeatInterval := baseInterval + jitter
+	
 	GlobalHeartbeatManager = &HeartbeatManager{
-		nodeID:   nodeID,
-		isLeader: isLeader,
-		nodes:    make(map[string]HeartbeatData),
-		stopChan: make(chan struct{}),
+		nodeID:            nodeID,
+		isLeader:          isLeader,
+		nodes:             make(map[string]HeartbeatData),
+		stopChan:          make(chan struct{}),
+		heartbeatInterval: heartbeatInterval,
+	}
+	
+	if !isLeader {
+		logger.Info("Follower heartbeat initialized with randomized interval", 
+			"node_id", nodeID, "interval", heartbeatInterval)
 	}
 }
 
@@ -70,8 +83,12 @@ func (hm *HeartbeatManager) updateLeaderSystemMetrics() {
 		return
 	}
 
-	ticker := time.NewTicker(5 * time.Second) // Same frequency as follower heartbeat
+	// Use same randomized interval as followers for consistency
+	ticker := time.NewTicker(hm.heartbeatInterval)
 	defer ticker.Stop()
+
+	logger.Info("Starting leader system metrics update with randomized interval", 
+		"node_id", hm.nodeID, "interval", hm.heartbeatInterval)
 
 	for {
 		select {
@@ -90,8 +107,12 @@ func (hm *HeartbeatManager) updateLeaderSystemMetrics() {
 
 // startFollowerHeartbeat starts follower heartbeat services
 func (hm *HeartbeatManager) startFollowerHeartbeat() {
-	ticker := time.NewTicker(5 * time.Second)
+	// Use randomized heartbeat interval to avoid heartbeat storms
+	ticker := time.NewTicker(hm.heartbeatInterval)
 	defer ticker.Stop()
+
+	logger.Info("Starting follower heartbeat with randomized interval", 
+		"node_id", hm.nodeID, "interval", hm.heartbeatInterval)
 
 	for {
 		select {
