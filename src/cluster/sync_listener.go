@@ -192,7 +192,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		} else if a.ComponentType != "project" && b.ComponentType == "project" {
 			return -1
 		} else {
-			return 0
+			return int(a.Version) - int(b.Version)
 		}
 	})
 	for _, instruction := range instructions {
