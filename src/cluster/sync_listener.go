@@ -197,6 +197,9 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	})
 	for _, instruction := range instructions {
 		version := instruction.Version
+		if version == 0 {
+			continue
+		}
 		// Apply instruction - execute once regardless of success/failure
 		if err := sl.applyInstruction(version); err != nil {
 			logger.Error("Failed to apply instruction", "version", version, "component", instruction.ComponentName, "operation", instruction.Operation, "error", err)
