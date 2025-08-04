@@ -187,18 +187,18 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 	//}
 
 	for i, instruction := range instructions {
-		version := i + 1
-		key := fmt.Sprintf("cluster:instruction:%d", version)
+		instruction.Version = int64(i + 1)
+		key := fmt.Sprintf("cluster:instruction:%d", instruction.Version)
 
 		if delInstructions[i] {
 			if _, err := common.RedisSet(key, GetDeletedIntentionsString(), 0); err != nil {
-				logger.Error("Failed to store compacted instruction", "version", version, "error", err)
+				logger.Error("Failed to store compacted instruction", "version", instruction.Version, "error", err)
 				continue
 			}
 		} else {
 			data, _ := json.Marshal(instruction)
 			if _, err := common.RedisSet(key, string(data), 0); err != nil {
-				logger.Error("Failed to store compacted instruction", "version", version, "error", err)
+				logger.Error("Failed to store compacted instruction", "version", instruction.Version, "error", err)
 				continue
 			}
 		}
