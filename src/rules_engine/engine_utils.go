@@ -41,7 +41,6 @@ func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (b
 }
 
 // LocalCacheFRQSum performs frequency sum aggregation using local cache
-// Note: In concurrent situations, there may be precision issues
 // groupByKey: Cache key for grouping
 // sumData: Value to add to the sum
 // rangeInt: Time range in seconds
@@ -54,12 +53,28 @@ func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int,
 			return true, nil
 		} else {
 			if tmpTtl, exist := r.Cache.GetTTL(groupByKey); exist {
-				r.Cache.SetWithTTL(groupByKey, v+sumData, 0, tmpTtl)
+				success := r.Cache.SetWithTTL(groupByKey, v+sumData, 1, tmpTtl)
+				if success {
+					// Wait for the cache to be ready (ristretto is async)
+					r.Cache.Wait()
+				}
+			} else {
+				success := r.Cache.SetWithTTL(groupByKey, v+sumData, 1, time.Duration(rangeInt)*time.Second)
+				if success {
+					// Wait for the cache to be ready (ristretto is async)
+					r.Cache.Wait()
+				}
 			}
 			return false, nil
 		}
 	} else {
-		r.Cache.SetWithTTL(groupByKey, sumData, 0, time.Duration(rangeInt)*time.Second)
+		// Use cost=1 instead of 0, as ristretto may have special handling for cost=0
+		// Set the value and wait for async operation to complete
+		success := r.Cache.SetWithTTL(groupByKey, sumData, 1, time.Duration(rangeInt)*time.Second)
+		if success {
+			// Wait for the cache to be ready (ristretto is async)
+			r.Cache.Wait()
+		}
 		return false, nil
 	}
 }
@@ -94,8 +109,6 @@ func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold 
 }
 
 func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
-	r.CacheMu.Lock()
-	defer r.CacheMu.Unlock()
 
 	if keys, ok := r.CacheForClassify.Get(groupByKey); ok {
 		count := len(keys) + 1
@@ -114,16 +127,24 @@ func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeI
 			return true, nil
 		} else {
 			keys[tmpKey] = true
-			r.CacheForClassify.SetWithTTL(groupByKey, keys, 0, time.Duration(rangeInt*2)*time.Second)
-			r.Cache.SetWithTTL(tmpKey, 1, 0, time.Duration(rangeInt)*time.Second)
+			r.CacheForClassify.SetWithTTL(groupByKey, keys, 1, time.Duration(rangeInt*2)*time.Second)
+			success := r.Cache.SetWithTTL(tmpKey, 1, 1, time.Duration(rangeInt)*time.Second)
+			if success {
+				// Wait for the cache to be ready (ristretto is async)
+				r.Cache.Wait()
+			}
 			return false, nil
 		}
 	} else {
 		keys := map[string]bool{
 			tmpKey: true,
 		}
-		r.Cache.SetWithTTL(tmpKey, 1, 0, time.Duration(rangeInt)*time.Second)
-		r.CacheForClassify.SetWithTTL(groupByKey, keys, 0, time.Duration(rangeInt*2)*time.Second)
+		success := r.Cache.SetWithTTL(tmpKey, 1, 1, time.Duration(rangeInt)*time.Second)
+		if success {
+			// Wait for the cache to be ready (ristretto is async)
+			r.Cache.Wait()
+		}
+		r.CacheForClassify.SetWithTTL(groupByKey, keys, 1, time.Duration(rangeInt*2)*time.Second)
 		return false, nil
 	}
 }

@@ -43,7 +43,7 @@
     "ADVANCED_TEMPLATES": {
       "complex_detection_logic": {
         "name": "Complex Detection with Boolean Logic",
-        "description": "Using checklist for OR/NOT logic when needed",
+        "description": "Using checklist for OR/NOT logic when needed (supports both check and threshold nodes)",
         "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"source_a or source_b\">\n    <check id=\"source_a\" type=\"EQU\" field=\"source\">A</check>\n    <check id=\"source_b\" type=\"EQU\" field=\"source\">B</check>\n  </checklist>\n  <check type=\"MT\" field=\"severity\">7</check>\n  <threshold group_by=\"user\" range=\"1h\">10</threshold>\n</rule>",
         "required_fields": ["rule_id", "rule_name"],
         "use_case": "Complex conditions requiring OR logic",
@@ -57,6 +57,15 @@
         "use_case": "Complex multi-stage threat detection",
         "performance": "Most selective checks first for efficiency",
         "optimization_tips": ["Order checks by selectivity", "Use early filtering to reduce processing"]
+      },
+      
+      "checklist_with_threshold": {
+        "name": "Checklist with Threshold Detection",
+        "description": "Combining check and threshold nodes in a single checklist",
+        "xml": "<rule id=\"{rule_id}\" name=\"{rule_name}\">\n  <checklist condition=\"suspicious_activity and high_frequency\">\n    <check id=\"suspicious_activity\" type=\"INCL\" field=\"command\">powershell|cmd|wmic</check>\n    <threshold id=\"high_frequency\" group_by=\"source_ip\" range=\"5m\">10</threshold>\n  </checklist>\n  <append field=\"alert_type\">suspicious_command_high_freq</append>\n</rule>",
+        "use_case": "Combining pattern detection with frequency analysis",
+        "performance": "Efficient when both conditions need to be evaluated together",
+        "optimization_tips": ["Use threshold ID for condition reference", "Combine related checks in single checklist"]
       }
     },
 

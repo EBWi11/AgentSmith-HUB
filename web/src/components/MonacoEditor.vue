@@ -3404,8 +3404,8 @@ function getXmlTagNameCompletions(context, range, fullText) {
       {
         label: 'checklist',
         kind: monaco.languages.CompletionItemKind.Module,
-        documentation: 'Checklist with conditional logic',
-        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
+        documentation: 'Checklist with conditional logic (supports check and threshold nodes)',
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n    <threshold id="threshold_b" group_by="user_id" range="5m">10</threshold>\n</checklist',
         range: range,
         sortText: '2_checklist'
       },

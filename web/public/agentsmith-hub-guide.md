@@ -795,10 +795,25 @@ Rule using conditional combinations:
 - `(a or b) and not c`: a or b satisfied, and c not satisfied
 - `a and (b or (c and d))`: Complex nested conditions
 
+**Example of using threshold in checklist:**
+```xml
+<checklist condition="suspicious_activity and high_frequency">
+    <check id="suspicious_activity" type="INCL" field="command">powershell|cmd|wmic</check>
+    <threshold id="high_frequency" group_by="source_ip" range="5m">10</threshold>
+</checklist>
+```
+- Check if command contains suspicious keywords
+- Also check if source IP triggers more than 10 times within 5 minutes
+- Checklist passes when both conditions are satisfied
+
 **Working Principle:**
-- Execute all check nodes with `id`, record the result of each node (true/false)
+- Execute all check nodes and threshold nodes with `id`, record the result of each node (true/false)
 - Substitute results into the `condition` expression to calculate final result
 - If final result is true, checklist passes
+
+**Supported Node Types:**
+- `<check>` nodes: Execute field checks, regex matching, plugin calls, etc.
+- `<threshold>` nodes: Execute threshold detection, supporting counting, summing, classification statistics, etc.
 
 #### 🔍 Syntax Details: Multi-value Matching (logic and delimiter)
 

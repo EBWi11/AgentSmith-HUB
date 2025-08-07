@@ -105,8 +105,6 @@ type Ruleset struct {
 
 	Cache            *ristretto.Cache[string, int]
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
-	// only for classify local cache
-	CacheMu sync.RWMutex
 
 	// Regex result cache for this ruleset instance
 	RegexResultCache *RegexResultCache
@@ -127,11 +125,12 @@ type Ruleset struct {
 
 // Checklist contains the logical condition and nodes to check.
 type Checklist struct {
-	Condition     string       `xml:"condition,attr"`
-	CheckNodes    []CheckNodes `xml:"node"`
-	ConditionAST  *ReCepAST
-	ConditionFlag bool
-	ConditionMap  map[string]bool
+	Condition      string       `xml:"condition,attr"`
+	CheckNodes     []CheckNodes `xml:"node"`
+	ThresholdNodes []Threshold  `xml:"threshold"` // Add support for threshold nodes
+	ConditionAST   *ReCepAST
+	ConditionFlag  bool
+	ConditionMap   map[string]bool
 }
 
 // CheckNodes represents a single check operation in a checklist.
@@ -166,6 +165,7 @@ type PluginArg struct {
 // Threshold defines aggregation and counting logic for a rule.
 // It supports grouping by fields, time-based ranges, and different counting methods.
 type Threshold struct {
+	ID             string              `xml:"id,attr"`       // ID for referencing in checklist conditions
 	group_by       string              `xml:"group_by,attr"` // Field to group by
 	GroupByList    map[string][]string // Parsed group by fields
 	Range          string              `xml:"range,attr"` // Time range for aggregation
@@ -643,11 +643,11 @@ func validateStandaloneCheck(checkNode *CheckNodes, xmlContent, ruleID string, r
 
 // validateChecklist validates checklist elements
 func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
-	if len(checklist.CheckNodes) == 0 {
+	if len(checklist.CheckNodes) == 0 && len(checklist.ThresholdNodes) == 0 {
 		result.IsValid = false
 		result.Errors = append(result.Errors, ValidationError{
 			Line:    findElementInRule(xmlContent, ruleID, "<checklist", ruleIndex, 0),
-			Message: "Checklist must have at least one check node",
+			Message: "Checklist must have at least one check node or threshold node",
 			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 		})
 		return
@@ -657,6 +657,7 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 	nodeIDMap := make(map[string]int)
 	hasCondition := checklist.Condition != "" && strings.TrimSpace(checklist.Condition) != ""
 
+	// Validate check nodes
 	for nodeIndex, node := range checklist.CheckNodes {
 		nodeLine := findElementInRule(xmlContent, ruleID, "<check", ruleIndex, nodeIndex)
 
@@ -741,27 +742,124 @@ func validateChecklist(checklist *Checklist, xmlContent, ruleID string, ruleInde
 					result.IsValid = false
 					result.Errors = append(result.Errors, ValidationError{
 						Line:    nodeLine,
-						Message: "Invalid regex pattern",
-						Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+						Message: fmt.Sprintf("Invalid regex pattern: %s", err.Error()),
+						Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
 					})
 				}
 			}
 		}
 
-		// Validate plugin node
-		if node.Type == "PLUGIN" {
-			nodeValue := strings.TrimSpace(node.Value)
-			if nodeValue == "" {
+		// Validate logic and delimiter consistency
+		if node.Logic != "" && node.Delimiter == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Delimiter cannot be empty when logic is specified",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+		if node.Logic == "" && node.Delimiter != "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Logic cannot be empty when delimiter is specified",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		// Validate logic values
+		if node.Logic != "" && node.Logic != "AND" && node.Logic != "OR" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    nodeLine,
+				Message: "Logic must be either 'AND' or 'OR'",
+				Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, node.Logic),
+			})
+		}
+	}
+
+	// Validate threshold nodes
+	for thresholdIndex, threshold := range checklist.ThresholdNodes {
+		thresholdLine := findElementInRule(xmlContent, ruleID, "<threshold", ruleIndex, thresholdIndex)
+
+		// Validate threshold attributes
+		if threshold.group_by == "" || strings.TrimSpace(threshold.group_by) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold group_by cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		if threshold.Range == "" || strings.TrimSpace(threshold.Range) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold range cannot be empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		if threshold.Value <= 0 {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold value must be a positive integer (greater than 0)",
+				Detail:  fmt.Sprintf("Rule ID: %s, Current value: %d", ruleID, threshold.Value),
+			})
+		}
+
+		// Validate count_type
+		if threshold.CountType != "" && threshold.CountType != "SUM" && threshold.CountType != "CLASSIFY" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold count_type must be empty (default count mode), 'SUM', or 'CLASSIFY'",
+				Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, threshold.CountType),
+			})
+		}
+
+		// Validate count_field for SUM and CLASSIFY types
+		if (threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY") &&
+			(threshold.CountField == "" || strings.TrimSpace(threshold.CountField) == "") {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    thresholdLine,
+				Message: "Threshold count_field cannot be empty when count_type is 'SUM' or 'CLASSIFY'",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+
+		// Check threshold ID for condition checking
+		if hasCondition {
+			thresholdID := threshold.ID
+			if thresholdID == "" {
+				thresholdID = fmt.Sprintf("threshold_%d", thresholdIndex)
+			}
+
+			if prevIndex, exists := nodeIDMap[thresholdID]; exists {
 				result.IsValid = false
 				result.Errors = append(result.Errors, ValidationError{
-					Line:    nodeLine,
-					Message: "PLUGIN node value cannot be empty",
-					Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+					Line:    thresholdLine,
+					Message: fmt.Sprintf("Duplicate threshold ID: %s", thresholdID),
+					Detail:  fmt.Sprintf("Rule ID: %s, first occurrence at index %d", ruleID, prevIndex),
 				})
 			} else {
-				// Validate plugin parameters and return type for checknode
-				validateCheckNodePluginCall(nodeValue, nodeLine, ruleID, result)
+				nodeIDMap[thresholdID] = thresholdIndex
 			}
+		}
+	}
+
+	// Validate condition expression if present
+	if hasCondition {
+		if _, _, ok := ConditionRegex.Find(strings.TrimSpace(checklist.Condition)); !ok {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    findElementInRule(xmlContent, ruleID, "<checklist", ruleIndex, 0),
+				Message: "Invalid condition expression",
+				Detail:  fmt.Sprintf("Rule ID: %s, Condition: %s", ruleID, checklist.Condition),
+			})
 		}
 	}
 }
@@ -1549,7 +1647,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		newRuleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
 			NumCounters: 10_000_000,       // number of keys to track frequency of.
 			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
-			BufferItems: 32,               // number of keys per Get buffer.
+			BufferItems: 256,              // number of keys per Get buffer.
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create local cache: %w", err)
@@ -1561,7 +1659,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		newRuleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
 			NumCounters: 10_000_000,       // number of keys to track frequency of.
 			MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
-			BufferItems: 32,               // number of keys per Get buffer.
+			BufferItems: 256,              // number of keys per Get buffer.
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create classify cache: %w", err)
@@ -1771,15 +1869,15 @@ func RulesetBuild(ruleset *Ruleset) error {
 
 		// Process checklists in ChecklistMap
 		for id, checklist := range rule.ChecklistMap {
-			// Validate that checklist has at least one check node
-			if len(checklist.CheckNodes) == 0 {
-				return errors.New("checklist must have at least one check node: " + rule.ID)
+			// Validate that checklist has at least one check node or threshold node
+			if len(checklist.CheckNodes) == 0 && len(checklist.ThresholdNodes) == 0 {
+				return errors.New("checklist must have at least one check node or threshold node: " + rule.ID)
 			}
 
 			if strings.TrimSpace(checklist.Condition) != "" {
 				if _, _, ok := ConditionRegex.Find(strings.TrimSpace(checklist.Condition)); ok {
 					checklist.ConditionAST = GetAST(strings.TrimSpace(checklist.Condition))
-					checklist.ConditionMap = make(map[string]bool, len(checklist.CheckNodes))
+					checklist.ConditionMap = make(map[string]bool, len(checklist.CheckNodes)+len(checklist.ThresholdNodes))
 					checklist.ConditionFlag = true
 				} else {
 					return errors.New("checklist condition is not a valid expression")
@@ -1792,6 +1890,69 @@ func RulesetBuild(ruleset *Ruleset) error {
 				err := processCheckNode(node, &checklist, rule.ID)
 				if err != nil {
 					return err
+				}
+			}
+
+			// Process threshold nodes in this checklist
+			for j := range checklist.ThresholdNodes {
+				threshold := &checklist.ThresholdNodes[j]
+
+				// Parse threshold group by fields
+				if threshold.group_by != "" {
+					threshold.GroupByList = make(map[string][]string)
+					groupByFields := strings.Split(threshold.group_by, ",")
+					for _, field := range groupByFields {
+						field = strings.TrimSpace(field)
+						if field != "" {
+							threshold.GroupByList[field] = common.StringToList(field)
+						}
+					}
+				}
+
+				// Parse threshold range
+				if threshold.Range != "" {
+					rangeInt, err := common.ParseDurationToSecondsInt(threshold.Range)
+					if err != nil {
+						return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
+					}
+					threshold.RangeInt = rangeInt
+				}
+
+				// Set threshold group ID - use same format as standalone threshold for consistency
+				threshold.GroupByID = ruleset.RulesetID + rule.ID
+
+				// Initialize cache if needed for checklist thresholds
+				if threshold.LocalCache && !createLocalCache {
+					ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+						NumCounters: 10_000_000,       // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						BufferItems: 32,               // number of keys per Get buffer.
+					})
+
+					if err != nil {
+						return fmt.Errorf("failed to create local cache: %w", err)
+					}
+					createLocalCache = true
+				}
+
+				if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+						NumCounters: 10_000_000,       // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						BufferItems: 32,               // number of keys per Get buffer.
+					})
+
+					if err != nil {
+						return fmt.Errorf("failed to create local cache: %w", err)
+					}
+					createLocalCacheForClassify = true
+				}
+
+				// Parse count field for SUM and CLASSIFY types
+				if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+					if threshold.CountField != "" {
+						threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+					}
 				}
 			}
 

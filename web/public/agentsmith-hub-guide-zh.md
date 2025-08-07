@@ -793,10 +793,25 @@ AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
 - `(a or b) and not c`：a或b满足，且c不满足；
 - `a and (b or (c and d))`：复杂嵌套条件。
 
+**在checklist中使用threshold的示例：**
+```xml
+<checklist condition="suspicious_activity and high_frequency">
+    <check id="suspicious_activity" type="INCL" field="command">powershell|cmd|wmic</check>
+    <threshold id="high_frequency" group_by="source_ip" range="5m">10</threshold>
+</checklist>
+```
+- 检查命令是否包含可疑关键词
+- 同时检查源IP在5分钟内是否触发超过10次
+- 两个条件都满足时，checklist通过
+
 **工作原理：**
-- 执行所有带 `id` 的检查节点，记录每个节点的结果（true/false）
+- 执行所有带 `id` 的检查节点和阈值节点，记录每个节点的结果（true/false）
 - 将结果代入 `condition` 表达式计算最终结果
 - 如果最终结果为 true，则 checklist 通过
+
+**支持节点类型：**
+- `<check>` 节点：执行字段检查、正则匹配、插件调用等
+- `<threshold>` 节点：执行阈值检测，支持计数、求和、分类统计等模式
 
 #### 🔍 语法详解：多值匹配（logic 和 delimiter）
 
