@@ -21,11 +21,12 @@ export function generateRulesetTemplate(id) {
         <!-- Threshold example -->
         <threshold group_by="user_id,ip" range="5m">10</threshold>
         
-        <!-- Checklist with conditional logic -->
+        <!-- Checklist with conditional logic (supports check and threshold nodes) -->
         <checklist condition="a and (b or c)">
             <check id="a" type="INCL" field="data" logic="OR" delimiter="|">test1|test2</check>
             <check id="b" type="REGEX" field="data">^example.*pattern$</check>
             <check id="c" type="MT" field="score">80</check>
+            <threshold id="threshold_c" group_by="user_id" range="5m">10</threshold>
         </checklist>
         
         <!-- Additional operations -->

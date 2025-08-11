@@ -546,7 +546,7 @@ func (r *Ruleset) executeCheckList(rule *Rule, operationID int, data map[string]
 	// Pre-allocate conditionMap only if needed
 	var conditionMap map[string]bool
 	if checklist.ConditionFlag {
-		conditionMap = make(map[string]bool, len(checklist.CheckNodes))
+		conditionMap = make(map[string]bool, len(checklist.CheckNodes)+len(checklist.ThresholdNodes))
 	}
 
 	// Execute each check node in the checklist
@@ -563,9 +563,37 @@ func (r *Ruleset) executeCheckList(rule *Rule, operationID int, data map[string]
 		}
 	}
 
+	// Execute each threshold node in the checklist
+	for i, thresholdNode := range checklist.ThresholdNodes {
+		// Use threshold ID if provided, otherwise generate one
+		thresholdID := thresholdNode.ID
+		if thresholdID == "" {
+			thresholdID = fmt.Sprintf("threshold_%d", i)
+		}
+
+		// Create a temporary threshold map for execution
+		tempThresholdMap := map[int]Threshold{1: thresholdNode}
+		tempRule := &Rule{
+			ID:           rule.ID, // Use the original rule ID
+			ThresholdMap: tempThresholdMap,
+		}
+
+		thresholdResult := r.executeThreshold(tempRule, 1, data, ruleCache)
+
+		if checklist.ConditionFlag {
+			conditionMap[thresholdID] = thresholdResult
+		} else {
+			// Simple AND logic for non-condition checklists
+			if !thresholdResult {
+				return false
+			}
+		}
+	}
+
 	// If using condition expression, evaluate it
 	if checklist.ConditionFlag {
-		return checklist.ConditionAST.ExprASTResult(checklist.ConditionAST.ExprAST, conditionMap)
+		result := checklist.ConditionAST.ExprASTResult(checklist.ConditionAST.ExprAST, conditionMap)
+		return result
 	}
 
 	return true
@@ -914,10 +942,16 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 	if existingID, ok := data[HitRuleIdFieldName]; !ok {
 		data[HitRuleIdFieldName] = ruleID
 	} else {
+		// Check if this is the same rule ID to avoid duplication
+		existingStr := existingID.(string)
+		if existingStr == ruleID {
+			// Same rule ID, don't duplicate
+			return
+		}
 		// Use strings.Builder pool for efficient string concatenation
 		sb := stringBuilderPool.Get().(*strings.Builder)
 		sb.Reset()
-		sb.WriteString(existingID.(string))
+		sb.WriteString(existingStr)
 		sb.WriteString(",")
 		sb.WriteString(ruleID)
 		data[HitRuleIdFieldName] = sb.String()

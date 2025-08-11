@@ -172,12 +172,18 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 						return nil, err
 					}
 
-					operatorIDCounter++
-					currentRule.ThresholdMap[operatorIDCounter] = threshold
-					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
-						Type: T_Threshold,
-						ID:   operatorIDCounter,
-					})
+					if inChecklist && currentChecklist != nil {
+						// Add to current checklist
+						currentChecklist.ThresholdNodes = append(currentChecklist.ThresholdNodes, threshold)
+					} else {
+						// Standalone threshold node
+						operatorIDCounter++
+						currentRule.ThresholdMap[operatorIDCounter] = threshold
+						*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
+							Type: T_Threshold,
+							ID:   operatorIDCounter,
+						})
+					}
 				}
 
 			case "append":
@@ -380,6 +386,8 @@ func parseThreshold(element xml.StartElement, decoder *XMLDecoder, elementLine i
 	// Parse attributes with validation
 	for _, attr := range element.Attr {
 		switch attr.Name.Local {
+		case "id":
+			threshold.ID = strings.TrimSpace(attr.Value)
 		case "group_by":
 			group_by := strings.TrimSpace(attr.Value)
 			if group_by == "" {

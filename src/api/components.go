@@ -1144,13 +1144,8 @@ func createComponent(componentType string, c echo.Context) error {
 		project.SetProjectNew(request.ID, request.Raw)
 	}
 
-	// Publish instruction for component creation (NEW - this was missing!)
-	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
-		if err := cluster.GlobalInstructionManager.PublishComponentAdd(componentType, request.ID, request.Raw); err != nil {
-			logger.Error("Failed to publish component creation instruction", "type", componentType, "id", request.ID, "error", err)
-			// Don't fail the request, but log the error
-		}
-		// Record component creation operation history (for leader visibility)
+	// Record component creation operation history (for leader visibility)
+	if common.IsCurrentNodeLeader() {
 		common.RecordComponentAdd(componentType, request.ID, request.Raw, "success", "")
 	}
 
