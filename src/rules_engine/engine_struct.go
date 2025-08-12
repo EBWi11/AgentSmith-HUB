@@ -109,6 +109,9 @@ type Ruleset struct {
 	// Regex result cache for this ruleset instance
 	RegexResultCache *RegexResultCache
 
+	// Mutex for protecting cache operations
+	mu sync.RWMutex
+
 	RawConfig string
 	sampler   *common.Sampler
 

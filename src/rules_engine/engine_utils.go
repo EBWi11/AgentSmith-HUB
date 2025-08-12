@@ -47,6 +47,10 @@ func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (b
 // threshold: Threshold value to trigger
 // Returns: true if threshold is exceeded, false otherwise
 func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
+	// Acquire write lock to protect cache operations
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if v, ok := r.Cache.Get(groupByKey); ok {
 		if v+sumData > threshold {
 			r.Cache.Del(groupByKey)
@@ -109,25 +113,34 @@ func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold 
 }
 
 func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
+	// Acquire write lock to protect cache operations
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if keys, ok := r.CacheForClassify.Get(groupByKey); ok {
-		count := len(keys) + 1
-		for key := range keys {
+		// Create a copy of the map to avoid modifying the cached map directly
+		keysCopy := make(map[string]bool)
+		for k, v := range keys {
+			keysCopy[k] = v
+		}
+
+		count := len(keysCopy) + 1
+		for key := range keysCopy {
 			if _, okk := r.Cache.Get(key); !okk {
 				count = count - 1
-				delete(keys, key)
+				delete(keysCopy, key)
 			}
 		}
 
 		if count > threshold {
-			for key := range keys {
+			for key := range keysCopy {
 				r.Cache.Del(key)
 			}
 			r.CacheForClassify.Del(groupByKey)
 			return true, nil
 		} else {
-			keys[tmpKey] = true
-			r.CacheForClassify.SetWithTTL(groupByKey, keys, 1, time.Duration(rangeInt*2)*time.Second)
+			keysCopy[tmpKey] = true
+			r.CacheForClassify.SetWithTTL(groupByKey, keysCopy, 1, time.Duration(rangeInt*2)*time.Second)
 			success := r.Cache.SetWithTTL(tmpKey, 1, 1, time.Duration(rangeInt)*time.Second)
 			if success {
 				// Wait for the cache to be ready (ristretto is async)
