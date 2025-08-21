@@ -3392,7 +3392,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'iterator',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Iterator for a array field (can be placed anywhere in rule)',
-        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="field">value</check>\n</iterator>',
+        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="field">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
       }
@@ -3502,7 +3502,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'iterator',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Iterator for a array field',
-        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="variable">value</check>\n</iterator>',
+        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="variable">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
       }
