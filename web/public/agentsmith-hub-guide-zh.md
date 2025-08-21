@@ -722,6 +722,77 @@ AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
 - 使用 `<del>` 在数据处理后删除该字段；
 - 确保敏感信息不会被存储或传输。
 
+#### 🔍 语法详解：`<iterator>` 标签
+
+`<iterator>` 用于对数组/列表中的每个元素执行一组检查，支持两种判定方式：`ANY`（任意一个元素匹配即通过）和 `ALL`（所有元素都必须匹配）。
+
+**基本语法：**
+```xml
+<iterator type="ANY|ALL" field="数组字段路径" variable="迭代变量名">
+    <!-- 可包含：check / threshold / checklist -->
+    <check ...>...</check>
+    <threshold ...>...</threshold>
+    <checklist condition="...">
+        <check id="..." ...>...</check>
+        <!-- 也可包含 threshold -->
+    </checklist>
+</iterator>
+```
+
+**属性说明：**
+- `type`（必需）：`ANY` 或 `ALL`
+- `field`（必需）：要迭代的数组字段路径；支持：
+  - 原生数组：`[]interface{}`、`[]string`、`[]map[string]interface{}`
+  - JSON 字符串且内容为数组（会自动解析）
+- `variable`（必需）：迭代变量名，用于在内部访问当前元素
+  - 命名规则：以字母或下划线开头，只能包含字母、数字、下划线
+  - 不可与内部前缀或保留名冲突（如：`_$`、`ORIDATA` 等）
+
+**执行语义：**
+- 迭代上下文：在 `<iterator>` 内执行时，默认上下文被替换为仅包含迭代变量的新上下文： `{variable: 当前元素}`。
+  - 在内部 `<check>`/`<threshold>`/`<checklist>` 的 `field` 中通过迭代变量访问当前元素，如：`variable.name`、`variable._ip`、`variable.value`。
+- `ANY`：任意元素使内部检查整体通过，则迭代返回 true；
+- `ALL`：所有元素都满足内部检查，迭代才返回 true。
+
+**示例1：字符串数组（任意一个为公网IP）**
+```json
+{"ips": ["1.2.3.4", "10.0.0.1", "8.8.8.8"]}
+```
+```xml
+<rule id="ip_any_public" name="任意公网IP">
+    <iterator type="ANY" field="ips" variable="_ip">
+        <check type="PLUGIN">!isPrivateIP(_ip)</check>
+    </iterator>
+</rule>
+```
+
+**示例2：对象数组（全部进程都不为浏览器）**
+```json
+{"processes": [{"name":"powershell.exe","cmd":"..."},{"name":"svchost.exe","cmd":"..."}]}
+```
+```xml
+<rule id="no_browser" name="进程白名单">
+    <iterator type="ALL" field="processes" variable="proc">
+        <check type="NI" field="proc.name" logic="AND" delimiter="|">chrome.exe|firefox.exe</check>
+        <checklist condition="a or b">
+            <check id="a" type="INCL" field="proc.name">powershell</check>
+            <check id="b" type="INCL" field="proc.cmd">-EncodedCommand</check>
+        </checklist>
+    </iterator>
+</rule>
+```
+
+**示例3：JSON 字符串数组（全部以 .com 结尾）**
+```json
+{"targets": "[\"example.com\", \"test.com\"]"}
+```
+```xml
+<rule id="domains_all_com" name="域名后缀检查">
+    <iterator type="ALL" field="targets" variable="_domain">
+        <check type="END" field="_domain">.com</check>
+    </iterator>
+</rule>
+```
 ### 4.3 条件组合逻辑（checklist）
 
 输入数据：
@@ -1905,6 +1976,44 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
     <append field="debug_array">_$items.0.name</append>
     <!-- 检查输出中的debug字段值 -->
 </rule>
+```
+
+### 8.10 迭代器 `<iterator>`
+
+#### 基本语法
+```xml
+<iterator type="ANY|ALL" field="数组字段路径" variable="迭代变量名">
+    <!-- 内部可包含：check / threshold / checklist -->
+    ...
+</iterator>
+```
+
+#### 属性
+| 属性 | 必需 | 说明 |
+|------|------|------|
+| type | 是 | 迭代判定方式：`ANY` 任意一个元素匹配即通过；`ALL` 所有元素匹配才通过 |
+| field | 是 | 要迭代的数组字段路径，支持原生数组或 JSON 字符串数组 |
+| variable | 是 | 迭代变量名；以字母或下划线开头，只能包含字母、数字、下划线；不可与内部前缀或保留名（如 `_$`、`ORIDATA`）冲突 |
+
+#### 迭代上下文与字段访问
+- 在迭代体内，默认上下文仅包含 `{variable: 当前元素}`；
+- 在子节点（`<check>`/`<threshold>`/`<checklist>`）中通过迭代变量访问当前元素：
+  - 当前元素为对象：`proc.name`、`item.value`
+  - 当前元素为标量（如字符串）：直接使用变量名：`_ip`
+
+#### 数据类型支持
+- `[]interface{}`、`[]string`、`[]map[string]interface{}`
+- 字符串类型但内容为 JSON 数组（自动解析）
+
+#### 结果判定
+- `ANY`：找到任意一个元素使内部检查整体通过 → 返回 true；
+- `ALL`：全部元素都通过内部检查 → 返回 true；否则返回 false。
+
+#### 示例
+```xml
+<iterator type="ANY" field="ips" variable="_ip">
+    <check type="PLUGIN">!isPrivateIP(_ip)</check>
+</iterator>
 ```
 
 ## 第九部分：自定义插件开发

@@ -28,6 +28,17 @@ export function generateRulesetTemplate(id) {
             <check id="c" type="MT" field="score">80</check>
             <threshold id="threshold_c" group_by="user_id" range="5m">10</threshold>
         </checklist>
+
+        <!-- Iterator example -->
+        <iterator type="ALL" field="data" variable="item">
+            <check type="EQU" field="item.a">value</check>
+            <checklist condition="a and (b or c)">
+                <check id="a" type="INCL" field="item.a" logic="OR" delimiter="|">test1|test2</check>
+                <check id="b" type="REGEX" field="item.b">^example.*pattern$</check>
+                <check id="c" type="MT" field="item.c">80</check>
+            </checklist>
+            <threshold id="threshold_c" group_by="item.a" range="5m">10</threshold>
+        </iterator>
         
         <!-- Additional operations -->
         <append field="risk_level">high</append>
