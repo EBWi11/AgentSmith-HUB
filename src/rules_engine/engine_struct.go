@@ -27,6 +27,56 @@ const FromRawSymbol = "_$"
 const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
 
+// Reserved variable prefixes and names in the rules engine
+var reservedVariablePrefixes = []string{
+	"_$",   // FromRawSymbol prefix
+	"_hub", // Internal hub prefixes
+	"#_",
+}
+
+var reservedVariableNames = []string{
+	"_$ORIDATA", // PluginArgFromRawSymbol
+}
+
+// isValidVariableName validates if a variable name follows the naming rules:
+// - Must start with a letter or underscore
+// - Can contain letters, numbers, and underscores
+// - Cannot start with reserved prefixes
+// - Cannot be a reserved variable name
+func isValidVariableName(name string) (bool, string) {
+	if name == "" {
+		return false, "variable name cannot be empty"
+	}
+
+	// Check if starts with letter or underscore
+	if !((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') || name[0] == '_') {
+		return false, "variable name must start with a letter or underscore"
+	}
+
+	// Check reserved variable names first
+	for _, reserved := range reservedVariableNames {
+		if name == reserved {
+			return false, fmt.Sprintf("variable name '%s' is reserved", name)
+		}
+	}
+
+	// Check reserved prefixes
+	for _, prefix := range reservedVariablePrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return false, fmt.Sprintf("variable name cannot start with reserved prefix '%s'", prefix)
+		}
+	}
+
+	// Check if contains only valid characters
+	for i, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false, fmt.Sprintf("variable name contains invalid character '%c' at position %d", r, i)
+		}
+	}
+
+	return true, ""
+}
+
 // getMinPoolSize returns the minimum pool size
 // Increased for better throughput on multi-core systems
 func getMinPoolSize() int {
@@ -60,6 +110,7 @@ const (
 	T_Append                        // Append = 3
 	T_Del                           // Del = 4
 	T_Plugin                        // Plugin = 5
+	T_Iterator                      // Iterator = 6
 )
 
 type EngineOperator struct {
@@ -76,6 +127,7 @@ type Rule struct {
 	ChecklistMap map[int]Checklist
 	CheckMap     map[int]CheckNodes
 	ThresholdMap map[int]Threshold
+	IteratorMap  map[int]Iterator
 	AppendsMap   map[int]Append
 	PluginMap    map[int]Plugin
 	DelMap       map[int][][]string
@@ -134,6 +186,15 @@ type Checklist struct {
 	ConditionAST   *ReCepAST
 	ConditionFlag  bool
 	ConditionMap   map[string]bool
+}
+type Iterator struct {
+	Type           string       `xml:"type,attr"` // ANY, ALL
+	Field          string       `xml:"field,attr"`
+	FieldList      []string     `xml:"field_list,attr"`
+	Variable       string       `xml:"variable,attr"`
+	CheckNodes     []CheckNodes `xml:"node"`
+	ThresholdNodes []Threshold  `xml:"threshold"`
+	Checklists     []Checklist  `xml:"checklist"`
 }
 
 // CheckNodes represents a single check operation in a checklist.
@@ -513,6 +574,11 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	// Validate thresholds in ThresholdMap
 	for _, threshold := range rule.ThresholdMap {
 		validateThreshold(&threshold, xmlContent, ruleID, ruleIndex, result)
+	}
+
+	// Validate iterators in IteratorMap
+	for _, iterator := range rule.IteratorMap {
+		validateIterator(&iterator, xmlContent, ruleID, ruleIndex, result)
 	}
 
 	// Validate appends in AppendsMap
@@ -934,6 +1000,171 @@ func validateThreshold(threshold *Threshold, xmlContent, ruleID string, ruleInde
 				Detail:  fmt.Sprintf("Rule ID: %s, count_field will be ignored", ruleID),
 			})
 		}
+	}
+}
+func validateIterator(iterator *Iterator, xmlContent, ruleID string, ruleIndex int, result *ValidationResult) {
+	iteratorLine := findElementInRule(xmlContent, ruleID, "<iterator", ruleIndex, 0)
+
+	// Validate required fields
+	if iterator.Type == "" || strings.TrimSpace(iterator.Type) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    iteratorLine,
+			Message: "Iterator type cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	} else if iterator.Type != "ANY" && iterator.Type != "ALL" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    iteratorLine,
+			Message: "Iterator type must be 'ANY' or 'ALL'",
+			Detail:  fmt.Sprintf("Rule ID: %s, got: %s", ruleID, iterator.Type),
+		})
+	}
+
+	if iterator.Field == "" || strings.TrimSpace(iterator.Field) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    iteratorLine,
+			Message: "Iterator field cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if iterator.Variable == "" || strings.TrimSpace(iterator.Variable) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    iteratorLine,
+			Message: "Iterator variable cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	} else {
+		// Validate variable name format
+		if valid, errMsg := isValidVariableName(strings.TrimSpace(iterator.Variable)); !valid {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    iteratorLine,
+				Message: fmt.Sprintf("Invalid iterator variable name '%s': %s", iterator.Variable, errMsg),
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+	}
+
+	// Validate that iterator has at least one check node or threshold node
+	if len(iterator.CheckNodes) == 0 && len(iterator.ThresholdNodes) == 0 && len(iterator.Checklists) == 0 {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    iteratorLine,
+			Message: "Iterator must have at least one check node or threshold node or checklist",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	// Validate check nodes within iterator
+	for i, checkNode := range iterator.CheckNodes {
+		validateIteratorCheckNode(&checkNode, xmlContent, ruleID, ruleIndex, i, result)
+	}
+
+	// Validate threshold nodes within iterator
+	for i, threshold := range iterator.ThresholdNodes {
+		validateIteratorThreshold(&threshold, xmlContent, ruleID, ruleIndex, i, result)
+	}
+
+	// Validate checklists within iterator
+	for _, cl := range iterator.Checklists {
+		// Reuse checklist validation
+		validateChecklist(&cl, xmlContent, ruleID, ruleIndex, result)
+	}
+}
+
+// validateIteratorCheckNode validates check nodes within an iterator
+func validateIteratorCheckNode(checkNode *CheckNodes, xmlContent, ruleID string, ruleIndex, checkIndex int, result *ValidationResult) {
+	// Find the line number for this specific check node within the iterator
+	checkLine := findElementInRule(xmlContent, ruleID, "<check", ruleIndex, checkIndex)
+
+	// Validate required fields for check node
+	if checkNode.Type == "" || strings.TrimSpace(checkNode.Type) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Iterator check node type cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	// For non-PLUGIN types, field is required
+	if checkNode.Type != "PLUGIN" && (checkNode.Field == "" || strings.TrimSpace(checkNode.Field) == "") {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Iterator check node field cannot be empty for non-PLUGIN types",
+			Detail:  fmt.Sprintf("Rule ID: %s, Type: %s", ruleID, checkNode.Type),
+		})
+	}
+
+	// Validate logic field if present
+	if checkNode.Logic != "" && checkNode.Logic != "OR" && checkNode.Logic != "AND" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    checkLine,
+			Message: "Iterator check node logic must be 'OR' or 'AND'",
+			Detail:  fmt.Sprintf("Rule ID: %s, got: %s", ruleID, checkNode.Logic),
+		})
+	}
+}
+
+// validateIteratorThreshold validates threshold nodes within an iterator
+func validateIteratorThreshold(threshold *Threshold, xmlContent, ruleID string, ruleIndex, thresholdIndex int, result *ValidationResult) {
+	// Find the line number for this specific threshold node within the iterator
+	thresholdLine := findElementInRule(xmlContent, ruleID, "<threshold", ruleIndex, thresholdIndex)
+
+	// Validate required fields for threshold
+	if threshold.group_by == "" || strings.TrimSpace(threshold.group_by) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Iterator threshold group_by cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if threshold.Range == "" || strings.TrimSpace(threshold.Range) == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Iterator threshold range cannot be empty",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+	}
+
+	if threshold.Value <= 0 {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Iterator threshold value must be a positive integer (greater than 0)",
+			Detail:  fmt.Sprintf("Rule ID: %s, got: %d", ruleID, threshold.Value),
+		})
+	}
+
+	// Validate count_type if present
+	if threshold.CountType != "" && threshold.CountType != "SUM" && threshold.CountType != "CLASSIFY" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Iterator threshold count_type must be empty (default count mode), 'SUM', or 'CLASSIFY'",
+			Detail:  fmt.Sprintf("Rule ID: %s, got: %s", ruleID, threshold.CountType),
+		})
+	}
+
+	// Validate count_field for SUM and CLASSIFY types
+	if (threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY") &&
+		(threshold.CountField == "" || strings.TrimSpace(threshold.CountField) == "") {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    thresholdLine,
+			Message: "Iterator threshold count_field cannot be empty when count_type is 'SUM' or 'CLASSIFY'",
+			Detail:  fmt.Sprintf("Rule ID: %s, count_type: %s", ruleID, threshold.CountType),
+		})
 	}
 }
 
@@ -1437,7 +1668,7 @@ func Verify(path string, raw string) error {
 	}
 
 	if valiRes != nil && len(valiRes.Errors) > 0 {
-		return fmt.Errorf(valiRes.Errors[0].Message)
+		return fmt.Errorf("%s", valiRes.Errors[0].Message)
 	}
 
 	// Parse with new flexible ruleset syntax
@@ -2113,6 +2344,164 @@ func RulesetBuild(ruleset *Ruleset) error {
 			}
 			// Update the threshold in the map
 			rule.ThresholdMap[id] = threshold
+		}
+
+		// Process iterators in IteratorMap
+		for id, iterator := range rule.IteratorMap {
+			// Parse iterator field path
+			if iterator.Field != "" {
+				iterator.FieldList = common.StringToList(strings.TrimSpace(iterator.Field))
+			}
+
+			// Process check nodes within iterator
+			for j := range iterator.CheckNodes {
+				node := &iterator.CheckNodes[j]
+				err := processCheckNode(node, nil, rule.ID)
+				if err != nil {
+					return err
+				}
+			}
+
+			// Process threshold nodes within iterator
+			for j := range iterator.ThresholdNodes {
+				threshold := &iterator.ThresholdNodes[j]
+
+				// Parse threshold group by fields
+				if threshold.group_by != "" {
+					threshold.GroupByList = make(map[string][]string)
+					groupByFields := strings.Split(threshold.group_by, ",")
+					for _, field := range groupByFields {
+						field = strings.TrimSpace(field)
+						if field != "" {
+							threshold.GroupByList[field] = common.StringToList(field)
+						}
+					}
+				}
+
+				// Parse threshold range
+				if threshold.Range != "" {
+					rangeInt, err := common.ParseDurationToSecondsInt(threshold.Range)
+					if err != nil {
+						return errors.New("iterator threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
+					}
+					threshold.RangeInt = rangeInt
+				}
+
+				// Set threshold group ID for iterator thresholds
+				threshold.GroupByID = ruleset.RulesetID + rule.ID
+
+				// Initialize cache if needed for iterator thresholds
+				if threshold.LocalCache && !createLocalCache {
+					ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+						NumCounters: 10_000_000,       // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						BufferItems: 32,               // number of keys per Get buffer.
+					})
+
+					if err != nil {
+						return fmt.Errorf("failed to create local cache for iterator: %w", err)
+					}
+					createLocalCache = true
+				}
+
+				if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+					ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+						NumCounters: 10_000_000,       // number of keys to track frequency of.
+						MaxCost:     1024 * 1024 * 64, // maximum cost of cache.
+						BufferItems: 32,               // number of keys per Get buffer.
+					})
+
+					if err != nil {
+						return fmt.Errorf("failed to create local cache for iterator classify: %w", err)
+					}
+					createLocalCacheForClassify = true
+				}
+
+				// Parse count field for SUM and CLASSIFY types
+				if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+					if threshold.CountField != "" {
+						threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+					}
+				}
+			}
+
+			// Update the iterator in the map
+			rule.IteratorMap[id] = iterator
+		}
+
+		// Process checklists within iterator
+		for id, iterator := range rule.IteratorMap {
+			for j := range iterator.Checklists {
+				cl := &iterator.Checklists[j]
+				if strings.TrimSpace(cl.Condition) != "" {
+					if _, _, ok := ConditionRegex.Find(strings.TrimSpace(cl.Condition)); ok {
+						cl.ConditionAST = GetAST(strings.TrimSpace(cl.Condition))
+						cl.ConditionMap = make(map[string]bool, len(cl.CheckNodes)+len(cl.ThresholdNodes))
+						cl.ConditionFlag = true
+					} else {
+						return errors.New("checklist condition is not a valid expression")
+					}
+				}
+				for k := range cl.CheckNodes {
+					node := &cl.CheckNodes[k]
+					if err := processCheckNode(node, cl, rule.ID); err != nil {
+						return err
+					}
+				}
+				for k := range cl.ThresholdNodes {
+					threshold := &cl.ThresholdNodes[k]
+					if threshold.group_by != "" {
+						threshold.GroupByList = make(map[string][]string)
+						groupByFields := strings.Split(threshold.group_by, ",")
+						for _, field := range groupByFields {
+							field = strings.TrimSpace(field)
+							if field != "" {
+								threshold.GroupByList[field] = common.StringToList(field)
+							}
+						}
+					}
+					if threshold.Range != "" {
+						rangeInt, err := common.ParseDurationToSecondsInt(threshold.Range)
+						if err != nil {
+							return errors.New("iterator checklist threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
+						}
+						threshold.RangeInt = rangeInt
+					}
+					threshold.GroupByID = ruleset.RulesetID + rule.ID
+
+					if threshold.LocalCache && !createLocalCache {
+						var err error
+						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+							NumCounters: 10_000_000,
+							MaxCost:     1024 * 1024 * 64,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local cache for iterator checklist: %w", err)
+						}
+						createLocalCache = true
+					}
+					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+						var err error
+						ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+							NumCounters: 10_000_000,
+							MaxCost:     1024 * 1024 * 64,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local cache for iterator checklist classify: %w", err)
+						}
+						createLocalCacheForClassify = true
+					}
+					if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+						if threshold.CountField != "" {
+							threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+						}
+					}
+				}
+			}
+			// Update iterator back (in case of pointer changes)
+			rule.IteratorMap[id] = iterator
 		}
 
 		// Process del operations in DelMap (no additional processing needed as DelMap already contains parsed field paths)

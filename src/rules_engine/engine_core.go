@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -521,6 +522,16 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				}
 				// For exclude rules, continue executing other operations
 			}
+		case T_Iterator:
+			iteratorResult := r.executeIterator(rule, op.ID, data, ruleCache)
+			if !iteratorResult {
+				ruleResult = false
+				// For detection rules, if iterator fails, stop execution
+				if r.IsDetection {
+					return false
+				}
+				// For exclude rules, continue executing other operations
+			}
 		case T_Append:
 			// Execute append operation according to user-defined order
 			r.executeAppend(rule, op.ID, data, ruleCache)
@@ -846,6 +857,169 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 			logger.Info("Interface-type plugin execution failed", "plugin", pluginOp.Plugin.Name, "ruleID", rule.ID, "rulesetID", r.RulesetID)
 		}
 	}
+}
+
+// executeIterator executes an iterator operation
+func (r *Ruleset) executeIterator(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	iterator, exists := rule.IteratorMap[operationID]
+	if !exists {
+		return true
+	}
+
+	// Get the array/slice to iterate over
+	iterateData, exist := common.GetCheckDataWithType(data, iterator.FieldList)
+	if !exist {
+		return false
+	}
+
+	// Convert to slice of interface{} for iteration
+	var iterateSlice []interface{}
+	switch v := iterateData.(type) {
+	case []interface{}:
+		iterateSlice = v
+	case []string:
+		iterateSlice = make([]interface{}, len(v))
+		for i, item := range v {
+			iterateSlice[i] = item
+		}
+	case []map[string]interface{}:
+		iterateSlice = make([]interface{}, len(v))
+		for i, item := range v {
+			iterateSlice[i] = item
+		}
+	case string:
+		// If it's a string, try to parse it as JSON array
+		var jsonArray []interface{}
+		if err := sonic.Unmarshal([]byte(v), &jsonArray); err == nil {
+			iterateSlice = jsonArray
+		} else {
+			return false
+		}
+	default:
+		// Try to convert using reflection if possible
+		return false
+	}
+
+	if len(iterateSlice) == 0 {
+		return false
+	}
+
+	successCount := 0
+	totalCount := len(iterateSlice)
+
+	// Iterate over each item in the array
+	for _, item := range iterateSlice {
+		iterationContext := map[string]interface{}{iterator.Variable: item}
+
+		// Execute all check nodes and threshold nodes for this item
+		itemResult := true
+
+		// Execute check nodes
+		for i := range iterator.CheckNodes {
+			checkNode := &iterator.CheckNodes[i]
+			checkResult := r.executeCheckNode(checkNode, iterationContext, ruleCache)
+			if !checkResult {
+				itemResult = false
+				break // Early exit for this item if any check fails
+			}
+		}
+
+		// Execute threshold nodes only if check nodes passed
+		if itemResult && len(iterator.ThresholdNodes) > 0 {
+			for _, thresholdNode := range iterator.ThresholdNodes {
+
+				tempRule := &Rule{
+					ID:           rule.ID, // Use the original rule ID
+					ThresholdMap: map[int]Threshold{1: thresholdNode},
+				}
+
+				// Use iteration context so group_by/count_field can reference the iterator variable
+				thresholdResult := r.executeThreshold(tempRule, 1, iterationContext, ruleCache)
+				if !thresholdResult {
+					itemResult = false
+					break
+				}
+			}
+		}
+
+		// Execute checklists inside iterator
+		if itemResult && len(iterator.Checklists) > 0 {
+			for _, checklist := range iterator.Checklists {
+				tempRule := &Rule{
+					ID:           rule.ID, // Use the original rule ID
+					ChecklistMap: map[int]Checklist{1: checklist},
+				}
+
+				// Use iteration context so inner checks/thresholds evaluate against iterator variable only
+				checklistResult := r.executeCheckList(tempRule, 1, iterationContext, ruleCache)
+				if !checklistResult {
+					itemResult = false
+					break
+				}
+			}
+		}
+
+		if itemResult {
+			successCount++
+		}
+
+		// Early exit optimization
+		if iterator.Type == "ANY" && successCount > 0 {
+			return true // Found at least one match for ANY
+		}
+		if iterator.Type == "ALL" && !itemResult {
+			return false // Found a failure for ALL
+		}
+	}
+
+	// Final result based on iterator type
+	switch iterator.Type {
+	case "ANY":
+		return successCount > 0
+	case "ALL":
+		return successCount == totalCount
+	default:
+		return false
+	}
+}
+
+// executeIteratorThreshold executes a threshold check within an iterator context
+func (r *Ruleset) executeIteratorThreshold(threshold *Threshold, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	// This is similar to executeThreshold but operates within iterator context
+	// For simplicity, we'll use a basic implementation that checks if the threshold conditions are met
+	// In a full implementation, you might want to handle iterator-specific threshold logic
+
+	// Get group by data
+	groupByKey := ""
+	for groupByField := range threshold.GroupByList {
+		fieldData, exist := common.GetCheckData(data, threshold.GroupByList[groupByField])
+		if exist {
+			groupByKey += fmt.Sprintf("%v", fieldData) + "_"
+		}
+	}
+
+	if groupByKey == "" {
+		return false
+	}
+
+	// For iterator thresholds, we use a simplified approach
+	// In practice, you might want to implement more sophisticated threshold logic
+	// that accumulates across iterator iterations
+
+	// Get count value based on count type
+	countValue := 1 // Default count
+	if threshold.CountType == "SUM" && threshold.CountFieldList != nil {
+		if fieldData, exist := common.GetCheckDataWithType(data, threshold.CountFieldList); exist {
+			if val, ok := fieldData.(int); ok {
+				countValue = val
+			} else if val, ok := fieldData.(float64); ok {
+				countValue = int(val)
+			}
+		}
+	}
+
+	// Simple threshold check - in practice, this would accumulate over time/iterations
+	return countValue >= threshold.Value
 }
 
 // checkNodeLogic executes the check logic for a single check node.
