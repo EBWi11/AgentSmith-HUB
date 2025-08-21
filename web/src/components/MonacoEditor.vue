@@ -3113,6 +3113,25 @@ function getXmlAttributeValueCompletions(context, range) {
       { label: 'ANY', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Return true if any element is true', insertText: 'ANY', range: range }
     );
   }
+  else if (context.currentTag === 'iterator' && context.currentAttribute === 'variable') {
+    const vars = [
+      { value: 'it', desc: 'Iterator variable (recommended default)' },
+      { value: 'item', desc: 'Iterator variable (alias)' },
+      { value: 'proc', desc: 'Common: process object iterator' },
+      { value: '_ip', desc: 'Common: IP string iterator' }
+    ];
+    vars.forEach(v => {
+      if (!suggestions.some(s => s.label === v.value)) {
+        suggestions.push({
+          label: v.value,
+          kind: monaco.languages.CompletionItemKind.Variable,
+          documentation: v.desc,
+          insertText: v.value,
+          range: range
+        });
+      }
+    });
+  }
   
   // 时间范围建议 (threshold range属性)
   else if (context.currentTag === 'threshold' && context.currentAttribute === 'range') {
@@ -3149,7 +3168,27 @@ function getXmlAttributeValueCompletions(context, range) {
         }
       });
     }
-    
+    // Iterator context hints for field references
+    if (context.parentTags && context.parentTags.includes('iterator')) {
+      const iteratorFieldHints = [
+        { label: 'it', doc: 'Use iterator variable directly (primitive array)' },
+        { label: 'it.value', doc: 'Access property on iterator variable (object array)' },
+        { label: 'item', doc: 'Alternative iterator variable' },
+        { label: 'item.value', doc: 'Access property on alternative variable' }
+      ];
+      iteratorFieldHints.forEach(h => {
+        if (!suggestions.some(s => s.label === h.label)) {
+          suggestions.push({
+            label: h.label,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: h.doc,
+            insertText: h.label,
+            range: range,
+            sortText: `00_${h.label}`
+          });
+        }
+      });
+    }
   }
   
   // group_by attribute - supports comma-separated field lists
@@ -3222,7 +3261,10 @@ function getXmlAttributeNameCompletions(context, range) {
     case 'node':
       // Generate smart field suggestion with available fields  
       let checkFieldTemplate = 'field="field-name"';
-      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      // Prefer iterator variable if inside iterator, otherwise use dynamic field when available
+      if (context.parentTags && context.parentTags.includes('iterator')) {
+        checkFieldTemplate = 'field="it"';
+      } else if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
         checkFieldTemplate = `field="${dynamicFieldKeys.value[0]}"`;
       }
       
@@ -3392,7 +3434,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'iterator',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Iterator for a array field (can be placed anywhere in rule)',
-        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="field">value</check>\n</iterator',
+        insertText: 'iterator type="ALL" field="array_field" variable="it">\n    <check type="EQU" field="it">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
       }
@@ -3425,7 +3467,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'check',
         kind: monaco.languages.CompletionItemKind.Property,
         documentation: 'Check node within iterator',
-        insertText: 'check type="EQU" field="field">value</check',
+        insertText: 'check type="EQU" field="it">value</check',
         range: range,
       },
       {
@@ -3502,7 +3544,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
         label: 'iterator',
         kind: monaco.languages.CompletionItemKind.Module,
         documentation: 'Iterator for a array field',
-        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="variable">value</check>\n</iterator',
+        insertText: 'iterator type="ALL" field="array_field" variable="it">\n    <check type="EQU" field="it">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
       }
