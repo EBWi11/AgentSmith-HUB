@@ -724,6 +724,78 @@ Rule for processing nested data:
 - Use `<del>` to delete this field after data processing
 - Ensure sensitive information won't be stored or transmitted
 
+#### 🔍 Syntax Details: `<iterator>` Tag
+
+`<iterator>` is used to execute a set of checks against each element in an array/list, supporting two evaluation types: `ANY` (pass if any element matches) and `ALL` (all elements must match).
+
+**Basic Syntax:**
+```xml
+<iterator type="ANY|ALL" field="array_field_path" variable="iteration_variable">
+    <!-- May contain: check / threshold / checklist -->
+    <check ...>...</check>
+    <threshold ...>...</threshold>
+    <checklist condition="...">
+        <check id="..." ...>...</check>
+        <!-- May also contain threshold -->
+    </checklist>
+</iterator>
+```
+
+**Attributes:**
+- `type` (required): `ANY` or `ALL`
+- `field` (required): The array field path to iterate; supports:
+  - Native arrays: `[]interface{}`, `[]string`, `[]map[string]interface{}`
+  - JSON string whose content is an array (auto-parsed)
+- `variable` (required): Iteration variable name for accessing the current element
+  - Naming rules: start with a letter or underscore; only letters, digits, underscores
+  - Must not conflict with internal prefixes or reserved names (e.g., `_$`, `ORIDATA`)
+
+**Execution Semantics:**
+- Iteration context: during `<iterator>`, the default context is replaced with a new context that contains only the iteration variable: `{variable: current_element}`.
+  - Within inner `<check>`/`<threshold>`/`<checklist>` nodes, access the current element via the iteration variable, e.g., `proc.name`, `_ip`, `item.value`.
+- `ANY`: If any element makes the inner checks pass as a whole, iterator returns true.
+- `ALL`: Only if every element makes the inner checks pass, iterator returns true.
+
+**Example 1: String array (any one is a public IP)**
+```json
+{"ips": ["1.2.3.4", "10.0.0.1", "8.8.8.8"]}
+```
+```xml
+<rule id="ip_any_public" name="Any Public IP">
+    <iterator type="ANY" field="ips" variable="_ip">
+        <check type="PLUGIN">!isPrivateIP(_ip)</check>
+    </iterator>
+</rule>
+```
+
+**Example 2: Object array (all processes are not browsers)**
+```json
+{"processes": [{"name":"powershell.exe","cmd":"..."},{"name":"svchost.exe","cmd":"..."}]}
+```
+```xml
+<rule id="no_browser" name="Process Whitelist">
+    <iterator type="ALL" field="processes" variable="proc">
+        <check type="NI" field="proc.name" logic="AND" delimiter="|">chrome.exe|firefox.exe</check>
+        <checklist condition="a or b">
+            <check id="a" type="INCL" field="proc.name">powershell</check>
+            <check id="b" type="INCL" field="proc.cmd">-EncodedCommand</check>
+        </checklist>
+    </iterator>
+</rule>
+```
+
+**Example 3: JSON string array (all end with .com)**
+```json
+{"targets": "[\"example.com\", \"test.com\"]"}
+```
+```xml
+<rule id="domains_all_com" name="Domain Suffix Check">
+    <iterator type="ALL" field="targets" variable="_domain">
+        <check type="END" field="_domain">.com</check>
+    </iterator>
+</rule>
+```
+
 ### 4.3 Conditional Combination Logic (checklist)
 
 Input data:
@@ -1750,7 +1822,7 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 #### Threshold Detection `<threshold>`
 ```xml
 <threshold group_by="field1,field2" range="time_range"
-           count_type="SUM|CLASSIFY" count_field="statistical_field" local_cache="true|false">threshold value</threshold>>
+           count_type="SUM|CLASSIFY" count_field="statistical_field" local_cache="true|false">threshold value</threshold>
 ```
 
 | Attribute | Required | Description | Example |
@@ -1887,6 +1959,44 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
     <append field="_debug_step3">threshold passed</append>
     <!-- Final data will contain all debug fields, showing execution flow -->
 </rule>
+```
+
+### 8.10 Iterator `<iterator>`
+
+#### Basic Syntax
+```xml
+<iterator type="ANY|ALL" field="array_field_path" variable="iteration_variable">
+    <!-- Inner nodes can include: check / threshold / checklist -->
+    ...
+</iterator>
+```
+
+#### Attributes
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| type | Yes | Evaluation: `ANY` passes if any element matches; `ALL` passes only if all elements match |
+| field | Yes | Array field path to iterate; supports native arrays or JSON string arrays |
+| variable | Yes | Iteration variable name; must start with letter/underscore, contain only letters/digits/underscores; must not conflict with internal prefixes or reserved names (e.g., `_$`, `ORIDATA`) |
+
+#### Iteration Context and Field Access
+- Within the iterator body, the default context is replaced with `{variable: current_element}`.
+- In child nodes (`<check>`/`<threshold>`/`<checklist>`), access the current element via the iteration variable:
+  - Object element: `proc.name`, `item.value`
+  - Scalar element (e.g., string): use the variable directly: `_ip`
+
+#### Supported Data Types
+- `[]interface{}`, `[]string`, `[]map[string]interface{}`
+- String whose content is a JSON array (auto-parsed)
+
+#### Result Evaluation
+- `ANY`: Return true if any element passes the inner checks as a whole
+- `ALL`: Return true only if all elements pass; otherwise false
+
+#### Example
+```xml
+<iterator type="ANY" field="ips" variable="_ip">
+    <check type="PLUGIN">!isPrivateIP(_ip)</check>
+</iterator>
 ```
 
 #### 2. Test single rule

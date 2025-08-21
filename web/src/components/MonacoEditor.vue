@@ -3106,6 +3106,13 @@ function getXmlAttributeValueCompletions(context, range) {
       { label: 'PLUGIN', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Plugin-based append', insertText: 'PLUGIN', range: range }
     );
   }
+
+  else if (context.currentTag === 'iterator' && context.currentAttribute === 'type') {
+    suggestions.push(
+      { label: 'ALL', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Return true if all elements are true', insertText: 'ALL', range: range },
+      { label: 'ANY', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Return true if any element is true', insertText: 'ANY', range: range }
+    );
+  }
   
   // 时间范围建议 (threshold range属性)
   else if (context.currentTag === 'threshold' && context.currentAttribute === 'range') {
@@ -3269,6 +3276,13 @@ function getXmlAttributeNameCompletions(context, range) {
         { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Append type (PLUGIN for dynamic values)', insertText: 'type="PLUGIN"', range: range }
       );
       break;
+    case 'iterator':
+      suggestions.push(
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Iterator type', insertText: 'type="ALL"', range: range },
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field to iterate over', insertText: 'field="field-name"', range: range },
+        { label: 'variable', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Variable name for iteration', insertText: 'variable="variable-name"', range: range }
+      );
+      break;
   }
   
   return { suggestions };
@@ -3373,12 +3387,20 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range,
         sortText: '6_del'
+      },
+      {
+        label: 'iterator',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'Iterator for a array field (can be placed anywhere in rule)',
+        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="field">value</check>\n</iterator',
+        range: range,
+        sortText: '7_iterator'
       }
     ];
     
     suggestions.push(...ruleChildTags);
   } else if (parentTag === 'checklist') {
-    // checklist内部 - 只能有check标签（注意：不是node）
+    // checklist内部 - 只能有check或者threshold标签（注意：不是node）
     if (!suggestions.some(s => s.label === 'check')) {
       suggestions.push({
         label: 'check',
@@ -3386,8 +3408,43 @@ function getXmlTagNameCompletions(context, range, fullText) {
         documentation: 'Check node within checklist (must have id attribute for condition)',
         insertText: 'check id="id" type="INCL" field="field">value</check',
         range: range
-      });
+      },
+      {
+        label: 'threshold',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Threshold node within checklist (must have id attribute for condition)',
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
+        range: range,
+      }
+    );
     }
+  } else if (parentTag === 'iterator') {
+    // iterator内部 - 只能有check或者threshold或者checklist标签
+    const iteratorChildTags = [
+      {
+        label: 'check',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Check node within iterator',
+        insertText: 'check type="EQU" field="field">value</check',
+        range: range,
+      },
+      {
+        label: 'checklist',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'Checklist within iterator ',
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
+        range: range,
+      },
+      {
+        label: 'threshold',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Threshold node within iterator',
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
+        range: range,
+      }
+    ];
+    
+    suggestions.push(...iteratorChildTags);
   }
   
   // If user is typing tag name but no parent tag found, provide all possible tags
@@ -3440,6 +3497,14 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertText: 'del>field</del',
         range: range,
         sortText: '6_del'
+      },
+      {
+        label: 'iterator',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'Iterator for a array field',
+        insertText: 'iterator type="ALL" field="field" variable="variable">\n    <check type="EQU" field="variable">value</check>\n</iterator',
+        range: range,
+        sortText: '7_iterator'
       }
     );
   }

@@ -96,6 +96,7 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					ChecklistMap: make(map[int]Checklist),
 					CheckMap:     make(map[int]CheckNodes),
 					ThresholdMap: make(map[int]Threshold),
+					IteratorMap:  make(map[int]Iterator),
 					AppendsMap:   make(map[int]Append),
 					PluginMap:    make(map[int]Plugin),
 					DelMap:       make(map[int][][]string),
@@ -184,6 +185,19 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 							ID:   operatorIDCounter,
 						})
 					}
+				}
+			case "iterator":
+				if currentRule != nil {
+					iterator, err := parseIterator(element, decoder, elementLine)
+					if err != nil {
+						return nil, err
+					}
+					operatorIDCounter++
+					currentRule.IteratorMap[operatorIDCounter] = iterator
+					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
+						Type: T_Iterator,
+						ID:   operatorIDCounter,
+					})
 				}
 
 			case "append":
@@ -278,6 +292,160 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 	// Initialize ruleset status to stopped
 	ruleset.Status = common.StatusStopped
 	return &ruleset, nil
+}
+
+func parseIterator(element xml.StartElement, decoder *XMLDecoder, elementLine int) (Iterator, error) {
+	var iterator Iterator
+
+	// Parse attributes with validation
+	for _, attr := range element.Attr {
+		switch attr.Name.Local {
+		case "type":
+			iteratorType := strings.TrimSpace(attr.Value)
+			if iteratorType != "ANY" && iteratorType != "ALL" {
+				return iterator, fmt.Errorf("iterator type must be 'ANY' or 'ALL', got '%s' at line %d", iteratorType, elementLine)
+			}
+			iterator.Type = iteratorType
+		case "field":
+			field := strings.TrimSpace(attr.Value)
+			if field == "" {
+				return iterator, fmt.Errorf("iterator field cannot be empty at line %d", elementLine)
+			}
+			iterator.Field = field
+		case "variable":
+			variable := strings.TrimSpace(attr.Value)
+			if variable == "" {
+				return iterator, fmt.Errorf("iterator variable cannot be empty at line %d", elementLine)
+			}
+
+			// Validate variable name format
+			if valid, errMsg := isValidVariableName(variable); !valid {
+				return iterator, fmt.Errorf("invalid iterator variable name '%s' at line %d: %s", variable, elementLine, errMsg)
+			}
+
+			iterator.Variable = variable
+		}
+	}
+
+	// Validate required attributes
+	if iterator.Type == "" {
+		return iterator, fmt.Errorf("iterator type is required at line %d", elementLine)
+	}
+	if iterator.Field == "" {
+		return iterator, fmt.Errorf("iterator field is required at line %d", elementLine)
+	}
+	if iterator.Variable == "" {
+		return iterator, fmt.Errorf("iterator variable is required at line %d", elementLine)
+	}
+
+	// Parse nested elements (check nodes, threshold nodes, and checklists)
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return iterator, fmt.Errorf("error parsing iterator content at line %d: %v", elementLine, err)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "check":
+				// Parse check node within iterator
+				checkNode, err := parseCheckNode(t, decoder, decoder.line)
+				if err != nil {
+					return iterator, err
+				}
+				iterator.CheckNodes = append(iterator.CheckNodes, checkNode)
+			case "threshold":
+				// Parse threshold node within iterator
+				threshold, err := parseThreshold(t, decoder, decoder.line)
+				if err != nil {
+					return iterator, err
+				}
+				iterator.ThresholdNodes = append(iterator.ThresholdNodes, threshold)
+			case "checklist":
+				cl, err := parseIteratorChecklist(t, decoder, decoder.line)
+				if err != nil {
+					return iterator, err
+				}
+				iterator.Checklists = append(iterator.Checklists, cl)
+			default:
+				// Skip unknown elements
+				if err := decoder.Skip(); err != nil {
+					return iterator, fmt.Errorf("error skipping unknown element '%s' in iterator at line %d: %v", t.Name.Local, elementLine, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "iterator" {
+				// Validate that iterator has at least one check node or threshold node or checklist
+				if len(iterator.CheckNodes) == 0 && len(iterator.ThresholdNodes) == 0 && len(iterator.Checklists) == 0 {
+					return iterator, fmt.Errorf("iterator must have at least one check node or threshold node at line %d", elementLine)
+				}
+				return iterator, nil
+			}
+		}
+	}
+
+	return iterator, fmt.Errorf("unexpected end of iterator element at line %d", elementLine)
+}
+
+// parseIteratorChecklist parses a checklist element specifically within an iterator context
+func parseIteratorChecklist(element xml.StartElement, decoder *XMLDecoder, elementLine int) (Checklist, error) {
+	var checklist Checklist
+
+	// Parse checklist attributes
+	for _, attr := range element.Attr {
+		if attr.Name.Local == "condition" {
+			condition := strings.TrimSpace(attr.Value)
+			if condition != "" {
+				// Validate condition syntax early
+				if _, _, ok := ConditionRegex.Find(condition); !ok {
+					return checklist, fmt.Errorf("checklist condition is not a valid expression: %s at line %d", condition, elementLine)
+				}
+				checklist.Condition = condition
+				checklist.ConditionFlag = true
+			}
+		}
+	}
+
+	// Parse nested elements inside checklist
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return checklist, err
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "check":
+				checkNode, err := parseCheckNode(t, decoder, decoder.line)
+				if err != nil {
+					return checklist, err
+				}
+				checklist.CheckNodes = append(checklist.CheckNodes, checkNode)
+			case "threshold":
+				threshold, err := parseThreshold(t, decoder, decoder.line)
+				if err != nil {
+					return checklist, err
+				}
+				checklist.ThresholdNodes = append(checklist.ThresholdNodes, threshold)
+			default:
+				if err := decoder.Skip(); err != nil {
+					return checklist, fmt.Errorf("error skipping unknown element '%s' in checklist at line %d: %v", t.Name.Local, elementLine, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "checklist" {
+				if len(checklist.CheckNodes) == 0 && len(checklist.ThresholdNodes) == 0 {
+					return checklist, fmt.Errorf("checklist must have at least one check node or threshold node at line %d", elementLine)
+				}
+				return checklist, nil
+			}
+		}
+	}
 }
 
 func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine int) (CheckNodes, error) {
