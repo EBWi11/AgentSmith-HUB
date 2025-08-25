@@ -32,6 +32,7 @@ type InputConfig struct {
 	Kafka       *KafkaInputConfig     `yaml:"kafka,omitempty"`
 	AliyunSLS   *AliyunSLSInputConfig `yaml:"aliyun_sls,omitempty"`
 	GrokPattern string                `yaml:"grok_pattern,omitempty"`
+	GrokField   string                `yaml:"grok_field,omitempty"`
 	RawConfig   string
 }
 
@@ -222,16 +223,24 @@ func (in *Input) parseWithGrok(data map[string]interface{}) map[string]interface
 
 	// Try to find a message field to parse
 	var message string
-	if msg, ok := data["message"].(string); ok {
-		message = msg
-	} else if msg, ok := data["msg"].(string); ok {
-		message = msg
-	} else if msg, ok := data["log"].(string); ok {
-		message = msg
+	if in.Config.GrokField != "" {
+		if msg, ok := data[in.Config.GrokField].(string); ok {
+			message = msg
+		} else {
+			return data
+		}
 	} else {
-		// If no message field found, try to parse the entire data as string
-		// This is a fallback for cases where the data might be a raw string
-		return data
+		if msg, ok := data["message"].(string); ok {
+			message = msg
+		} else if msg, ok := data["msg"].(string); ok {
+			message = msg
+		} else if msg, ok := data["log"].(string); ok {
+			message = msg
+		} else {
+			// If no message field found, try to parse the entire data as string
+			// This is a fallback for cases where the data might be a raw string
+			return data
+		}
 	}
 
 	// Parse with grok

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"AgentSmith-HUB/logger"
 	"fmt"
 	"strings"
 
@@ -28,7 +29,7 @@ func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logst
 		Project:           project,
 		Logstore:          logstore,
 		ConsumerGroupName: consumerGroupName,
-		ConsumerName:      consumerName,
+		ConsumerName:      fmt.Sprintf("%s-%s", consumerName, Config.LocalIP),
 		CursorPosition:    cursorPosition,
 		Query:             query,
 	}
@@ -72,7 +73,10 @@ func (consumer *AliyunSLSConsumer) aliyunSLSConsumerProcess(shardId int, logGrou
 			consumer.MsgChan <- data
 		}
 	}
-	_ = checkpointTracker.SaveCheckPoint(false)
+	err := checkpointTracker.SaveCheckPoint(false)
+	if err != nil {
+		logger.Error("[AliyunSLSConsumer] failed to save checkpoint", "error", err.Error())
+	}
 	return "", nil
 }
 
