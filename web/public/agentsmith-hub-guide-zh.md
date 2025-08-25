@@ -1858,12 +1858,13 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 基本访问
 - **直接字段**：`field_name`
 - **嵌套字段**：`parent.child.grandchild`
-- **数组索引**：`array.0.field`（访问第一个元素）
+- **数组索引**：`array.#0.field`（访问第一个元素）
 
 #### 动态引用（_$前缀）
 - **字段引用**：`_$field_name`
 - **嵌套引用**：`_$parent.child.field`
 - **原始数据**：`_$ORIDATA`
+- **数组索引**：`array.#0.field`（访问第一个元素）
 
 #### 示例对比
 ```xml

@@ -1861,12 +1861,13 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 #### Basic Access
 - **Direct field**: `field_name`
 - **Nested field**: `parent.child.grandchild`
-- **Array index**: `array.0.field` (access first element)
+- **Array index**: `array.#0.field` (access first element)
 
 #### Dynamic Reference (_$ prefix)
 - **Field reference**: `_$field_name`
 - **Nested reference**: `_$parent.child.field`
 - **Original data**: `_$ORIDATA`
+- **Array index**: `_$array.#0.field` (access first element)
 
 #### Example Comparison
 ```xml
