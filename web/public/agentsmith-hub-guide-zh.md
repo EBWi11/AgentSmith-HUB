@@ -94,7 +94,7 @@ kafka:
 
 #### Grok 模式支持
 
-INPUT 组件支持 Grok 模式解析日志数据。如果配置了 `grok_pattern`，输入组件将使用指定模式解析 `message` 字段。如果未配置，数据将按 JSON 格式处理。
+INPUT 组件支持 Grok 模式解析日志数据。如果配置了 `grok_pattern`，输入组件将解析由 `grok_field` 指定的字段；若未设置 `grok_field`，则默认解析 `message` 字段。如果未配置 `grok_pattern`，数据将按 JSON 格式处理。
 
 ##### Grok 模式配置
 ```yaml
@@ -108,6 +108,7 @@ kafka:
 
 # Grok 模式解析日志数据
 grok_pattern: "%{COMBINEDAPACHELOG}"
+grok_field: content  # 可选：指定解析的字段；不设置则默认为 "message"
 ```
 
 ##### 常用 Grok 模式
@@ -132,7 +133,7 @@ grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) (?<level>
 ↓
 检查是否配置了 grok_pattern
 ↓
-如果配置了：解析 message 字段并将结果合并到原始数据中
+如果配置了：解析目标字段（若设置 grok_field 则解析其值，否则解析 message）并将结果合并到原始数据中
 如果未配置：保持原始数据不变
 ↓
 传递给下游（JSON 格式）

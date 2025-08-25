@@ -98,7 +98,7 @@ kafka:
 
 #### Grok Pattern Support
 
-INPUT components support Grok pattern parsing for log data. If `grok_pattern` is configured, the input will parse the `message` field using the specified pattern. If not configured, data will be treated as JSON by default.
+INPUT components support Grok pattern parsing for log data. If `grok_pattern` is configured, the input will parse the field specified by `grok_field`; if `grok_field` is not set, the `message` field will be parsed by default. If `grok_pattern` is not configured, data will be treated as JSON by default.
 
 ##### Grok Pattern Configuration
 ```yaml
@@ -112,6 +112,7 @@ kafka:
 
 # Grok pattern for parsing log data
 grok_pattern: "%{COMBINEDAPACHELOG}"
+grok_field: content  # Optional: which field to parse; defaults to "message" if unset
 ```
 
 ##### Common Grok Patterns
@@ -136,7 +137,7 @@ Input Data (map[string]interface{})
 ↓
 Check if grok_pattern is configured
 ↓
-If configured: Parse message field and merge results into original data
+If configured: Parse target field (grok_field if set, otherwise message) and merge results into original data
 If not configured: Keep original data unchanged
 ↓
 Pass to downstream (JSON format)
