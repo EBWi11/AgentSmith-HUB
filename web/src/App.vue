@@ -25,7 +25,7 @@ onMounted(() => {
   // Keep global variable for compatibility
   window.$toast = toast.value
   // Fetch available plugins using unified cache
-  dataCache.fetchAvailablePlugins()
+  // dataCache.fetchAvailablePlugins()
 })
 </script>
 

@@ -360,6 +360,52 @@ AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
 目前可以通过 MCP 覆盖了大部分使用场景，包括策略编辑等。
 ![MCP.png](png/MCP.png)
 
+### 2.6 认证与登录（OIDC 单点登录）
+
+AgentSmith-HUB 支持两种认证方式：
+
+- 传统 Token：在请求头携带 `token: <your-token>`（保留兼容）；
+- OIDC（OpenID Connect）：浏览器完成登录后使用 Bearer ID Token，后端验证后放行。
+
+后端公开 `GET /auth/config` 供前端在运行时获取 OIDC 配置；前端在启用 OIDC 时，登录页会显示“Use Single Sign-On”按钮，回调路径默认 `/oidc/callback`。
+
+#### 后端配置（config.yaml）
+
+```yaml
+oidc_enabled: true
+oidc_issuer: "https://your-idp/realms/your-realm"   # Issuer（可为 OIDC 发现端点对应的 Issuer）
+oidc_client_id: "agentsmith-web"                    # 在 IdP 中注册的客户端 ID
+oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # 必须在 IdP 客户端允许列表中
+oidc_username_claim: "preferred_username"           # 可选，默认优先 preferred_username，否则 email
+oidc_allowed_users: ["alice@example.com", "bob"]    # 可选，限制允许访问的用户名（为空表示禁止任何人登录）
+oidc_scope: "openid profile email"                   # 可选，默认为 openid profile email
+```
+
+也可通过环境变量覆盖（优先级更高）：
+
+```bash
+OIDC_ENABLED=true
+OIDC_ISSUER=https://your-idp/realms/your-realm
+OIDC_CLIENT_ID=agentsmith-web
+OIDC_REDIRECT_URI=https://hub.example.com/oidc/callback
+OIDC_USERNAME_CLAIM=preferred_username
+OIDC_ALLOWED_USERS=alice@example.com,bob
+OIDC_SCOPE="openid profile email"
+```
+
+注意：
+
+- `oidc_enabled: true` 时必须同时配置 `oidc_issuer`、`oidc_client_id`、`oidc_redirect_uri`；
+- `oidc_redirect_uri` 必须与 IdP 客户端配置完全一致；如 Hub 位于反向代理/子路径下，请据实设置完整回调地址（例如 `https://hub.example.com/subpath/oidc/callback`），并在 IdP 端放行；
+- 用户名判定优先使用 `preferred_username`，找不到则使用 `email`；可通过 `oidc_username_claim` 显式指定；
+- 如配置了 `oidc_allowed_users`，仅名单内用户可访问；为空表示禁止任何人登录；
+- 传统 Token 方式仍受支持，MCP 与脚本集成可继续使用 `token` 请求头。
+
+前端说明：前端默认从后端 `GET /auth/config` 动态获取 OIDC 配置，一般无需在前端写死;
+
+回调路由：`/oidc/callback`
+
+
 ## 📚 第三部分：RULESET 语法详解
 
 ### 3.1 你的第一个规则

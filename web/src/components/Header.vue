@@ -27,12 +27,17 @@
 
 <script>
 import { hubApi } from '../api';
+import { getUserManager } from '../api/oidc';
 
 export default {
   name: 'Header',
   methods: {
     logout() {
       hubApi.clearToken();
+      try {
+        // Avoid throwing if OIDC not initialized
+        getUserManager().removeUser();
+      } catch (e) {}
       this.$router.push('/');
     },
     openGitHub() {

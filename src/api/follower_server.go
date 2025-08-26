@@ -34,7 +34,7 @@ func ServerStartFollower(listenAddr string) error {
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodOptions},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, "token"},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, "token", "Authorization"},
 	}))
 
 	// Add request logging
@@ -48,20 +48,20 @@ func ServerStartFollower(listenAddr string) error {
 	// Authentication middleware for protected endpoints
 	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			// Allow legacy token for followers for backward compatibility
 			token := c.Request().Header.Get("token")
-			if token == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "Token required",
-				})
+			if token != "" && token == followerToken {
+				return next(c)
 			}
-
-			if token != followerToken {
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "Invalid token",
-				})
+			// Otherwise try OIDC Bearer if enabled
+			if common.Config.OIDCEnabled {
+				if err := AuthenticateRequest(c); err == nil {
+					return next(c)
+				}
 			}
-
-			return next(c)
+			return c.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "Authentication required",
+			})
 		}
 	}
 
@@ -72,6 +72,9 @@ func ServerStartFollower(listenAddr string) error {
 			"role":    "follower",
 		})
 	})
+
+	// Expose auth config
+	e.GET("/auth/config", getAuthConfig)
 
 	e.GET("/follower-status", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]interface{}{

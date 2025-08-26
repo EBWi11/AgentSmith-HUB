@@ -1,7 +1,6 @@
 package api
 
 import (
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/mcp"
 	"errors"
@@ -17,8 +16,8 @@ func ServerStart(listener string) error {
 
 	// Add CORS middleware with more permissive configuration
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"*"},          // Allow all origins
-		AllowHeaders:     []string{"*", "token"}, // Allow all headers and explicitly allow token
+		AllowOrigins:     []string{"*"},                           // Allow all origins
+		AllowHeaders:     []string{"*", "token", "Authorization"}, // Allow all headers and explicitly allow token and Authorization
 		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete, http.MethodOptions},
 		AllowCredentials: true,                       // Allow credentials
 		ExposeHeaders:    []string{"Content-Length"}, // Expose these headers
@@ -46,30 +45,14 @@ func ServerStart(listener string) error {
 	}))
 	e.Use(middleware.Recover())
 
-	// Authentication middleware function - will be applied selectively
-	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			token := c.Request().Header.Get("token")
-			if token == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "missing token",
-				})
-			}
-
-			if token != common.Config.Token {
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "authentication failed",
-				})
-			}
-
-			return next(c)
-		}
-	}
+	// Authentication middleware will be applied selectively via AuthenticateRequest
 
 	// Public endpoints (no authentication required)
 	// Health check and token verification
 	e.GET("/ping", ping)
 	e.GET("/token-check", tokenCheck)
+	// Authentication config for frontend
+	e.GET("/auth/config", getAuthConfig)
 
 	// Statistics and metrics endpoints (public access for monitoring)
 	e.GET("/daily-messages", getDailyMessages)
@@ -81,7 +64,18 @@ func ServerStart(listener string) error {
 	e.GET("/cluster", getCluster)
 
 	// Create authenticated group for management endpoints
-	auth := e.Group("", authMiddleware)
+	auth := e.Group("", func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if err := AuthenticateRequest(c); err != nil {
+				logger.Error("authentication failed", "error", err)
+				// return 401 status code
+				return c.JSON(http.StatusUnauthorized, map[string]string{
+					"error": "Authentication failed",
+				})
+			}
+			return next(c)
+		}
+	})
 
 	// Project endpoints (use plural form for consistency) - REQUIRE AUTH
 	auth.GET("/projects", getProjects)

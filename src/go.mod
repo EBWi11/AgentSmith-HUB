@@ -7,6 +7,7 @@ require (
 	github.com/aliyun/aliyun-log-go-sdk v0.1.106
 	github.com/bytedance/sonic v1.13.3
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/coreos/go-oidc/v3 v3.11.0
 	github.com/dgraph-io/ristretto/v2 v2.2.0
 	github.com/elastic/go-elasticsearch/v8 v8.18.1
 	github.com/google/uuid v1.6.0
@@ -26,7 +27,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require google.golang.org/genproto/googleapis/rpc v0.0.0-20250728155136-f173205681a0 // indirect
+require (
+	github.com/go-jose/go-jose/v4 v4.0.2 // indirect
+	golang.org/x/oauth2 v0.30.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250728155136-f173205681a0 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

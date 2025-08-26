@@ -103,6 +103,22 @@ If no other configuration is provided, the system will use built-in default conf
 - `theme`: Theme setting (`light` | `dark`)
 - `language`: Language setting (`en` | `zh`)
 
+### Authentication (OIDC)
+
+The frontend initializes OIDC based on backend runtime config from `GET /auth/config`. Usually no build-time values are needed. If you need static values at build time (optional), set:
+
+```env
+# VITE_OIDC_ISSUER=https://your-idp/.well-known/openid-configuration
+# VITE_OIDC_CLIENT_ID=agentsmith-web
+```
+
+At runtime, the backend must be configured with:
+
+- `OIDC_ENABLED`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (required when enabled)
+- Optional: `OIDC_USERNAME_CLAIM`, `OIDC_ALLOWED_USERS`, `OIDC_SCOPE`
+
+The login page shows an SSO button when OIDC is enabled. Default callback route is `/oidc/callback`.
+
 ## Deployment Scenarios
 
 ### Scenario 1: Containerized Deployment

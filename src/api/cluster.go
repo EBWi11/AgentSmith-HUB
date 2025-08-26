@@ -108,22 +108,25 @@ func getClusterProjectStates(c echo.Context) error {
 }
 
 func tokenCheck(c echo.Context) error {
+	// Legacy token header check first
 	token := c.Request().Header.Get("token")
-	if token == "" {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "missing token",
-		})
-	}
-
-	if token == common.Config.Token {
+	if token != "" && token == common.Config.Token {
 		return c.JSON(http.StatusOK, map[string]string{
 			"status": "Authentication successful",
 		})
-	} else {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"status": "Authentication failed",
-		})
 	}
+
+	// Try OIDC bearer verification if enabled
+	if common.Config.OIDCEnabled {
+		if err := AuthenticateRequest(c); err == nil {
+			return c.JSON(http.StatusOK, map[string]string{
+				"status": "Authentication successful",
+			})
+		}
+	}
+	return c.JSON(http.StatusUnauthorized, map[string]string{
+		"status": "Authentication failed",
+	})
 }
 
 func leaderConfig(c echo.Context) error {

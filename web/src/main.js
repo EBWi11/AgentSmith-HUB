@@ -6,6 +6,7 @@ import router from './router/index.js'
 import store from './store/index.js'
 import './monaco-loader.js'
 import { initializeConfig } from './config/index.js'
+import { initOidc } from './api/oidc.js'
 
 // Initialize configuration before creating the app
 async function initializeApp() {
@@ -13,6 +14,8 @@ async function initializeApp() {
     // Load runtime configuration
     await initializeConfig()
     console.log('Configuration initialized successfully')
+    await initOidc(); // 在配置加载后初始化 OIDC（需要已知的回调 URL 等）
+    console.log('OIDC initialized successfully')
   } catch (error) {
     console.warn('Failed to initialize configuration:', error)
     // Continue with default configuration
