@@ -1965,22 +1965,43 @@ func parseArgs(s string) ([]*PluginArg, error) {
 	var args []*PluginArg
 	var current strings.Builder
 	inQuotes := false
+	var quoteChar rune
 	escaped := false
 
 	for i, ch := range s {
-		switch ch {
-		case '"':
-			if escaped {
-				current.WriteRune(ch)
-				escaped = false
-			} else {
-				inQuotes = !inQuotes
-				current.WriteRune(ch)
+		// Handle escape: write current rune verbatim and clear escape flag
+		if escaped {
+			current.WriteRune(ch)
+			escaped = false
+			if i == len(s)-1 {
+				arg := strings.TrimSpace(current.String())
+				if arg != "" {
+					val, err := parseValue(arg)
+					if err != nil {
+						return nil, err
+					}
+					args = append(args, val)
+				}
 			}
+			continue
+		}
+
+		switch ch {
 		case '\\':
 			if inQuotes {
 				escaped = true
 			} else {
+				current.WriteRune(ch)
+			}
+		case '"', '\'':
+			if inQuotes {
+				if ch == quoteChar {
+					inQuotes = false
+				}
+				current.WriteRune(ch)
+			} else {
+				inQuotes = true
+				quoteChar = ch
 				current.WriteRune(ch)
 			}
 		case ',':

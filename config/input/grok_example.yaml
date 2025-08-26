@@ -20,3 +20,7 @@ grok_pattern: "%{COMBINEDAPACHELOG}"
 
 # Custom regex patterns (write directly in grok_pattern):
 # grok_pattern: "(?<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z) (?<client_ip>\\d+\\.\\d+\\.\\d+\\.\\d+) (?<method>GET|POST|PUT|DELETE) (?<path>/[a-zA-Z0-9/_-]*)" 
+
+# grok_pattern is used to specify the Grok pattern for log parsing.
+# If grok_pattern is configured, the input component will use this pattern to parse the log message field (default is the "message" field, or as specified by grok_field).
+grok_field: content

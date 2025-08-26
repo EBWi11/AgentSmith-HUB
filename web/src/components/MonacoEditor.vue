@@ -1950,6 +1950,17 @@ function getInputKeyCompletions(context, range, fullText) {
       sortText: '001_grok_pattern'
     });
   }
+
+  if (context.indentLevel === 0 && !fullText.includes('grok_field:')) {
+    suggestions.push({
+      label: 'grok_field',
+      kind: monaco.languages.CompletionItemKind.Property,
+      documentation: 'Grok field for parsing log data. If configured, input will parse message field using this field. If not configured, message field will be parsed by default.',
+      insertText: 'grok_field:',
+      range: range,
+      sortText: '002_grok_field'
+    });
+  }
   
   // Clean root-level meta suggestions if type already present
   if (context.indentLevel === 0 && fullText.includes('type:')) {

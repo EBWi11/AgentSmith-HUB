@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -241,14 +242,6 @@ func GetCheckData(data map[string]interface{}, checkKeyList []string) (res strin
 			case map[string]interface{}:
 				// Continue traversing nested map
 				tmp = value
-			case []interface{}:
-				// Convert slice to map with index keys
-				tmpMapForList := make(map[string]interface{}, len(value))
-				for idx, v := range value {
-					tmpKey := "#_" + strconv.Itoa(idx)
-					tmpMapForList[tmpKey] = v
-				}
-				tmp = tmpMapForList
 			case string:
 				// Try to parse as JSON if it looks like JSON
 				if (strings.Contains(value, ":") || strings.Contains(value, "{") || strings.Contains(value, "[")) && len(value) > 2 {
@@ -266,8 +259,18 @@ func GetCheckData(data map[string]interface{}, checkKeyList []string) (res strin
 				// Not a traversable structure
 				return "", false
 			default:
-				// Unsupported type for traversal
-				return "", false
+				rv := reflect.ValueOf(value)
+				switch rv.Kind() {
+				case reflect.Slice, reflect.Array:
+					// for array and slice
+					tmpMapForList := make(map[string]interface{}, rv.Len())
+					for i := 0; i < rv.Len(); i++ {
+						tmpMapForList["#"+strconv.Itoa(i)] = rv.Index(i).Interface()
+					}
+					tmp = tmpMapForList
+				default:
+					return "", false
+				}
 			}
 		} else {
 			// Last key, convert value to string
@@ -300,14 +303,6 @@ func GetCheckDataWithType(data map[string]interface{}, checkKeyList []string) (r
 			case map[string]interface{}:
 				// Continue traversing nested map
 				tmp = value
-			case []interface{}:
-				// Convert slice to map with index keys
-				tmpMapForList := make(map[string]interface{}, len(value))
-				for idx, v := range value {
-					tmpKey := "#_" + strconv.Itoa(idx)
-					tmpMapForList[tmpKey] = v
-				}
-				tmp = tmpMapForList
 			case string:
 				// Try to parse as JSON if it looks like JSON
 				if (strings.Contains(value, ":") || strings.Contains(value, "{") || strings.Contains(value, "[")) && len(value) > 2 {
@@ -325,8 +320,18 @@ func GetCheckDataWithType(data map[string]interface{}, checkKeyList []string) (r
 				// Not a traversable structure
 				return nil, false
 			default:
-				// Unsupported type for traversal
-				return nil, false
+				rv := reflect.ValueOf(value)
+				switch rv.Kind() {
+				case reflect.Slice, reflect.Array:
+					// 所有数组/切片都会走这里
+					tmpMapForList := make(map[string]interface{}, rv.Len())
+					for i := 0; i < rv.Len(); i++ {
+						tmpMapForList["#"+strconv.Itoa(i)] = rv.Index(i).Interface()
+					}
+					tmp = tmpMapForList
+				default:
+					return "", false
+				}
 			}
 		} else {
 			// Last key, return original typed value
