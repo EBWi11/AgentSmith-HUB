@@ -45,6 +45,18 @@ jobs:
         cd web
         npm ci
     
+    - name: Sync documentation files
+      run: |
+        # Ensure public directory exists
+        mkdir -p web/public
+        
+        # Copy markdown documentation from docs to web/public
+        cp docs/agentsmith-hub-guide.md web/public/
+        cp docs/agentsmith-hub-guide-zh.md web/public/
+        
+        echo "✓ Documentation files synced"
+        ls -la web/public/*.md
+    
     - name: Install build dependencies
       run: |
         sudo apt-get update

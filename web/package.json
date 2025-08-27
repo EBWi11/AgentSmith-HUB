@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "prebuild": "node -e \"const fs=require('fs');const path=require('path');const docsDir=path.join(__dirname,'../docs');const publicDir=path.join(__dirname,'public');if(!fs.existsSync(publicDir))fs.mkdirSync(publicDir,{recursive:true});['agentsmith-hub-guide.md','agentsmith-hub-guide-zh.md'].forEach(f=>{const src=path.join(docsDir,f);const dest=path.join(publicDir,f);if(fs.existsSync(src)){fs.copyFileSync(src,dest);console.log('✓ Copied',f,'to public directory')}else{console.warn('⚠ Warning:',f,'not found in docs directory')}})\"",
     "build": "vite build",
     "preview": "vite preview"
   },
