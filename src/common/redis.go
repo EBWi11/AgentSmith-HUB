@@ -263,8 +263,34 @@ func RedisGet(key string) (string, error) {
 	return val, nil
 }
 
+// RedisGetInt64 gets a value from Redis as int64
+func RedisGetInt64(key string) (int64, error) {
+	return rdb.Get(ctx, key).Int64()
+}
+
 func RedisKeys(key string) ([]string, error) {
-	return rdb.Keys(ctx, key).Result()
+	var (
+		cursor uint64 = 0
+		keys   []string
+	)
+
+	for {
+		var scanKeys []string
+		var err error
+
+		scanKeys, cursor, err = rdb.Scan(ctx, cursor, key, 100).Result()
+		if err != nil {
+			return nil, err
+		}
+
+		keys = append(keys, scanKeys...)
+
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return keys, nil
 }
 
 func RedisSet(key string, value interface{}, expiration int) (string, error) {
@@ -281,6 +307,11 @@ func RedisIncrby(key string, value int64) (int64, error) {
 
 func RedisDel(key string) error {
 	return rdb.Del(ctx, key).Err()
+}
+
+// RedisDelMultiple deletes multiple keys at once
+func RedisDelMultiple(keys ...string) error {
+	return rdb.Del(ctx, keys...).Err()
 }
 
 // ===================== Hash and Pub/Sub Helpers =====================
@@ -340,6 +371,52 @@ func RedisLRange(key string, start, stop int64) ([]string, error) {
 // RedisExpire sets the expiration time for a key
 func RedisExpire(key string, expiration int) error {
 	return rdb.Expire(ctx, key, time.Duration(expiration)*time.Second).Err()
+}
+
+// ===================== Set Operations =====================
+
+// RedisSAdd adds a member to a set
+func RedisSAdd(key string, member interface{}) (int64, error) {
+	return rdb.SAdd(ctx, key, member).Result()
+}
+
+// RedisSRem removes a member from a set
+func RedisSRem(key string, member interface{}) (int64, error) {
+	return rdb.SRem(ctx, key, member).Result()
+}
+
+// RedisSMembers returns all members of a set
+func RedisSMembers(key string) ([]string, error) {
+	return rdb.SMembers(ctx, key).Result()
+}
+
+// ===================== Sorted Set Operations =====================
+
+// RedisZAdd adds a member to a sorted set
+func RedisZAdd(key string, score float64, member interface{}) (int64, error) {
+	return rdb.ZAdd(ctx, key, redis.Z{Score: score, Member: member}).Result()
+}
+
+// RedisZRevRange returns members from a sorted set in reverse order
+func RedisZRevRange(key string, start, stop int64) ([]string, error) {
+	return rdb.ZRevRange(ctx, key, start, stop).Result()
+}
+
+// RedisZRemRangeByRank removes members by rank from a sorted set
+func RedisZRemRangeByRank(key string, start, stop int64) (int64, error) {
+	return rdb.ZRemRangeByRank(ctx, key, start, stop).Result()
+}
+
+// RedisZRemRangeByScore removes members by score from a sorted set
+func RedisZRemRangeByScore(key string, min, max string) (int64, error) {
+	return rdb.ZRemRangeByScore(ctx, key, min, max).Result()
+}
+
+// ===================== Pipeline Operations =====================
+
+// GetRedisPipeline returns a new Redis pipeline for batch operations
+func GetRedisPipeline() redis.Pipeliner {
+	return rdb.TxPipeline()
 }
 
 // ===================== Project Config Helpers =====================

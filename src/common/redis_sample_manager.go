@@ -97,19 +97,19 @@ func (rsm *RedisSampleManager) StoreSample(samplerName string, sample SampleData
 	hashKey := fmt.Sprintf("%s%s:%s", RedisSampleHashKey, samplerName, sample.ProjectNodeSequence)
 
 	// SAdd returns 1 if new, 0 if already exists -> skip duplicate sample
-	added, err := rdb.SAdd(ctx, hashKey, hashVal).Result()
+	added, err := RedisSAdd(hashKey, hashVal)
 	if err != nil {
 		return fmt.Errorf("failed to add hash set: %w", err)
 	}
 	// set TTL for hash set key
-	rdb.Expire(ctx, hashKey, rsm.ttl)
+	RedisExpire(hashKey, int(rsm.ttl.Seconds()))
 	if added == 0 {
 		// duplicate, do not store
 		return nil
 	}
 
 	// Use Redis transaction to ensure atomicity
-	pipe := rdb.TxPipeline()
+	pipe := GetRedisPipeline()
 
 	// Add to sorted set (sorted by timestamp)
 	pipe.ZAdd(ctx, key, redis.Z{
@@ -143,11 +143,10 @@ func (rsm *RedisSampleManager) GetSamples(samplerName string) (map[string][]Samp
 		return nil, fmt.Errorf("Redis client not available")
 	}
 
-	ctx := context.Background()
 	pattern := fmt.Sprintf("%s%s:*", RedisSampleKeyPrefix, samplerName)
 
 	// Get all keys matching the pattern
-	keys, err := rdb.Keys(ctx, pattern).Result()
+	keys, err := RedisKeys(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sample keys: %w", err)
 	}
@@ -161,7 +160,7 @@ func (rsm *RedisSampleManager) GetSamples(samplerName string) (map[string][]Samp
 		projectNodeSequence := key[len(prefix):]
 
 		// Get samples from sorted set (latest first)
-		samples, err := rsm.getSamplesFromKey(ctx, key)
+		samples, err := rsm.getSamplesFromKey(key)
 		if err != nil {
 			continue // Skip this key if error
 		}
@@ -175,9 +174,9 @@ func (rsm *RedisSampleManager) GetSamples(samplerName string) (map[string][]Samp
 }
 
 // getSamplesFromKey retrieves samples from a specific Redis key
-func (rsm *RedisSampleManager) getSamplesFromKey(ctx context.Context, key string) ([]SampleData, error) {
+func (rsm *RedisSampleManager) getSamplesFromKey(key string) ([]SampleData, error) {
 	// Get all samples from sorted set (latest first)
-	members, err := rdb.ZRevRange(ctx, key, 0, -1).Result()
+	members, err := RedisZRevRange(key, 0, -1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get samples from key %s: %w", key, err)
 	}
@@ -208,11 +207,10 @@ func (rsm *RedisSampleManager) GetStats(samplerName string) (map[string]int64, e
 		return nil, fmt.Errorf("Redis client not available")
 	}
 
-	ctx := context.Background()
 	pattern := fmt.Sprintf("%s%s:*", RedisSampleCountKey, samplerName)
 
 	// Get all count keys
-	keys, err := rdb.Keys(ctx, pattern).Result()
+	keys, err := RedisKeys(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get count keys: %w", err)
 	}
@@ -224,7 +222,7 @@ func (rsm *RedisSampleManager) GetStats(samplerName string) (map[string]int64, e
 		projectNodeSequence := key[len(fmt.Sprintf("%s%s:", RedisSampleCountKey, samplerName)):]
 
 		// Get count
-		count, err := rdb.Get(ctx, key).Int64()
+		count, err := RedisGetInt64(key)
 		if err != nil {
 			continue // Skip this key if error
 		}
@@ -241,17 +239,15 @@ func (rsm *RedisSampleManager) Reset(samplerName string) error {
 		return fmt.Errorf("Redis client not available")
 	}
 
-	ctx := context.Background()
-
 	// Delete all sample data keys
 	pattern := fmt.Sprintf("%s%s:*", RedisSampleKeyPrefix, samplerName)
-	keys, err := rdb.Keys(ctx, pattern).Result()
+	keys, err := RedisKeys(pattern)
 	if err != nil {
 		return fmt.Errorf("failed to get sample keys: %w", err)
 	}
 
 	if len(keys) > 0 {
-		err = rdb.Del(ctx, keys...).Err()
+		err = RedisDelMultiple(keys...)
 		if err != nil {
 			return fmt.Errorf("failed to delete sample keys: %w", err)
 		}
@@ -259,13 +255,13 @@ func (rsm *RedisSampleManager) Reset(samplerName string) error {
 
 	// Delete all count keys
 	pattern = fmt.Sprintf("%s%s:*", RedisSampleCountKey, samplerName)
-	keys, err = rdb.Keys(ctx, pattern).Result()
+	keys, err = RedisKeys(pattern)
 	if err != nil {
 		return fmt.Errorf("failed to get count keys: %w", err)
 	}
 
 	if len(keys) > 0 {
-		err = rdb.Del(ctx, keys...).Err()
+		err = RedisDelMultiple(keys...)
 		if err != nil {
 			return fmt.Errorf("failed to delete count keys: %w", err)
 		}
@@ -302,11 +298,9 @@ func (rsm *RedisSampleManager) cleanupExpiredData() {
 		return
 	}
 
-	ctx := context.Background()
-
 	// Get all sample keys
 	pattern := fmt.Sprintf("%s*", RedisSampleKeyPrefix)
-	keys, err := rdb.Keys(ctx, pattern).Result()
+	keys, err := RedisKeys(pattern)
 	if err != nil {
 		return
 	}
@@ -317,7 +311,7 @@ func (rsm *RedisSampleManager) cleanupExpiredData() {
 
 	for _, key := range keys {
 		// Remove samples older than TTL
-		rdb.ZRemRangeByScore(ctx, key, "0", strconv.FormatFloat(cutoffScore, 'f', -1, 64))
+		RedisZRemRangeByScore(key, "0", strconv.FormatFloat(cutoffScore, 'f', -1, 64))
 	}
 }
 
@@ -375,8 +369,7 @@ func (rsm *RedisSampleManager) processBatch(batch []SampleData) {
 		return
 	}
 
-	ctx := context.Background()
-	pipe := rdb.TxPipeline()
+	pipe := GetRedisPipeline()
 
 	// Group samples by key to optimize Redis operations
 	samplesByKey := make(map[string][]SampleData)
