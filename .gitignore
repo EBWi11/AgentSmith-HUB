@@ -64,3 +64,4 @@ src/.token
 
 # Kubernetes secrets
 k8s/secrets.yaml
+web/pnpm-lock.yaml

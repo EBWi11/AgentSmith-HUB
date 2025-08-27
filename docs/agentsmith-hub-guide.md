@@ -362,6 +362,54 @@ AgentSmith-HUB supports MCP, with tokens shared on the server. The following is 
 Currently, MCP covers most use cases, including policy editing, etc.
 ![MCP.png](png/MCP.png)
 
+### 2.6 Authentication and Login (OIDC SSO)
+
+AgentSmith-HUB supports two authentication methods:
+
+- Legacy Token: send `token: <your-token>` in request headers (kept for compatibility);
+- OIDC (OpenID Connect): the browser completes login and uses Bearer ID Token; the backend verifies it.
+
+The backend exposes `GET /auth/config` so the frontend can load OIDC settings at runtime. When OIDC is enabled, the login page shows a “Use Single Sign-On” button. The default callback route is `/oidc/callback`.
+
+#### Backend configuration (config.yaml)
+
+```yaml
+oidc_enabled: true
+oidc_issuer: "https://your-idp/realms/your-realm"   # Issuer for your IdP
+oidc_client_id: "agentsmith-web"                    # Client ID registered at IdP
+oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # Must be allowed in IdP
+oidc_username_claim: "preferred_username"           # Optional; default prefers preferred_username, else email
+oidc_allowed_users: ["alice@example.com", "bob"]    # Optional allowlist; empty means nobody will allow
+oidc_scope: "openid profile email"                   # Optional; default openid profile email
+```
+
+You can also override via environment variables (higher priority):
+
+```bash
+OIDC_ENABLED=true
+OIDC_ISSUER=https://your-idp/realms/your-realm
+OIDC_CLIENT_ID=agentsmith-web
+OIDC_REDIRECT_URI=https://hub.example.com/oidc/callback
+OIDC_USERNAME_CLAIM=preferred_username
+OIDC_ALLOWED_USERS=alice@example.com,bob
+OIDC_SCOPE="openid profile email"
+```
+
+Notes:
+
+- When `oidc_enabled: true`, you must set `oidc_issuer`, `oidc_client_id`, and `oidc_redirect_uri`.
+- `oidc_redirect_uri` must exactly match the IdP client configuration. If Hub is behind a reverse proxy or served under a subpath, set the full callback URL accordingly (e.g., `https://hub.example.com/subpath/oidc/callback`) and allow it at the IdP.
+- Username resolution prefers `preferred_username`, then falls back to `email`; override with `oidc_username_claim` if needed.
+- If `oidc_allowed_users` is set, only listed users can access; leave empty to deny anyone.
+- Legacy Token remains supported for MCP and automation via the `token` header.
+
+Frontend:
+
+The frontend loads OIDC configuration from `GET /auth/config` by default, so no static values are required.
+
+Callback route: `/oidc/callback`
+
+
 ## 📚 Part 3: RULESET Syntax Detailed Explanation
 
 ### 3.1 Your First Rule

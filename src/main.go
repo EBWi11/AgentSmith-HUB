@@ -568,6 +568,61 @@ func loadHubConfig(root string) error {
 		logger.Info("Using SIMD enabled from environment variable", "enabled", simdEnabled)
 	}
 
+	// OIDC/OAuth2 environment overrides
+	if v := os.Getenv("OIDC_ENABLED"); v != "" {
+		common.Config.OIDCEnabled = strings.ToLower(v) == "true" || v == "1"
+		logger.Info("Using OIDC enabled from environment variable", "enabled", common.Config.OIDCEnabled)
+	}
+	if v := os.Getenv("OIDC_ISSUER"); v != "" {
+		common.Config.OIDCIssuer = v
+		logger.Info("Using OIDC issuer from environment variable")
+	}
+	if v := os.Getenv("OIDC_CLIENT_ID"); v != "" {
+		common.Config.OIDCClientID = v
+		logger.Info("Using OIDC client_id from environment variable")
+	}
+	if v := os.Getenv("OIDC_USERNAME_CLAIM"); v != "" {
+		common.Config.OIDCUsernameClaim = v
+	}
+	if v := os.Getenv("OIDC_ALLOWED_USERS"); v != "" {
+		parts := strings.Split(v, ",")
+		allowed := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				allowed = append(allowed, p)
+			}
+		}
+		common.Config.OIDCAllowedUsers = allowed
+	}
+	if v := os.Getenv("OIDC_REDIRECT_URI"); v != "" {
+		common.Config.OIDCRedirectURI = v
+	}
+	if v := os.Getenv("OIDC_SCOPE"); v != "" {
+		common.Config.OIDCScope = v
+	}
+
+	// Set OIDC defaults and validations during config parsing
+	if common.Config.OIDCEnabled {
+		if common.Config.OIDCScope == "" {
+			common.Config.OIDCScope = "openid profile email"
+		}
+		if common.Config.OIDCUsernameClaim == "" {
+			common.Config.OIDCUsernameClaim = "preferred_username"
+		}
+		// issuer and client_id are required when OIDC is enabled
+		if strings.TrimSpace(common.Config.OIDCIssuer) == "" {
+			return fmt.Errorf("OIDC is enabled but OIDC_ISSUER (oidc_issuer) is not set")
+		}
+		if strings.TrimSpace(common.Config.OIDCClientID) == "" {
+			return fmt.Errorf("OIDC is enabled but OIDC_CLIENT_ID (oidc_client_id) is not set")
+		}
+		// redirect_uri is required when OIDC is enabled
+		if strings.TrimSpace(common.Config.OIDCRedirectURI) == "" {
+			return fmt.Errorf("OIDC is enabled but OIDC_REDIRECT_URI (oidc_redirect_uri) is not set")
+		}
+	}
+
 	// Set config root
 	common.Config.ConfigRoot = root
 

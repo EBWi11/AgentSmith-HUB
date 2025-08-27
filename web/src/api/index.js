@@ -31,11 +31,14 @@ const handleApiError = (error, defaultMessage, returnEmptyArray = false) => {
   throw error;
 };
 
-// Add request interceptor to add token to all requests
+// Add request interceptor to add token or bearer to all requests
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token');
-    if (token) {
+    const bearer = localStorage.getItem('auth_bearer');
+    if (bearer) {
+      config.headers.Authorization = `Bearer ${bearer}`;
+    } else if (token) {
       config.headers.token = token;
     }
     return config;
@@ -52,7 +55,12 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
+      try {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_bearer');
+        delete api.defaults.headers.token;
+        delete api.defaults.headers.Authorization;
+      } catch (e) {}
       console.error('Authentication failed: Token invalid or expired');
       
       // Safe redirect to login page
@@ -111,7 +119,9 @@ export const hubApi = {
 
   clearToken() {
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_bearer');
     delete api.defaults.headers.token;
+    delete api.defaults.headers.Authorization;
   },
 
   async verifyToken() {
@@ -123,6 +133,16 @@ export const hubApi = {
       this.clearToken();
       throw error;
     }
+  },
+
+  async getAuthConfig() {
+    const response = await publicApi.get('/auth/config');
+    return response.data;
+  },
+
+  setBearer(idToken) {
+    localStorage.setItem('auth_bearer', idToken);
+    api.defaults.headers.Authorization = `Bearer ${idToken}`;
   },
 
   /**

@@ -32,6 +32,12 @@
             Sign In
           </button>
         </div>
+        <div v-if="oidcEnabled">
+          <button type="button" @click="loginOIDC" :disabled="loading"
+                  class="relative flex justify-center w-full px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md group hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-green-300">
+            Use Single Sign-On
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -39,6 +45,7 @@
 
 <script>
 import { hubApi } from '../api';
+import { getUserManager, isOidcEnabled } from '../api/oidc';
 
 export default {
   name: 'Login',
@@ -46,7 +53,8 @@ export default {
     return {
       token: '',
       loading: false,
-      error: null
+      error: null,
+      oidcEnabled: isOidcEnabled(),
     };
   },
   created() {
@@ -67,6 +75,18 @@ export default {
         hubApi.clearToken();
         this.error = 'Login failed. Please check your token.';
       } finally {
+        this.loading = false;
+      }
+    },
+    async loginOIDC() {
+      this.loading = true;
+      try {
+        await getUserManager().signinRedirect();
+      } catch (e) {
+        this.error = 'OIDC Login failed. Please check your settings.';
+        console.error(e);
+      }
+      finally {
         this.loading = false;
       }
     }

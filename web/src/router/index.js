@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import Login from '../views/Login.vue';
+const OidcCallback = () => import('../views/OidcCallback.vue');
 import MainLayout from '../views/MainLayout.vue';
 import Dashboard from '../views/Dashboard.vue';
 import ComponentDetail from '../components/ComponentDetail.vue';
@@ -16,6 +17,11 @@ const routes = [
     path: '/login',
     name: 'LoginPage',
     component: Login,
+  },
+  {
+    path: '/oidc/callback',
+    name: 'OidcCallback',
+    component: OidcCallback,
   },
   {
     path: '/dashboard',
@@ -133,7 +139,7 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from, next) => {
-  const token = localStorage.getItem('auth_token');
+  const token = localStorage.getItem('auth_token') || localStorage.getItem('auth_bearer');
   
   if (to.matched.some(record => record.meta.requiresAuth)) {
     if (!token) {

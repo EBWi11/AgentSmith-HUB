@@ -32,6 +32,14 @@ type HubConfig struct {
 	Leader        string
 	LocalIP       string
 	Token         string
+	// OIDC/OAuth2 configuration
+	OIDCEnabled       bool     `yaml:"oidc_enabled"`
+	OIDCIssuer        string   `yaml:"oidc_issuer"`
+	OIDCClientID      string   `yaml:"oidc_client_id"`
+	OIDCUsernameClaim string   `yaml:"oidc_username_claim"`
+	OIDCAllowedUsers  []string `yaml:"oidc_allowed_users"`
+	OIDCRedirectURI   string   `yaml:"oidc_redirect_uri"`
+	OIDCScope         string   `yaml:"oidc_scope"`
 }
 
 // Operation types for project operations
