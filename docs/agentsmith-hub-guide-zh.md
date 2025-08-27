@@ -1,9 +1,5 @@
 # 🛡️ AgentSmith-HUB 完整指南
 
-简体中文 | [English](agentsmith-hub-guide.md)
-
----
-
 AgentSmith-HUB 规则引擎是一个强大的实时数据处理引擎，它能够：
  - 🔍 **实时检测**：从数据流中识别威胁和异常
  - 🔄 **数据转换**：对数据进行加工和丰富化

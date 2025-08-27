@@ -1,9 +1,5 @@
 # 🛡️ AgentSmith-HUB Complete Guide
 
-English | [简体中文](agentsmith-hub-guide-zh.md)
-
----
-
 AgentSmith-HUB Rules Engine is a powerful real-time data processing engine that can:
 - 🔍 **Real-time Detection**: Identify threats and anomalies from data streams
 - 🔄 **Data Transformation**: Process and enrich data
