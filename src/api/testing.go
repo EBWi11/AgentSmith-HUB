@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,15 +310,17 @@ func testPlugin(c echo.Context) error {
 	}
 
 	// Process parameter values, try to convert to appropriate types
-	args := make([]interface{}, 0)
-	for _, value := range req.Data {
-		// Convert to appropriate types
-		if str, ok := value.(string); ok {
-			args = append(args, str)
-		} else {
-			// Convert other types to string
-			args = append(args, fmt.Sprintf("%v", value))
+	args := make([]interface{}, len(req.Data))
+	for key, value := range req.Data {
+		intKey, err := strconv.Atoi(key)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   "Invalid key: " + key,
+				"result":  nil,
+			})
 		}
+		args[intKey] = value
 	}
 
 	// Determine plugin type and execute

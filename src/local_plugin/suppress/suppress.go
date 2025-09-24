@@ -31,7 +31,7 @@ func Eval(args ...interface{}) (bool, error) {
 	case string:
 		i, err := strconv.Atoi(v)
 		if err != nil {
-			winSec, err = common.ParseDurationToSecondsInt(v)
+			i, err = common.ParseDurationToSecondsInt(v)
 			if err != nil {
 				return false, fmt.Errorf("invalid window seconds: %v", v)
 			}
