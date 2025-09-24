@@ -699,7 +699,7 @@ One of the major features of the rules engine is flexible execution order:
 **Execution Flow:**
 - The rules engine executes operations according to the appearance order of tags in XML
 - If check operations (check, threshold) fail, the rule ends immediately
-- Processing operations (append, del, plugin) only execute after all checks pass
+- Processing operations (append, modify, del, plugin) only execute after all checks pass
 
 #### 🔍 Syntax Details: `<threshold>` Tag
 
@@ -1939,6 +1939,25 @@ When a ruleset contains multiple `<rule>` elements, they have an **OR relationsh
 #### Plugin Execution `<plugin>`
 ```xml
 <plugin>plugin_function(parameter1, parameter2)</plugin>
+```
+
+#### Field Modify `<modify>`
+```xml
+<modify field="field_name">value</modify>
+```
+
+- Use to update an existing field or replace the entire record.
+- Two modes are supported via the optional `type` attribute:
+  - Empty (literal assignment, default): assign the literal body text to `field`.
+  - `PLUGIN`: execute a plugin and use its return value to set specified `field` or replace the entire record(only when `field` is undefined).
+
+Syntax (PLUGIN mode):
+```xml
+<!-- Assign plugin result to a field -->
+<modify type="PLUGIN" field="risk_score">calculateRisk(amount, user.daily_limit)</modify>
+
+<!-- Replace entire data with plugin result (must return a map) -->
+<modify type="PLUGIN">transformRecord(_$ORIDATA)</modify>
 ```
 
 ### 8.6 Field Access Syntax

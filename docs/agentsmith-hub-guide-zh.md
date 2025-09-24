@@ -695,7 +695,7 @@ OIDC_SCOPE="openid profile email"
 **执行流程：**
 - 规则引擎按照 XML 中标签的出现顺序执行操作
 - 检查类操作（check、threshold）如果失败，规则立即结束
-- 处理类操作（append、del、plugin）只在所有检查通过后执行
+- 处理类操作（append、modify、del、plugin）只在所有检查通过后执行
 
 #### 🔍 语法详解：`<threshold>` 标签
 
@@ -1934,6 +1934,25 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 #### 插件执行 `<plugin>`
 ```xml
 <plugin>插件函数(参数1, 参数2)</plugin>
+```
+
+#### 字段修改 `<modify>`
+```xml
+<modify field="字段名">值</modify>
+```
+
+- 用于更新已有字段，或替换整条记录。
+- 通过可选的 `type` 属性支持两种模式：
+  - 空（字面量赋值，默认）：将标签体文本赋值给 `field`
+  - `PLUGIN`：执行插件并使用其返回值设置`field`或者替换整条记录(当field未指定时)。
+
+语法（PLUGIN 模式）：
+```xml
+<!-- 将插件返回值赋给某个字段 -->
+<modify type="PLUGIN" field="risk_score">calculateRisk(amount, user.daily_limit)</modify>
+
+<!-- 用插件返回的整对象替换当前记录 -->
+<modify type="PLUGIN">transformRecord(_$ORIDATA)</modify>
 ```
 
 ### 8.6 字段访问语法

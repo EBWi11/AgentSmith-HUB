@@ -99,6 +99,7 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					IteratorMap:  make(map[int]Iterator),
 					AppendsMap:   make(map[int]Append),
 					PluginMap:    make(map[int]Plugin),
+					ModifyMap:    make(map[int]Modify),
 					DelMap:       make(map[int][][]string),
 				}
 
@@ -211,6 +212,21 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					currentRule.AppendsMap[operatorIDCounter] = appendOp
 					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
 						Type: T_Append,
+						ID:   operatorIDCounter,
+					})
+				}
+
+			case "modify":
+				if currentRule != nil {
+					modifyOp, err := parseModify(element, decoder, elementLine)
+					if err != nil {
+						return nil, err
+					}
+
+					operatorIDCounter++
+					currentRule.ModifyMap[operatorIDCounter] = modifyOp
+					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
+						Type: T_Modify,
 						ID:   operatorIDCounter,
 					})
 				}
@@ -701,6 +717,67 @@ func parseAppend(element xml.StartElement, decoder *XMLDecoder, elementLine int)
 				}
 
 				return appendElem, nil
+			}
+		}
+	}
+}
+
+func parseModify(element xml.StartElement, decoder *XMLDecoder, elementLine int) (Modify, error) {
+	var modifyElem Modify
+
+	// Parse attributes: field is optional
+	for _, attr := range element.Attr {
+		switch attr.Name.Local {
+		case "type":
+			mtype := strings.TrimSpace(attr.Value)
+			if mtype != "" && mtype != "PLUGIN" {
+				return modifyElem, fmt.Errorf("modify type must be empty or 'PLUGIN', got '%s' at line %d", mtype, elementLine)
+			}
+			modifyElem.Type = mtype
+		case "field":
+			modifyElem.FieldName = strings.TrimSpace(attr.Value)
+		}
+	}
+
+	// Parse content
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return modifyElem, err
+		}
+
+		switch t := token.(type) {
+		case xml.CharData:
+			value := strings.TrimSpace(string(t))
+			modifyElem.Value = value
+		case xml.EndElement:
+			if t.Name.Local == "modify" {
+				// If type is PLUGIN, validate plugin call
+				if modifyElem.Type == "PLUGIN" {
+					if strings.TrimSpace(modifyElem.Value) == "" {
+						return modifyElem, fmt.Errorf("modify value (plugin call) cannot be empty at line %d", elementLine)
+					}
+					pluginName, args, err := ParseFunctionCall(modifyElem.Value)
+					if err != nil {
+						return modifyElem, fmt.Errorf("invalid plugin call syntax at line %d: %v", elementLine, err)
+					}
+					if _, ok := plugin.Plugins[pluginName]; !ok {
+						if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+							return modifyElem, fmt.Errorf("cannot reference temporary plugin '%s' at line %d, please save it first", pluginName, elementLine)
+						}
+						return modifyElem, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
+					}
+					modifyElem.Plugin = plugin.Plugins[pluginName]
+					modifyElem.PluginArgs = args
+				} else {
+					// Literal mode: field must not be empty
+					if strings.TrimSpace(modifyElem.FieldName) == "" {
+						return modifyElem, fmt.Errorf("modify field cannot be empty when type is empty at line %d", elementLine)
+					}
+					// Value may be empty string; no plugin validation
+				}
+
+				return modifyElem, nil
 			}
 		}
 	}

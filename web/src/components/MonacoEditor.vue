@@ -3179,6 +3179,12 @@ function getXmlAttributeValueCompletions(context, range) {
     );
   }
 
+  else if (context.currentTag === 'modify' && context.currentAttribute === 'type') {
+    suggestions.push(
+      { label: 'PLUGIN', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Plugin-based modify', insertText: 'PLUGIN', range: range }
+    );
+  }
+
   else if (context.currentTag === 'iterator' && context.currentAttribute === 'type') {
     suggestions.push(
       { label: 'ALL', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Return true if all elements are true', insertText: 'ALL', range: range },
@@ -3390,6 +3396,14 @@ function getXmlAttributeNameCompletions(context, range) {
         { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Append type (PLUGIN for dynamic values)', insertText: 'type="PLUGIN"', range: range }
       );
       break;
+    
+    case 'modify':
+      suggestions.push(
+        { label: 'field', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Name of field to modify', insertText: 'field="field-name"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Modify type (PLUGIN for dynamic values)', insertText: 'type="PLUGIN"', range: range }
+      );
+      break;
+
     case 'iterator':
       suggestions.push(
         { label: 'type', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Iterator type', insertText: 'type="ALL"', range: range },
@@ -3484,6 +3498,14 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertText: 'append field="field_name">value</append',
         range: range,
         sortText: '4_append'
+      },
+      {
+        label: 'modify',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Modify field to result (can be placed anywhere in rule)',
+        insertText: 'modify field="field_name">value</modify',
+        range: range,
+        sortText: '4_modify'
       },
       {
         label: 'plugin',
@@ -3597,6 +3619,14 @@ function getXmlTagNameCompletions(context, range, fullText) {
         sortText: '4_append'
       },
       {
+        label: 'modify',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Modify field to result',
+        insertText: 'modify field="field_name">value</modify',
+        range: range,
+        sortText: '4_modify'
+      },
+      {
         label: 'plugin',
         kind: monaco.languages.CompletionItemKind.Function,
         documentation: 'Plugin execution',
@@ -3645,7 +3675,8 @@ function getXmlTagContentCompletions(context, range, fullText) {
   if (context.currentTag === 'plugin' || 
       (context.currentTag === 'check' && fullText.includes('type="PLUGIN"')) || 
       (context.currentTag === 'node' && fullText.includes('type="PLUGIN"')) || 
-      (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))) {
+      (context.currentTag === 'append' && fullText.includes('type="PLUGIN"'))||
+      (context.currentTag === 'modify' && fullText.includes('type="PLUGIN"'))) {
     
     // Determine if we're in a check context (which requires bool return type)
     const isInCheckNode = (context.currentTag === 'check' || context.currentTag === 'node') && fullText.includes('type="PLUGIN"');

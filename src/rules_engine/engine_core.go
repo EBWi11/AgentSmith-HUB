@@ -4,6 +4,7 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -535,6 +536,9 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 		case T_Append:
 			// Execute append operation according to user-defined order
 			r.executeAppend(rule, op.ID, data, ruleCache)
+		case T_Modify:
+			// Execute modify operation according to user-defined order
+			r.executeModify(rule, op.ID, data, ruleCache)
 		case T_Del:
 			// Execute del operation according to user-defined order
 			r.executeDel(rule, op.ID, data)
@@ -811,6 +815,68 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string
 				logger.PluginError("Interface-type plugin evaluation error in append", "plugin", appendOp.Plugin.Name, "error", err)
 			}
 		}
+	}
+}
+
+// executeModify executes a modify operation
+func (r *Ruleset) executeModify(rule *Rule, operationID int, dataCopy map[string]interface{}, ruleCache map[string]common.CheckCoreCache) {
+	modifyOp, exists := rule.ModifyMap[operationID]
+	if !exists {
+		return
+	}
+
+	// Handle by type
+	if strings.TrimSpace(modifyOp.Type) == "" {
+		// Literal assignment mode; field must be present (enforced in build/validation)
+		dataCopy[modifyOp.FieldName] = modifyOp.Value
+		return
+	}
+
+	// Plugin mode
+	args := GetPluginRealArgs(modifyOp.PluginArgs, dataCopy, ruleCache)
+
+	// Check plugin return type to determine which evaluation method to use
+	if modifyOp.Plugin.ReturnType == "bool" {
+		boolResult, err := modifyOp.Plugin.FuncEvalCheckNode(args...)
+		if err != nil {
+			logger.PluginError("Check-type plugin evaluation error in modify", "plugin", modifyOp.Plugin.Name, "error", err)
+			return
+		}
+		if modifyOp.FieldName != "" {
+			dataCopy[modifyOp.FieldName] = boolResult
+		} else {
+			logger.PluginError("Modify without field requires map result; got bool", "plugin", modifyOp.Plugin.Name, "ruleID", rule.ID)
+		}
+		return
+	}
+
+	// For interface{} type plugins, use FuncEvalOther
+	res, ok, err := modifyOp.Plugin.FuncEvalOther(args...)
+	if err != nil || !ok {
+		if err != nil {
+			logger.PluginError("Interface-type plugin evaluation error in modify", "plugin", modifyOp.Plugin.Name, "error", err)
+		}
+		return
+	}
+
+	if modifyOp.FieldName != "" {
+		if modifyOp.FieldName == PluginArgFromRawSymbol {
+			if rmap, ok := res.(map[string]interface{}); ok {
+				res = common.MapDeepCopy(rmap)
+			} else {
+				logger.PluginError("Plugin result is not a map", "plugin", modifyOp.Plugin.Name, "result", res)
+				res = nil
+			}
+		}
+		dataCopy[modifyOp.FieldName] = res
+		return
+	}
+
+	if rmap, ok := res.(map[string]interface{}); ok {
+		clear(dataCopy)
+		maps.Copy(dataCopy, rmap)
+	} else {
+		logger.PluginError("Modify without field expects map result to replace data", "plugin", modifyOp.Plugin.Name, "result", res)
 	}
 }
 
@@ -1169,7 +1235,7 @@ func (r *Ruleset) ruleModifiesData(rule *Rule) bool {
 
 	for _, op := range *rule.Queue {
 		switch op.Type {
-		case T_Append, T_Del, T_Plugin:
+		case T_Append, T_Del, T_Plugin, T_Modify:
 			return true // These operations modify data
 		}
 	}

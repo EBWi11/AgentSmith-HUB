@@ -111,6 +111,7 @@ const (
 	T_Del                           // Del = 4
 	T_Plugin                        // Plugin = 5
 	T_Iterator                      // Iterator = 6
+	T_Modify                        // Modify = 7
 )
 
 type EngineOperator struct {
@@ -130,6 +131,7 @@ type Rule struct {
 	IteratorMap  map[int]Iterator
 	AppendsMap   map[int]Append
 	PluginMap    map[int]Plugin
+	ModifyMap    map[int]Modify
 	DelMap       map[int][][]string
 }
 
@@ -251,6 +253,18 @@ type Append struct {
 
 	Plugin     *plugin.Plugin // Plugin instance if type is PLUGIN
 	PluginArgs []*PluginArg   // Arguments for plugin execution
+}
+
+// Modify defines a modification operation to the data.
+// - If FieldName is not empty: assign plugin result to the field
+// - If FieldName is empty: replace the original data with the plugin result (must be a map)
+type Modify struct {
+	Type      string `xml:"type,attr"` // "" or "PLUGIN"
+	FieldName string `xml:"field,attr"`
+	Value     string `xml:",chardata"`
+
+	Plugin     *plugin.Plugin
+	PluginArgs []*PluginArg
 }
 
 // Plugin represents a plugin configuration with its execution parameters
@@ -593,6 +607,13 @@ func validateRule(rule *Rule, xmlContent string, ruleIndex int, result *Validati
 	for _, plugin := range rule.PluginMap {
 		validatePlugin(&plugin, xmlContent, ruleID, ruleIndex, pluginCount, result)
 		pluginCount++
+	}
+
+	// Validate modifies in ModifyMap
+	modifyCount := 0
+	for _, modify := range rule.ModifyMap {
+		validateModify(&modify, xmlContent, ruleID, ruleIndex, modifyCount, result)
+		modifyCount++
 	}
 }
 
@@ -1247,6 +1268,95 @@ func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, ap
 				})
 			}
 		}
+	}
+}
+
+// validateModify validates modify elements
+func validateModify(modifyElem *Modify, xmlContent, ruleID string, ruleIndex, modifyIndex int, result *ValidationResult) {
+	modifyLine := findElementInRule(xmlContent, ruleID, "<modify", ruleIndex, modifyIndex)
+
+	mtype := strings.TrimSpace(modifyElem.Type)
+	if mtype != "" && mtype != "PLUGIN" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    modifyLine,
+			Message: "Modify type must be empty or 'PLUGIN'",
+			Detail:  fmt.Sprintf("Rule ID: %s, Current value: '%s'", ruleID, mtype),
+		})
+		return
+	}
+
+	if mtype == "" {
+		// Literal mode: field is required
+		if strings.TrimSpace(modifyElem.FieldName) == "" {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    modifyLine,
+				Message: "Modify field cannot be empty when type is empty",
+				Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+			})
+		}
+		// Value can be empty string literal; no further checks
+		return
+	}
+
+	// PLUGIN mode
+	value := strings.TrimSpace(modifyElem.Value)
+	if value == "" {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    modifyLine,
+			Message: "Modify value (plugin call) cannot be empty when type is 'PLUGIN'",
+			Detail:  fmt.Sprintf("Rule ID: %s", ruleID),
+		})
+		return
+	}
+
+	// Parse the plugin function call
+	pluginName, args, err := ParseFunctionCall(value)
+	if err != nil {
+		result.IsValid = false
+		result.Errors = append(result.Errors, ValidationError{
+			Line:    modifyLine,
+			Message: "Invalid plugin call syntax",
+			Detail:  fmt.Sprintf("Rule ID: %s, Error: %s", ruleID, err.Error()),
+		})
+		return
+	}
+
+	// Check if plugin exists
+	var pluginInstance *plugin.Plugin
+	if p, ok := plugin.Plugins[pluginName]; ok {
+		pluginInstance = p
+	} else {
+		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    modifyLine,
+				Message: "Cannot reference temporary plugin, please save it first",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		} else {
+			result.IsValid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Line:    modifyLine,
+				Message: "Plugin not found",
+				Detail:  fmt.Sprintf("Rule ID: %s, Plugin: %s", ruleID, pluginName),
+			})
+			return
+		}
+	}
+
+	// Validate plugin parameters
+	validatePluginParameters(pluginInstance, args, value, modifyLine, ruleID, result)
+
+	if pluginInstance.ReturnType == "bool" {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Line:    modifyLine,
+			Message: "Plugin returns bool; replacing entire data requires map result",
+			Detail:  fmt.Sprintf("Rule ID: %s, Field empty will be ignored for bool result", ruleID),
+		})
 	}
 }
 
@@ -2288,6 +2398,48 @@ func RulesetBuild(ruleset *Ruleset) error {
 			pluginNode.PluginArgs = args
 			// Update the plugin node in the map
 			rule.PluginMap[id] = pluginNode
+		}
+
+		// Process modifies in ModifyMap
+		for id, modifyNode := range rule.ModifyMap {
+			mtype := strings.TrimSpace(modifyNode.Type)
+			if !(mtype == "" || mtype == "PLUGIN") {
+				return errors.New("modify type must be empty or 'PLUGIN': " + rule.ID)
+			}
+
+			if mtype == "" {
+				// Literal mode: field is required; no plugin parsing
+				if strings.TrimSpace(modifyNode.FieldName) == "" {
+					return errors.New("modify field cannot be empty when type is empty: " + rule.ID)
+				}
+				// No further processing needed at build time
+			} else {
+				// PLUGIN mode
+				value := strings.TrimSpace(modifyNode.Value)
+				if value == "" {
+					return errors.New("modify value cannot be empty when type is 'PLUGIN': " + rule.ID)
+				}
+
+				pluginName, args, err := ParseFunctionCall(value)
+				if err != nil {
+					return err
+				}
+
+				if p, ok := plugin.Plugins[pluginName]; ok {
+					modifyNode.Plugin = p
+				} else {
+					// Check if it's a temporary component, temporary components should not be referenced
+					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
+					}
+					return errors.New("not found this plugin: " + pluginName)
+				}
+
+				modifyNode.PluginArgs = args
+			}
+
+			// Update the modify node in the map
+			rule.ModifyMap[id] = modifyNode
 		}
 
 		// Process thresholds in ThresholdMap
