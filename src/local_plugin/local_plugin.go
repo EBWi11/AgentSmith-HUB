@@ -41,6 +41,7 @@ import (
 
 	// threat intelligence
 	shodan "AgentSmith-HUB/local_plugin/shodan"
+	suppress "AgentSmith-HUB/local_plugin/suppress"
 	threatbook "AgentSmith-HUB/local_plugin/threatbook"
 	virustotal "AgentSmith-HUB/local_plugin/virustotal"
 )
@@ -51,6 +52,7 @@ var LocalPluginBoolRes = map[string]func(...interface{}) (bool, error){
 	"cidrMatch":    cidr_match.Eval,
 	"geoMatch":     geo_match.Eval,
 	"suppressOnce": suppressonce.Eval,
+	"suppress":     suppress.Eval,
 }
 
 // for append or other usage
