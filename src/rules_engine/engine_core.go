@@ -489,6 +489,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 		return false, copied, nil
 	}
 	ruleResult := true
+	copied := false
 	// Execute operations in the exact order specified by the Queue
 	for _, op := range *rule.Queue {
 		var modifiedRes map[string]interface{}
