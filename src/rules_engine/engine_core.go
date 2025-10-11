@@ -4,7 +4,6 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -425,36 +424,16 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	for ruleIndex := range r.Rules {
 		rule := &r.Rules[ruleIndex] // Use pointer to avoid copying
 
-		// Create data copy for this rule execution
-		var dataCopy map[string]interface{}
-		appendCount := len(rule.AppendsMap)
-
-		if r.IsDetection {
-			// For detection rules, always use deep copy to avoid rule interference
-			// This prevents multiple rules from accumulating hit rule IDs on the same data reference
-			// Reserve extra capacity for hit_rule_id (1) + actual append count
-			dataCopy = mapDeepCopyWithExtraCapacity(data, 1+appendCount)
-		} else {
-			// For exclude rules, check if rule modifies data
-			if appendCount > 0 {
-				// Has append operations, reserve extra capacity
-				dataCopy = mapDeepCopyWithExtraCapacity(data, appendCount)
-			} else if len(rule.ModifyMap) > 0 || len(rule.DelMap) > 0 || len(rule.PluginMap) > 0 {
-				// Has modify/del/plugin but no append, use standard deep copy
-				dataCopy = common.MapDeepCopy(data)
-			} else {
-				// No modifications at all, use original data
-				dataCopy = data
-			}
-		}
-
 		// Execute all operations in the order specified by the Queue
-		ruleCheckRes := r.executeRuleOperations(rule, dataCopy, ruleCache)
+		ruleCheckRes, modifiedData := r.executeRuleOperations(rule, data, ruleCache)
 
 		// Handle rule result based on ruleset type
 		if r.IsDetection {
 			// For detection rules, if rule passes, add to results
 			if ruleCheckRes {
+				if modifiedData == nil {
+					modifiedData = mapDeepCopyWithExtraCapacity(data, 1)
+				}
 				// Add rule info
 				// Build hit rule ID efficiently using string builder pool
 				sb := stringBuilderPool.Get().(*strings.Builder)
@@ -462,15 +441,19 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				sb.WriteString(r.RulesetID)
 				sb.WriteString(".")
 				sb.WriteString(rule.ID)
-				addHitRuleID(dataCopy, sb.String())
+				addHitRuleID(modifiedData, sb.String())
 				stringBuilderPool.Put(sb)
 				// Add to final result
-				finalRes = append(finalRes, dataCopy)
+				finalRes = append(finalRes, modifiedData)
 			}
 		} else {
 			// For exclude rules
 			// Always update lastModifiedData with the result of rule execution
-			lastModifiedData = dataCopy
+			if modifiedData == nil {
+				lastModifiedData = data
+			} else {
+				lastModifiedData = modifiedData
+			}
 
 			if ruleCheckRes {
 				// If exclude rule passes, data is excluded (filtered) - don't pass forward (return empty)
@@ -496,17 +479,19 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 }
 
 // executeRuleOperations executes all operations in a rule according to the Queue order
-func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, map[string]interface{}) {
 	if rule.Queue == nil || len(*rule.Queue) == 0 {
 		// No operations to execute
 		// For detection rules, empty rule means no match (false)
 		// For exclude rules, empty rule also means no match (false), allowing data to pass
-		return false
+		return false, nil
 	}
 
 	ruleResult := true
+	copied := false
 	// Execute operations in the exact order specified by the Queue
 	for _, op := range *rule.Queue {
+		var modifiedRes map[string]interface{}
 		switch op.Type {
 		case T_CheckList:
 			checkResult := r.executeCheckList(rule, op.ID, data, ruleCache)
@@ -514,7 +499,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if check fails, stop execution
 				if r.IsDetection {
-					return false
+					return false, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -524,7 +509,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if check fails, stop execution
 				if r.IsDetection {
-					return false
+					return false, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -534,7 +519,7 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if threshold fails, stop execution
 				if r.IsDetection {
-					return false
+					return false, data
 				}
 				// For exclude rules, continue executing other operations
 			}
@@ -544,26 +529,31 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 				ruleResult = false
 				// For detection rules, if iterator fails, stop execution
 				if r.IsDetection {
-					return false
+					return false, data
 				}
 				// For exclude rules, continue executing other operations
 			}
 		case T_Append:
 			// Execute append operation according to user-defined order
-			r.executeAppend(rule, op.ID, data, ruleCache)
+			modifiedRes = r.executeAppend(rule, op.ID, copied, data, ruleCache)
+
 		case T_Modify:
 			// Execute modify operation according to user-defined order
-			r.executeModify(rule, op.ID, data, ruleCache)
+			modifiedRes = r.executeModify(rule, op.ID, copied, data, ruleCache)
 		case T_Del:
 			// Execute del operation according to user-defined order
-			r.executeDel(rule, op.ID, data)
+			modifiedRes = r.executeDel(rule, op.ID, copied, data)
 		case T_Plugin:
 			// Execute plugin operation according to user-defined order
 			r.executePlugin(rule, op.ID, data, ruleCache)
 		}
+		if modifiedRes != nil {
+			copied = true
+			data = modifiedRes
+		}
 	}
 
-	return ruleResult
+	return ruleResult, data
 }
 
 // executeCheckList executes a checklist operation
@@ -786,29 +776,33 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 }
 
 // executeAppend executes an append operation
-func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string]interface{}, ruleCache map[string]common.CheckCoreCache) {
+func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (modifiedData map[string]interface{}) {
 	appendOp, exists := rule.AppendsMap[operationID]
 	if !exists {
 		return
 	}
-
+	if !copied {
+		modifiedData = common.MapDeepCopy(data)
+	} else {
+		modifiedData = data
+	}
 	if appendOp.Type == "" {
 		appendData := appendOp.Value
 		if hasFromRawPrefix(appendOp.Value) {
-			appendData = GetRuleValueFromRawFromCache(ruleCache, appendOp.Value, dataCopy)
+			appendData = GetRuleValueFromRawFromCache(ruleCache, appendOp.Value, data)
 		}
 
-		dataCopy[appendOp.FieldName] = appendData
+		modifiedData[appendOp.FieldName] = appendData
 	} else {
 		// Plugin
-		args := GetPluginRealArgs(appendOp.PluginArgs, dataCopy, ruleCache)
+		args := GetPluginRealArgs(appendOp.PluginArgs, modifiedData, ruleCache)
 
 		// Check plugin return type to determine which evaluation method to use
 		if appendOp.Plugin.ReturnType == "bool" {
 			// For check-type plugins (bool return type), use FuncEvalCheckNode and get the boolean result
 			boolResult, err := appendOp.Plugin.FuncEvalCheckNode(args...)
 			if err == nil {
-				dataCopy[appendOp.FieldName] = boolResult
+				modifiedData[appendOp.FieldName] = boolResult
 			} else {
 				logger.PluginError("Check-type plugin evaluation error in append", "plugin", appendOp.Plugin.Name, "error", err)
 			}
@@ -825,30 +819,35 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, dataCopy map[string
 					}
 				}
 
-				dataCopy[appendOp.FieldName] = res
+				modifiedData[appendOp.FieldName] = res
 			} else if err != nil {
 				logger.PluginError("Interface-type plugin evaluation error in append", "plugin", appendOp.Plugin.Name, "error", err)
 			}
 		}
 	}
+	return
 }
 
 // executeModify executes a modify operation
-func (r *Ruleset) executeModify(rule *Rule, operationID int, dataCopy map[string]interface{}, ruleCache map[string]common.CheckCoreCache) {
+func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (modifiedData map[string]interface{}) {
 	modifyOp, exists := rule.ModifyMap[operationID]
 	if !exists {
 		return
 	}
-
+	if !copied {
+		modifiedData = common.MapDeepCopy(data)
+	} else {
+		modifiedData = data
+	}
 	// Handle by type
 	if strings.TrimSpace(modifyOp.Type) == "" {
 		// Literal assignment mode; field must be present (enforced in build/validation)
-		dataCopy[modifyOp.FieldName] = modifyOp.Value
+		modifiedData[modifyOp.FieldName] = modifyOp.Value
 		return
 	}
 
 	// Plugin mode
-	args := GetPluginRealArgs(modifyOp.PluginArgs, dataCopy, ruleCache)
+	args := GetPluginRealArgs(modifyOp.PluginArgs, modifiedData, ruleCache)
 
 	// Check plugin return type to determine which evaluation method to use
 	if modifyOp.Plugin.ReturnType == "bool" {
@@ -858,11 +857,12 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, dataCopy map[string
 			return
 		}
 		if modifyOp.FieldName != "" {
-			dataCopy[modifyOp.FieldName] = boolResult
+			modifiedData[modifyOp.FieldName] = boolResult
+			return
 		} else {
 			logger.PluginError("Modify without field requires map result; got bool", "plugin", modifyOp.Plugin.Name, "ruleID", rule.ID)
+			return
 		}
-		return
 	}
 
 	// For interface{} type plugins, use FuncEvalOther
@@ -877,34 +877,42 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, dataCopy map[string
 	if modifyOp.FieldName != "" {
 		if modifyOp.FieldName == PluginArgFromRawSymbol {
 			if rmap, ok := res.(map[string]interface{}); ok {
-				res = common.MapDeepCopy(rmap)
+				modifiedData = rmap
+				return
 			} else {
 				logger.PluginError("Plugin result is not a map", "plugin", modifyOp.Plugin.Name, "result", res)
-				res = nil
+				return
 			}
 		}
-		dataCopy[modifyOp.FieldName] = res
+		modifiedData[modifyOp.FieldName] = res
 		return
 	}
 
+	// rmap from plugin's result without any race condition
 	if rmap, ok := res.(map[string]interface{}); ok {
-		clear(dataCopy)
-		maps.Copy(dataCopy, rmap)
+		modifiedData = rmap
+		return
 	} else {
 		logger.PluginError("Modify without field expects map result to replace data", "plugin", modifyOp.Plugin.Name, "result", res)
+		return
 	}
 }
 
 // executeDel executes a delete operation
-func (r *Ruleset) executeDel(rule *Rule, operationID int, dataCopy map[string]interface{}) {
+func (r *Ruleset) executeDel(rule *Rule, operationID int, copied bool, data map[string]interface{}) (modifiedData map[string]interface{}) {
 	delFields, exists := rule.DelMap[operationID]
 	if !exists {
 		return
 	}
-
-	for _, fieldPath := range delFields {
-		common.MapDel(dataCopy, fieldPath)
+	if !copied {
+		modifiedData = common.MapDeepCopy(data)
+	} else {
+		modifiedData = data
 	}
+	for _, fieldPath := range delFields {
+		common.MapDel(modifiedData, fieldPath)
+	}
+	return modifiedData
 }
 
 // executePlugin executes a plugin operation
@@ -913,7 +921,6 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 	if !exists {
 		return
 	}
-
 	args := GetPluginRealArgs(pluginOp.PluginArgs, dataCopy, ruleCache)
 
 	// Check plugin return type to determine which evaluation method to use
