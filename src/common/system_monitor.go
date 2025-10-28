@@ -1,6 +1,7 @@
 package common
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -114,8 +115,7 @@ func (sm *SystemMonitor) collectMetrics() {
 	memoryUsedMB := getProcessRSSMB()
 
 	// Get system total memory for accurate percentage calculation
-	systemMemoryGB := getSystemMemoryGB()
-	systemMemoryMB := systemMemoryGB * 1024
+	systemMemoryMB := getSystemMemoryMB()
 
 	// Calculate memory percentage relative to system total memory
 	var memoryPercent float64
@@ -181,7 +181,7 @@ func (sm *SystemMonitor) calculateCPUPercent() float64 {
 	// Normalize to per-core usage (0-100%)
 	// This represents the true percentage of a single core used
 	// For example, 100% means using one full core, 50% means using half a core
-	numCPU := float64(runtime.NumCPU())
+	numCPU := getCPULimit()
 	if numCPU > 0 {
 		cpuPercent = cpuPercent / numCPU
 	}
@@ -251,9 +251,58 @@ func getProcessRSSMB() float64 {
 	runtime.ReadMemStats(&memStats)
 	return float64(memStats.Alloc) / 1024 / 1024
 }
+func getCPULimit() float64 {
+	// Cgroup v2
+	cgroupV2Path := "/sys/fs/cgroup/cpu.max"
+	if _, err := os.Stat(cgroupV2Path); err == nil {
+		if data, err := os.ReadFile(cgroupV2Path); err == nil {
+			str := strings.TrimSpace(string(data))
+			if str != "max" {
+				fields := strings.Fields(str)
+				if len(fields) >= 2 {
+					if quota, err := strconv.ParseFloat(fields[0], 64); err == nil {
+						if period, err := strconv.ParseFloat(fields[1], 64); err == nil {
+							return quota / period
+						}
+					}
+				}
+			}
+		}
+	}
 
-// getSystemMemoryGB attempts to get system total memory in GB
-func getSystemMemoryGB() float64 {
+	// Cgroup v1
+	quotaPath := "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"
+	periodPath := "/sys/fs/cgroup/cpu/cpu.cfs_period_us"
+
+	if _, err := os.Stat(quotaPath); err == nil {
+		if quotaData, err := os.ReadFile(quotaPath); err == nil {
+			if periodData, err := os.ReadFile(periodPath); err == nil {
+				if quota, err := strconv.ParseFloat(strings.TrimSpace(string(quotaData)), 64); err == nil {
+					if period, err := strconv.ParseFloat(strings.TrimSpace(string(periodData)), 64); err == nil {
+						if quota > 0 {
+							return quota / period
+						}
+					}
+				}
+			}
+		}
+	}
+	return float64(runtime.NumCPU())
+}
+
+// getSystemMemoryMB attempts to get system total memory in MB
+func getSystemMemoryMB() float64 {
+	for _, p := range []string{"/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"} {
+		if res, err := os.ReadFile(p); err == nil {
+			res := strings.TrimSpace(string(res))
+			if res != "max" {
+				if limit, err := strconv.ParseUint(res, 10, 64); err == nil && limit < math.MaxInt64/2 {
+					return float64(limit) / 1024 / 1024
+				}
+			}
+		}
+
+	}
 	// Try to read from /proc/meminfo on Linux
 	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
 		lines := strings.Split(string(data), "\n")
@@ -262,7 +311,7 @@ func getSystemMemoryGB() float64 {
 				fields := strings.Fields(line)
 				if len(fields) >= 2 {
 					if kb, err := strconv.ParseFloat(fields[1], 64); err == nil {
-						return kb / 1024 / 1024 // Convert KB to GB
+						return kb / 1024 // Convert KB to MB
 					}
 				}
 				break
@@ -276,17 +325,16 @@ func getSystemMemoryGB() float64 {
 		output, err := cmd.Output()
 		if err == nil {
 			if memsizeBytes, err := strconv.ParseFloat(strings.TrimSpace(string(output)), 64); err == nil {
-				memsizeGB := memsizeBytes / 1024 / 1024 / 1024
-				return memsizeGB
+				return memsizeBytes / 1024 / 1024
 			}
 		}
 		// Fallback to conservative estimate if sysctl fails
-		return 16.0
+		return 16.0 * 1024
 	}
 
 	// For other systems or as general fallback
 	// Use a more reasonable estimation based on typical modern systems
-	return 8.0 // Assume at least 8GB for modern systems
+	return 8.0 * 1024 // Assume at least 8GB for modern systems
 }
 
 // cleanupLoop periodically removes old data (older than 1 hour)
