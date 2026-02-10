@@ -258,6 +258,36 @@ index: "metrics-{YYYY.MM}"        # metrics-2024.01
 index: "hourly-{YYYY.MM.DD}-{HH}" # hourly-2024.01.15-14
 ```
 
+##### ClickHouse
+```yaml
+type: clickhouse
+clickhouse:
+  hosts:
+    - "http://localhost:8123"
+  database: "default"
+  table: "security_events"
+  batch_size: 1000  # Batch insert size (default: 1000)
+  flush_dur: "3s"   # Flush interval (default: 3s)
+  # Authentication (optional)
+  auth:
+    username: "default"
+    password: "password"
+  # TLS Configuration (optional)
+  tls:
+    enable: true
+    insecure_skip_verify: false
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/client-cert.pem"
+    key_file: "/path/to/client-key.pem"
+```
+
+**Notes:**
+- Uses ClickHouse HTTP interface for data ingestion (default port: 8123, HTTPS: 8443)
+- Data is inserted in `JSONEachRow` format — ClickHouse handles type coercion automatically
+- Supports multiple hosts for load balancing (round-robin)
+- The target table must be created in ClickHouse beforehand
+- For HTTPS, use `https://` prefix in hosts and enable TLS configuration
+
 ### 1.3 PROJECT Syntax Description
 
 PROJECT defines the overall configuration of a project using simple arrow syntax to describe data flow.

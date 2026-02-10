@@ -24,6 +24,7 @@ const (
 	OutputTypeKafkaAWS      OutputType = "kafka_aws"
 	OutputTypeElasticsearch OutputType = "elasticsearch"
 	OutputTypeAliyunSLS     OutputType = "aliyun_sls"
+	OutputTypeClickHouse    OutputType = "clickhouse"
 	OutputTypePrint         OutputType = "print"
 )
 
@@ -34,6 +35,7 @@ type OutputConfig struct {
 	Kafka         *KafkaOutputConfig         `yaml:"kafka,omitempty"`
 	Elasticsearch *ElasticsearchOutputConfig `yaml:"elasticsearch,omitempty"`
 	AliyunSLS     *AliyunSLSOutputConfig     `yaml:"aliyun_sls,omitempty"`
+	ClickHouse    *ClickHouseOutputConfig    `yaml:"clickhouse,omitempty"`
 	RawConfig     string
 }
 
@@ -66,6 +68,17 @@ type AliyunSLSOutputConfig struct {
 	Logstore        string `yaml:"logstore"`
 }
 
+// ClickHouseOutputConfig holds ClickHouse-specific config.
+type ClickHouseOutputConfig struct {
+	Hosts     []string                      `yaml:"hosts"`
+	Database  string                        `yaml:"database"`
+	Table     string                        `yaml:"table"`
+	BatchSize int                           `yaml:"batch_size,omitempty"`
+	FlushDur  string                        `yaml:"flush_dur,omitempty"`
+	Auth      *common.ClickHouseAuthConfig  `yaml:"auth,omitempty"`
+	TLS       *common.ClickHouseTLSConfig   `yaml:"tls,omitempty"`
+}
+
 // Output is the runtime output instance.
 type Output struct {
 	Status              common.Status
@@ -80,12 +93,14 @@ type Output struct {
 	// runtime
 	kafkaProducer         *common.KafkaProducer
 	elasticsearchProducer *common.ElasticsearchProducer
+	clickhouseProducer    *common.ClickHouseProducer
 	wg                    sync.WaitGroup
 
 	// config cache
 	kafkaCfg         *KafkaOutputConfig
 	elasticsearchCfg *ElasticsearchOutputConfig
 	aliyunSLSCfg     *AliyunSLSOutputConfig
+	clickhouseCfg    *ClickHouseOutputConfig
 
 	// metrics - only total count is needed now
 	produceTotal      uint64 // cumulative production total
@@ -174,6 +189,19 @@ func Verify(path string, raw string) error {
 			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS output (line: unknown)")
 		}
 		// Add more AliyunSLS specific field validation
+	case OutputTypeClickHouse:
+		if cfg.ClickHouse == nil {
+			return fmt.Errorf("missing required field 'clickhouse' for clickhouse output (line: unknown)")
+		}
+		if len(cfg.ClickHouse.Hosts) == 0 {
+			return fmt.Errorf("missing required field 'clickhouse.hosts' for clickhouse output (line: unknown)")
+		}
+		if cfg.ClickHouse.Database == "" {
+			return fmt.Errorf("missing required field 'clickhouse.database' for clickhouse output (line: unknown)")
+		}
+		if cfg.ClickHouse.Table == "" {
+			return fmt.Errorf("missing required field 'clickhouse.table' for clickhouse output (line: unknown)")
+		}
 	case OutputTypePrint:
 		// Print output doesn't require external connectivity
 	default:
@@ -209,6 +237,7 @@ func NewOutput(path string, raw string, id string) (*Output, error) {
 		kafkaCfg:         cfg.Kafka,
 		elasticsearchCfg: cfg.Elasticsearch,
 		aliyunSLSCfg:     cfg.AliyunSLS,
+		clickhouseCfg:    cfg.ClickHouse,
 		Config:           &cfg,
 		sampler:          nil, // Will be set below based on cluster role
 		Status:           common.StatusStopped,
@@ -245,6 +274,11 @@ func (out *Output) cleanup() {
 	if out.elasticsearchProducer != nil {
 		out.elasticsearchProducer.Close()
 		out.elasticsearchProducer = nil
+	}
+
+	if out.clickhouseProducer != nil {
+		out.clickhouseProducer.Close()
+		out.clickhouseProducer = nil
 	}
 
 	// Reset atomic counter
@@ -747,6 +781,124 @@ func (out *Output) Start() error {
 			}
 		}()
 
+	case OutputTypeClickHouse:
+		if out.clickhouseProducer != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("clickhouse producer already running for output %s", out.Id))
+			return fmt.Errorf("clickhouse producer already running for output %s", out.Id)
+		}
+		if out.clickhouseCfg == nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("clickhouse configuration missing for output %s", out.Id))
+			return fmt.Errorf("clickhouse configuration missing for output %s", out.Id)
+		}
+
+		msgChan := make(chan map[string]interface{}, 1024)
+		batchSize := 1000
+		if out.clickhouseCfg.BatchSize > 0 {
+			batchSize = out.clickhouseCfg.BatchSize
+		}
+		flushDur := 3 * time.Second
+		if out.clickhouseCfg.FlushDur != "" {
+			if d, err := time.ParseDuration(out.clickhouseCfg.FlushDur); err == nil {
+				flushDur = d
+			}
+		}
+		producer, err := common.NewClickHouseProducer(
+			out.clickhouseCfg.Hosts,
+			out.clickhouseCfg.Database,
+			out.clickhouseCfg.Table,
+			msgChan,
+			batchSize,
+			flushDur,
+			out.clickhouseCfg.Auth,
+			out.clickhouseCfg.TLS,
+		)
+		if err != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("failed to create clickhouse producer for output %s: %v", out.Id, err))
+			return fmt.Errorf("failed to create clickhouse producer for output %s: %v", out.Id, err)
+		}
+		out.clickhouseProducer = producer
+
+		// Initialize stop channel for this output
+		if out.stopChan == nil {
+			out.stopChan = make(chan struct{})
+		}
+
+		// Start goroutine to read from UpStream and send enhanced messages to msgChan for ClickHouse producer
+		out.wg.Add(1)
+		go func() {
+			defer out.wg.Done()
+			defer close(msgChan)
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic in clickhouse output goroutine", "output", out.Id, "panic", r)
+				}
+			}()
+
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-out.stopChan:
+					logger.Debug("ClickHouse output goroutine received stop signal", "id", out.Id)
+					return
+				case <-ticker.C:
+					select {
+					case <-out.stopChan:
+						logger.Debug("ClickHouse output goroutine received stop signal before processing", "id", out.Id)
+						return
+					default:
+					}
+
+					for _, up := range out.UpStream {
+						select {
+						case <-out.stopChan:
+							logger.Debug("ClickHouse output goroutine received stop signal during upstream processing", "id", out.Id)
+							return
+						default:
+						}
+
+						select {
+						case msg, ok := <-*up:
+							if !ok {
+								continue
+							}
+
+							atomic.AddUint64(&out.produceTotal, 1)
+
+							if out.sampler != nil {
+								out.sampler.Sample(msg, out.ProjectNodeSequence)
+							}
+
+							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+							if hasTestCollector {
+								select {
+								case *out.TestCollectionChan <- enhancedMsg:
+								default:
+									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
+								}
+							}
+
+							select {
+							case msgChan <- enhancedMsg:
+							default:
+								logger.Warn("ClickHouse producer channel full, dropping message", "id", out.Id)
+							}
+						default:
+						}
+					}
+
+					select {
+					case <-out.stopChan:
+						logger.Debug("ClickHouse output goroutine received stop signal after processing", "id", out.Id)
+						return
+					default:
+					}
+				}
+			}
+		}()
+
 	case OutputTypeAliyunSLS:
 		out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS output not implemented yet"))
 		return fmt.Errorf("aliyun SLS output not implemented yet")
@@ -790,6 +942,11 @@ func (out *Output) Stop() error {
 		logger.Debug("Closing elasticsearch producer", "id", out.Id)
 		out.elasticsearchProducer.Close()
 		out.elasticsearchProducer = nil
+	}
+	if out.clickhouseProducer != nil {
+		logger.Debug("Closing clickhouse producer", "id", out.Id)
+		out.clickhouseProducer.Close()
+		out.clickhouseProducer = nil
 	}
 
 	// Step 3: Wait for goroutines to finish with timeout and force cleanup if needed
@@ -1043,6 +1200,78 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 			}
 		}
 
+	case OutputTypeClickHouse:
+		if out.clickhouseCfg == nil {
+			result["status"] = "error"
+			result["message"] = "ClickHouse configuration missing"
+			result["details"].(map[string]interface{})["connection_status"] = "not_configured"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": "ClickHouse configuration is incomplete or missing", "severity": "error"},
+			}
+			return result
+		}
+
+		// Set connection info
+		connectionInfo := map[string]interface{}{
+			"hosts":    out.clickhouseCfg.Hosts,
+			"database": out.clickhouseCfg.Database,
+			"table":    out.clickhouseCfg.Table,
+		}
+		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
+
+		// Test actual connectivity to ClickHouse
+		err := common.TestClickHouseConnection(out.clickhouseCfg.Hosts, out.clickhouseCfg.Auth, out.clickhouseCfg.TLS)
+		if err != nil {
+			result["status"] = "error"
+			result["message"] = "Failed to connect to ClickHouse"
+			result["details"].(map[string]interface{})["connection_status"] = "connection_failed"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": err.Error(), "severity": "error"},
+			}
+			return result
+		}
+
+		// Test if table exists
+		tableExists, err := common.TestClickHouseTableExists(out.clickhouseCfg.Hosts, out.clickhouseCfg.Database, out.clickhouseCfg.Table, out.clickhouseCfg.Auth, out.clickhouseCfg.TLS)
+		if err != nil {
+			result["status"] = "warning"
+			result["message"] = "Connected to ClickHouse but failed to verify table"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_table_unknown"
+			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Could not verify table existence: %v", err), "severity": "warning"},
+			}
+		} else if !tableExists {
+			result["status"] = "error"
+			result["message"] = "Connected to ClickHouse but table does not exist"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_table_missing"
+			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
+				{"message": fmt.Sprintf("Table '%s.%s' does not exist", out.clickhouseCfg.Database, out.clickhouseCfg.Table), "severity": "error"},
+			}
+			return result
+		} else {
+			result["details"].(map[string]interface{})["connection_status"] = "connected"
+			result["message"] = "Successfully connected to ClickHouse and verified table"
+		}
+
+		// Get server info for additional details
+		serverInfo, err := common.GetClickHouseServerInfo(out.clickhouseCfg.Hosts, out.clickhouseCfg.Auth, out.clickhouseCfg.TLS)
+		if err == nil {
+			result["details"].(map[string]interface{})["server_info"] = serverInfo
+		}
+
+		// Add producer metrics if available
+		if out.clickhouseProducer != nil {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"produce_total":   out.GetProduceTotal(),
+				"producer_active": true,
+				"batch_size":      out.clickhouseCfg.BatchSize,
+			}
+		} else {
+			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
+				"producer_active": false,
+			}
+		}
+
 	case OutputTypePrint:
 		// Print output doesn't require external connectivity testing
 		result["status"] = "success"
@@ -1173,6 +1402,7 @@ func NewFromExisting(existing *Output, newProjectNodeSequence string) (*Output, 
 		kafkaCfg:            existing.kafkaCfg,
 		elasticsearchCfg:    existing.elasticsearchCfg,
 		aliyunSLSCfg:        existing.aliyunSLSCfg,
+		clickhouseCfg:       existing.clickhouseCfg,
 		Config:              existing.Config,
 		Status:              common.StatusStopped, // Initialize status to stopped
 		TestCollectionChan:  nil,                  // Reset for new instance
@@ -1212,6 +1442,10 @@ func (out *Output) GetPendingMessageCount() int {
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
 			pendingCount += len(out.elasticsearchProducer.MsgChan)
+		}
+	case OutputTypeClickHouse:
+		if out.clickhouseProducer != nil && out.clickhouseProducer.MsgChan != nil {
+			pendingCount += len(out.clickhouseProducer.MsgChan)
 		}
 	}
 

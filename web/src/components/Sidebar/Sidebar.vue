@@ -3596,6 +3596,7 @@ function getOutputTypeInfo(item) {
     'kafka_azure': { icon: 'AK', color: 'bg-blue-100 text-blue-800', tooltip: 'Azure Kafka Output' },
     'kafka_aws': { icon: 'WK', color: 'bg-yellow-100 text-yellow-800', tooltip: 'AWS Kafka Output' },
     'elasticsearch': { icon: 'ES', color: 'bg-purple-100 text-purple-800', tooltip: 'Elasticsearch Output' },
+    'clickhouse': { icon: 'CH', color: 'bg-amber-100 text-amber-800', tooltip: 'ClickHouse Output' },
     'aliyun_sls': { icon: 'SLS', color: 'bg-green-100 text-green-800', tooltip: 'Aliyun SLS Output' },
     'print': { icon: 'P', color: 'bg-gray-100 text-gray-800', tooltip: 'Print Output' },
     'unknown': { icon: '?', color: 'bg-gray-100 text-gray-800', tooltip: 'Unknown Output Type' }

@@ -258,6 +258,35 @@ index: "metrics-{YYYY.MM}"        # metrics-2024.01
 index: "hourly-{YYYY.MM.DD}-{HH}" # hourly-2024.01.15-14
 ```
 
+##### ClickHouse
+```yaml
+type: clickhouse
+clickhouse:
+  hosts:
+    - "http://localhost:8123"
+  database: "default"
+  table: "security_events"
+  batch_size: 1000  # 批量写入大小（默认：1000）
+  flush_dur: "3s"   # 刷新间隔（默认：3s）
+  # 认证配置（可选）
+  auth:
+    username: "default"
+    password: "password"
+  # TLS 配置（可选）
+  tls:
+    enable: true
+    insecure_skip_verify: false
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/client-cert.pem"
+    key_file: "/path/to/client-key.pem"
+```
+
+**说明：**
+- 使用 ClickHouse HTTP 接口进行数据写入（默认端口：8123，HTTPS：8443）
+- 数据以 `JSONEachRow` 格式写入，ClickHouse 自动处理类型转换
+- 支持多个 hosts 进行负载均衡（轮询方式）
+- 目标表需要在 ClickHouse 中预先创建
+- 使用 HTTPS 时，hosts 中使用 `https://` 前缀并启用 TLS 配置
 
 ### 1.3 PROJECT 语法说明
 

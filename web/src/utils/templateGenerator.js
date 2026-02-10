@@ -138,7 +138,27 @@ kafka:
 #   #   # For API key auth:
 #   #   # api_key: "your-api-key"
 #   #   # For bearer token auth:
-#   #   # token: "your-bearer-token"`;
+#   #   # token: "your-bearer-token"
+
+# Alternative ClickHouse output example:
+# name: ${id}
+# type: clickhouse
+# clickhouse:
+#   hosts:
+#     - "http://localhost:8123"
+#   database: "default"
+#   table: "table_name"
+#   batch_size: 1000
+#   flush_dur: "3s"
+#   # Uncomment below for authentication
+#   # auth:
+#   #   username: "default"
+#   #   password: "password"
+#   # Uncomment below for TLS
+#   # tls:
+#   #   enable: true
+#   #   insecure_skip_verify: false
+#   #   ca_file: "/path/to/ca.pem"`;
 }
 
 /**

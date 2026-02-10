@@ -2179,6 +2179,7 @@ function getOutputValueCompletions(context, range, fullText) {
       { value: 'kafka_azure', description: 'Azure Event Hubs (Kafka) output' },
       { value: 'kafka_aws', description: 'AWS MSK (Kafka) output' },
       { value: 'elasticsearch', description: 'Elasticsearch output destination' },
+      { value: 'clickhouse', description: 'ClickHouse output destination' },
       { value: 'aliyun_sls', description: 'Alibaba Cloud SLS output destination' },
       { value: 'print', description: 'Console print output for debugging' }
     ];
@@ -2257,12 +2258,20 @@ function getOutputValueCompletions(context, range, fullText) {
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
         range: range
       });
-    } else if (context.currentSection === 'elasticsearch' || context.beforeCursor.includes('hosts')) {
+    } else if (context.currentSection === 'elasticsearch') {
       suggestions.push({
         label: 'http://host:port',
         kind: monaco.languages.CompletionItemKind.Snippet,
         documentation: 'Elasticsearch host URL format',
         insertText: 'http://localhost:9200',
+        range: range
+      });
+    } else if (context.currentSection === 'clickhouse') {
+      suggestions.push({
+        label: 'http://host:port',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'ClickHouse HTTP endpoint format (default port: 8123, HTTPS: 8443)',
+        insertText: 'http://localhost:8123',
         range: range
       });
     }
@@ -2367,7 +2376,7 @@ function getOutputKeyCompletions(context, range, fullText) {
       suggestions.push({
         label: 'type',
         kind: monaco.languages.CompletionItemKind.Property,
-        documentation: 'Output destination type - choose from: kafka, kafka_azure, kafka_aws, elasticsearch, aliyun_sls, print',
+        documentation: 'Output destination type - choose from: kafka, kafka_azure, kafka_aws, elasticsearch, clickhouse, aliyun_sls, print',
         insertText: 'type:',
         range: range,
         sortText: '000_type'
@@ -2375,7 +2384,7 @@ function getOutputKeyCompletions(context, range, fullText) {
     }
     
     // 根据type提供相应的配置段
-    const typeMatch = fullText.match(/type:\s*(kafka|kafka_azure|kafka_aws|elasticsearch|aliyun_sls|print)/);
+    const typeMatch = fullText.match(/type:\s*(kafka|kafka_azure|kafka_aws|elasticsearch|clickhouse|aliyun_sls|print)/);
     if (typeMatch) {
       const outputType = typeMatch[1];
       
@@ -2452,6 +2461,34 @@ function getOutputKeyCompletions(context, range, fullText) {
             '  #   type: basic',
             '  #   username: "elastic"',
             '  #   password: "password"'
+          ].join('\n'),
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range: range
+        });
+      }
+      
+      if (outputType === 'clickhouse' && !fullText.includes('clickhouse:')) {
+        suggestions.push({
+          label: 'clickhouse',
+          kind: monaco.languages.CompletionItemKind.Module,
+          documentation: 'ClickHouse output configuration section with auth and TLS example',
+          insertText: [
+            'clickhouse:',
+            '  hosts:',
+            '    - "http://localhost:8123"',
+            '  database: "default"',
+            '  table: "table_name"',
+            '  batch_size: 1000',
+            '  flush_dur: "3s"',
+            '  # auth:',
+            '  #   username: "default"',
+            '  #   password: "password"',
+            '  # tls:',
+            '  #   enable: false',
+            '  #   insecure_skip_verify: false',
+            '  #   ca_file: "/path/to/ca.pem"',
+            '  #   cert_file: "/path/to/client-cert.pem"',
+            '  #   key_file: "/path/to/client-key.pem"'
           ].join('\n'),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range: range
@@ -2537,6 +2574,51 @@ function getOutputKeyCompletions(context, range, fullText) {
     ];
     
     authKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // ClickHouse配置段内部
+  else if (context.currentSection === 'clickhouse') {
+    const chKeys = [
+      { key: 'hosts', desc: 'ClickHouse HTTP endpoint addresses (e.g. http://localhost:8123)' },
+      { key: 'database', desc: 'ClickHouse database name' },
+      { key: 'table', desc: 'ClickHouse table name' },
+      { key: 'batch_size', desc: 'Batch size for bulk inserts (default: 1000)' },
+      { key: 'flush_dur', desc: 'Flush duration for batching (default: 3s)' },
+      { key: 'auth', desc: 'Authentication configuration (username/password)' },
+      { key: 'tls', desc: 'TLS configuration' }
+    ];
+    
+    chKeys.forEach(item => {
+      if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
+        suggestions.push({
+          label: item.key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: item.desc,
+          insertText: `${item.key}:`,
+          range: range
+        });
+      }
+    });
+  }
+  
+  // ClickHouse Auth配置段内部
+  else if (context.currentSection === 'auth' && context.parentSection === 'clickhouse') {
+    const chAuthKeys = [
+      { key: 'username', desc: 'ClickHouse username (default: "default")' },
+      { key: 'password', desc: 'ClickHouse password' }
+    ];
+    
+    chAuthKeys.forEach(item => {
       if (!fullText.includes(`${item.key}:`) && !suggestions.some(s => s.label === item.key)) {
         suggestions.push({
           label: item.key,
