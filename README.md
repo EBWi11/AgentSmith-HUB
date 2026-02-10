@@ -1,94 +1,174 @@
 # AgentSmith-HUB
 
-> **Enterprise Security Data Pipeline Platform (SDPP) with Integrated Real-Time Threat Detection Engine**
-
-AgentSmith-HUB is a **Security Data Pipeline Platform** designed to provide comprehensive security data processing, real-time threat detection, and automated incident response capabilities. It enables security teams to build, deploy, and manage sophisticated detection and response workflows at enterprise scale.
-
-![Dashboard.png](docs/png/Dashboard.png)
-
-If you have a lot of raw logs, security alarms that need to be processed, enriched, and linked with other systems, then the HUB will be your best tool to help you get the job done efficiently, standardized, and with very low learning costs.
-![ExampleRule01.png](docs/png/ExampleRule01.png)
-
-If you have an intrusion detection scenario, then the HUB can also support complex intrusion detection syntax, and the HUB has extremely high performance, which can easily and efficiently handle large amounts of data. And the HUB supports cluster mode, so you can easily expand capacity.
-![ExampleRule02.png](docs/png/ExampleRule02.png)
-
-From this, we can see that HUB's Ruleset syntax is actually very simple, using the following combinations for detection and data operations:
-
-* **\<check\>**: Used for detection, supporting common operations like regex matching, string matching, numeric comparisons, custom plugins, etc.
-* **\<checklist\>**: Used for detection, supporting logical operator combinations of `<check>` with and, or, not, and parentheses.
-* **\<threshold\>**: Used for detection, supporting frequency statistics and threshold judgment of data.
-* **\<append\>**: Used for data operations, supporting data appending, modification, and other operations, with support for custom plugins.
-* **\<del\>**: Used for data operations, for deleting data.
-* **\<plugin\>**: Calls custom plugins, commonly used for calling external APIs and other operations.
-
-The execution order of the rules engine follows the order written by the user, for example:
-
-* First use **\<append\>** to append threat intelligence data to the original data, then use **\<check\>** to evaluate the threat intelligence content.
-* First use **\<check\>** to detect the original data, and after passing, use **\<append\>** to enrich the data.
-
-In summary, HUB provides simple and flexible syntax that can well support various security scenarios for detection, data processing, alert handling, and other requirements.
+[![GitHub release](https://img.shields.io/github/v/release/EBWi11/AgentSmith-HUB)](https://github.com/EBWi11/AgentSmith-HUB/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0%20with%20Commons%20Clause-blue)](./LICENSE)
 
 
-<br>
+**A high-performance security data pipeline platform with a built-in real-time rules engine.**
 
-The HUB not only has a powerful rules engine and plug-in mechanism, but also has a very flexible data orchestration mechanism, which can easily meet various needs in the workplace.
-![ExampleProject.png](docs/png/ExampleProject.png)
+Process, enrich, detect, and respond — all in one place, with simple XML-based rules.
 
-### Function Show
-Input Connect Check
-![InputEditConnectCheck.gif](docs/GIF/InputEditConnectCheck.gif)
+![Dashboard](docs/png/Dashboard.png)
 
-Rule Edit
-![RuleEdit.gif](docs/GIF/RuleEdit.gif)
+---
 
-Rule Test
-![RuleTest.gif](docs/GIF/RuleTest.gif)
+## Why AgentSmith-HUB?
 
-Project Edit
-![ProjectEdit.gif](docs/GIF/ProjectEdit.gif)
+If you work in security operations, you probably deal with massive volumes of raw logs and alerts every day. You need to normalize, enrich, correlate, and route them — and ideally detect threats in real time. AgentSmith-HUB is built to handle all of this in a single platform:
 
-Plugin Test
-![Plugintest.gif](docs/GIF/Plugintest.gif)
+- **No coding required** — Write detection and processing logic in simple, readable XML rules
+- **Blazing fast** — 40,000+ messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md))
+- **All-in-one pipeline** — Input, detection, enrichment, transformation, and output in a unified flow
+- **Scale horizontally** — Built-in cluster mode with leader/follower architecture
+- **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, and more
+- **Modern Web UI** — Visual rule editing, project orchestration, real-time testing, and log search
+- **MCP support** — Integrate with AI-powered tools for intelligent rule management
 
-Search
-![Search.gif](docs/GIF/Search.gif)
+## How It Works
 
-Errlog & Operations
-![ErrlogOperations.gif](docs/GIF/ErrlogOperations.gif)
+AgentSmith-HUB uses a straightforward pipeline model:
 
-MCP
-![MCP.png](docs/png/MCP.png)
+```
+INPUT (Kafka / SLS / ...) → RULESET (detect & transform) → OUTPUT (Kafka / ES / SLS / ...)
+```
 
+Multiple rulesets can be chained together within a **Project**, giving you full control over data flow:
 
+![ExampleProject](docs/png/ExampleProject.png)
 
-### Guide
-[Agentsmith-HUB Guide](docs/agentsmith-hub-guide.md)
+### Rules Engine Syntax
 
+The rules engine uses six intuitive XML elements:
 
+| Element | Purpose | Example |
+|---------|---------|---------|
+| `<check>` | Detection — regex, string match, numeric comparison, plugin | `<check type="REGEX" field="src_ip">^10\..*</check>` |
+| `<checklist>` | Logical combination of checks (AND / OR / NOT) | `<checklist condition="a and (b or c)">` |
+| `<threshold>` | Frequency-based detection with time windows | Detect brute-force: 5 failures in 60s |
+| `<append>` | Enrich or modify data fields | `<append type="PLUGIN" field="geo">geoMatch(src_ip)</append>` |
+| `<del>` | Remove fields from data | `<del>sensitive_field</del>` |
+| `<plugin>` | Call external APIs or custom logic | Threat intel lookup, enrichment, etc. |
 
-### Performance Testing Report
-[Performance Testing Report](docs/performance-testing-report.md)
+Rules execute **in the order you write them**, so you can freely combine detection and transformation:
 
+```xml
+<rule id="enrich_and_detect">
+    <!-- First, enrich with threat intelligence -->
+    <append type="PLUGIN" field="threat_info">threatbook(src_ip)</append>
+    <!-- Then, detect based on enriched data -->
+    <check type="EQU" field="threat_info.severity">high</check>
+    <!-- Finally, add metadata -->
+    <append field="alert_level">critical</append>
+</rule>
+```
 
+![ExampleRule01](docs/png/ExampleRule01.png)
+![ExampleRule02](docs/png/ExampleRule02.png)
 
-### Deployment Tutorial
+## Features at a Glance
 
-1. unzip and tar -xf AgentSmith-HUB, And make sure the hub folder is under /opt/: `/opt/agentsmith-hub`
-2. Copy hub config folder to /opt/, `cp -r /opt/agentsmith-hub/config /opt/`
-3. Install redis and configure it in `/opt/hub_config/config.yaml`
-4. Run start.sh or stop.sh under the hub to start or stop the hub backend service, like: `./start.sh`, The start.sh default mode is Leader, `./start.sh --follower` will run in follower mode. In this mode, config.yaml needs to be consistent with Leader (that is, use the same Redis instance); For more information, see `./start.sh --help`.
-5. The first time you run the backend, a token will be created, located in `/etc/hub/.token`
-6. The backend logs are located in `/var/log/hub_logs/`
-7. Install Nginx, and `sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/`(This will overwrite your previous nginx.conf. Please back it up in advance if necessary), and run `sudo nginx -t reload`, the frontend will work on port 80 and a token is required for access.
+<table>
+<tr>
+<td width="50%">
 
+**Rule Editing**
 
+![RuleEdit](docs/GIF/RuleEdit.gif)
 
-### License
+</td>
+<td width="50%">
 
-AgentSmith-HUB is licensed under the Apache License 2.0 with the Commons Clause restriction. This means:
+**Rule Testing**
 
-- You are free to use, modify, and distribute the software for personal or non-commercial purposes.
-- Commercial use, including direct or indirect integration into commercial products or services, is strictly prohibited.
+![RuleTest](docs/GIF/RuleTest.gif)
 
-For more details, see the [LICENSE](./LICENSE) file.
+</td>
+</tr>
+<tr>
+<td>
 
+**Project Orchestration**
+
+![ProjectEdit](docs/GIF/ProjectEdit.gif)
+
+</td>
+<td>
+
+**Plugin Testing**
+
+![Plugintest](docs/GIF/Plugintest.gif)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Input Connection Check**
+
+![InputEditConnectCheck](docs/GIF/InputEditConnectCheck.gif)
+
+</td>
+<td>
+
+**Search**
+
+![Search](docs/GIF/Search.gif)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Error Logs & Operations History**
+
+![ErrlogOperations](docs/GIF/ErrlogOperations.gif)
+
+</td>
+<td>
+
+**MCP Integration**
+
+![MCP](docs/png/MCP.png)
+
+</td>
+</tr>
+</table>
+
+## Deployment
+
+1. Download and extract the release archive to `/opt/agentsmith-hub`
+2. Copy the config folder: `cp -r /opt/agentsmith-hub/config /opt/`
+3. Configure Redis in `/opt/hub_config/config.yaml`
+4. Start the service:
+   ```bash
+   # Leader mode (default)
+   ./start.sh
+
+   # Follower mode (uses the same Redis as leader)
+   ./start.sh --follower
+
+   # See all options
+   ./start.sh --help
+   ```
+5. Access token is generated at `/etc/hub/.token` on first run
+6. Install and configure Nginx:
+   ```bash
+   sudo cp /opt/agentsmith-hub/nginx/nginx.conf /etc/nginx/
+   sudo nginx -s reload
+   ```
+7. Open `http://your-host` in your browser (port 80)
+
+### Kubernetes
+
+K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
+
+## Documentation
+
+- [Complete Guide](docs/agentsmith-hub-guide.md) | [Guide (Chinese)](docs/agentsmith-hub-guide-zh.md)
+- [Performance Testing Report](docs/performance-testing-report.md)
+
+## License
+
+AgentSmith-HUB is licensed under the [Apache License 2.0](./LICENSE) with the Commons Clause restriction.
+
+You are free to use, modify, and deploy this software — the restriction only prevents selling the software itself as a commercial product or service. Internal enterprise use is fully permitted.
