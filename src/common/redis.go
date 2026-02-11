@@ -322,6 +322,11 @@ func RedisDelMultiple(keys ...string) error {
 	return rdb.Del(ctx, keys...).Err()
 }
 
+// RedisEval executes a Lua script on Redis.
+func RedisEval(script string, keys []string, args ...interface{}) (interface{}, error) {
+	return rdb.Eval(ctx, script, keys, args...).Result()
+}
+
 // ===================== Hash and Pub/Sub Helpers =====================
 
 // RedisHSet sets a field in a Redis hash (no expiration)

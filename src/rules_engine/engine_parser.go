@@ -101,6 +101,7 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					PluginMap:    make(map[int]Plugin),
 					ModifyMap:    make(map[int]Modify),
 					DelMap:       make(map[int][][]string),
+					SequenceMap:  make(map[int]Sequence),
 				}
 
 				// Parse rule attributes
@@ -257,6 +258,21 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					currentRule.DelMap[operatorIDCounter] = delFields
 					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
 						Type: T_Del,
+						ID:   operatorIDCounter,
+					})
+				}
+
+			case "sequence":
+				if currentRule != nil {
+					seq, err := parseSequence(element, decoder, elementLine)
+					if err != nil {
+						return nil, err
+					}
+
+					operatorIDCounter++
+					currentRule.SequenceMap[operatorIDCounter] = seq
+					*currentRule.Queue = append(*currentRule.Queue, EngineOperator{
+						Type: T_Sequence,
 						ID:   operatorIDCounter,
 					})
 				}
@@ -462,6 +478,198 @@ func parseIteratorChecklist(element xml.StartElement, decoder *XMLDecoder, eleme
 			}
 		}
 	}
+}
+
+// parseSequence parses a <sequence> element and its nested <event> and <condition> children.
+func parseSequence(element xml.StartElement, decoder *XMLDecoder, elementLine int) (Sequence, error) {
+	seq := Sequence{
+		Events: make(map[string]*EventDef),
+	}
+
+	// Parse <sequence> attributes
+	for _, attr := range element.Attr {
+		switch attr.Name.Local {
+		case "within":
+			within := strings.TrimSpace(attr.Value)
+			if within == "" {
+				return seq, fmt.Errorf("sequence 'within' attribute cannot be empty at line %d", elementLine)
+			}
+			seq.Within = within
+		case "group_by":
+			groupBy := strings.TrimSpace(attr.Value)
+			if groupBy != "" {
+				seq.GroupBy = groupBy
+			}
+		case "local_cache":
+			val := strings.TrimSpace(strings.ToLower(attr.Value))
+			seq.LocalCache = (val == "true")
+		case "compress":
+			val := strings.TrimSpace(strings.ToLower(attr.Value))
+			seq.Compress = (val == "true")
+		}
+	}
+
+	if seq.Within == "" {
+		return seq, fmt.Errorf("sequence 'within' attribute is required at line %d", elementLine)
+	}
+
+	// Parse nested elements
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return seq, fmt.Errorf("error parsing sequence content at line %d: %v", elementLine, err)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "event":
+				eventDef, err := parseSequenceEvent(t, decoder, decoder.line)
+				if err != nil {
+					return seq, err
+				}
+				if eventDef.ID == "" {
+					return seq, fmt.Errorf("event 'id' attribute is required at line %d", decoder.line)
+				}
+				if _, exists := seq.Events[eventDef.ID]; exists {
+					return seq, fmt.Errorf("duplicate event id '%s' in sequence at line %d", eventDef.ID, decoder.line)
+				}
+				seq.Events[eventDef.ID] = &eventDef
+				seq.EventOrder = append(seq.EventOrder, eventDef.ID)
+			case "condition":
+				// Parse <condition> text content
+				var condBuf strings.Builder
+				for {
+					inner, err := decoder.Token()
+					if err != nil {
+						return seq, fmt.Errorf("error parsing condition content at line %d: %v", decoder.line, err)
+					}
+					switch v := inner.(type) {
+					case xml.CharData:
+						condBuf.Write(v)
+					case xml.EndElement:
+						if v.Name.Local == "condition" {
+							goto conditionDone
+						}
+					}
+				}
+			conditionDone:
+				condExpr := strings.TrimSpace(condBuf.String())
+				if condExpr == "" {
+					return seq, fmt.Errorf("sequence condition expression cannot be empty at line %d", decoder.line)
+				}
+				seq.ConditionExpr = condExpr
+			default:
+				if err := decoder.Skip(); err != nil {
+					return seq, fmt.Errorf("error skipping unknown element '%s' in sequence at line %d: %v", t.Name.Local, decoder.line, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "sequence" {
+				// Validate minimum requirements
+				if len(seq.Events) < 2 {
+					return seq, fmt.Errorf("sequence must contain at least 2 event definitions at line %d", elementLine)
+				}
+				if seq.ConditionExpr == "" {
+					return seq, fmt.Errorf("sequence must contain a <condition> element at line %d", elementLine)
+				}
+				return seq, nil
+			}
+		}
+	}
+
+	return seq, fmt.Errorf("unexpected end of sequence element at line %d", elementLine)
+}
+
+// parseSequenceEvent parses an <event> element within a <sequence>.
+func parseSequenceEvent(element xml.StartElement, decoder *XMLDecoder, elementLine int) (EventDef, error) {
+	var eventDef EventDef
+
+	// Parse <event> attributes
+	for _, attr := range element.Attr {
+		switch attr.Name.Local {
+		case "id":
+			id := strings.TrimSpace(attr.Value)
+			if id == "" {
+				return eventDef, fmt.Errorf("event 'id' attribute cannot be empty at line %d", elementLine)
+			}
+			if !isValidCEPEventID(id) {
+				return eventDef, fmt.Errorf("event id '%s' contains invalid characters (only alphanumeric, underscore, hyphen allowed) at line %d", id, elementLine)
+			}
+			// Reject event IDs that clash with CEP condition operators
+			lower := strings.ToLower(id)
+			if lower == "and" || lower == "or" || lower == "not" {
+				return eventDef, fmt.Errorf("event id '%s' conflicts with reserved keyword at line %d", id, elementLine)
+			}
+			eventDef.ID = id
+		case "event_time":
+			et := strings.TrimSpace(attr.Value)
+			if et != "" {
+				eventDef.EventTime = et
+			}
+		case "group_by":
+			gb := strings.TrimSpace(attr.Value)
+			if gb != "" {
+				eventDef.GroupBy = gb
+			}
+		}
+	}
+
+	if eventDef.ID == "" {
+		return eventDef, fmt.Errorf("event 'id' attribute is required at line %d", elementLine)
+	}
+
+	// Parse nested elements (check, checklist, threshold)
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return eventDef, fmt.Errorf("error parsing event content at line %d: %v", elementLine, err)
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "check":
+				checkNode, err := parseCheckNode(t, decoder, decoder.line)
+				if err != nil {
+					return eventDef, err
+				}
+				eventDef.CheckNodes = append(eventDef.CheckNodes, checkNode)
+			case "checklist":
+				cl, err := parseIteratorChecklist(t, decoder, decoder.line)
+				if err != nil {
+					return eventDef, err
+				}
+				eventDef.Checklists = append(eventDef.Checklists, cl)
+			case "threshold":
+				threshold, err := parseThreshold(t, decoder, decoder.line)
+				if err != nil {
+					return eventDef, err
+				}
+				eventDef.Thresholds = append(eventDef.Thresholds, threshold)
+			default:
+				if err := decoder.Skip(); err != nil {
+					return eventDef, fmt.Errorf("error skipping unknown element '%s' in event at line %d: %v", t.Name.Local, decoder.line, err)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "event" {
+				// Validate that event has at least one matching criterion
+				if len(eventDef.CheckNodes) == 0 && len(eventDef.Checklists) == 0 && len(eventDef.Thresholds) == 0 {
+					return eventDef, fmt.Errorf("event '%s' must have at least one check, checklist, or threshold at line %d", eventDef.ID, elementLine)
+				}
+				return eventDef, nil
+			}
+		}
+	}
+
+	return eventDef, fmt.Errorf("unexpected end of event element at line %d", elementLine)
 }
 
 func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine int) (CheckNodes, error) {

@@ -3351,6 +3351,70 @@ function getXmlAttributeValueCompletions(context, range) {
     }
   }
   
+  // sequence within attribute - time window suggestions
+  else if (context.currentTag === 'sequence' && context.currentAttribute === 'within') {
+    const timeRanges = ['30s', '1m', '2m', '5m', '10m', '15m', '30m', '1h', '6h', '12h', '1d'];
+    timeRanges.forEach(time => {
+      if (!suggestions.some(s => s.label === time)) {
+        suggestions.push({
+          label: time,
+          kind: monaco.languages.CompletionItemKind.Value,
+          documentation: `Time window: ${time}`,
+          insertText: time,
+          range: range
+        });
+      }
+    });
+  }
+
+  // sequence local_cache attribute
+  else if ((context.currentTag === 'sequence') && context.currentAttribute === 'local_cache') {
+    suggestions.push(
+      { label: 'true', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Use local Ristretto cache (single-node, high performance)', insertText: 'true', range: range },
+      { label: 'false', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Use Redis for distributed state (default)', insertText: 'false', range: range }
+    );
+  }
+
+  // sequence compress attribute
+  else if ((context.currentTag === 'sequence') && context.currentAttribute === 'compress') {
+    suggestions.push(
+      { label: 'true', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'Enable zstd compression for Redis state (saves memory, adds CPU cost)', insertText: 'true', range: range },
+      { label: 'false', kind: monaco.languages.CompletionItemKind.EnumMember, documentation: 'No compression (default, best performance)', insertText: 'false', range: range }
+    );
+  }
+
+  // event event_time attribute - field name suggestions
+  else if (context.currentTag === 'event' && context.currentAttribute === 'event_time') {
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Sample data field: ${field}`,
+            insertText: field,
+            range: range,
+            sortText: `0_${field}`
+          });
+        }
+      });
+    }
+    // Common timestamp field names
+    const commonTimestampFields = ['timestamp', '@timestamp', 'event_time', 'time', 'created_at', 'ts'];
+    commonTimestampFields.forEach(field => {
+      if (!suggestions.some(s => s.label === field)) {
+        suggestions.push({
+          label: field,
+          kind: monaco.languages.CompletionItemKind.Value,
+          documentation: `Common timestamp field: ${field}`,
+          insertText: field,
+          range: range,
+          sortText: `1_${field}`
+        });
+      }
+    });
+  }
+
   // group_by attribute - supports comma-separated field lists
   else if (context.currentAttribute === 'group_by') {
     // Add individual fields
@@ -3493,6 +3557,37 @@ function getXmlAttributeNameCompletions(context, range) {
         { label: 'variable', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Variable name for iteration', insertText: 'variable="variable-name"', range: range }
       );
       break;
+
+    case 'sequence': {
+      // Generate smart group_by suggestion with available fields
+      let seqGroupByTemplate = 'group_by="source_ip"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        seqGroupByTemplate = `group_by="${dynamicFieldKeys.value[0]}"`;
+      }
+      suggestions.push(
+        { label: 'within', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Time window for sequence completion (e.g., 30s, 5m, 1h, 1d)', insertText: 'within="5m"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'group_by', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Default correlation field(s) for all events (comma-separated)', insertText: seqGroupByTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'local_cache', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Use local Ristretto cache instead of Redis for state storage', insertText: 'local_cache="true"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'compress', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Enable zstd compression for Redis state storage (reduces memory at cost of CPU)', insertText: 'compress="true"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+      );
+      break;
+    }
+
+    case 'event': {
+      // Generate smart group_by and event_time suggestions
+      let eventGroupByTemplate = 'group_by="field_name"';
+      let eventTimeTemplate = 'event_time="timestamp"';
+      if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+        eventGroupByTemplate = `group_by="${dynamicFieldKeys.value[0]}"`;
+        eventTimeTemplate = `event_time="${dynamicFieldKeys.value[0]}"`;
+      }
+      suggestions.push(
+        { label: 'id', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Unique event identifier (required, referenced in condition)', insertText: 'id="event_id"', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'event_time', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Field containing event timestamp (optional, defaults to processing time)', insertText: eventTimeTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range },
+        { label: 'group_by', kind: monaco.languages.CompletionItemKind.Property, documentation: 'Per-event correlation field(s), overrides sequence default', insertText: eventGroupByTemplate, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, range: range }
+      );
+      break;
+    }
   }
   
   return { suggestions };
@@ -3613,6 +3708,14 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertText: 'iterator type="ALL" field="array_field" variable="it">\n    <check type="EQU" field="it">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
+      },
+      {
+        label: 'sequence',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'CEP sequence detection - detect ordered patterns across multiple events within a time window',
+        insertText: 'sequence within="5m" group_by="source_ip" local_cache="true">\n    <event id="login" event_time="timestamp">\n        <check type="EQU" field="event_type">login</check>\n    </event>\n    <event id="exfil" event_time="timestamp">\n        <check type="EQU" field="event_type">file_transfer</check>\n    </event>\n    <condition>login -> exfil</condition>\n</sequence',
+        range: range,
+        sortText: '8_sequence'
       }
     ];
     
@@ -3663,6 +3766,56 @@ function getXmlTagNameCompletions(context, range, fullText) {
     ];
     
     suggestions.push(...iteratorChildTags);
+  } else if (parentTag === 'sequence') {
+    // sequence内部 - event和condition标签
+    const sequenceChildTags = [
+      {
+        label: 'event',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Event definition within sequence (contains check/checklist/threshold)',
+        insertText: 'event id="event_id" event_time="timestamp">\n    <check type="EQU" field="event_type">value</check>\n</event',
+        range: range,
+        sortText: '1_event'
+      },
+      {
+        label: 'condition',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Temporal pattern expression (e.g., "a -> b", "a -> (b or c)", "a -> !b")',
+        insertText: 'condition>event1 -> event2</condition',
+        range: range,
+        sortText: '2_condition'
+      }
+    ];
+    suggestions.push(...sequenceChildTags);
+  } else if (parentTag === 'event') {
+    // event内部 - check, checklist, threshold标签
+    const eventChildTags = [
+      {
+        label: 'check',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Check condition within event definition',
+        insertText: 'check type="EQU" field="field">value</check',
+        range: range,
+        sortText: '1_check'
+      },
+      {
+        label: 'checklist',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'Checklist with conditional logic within event definition',
+        insertText: 'checklist condition="a and b">\n    <check id="a" type="EQU" field="field">value</check>\n    <check id="b" type="INCL" field="field">value</check>\n</checklist',
+        range: range,
+        sortText: '2_checklist'
+      },
+      {
+        label: 'threshold',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Threshold within event definition',
+        insertText: 'threshold group_by="user_id" range="5m">10</threshold',
+        range: range,
+        sortText: '3_threshold'
+      }
+    ];
+    suggestions.push(...eventChildTags);
   }
   
   // If user is typing tag name but no parent tag found, provide all possible tags
@@ -3731,7 +3884,18 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertText: 'iterator type="ALL" field="array_field" variable="it">\n    <check type="EQU" field="it">value</check>\n</iterator',
         range: range,
         sortText: '7_iterator'
-      }
+      },
+      {
+        label: 'sequence',
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: 'CEP sequence detection - detect ordered patterns across multiple events',
+        insertText: 'sequence within="5m" group_by="source_ip" local_cache="true">\n    <event id="login" event_time="timestamp">\n        <check type="EQU" field="event_type">login</check>\n    </event>\n    <event id="exfil" event_time="timestamp">\n        <check type="EQU" field="event_type">file_transfer</check>\n    </event>\n    <condition>login -> exfil</condition>\n</sequence',
+        range: range,
+        sortText: '8_sequence'
+      },
+      // Note: <event> and <condition> are only valid inside <sequence>,
+      // so they are NOT included in fallback completions.
+      
     );
   }
   

@@ -252,8 +252,183 @@ func (r *Ruleset) Start() error {
 		}(upID, upCh)
 	}
 
+	// Start absence scanner goroutine if any rule has sequences with absence stages
+	if r.hasAbsenceSequences && r.seqStateManager != nil {
+		r.wg.Add(1)
+		go r.absenceScannerLoop()
+	}
+
 	r.SetStatus(common.StatusRunning, nil)
 	return nil
+}
+
+// absenceScannerLoop periodically checks for expired absence sequences and triggers alerts.
+func (r *Ruleset) absenceScannerLoop() {
+	defer r.wg.Done()
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			logger.Error("Panic in absence scanner, restarting", "ruleset", r.RulesetID, "panic", panicErr)
+			// Check if we're shutting down before restarting
+			select {
+			case <-r.stopChan:
+				return // Don't restart during shutdown
+			default:
+			}
+			time.Sleep(2 * time.Second)
+			r.wg.Add(1)
+			go r.absenceScannerLoop()
+		}
+	}()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.stopChan:
+			return
+		case <-ticker.C:
+			r.scanAbsenceTimeouts()
+		}
+	}
+}
+
+// scanAbsenceTimeouts checks for expired absence sequences and triggers them.
+func (r *Ruleset) scanAbsenceTimeouts() {
+	nowMs := time.Now().UnixMilli()
+	expiredKeys := r.seqStateManager.GetExpiredAbsenceKeys(nowMs)
+
+	for key, info := range expiredKeys {
+		// Lock the state key to prevent concurrent modification
+		r.seqStateManager.LockKey(key)
+
+		state := r.seqStateManager.GetState(key)
+		if state == nil {
+			r.seqStateManager.UnlockKey(key)
+			r.seqStateManager.CleanupKeyLock(key)
+			continue // Already cleaned up
+		}
+
+		// Find the rule and sequence
+		var rule *Rule
+		for i := range r.Rules {
+			if r.Rules[i].ID == info.RuleID {
+				rule = &r.Rules[i]
+				break
+			}
+		}
+		if rule == nil {
+			r.seqStateManager.DeleteState(key)
+			r.seqStateManager.UnlockKey(key)
+			r.seqStateManager.CleanupKeyLock(key)
+			continue
+		}
+
+		seq, exists := rule.SequenceMap[info.SeqID]
+		if !exists {
+			r.seqStateManager.DeleteState(key)
+			r.seqStateManager.UnlockKey(key)
+			r.seqStateManager.CleanupKeyLock(key)
+			continue
+		}
+
+		// Check if the absence timeout triggers the sequence
+		if seq.Condition.CheckAbsenceTimeout(state, nowMs) {
+			// Build result data from the stored stage match snapshots
+			resultData := r.buildAbsenceResult(state, &seq)
+			if resultData != nil {
+				// Execute post-sequence operations (append/plugin/del/modify)
+				// that follow the sequence in the rule's operation queue
+				resultData = r.executePostSequenceOps(rule, info.SeqID, resultData)
+
+				// Add hit rule ID
+				sb := stringBuilderPool.Get().(*strings.Builder)
+				sb.Reset()
+				sb.WriteString(r.RulesetID)
+				sb.WriteString(".")
+				sb.WriteString(rule.ID)
+				addHitRuleID(resultData, sb.String())
+				stringBuilderPool.Put(sb)
+
+				// Send to downstream
+				for _, downCh := range r.DownStream {
+					*downCh <- resultData
+				}
+			}
+		}
+
+		// Clean up: unlock first, then remove the lock entry
+		r.seqStateManager.DeleteState(key)
+		r.seqStateManager.UnlockKey(key)
+		r.seqStateManager.CleanupKeyLock(key)
+	}
+}
+
+// executePostSequenceOps executes operations that follow a sequence in the rule's queue.
+// This is needed for absence-triggered sequences which bypass the normal rule execution pipeline.
+// Only executes data-modifying operations: append, modify, del, plugin.
+func (r *Ruleset) executePostSequenceOps(rule *Rule, seqOpID int, data map[string]interface{}) map[string]interface{} {
+	if rule.Queue == nil {
+		return data
+	}
+
+	ruleCache := make(map[string]common.CheckCoreCache)
+	foundSequence := false
+
+	for _, op := range *rule.Queue {
+		if op.Type == T_Sequence && op.ID == seqOpID {
+			foundSequence = true
+			continue
+		}
+		if !foundSequence {
+			continue
+		}
+
+		// Only execute data-modifying operations after the sequence
+		switch op.Type {
+		case T_Append:
+			if modified := r.executeAppend(rule, op.ID, true, data, ruleCache); modified != nil {
+				data = modified
+			}
+		case T_Modify:
+			if modified := r.executeModify(rule, op.ID, true, data, ruleCache); modified != nil {
+				data = modified
+			}
+		case T_Del:
+			if modified := r.executeDel(rule, op.ID, true, data); modified != nil {
+				data = modified
+			}
+		case T_Plugin:
+			r.executePlugin(rule, op.ID, data, ruleCache)
+		}
+	}
+
+	return data
+}
+
+// buildAbsenceResult constructs the result data for a sequence triggered by absence timeout.
+func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[string]interface{} {
+	// Find the last non-absence stage match data to use as base
+	var baseData map[string]interface{}
+	for i := len(seq.Condition.Stages) - 1; i >= 0; i-- {
+		stage := seq.Condition.Stages[i]
+		if stage.IsAbsent {
+			continue
+		}
+		matches, exists := state.StageMatches[i]
+		if exists && len(matches) > 0 && matches[0].Data != nil {
+			baseData = matches[0].Data
+			break
+		}
+	}
+
+	if baseData == nil {
+		return nil
+	}
+
+	result := common.MapDeepCopy(baseData)
+	enrichSequenceResultData(result, state, seq)
+	return result
 }
 
 // Stop the ruleset engine, waiting for all upstream and downstream data to be processed before shutdown.
@@ -584,6 +759,18 @@ func (r *Ruleset) executeRuleOperations(rule *Rule, data map[string]interface{},
 		case T_Plugin:
 			// Execute plugin operation according to user-defined order
 			r.executePlugin(rule, op.ID, data, ruleCache)
+		case T_Sequence:
+			seqResult, seqData := r.executeSequence(rule, op.ID, data, ruleCache)
+			if !seqResult {
+				ruleResult = false
+				if r.IsDetection {
+					return false, copied, data
+				}
+			} else if seqData != nil {
+				// Sequence completed: use the enriched data
+				copied = true
+				data = seqData
+			}
 		}
 		if modifiedRes != nil {
 			copied = true
@@ -811,6 +998,325 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 	}
 
 	return ruleCheckRes
+}
+
+// executeSequence executes a CEP sequence operation.
+// Returns (completed bool, enrichedData map) where enrichedData is non-nil when the sequence completes.
+func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, map[string]interface{}) {
+	seq, exists := rule.SequenceMap[operationID]
+	if !exists {
+		return true, nil
+	}
+
+	if r.seqStateManager == nil {
+		logger.Error("CEP state manager not initialized", "ruleID", rule.ID, "rulesetID", r.RulesetID)
+		return false, nil
+	}
+
+	// Step 1: Match incoming event against all event definitions
+	matchMap := make(map[string]bool, len(seq.Events))
+	matchedEventIDs := make([]string, 0, 2) // Track which events matched (for group_by extraction)
+
+	for _, eventID := range seq.EventOrder {
+		eventDef := seq.Events[eventID]
+		matched := r.evaluateEventDef(eventDef, data, ruleCache)
+		matchMap[eventID] = matched
+		if matched {
+			matchedEventIDs = append(matchedEventIDs, eventID)
+		}
+	}
+
+	// Step 2: Stage evaluation - determine which stages this event satisfies
+	matchedStages := seq.Condition.EvaluateEvent(matchMap)
+	if len(matchedStages) == 0 {
+		return false, nil
+	}
+
+	// Step 3: Compute correlation key using group_by values from matched events
+	correlateValues := r.extractCorrelateValues(&seq, matchedEventIDs, data, ruleCache)
+	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
+		// group_by is configured but no values could be extracted
+		return false, nil
+	}
+	stateKey := BuildStateKey(seq.GroupByID, correlateValues)
+
+	// Lock the state key to prevent concurrent modification from multiple upstream goroutines.
+	// This protects the entire read-modify-write cycle on SequenceState.
+	r.seqStateManager.LockKey(stateKey)
+	sequenceCompleted := false
+	defer func() {
+		r.seqStateManager.UnlockKey(stateKey)
+		if sequenceCompleted {
+			r.seqStateManager.CleanupKeyLock(stateKey)
+		}
+	}()
+
+	// Step 4: Get or create sequence state
+	state := r.seqStateManager.GetOrCreateState(stateKey, seq.WithinMs, seq.WithinSec, seq.Compress)
+
+	// Step 5: Extract event timestamp
+	eventTimestamp := r.extractEventTimestamp(&seq, matchedEventIDs, data, ruleCache)
+
+	// Step 6: Record stage matches
+	// For absence stages, recording a match means the absent event WAS observed,
+	// which causes CheckComplete to return false for that stage.
+	// For normal stages, recording advances the sequence towards completion.
+	dataSnapshot := r.snapshotEventData(data, matchedEventIDs, &seq)
+	for _, stageIdx := range matchedStages {
+		state.AddMatch(stageIdx, StageMatch{
+			Timestamp: eventTimestamp,
+			Data:      dataSnapshot,
+		})
+	}
+
+	// Step 7: Check if the sequence is now complete
+	if seq.Condition.CheckComplete(state) {
+		// Sequence completed - build enriched data and clean up
+		enrichedData := r.buildSequenceResult(state, &seq, data)
+		r.seqStateManager.DeleteState(stateKey)
+		sequenceCompleted = true
+		return true, enrichedData
+	}
+
+	// Step 8: Persist updated state
+	r.seqStateManager.UpdateState(stateKey, state, seq.WithinSec, seq.Compress)
+
+	// Step 9: Track for absence scanning if needed
+	if seq.Condition.HasAbsenceStages() {
+		r.seqStateManager.TrackAbsenceKey(stateKey, absenceKeyInfo{
+			ExpiresAt: state.ExpiresAt,
+			RuleID:    rule.ID,
+			SeqID:     operationID,
+		})
+	}
+
+	return false, nil
+}
+
+// evaluateEventDef checks if the incoming data matches a single event definition.
+// All checks within an event must pass (AND logic).
+func (r *Ruleset) evaluateEventDef(eventDef *EventDef, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	// Evaluate standalone check nodes (AND logic)
+	for i := range eventDef.CheckNodes {
+		if !r.executeCheckNode(&eventDef.CheckNodes[i], data, ruleCache) {
+			return false
+		}
+	}
+
+	// Evaluate checklists
+	for i := range eventDef.Checklists {
+		cl := &eventDef.Checklists[i]
+		if !r.evaluateEventChecklist(cl, data, ruleCache) {
+			return false
+		}
+	}
+
+	// Evaluate thresholds
+	for i := range eventDef.Thresholds {
+		threshold := &eventDef.Thresholds[i]
+		tempThresholdMap := map[int]Threshold{1: *threshold}
+		tempRule := &Rule{
+			ID:           "cep_event_threshold",
+			ThresholdMap: tempThresholdMap,
+		}
+		if !r.executeThreshold(tempRule, 1, data, ruleCache) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// evaluateEventChecklist evaluates a checklist within an event definition.
+func (r *Ruleset) evaluateEventChecklist(cl *Checklist, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	var conditionMap map[string]bool
+	if cl.ConditionFlag {
+		conditionMap = make(map[string]bool, len(cl.CheckNodes)+len(cl.ThresholdNodes))
+	}
+
+	for _, checkNode := range cl.CheckNodes {
+		result := r.executeCheckNode(&checkNode, data, ruleCache)
+		if cl.ConditionFlag {
+			conditionMap[checkNode.ID] = result
+		} else if !result {
+			return false
+		}
+	}
+
+	for i, thresholdNode := range cl.ThresholdNodes {
+		thresholdID := thresholdNode.ID
+		if thresholdID == "" {
+			thresholdID = fmt.Sprintf("threshold_%d", i)
+		}
+		tempThresholdMap := map[int]Threshold{1: thresholdNode}
+		tempRule := &Rule{
+			ID:           "cep_event_threshold",
+			ThresholdMap: tempThresholdMap,
+		}
+		result := r.executeThreshold(tempRule, 1, data, ruleCache)
+		if cl.ConditionFlag {
+			conditionMap[thresholdID] = result
+		} else if !result {
+			return false
+		}
+	}
+
+	if cl.ConditionFlag {
+		return cl.ConditionAST.ExprASTResult(cl.ConditionAST.ExprAST, conditionMap)
+	}
+	return true
+}
+
+// extractCorrelateValues extracts correlation values from the event data based on group_by configuration.
+func (r *Ruleset) extractCorrelateValues(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) string {
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer stringBuilderPool.Put(sb)
+
+	// Try per-event group_by first (from the first matched event)
+	for _, eventID := range matchedEventIDs {
+		eventDef := seq.Events[eventID]
+		groupByFields := eventDef.GroupByList
+		if len(groupByFields) == 0 {
+			groupByFields = seq.GroupByList
+		}
+		if len(groupByFields) == 0 {
+			continue
+		}
+
+		for _, field := range groupByFields {
+			fieldList := common.StringToList(field)
+			val, ok := GetCheckDataFromCache(ruleCache, field, data, fieldList)
+			if ok {
+				sb.WriteString(val)
+				sb.WriteString("|")
+			}
+		}
+		break // Use the first matched event's group_by values
+	}
+
+	return sb.String()
+}
+
+// hasEventGroupBy checks if any event in the sequence has a per-event group_by.
+func (r *Ruleset) hasEventGroupBy(seq *Sequence) bool {
+	for _, eventDef := range seq.Events {
+		if len(eventDef.GroupByList) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// extractEventTimestamp extracts the event timestamp from data based on event_time configuration.
+// Returns unix milliseconds. Falls back to current time if event_time is not set or parsing fails.
+func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) int64 {
+	for _, eventID := range matchedEventIDs {
+		eventDef := seq.Events[eventID]
+		if eventDef.EventTime == "" {
+			continue
+		}
+
+		fieldList := common.StringToList(eventDef.EventTime)
+		val, ok := GetCheckDataFromCache(ruleCache, eventDef.EventTime, data, fieldList)
+		if !ok || val == "" {
+			continue
+		}
+
+		ts := parseTimestampToMs(val)
+		if ts > 0 {
+			return ts
+		}
+	}
+
+	// Fallback: use current processing time
+	return time.Now().UnixMilli()
+}
+
+// parseTimestampToMs attempts to parse a timestamp string into unix milliseconds.
+// Supports: Unix seconds, Unix milliseconds, ISO 8601, RFC 3339.
+func parseTimestampToMs(val string) int64 {
+	// Try numeric (unix epoch)
+	if n, err := strconv.ParseInt(val, 10, 64); err == nil {
+		if n > 1e15 {
+			// Already in microseconds, convert to ms
+			return n / 1000
+		} else if n > 1e12 {
+			// Already in milliseconds
+			return n
+		} else if n > 1e9 {
+			// Seconds
+			return n * 1000
+		}
+		// Very small number, treat as seconds
+		return n * 1000
+	}
+
+	// Try float (e.g., "1700000000.123")
+	if f, err := strconv.ParseFloat(val, 64); err == nil {
+		return int64(f * 1000)
+	}
+
+	// Try common time formats
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	}
+	for _, format := range formats {
+		if t, err := time.Parse(format, val); err == nil {
+			return t.UnixMilli()
+		}
+	}
+
+	return 0
+}
+
+// snapshotEventData creates a deep copy snapshot of event data for cross-event reference.
+// Deep copy is essential because the original data may be modified by subsequent operations
+// (append/modify/del), and we need the snapshot to remain unchanged in stored state.
+func (r *Ruleset) snapshotEventData(data map[string]interface{}, matchedEventIDs []string, seq *Sequence) map[string]interface{} {
+	return common.MapDeepCopy(data)
+}
+
+// buildSequenceResult builds the final enriched data when a sequence completes.
+// The current event provides the base data, enriched with:
+//   - "#<event_id>" keys: per-event snapshots for cross-event field references (_$#event_id.field)
+//   - "_sequence_events" key: a map[event_id] -> raw data for all events in the sequence,
+//     providing downstream consumers a single structured view of the entire sequence
+func (r *Ruleset) buildSequenceResult(state *SequenceState, seq *Sequence, currentData map[string]interface{}) map[string]interface{} {
+	result := common.MapDeepCopy(currentData)
+	enrichSequenceResultData(result, state, seq)
+	return result
+}
+
+// enrichSequenceResultData adds cross-event reference data and _sequence_events to the result.
+func enrichSequenceResultData(result map[string]interface{}, state *SequenceState, seq *Sequence) {
+	sequenceEvents := make(map[string]interface{})
+
+	for stageIdx, matches := range state.StageMatches {
+		if stageIdx >= len(seq.Condition.Stages) || len(matches) == 0 {
+			continue
+		}
+		stage := seq.Condition.Stages[stageIdx]
+		if stage.IsAbsent {
+			continue
+		}
+		// Store the first match's data under "#<event_id>" for cross-event field references,
+		// and also add to _sequence_events map for structured downstream consumption
+		for _, eventID := range stage.EventIDs {
+			if matches[0].Data != nil {
+				result["#"+eventID] = matches[0].Data
+				sequenceEvents[eventID] = matches[0].Data
+			}
+		}
+	}
+
+	if len(sequenceEvents) > 0 {
+		result["_sequence_events"] = sequenceEvents
+	}
 }
 
 // executeAppend executes an append operation
