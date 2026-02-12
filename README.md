@@ -155,7 +155,7 @@ Detect **event sequences** across time with CEP:
 ## Deployment
 
 1. Download and extract the release archive to `/opt/agentsmith-hub`
-2. Copy the config folder: `cp -r /opt/agentsmith-hub/config /opt/`
+2. Copy the config folder: `cp -r /opt/agentsmith-hub/config /opt/hub_config`
 3. Configure Redis in `/opt/hub_config/config.yaml`
 4. Start the service:
    ```bash
