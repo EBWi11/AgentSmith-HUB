@@ -31,6 +31,11 @@ const (
 	// These keys store metadata for sequences that have absence stages,
 	// enabling distributed absence scanning across cluster nodes.
 	CEPAbsenceKeyPrefix = "SEQABS_"
+
+	// TimingWheelSlots is the number of slots in the absence timing wheel (local cache mode).
+	// One slot per second; 3600 slots = 1 hour. Expired keys are only checked in the current
+	// second's bucket, reducing scan cost from O(all keys) to O(bucket size) per tick.
+	TimingWheelSlots = 3600
 )
 
 // ============================================================================
@@ -142,6 +147,15 @@ type CEPStateManager struct {
 	// For absence scanning: track keys that have absence stages (local cache mode)
 	absenceKeys   map[string]absenceKeyInfo
 	absenceKeysMu sync.Mutex
+
+	// Timing wheel for absence expiry (local cache only). Only the current second's bucket
+	// is scanned each tick instead of the full key set. Slot index = (ExpiresAt/1000) % TimingWheelSlots.
+	absenceWheel [][]absenceSlotItem
+	// Tracks which slot a key is currently in, allowing O(bucket) replacement/removal
+	// instead of append-only growth for repeated TrackAbsenceKey calls.
+	absenceKeySlot map[string]int
+	// Last second processed by local timing wheel scan; used to catch up missed ticks.
+	lastProcessedSecond int64
 }
 
 // absenceKeyInfo tracks metadata for absence scanning.
@@ -151,13 +165,25 @@ type absenceKeyInfo struct {
 	SeqID     int    // SequenceMap key
 }
 
+// absenceSlotItem is a single entry in a timing wheel bucket (for local cache absence scanning).
+type absenceSlotItem struct {
+	Key  string
+	Info absenceKeyInfo
+}
+
 // NewCEPStateManager creates a new state manager.
 func NewCEPStateManager(useLocalCache bool, cache *ristretto.Cache[string, *SequenceState]) *CEPStateManager {
-	return &CEPStateManager{
+	m := &CEPStateManager{
 		useLocalCache: useLocalCache,
 		cache:         cache,
 		absenceKeys:   make(map[string]absenceKeyInfo),
 	}
+	if useLocalCache {
+		m.absenceWheel = make([][]absenceSlotItem, TimingWheelSlots)
+		m.absenceKeySlot = make(map[string]int)
+		m.lastProcessedSecond = -1
+	}
+	return m
 }
 
 // BuildStateKey constructs a state key from the GroupByID and correlation values.
@@ -213,15 +239,84 @@ func (m *CEPStateManager) DeleteState(key string) {
 	m.deleteRedisState(key)
 }
 
+func timingWheelSlot(expiresAtMs int64) int {
+	slot := (expiresAtMs / 1000) % int64(TimingWheelSlots)
+	if slot < 0 {
+		slot += int64(TimingWheelSlots)
+	}
+	return int(slot)
+}
+
+// removeFromWheelSlot removes a key from a specific wheel slot.
+// Caller must hold absenceKeysMu.
+func (m *CEPStateManager) removeFromWheelSlot(key string, slot int) {
+	if m.absenceWheel == nil || slot < 0 || slot >= len(m.absenceWheel) {
+		return
+	}
+	bucket := m.absenceWheel[slot]
+	for i := range bucket {
+		if bucket[i].Key == key {
+			m.absenceWheel[slot] = append(bucket[:i], bucket[i+1:]...)
+			return
+		}
+	}
+}
+
+// collectExpiredFromWheelSlot collects expired entries from a given slot into expired map.
+// Uses absenceKeys as canonical source to prevent stale wheel entries from triggering.
+// Caller must hold absenceKeysMu.
+func (m *CEPStateManager) collectExpiredFromWheelSlot(slot int, nowMs int64, expired map[string]absenceKeyInfo) {
+	if m.absenceWheel == nil || slot < 0 || slot >= len(m.absenceWheel) {
+		return
+	}
+	bucket := m.absenceWheel[slot]
+	keep := bucket[:0]
+	for _, item := range bucket {
+		if item.Info.ExpiresAt <= nowMs {
+			if trackedInfo, tracked := m.absenceKeys[item.Key]; tracked && trackedInfo.ExpiresAt == item.Info.ExpiresAt {
+				expired[item.Key] = trackedInfo
+				delete(m.absenceKeys, item.Key)
+				delete(m.absenceKeySlot, item.Key)
+			}
+		} else {
+			keep = append(keep, item)
+		}
+	}
+	m.absenceWheel[slot] = keep
+}
+
 // TrackAbsenceKey registers a key for absence scanning.
 // In Redis mode, stores a separate tracking key so any cluster node can discover it.
+// In local cache mode, tracks one canonical wheel entry per key to avoid duplicates.
 func (m *CEPStateManager) TrackAbsenceKey(key string, info absenceKeyInfo) {
-	// Always track locally for fast lookup
 	m.absenceKeysMu.Lock()
 	m.absenceKeys[key] = info
+	if m.useLocalCache && m.absenceWheel != nil {
+		newSlot := timingWheelSlot(info.ExpiresAt)
+
+		if oldSlot, exists := m.absenceKeySlot[key]; exists {
+			if oldSlot == newSlot {
+				// Update existing slot entry in place
+				bucket := m.absenceWheel[newSlot]
+				for i := range bucket {
+					if bucket[i].Key == key {
+						bucket[i].Info = info
+						m.absenceWheel[newSlot] = bucket
+						m.absenceKeysMu.Unlock()
+						return
+					}
+				}
+			} else {
+				// Key moved to a new slot: remove stale old entry first
+				m.removeFromWheelSlot(key, oldSlot)
+			}
+		}
+
+		m.absenceWheel[newSlot] = append(m.absenceWheel[newSlot], absenceSlotItem{Key: key, Info: info})
+		m.absenceKeySlot[key] = newSlot
+	}
 	m.absenceKeysMu.Unlock()
 
-	// In Redis mode, also store a Redis tracking key for distributed scanning
 	if !m.useLocalCache {
 		m.setRedisAbsenceTracker(key, info)
 	}
@@ -231,6 +326,12 @@ func (m *CEPStateManager) TrackAbsenceKey(key string, info absenceKeyInfo) {
 func (m *CEPStateManager) UntrackAbsenceKey(key string) {
 	m.absenceKeysMu.Lock()
 	delete(m.absenceKeys, key)
+	if m.useLocalCache && m.absenceWheel != nil {
+		if slot, exists := m.absenceKeySlot[key]; exists {
+			m.removeFromWheelSlot(key, slot)
+			delete(m.absenceKeySlot, key)
+		}
+	}
 	m.absenceKeysMu.Unlock()
 
 	// In Redis mode, also remove the Redis tracking key
@@ -250,16 +351,51 @@ func (m *CEPStateManager) GetExpiredAbsenceKeys(nowMs int64) map[string]absenceK
 	return m.getExpiredAbsenceKeysLocal(nowMs)
 }
 
-// getExpiredAbsenceKeysLocal checks the local in-memory map for expired absence keys.
+// getExpiredAbsenceKeysLocal returns absence keys that have expired (ExpiresAt <= nowMs).
+// When the timing wheel is used (local cache), only the current second's bucket is scanned
+// instead of the full key set, reducing cost from O(n) to O(bucket size) per tick.
 func (m *CEPStateManager) getExpiredAbsenceKeysLocal(nowMs int64) map[string]absenceKeyInfo {
 	m.absenceKeysMu.Lock()
 	defer m.absenceKeysMu.Unlock()
 
 	expired := make(map[string]absenceKeyInfo)
+
+	if m.absenceWheel != nil {
+		// Timing wheel catch-up: process all missed second-slots since last scan.
+		nowSec := nowMs / 1000
+		if m.lastProcessedSecond < 0 {
+			m.lastProcessedSecond = nowSec - 1
+		}
+		if nowSec < m.lastProcessedSecond {
+			// Clock moved backwards: process current slot only and reset baseline.
+			m.collectExpiredFromWheelSlot(timingWheelSlot(nowMs), nowMs, expired)
+			m.lastProcessedSecond = nowSec
+			return expired
+		}
+
+		delta := nowSec - m.lastProcessedSecond
+		if delta >= int64(TimingWheelSlots) {
+			// Long pause/gap: scan all slots once.
+			for slot := 0; slot < TimingWheelSlots; slot++ {
+				m.collectExpiredFromWheelSlot(slot, nowMs, expired)
+			}
+		} else {
+			for sec := m.lastProcessedSecond + 1; sec <= nowSec; sec++ {
+				m.collectExpiredFromWheelSlot(timingWheelSlot(sec*1000), nowMs, expired)
+			}
+		}
+		m.lastProcessedSecond = nowSec
+		return expired
+	}
+
+	// Fallback: full map scan (e.g. wheel not initialized)
 	for key, info := range m.absenceKeys {
 		if info.ExpiresAt <= nowMs {
 			expired[key] = info
 			delete(m.absenceKeys, key)
+			if m.absenceKeySlot != nil {
+				delete(m.absenceKeySlot, key)
+			}
 		}
 	}
 	return expired

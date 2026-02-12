@@ -188,6 +188,9 @@ type Ruleset struct {
 	// Flag: true if any rule has a sequence with absence stages (needs absence scanner)
 	hasAbsenceSequences bool
 
+	// Fast lookup table for absence scanner: rule ID -> rule pointer
+	ruleByID map[string]*Rule
+
 	// OwnerProjects field removed - project usage is now calculated dynamically
 }
 
@@ -265,6 +268,8 @@ type Sequence struct {
 
 	GroupBy     string   // Default correlation field(s), comma-separated
 	GroupByList []string // Parsed default group_by fields
+	// Pre-parsed field paths for GroupByList to avoid repeated StringToList on hot path
+	GroupByFieldPaths [][]string
 
 	LocalCache bool // true = use local Ristretto cache; false = use Redis
 	Compress   bool // true = use zstd compression for Redis state storage
@@ -282,9 +287,13 @@ type Sequence struct {
 type EventDef struct {
 	ID        string // Unique identifier, referenced in condition expression
 	EventTime string // Field name containing the event's timestamp (optional)
+	// Pre-parsed event_time field path for faster timestamp extraction
+	EventTimeFieldPath []string
 
 	GroupBy     string   // Per-event correlation field(s) override
 	GroupByList []string // Parsed per-event group_by fields
+	// Pre-parsed field paths for GroupByList to avoid repeated StringToList on hot path
+	GroupByFieldPaths [][]string
 
 	CheckNodes []CheckNodes // Nested <check> elements
 	Checklists []Checklist  // Nested <checklist> elements
@@ -2785,10 +2794,12 @@ func RulesetBuild(ruleset *Ruleset) error {
 			if seq.GroupBy != "" {
 				fields := strings.Split(seq.GroupBy, ",")
 				seq.GroupByList = make([]string, 0, len(fields))
+				seq.GroupByFieldPaths = make([][]string, 0, len(fields))
 				for _, f := range fields {
 					f = strings.TrimSpace(f)
 					if f != "" {
 						seq.GroupByList = append(seq.GroupByList, f)
+						seq.GroupByFieldPaths = append(seq.GroupByFieldPaths, common.StringToList(f))
 					}
 				}
 			}
@@ -2816,12 +2827,17 @@ func RulesetBuild(ruleset *Ruleset) error {
 				if eventDef.GroupBy != "" {
 					fields := strings.Split(eventDef.GroupBy, ",")
 					eventDef.GroupByList = make([]string, 0, len(fields))
+					eventDef.GroupByFieldPaths = make([][]string, 0, len(fields))
 					for _, f := range fields {
 						f = strings.TrimSpace(f)
 						if f != "" {
 							eventDef.GroupByList = append(eventDef.GroupByList, f)
+							eventDef.GroupByFieldPaths = append(eventDef.GroupByFieldPaths, common.StringToList(f))
 						}
 					}
+				}
+				if eventDef.EventTime != "" {
+					eventDef.EventTimeFieldPath = common.StringToList(eventDef.EventTime)
 				}
 
 				// Determine effective group_by for this event
@@ -2919,9 +2935,9 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 			}
 
-			// Validate: if no sequence-level group_by, all events must have per-event group_by
-			if hasNoGroupBy && len(seq.GroupByList) == 0 {
-				return fmt.Errorf("when no sequence-level group_by is set, every event must have its own group_by in rule '%s'", rule.ID)
+			// Validate: group_by is required — must be set on <sequence> or on every <event>
+			if len(seq.GroupByList) == 0 && hasNoGroupBy {
+				return fmt.Errorf("sequence group_by is required: set group_by on <sequence> or on every <event> in rule '%s'", rule.ID)
 			}
 
 			// Check if this sequence has absence stages (for absence scanner)
@@ -2966,6 +2982,12 @@ func RulesetBuild(ruleset *Ruleset) error {
 	if hasSequences {
 		useLocalCache := seqUseLocal == 1
 		ruleset.seqStateManager = NewCEPStateManager(useLocalCache, ruleset.SequenceCache)
+	}
+
+	// Build rule lookup map for faster absence scan path
+	ruleset.ruleByID = make(map[string]*Rule, len(ruleset.Rules))
+	for i := range ruleset.Rules {
+		ruleset.ruleByID[ruleset.Rules[i].ID] = &ruleset.Rules[i]
 	}
 
 	// Initialize regex result cache

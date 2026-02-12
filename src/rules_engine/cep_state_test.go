@@ -151,6 +151,86 @@ func TestCEPStateManager_AbsenceKeyTracking(t *testing.T) {
 	}
 }
 
+func TestCEPStateManager_AbsenceWheel_KeyReuseNoStaleTrigger(t *testing.T) {
+	cache := newTestLocalCache()
+	defer cache.Close()
+	mgr := NewCEPStateManager(true, cache)
+
+	// First lifecycle for the same key
+	mgr.TrackAbsenceKey("reused_key", absenceKeyInfo{ExpiresAt: 10000, RuleID: "r1", SeqID: 1})
+	mgr.UntrackAbsenceKey("reused_key")
+
+	// Reuse the same key for a new lifecycle with a different expiry
+	mgr.TrackAbsenceKey("reused_key", absenceKeyInfo{ExpiresAt: 20000, RuleID: "r2", SeqID: 2})
+
+	// At old expiry slot/time, stale wheel entry must NOT trigger the new state
+	expired := mgr.GetExpiredAbsenceKeys(10000)
+	if len(expired) != 0 {
+		t.Fatalf("expected no expired keys at old expiry, got %d", len(expired))
+	}
+
+	// At new expiry, key should expire exactly once with latest metadata
+	expired = mgr.GetExpiredAbsenceKeys(20000)
+	if len(expired) != 1 {
+		t.Fatalf("expected 1 expired key at new expiry, got %d", len(expired))
+	}
+	info, ok := expired["reused_key"]
+	if !ok {
+		t.Fatal("expected reused_key to be expired at new expiry")
+	}
+	if info.RuleID != "r2" || info.SeqID != 2 {
+		t.Fatalf("expected latest absence info (r2,2), got (%s,%d)", info.RuleID, info.SeqID)
+	}
+}
+
+func TestCEPStateManager_AbsenceWheel_ReTrackUpdatesEntry(t *testing.T) {
+	cache := newTestLocalCache()
+	defer cache.Close()
+	mgr := NewCEPStateManager(true, cache)
+
+	// Re-track same key in the same slot with updated metadata.
+	mgr.TrackAbsenceKey("k", absenceKeyInfo{ExpiresAt: 30000, RuleID: "r1", SeqID: 1})
+	mgr.TrackAbsenceKey("k", absenceKeyInfo{ExpiresAt: 30000, RuleID: "r1", SeqID: 99})
+
+	expired := mgr.GetExpiredAbsenceKeys(30000)
+	if len(expired) != 1 {
+		t.Fatalf("expected exactly one expired entry, got %d", len(expired))
+	}
+	info := expired["k"]
+	if info.SeqID != 99 {
+		t.Fatalf("expected updated SeqID=99, got %d", info.SeqID)
+	}
+}
+
+func TestCEPStateManager_AbsenceWheel_CatchUpMissedSlots(t *testing.T) {
+	cache := newTestLocalCache()
+	defer cache.Close()
+	mgr := NewCEPStateManager(true, cache)
+
+	mgr.TrackAbsenceKey("k", absenceKeyInfo{ExpiresAt: 2000, RuleID: "r1", SeqID: 1})
+
+	// First scan at t=1000, key is not expired yet.
+	expired := mgr.GetExpiredAbsenceKeys(1000)
+	if len(expired) != 0 {
+		t.Fatalf("expected 0 expired keys at t=1000, got %d", len(expired))
+	}
+
+	// Jump directly to t=4000. Catch-up should process missed slots and expire key.
+	expired = mgr.GetExpiredAbsenceKeys(4000)
+	if len(expired) != 1 {
+		t.Fatalf("expected 1 expired key at t=4000 after slot catch-up, got %d", len(expired))
+	}
+	if _, ok := expired["k"]; !ok {
+		t.Fatal("expected key k to expire during catch-up scan")
+	}
+
+	// Ensure key is removed and not emitted again.
+	expired = mgr.GetExpiredAbsenceKeys(5000)
+	if len(expired) != 0 {
+		t.Fatalf("expected no duplicate expiry at t=5000, got %d", len(expired))
+	}
+}
+
 // ============================================================================
 // BuildStateKey Tests
 // ============================================================================

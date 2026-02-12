@@ -310,13 +310,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 		}
 
 		// Find the rule and sequence
-		var rule *Rule
-		for i := range r.Rules {
-			if r.Rules[i].ID == info.RuleID {
-				rule = &r.Rules[i]
-				break
-			}
-		}
+		rule := r.ruleByID[info.RuleID]
 		if rule == nil {
 			r.seqStateManager.DeleteState(key)
 			r.seqStateManager.UnlockKey(key)
@@ -1036,6 +1030,10 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	correlateValues := r.extractCorrelateValues(&seq, matchedEventIDs, data, ruleCache)
 	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
 		// group_by is configured but no values could be extracted
+		logger.Warn("Sequence group_by extraction yielded empty key",
+			"rulesetID", r.RulesetID,
+			"ruleID", rule.ID,
+			"sequenceOpID", operationID)
 		return false, nil
 	}
 	stateKey := BuildStateKey(seq.GroupByID, correlateValues)
@@ -1184,8 +1182,18 @@ func (r *Ruleset) extractCorrelateValues(seq *Sequence, matchedEventIDs []string
 			continue
 		}
 
-		for _, field := range groupByFields {
+		var fieldPaths [][]string
+		if len(eventDef.GroupByFieldPaths) > 0 {
+			fieldPaths = eventDef.GroupByFieldPaths
+		} else {
+			fieldPaths = seq.GroupByFieldPaths
+		}
+
+		for idx, field := range groupByFields {
 			fieldList := common.StringToList(field)
+			if idx < len(fieldPaths) {
+				fieldList = fieldPaths[idx]
+			}
 			val, ok := GetCheckDataFromCache(ruleCache, field, data, fieldList)
 			if ok {
 				sb.WriteString(val)
@@ -1209,7 +1217,8 @@ func (r *Ruleset) hasEventGroupBy(seq *Sequence) bool {
 }
 
 // extractEventTimestamp extracts the event timestamp from data based on event_time configuration.
-// Returns unix milliseconds. Falls back to current time if event_time is not set or parsing fails.
+// Returns unix milliseconds. When event_time is not specified on the matched event(s), or the
+// field is missing or unparseable, uses the engine processing time (time at which the event is seen).
 func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) int64 {
 	for _, eventID := range matchedEventIDs {
 		eventDef := seq.Events[eventID]
@@ -1217,7 +1226,10 @@ func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string,
 			continue
 		}
 
-		fieldList := common.StringToList(eventDef.EventTime)
+		fieldList := eventDef.EventTimeFieldPath
+		if len(fieldList) == 0 {
+			fieldList = common.StringToList(eventDef.EventTime)
+		}
 		val, ok := GetCheckDataFromCache(ruleCache, eventDef.EventTime, data, fieldList)
 		if !ok || val == "" {
 			continue
@@ -1229,7 +1241,7 @@ func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string,
 		}
 	}
 
-	// Fallback: use current processing time
+	// No event_time set or parseable: use engine processing time (when the engine sees the event)
 	return time.Now().UnixMilli()
 }
 

@@ -247,6 +247,9 @@ func RedisInit(addr string, passwd string) error {
 }
 
 func RedisPing() error {
+	if rdb == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	// Ping the Redis server to check connection with retry
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -264,6 +267,9 @@ func RedisPing() error {
 }
 
 func RedisGet(key string) (string, error) {
+	if rdb == nil {
+		return "", fmt.Errorf("redis client not initialized")
+	}
 	val, err := rdb.Get(ctx, key).Result()
 	if err != nil {
 		return "", err
@@ -302,28 +308,46 @@ func RedisKeys(key string) ([]string, error) {
 }
 
 func RedisSet(key string, value interface{}, expiration int) (string, error) {
+	if rdb == nil {
+		return "", fmt.Errorf("redis client not initialized")
+	}
 	return rdb.Set(ctx, key, value, time.Duration(expiration)*time.Second).Result()
 }
 
 func RedisSetNX(key string, value interface{}, expiration int) (bool, error) {
+	if rdb == nil {
+		return false, fmt.Errorf("redis client not initialized")
+	}
 	return rdb.SetNX(ctx, key, value, time.Duration(expiration)*time.Second).Result()
 }
 
 func RedisIncrby(key string, value int64) (int64, error) {
+	if rdb == nil {
+		return 0, fmt.Errorf("redis client not initialized")
+	}
 	return rdb.IncrBy(ctx, key, value).Result()
 }
 
 func RedisDel(key string) error {
+	if rdb == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	return rdb.Del(ctx, key).Err()
 }
 
 // RedisDelMultiple deletes multiple keys at once
 func RedisDelMultiple(keys ...string) error {
+	if rdb == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	return rdb.Del(ctx, keys...).Err()
 }
 
 // RedisEval executes a Lua script on Redis.
 func RedisEval(script string, keys []string, args ...interface{}) (interface{}, error) {
+	if rdb == nil {
+		return nil, fmt.Errorf("redis client not initialized")
+	}
 	return rdb.Eval(ctx, script, keys, args...).Result()
 }
 
