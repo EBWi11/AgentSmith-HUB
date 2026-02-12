@@ -2,7 +2,6 @@ package rules_engine
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/cockroachdb/pebble"
 )
 
@@ -33,7 +33,6 @@ type pebblePutRequest struct {
 	ref         string
 	payload     []byte
 	expiresAtNs int64
-	resp        chan error
 }
 
 const (
@@ -48,6 +47,7 @@ type PebbleCEPValueStore struct {
 	db          *pebble.DB
 	counter     uint64
 	writeQueue  chan *pebblePutRequest
+	inflight    sync.Map // ref -> []byte (payload pending batch commit)
 	stopCh      chan struct{}
 	wg          sync.WaitGroup
 	closed      atomic.Bool
@@ -100,48 +100,68 @@ func NewPebbleCEPValueStore(rulesetID string) (*PebbleCEPValueStore, error) {
 	return store, nil
 }
 
+// PutSnapshot serializes data and enqueues an asynchronous write to Pebble.
+// The payload is kept in an inflight map so that an immediate GetSnapshot
+// can serve it before the batch commits. If the write queue is full the
+// call returns an error and the caller should keep data inline.
 func (s *PebbleCEPValueStore) PutSnapshot(data map[string]interface{}, expiresAtNs int64) (string, error) {
 	if s == nil || s.db == nil || s.closed.Load() {
 		return "", fmt.Errorf("pebble value store not initialized")
 	}
-	ref := fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&s.counter, 1))
+	// Encode expiresAtNs in ref so deleteSnapshotDirect can reconstruct the
+	// expiry index key without an extra refIndex lookup (saves one key per snapshot).
+	ref := fmt.Sprintf("%d|%d-%d", expiresAtNs, time.Now().UnixNano(), atomic.AddUint64(&s.counter, 1))
 	record := pebbleCEPValueRecord{
 		Data:        data,
 		ExpiresAtNs: expiresAtNs,
 	}
-	payload, err := json.Marshal(record)
+	payload, err := sonic.Marshal(record)
 	if err != nil {
 		return "", err
 	}
+
+	// Keep payload in inflight map so immediate GetSnapshot can return it
+	// before the writeLoop commits the batch to Pebble.
+	s.inflight.Store(ref, payload)
+
 	req := &pebblePutRequest{
 		ref:         ref,
 		payload:     payload,
 		expiresAtNs: expiresAtNs,
-		resp:        make(chan error, 1),
 	}
 	select {
 	case s.writeQueue <- req:
+		return ref, nil
 	case <-s.stopCh:
+		s.inflight.Delete(ref)
 		return "", fmt.Errorf("pebble value store stopping")
+	default:
+		// Queue full – caller will keep data inline as fallback.
+		s.inflight.Delete(ref)
+		return "", fmt.Errorf("write queue full")
 	}
-	if err := <-req.resp; err != nil {
-		return "", err
-	}
-	return ref, nil
 }
 
 func (s *PebbleCEPValueStore) GetSnapshot(ref string) (map[string]interface{}, error) {
 	if s == nil || s.db == nil || s.closed.Load() {
 		return nil, fmt.Errorf("pebble value store not initialized")
 	}
-	val, closer, err := s.db.Get(dataKey(ref))
-	if err != nil {
-		return nil, err
+
+	// Check inflight map first (covers the async window before batch commit).
+	var val []byte
+	if raw, ok := s.inflight.Load(ref); ok {
+		val = raw.([]byte)
+	} else {
+		v, closer, err := s.db.Get(dataKey(ref))
+		if err != nil {
+			return nil, err
+		}
+		val = append([]byte(nil), v...)
+		closer.Close()
 	}
-	defer closer.Close()
 
 	var record pebbleCEPValueRecord
-	if err := json.Unmarshal(val, &record); err != nil {
+	if err := sonic.Unmarshal(val, &record); err != nil {
 		return nil, err
 	}
 
@@ -156,6 +176,7 @@ func (s *PebbleCEPValueStore) DeleteSnapshot(ref string) error {
 	if s == nil || s.db == nil || s.closed.Load() {
 		return nil
 	}
+	s.inflight.Delete(ref)
 	return s.deleteSnapshotDirect(ref)
 }
 
@@ -197,9 +218,10 @@ func (s *PebbleCEPValueStore) writeLoop() {
 					break drain
 				}
 			}
-			err := s.commitPutBatch(reqs)
+			_ = s.commitPutBatch(reqs)
+			// Remove committed entries from inflight map.
 			for _, req := range reqs {
-				req.resp <- err
+				s.inflight.Delete(req.ref)
 			}
 		}
 	}
@@ -212,14 +234,17 @@ func (s *PebbleCEPValueStore) flushPendingWrites() {
 			if req == nil {
 				continue
 			}
-			err := s.commitPutBatch([]*pebblePutRequest{req})
-			req.resp <- err
+			_ = s.commitPutBatch([]*pebblePutRequest{req})
+			s.inflight.Delete(req.ref)
 		default:
 			return
 		}
 	}
 }
 
+// commitPutBatch writes data and expiry-index keys for each request.
+// The refIndex key is no longer needed because expiresAtNs is encoded
+// in the ref string itself (2 keys per snapshot instead of 3).
 func (s *PebbleCEPValueStore) commitPutBatch(reqs []*pebblePutRequest) error {
 	if len(reqs) == 0 {
 		return nil
@@ -228,14 +253,10 @@ func (s *PebbleCEPValueStore) commitPutBatch(reqs []*pebblePutRequest) error {
 	defer batch.Close()
 
 	for _, req := range reqs {
-		expiryKey := expiryIndexKey(req.expiresAtNs, req.ref)
 		if err := batch.Set(dataKey(req.ref), req.payload, nil); err != nil {
 			return err
 		}
-		if err := batch.Set(expiryKey, []byte{}, nil); err != nil {
-			return err
-		}
-		if err := batch.Set(refIndexKey(req.ref), []byte(strconv.FormatInt(req.expiresAtNs, 10)), nil); err != nil {
+		if err := batch.Set(expiryIndexKey(req.expiresAtNs, req.ref), []byte{}, nil); err != nil {
 			return err
 		}
 	}
@@ -285,9 +306,7 @@ func (s *PebbleCEPValueStore) cleanupExpired(nowNs int64, limit int) error {
 		if err := batch.Delete(dataKey(ref), nil); err != nil {
 			return err
 		}
-		if err := batch.Delete(refIndexKey(ref), nil); err != nil {
-			return err
-		}
+		s.inflight.Delete(ref)
 		count++
 		if limit > 0 && count >= limit {
 			break
@@ -299,26 +318,17 @@ func (s *PebbleCEPValueStore) cleanupExpired(nowNs int64, limit int) error {
 	return batch.Commit(pebble.NoSync)
 }
 
+// deleteSnapshotDirect deletes a snapshot and its expiry index entry.
+// The expiresAtNs is parsed from the ref itself instead of performing
+// an extra db.Get on a refIndex key.
 func (s *PebbleCEPValueStore) deleteSnapshotDirect(ref string) error {
 	batch := s.db.NewBatch()
 	defer batch.Close()
 
-	refIdxKey := refIndexKey(ref)
-	expRaw, closer, err := s.db.Get(refIdxKey)
-	if err == nil {
-		expVal := string(expRaw)
-		closer.Close()
-		if expNs, parseErr := strconv.ParseInt(expVal, 10, 64); parseErr == nil {
-			_ = batch.Delete(expiryIndexKey(expNs, ref), nil)
-		}
-	} else if err != pebble.ErrNotFound {
-		return err
+	if expNs, ok := parseExpiresNsFromRef(ref); ok {
+		_ = batch.Delete(expiryIndexKey(expNs, ref), nil)
 	}
-
 	if err := batch.Delete(dataKey(ref), nil); err != nil {
-		return err
-	}
-	if err := batch.Delete(refIdxKey, nil); err != nil {
 		return err
 	}
 	return batch.Commit(pebble.NoSync)
@@ -326,10 +336,6 @@ func (s *PebbleCEPValueStore) deleteSnapshotDirect(ref string) error {
 
 func dataKey(ref string) []byte {
 	return []byte("d:" + ref)
-}
-
-func refIndexKey(ref string) []byte {
-	return []byte("r:" + ref)
 }
 
 func expiryPrefix() []byte {
@@ -353,6 +359,20 @@ func parseRefFromExpiryKey(k []byte) string {
 		return ""
 	}
 	return string(parts[2])
+}
+
+// parseExpiresNsFromRef extracts expiresAtNs encoded in the ref string.
+// Ref format: "<expiresAtNs>|<ts>-<counter>".
+func parseExpiresNsFromRef(ref string) (int64, bool) {
+	idx := strings.IndexByte(ref, '|')
+	if idx <= 0 {
+		return 0, false
+	}
+	ns, err := strconv.ParseInt(ref[:idx], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return ns, true
 }
 
 func sanitizePathComponent(s string) string {

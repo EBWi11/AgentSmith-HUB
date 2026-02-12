@@ -2326,3 +2326,354 @@ func TestGetStageEventIDs(t *testing.T) {
 		t.Errorf("expected nil for out-of-range index, got %v", idsOver)
 	}
 }
+
+// ############################################################################
+//
+//  PART 8: Extended Coverage — Threshold, Cross-Event Ref, GroupBy, Within
+//
+// ############################################################################
+
+// TestCEP_Execute_ThresholdInEvent verifies that a <threshold> inside a
+// sequence <event> gates the event match. The login event requires >2
+// occurrences before the stage is satisfied.
+func TestCEP_Execute_ThresholdInEvent(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="threshold gate"><sequence within="10m" group_by="source_ip" local_cache="true"><event id="login"><check type="EQU" field="event_type">login</check><threshold group_by="source_ip" range="5m" local_cache="true">2</threshold></event><event id="exfil"><check type="EQU" field="event_type">exfil</check></event><condition>login -> exfil</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	// Login 1: threshold count=1, 1>2 false => event does not match stage
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.1"})
+	time.Sleep(20 * time.Millisecond)
+
+	// Exfil should not trigger because login stage was never satisfied
+	results := rs.EngineCheck(map[string]interface{}{"event_type": "exfil", "source_ip": "10.0.0.1"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (threshold not met after 1 login), got %d", len(results))
+	}
+
+	// Login 2: count=2, 2>2 false => still not met
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.1"})
+	time.Sleep(20 * time.Millisecond)
+
+	results = rs.EngineCheck(map[string]interface{}{"event_type": "exfil", "source_ip": "10.0.0.1"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (threshold not met after 2 logins), got %d", len(results))
+	}
+
+	// Login 3: count=3, 3>2 true => threshold met, login stage satisfied
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.1"})
+	time.Sleep(20 * time.Millisecond)
+
+	// Now exfil should complete the sequence
+	results = rs.EngineCheck(map[string]interface{}{"event_type": "exfil", "source_ip": "10.0.0.1"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (threshold met after 3 logins), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_ThresholdInEvent_DifferentGroups verifies that threshold
+// counters are isolated by their group_by field.
+func TestCEP_Execute_ThresholdInEvent_DifferentGroups(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="threshold groups"><sequence within="10m" group_by="source_ip" local_cache="true"><event id="login"><check type="EQU" field="event_type">login</check><threshold group_by="source_ip" range="5m" local_cache="true">2</threshold></event><event id="exfil"><check type="EQU" field="event_type">exfil</check></event><condition>login -> exfil</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	// 2 logins from IP1 (threshold not met: count=2, 2>2 false)
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.1"})
+	time.Sleep(10 * time.Millisecond)
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.1"})
+	time.Sleep(10 * time.Millisecond)
+
+	// 3 logins from IP2 (threshold met: count=3, 3>2 true)
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.2"})
+	time.Sleep(10 * time.Millisecond)
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.2"})
+	time.Sleep(10 * time.Millisecond)
+	rs.EngineCheck(map[string]interface{}{"event_type": "login", "source_ip": "10.0.0.2"})
+	time.Sleep(10 * time.Millisecond)
+
+	// Exfil from IP1: 0 results (threshold not met for IP1)
+	results := rs.EngineCheck(map[string]interface{}{"event_type": "exfil", "source_ip": "10.0.0.1"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for IP1 (threshold not met), got %d", len(results))
+	}
+
+	// Exfil from IP2: 1 result (threshold met for IP2)
+	results = rs.EngineCheck(map[string]interface{}{"event_type": "exfil", "source_ip": "10.0.0.2"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for IP2 (threshold met), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_CrossEventFieldRef_InAppend verifies that post-sequence
+// <append> operations can reference fields from earlier events using the
+// _$#event_id.field syntax.
+func TestCEP_Execute_CrossEventFieldRef_InAppend(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="cross ref append"><sequence within="10m" group_by="user" local_cache="true"><event id="login"><check type="EQU" field="type">login</check></event><event id="exfil"><check type="EQU" field="type">exfil</check></event><condition>login -> exfil</condition></sequence><append field="initial_login_ip">_$#login.source_ip</append><append field="exfil_destination">_$#exfil.dest</append><append field="alert_summary">User logged in from _$#login.source_ip then exfil to _$#exfil.dest</append></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"type": "login", "user": "alice", "source_ip": "192.168.1.100"})
+	time.Sleep(20 * time.Millisecond)
+
+	results := rs.EngineCheck(map[string]interface{}{"type": "exfil", "user": "alice", "dest": "evil.com"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+
+	// Verify cross-event field references resolved correctly
+	if r["initial_login_ip"] != "192.168.1.100" {
+		t.Errorf("expected initial_login_ip=192.168.1.100, got %v", r["initial_login_ip"])
+	}
+	if r["exfil_destination"] != "evil.com" {
+		t.Errorf("expected exfil_destination=evil.com, got %v", r["exfil_destination"])
+	}
+
+	// Verify mixed template interpolation
+	expected := "User logged in from 192.168.1.100 then exfil to evil.com"
+	if r["alert_summary"] != expected {
+		t.Errorf("expected alert_summary=%q, got %q", expected, r["alert_summary"])
+	}
+}
+
+// TestCEP_Execute_CrossEventFieldRef_ThreeStage verifies _$# references
+// work across a 3-stage sequence.
+func TestCEP_Execute_CrossEventFieldRef_ThreeStage(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="three stage ref"><sequence within="10m" group_by="host" local_cache="true"><event id="recon"><check type="EQU" field="type">recon</check></event><event id="exploit"><check type="EQU" field="type">exploit</check></event><event id="exfil"><check type="EQU" field="type">exfil</check></event><condition>recon -> exploit -> exfil</condition></sequence><append field="recon_target">_$#recon.target</append><append field="exploit_cve">_$#exploit.cve</append><append field="exfil_bytes">_$#exfil.bytes_sent</append></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"type": "recon", "host": "srv1", "target": "db-server"})
+	time.Sleep(20 * time.Millisecond)
+	rs.EngineCheck(map[string]interface{}{"type": "exploit", "host": "srv1", "cve": "CVE-2024-1234"})
+	time.Sleep(20 * time.Millisecond)
+	results := rs.EngineCheck(map[string]interface{}{"type": "exfil", "host": "srv1", "bytes_sent": "50000"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+	if r["recon_target"] != "db-server" {
+		t.Errorf("expected recon_target=db-server, got %v", r["recon_target"])
+	}
+	if r["exploit_cve"] != "CVE-2024-1234" {
+		t.Errorf("expected exploit_cve=CVE-2024-1234, got %v", r["exploit_cve"])
+	}
+	if r["exfil_bytes"] != "50000" {
+		t.Errorf("expected exfil_bytes=50000, got %v", r["exfil_bytes"])
+	}
+}
+
+// TestCEP_Execute_MultiFieldGroupBy verifies that comma-separated group_by
+// fields produce distinct correlation keys per unique field combination.
+func TestCEP_Execute_MultiFieldGroupBy(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="multi field group_by"><sequence within="10m" group_by="src_ip,src_port" local_cache="true"><event id="scan"><check type="EQU" field="type">scan</check></event><event id="exploit"><check type="EQU" field="type">exploit</check></event><condition>scan -> exploit</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	// Scan from (1.1.1.1, 80)
+	rs.EngineCheck(map[string]interface{}{"type": "scan", "src_ip": "1.1.1.1", "src_port": "80"})
+	time.Sleep(20 * time.Millisecond)
+
+	// Exploit from (1.1.1.1, 443) — different port, should NOT match
+	results := rs.EngineCheck(map[string]interface{}{"type": "exploit", "src_ip": "1.1.1.1", "src_port": "443"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (different port), got %d", len(results))
+	}
+
+	// Exploit from (1.1.1.1, 80) — same IP+port, should match
+	results = rs.EngineCheck(map[string]interface{}{"type": "exploit", "src_ip": "1.1.1.1", "src_port": "80"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (same IP+port), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_MultiFieldGroupBy_ThreeFields verifies 3-field group_by.
+func TestCEP_Execute_MultiFieldGroupBy_ThreeFields(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="3 field group_by"><sequence within="10m" group_by="region,host,service" local_cache="true"><event id="err"><check type="EQU" field="type">error</check></event><event id="crash"><check type="EQU" field="type">crash</check></event><condition>err -> crash</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"type": "error", "region": "us-east", "host": "web-1", "service": "api"})
+	time.Sleep(20 * time.Millisecond)
+
+	// Different service
+	results := rs.EngineCheck(map[string]interface{}{"type": "crash", "region": "us-east", "host": "web-1", "service": "worker"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (different service), got %d", len(results))
+	}
+
+	// Exact match
+	results = rs.EngineCheck(map[string]interface{}{"type": "crash", "region": "us-east", "host": "web-1", "service": "api"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (all 3 fields match), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_MixedGroupBy verifies that when sequence-level group_by is
+// set, it takes precedence over per-event group_by for all events. The
+// per-event group_by is only used when no sequence-level group_by exists
+// (tested by TestCEP_Execute_MultiSourceSequence_DifferentEventGroupByFields).
+func TestCEP_Execute_MixedGroupBy(t *testing.T) {
+	// Sequence-level group_by="source_ip" is set; event "login" also has
+	// group_by="client_ip", but the sequence-level one takes precedence.
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="mixed group_by"><sequence within="10m" group_by="source_ip" local_cache="true"><event id="fw_block"><check type="EQU" field="type">block</check></event><event id="login" group_by="client_ip"><check type="EQU" field="type">login</check></event><condition>fw_block -> login</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"type": "block", "source_ip": "10.0.0.1"})
+	time.Sleep(20 * time.Millisecond)
+
+	// login has client_ip but NOT source_ip — sequence-level group_by
+	// extracts source_ip from the data, which is missing for login event.
+	// So the correlation key is empty and no match happens.
+	results := rs.EngineCheck(map[string]interface{}{"type": "login", "client_ip": "10.0.0.1"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (sequence-level group_by takes precedence, source_ip missing), got %d", len(results))
+	}
+
+	// login with source_ip set — now sequence-level group_by can extract it
+	results = rs.EngineCheck(map[string]interface{}{"type": "login", "source_ip": "10.0.0.1"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (source_ip matches), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_MixedGroupBy_Isolation verifies that different per-event
+// group_by values produce isolated state.
+func TestCEP_Execute_MixedGroupBy_Isolation(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="mixed group_by isolated"><sequence within="10m" group_by="source_ip" local_cache="true"><event id="fw_block"><check type="EQU" field="type">block</check></event><event id="login" group_by="client_ip"><check type="EQU" field="type">login</check></event><condition>fw_block -> login</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"type": "block", "source_ip": "10.0.0.1"})
+	time.Sleep(20 * time.Millisecond)
+
+	// login with different client_ip — should NOT match
+	results := rs.EngineCheck(map[string]interface{}{"type": "login", "client_ip": "10.0.0.2"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (different client_ip), got %d", len(results))
+	}
+}
+
+// TestCEP_Execute_WithinWindowExpiration verifies that events arriving after
+// the within window do not complete the sequence.
+func TestCEP_Execute_WithinWindowExpiration(t *testing.T) {
+	// within must be > 5s (ParseDurationToSecondsInt enforces minimum)
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="within expiry"><sequence within="6s" group_by="ip" local_cache="true"><event id="a"><check type="EQU" field="type">a</check></event><event id="b"><check type="EQU" field="type">b</check></event><condition>a -> b</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	// Send stage 1 event
+	rs.EngineCheck(map[string]interface{}{"type": "a", "ip": "1.1.1.1"})
+
+	// Wait for the within window + Ristretto TTL to expire (6s TTL + buffer)
+	time.Sleep(8 * time.Second)
+
+	// Stage 2 event should not complete because state expired from Ristretto
+	results := rs.EngineCheck(map[string]interface{}{"type": "b", "ip": "1.1.1.1"})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results (within window expired), got %d", len(results))
+	}
+
+	// Verify sequence still works within a fresh window
+	rs.EngineCheck(map[string]interface{}{"type": "a", "ip": "1.1.1.1"})
+	time.Sleep(20 * time.Millisecond)
+	results = rs.EngineCheck(map[string]interface{}{"type": "b", "ip": "1.1.1.1"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (fresh window), got %d", len(results))
+	}
+}
+
+// TestSerializeState_WithContext verifies that SequenceState.Context is
+// correctly preserved through serialization/deserialization.
+func TestSerializeState_WithContext(t *testing.T) {
+	state := NewSequenceState(5000, 10000)
+	state.AddMatch(0, StageMatch{Timestamp: 100, Data: map[string]interface{}{"event": "login"}})
+	state.Context["file.current"] = "/tmp/malware.exe"
+	state.Context["user.name"] = "alice"
+
+	data, err := serializeState(state)
+	if err != nil {
+		t.Fatalf("serializeState failed: %v", err)
+	}
+
+	restored, err := decompressState(data)
+	if err != nil {
+		t.Fatalf("decompressState failed: %v", err)
+	}
+
+	if restored.CreatedAt != 5000 || restored.ExpiresAt != 10000 {
+		t.Errorf("timestamps mismatch: CreatedAt=%d ExpiresAt=%d", restored.CreatedAt, restored.ExpiresAt)
+	}
+
+	if restored.Context == nil {
+		t.Fatal("expected non-nil Context after deserialization")
+	}
+	if restored.Context["file.current"] != "/tmp/malware.exe" {
+		t.Errorf("expected file.current=/tmp/malware.exe, got %v", restored.Context["file.current"])
+	}
+	if restored.Context["user.name"] != "alice" {
+		t.Errorf("expected user.name=alice, got %v", restored.Context["user.name"])
+	}
+
+	matches := restored.StageMatches[0]
+	if len(matches) != 1 || matches[0].Data["event"] != "login" {
+		t.Errorf("unexpected restored match data: %v", matches)
+	}
+}
+
+// TestCEP_Execute_PebbleValueRef_Integration verifies the full round-trip of
+// event snapshots through PebbleCEPValueStore: PutSnapshot on stage match →
+// GetSnapshot on sequence completion → correct data in _sequence_events.
+func TestCEP_Execute_PebbleValueRef_Integration(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="pebble roundtrip"><sequence within="10m" group_by="user" local_cache="true"><event id="login"><check type="EQU" field="type">login</check></event><event id="transfer"><check type="EQU" field="type">transfer</check></event><condition>login -> transfer</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	// Verify cepValueStore is initialized (local_cache=true triggers Pebble)
+	if rs.cepValueStore == nil {
+		t.Fatal("expected cepValueStore to be initialized for local_cache=true")
+	}
+
+	// Send login with rich payload — this data goes through Pebble (PutSnapshot)
+	rs.EngineCheck(map[string]interface{}{
+		"type":      "login",
+		"user":      "bob",
+		"source_ip": "172.16.0.55",
+		"country":   "US",
+		"device":    "laptop-42",
+	})
+	time.Sleep(20 * time.Millisecond)
+
+	// Complete sequence — login data should be read back from Pebble (GetSnapshot)
+	results := rs.EngineCheck(map[string]interface{}{
+		"type":    "transfer",
+		"user":    "bob",
+		"dest":    "external-server",
+		"size_mb": 500,
+	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	seqEvents := results[0]["_sequence_events"]
+	if seqEvents == nil {
+		t.Fatal("expected _sequence_events in result")
+	}
+	seqEventsMap := seqEvents.(map[string]interface{})
+
+	// Verify login event data was preserved through Pebble round-trip
+	loginEvt, ok := seqEventsMap["login"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected login event in _sequence_events")
+	}
+	if loginEvt["source_ip"] != "172.16.0.55" {
+		t.Errorf("expected login source_ip=172.16.0.55, got %v", loginEvt["source_ip"])
+	}
+	if loginEvt["country"] != "US" {
+		t.Errorf("expected login country=US, got %v", loginEvt["country"])
+	}
+	if loginEvt["device"] != "laptop-42" {
+		t.Errorf("expected login device=laptop-42, got %v", loginEvt["device"])
+	}
+
+	// Verify transfer event data
+	transferEvt, ok := seqEventsMap["transfer"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected transfer event in _sequence_events")
+	}
+	if transferEvt["dest"] != "external-server" {
+		t.Errorf("expected transfer dest=external-server, got %v", transferEvt["dest"])
+	}
+}

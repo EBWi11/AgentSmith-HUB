@@ -2926,9 +2926,37 @@ func RulesetBuild(ruleset *Ruleset) error {
 							}
 							threshold.RangeInt = rangeInt
 						}
-						threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+
+					if threshold.LocalCache && !createLocalCache {
+						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local cache for event checklist threshold: %w", err)
+						}
+						createLocalCache = true
+					}
+					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+						ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local classify cache for event checklist threshold: %w", err)
+						}
+						createLocalCacheForClassify = true
+					}
+					if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+						if threshold.CountField != "" {
+							threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+						}
 					}
 				}
+			}
 
 				// Process thresholds in the event
 				for j := range eventDef.Thresholds {
@@ -2951,6 +2979,34 @@ func RulesetBuild(ruleset *Ruleset) error {
 						threshold.RangeInt = rangeInt
 					}
 					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+
+					if threshold.LocalCache && !createLocalCache {
+						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local cache for sequence event threshold: %w", err)
+						}
+						createLocalCache = true
+					}
+					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+						ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+							NumCounters: 1_000_000,
+							MaxCost:     1024 * 1024 * 16,
+							BufferItems: 32,
+						})
+						if err != nil {
+							return fmt.Errorf("failed to create local classify cache for sequence event threshold: %w", err)
+						}
+						createLocalCacheForClassify = true
+					}
+					if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+						if threshold.CountField != "" {
+							threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+						}
+					}
 				}
 			}
 
