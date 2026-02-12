@@ -112,6 +112,7 @@ const (
 	T_Plugin                        // Plugin = 5
 	T_Iterator                      // Iterator = 6
 	T_Modify                        // Modify = 7
+	T_Sequence                      // Sequence = 8 (CEP sequence detection)
 )
 
 type EngineOperator struct {
@@ -133,6 +134,7 @@ type Rule struct {
 	PluginMap    map[int]Plugin
 	ModifyMap    map[int]Modify
 	DelMap       map[int][][]string
+	SequenceMap  map[int]Sequence
 }
 
 type Ruleset struct {
@@ -160,6 +162,9 @@ type Ruleset struct {
 	Cache            *ristretto.Cache[string, int]
 	CacheForClassify *ristretto.Cache[string, map[string]bool]
 
+	// CEP sequence state cache (local cache mode)
+	SequenceCache *ristretto.Cache[string, *SequenceState]
+
 	// Regex result cache for this ruleset instance
 	RegexResultCache *RegexResultCache
 
@@ -176,6 +181,15 @@ type Ruleset struct {
 	processTotal      uint64         // cumulative message processing total
 	lastReportedTotal uint64         // For calculating increments in 10-second intervals
 	wg                sync.WaitGroup // WaitGroup for goroutine management
+
+	// CEP state manager for sequence partial match storage
+	seqStateManager *CEPStateManager
+
+	// Flag: true if any rule has a sequence with absence stages (needs absence scanner)
+	hasAbsenceSequences bool
+
+	// Fast lookup table for absence scanner: rule ID -> rule pointer
+	ruleByID map[string]*Rule
 
 	// OwnerProjects field removed - project usage is now calculated dynamically
 }
@@ -242,6 +256,48 @@ type Threshold struct {
 	CountFieldList []string            // Parsed count field path
 	Value          int                 `xml:",chardata"` // Threshold value
 	GroupByID      string              // Unique identifier for grouping
+}
+
+// Sequence defines a CEP sequence detection container.
+// It holds event definitions, a condition expression, and configuration
+// for temporal pattern matching across multiple events.
+type Sequence struct {
+	Within    string // Time window string (e.g., "5m", "1h")
+	WithinMs  int64  // Parsed time window in milliseconds
+	WithinSec int    // Parsed time window in seconds (for TTL)
+
+	GroupBy     string   // Default correlation field(s), comma-separated
+	GroupByList []string // Parsed default group_by fields
+	// Pre-parsed field paths for GroupByList to avoid repeated StringToList on hot path
+	GroupByFieldPaths [][]string
+
+	LocalCache bool // true = use local Ristretto cache; false = use Redis
+	Compress   bool // true = use zstd compression for Redis state storage
+
+	Events     map[string]*EventDef // Event ID -> definition
+	EventOrder []string             // Preserve definition order
+
+	ConditionExpr string        // Raw condition expression string
+	Condition     *CEPCondition // Parsed condition from cep_condition.go
+
+	GroupByID string // Unique prefix for state keys: rulesetID + ruleID
+}
+
+// EventDef defines the matching criteria for a single event within a sequence.
+type EventDef struct {
+	ID        string // Unique identifier, referenced in condition expression
+	EventTime string // Field name containing the event's timestamp (optional)
+	// Pre-parsed event_time field path for faster timestamp extraction
+	EventTimeFieldPath []string
+
+	GroupBy     string   // Per-event correlation field(s) override
+	GroupByList []string // Parsed per-event group_by fields
+	// Pre-parsed field paths for GroupByList to avoid repeated StringToList on hot path
+	GroupByFieldPaths [][]string
+
+	CheckNodes []CheckNodes // Nested <check> elements
+	Checklists []Checklist  // Nested <checklist> elements
+	Thresholds []Threshold  // Nested <threshold> elements
 }
 
 // Append defines additional fields to append after rule matching.
@@ -2319,7 +2375,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 
 				// Set threshold group ID - use same format as standalone threshold for consistency
-				threshold.GroupByID = ruleset.RulesetID + rule.ID
+				threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
 
 				// Initialize cache if needed for checklist thresholds
 				if threshold.LocalCache && !createLocalCache {
@@ -2512,7 +2568,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
 			}
 
-			threshold.GroupByID = ruleset.RulesetID + rule.ID
+			threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
 
 			if !createLocalCache {
 				ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
@@ -2596,7 +2652,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 
 				// Set threshold group ID for iterator thresholds
-				threshold.GroupByID = ruleset.RulesetID + rule.ID
+				threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
 
 				// Initialize cache if needed for iterator thresholds
 				if threshold.LocalCache && !createLocalCache {
@@ -2675,7 +2731,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 						}
 						threshold.RangeInt = rangeInt
 					}
-					threshold.GroupByID = ruleset.RulesetID + rule.ID
+					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
 
 					if threshold.LocalCache && !createLocalCache {
 						var err error
@@ -2713,6 +2769,225 @@ func RulesetBuild(ruleset *Ruleset) error {
 		}
 
 		// Process del operations in DelMap (no additional processing needed as DelMap already contains parsed field paths)
+
+		// Process sequences in SequenceMap
+		for id, seq := range rule.SequenceMap {
+			// Parse the condition expression
+			cepCondition, err := ParseCEPCondition(seq.ConditionExpr)
+			if err != nil {
+				return fmt.Errorf("sequence condition parse error in rule '%s': %w", rule.ID, err)
+			}
+			seq.Condition = cepCondition
+
+			// Parse the 'within' duration
+			withinSec, err := common.ParseDurationToSecondsInt(seq.Within)
+			if err != nil {
+				return fmt.Errorf("sequence 'within' parse error in rule '%s': %w", rule.ID, err)
+			}
+			seq.WithinSec = withinSec
+			seq.WithinMs = int64(withinSec) * 1000
+
+			// Set GroupByID for state key prefix
+			seq.GroupByID = ruleset.RulesetID + ":" + rule.ID
+
+			// Parse sequence-level group_by
+			if seq.GroupBy != "" {
+				fields := strings.Split(seq.GroupBy, ",")
+				seq.GroupByList = make([]string, 0, len(fields))
+				seq.GroupByFieldPaths = make([][]string, 0, len(fields))
+				for _, f := range fields {
+					f = strings.TrimSpace(f)
+					if f != "" {
+						seq.GroupByList = append(seq.GroupByList, f)
+						seq.GroupByFieldPaths = append(seq.GroupByFieldPaths, common.StringToList(f))
+					}
+				}
+			}
+
+			// Validate: all event IDs in condition must have a corresponding <event> definition
+			for eventID := range cepCondition.AllEvents {
+				if _, exists := seq.Events[eventID]; !exists {
+					return fmt.Errorf("sequence condition references undefined event '%s' in rule '%s'", eventID, rule.ID)
+				}
+			}
+			// Validate: all <event> definitions must be referenced in the condition
+			for eventID := range seq.Events {
+				if !cepCondition.AllEvents[eventID] {
+					return fmt.Errorf("event '%s' is defined but not referenced in sequence condition in rule '%s'", eventID, rule.ID)
+				}
+			}
+
+			// Process each event definition
+			hasNoGroupBy := false
+			groupByFieldCount := -1
+			for _, eventID := range seq.EventOrder {
+				eventDef := seq.Events[eventID]
+
+				// Parse per-event group_by
+				if eventDef.GroupBy != "" {
+					fields := strings.Split(eventDef.GroupBy, ",")
+					eventDef.GroupByList = make([]string, 0, len(fields))
+					eventDef.GroupByFieldPaths = make([][]string, 0, len(fields))
+					for _, f := range fields {
+						f = strings.TrimSpace(f)
+						if f != "" {
+							eventDef.GroupByList = append(eventDef.GroupByList, f)
+							eventDef.GroupByFieldPaths = append(eventDef.GroupByFieldPaths, common.StringToList(f))
+						}
+					}
+				}
+				if eventDef.EventTime != "" {
+					eventDef.EventTimeFieldPath = common.StringToList(eventDef.EventTime)
+				}
+
+				// Determine effective group_by for this event
+				effectiveGroupBy := eventDef.GroupByList
+				if len(effectiveGroupBy) == 0 {
+					effectiveGroupBy = seq.GroupByList
+				}
+				if len(effectiveGroupBy) == 0 {
+					hasNoGroupBy = true
+				} else {
+					// Validate field count consistency across events.
+					// Note: field names may differ across events (e.g., "src_ip" vs "client_ip")
+					// as long as they represent the same logical correlation entity.
+					if groupByFieldCount == -1 {
+						groupByFieldCount = len(effectiveGroupBy)
+					} else if len(effectiveGroupBy) != groupByFieldCount {
+						return fmt.Errorf("inconsistent group_by field count across events in sequence in rule '%s': expected %d, got %d for event '%s'",
+							rule.ID, groupByFieldCount, len(effectiveGroupBy), eventID)
+					}
+				}
+
+				// Process check nodes in the event
+				for j := range eventDef.CheckNodes {
+					node := &eventDef.CheckNodes[j]
+					err := processCheckNode(node, nil, rule.ID)
+					if err != nil {
+						return fmt.Errorf("error in event '%s' of rule '%s': %w", eventID, rule.ID, err)
+					}
+				}
+
+				// Process checklists in the event
+				for j := range eventDef.Checklists {
+					cl := &eventDef.Checklists[j]
+					if strings.TrimSpace(cl.Condition) != "" {
+						if _, _, ok := ConditionRegex.Find(strings.TrimSpace(cl.Condition)); ok {
+							cl.ConditionAST = GetAST(strings.TrimSpace(cl.Condition))
+							cl.ConditionMap = make(map[string]bool, len(cl.CheckNodes)+len(cl.ThresholdNodes))
+							cl.ConditionFlag = true
+						} else {
+							return fmt.Errorf("invalid checklist condition in event '%s' of rule '%s'", eventID, rule.ID)
+						}
+					}
+					for k := range cl.CheckNodes {
+						node := &cl.CheckNodes[k]
+						err := processCheckNode(node, cl, rule.ID)
+						if err != nil {
+							return fmt.Errorf("error in checklist of event '%s' in rule '%s': %w", eventID, rule.ID, err)
+						}
+					}
+					// Process threshold nodes in checklist
+					for k := range cl.ThresholdNodes {
+						threshold := &cl.ThresholdNodes[k]
+						if threshold.group_by != "" {
+							threshold.GroupByList = make(map[string][]string)
+							groupByFields := strings.Split(threshold.group_by, ",")
+							for _, field := range groupByFields {
+								field = strings.TrimSpace(field)
+								if field != "" {
+									threshold.GroupByList[field] = common.StringToList(field)
+								}
+							}
+						}
+						if threshold.Range != "" {
+							rangeInt, err := common.ParseDurationToSecondsInt(threshold.Range)
+							if err != nil {
+								return fmt.Errorf("threshold range error in event '%s' of rule '%s': %w", eventID, rule.ID, err)
+							}
+							threshold.RangeInt = rangeInt
+						}
+						threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+					}
+				}
+
+				// Process thresholds in the event
+				for j := range eventDef.Thresholds {
+					threshold := &eventDef.Thresholds[j]
+					if threshold.group_by != "" {
+						threshold.GroupByList = make(map[string][]string)
+						groupByFields := strings.Split(threshold.group_by, ",")
+						for _, field := range groupByFields {
+							field = strings.TrimSpace(field)
+							if field != "" {
+								threshold.GroupByList[field] = common.StringToList(field)
+							}
+						}
+					}
+					if threshold.Range != "" {
+						rangeInt, err := common.ParseDurationToSecondsInt(threshold.Range)
+						if err != nil {
+							return fmt.Errorf("threshold range error in event '%s' of rule '%s': %w", eventID, rule.ID, err)
+						}
+						threshold.RangeInt = rangeInt
+					}
+					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+				}
+			}
+
+			// Validate: group_by is required — must be set on <sequence> or on every <event>
+			if len(seq.GroupByList) == 0 && hasNoGroupBy {
+				return fmt.Errorf("sequence group_by is required: set group_by on <sequence> or on every <event> in rule '%s'", rule.ID)
+			}
+
+			// Check if this sequence has absence stages (for absence scanner)
+			if cepCondition.HasAbsenceStages() {
+				ruleset.hasAbsenceSequences = true
+			}
+
+			// Initialize local cache for sequence if needed
+			if seq.LocalCache && ruleset.SequenceCache == nil {
+				ruleset.SequenceCache, err = ristretto.NewCache(&ristretto.Config[string, *SequenceState]{
+					NumCounters: 1_000_000,
+					MaxCost:     1024 * 1024 * 32, // 32MB
+					BufferItems: 64,
+				})
+				if err != nil {
+					return fmt.Errorf("failed to create sequence local cache: %w", err)
+				}
+			}
+
+			// Store back
+			rule.SequenceMap[id] = seq
+		}
+	}
+
+	// Initialize CEP state manager if any rule has sequences
+	hasSequences := false
+	seqUseLocal := -1 // -1=unset, 0=false, 1=true
+	for _, rule := range ruleset.Rules {
+		for _, seq := range rule.SequenceMap {
+			hasSequences = true
+			localVal := 0
+			if seq.LocalCache {
+				localVal = 1
+			}
+			if seqUseLocal == -1 {
+				seqUseLocal = localVal
+			} else if seqUseLocal != localVal {
+				return fmt.Errorf("inconsistent local_cache settings across sequences: all sequences in a ruleset must use the same local_cache value")
+			}
+		}
+	}
+	if hasSequences {
+		useLocalCache := seqUseLocal == 1
+		ruleset.seqStateManager = NewCEPStateManager(useLocalCache, ruleset.SequenceCache)
+	}
+
+	// Build rule lookup map for faster absence scan path
+	ruleset.ruleByID = make(map[string]*Rule, len(ruleset.Rules))
+	for i := range ruleset.Rules {
+		ruleset.ruleByID[ruleset.Rules[i].ID] = &ruleset.Rules[i]
 	}
 
 	// Initialize regex result cache

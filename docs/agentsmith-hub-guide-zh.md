@@ -1048,6 +1048,172 @@ OIDC_SCOPE="openid profile email"
 - 使用 OR 逻辑：任一扩展名匹配即可；
 - 使用 | 作为分隔符。
 
+### 4.4 CEP 序列检测（复杂事件处理）
+
+`<sequence>` 元素用于在时间窗口内检测多个事件的有序模式。与单事件匹配不同，序列检测通过共享字段关联不同事件，并检查时间顺序。
+
+**典型应用场景：**
+
+| 场景 | 模式 | 描述 |
+|------|------|------|
+| 暴力破解后横向移动 | `brute -> login_success -> rdp` | 多次登录失败，然后成功，接着 RDP 会话 |
+| 登录未做 MFA | `login -> !mfa` | 登录后未进行 MFA 验证 |
+| 登录后数据外泄 | `login -> exfil` | 登录后出现大文件传输 |
+| 攻击链检测 | `recon -> exploit -> persist -> exfil` | 完整杀伤链检测 |
+
+#### 基本结构
+
+```xml
+<rule id="rule_id" name="规则名称">
+    <!-- 可选：前置过滤（应用于每个入站事件） -->
+    <check type="..." field="...">value</check>
+
+    <!-- 序列检测 -->
+    <sequence within="时间窗口" group_by="字段" local_cache="true|false">
+        <event id="事件ID" event_time="时间字段" group_by="字段">
+            <!-- 事件匹配条件：check / checklist / threshold -->
+        </event>
+
+        <event id="事件ID" event_time="时间字段">
+            <!-- 事件匹配条件 -->
+        </event>
+
+        <condition>表达式</condition>
+    </sequence>
+
+    <!-- 可选：序列完成后的操作 -->
+    <append field="...">value</append>
+</rule>
+```
+
+#### 元素参考
+
+**`<sequence>` 属性：**
+
+| 属性 | 必填 | 描述 |
+|------|------|------|
+| `within` | 是 | 时间窗口（如 `30s`、`5m`、`1h`、`1d`） |
+| `group_by` | 否 | 默认关联字段，多个用逗号分隔 |
+| `local_cache` | 否 | `true` 使用本地缓存，`false`（默认）使用 Redis |
+| `compress` | 否 | `true` 启用 zstd 压缩 Redis 状态数据（节省内存，增加 CPU 开销） |
+
+**`<event>` 属性：**
+
+| 属性 | 必填 | 描述 |
+|------|------|------|
+| `id` | 是 | 唯一标识符，在 `<condition>` 中引用 |
+| `event_time` | 否 | 包含事件时间戳的字段名 |
+| `group_by` | 否 | 每事件关联字段，覆盖序列级默认值 |
+
+**`<condition>` 操作符：**
+
+| 操作符 | 含义 | 示例 |
+|--------|------|------|
+| `->` | 序列（A 后接 B） | `a -> b` |
+| `and` | 同一事件满足两个条件 | `a and b` |
+| `or` | 同一事件满足其一 | `a or b` |
+| `!` | 缺席（不能出现） | `a -> !b` |
+| `()` | 分组 | `a -> (b or c)` |
+
+#### 示例 1：基本序列
+
+```xml
+<rule id="login_then_exfil" name="登录后数据外泄">
+    <sequence within="10m" group_by="source_ip" local_cache="true">
+        <event id="login" event_time="timestamp">
+            <check type="EQU" field="event_type">login</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <event id="exfil" event_time="timestamp">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+        <condition>login -> exfil</condition>
+    </sequence>
+    <append field="alert_type">post_login_data_exfiltration</append>
+</rule>
+```
+
+#### 示例 2：缺席检测（登录未做 MFA）
+
+```xml
+<rule id="login_no_mfa" name="登录后未验证MFA">
+    <sequence within="2m" group_by="user_id">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+    <append field="alert_type">missing_mfa</append>
+</rule>
+```
+
+当登录发生后 2 分钟内没有 MFA 验证时触发。
+
+#### 示例 3：多数据源关联
+
+当事件来自不同数据源且字段名不同时：
+
+```xml
+<rule id="multi_source" name="防火墙拦截后认证绕过">
+    <sequence within="5m">
+        <event id="fw_block" group_by="src_ip" event_time="fw_timestamp">
+            <check type="EQU" field="action">block</check>
+        </event>
+        <event id="auth_success" group_by="client_ip" event_time="auth_time">
+            <check type="EQU" field="event_type">authentication</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <condition>fw_block -> auth_success</condition>
+    </sequence>
+</rule>
+```
+
+引擎按位置映射进行关联：`fw_block.src_ip` 对应 `auth_success.client_ip`。
+
+#### 示例 4：分支模式（OR）
+
+```xml
+<rule id="login_suspicious" name="登录后可疑活动">
+    <sequence within="15m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="priv_esc">
+            <check type="EQU" field="event_type">privilege_escalation</check>
+        </event>
+        <event id="data_access">
+            <check type="EQU" field="event_type">sensitive_data_access</check>
+        </event>
+        <condition>login -> (priv_esc or data_access)</condition>
+    </sequence>
+</rule>
+```
+
+#### 跨事件字段引用
+
+序列完成后，可以通过 `_$#event_id.field` 语法访问之前事件的字段：
+
+```xml
+<append field="initial_login_ip">_$#login.source_ip</append>
+<append field="exfil_dest">_$dest_ip</append>  <!-- 当前事件字段 -->
+```
+
+#### 事件时间与乱序处理
+
+默认使用处理时间。指定 `event_time` 可使用事件自带的时间戳，即使事件乱序到达也能正确排序：
+
+```xml
+<event id="login" event_time="timestamp">
+    <!-- 引擎从事件数据的 "timestamp" 字段读取时间用于排序 -->
+</event>
+```
+
+支持格式：Unix 时间戳（秒/毫秒）、ISO 8601、RFC 3339。
+
 ## 🔧 第五部分：高级特性详解
 
 ### 5.1 阈值检测的三种模式

@@ -4734,7 +4734,7 @@ func Eval(funcName string, params ...interface{}) (interface{}, error) {
 		%s
 		
 		// TODO: Implement your action logic here
-		// Example: fmt.Printf("Action executed with: %s\n", value)
+		// Example: fmt.Printf("Action executed with: %%s\n", value)
 		fmt.Printf("Action executed\n")
 		return true, nil
 	}

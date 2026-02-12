@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -146,13 +147,16 @@ func isValidQueryType(queryType string) bool {
 
 // isValidIP checks if the input is a valid IP address
 func isValidIP(ip string) bool {
-	return regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`).MatchString(ip) ||
-		regexp.MustCompile(`^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^::$`).MatchString(ip)
+	return net.ParseIP(ip) != nil
 }
 
 // isValidDomain checks if the input is a valid domain
 func isValidDomain(domain string) bool {
-	return regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`).MatchString(domain)
+	// Domain must not be an IP and should contain at least one dot.
+	if net.ParseIP(domain) != nil || !strings.Contains(domain, ".") {
+		return false
+	}
+	return regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$`).MatchString(domain)
 }
 
 // isValidFileHash checks if the input is a valid file hash

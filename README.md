@@ -19,6 +19,7 @@ If you work in security operations, you probably deal with massive volumes of ra
 - **No coding required** — Write detection and processing logic in simple, readable XML rules
 - **Blazing fast** — 40,000+ messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md))
 - **All-in-one pipeline** — Input, detection, enrichment, transformation, and output in a unified flow
+- **CEP built-in** — Detect ordered event sequences, absence patterns, and multi-source correlations over time
 - **Scale horizontally** — Built-in cluster mode with leader/follower architecture
 - **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, and more
 - **Modern Web UI** — Visual rule editing, project orchestration, real-time testing, and log search
@@ -29,7 +30,7 @@ If you work in security operations, you probably deal with massive volumes of ra
 AgentSmith-HUB uses a straightforward pipeline model:
 
 ```
-INPUT (Kafka / SLS / ...) → RULESET (detect & transform) → OUTPUT (Kafka / ES / SLS / ...)
+INPUT (Kafka / SLS / ...) → RULESET (detect & transform) → OUTPUT (Kafka / ES / ClickHouse / SLS / ...)
 ```
 
 Multiple rulesets can be chained together within a **Project**, giving you full control over data flow:
@@ -38,13 +39,14 @@ Multiple rulesets can be chained together within a **Project**, giving you full 
 
 ### Rules Engine Syntax
 
-The rules engine uses six intuitive XML elements:
+The rules engine uses seven intuitive XML elements:
 
 | Element | Purpose | Example |
 |---------|---------|---------|
 | `<check>` | Detection — regex, string match, numeric comparison, plugin | `<check type="REGEX" field="src_ip">^10\..*</check>` |
 | `<checklist>` | Logical combination of checks (AND / OR / NOT) | `<checklist condition="a and (b or c)">` |
 | `<threshold>` | Frequency-based detection with time windows | Detect brute-force: 5 failures in 60s |
+| `<sequence>` | CEP — detect ordered event patterns across time | `login -> !mfa` (login without MFA) |
 | `<append>` | Enrich or modify data fields | `<append type="PLUGIN" field="geo">geoMatch(src_ip)</append>` |
 | `<del>` | Remove fields from data | `<del>sensitive_field</del>` |
 | `<plugin>` | Call external APIs or custom logic | Threat intel lookup, enrichment, etc. |
@@ -59,6 +61,22 @@ Rules execute **in the order you write them**, so you can freely combine detecti
     <check type="EQU" field="threat_info.severity">high</check>
     <!-- Finally, add metadata -->
     <append field="alert_level">critical</append>
+</rule>
+```
+
+Detect **event sequences** across time with CEP:
+
+```xml
+<rule id="login_no_mfa" name="Login without MFA">
+    <sequence within="2m" group_by="user_id">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
 </rule>
 ```
 
@@ -165,6 +183,7 @@ K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
 ## Documentation
 
 - [Complete Guide](docs/agentsmith-hub-guide.md) | [Guide (Chinese)](docs/agentsmith-hub-guide-zh.md)
+- [CEP Sequence Design](docs/cep-sequence-design.md)
 - [Performance Testing Report](docs/performance-testing-report.md)
 
 ## License

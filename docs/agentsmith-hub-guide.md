@@ -1054,6 +1054,172 @@ When you need to check if a field matches multiple values, you can use multi-val
 - Use OR logic: Any extension matches is sufficient
 - Use | as separator
 
+### 4.4 CEP Sequence Detection (Complex Event Processing)
+
+The `<sequence>` element enables detection of ordered patterns across multiple events within a time window. Unlike single-event matching, sequence detection correlates separate events by shared fields and checks temporal ordering.
+
+**Typical Use Cases:**
+
+| Scenario | Pattern | Description |
+|----------|---------|-------------|
+| Brute force then lateral movement | `brute -> login_success -> rdp` | Multiple failed logins, then success, then RDP session |
+| Login without MFA | `login -> !mfa` | Login occurred but MFA verification never followed |
+| Post-login data exfiltration | `login -> exfil` | Login followed by large file transfer |
+| Attack chain detection | `recon -> exploit -> persist -> exfil` | Full kill chain detection |
+
+#### Basic Structure
+
+```xml
+<rule id="rule_id" name="Rule Name">
+    <!-- Optional: pre-filter checks (applied to every incoming event) -->
+    <check type="..." field="...">value</check>
+
+    <!-- Sequence detection -->
+    <sequence within="TIME_WINDOW" group_by="FIELD" local_cache="true|false">
+        <event id="EVENT_ID" event_time="FIELD" group_by="FIELD">
+            <!-- Event matching criteria: check / checklist / threshold -->
+        </event>
+
+        <event id="EVENT_ID" event_time="FIELD">
+            <!-- Event matching criteria -->
+        </event>
+
+        <condition>EXPRESSION</condition>
+    </sequence>
+
+    <!-- Optional: post-match operations (only execute when sequence completes) -->
+    <append field="...">value</append>
+</rule>
+```
+
+#### Element Reference
+
+**`<sequence>` Attributes:**
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `within` | Yes | Time window (e.g., `30s`, `5m`, `1h`, `1d`) |
+| `group_by` | No | Default correlation field(s), comma-separated |
+| `local_cache` | No | `true` for local cache, `false` (default) for Redis |
+| `compress` | No | `true` to enable zstd compression for Redis state (saves memory, adds CPU cost) |
+
+**`<event>` Attributes:**
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `id` | Yes | Unique identifier, referenced in `<condition>` |
+| `event_time` | No | Field containing the event's timestamp |
+| `group_by` | No | Per-event correlation field(s), overrides sequence default |
+
+**`<condition>` Operators:**
+
+| Operator | Meaning | Example |
+|----------|---------|---------|
+| `->` | Sequence (A followed by B) | `a -> b` |
+| `and` | Both conditions on same event | `a and b` |
+| `or` | Either condition on same event | `a or b` |
+| `!` | Absence (must NOT occur) | `a -> !b` |
+| `()` | Grouping | `a -> (b or c)` |
+
+#### Example 1: Basic Sequence
+
+```xml
+<rule id="login_then_exfil" name="Post-login data exfiltration">
+    <sequence within="10m" group_by="source_ip" local_cache="true">
+        <event id="login" event_time="timestamp">
+            <check type="EQU" field="event_type">login</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <event id="exfil" event_time="timestamp">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+        <condition>login -> exfil</condition>
+    </sequence>
+    <append field="alert_type">post_login_data_exfiltration</append>
+</rule>
+```
+
+#### Example 2: Absence Detection (Login Without MFA)
+
+```xml
+<rule id="login_no_mfa" name="Login without MFA verification">
+    <sequence within="2m" group_by="user_id">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+    <append field="alert_type">missing_mfa</append>
+</rule>
+```
+
+Triggers when a login occurs and no MFA verification follows within 2 minutes.
+
+#### Example 3: Multi-Source Correlation
+
+When events come from different sources with different field names:
+
+```xml
+<rule id="multi_source" name="Firewall block then auth bypass">
+    <sequence within="5m">
+        <event id="fw_block" group_by="src_ip" event_time="fw_timestamp">
+            <check type="EQU" field="action">block</check>
+        </event>
+        <event id="auth_success" group_by="client_ip" event_time="auth_time">
+            <check type="EQU" field="event_type">authentication</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <condition>fw_block -> auth_success</condition>
+    </sequence>
+</rule>
+```
+
+The engine correlates by positional mapping: `fw_block.src_ip` corresponds to `auth_success.client_ip`.
+
+#### Example 4: Branch Pattern (OR)
+
+```xml
+<rule id="login_suspicious" name="Post-login suspicious activity">
+    <sequence within="15m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="priv_esc">
+            <check type="EQU" field="event_type">privilege_escalation</check>
+        </event>
+        <event id="data_access">
+            <check type="EQU" field="event_type">sensitive_data_access</check>
+        </event>
+        <condition>login -> (priv_esc or data_access)</condition>
+    </sequence>
+</rule>
+```
+
+#### Cross-Event Field References
+
+When a sequence completes, fields from earlier events can be accessed using `_$#event_id.field` syntax:
+
+```xml
+<append field="initial_login_ip">_$#login.source_ip</append>
+<append field="exfil_dest">_$dest_ip</append>  <!-- current event field -->
+```
+
+#### Event Time and Out-of-Order Events
+
+By default, the engine uses processing time. Specify `event_time` to use the event's own timestamp, enabling correct ordering even when events arrive out of order:
+
+```xml
+<event id="login" event_time="timestamp">
+    <!-- Engine reads the "timestamp" field from event data for ordering -->
+</event>
+```
+
+Supported formats: Unix epoch (seconds/milliseconds), ISO 8601, RFC 3339.
+
 ## 🔧 Part 5: Advanced Features Detailed Explanation
 
 ### 5.1 Three Modes of Threshold Detection
