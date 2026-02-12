@@ -1,6 +1,7 @@
 package rules_engine
 
 import (
+	"AgentSmith-HUB/common"
 	"testing"
 	"time"
 
@@ -193,6 +194,81 @@ func TestCEP_ParseMultiSourceSequence(t *testing.T) {
 	authEvent := seq.Events["auth_success"]
 	if authEvent.GroupBy != "client_ip" {
 		t.Errorf("expected auth_success group_by='client_ip', got '%s'", authEvent.GroupBy)
+	}
+}
+
+func TestCEP_Execute_MultiSourceSequence_DifferentEventGroupByFields(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="r1" name="multi source execute">
+			<sequence within="10m">
+				<event id="fw_block" group_by="src_ip" event_time="ts">
+					<check type="EQU" field="event_type">fw_block</check>
+				</event>
+				<event id="auth_success" group_by="client_ip" event_time="ts">
+					<check type="EQU" field="event_type">auth_success</check>
+				</event>
+				<condition>fw_block -> auth_success</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+	var seq Sequence
+	foundSeq := false
+	for _, s := range rs.Rules[0].SequenceMap {
+		seq = s
+		foundSeq = true
+		break
+	}
+	if !foundSeq {
+		t.Fatal("expected sequence definition in rule")
+	}
+
+	// Stage 1 (group_by=src_ip)
+	stage1 := map[string]interface{}{
+		"event_type": "fw_block",
+		"src_ip":     "10.0.0.8",
+		"ts":         "1000",
+	}
+	preMatchStage1 := make([]string, 0, len(seq.EventOrder))
+	preMatchCacheStage1 := map[string]common.CheckCoreCache{}
+	for _, eventID := range seq.EventOrder {
+		if rs.evaluateEventDef(seq.Events[eventID], stage1, preMatchCacheStage1) {
+			preMatchStage1 = append(preMatchStage1, eventID)
+		}
+	}
+	if len(preMatchStage1) != 1 || preMatchStage1[0] != "fw_block" {
+		t.Fatalf("unexpected stage1 pre-match event IDs: %+v", preMatchStage1)
+	}
+	key1Vals := rs.extractCorrelateValuesForStateLookup(&seq, preMatchStage1, stage1, map[string]common.CheckCoreCache{})
+	key1 := BuildStateKey(seq.GroupByID, key1Vals)
+	if key1Vals == "" {
+		t.Fatal("expected non-empty group_by values for stage1")
+	}
+
+	// Stage 2 (group_by=client_ip, same logical identity value as stage 1)
+	stage2 := map[string]interface{}{
+		"event_type": "auth_success",
+		"client_ip":  "10.0.0.8",
+		"ts":         "1001",
+	}
+	preMatchStage2 := make([]string, 0, len(seq.EventOrder))
+	preMatchCacheStage2 := map[string]common.CheckCoreCache{}
+	for _, eventID := range seq.EventOrder {
+		if rs.evaluateEventDef(seq.Events[eventID], stage2, preMatchCacheStage2) {
+			preMatchStage2 = append(preMatchStage2, eventID)
+		}
+	}
+	if len(preMatchStage2) != 1 || preMatchStage2[0] != "auth_success" {
+		t.Fatalf("unexpected stage2 pre-match event IDs: %+v", preMatchStage2)
+	}
+	key2Vals := rs.extractCorrelateValuesForStateLookup(&seq, preMatchStage2, stage2, map[string]common.CheckCoreCache{})
+	key2 := BuildStateKey(seq.GroupByID, key2Vals)
+	if key2Vals == "" {
+		t.Fatal("expected non-empty group_by values for stage2")
+	}
+	if key1 != key2 {
+		t.Fatalf("expected same state key across per-event group_by mapping, key1=%s key2=%s", key1, key2)
 	}
 }
 

@@ -1043,7 +1043,7 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	// Step 3: Compute correlation key for state lookup.
 	// Use deterministic group_by extraction from sequence/event configuration
 	// (independent of stage match outcome) so "_@"-dependent stages can still load state.
-	correlateValues := r.extractCorrelateValuesForStateLookup(&seq, data, ruleCache)
+	correlateValues := r.extractCorrelateValuesForStateLookup(&seq, matchedEventIDs, data, ruleCache)
 	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
 		// group_by is configured but no values could be extracted
 		logger.Warn("Sequence group_by extraction yielded empty key",
@@ -1409,12 +1409,13 @@ func (r *Ruleset) extractCorrelateValues(seq *Sequence, matchedEventIDs []string
 
 // extractCorrelateValuesForStateLookup extracts group_by values without relying on
 // stage match results, so sequence state can be loaded before "_@"-dependent checks.
-func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) string {
+func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) string {
 	sb := stringBuilderPool.Get().(*strings.Builder)
 	sb.Reset()
 	defer stringBuilderPool.Put(sb)
 
-	appendGroupBy := func(groupByFields []string, fieldPaths [][]string) {
+	appendGroupBy := func(groupByFields []string, fieldPaths [][]string) int {
+		before := sb.Len()
 		for idx, field := range groupByFields {
 			fieldList := common.StringToList(field)
 			if idx < len(fieldPaths) && len(fieldPaths[idx]) > 0 {
@@ -1425,11 +1426,26 @@ func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, data map[s
 				sb.WriteString("|")
 			}
 		}
+		return sb.Len() - before
 	}
 
 	if len(seq.GroupByList) > 0 {
 		appendGroupBy(seq.GroupByList, seq.GroupByFieldPaths)
 		return sb.String()
+	}
+
+	// Prefer event-level group_by from event definitions that matched this input.
+	// This supports multi-source sequences where each event uses different field names
+	// (e.g. src_ip on stage 1, client_ip on stage 2) while preserving a stable key.
+	for _, eventID := range matchedEventIDs {
+		eventDef := seq.Events[eventID]
+		if eventDef == nil || len(eventDef.GroupByList) == 0 {
+			continue
+		}
+		if appendGroupBy(eventDef.GroupByList, eventDef.GroupByFieldPaths) > 0 {
+			return sb.String()
+		}
+		sb.Reset()
 	}
 
 	// Per-event fallback: use first event definition that has group_by configured.
@@ -1438,8 +1454,10 @@ func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, data map[s
 		if eventDef == nil || len(eventDef.GroupByList) == 0 {
 			continue
 		}
-		appendGroupBy(eventDef.GroupByList, eventDef.GroupByFieldPaths)
-		break
+		if appendGroupBy(eventDef.GroupByList, eventDef.GroupByFieldPaths) > 0 {
+			break
+		}
+		sb.Reset()
 	}
 
 	return sb.String()
