@@ -504,8 +504,7 @@ func parseSequence(element xml.StartElement, decoder *XMLDecoder, elementLine in
 			val := strings.TrimSpace(strings.ToLower(attr.Value))
 			seq.LocalCache = (val == "true")
 		case "compress":
-			val := strings.TrimSpace(strings.ToLower(attr.Value))
-			seq.Compress = (val == "true")
+			return seq, fmt.Errorf("sequence attribute 'compress' has been removed (compression is always enabled) at line %d", elementLine)
 		}
 	}
 
@@ -622,7 +621,7 @@ func parseSequenceEvent(element xml.StartElement, decoder *XMLDecoder, elementLi
 		return eventDef, fmt.Errorf("event 'id' attribute is required at line %d", elementLine)
 	}
 
-	// Parse nested elements (check, checklist, threshold)
+	// Parse nested elements (check, checklist, threshold, append)
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -653,6 +652,12 @@ func parseSequenceEvent(element xml.StartElement, decoder *XMLDecoder, elementLi
 					return eventDef, err
 				}
 				eventDef.Thresholds = append(eventDef.Thresholds, threshold)
+			case "append":
+				appendOp, err := parseAppend(t, decoder, decoder.line)
+				if err != nil {
+					return eventDef, err
+				}
+				eventDef.Appends = append(eventDef.Appends, appendOp)
 			default:
 				if err := decoder.Skip(); err != nil {
 					return eventDef, fmt.Errorf("error skipping unknown element '%s' in event at line %d: %v", t.Name.Local, decoder.line, err)
@@ -1051,14 +1056,14 @@ func parseDel(element xml.StartElement, decoder *XMLDecoder, elementLine int) ([
 				return delFields, fmt.Errorf("del content cannot be empty at line %d", elementLine)
 			}
 
-		fields := strings.Split(content, ",")
-		for _, field := range fields {
-			field = strings.TrimSpace(field)
-			if field != "" {
-				fieldPath := common.StringToList(field)
-				delFields = append(delFields, fieldPath)
+			fields := strings.Split(content, ",")
+			for _, field := range fields {
+				field = strings.TrimSpace(field)
+				if field != "" {
+					fieldPath := common.StringToList(field)
+					delFields = append(delFields, fieldPath)
+				}
 			}
-		}
 		case xml.EndElement:
 			if t.Name.Local == "del" {
 				if len(delFields) == 0 {

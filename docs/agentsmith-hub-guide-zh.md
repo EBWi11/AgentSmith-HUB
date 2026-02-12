@@ -1052,6 +1052,8 @@ OIDC_SCOPE="openid profile email"
 
 `<sequence>` 元素用于在时间窗口内检测多个事件的有序模式。与单事件匹配不同，序列检测通过共享字段关联不同事件，并检查时间顺序。
 
+**建议：** CEP 规则较多或吞吐较高时，优先使用 `local_cache="true"`。引擎会把序列 key/state 放在内存，把事件快照 value 存在本地 Pebble 磁盘中，通常能更好地平衡性能与内存占用。
+
 **典型应用场景：**
 
 | 场景 | 模式 | 描述 |
@@ -1094,8 +1096,7 @@ OIDC_SCOPE="openid profile email"
 |------|------|------|
 | `within` | 是 | 时间窗口（如 `30s`、`5m`、`1h`、`1d`） |
 | `group_by` | 否 | 默认关联字段，多个用逗号分隔 |
-| `local_cache` | 否 | `true` 使用本地缓存，`false`（默认）使用 Redis |
-| `compress` | 否 | `true` 启用 zstd 压缩 Redis 状态数据（节省内存，增加 CPU 开销） |
+| `local_cache` | 否 | `true` 使用本地缓存（内存 key/state + Pebble 磁盘 value 快照，推荐），`false` 使用 Redis |
 
 **`<event>` 属性：**
 
@@ -1200,6 +1201,29 @@ OIDC_SCOPE="openid profile email"
 ```xml
 <append field="initial_login_ip">_$#login.source_ip</append>
 <append field="exfil_dest">_$dest_ip</append>  <!-- 当前事件字段 -->
+```
+
+#### Sequence Context（`_@`）引用
+
+在 `<sequence>` 内，`_@` 用于读取序列级上下文：
+
+- 读取：`_@path.to.key`
+- 写入：在 `<event>` 内使用 `<append field="_@path.to.key">...</append>`
+
+示例：
+
+```xml
+<sequence within="10m" group_by="user_id" local_cache="true">
+    <event id="download">
+        <check type="EQU" field="event_type">download</check>
+        <append field="_@file.current">_$file_path</append>
+    </event>
+    <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+        <check type="EQU" field="file_path">_@file.current</check>
+    </event>
+    <condition>download -> exec</condition>
+</sequence>
 ```
 
 #### 事件时间与乱序处理

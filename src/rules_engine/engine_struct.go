@@ -24,12 +24,15 @@ import (
 
 // FromRawSymbol is the prefix indicating a value should be fetched from raw data.
 const FromRawSymbol = "_$"
+const SequenceCtxSymbol = "_@"
 const PluginArgFromRawSymbol = "_$ORIDATA"
 const FromRawSymbolLen = len(FromRawSymbol)
+const SequenceCtxSymbolLen = len(SequenceCtxSymbol)
 
 // Reserved variable prefixes and names in the rules engine
 var reservedVariablePrefixes = []string{
 	"_$",   // FromRawSymbol prefix
+	"_@",   // SequenceCtxSymbol prefix
 	"_hub", // Internal hub prefixes
 	"#_",
 }
@@ -184,6 +187,8 @@ type Ruleset struct {
 
 	// CEP state manager for sequence partial match storage
 	seqStateManager *CEPStateManager
+	// Local value store for CEP event snapshots (enabled in local_cache mode)
+	cepValueStore CEPValueStore
 
 	// Flag: true if any rule has a sequence with absence stages (needs absence scanner)
 	hasAbsenceSequences bool
@@ -272,7 +277,6 @@ type Sequence struct {
 	GroupByFieldPaths [][]string
 
 	LocalCache bool // true = use local Ristretto cache; false = use Redis
-	Compress   bool // true = use zstd compression for Redis state storage
 
 	Events     map[string]*EventDef // Event ID -> definition
 	EventOrder []string             // Preserve definition order
@@ -298,6 +302,7 @@ type EventDef struct {
 	CheckNodes []CheckNodes // Nested <check> elements
 	Checklists []Checklist  // Nested <checklist> elements
 	Thresholds []Threshold  // Nested <threshold> elements
+	Appends    []Append     // Nested <append> elements (supports writing sequence context via "_@")
 }
 
 // Append defines additional fields to append after rule matching.
@@ -1867,6 +1872,10 @@ func Verify(path string, raw string) error {
 		ruleset.CacheForClassify.Close()
 		ruleset.CacheForClassify = nil
 	}
+	if ruleset.cepValueStore != nil {
+		_ = ruleset.cepValueStore.Close()
+		ruleset.cepValueStore = nil
+	}
 	if ruleset.RegexResultCache != nil {
 		ruleset.RegexResultCache.Clear()
 		ruleset.RegexResultCache = nil
@@ -1904,6 +1913,8 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ruleset: %w", err)
 	}
+	// Set RulesetID early so build-time initializers can use it (e.g. local CEP value store path).
+	ruleset.RulesetID = id
 
 	// IMPORTANT: Must call RulesetBuild to initialize all the parsed components
 	err = RulesetBuild(ruleset)
@@ -1921,6 +1932,10 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 		if ruleset.RegexResultCache != nil {
 			ruleset.RegexResultCache.Clear()
 			ruleset.RegexResultCache = nil
+		}
+		if ruleset.cepValueStore != nil {
+			_ = ruleset.cepValueStore.Close()
+			ruleset.cepValueStore = nil
 		}
 		return nil, fmt.Errorf("ruleset build error: %s %w", id, err)
 	}
@@ -1987,6 +2002,10 @@ func (r *Ruleset) cleanup() {
 	if r.CacheForClassify != nil {
 		r.CacheForClassify.Close()
 		r.CacheForClassify = nil
+	}
+	if r.cepValueStore != nil {
+		_ = r.cepValueStore.Close()
+		r.cepValueStore = nil
 	}
 
 	// Clear regex result cache
@@ -2982,6 +3001,12 @@ func RulesetBuild(ruleset *Ruleset) error {
 	if hasSequences {
 		useLocalCache := seqUseLocal == 1
 		ruleset.seqStateManager = NewCEPStateManager(useLocalCache, ruleset.SequenceCache)
+		if useLocalCache {
+			ruleset.cepValueStore, err = NewPebbleCEPValueStore(ruleset.RulesetID)
+			if err != nil {
+				return fmt.Errorf("failed to initialize local CEP value store: %w", err)
+			}
+		}
 	}
 
 	// Build rule lookup map for faster absence scan path

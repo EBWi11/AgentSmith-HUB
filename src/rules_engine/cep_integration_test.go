@@ -41,6 +41,12 @@ func buildTestRuleset(t *testing.T, xmlContent string) *Ruleset {
 		ruleset.SequenceCache = cache
 	}
 
+	t.Cleanup(func() {
+		if ruleset != nil {
+			ruleset.cleanup()
+		}
+	})
+
 	return ruleset
 }
 
@@ -606,17 +612,9 @@ func TestCEP_Execute_CrossEventFieldReference(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
-	// Check that #login data is available for cross-event reference
-	loginData, ok := results[0]["#login"]
-	if !ok {
-		t.Fatal("expected #login data in result for cross-event reference")
-	}
-	loginMap, ok := loginData.(map[string]interface{})
-	if !ok {
-		t.Fatal("expected #login data to be a map")
-	}
-	if loginMap["source_ip"] != "192.168.1.100" {
-		t.Errorf("expected source_ip=192.168.1.100, got %v", loginMap["source_ip"])
+	// Internal #event fields should not be exposed in output payloads.
+	if _, exists := results[0]["#login"]; exists {
+		t.Fatal("expected #login to be removed from output payload")
 	}
 
 	// Check _sequence_events contains ALL events keyed by event ID
@@ -648,6 +646,19 @@ func TestCEP_Execute_CrossEventFieldReference(t *testing.T) {
 	exfilEvtMap := exfilEvt.(map[string]interface{})
 	if exfilEvtMap["dest"] != "evil.com" {
 		t.Errorf("expected exfil dest=evil.com, got %v", exfilEvtMap["dest"])
+	}
+
+	// Check sequence condition details
+	cond, ok := results[0]["_sequence_condition"]
+	if !ok {
+		t.Fatal("expected _sequence_condition in result")
+	}
+	condMap, ok := cond.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected _sequence_condition to be a map")
+	}
+	if condMap["content"] != "login -> exfil" {
+		t.Errorf("expected content 'login -> exfil', got %v", condMap["content"])
 	}
 }
 
@@ -761,5 +772,45 @@ func TestCEP_Execute_SequenceWithAppend(t *testing.T) {
 
 	if results[0]["alert_type"] != "sequence_detected" {
 		t.Errorf("expected alert_type='sequence_detected', got '%v'", results[0]["alert_type"])
+	}
+}
+
+func TestCEP_Execute_SequenceContextReference_WithAtPrefix(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="r1" name="ctx ref test">
+			<sequence within="10m" group_by="user_id" local_cache="true">
+				<event id="download">
+					<check type="EQU" field="event_type">download</check>
+					<append field="_@file.current">_$file_path</append>
+				</event>
+				<event id="exec">
+					<check type="EQU" field="event_type">exec</check>
+					<check type="EQU" field="file_path">_@file.current</check>
+				</event>
+				<condition>download -> exec</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	// Stage 1: create partial state
+	results := rs.EngineCheck(map[string]interface{}{
+		"user_id":    "u-1",
+		"event_type": "download",
+		"file_path":  "/tmp/b",
+	})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results after stage 1, got %d", len(results))
+	}
+
+	// Stage 2: exec matches only when file_path equals _@file.current
+	results = rs.EngineCheck(map[string]interface{}{
+		"user_id":    "u-1",
+		"event_type": "exec",
+		"file_path":  "/tmp/b",
+	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result with _@ context match, got %d", len(results))
 	}
 }

@@ -68,12 +68,11 @@ func initZstd() {
 	})
 }
 
-// serializeState serializes a SequenceState to JSON, optionally compressing with zstd.
-// When compress=true, returns zstd-compressed bytes as a string.
-// When compress=false, returns plain JSON string.
-func serializeState(state *SequenceState, compress bool) (string, error) {
+// serializeState serializes a SequenceState to zstd-compressed JSON.
+func serializeState(state *SequenceState) (string, error) {
 	sj := sequenceStateJSON{
 		StageMatches: state.StageMatches,
+		Context:      state.Context,
 		CreatedAt:    state.CreatedAt,
 		ExpiresAt:    state.ExpiresAt,
 	}
@@ -82,14 +81,9 @@ func serializeState(state *SequenceState, compress bool) (string, error) {
 		return "", err
 	}
 
-	if !compress {
-		return string(jsonData), nil
-	}
-
 	initZstd()
 	if zstdEncoder == nil {
-		// Fallback: store uncompressed if encoder init failed
-		return string(jsonData), nil
+		return "", fmt.Errorf("zstd encoder not available")
 	}
 
 	compressed := zstdEncoder.EncodeAll(jsonData, nil)
@@ -127,6 +121,7 @@ func decompressState(data string) (*SequenceState, error) {
 
 	return &SequenceState{
 		StageMatches: sj.StageMatches,
+		Context:      sj.Context,
 		CreatedAt:    sj.CreatedAt,
 		ExpiresAt:    sj.ExpiresAt,
 	}, nil
@@ -206,9 +201,12 @@ func (m *CEPStateManager) UnlockKey(key string) {
 }
 
 // CleanupKeyLock removes a key lock entry after the state is deleted.
-// Prevents unbounded growth of the keyLocks map.
+// NOTE: intentionally kept as no-op to avoid lock replacement races:
+// deleting a lock while another goroutine still holds it can cause a later
+// goroutine to recreate a new mutex for the same key, breaking exclusion and
+// leading to unlock panics. We prefer correctness/stability here.
 func (m *CEPStateManager) CleanupKeyLock(key string) {
-	m.keyLocks.Delete(key)
+	_ = key
 }
 
 // GetState retrieves a SequenceState by key.
@@ -221,13 +219,12 @@ func (m *CEPStateManager) GetState(key string) *SequenceState {
 }
 
 // SetState stores a SequenceState with the given TTL.
-// The compress flag controls whether zstd compression is used for Redis storage.
-func (m *CEPStateManager) SetState(key string, state *SequenceState, ttlSeconds int, compress bool) {
+func (m *CEPStateManager) SetState(key string, state *SequenceState, ttlSeconds int) {
 	if m.useLocalCache {
 		m.setLocalState(key, state, ttlSeconds)
 		return
 	}
-	m.setRedisState(key, state, ttlSeconds, compress)
+	m.setRedisState(key, state, ttlSeconds)
 }
 
 // DeleteState removes a SequenceState by key.
@@ -530,9 +527,10 @@ func (m *CEPStateManager) deleteLocalState(key string) {
 
 // sequenceStateJSON is the JSON representation of SequenceState for Redis storage.
 type sequenceStateJSON struct {
-	StageMatches map[int][]StageMatch `json:"sm"`
-	CreatedAt    int64                `json:"ca"`
-	ExpiresAt    int64                `json:"ea"`
+	StageMatches map[int][]StageMatch   `json:"sm"`
+	Context      map[string]interface{} `json:"ctx,omitempty"`
+	CreatedAt    int64                  `json:"ca"`
+	ExpiresAt    int64                  `json:"ea"`
 }
 
 // getRedisState reads state from Redis, auto-detecting compressed vs plain JSON.
@@ -550,9 +548,9 @@ func (m *CEPStateManager) getRedisState(key string) *SequenceState {
 	return state
 }
 
-// setRedisState writes state to Redis, optionally with zstd compression.
-func (m *CEPStateManager) setRedisState(key string, state *SequenceState, ttlSeconds int, compress bool) {
-	data, err := serializeState(state, compress)
+// setRedisState writes state to Redis as zstd-compressed JSON.
+func (m *CEPStateManager) setRedisState(key string, state *SequenceState, ttlSeconds int) {
+	data, err := serializeState(state)
 	if err != nil {
 		logger.Warn("Failed to serialize CEP state for Redis", "key", key, "error", err)
 		return
@@ -592,9 +590,8 @@ const (
 )
 
 // GetOrCreateState atomically gets or creates a SequenceState for the given key.
-// The compress flag controls whether zstd compression is used for Redis storage.
 // IMPORTANT: The caller MUST hold the per-key lock via LockKey before calling this method.
-func (m *CEPStateManager) GetOrCreateState(key string, withinMs int64, ttlSeconds int, compress bool) *SequenceState {
+func (m *CEPStateManager) GetOrCreateState(key string, withinMs int64, ttlSeconds int) *SequenceState {
 	if m.useLocalCache {
 		// Per-key lock is held by caller; no global lock needed for local cache.
 		state := m.getLocalState(key)
@@ -607,14 +604,13 @@ func (m *CEPStateManager) GetOrCreateState(key string, withinMs int64, ttlSecond
 	}
 
 	// Redis: use Lua script for atomic get-or-create
-	return m.getOrCreateRedisStateAtomic(key, withinMs, ttlSeconds, compress)
+	return m.getOrCreateRedisStateAtomic(key, withinMs, ttlSeconds)
 }
 
 // UpdateState atomically updates the state after modifications.
-// The compress flag controls whether zstd compression is used for Redis storage.
 // Applies memory control before persisting.
 // IMPORTANT: The caller MUST hold the per-key lock via LockKey before calling this method.
-func (m *CEPStateManager) UpdateState(key string, state *SequenceState, ttlSeconds int, compress bool) {
+func (m *CEPStateManager) UpdateState(key string, state *SequenceState, ttlSeconds int) {
 	// Apply memory control: trim excess stage matches
 	trimStageMatches(state)
 
@@ -623,7 +619,7 @@ func (m *CEPStateManager) UpdateState(key string, state *SequenceState, ttlSecon
 		m.setLocalState(key, state, ttlSeconds)
 		return
 	}
-	m.updateRedisStateAtomic(key, state, ttlSeconds, compress)
+	m.updateRedisStateAtomic(key, state, ttlSeconds)
 }
 
 // trimStageMatches enforces the MaxStageMatchesPerStage limit.
@@ -666,11 +662,11 @@ return "OK"
 `
 
 // getOrCreateRedisStateAtomic uses a Lua script for atomic get-or-create.
-func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64, ttlSeconds int, compress bool) *SequenceState {
+func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64, ttlSeconds int) *SequenceState {
 	nowMs := time.Now().UnixMilli()
 	newState := NewSequenceState(nowMs, nowMs+withinMs)
 
-	serialized, err := serializeState(newState, compress)
+	serialized, err := serializeState(newState)
 	if err != nil {
 		logger.Warn("Failed to serialize new CEP state", "key", key, "error", err)
 		return newState
@@ -682,7 +678,7 @@ func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64
 		logger.Warn("Lua get-or-create failed, falling back", "key", key, "error", err)
 		state := m.getRedisState(key)
 		if state == nil {
-			m.setRedisState(key, newState, ttlSeconds, compress)
+			m.setRedisState(key, newState, ttlSeconds)
 			return newState
 		}
 		return state
@@ -702,8 +698,8 @@ func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64
 }
 
 // updateRedisStateAtomic uses a Lua script for atomic state update.
-func (m *CEPStateManager) updateRedisStateAtomic(key string, state *SequenceState, ttlSeconds int, compress bool) {
-	serialized, err := serializeState(state, compress)
+func (m *CEPStateManager) updateRedisStateAtomic(key string, state *SequenceState, ttlSeconds int) {
+	serialized, err := serializeState(state)
 	if err != nil {
 		logger.Warn("Failed to serialize CEP state for atomic update", "key", key, "error", err)
 		return
@@ -713,7 +709,7 @@ func (m *CEPStateManager) updateRedisStateAtomic(key string, state *SequenceStat
 	if err != nil {
 		// Fallback to regular SET
 		logger.Warn("Lua atomic update failed, falling back", "key", key, "error", err)
-		m.setRedisState(key, state, ttlSeconds, compress)
+		m.setRedisState(key, state, ttlSeconds)
 	}
 }
 

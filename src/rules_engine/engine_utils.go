@@ -199,6 +199,7 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 }
 
 func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}) string {
+	checkKey = normalizeDynamicRefKey(checkKey)
 	tmpRes, ok := cache[checkKey]
 	if ok {
 		return tmpRes.Data
@@ -228,7 +229,7 @@ func GetRuleValueFromRawFromCache(cache map[string]common.CheckCoreCache, checkK
 //	output: "Detected scanning behavior from 192.168.1.1 to _$dst"
 func replaceFromRawPlaceholders(cache map[string]common.CheckCoreCache, input string, data map[string]interface{}) string {
 	// Fast path: no marker
-	if len(input) < 2 || !strings.Contains(input, FromRawSymbol) {
+	if len(input) < 2 || (!strings.Contains(input, FromRawSymbol) && !strings.Contains(input, SequenceCtxSymbol)) {
 		return input
 	}
 
@@ -251,8 +252,8 @@ func replaceFromRawPlaceholders(cache map[string]common.CheckCoreCache, input st
 			continue
 		}
 
-		// Look for "_$"
-		if i+1 < len(input) && input[i] == '_' && input[i+1] == '$' {
+		// Look for "_$" or "_@"
+		if i+1 < len(input) && input[i] == '_' && (input[i+1] == '$' || input[i+1] == '@') {
 			// Parse variable path: letters, digits, '_', '.', '#'
 			j := i + 2
 			for j < len(input) {
@@ -269,10 +270,10 @@ func replaceFromRawPlaceholders(cache map[string]common.CheckCoreCache, input st
 				i++
 				continue
 			}
-			key := input[i:j] // includes "_$"
+			key := input[i:j] // includes "_$" or "_@"
 
 			// Check if field exists; only replace if it exists
-			fieldPath := input[i+2 : j] // without "_$" prefix
+			fieldPath := input[i+2 : j] // without prefix
 			checkKeyList := common.StringToList(strings.TrimSpace(fieldPath))
 			val, exist := GetCheckDataFromCache(cache, key, data, checkKeyList)
 
@@ -293,6 +294,8 @@ func replaceFromRawPlaceholders(cache map[string]common.CheckCoreCache, input st
 }
 
 func GetCheckDataFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res string, exist bool) {
+	checkKey = normalizeDynamicRefKey(checkKey)
+	checkKeyList = normalizeDynamicRefKeyList(checkKey, checkKeyList)
 	tmpRes, ok := cache[checkKey]
 	if ok {
 		return tmpRes.Data, tmpRes.Exist
@@ -310,6 +313,8 @@ func GetCheckDataFromCache(cache map[string]common.CheckCoreCache, checkKey stri
 
 // GetCheckDataWithTypeFromCache retrieves typed data from cache or fetches and caches it
 func GetCheckDataWithTypeFromCache(cache map[string]common.CheckCoreCache, checkKey string, data map[string]interface{}, checkKeyList []string) (res interface{}, exist bool) {
+	checkKey = normalizeDynamicRefKey(checkKey)
+	checkKeyList = normalizeDynamicRefKeyList(checkKey, checkKeyList)
 	tmpRes, ok := cache[checkKey]
 	if ok {
 		return tmpRes.TypedData, tmpRes.Exist
@@ -326,6 +331,24 @@ func GetCheckDataWithTypeFromCache(cache map[string]common.CheckCoreCache, check
 		}
 		return res, exist
 	}
+}
+
+func normalizeDynamicRefKey(checkKey string) string {
+	if strings.HasPrefix(checkKey, SequenceCtxSymbol) {
+		path := strings.TrimSpace(checkKey[SequenceCtxSymbolLen:])
+		if path == "" {
+			return FromRawSymbol + "#ctx"
+		}
+		return FromRawSymbol + "#ctx." + path
+	}
+	return checkKey
+}
+
+func normalizeDynamicRefKeyList(normalizedKey string, fallback []string) []string {
+	if strings.HasPrefix(normalizedKey, FromRawSymbol+"#ctx") {
+		return common.StringToList(strings.TrimSpace(normalizedKey[FromRawSymbolLen:]))
+	}
+	return fallback
 }
 
 func END(data string, ruleData string) (res bool, hitData string) {

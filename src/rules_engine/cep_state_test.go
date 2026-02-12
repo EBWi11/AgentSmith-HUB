@@ -31,7 +31,7 @@ func TestCEPStateManager_LocalCache_SetGet(t *testing.T) {
 	state := NewSequenceState(1000, 2000)
 	state.AddMatch(0, StageMatch{Timestamp: 1000, Data: map[string]interface{}{"a": "1"}})
 
-	mgr.SetState("test_key", state, 60, false)
+	mgr.SetState("test_key", state, 60)
 	time.Sleep(10 * time.Millisecond) // Wait for Ristretto async set
 
 	got := mgr.GetState("test_key")
@@ -70,7 +70,7 @@ func TestCEPStateManager_LocalCache_Delete(t *testing.T) {
 	mgr := NewCEPStateManager(true, cache)
 
 	state := NewSequenceState(1000, 2000)
-	mgr.SetState("delete_key", state, 60, false)
+	mgr.SetState("delete_key", state, 60)
 	time.Sleep(10 * time.Millisecond)
 
 	mgr.DeleteState("delete_key")
@@ -88,7 +88,7 @@ func TestCEPStateManager_LocalCache_GetOrCreate(t *testing.T) {
 	mgr := NewCEPStateManager(true, cache)
 
 	// First call should create
-	state1 := mgr.GetOrCreateState("gor_key", 5000, 5, false)
+	state1 := mgr.GetOrCreateState("gor_key", 5000, 5)
 	if state1 == nil {
 		t.Fatal("expected state, got nil")
 	}
@@ -98,11 +98,11 @@ func TestCEPStateManager_LocalCache_GetOrCreate(t *testing.T) {
 
 	// Add a match to distinguish
 	state1.AddMatch(0, StageMatch{Timestamp: 100})
-	mgr.UpdateState("gor_key", state1, 5, false)
+	mgr.UpdateState("gor_key", state1, 5)
 	time.Sleep(10 * time.Millisecond)
 
 	// Second call should get existing
-	state2 := mgr.GetOrCreateState("gor_key", 5000, 5, false)
+	state2 := mgr.GetOrCreateState("gor_key", 5000, 5)
 	if state2 == nil {
 		t.Fatal("expected state on second call, got nil")
 	}
@@ -303,21 +303,21 @@ func TestTrimStageMatches_NoTrimNeeded(t *testing.T) {
 // Compression Tests
 // ============================================================================
 
-func TestSerializeState_Uncompressed(t *testing.T) {
+func TestSerializeState_CompressedAndBackwardCompatibleDecode(t *testing.T) {
 	state := NewSequenceState(1000, 2000)
 	state.AddMatch(0, StageMatch{Timestamp: 100, Data: map[string]interface{}{"field": "value", "ip": "1.2.3.4"}})
 
-	data, err := serializeState(state, false)
+	data, err := serializeState(state)
 	if err != nil {
 		t.Fatalf("serializeState failed: %v", err)
 	}
 
-	// Should be plain JSON (starts with '{')
-	if data[0] != '{' {
-		t.Errorf("expected plain JSON, got byte 0x%x", data[0])
+	// Compressed data should start with zstd magic (0x28 0xB5 0x2F 0xFD)
+	if len(data) < 4 || data[0] != 0x28 || data[1] != 0xB5 {
+		t.Errorf("expected zstd magic header, got 0x%x 0x%x", data[0], data[1])
 	}
 
-	// Deserialize should work
+	// Deserialize should work for compressed data
 	restored, err := decompressState(data)
 	if err != nil {
 		t.Fatalf("decompressState failed: %v", err)
@@ -329,54 +329,15 @@ func TestSerializeState_Uncompressed(t *testing.T) {
 	if len(matches) != 1 || matches[0].Data["field"] != "value" {
 		t.Errorf("unexpected restored data: %v", matches)
 	}
-}
 
-func TestSerializeState_Compressed(t *testing.T) {
-	state := NewSequenceState(1000, 2000)
-	// Add some data to compress
-	state.AddMatch(0, StageMatch{Timestamp: 100, Data: map[string]interface{}{
-		"event_type": "login", "source_ip": "192.168.1.100", "user": "admin",
-		"hostname": "server-01", "port": "22", "protocol": "ssh",
-	}})
-	state.AddMatch(1, StageMatch{Timestamp: 200, Data: map[string]interface{}{
-		"event_type": "file_transfer", "source_ip": "192.168.1.100", "user": "admin",
-		"dest": "evil.com", "size": "1048576", "direction": "outbound",
-	}})
-
-	compressed, err := serializeState(state, true)
+	// Backward compatibility: plain JSON should still decode.
+	legacyPlain := `{"sm":{"0":[{"Timestamp":100,"Data":{"field":"legacy"}}]},"ca":1000,"ea":2000}`
+	legacyRestored, err := decompressState(legacyPlain)
 	if err != nil {
-		t.Fatalf("serializeState compressed failed: %v", err)
+		t.Fatalf("decompressState legacy plain json failed: %v", err)
 	}
-
-	uncompressed, err := serializeState(state, false)
-	if err != nil {
-		t.Fatalf("serializeState uncompressed failed: %v", err)
-	}
-
-	// Compressed data should start with zstd magic (0x28 0xB5 0x2F 0xFD)
-	if len(compressed) < 4 || compressed[0] != 0x28 || compressed[1] != 0xB5 {
-		t.Errorf("expected zstd magic header, got 0x%x 0x%x", compressed[0], compressed[1])
-	}
-
-	t.Logf("Uncompressed size: %d bytes, Compressed size: %d bytes, Ratio: %.1f%%",
-		len(uncompressed), len(compressed), float64(len(compressed))/float64(len(uncompressed))*100)
-
-	// Decompress should restore original data
-	restored, err := decompressState(compressed)
-	if err != nil {
-		t.Fatalf("decompressState failed: %v", err)
-	}
-	if restored.CreatedAt != 1000 {
-		t.Errorf("expected CreatedAt=1000, got %d", restored.CreatedAt)
-	}
-	if len(restored.StageMatches) != 2 {
-		t.Errorf("expected 2 stages, got %d", len(restored.StageMatches))
-	}
-	if restored.StageMatches[0][0].Data["source_ip"] != "192.168.1.100" {
-		t.Errorf("unexpected restored stage 0 data")
-	}
-	if restored.StageMatches[1][0].Data["dest"] != "evil.com" {
-		t.Errorf("unexpected restored stage 1 data")
+	if legacyRestored.CreatedAt != 1000 || legacyRestored.ExpiresAt != 2000 {
+		t.Errorf("unexpected legacy restored state: %+v", legacyRestored)
 	}
 }
 
@@ -384,25 +345,25 @@ func TestSerializeState_Compressed(t *testing.T) {
 // Timestamp Parsing Tests
 // ============================================================================
 
-func TestParseTimestampToMs(t *testing.T) {
+func TestParseTimestampToNs(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
 		expected int64
 	}{
-		{"unix seconds", "1700000000", 1700000000000},
-		{"unix milliseconds", "1700000000000", 1700000000000},
-		{"unix microseconds", "1700000000000000", 1700000000000},
-		{"float seconds", "1700000000.123", 1700000000123},
-		{"RFC3339", "2023-11-14T22:13:20Z", 1700000000000},
-		{"ISO 8601 with T", "2023-11-14T22:13:20", 1700000000000},
-		{"ISO 8601 space", "2023-11-14 22:13:20", 1700000000000},
+		{"unix seconds", "1700000000", 1700000000 * int64(time.Second)},
+		{"unix milliseconds", "1700000000000", 1700000000000 * int64(time.Millisecond)},
+		{"unix microseconds", "1700000000000000", 1700000000000000 * int64(time.Microsecond)},
+		{"float seconds", "1700000000.123", int64(1700000000.123 * float64(time.Second))},
+		{"RFC3339", "2023-11-14T22:13:20Z", 1700000000 * int64(time.Second)},
+		{"ISO 8601 with T", "2023-11-14T22:13:20", 1700000000 * int64(time.Second)},
+		{"ISO 8601 space", "2023-11-14 22:13:20", 1700000000 * int64(time.Second)},
 		{"invalid", "not_a_timestamp", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseTimestampToMs(tt.input)
+			result := parseTimestampToNs(tt.input)
 			if tt.expected == 0 {
 				if result != 0 {
 					t.Errorf("expected 0 for invalid input, got %d", result)
@@ -414,7 +375,7 @@ func TestParseTimestampToMs(t *testing.T) {
 			if diff < 0 {
 				diff = -diff
 			}
-			if diff > 1000 {
+			if diff > int64(time.Second) {
 				t.Errorf("expected ~%d, got %d (diff=%d)", tt.expected, result, diff)
 			}
 		})

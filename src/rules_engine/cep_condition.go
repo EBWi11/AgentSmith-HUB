@@ -61,30 +61,33 @@ type CEPStage struct {
 
 // CEPCondition represents a fully parsed and flattened CEP condition.
 type CEPCondition struct {
-	Raw       string           // Original expression string
-	Stages    []CEPStage       // Ordered stages extracted from the -> chain
-	AllEvents map[string]bool  // All event IDs referenced in the entire condition
+	Raw       string          // Original expression string
+	Stages    []CEPStage      // Ordered stages extracted from the -> chain
+	AllEvents map[string]bool // All event IDs referenced in the entire condition
 }
 
 // --- State Types (for sequence tracking) ---
 
 // StageMatch records that a stage was satisfied by an event at a given time.
 type StageMatch struct {
-	Timestamp int64                  // Unix milliseconds (from event_time or detection time)
-	Data      map[string]interface{} // Snapshot of event data (for cross-event field references)
+	Timestamp int64                  // Unix nanoseconds (from event_time or detection time)
+	Data      map[string]interface{} // Optional inline snapshot (used by Redis mode/fallback)
+	ValueRef  string                 // Optional external value-store reference (local cache mode)
 }
 
 // SequenceState tracks the accumulated matches for one correlation key.
 type SequenceState struct {
-	StageMatches map[int][]StageMatch // stageIndex -> list of matches (sorted by timestamp)
-	CreatedAt    int64                // When the first match was recorded (unix ms)
-	ExpiresAt    int64                // Deadline for sequence completion (unix ms)
+	StageMatches map[int][]StageMatch   // stageIndex -> list of matches (sorted by timestamp)
+	Context      map[string]interface{} // Sequence-scoped context for dynamic cross-event constraints
+	CreatedAt    int64                  // When the first match was recorded (unix ms)
+	ExpiresAt    int64                  // Deadline for sequence completion (unix ms)
 }
 
 // NewSequenceState creates a new SequenceState with the given expiration.
 func NewSequenceState(createdAt, expiresAt int64) *SequenceState {
 	return &SequenceState{
 		StageMatches: make(map[int][]StageMatch),
+		Context:      make(map[string]interface{}),
 		CreatedAt:    createdAt,
 		ExpiresAt:    expiresAt,
 	}
@@ -417,12 +420,13 @@ func collectEventIDsRecursive(ast ExprAST, ids *[]string) {
 // Returns an error if the expression is syntactically invalid.
 //
 // Examples:
-//   "a -> b"               -> 2 stages: [a], [b]
-//   "a -> b -> c"          -> 3 stages: [a], [b], [c]
-//   "a -> (b or c)"        -> 2 stages: [a], [b or c]
-//   "(a and b) -> c"       -> 2 stages: [a and b], [c]
-//   "a -> !b"              -> 2 stages: [a], [!b (absent)]
-//   "a -> !b -> c"         -> 3 stages: [a], [!b (absent)], [c]
+//
+//	"a -> b"               -> 2 stages: [a], [b]
+//	"a -> b -> c"          -> 3 stages: [a], [b], [c]
+//	"a -> (b or c)"        -> 2 stages: [a], [b or c]
+//	"(a and b) -> c"       -> 2 stages: [a and b], [c]
+//	"a -> !b"              -> 2 stages: [a], [!b (absent)]
+//	"a -> !b -> c"         -> 3 stages: [a], [!b (absent)], [c]
 func ParseCEPCondition(expr string) (*CEPCondition, error) {
 	tokens, allLiterals, err := tokenizeCEPCondition(expr)
 	if err != nil {
@@ -473,7 +477,9 @@ func ParseCEPCondition(expr string) (*CEPCondition, error) {
 
 // EvaluateEvent determines which stages the current event satisfies.
 // matchMap contains the result of checking the event against all event definitions:
-//   {"login": true, "exfil": false, "scan": true}
+//
+//	{"login": true, "exfil": false, "scan": true}
+//
 // Returns a list of stage indices that this event satisfies.
 func (c *CEPCondition) EvaluateEvent(matchMap map[string]bool) []int {
 	matched := make([]int, 0, len(c.Stages))

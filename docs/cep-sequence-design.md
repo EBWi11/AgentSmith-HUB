@@ -481,11 +481,43 @@ Fields from earlier events in the sequence can be accessed using the `_$#event_i
 - `_$#login.source_ip` -- Field `source_ip` from the event that matched stage `login`
 - `_$dest_ip` -- Field `dest_ip` from the current (final) event (standard syntax)
 
+### 7.5 Sequence Context (`_@`)
+
+CEP supports a sequence-scoped context map for cross-event state transfer.
+
+- Read with `_@path.to.key` (only inside `<sequence>`)
+- Write with `<append field="_@path.to.key">...</append>` inside an `<event>`
+- Scope and lifecycle are identical to the current sequence state (same correlation key)
+
+Example (download -> move -> exec):
+
+```xml
+<sequence within="10m" group_by="agent_id" local_cache="true">
+    <event id="download">
+        <check type="EQU" field="event_type">download</check>
+        <append field="_@file.current">_$output_file</append>
+    </event>
+
+    <event id="mv">
+        <check type="EQU" field="event_type">rename</check>
+        <check type="EQU" field="src">_@file.current</check>
+        <append field="_@file.current">_$dst</append>
+    </event>
+
+    <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+        <check type="EQU" field="file_path">_@file.current</check>
+    </event>
+
+    <condition>download -> mv -> exec</condition>
+</sequence>
+```
+
 ---
 
 ## 8. State Management
 
-### 8.1 Redis Mode (Default)
+### 8.1 Redis Mode
 
 Partial matches are stored in Redis, enabling distributed sequence detection across cluster nodes.
 
@@ -494,13 +526,17 @@ Partial matches are stored in Redis, enabling distributed sequence detection acr
 - **Concurrency**: Atomic operations (SETNX, HSET) ensure consistency
 - **Key format**: `SEQ_{rulesetID}_{ruleID}_{correlate_hash}`
 
-### 8.2 Local Cache Mode
+### 8.2 Local Cache Mode (Recommended)
 
-When `local_cache="true"`, partial matches are stored in the local Ristretto cache.
+When `local_cache="true"`, CEP uses a split storage model:
 
-- **Higher throughput**: No network overhead for state operations
-- **Single-node only**: Partial matches are not shared across cluster nodes
-- **Suitable for**: High-frequency patterns on single-node deployments or when event routing guarantees affinity
+- **Key/state in memory**: sequence indexes and stage progression are kept in local Ristretto cache
+- **Value snapshots on disk**: matched event snapshots are stored in local Pebble KV
+- **Higher throughput**: no network RTT on hot-path key/state operations
+- **Lower memory pressure**: large event payloads are offloaded to disk, loaded back only on sequence completion
+- **Suitable for**: high-frequency rules on single-node deployments, or clusters with sticky routing / key affinity
+
+> Recommendation: prefer `local_cache="true"` for CEP-heavy rulesets unless you explicitly need cross-node shared sequence state.
 
 ### 8.3 State Cleanup
 
@@ -526,7 +562,7 @@ When `local_cache="true"`, partial matches are stored in the local Ristretto cac
 |---------|-----------|----------|---------|-------------|
 | `<sequence>` | `within` | Yes | - | Time window (`30s`, `5m`, `1h`, `1d`) |
 | `<sequence>` | `group_by` | No | - | Default correlation field(s) for all events |
-| `<sequence>` | `local_cache` | No | `false` | Use local cache instead of Redis |
+| `<sequence>` | `local_cache` | No | `false` | Use local cache (Ristretto + Pebble) instead of Redis; recommended for CEP-heavy workloads |
 | `<event>` | `id` | Yes | - | Unique identifier, referenced in condition |
 | `<event>` | `event_time` | No | Detection time | Field containing event timestamp |
 | `<event>` | `group_by` | No | Sequence default | Per-event correlation field(s), overrides sequence default |
@@ -548,6 +584,7 @@ When `local_cache="true"`, partial matches are stored in the local Ristretto cac
 | `<check>` | Single field check (all existing types: EQU, INCL, MT, LT, REGEX, etc.) |
 | `<checklist>` | Complex condition combination with `condition` attribute |
 | `<threshold>` | Frequency/aggregation detection |
+| `<append>` | Optional side effect. When `field` starts with `_@`, writes into sequence context |
 
 ---
 

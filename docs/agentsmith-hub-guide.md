@@ -1058,6 +1058,8 @@ When you need to check if a field matches multiple values, you can use multi-val
 
 The `<sequence>` element enables detection of ordered patterns across multiple events within a time window. Unlike single-event matching, sequence detection correlates separate events by shared fields and checks temporal ordering.
 
+**Recommendation:** For CEP-heavy workloads, prefer `local_cache="true"`. The engine keeps sequence keys/state in memory and stores event snapshots on local Pebble disk, which is usually a better balance of throughput and memory usage.
+
 **Typical Use Cases:**
 
 | Scenario | Pattern | Description |
@@ -1100,8 +1102,7 @@ The `<sequence>` element enables detection of ordered patterns across multiple e
 |-----------|----------|-------------|
 | `within` | Yes | Time window (e.g., `30s`, `5m`, `1h`, `1d`) |
 | `group_by` | No | Default correlation field(s), comma-separated |
-| `local_cache` | No | `true` for local cache, `false` (default) for Redis |
-| `compress` | No | `true` to enable zstd compression for Redis state (saves memory, adds CPU cost) |
+| `local_cache` | No | `true` for local cache (in-memory key/state + Pebble value snapshots, recommended), `false` for Redis |
 
 **`<event>` Attributes:**
 
@@ -1206,6 +1207,29 @@ When a sequence completes, fields from earlier events can be accessed using `_$#
 ```xml
 <append field="initial_login_ip">_$#login.source_ip</append>
 <append field="exfil_dest">_$dest_ip</append>  <!-- current event field -->
+```
+
+#### Sequence Context (`_@`) References
+
+Inside `<sequence>`, `_@` reads sequence-scoped context values:
+
+- Read: `_@path.to.key`
+- Write: `<append field="_@path.to.key">...</append>` inside an `<event>`
+
+Example:
+
+```xml
+<sequence within="10m" group_by="user_id" local_cache="true">
+    <event id="download">
+        <check type="EQU" field="event_type">download</check>
+        <append field="_@file.current">_$file_path</append>
+    </event>
+    <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+        <check type="EQU" field="file_path">_@file.current</check>
+    </event>
+    <condition>download -> exec</condition>
+</sequence>
 ```
 
 #### Event Time and Out-of-Order Events

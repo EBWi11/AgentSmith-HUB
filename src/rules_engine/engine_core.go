@@ -83,7 +83,7 @@ var slicePool = sync.Pool{
 
 // Optimized prefix checking - avoid strings.HasPrefix overhead
 func hasFromRawPrefix(s string) bool {
-	return len(s) >= 2 && s[0] == '_' && s[1] == '$'
+	return len(s) >= 2 && s[0] == '_' && (s[1] == '$' || s[1] == '@')
 }
 
 // InitSIMDConfig initializes SIMD configuration from global config
@@ -312,6 +312,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 		// Find the rule and sequence
 		rule := r.ruleByID[info.RuleID]
 		if rule == nil {
+			r.cleanupStateValueRefs(state)
 			r.seqStateManager.DeleteState(key)
 			r.seqStateManager.UnlockKey(key)
 			r.seqStateManager.CleanupKeyLock(key)
@@ -320,6 +321,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 
 		seq, exists := rule.SequenceMap[info.SeqID]
 		if !exists {
+			r.cleanupStateValueRefs(state)
 			r.seqStateManager.DeleteState(key)
 			r.seqStateManager.UnlockKey(key)
 			r.seqStateManager.CleanupKeyLock(key)
@@ -352,6 +354,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 		}
 
 		// Clean up: unlock first, then remove the lock entry
+		r.cleanupStateValueRefs(state)
 		r.seqStateManager.DeleteState(key)
 		r.seqStateManager.UnlockKey(key)
 		r.seqStateManager.CleanupKeyLock(key)
@@ -410,8 +413,10 @@ func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[st
 			continue
 		}
 		matches, exists := state.StageMatches[i]
-		if exists && len(matches) > 0 && matches[0].Data != nil {
-			baseData = matches[0].Data
+		if exists && len(matches) > 0 {
+			if resolved := r.resolveStageMatchData(matches[0]); resolved != nil {
+				baseData = resolved
+			}
 			break
 		}
 	}
@@ -421,7 +426,7 @@ func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[st
 	}
 
 	result := common.MapDeepCopy(baseData)
-	enrichSequenceResultData(result, state, seq)
+	r.enrichSequenceResultData(result, state, seq)
 	return result
 }
 
@@ -641,6 +646,8 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				if !copied {
 					modifiedData = mapDeepCopyWithExtraCapacity(data, 1)
 				}
+				// Keep internal sequence helper fields out of output payloads.
+				sanitizeOutputData(modifiedData)
 				// Add rule info
 				// Build hit rule ID efficiently using string builder pool
 				sb := stringBuilderPool.Get().(*strings.Builder)
@@ -672,6 +679,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 
 	// For exclude: if no rule passed, data needs processing - pass forward the last modified data
 	if !r.IsDetection && len(finalRes) == 0 && lastModifiedData != nil {
+		sanitizeOutputData(lastModifiedData)
 		finalRes = append(finalRes, lastModifiedData)
 	}
 
@@ -683,6 +691,15 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	result := make([]map[string]interface{}, len(finalRes))
 	copy(result, finalRes)
 	return result
+}
+
+// sanitizeOutputData removes internal helper fields that are only needed during rule execution.
+func sanitizeOutputData(data map[string]interface{}) {
+	for key := range data {
+		if strings.HasPrefix(key, "#") {
+			delete(data, key)
+		}
+	}
 }
 
 // executeRuleOperations executes all operations in a rule according to the Queue order
@@ -1022,12 +1039,11 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 
 	// Step 2: Stage evaluation - determine which stages this event satisfies
 	matchedStages := seq.Condition.EvaluateEvent(matchMap)
-	if len(matchedStages) == 0 {
-		return false, nil
-	}
 
-	// Step 3: Compute correlation key using group_by values from matched events
-	correlateValues := r.extractCorrelateValues(&seq, matchedEventIDs, data, ruleCache)
+	// Step 3: Compute correlation key for state lookup.
+	// Use deterministic group_by extraction from sequence/event configuration
+	// (independent of stage match outcome) so "_@"-dependent stages can still load state.
+	correlateValues := r.extractCorrelateValuesForStateLookup(&seq, data, ruleCache)
 	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
 		// group_by is configured but no values could be extracted
 		logger.Warn("Sequence group_by extraction yielded empty key",
@@ -1050,7 +1066,49 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	}()
 
 	// Step 4: Get or create sequence state
-	state := r.seqStateManager.GetOrCreateState(stateKey, seq.WithinMs, seq.WithinSec, seq.Compress)
+	state := r.seqStateManager.GetOrCreateState(stateKey, seq.WithinMs, seq.WithinSec)
+
+	// Build sequence-scoped evaluation data with context exposed as "#ctx".
+	// This enables "_@foo.bar" references by rewriting them to "_$#ctx.foo.bar".
+	seqEvalData := data
+	if state.Context == nil {
+		state.Context = make(map[string]interface{})
+	}
+	seqEvalDataCopy := make(map[string]interface{}, len(data)+1)
+	for k, v := range data {
+		seqEvalDataCopy[k] = v
+	}
+	seqEvalDataCopy["#ctx"] = state.Context
+	seqEvalData = seqEvalDataCopy
+
+	// Clear cached dynamic references for sequence context before re-evaluation.
+	// First-pass checks run without "#ctx" and may cache empty values.
+	for k := range ruleCache {
+		if strings.HasPrefix(k, FromRawSymbol+"#ctx") || strings.HasPrefix(k, SequenceCtxSymbol) {
+			delete(ruleCache, k)
+		}
+	}
+
+	// Re-evaluate event matching with sequence context available.
+	// (When "_@" is not used, behavior is equivalent to the first evaluation pass.)
+	matchMap = make(map[string]bool, len(seq.Events))
+	matchedEventIDs = matchedEventIDs[:0]
+	for _, eventID := range seq.EventOrder {
+		eventDef := seq.Events[eventID]
+		matched := r.evaluateEventDef(eventDef, seqEvalData, ruleCache)
+		matchMap[eventID] = matched
+		if matched {
+			matchedEventIDs = append(matchedEventIDs, eventID)
+		}
+	}
+	matchedStages = seq.Condition.EvaluateEvent(matchMap)
+	if len(matchedStages) == 0 {
+		return false, nil
+	}
+
+	// Apply per-event append side effects for sequence context ("_@...") once
+	// matched event definitions are finalized for this input event.
+	r.applySequenceEventAppends(&seq, matchedEventIDs, seqEvalData, state, ruleCache)
 
 	// Step 5: Extract event timestamp
 	eventTimestamp := r.extractEventTimestamp(&seq, matchedEventIDs, data, ruleCache)
@@ -1060,10 +1118,20 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	// which causes CheckComplete to return false for that stage.
 	// For normal stages, recording advances the sequence towards completion.
 	dataSnapshot := r.snapshotEventData(data, matchedEventIDs, &seq)
+	var valueRef string
+	if seq.LocalCache && r.cepValueStore != nil {
+		expiresAtNs := state.ExpiresAt * int64(time.Millisecond)
+		if ref, err := r.cepValueStore.PutSnapshot(dataSnapshot, expiresAtNs); err == nil {
+			valueRef = ref
+			// Keep only pointer in memory for local_cache mode.
+			dataSnapshot = nil
+		}
+	}
 	for _, stageIdx := range matchedStages {
 		state.AddMatch(stageIdx, StageMatch{
 			Timestamp: eventTimestamp,
 			Data:      dataSnapshot,
+			ValueRef:  valueRef,
 		})
 	}
 
@@ -1071,13 +1139,14 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	if seq.Condition.CheckComplete(state) {
 		// Sequence completed - build enriched data and clean up
 		enrichedData := r.buildSequenceResult(state, &seq, data)
+		r.cleanupStateValueRefs(state)
 		r.seqStateManager.DeleteState(stateKey)
 		sequenceCompleted = true
 		return true, enrichedData
 	}
 
 	// Step 8: Persist updated state
-	r.seqStateManager.UpdateState(stateKey, state, seq.WithinSec, seq.Compress)
+	r.seqStateManager.UpdateState(stateKey, state, seq.WithinSec)
 
 	// Step 9: Track for absence scanning if needed
 	if seq.Condition.HasAbsenceStages() {
@@ -1089,6 +1158,96 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	}
 
 	return false, nil
+}
+
+func setSequenceContextValue(ctx map[string]interface{}, path []string, value interface{}) {
+	if len(path) == 0 {
+		return
+	}
+	cur := ctx
+	for i := 0; i < len(path)-1; i++ {
+		k := path[i]
+		next, ok := cur[k]
+		if !ok {
+			nm := make(map[string]interface{})
+			cur[k] = nm
+			cur = nm
+			continue
+		}
+		if nm, ok := next.(map[string]interface{}); ok {
+			cur = nm
+			continue
+		}
+		nm := make(map[string]interface{})
+		cur[k] = nm
+		cur = nm
+	}
+	cur[path[len(path)-1]] = value
+}
+
+func (r *Ruleset) applySequenceEventAppends(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, state *SequenceState, ruleCache map[string]common.CheckCoreCache) {
+	if state == nil {
+		return
+	}
+	if state.Context == nil {
+		state.Context = make(map[string]interface{})
+	}
+
+	for _, eventID := range matchedEventIDs {
+		eventDef := seq.Events[eventID]
+		if eventDef == nil || len(eventDef.Appends) == 0 {
+			continue
+		}
+		for _, appendOp := range eventDef.Appends {
+			if !strings.HasPrefix(appendOp.FieldName, SequenceCtxSymbol) {
+				continue
+			}
+			pathRaw := strings.TrimSpace(appendOp.FieldName[SequenceCtxSymbolLen:])
+			if pathRaw == "" {
+				continue
+			}
+			path := common.StringToList(pathRaw)
+			if len(path) == 0 {
+				continue
+			}
+
+			if strings.TrimSpace(appendOp.Type) == "" {
+				val := replaceFromRawPlaceholders(ruleCache, appendOp.Value, data)
+				setSequenceContextValue(state.Context, path, val)
+				continue
+			}
+
+			args := GetPluginRealArgs(appendOp.PluginArgs, data, ruleCache)
+			if appendOp.Plugin == nil {
+				continue
+			}
+			if appendOp.Plugin.ReturnType == "bool" {
+				boolResult, err := appendOp.Plugin.FuncEvalCheckNode(args...)
+				if err == nil {
+					setSequenceContextValue(state.Context, path, boolResult)
+				}
+				continue
+			}
+			res, ok, err := appendOp.Plugin.FuncEvalOther(args...)
+			if err == nil && ok {
+				setSequenceContextValue(state.Context, path, res)
+			}
+		}
+	}
+}
+
+// cleanupStateValueRefs deletes external snapshot references associated with a sequence state.
+func (r *Ruleset) cleanupStateValueRefs(state *SequenceState) {
+	if r.cepValueStore == nil || state == nil {
+		return
+	}
+	for _, matches := range state.StageMatches {
+		for _, m := range matches {
+			if m.ValueRef != "" {
+				_ = r.cepValueStore.DeleteSnapshot(m.ValueRef)
+			}
+		}
+	}
 }
 
 // evaluateEventDef checks if the incoming data matches a single event definition.
@@ -1206,6 +1365,44 @@ func (r *Ruleset) extractCorrelateValues(seq *Sequence, matchedEventIDs []string
 	return sb.String()
 }
 
+// extractCorrelateValuesForStateLookup extracts group_by values without relying on
+// stage match results, so sequence state can be loaded before "_@"-dependent checks.
+func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) string {
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer stringBuilderPool.Put(sb)
+
+	appendGroupBy := func(groupByFields []string, fieldPaths [][]string) {
+		for idx, field := range groupByFields {
+			fieldList := common.StringToList(field)
+			if idx < len(fieldPaths) && len(fieldPaths[idx]) > 0 {
+				fieldList = fieldPaths[idx]
+			}
+			if val, ok := GetCheckDataFromCache(ruleCache, field, data, fieldList); ok {
+				sb.WriteString(val)
+				sb.WriteString("|")
+			}
+		}
+	}
+
+	if len(seq.GroupByList) > 0 {
+		appendGroupBy(seq.GroupByList, seq.GroupByFieldPaths)
+		return sb.String()
+	}
+
+	// Per-event fallback: use first event definition that has group_by configured.
+	for _, eventID := range seq.EventOrder {
+		eventDef := seq.Events[eventID]
+		if eventDef == nil || len(eventDef.GroupByList) == 0 {
+			continue
+		}
+		appendGroupBy(eventDef.GroupByList, eventDef.GroupByFieldPaths)
+		break
+	}
+
+	return sb.String()
+}
+
 // hasEventGroupBy checks if any event in the sequence has a per-event group_by.
 func (r *Ruleset) hasEventGroupBy(seq *Sequence) bool {
 	for _, eventDef := range seq.Events {
@@ -1217,7 +1414,7 @@ func (r *Ruleset) hasEventGroupBy(seq *Sequence) bool {
 }
 
 // extractEventTimestamp extracts the event timestamp from data based on event_time configuration.
-// Returns unix milliseconds. When event_time is not specified on the matched event(s), or the
+// Returns unix nanoseconds. When event_time is not specified on the matched event(s), or the
 // field is missing or unparseable, uses the engine processing time (time at which the event is seen).
 func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) int64 {
 	for _, eventID := range matchedEventIDs {
@@ -1235,38 +1432,41 @@ func (r *Ruleset) extractEventTimestamp(seq *Sequence, matchedEventIDs []string,
 			continue
 		}
 
-		ts := parseTimestampToMs(val)
+		ts := parseTimestampToNs(val)
 		if ts > 0 {
 			return ts
 		}
 	}
 
 	// No event_time set or parseable: use engine processing time (when the engine sees the event)
-	return time.Now().UnixMilli()
+	return time.Now().UnixNano()
 }
 
-// parseTimestampToMs attempts to parse a timestamp string into unix milliseconds.
-// Supports: Unix seconds, Unix milliseconds, ISO 8601, RFC 3339.
-func parseTimestampToMs(val string) int64 {
+// parseTimestampToNs attempts to parse a timestamp string into unix nanoseconds.
+// Supports: Unix seconds, Unix milliseconds, Unix microseconds, Unix nanoseconds, ISO 8601, RFC 3339.
+func parseTimestampToNs(val string) int64 {
 	// Try numeric (unix epoch)
 	if n, err := strconv.ParseInt(val, 10, 64); err == nil {
-		if n > 1e15 {
-			// Already in microseconds, convert to ms
-			return n / 1000
-		} else if n > 1e12 {
-			// Already in milliseconds
+		if n > 1e18 {
+			// Already in nanoseconds
 			return n
+		} else if n > 1e15 {
+			// Microseconds -> nanoseconds
+			return n * 1000
+		} else if n > 1e12 {
+			// Milliseconds -> nanoseconds
+			return n * int64(time.Millisecond)
 		} else if n > 1e9 {
 			// Seconds
-			return n * 1000
+			return n * int64(time.Second)
 		}
 		// Very small number, treat as seconds
-		return n * 1000
+		return n * int64(time.Second)
 	}
 
 	// Try float (e.g., "1700000000.123")
 	if f, err := strconv.ParseFloat(val, 64); err == nil {
-		return int64(f * 1000)
+		return int64(f * float64(time.Second))
 	}
 
 	// Try common time formats
@@ -1279,7 +1479,7 @@ func parseTimestampToMs(val string) int64 {
 	}
 	for _, format := range formats {
 		if t, err := time.Parse(format, val); err == nil {
-			return t.UnixMilli()
+			return t.UnixNano()
 		}
 	}
 
@@ -1300,34 +1500,56 @@ func (r *Ruleset) snapshotEventData(data map[string]interface{}, matchedEventIDs
 //     providing downstream consumers a single structured view of the entire sequence
 func (r *Ruleset) buildSequenceResult(state *SequenceState, seq *Sequence, currentData map[string]interface{}) map[string]interface{} {
 	result := common.MapDeepCopy(currentData)
-	enrichSequenceResultData(result, state, seq)
+	r.enrichSequenceResultData(result, state, seq)
 	return result
 }
 
-// enrichSequenceResultData adds cross-event reference data and _sequence_events to the result.
-func enrichSequenceResultData(result map[string]interface{}, state *SequenceState, seq *Sequence) {
+func (r *Ruleset) resolveStageMatchData(match StageMatch) map[string]interface{} {
+	if match.Data != nil {
+		return match.Data
+	}
+	if match.ValueRef == "" || r.cepValueStore == nil {
+		return nil
+	}
+	data, err := r.cepValueStore.GetSnapshot(match.ValueRef)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// enrichSequenceResultData adds sequence metadata to the result.
+// Internal "#<event_id>" fields are kept during rule execution for cross-event references
+// and removed before data is emitted downstream by sanitizeOutputData.
+func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state *SequenceState, seq *Sequence) {
 	sequenceEvents := make(map[string]interface{})
 
-	for stageIdx, matches := range state.StageMatches {
-		if stageIdx >= len(seq.Condition.Stages) || len(matches) == 0 {
+	for stageIdx, stage := range seq.Condition.Stages {
+		matches := state.StageMatches[stageIdx]
+
+		if stage.IsAbsent || len(matches) == 0 {
 			continue
 		}
-		stage := seq.Condition.Stages[stageIdx]
-		if stage.IsAbsent {
+
+		firstData := r.resolveStageMatchData(matches[0])
+		if firstData == nil {
 			continue
 		}
-		// Store the first match's data under "#<event_id>" for cross-event field references,
-		// and also add to _sequence_events map for structured downstream consumption
+
+		// Keep first match under "#<event_id>" for internal cross-event references,
+		// and add to _sequence_events for structured output consumption.
 		for _, eventID := range stage.EventIDs {
-			if matches[0].Data != nil {
-				result["#"+eventID] = matches[0].Data
-				sequenceEvents[eventID] = matches[0].Data
-			}
+			result["#"+eventID] = firstData
+			sequenceEvents[eventID] = firstData
 		}
 	}
 
 	if len(sequenceEvents) > 0 {
 		result["_sequence_events"] = sequenceEvents
+	}
+
+	result["_sequence_condition"] = map[string]interface{}{
+		"content": seq.ConditionExpr,
 	}
 }
 
