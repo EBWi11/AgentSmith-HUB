@@ -1043,7 +1043,19 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	// Step 3: Compute correlation key for state lookup.
 	// Use deterministic group_by extraction from sequence/event configuration
 	// (independent of stage match outcome) so "_@"-dependent stages can still load state.
+	// If first-pass matchedEventIDs is empty (e.g., first stage depends on _@), we need
+	// to try sequence-level group_by first before falling back to per-event group_by.
 	correlateValues := r.extractCorrelateValuesForStateLookup(&seq, matchedEventIDs, data, ruleCache)
+
+	// If correlation key is empty and we have group_by configured, try sequence-level first
+	// before giving up. This handles the case where first-pass matchedEventIDs is empty
+	// (due to _@ dependency) but sequence-level group_by might still work.
+	if correlateValues == "" && len(seq.GroupByList) == 0 && r.hasEventGroupBy(&seq) {
+		// Try sequence-level group_by as fallback when per-event group_by failed
+		// (e.g., first-pass matchedEventIDs empty, or per-event fields not in current data)
+		correlateValues = r.extractCorrelateValuesForStateLookupWithSequenceFallback(&seq, data, ruleCache)
+	}
+
 	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
 		// group_by is configured but no values could be extracted
 		logger.Warn("Sequence group_by extraction yielded empty key",
@@ -1461,6 +1473,48 @@ func (r *Ruleset) extractCorrelateValuesForStateLookup(seq *Sequence, matchedEve
 	}
 
 	return sb.String()
+}
+
+// extractCorrelateValuesForStateLookupWithSequenceFallback attempts to extract group_by
+// using sequence-level configuration when per-event extraction failed. This is used as
+// a fallback when first-pass matchedEventIDs is empty (e.g., _@-dependent first stage).
+func (r *Ruleset) extractCorrelateValuesForStateLookupWithSequenceFallback(seq *Sequence, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) string {
+	// This function is only called when sequence-level group_by is not set and
+	// per-event extraction failed. We try to find any event's group_by that can
+	// extract values from current data, preferring events that are more likely
+	// to match (earlier in EventOrder for first stage, later for subsequent stages).
+	// However, since we don't know which stage this is, we try all events in order.
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
+	defer stringBuilderPool.Put(sb)
+
+	for _, eventID := range seq.EventOrder {
+		eventDef := seq.Events[eventID]
+		if eventDef == nil || len(eventDef.GroupByList) == 0 {
+			continue
+		}
+
+		// Try to extract group_by values for this event
+		extracted := false
+		for idx, field := range eventDef.GroupByList {
+			fieldList := common.StringToList(field)
+			if idx < len(eventDef.GroupByFieldPaths) && len(eventDef.GroupByFieldPaths[idx]) > 0 {
+				fieldList = eventDef.GroupByFieldPaths[idx]
+			}
+			if val, ok := GetCheckDataFromCache(ruleCache, field, data, fieldList); ok && val != "" {
+				sb.WriteString(val)
+				sb.WriteString("|")
+				extracted = true
+			}
+		}
+
+		// If we successfully extracted at least one value, return it
+		if extracted {
+			return sb.String()
+		}
+	}
+
+	return ""
 }
 
 // hasEventGroupBy checks if any event in the sequence has a per-event group_by.
