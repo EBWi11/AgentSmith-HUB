@@ -822,8 +822,10 @@ export const hubApi = {
         throw new Error('Ruleset ID is required');
       }
       
-      if (!data || typeof data !== 'object') {
-        throw new Error('Test data must be an object');
+      const isObject = data && typeof data === 'object' && !Array.isArray(data);
+      const isArray = Array.isArray(data);
+      if (!isObject && !isArray) {
+        throw new Error('Test data must be an object or array');
       }
       
       // Use API instance to send request
@@ -855,8 +857,10 @@ export const hubApi = {
         throw new Error('Ruleset content is required');
       }
       
-      if (!data || typeof data !== 'object') {
-        throw new Error('Test data must be an object');
+      const isObject = data && typeof data === 'object' && !Array.isArray(data);
+      const isArray = Array.isArray(data);
+      if (!isObject && !isArray) {
+        throw new Error('Test data must be an object or array');
       }
       
       // Use API instance to send request

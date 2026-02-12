@@ -43,8 +43,9 @@ func testRuleset(c echo.Context) error {
 
 	// Parse request body
 	var req struct {
-		Data    map[string]interface{} `json:"data"`
-		Content string                 `json:"content,omitempty"` // Optional content for direct testing
+		Data    interface{}              `json:"data"` // Supports both object and array
+		Datas   []map[string]interface{} `json:"datas,omitempty"` // Optional batch test events for sequence testing
+		Content string                   `json:"content,omitempty"` // Optional content for direct testing
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -52,10 +53,32 @@ func testRuleset(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "Invalid request body: "+err.Error()))
 	}
 
+	// Build test event list (supports single `data`, array `data`, and batch `datas`)
+	testEvents := make([]map[string]interface{}, 0, 1)
+
+	switch v := req.Data.(type) {
+	case map[string]interface{}:
+		testEvents = append(testEvents, v)
+	case []interface{}:
+		for _, item := range v {
+			if m, ok := item.(map[string]interface{}); ok {
+				testEvents = append(testEvents, m)
+			}
+		}
+	}
+
+	if len(req.Datas) > 0 {
+		for _, item := range req.Datas {
+			if item != nil {
+				testEvents = append(testEvents, item)
+			}
+		}
+	}
+
 	// Check if input data is provided
-	if req.Data == nil {
+	if len(testEvents) == 0 {
 		isContentMode := req.Content != ""
-		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "Input data is required"))
+		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "Input data is required (use `data` or `datas`)"))
 	}
 
 	var rulesetContent string
@@ -125,8 +148,12 @@ func testRuleset(c echo.Context) error {
 		})
 	}
 
-	// Create channels for testing
-	inputCh := make(chan map[string]interface{}, 100)
+	// Create channels for testing. Ensure input buffer can hold batch events.
+	inputBufferSize := 100
+	if len(testEvents)+10 > inputBufferSize {
+		inputBufferSize = len(testEvents) + 10
+	}
+	inputCh := make(chan map[string]interface{}, inputBufferSize)
 	outputCh := make(chan map[string]interface{}, 100)
 
 	// Ensure channels are properly cleaned up on function exit
@@ -166,8 +193,10 @@ func testRuleset(c echo.Context) error {
 		tempRuleset = nil
 	}()
 
-	// Send the test data
-	inputCh <- req.Data
+	// Send test data in order to preserve sequence semantics.
+	for _, event := range testEvents {
+		inputCh <- event
+	}
 
 	// Collect results with timeout
 	results := make([]map[string]interface{}, 0)

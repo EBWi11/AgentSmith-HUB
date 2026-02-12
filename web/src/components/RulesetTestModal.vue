@@ -199,51 +199,18 @@ async function runTest() {
       return;
     }
     
-    // Check if data is array or single object
-    if (Array.isArray(data)) {
-      // Process array of JSON objects
-      let allResults = [];
-      
-              for (let i = 0; i < data.length; i++) {
-          try {
-            let response;
-            // Use editor content if available and not empty, otherwise fall back to saved file
-            if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
-              response = await hubApi.testRulesetContent(props.rulesetContent, data[i]);
-            } else {
-              response = await hubApi.testRuleset(props.rulesetId, data[i]);
-            }
-          
-          if (response.success) {
-            // Add results from this item
-            const itemResults = response.results || [];
-            allResults.push(...itemResults);
-          } else {
-            testError.value = `Error processing item ${i + 1}: ${response.error || 'Unknown error'}`;
-            return;
-          }
-        } catch (e) {
-          testError.value = `Error processing item ${i + 1}: ${e.message}`;
-          return;
-        }
-      }
-      
-      testResults.value = allResults;
+    // Send a single request for both single object and array inputs.
+    let response;
+    if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
+      response = await hubApi.testRulesetContent(props.rulesetContent, data);
     } else {
-      // Process single JSON object (existing logic)
-      let response;
-      // Use editor content if available and not empty, otherwise fall back to saved file
-      if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
-        response = await hubApi.testRulesetContent(props.rulesetContent, data);
-      } else {
-        response = await hubApi.testRuleset(props.rulesetId, data);
-      }
-      
-      if (response.success) {
-        testResults.value = response.results || [];
-      } else {
-        testError.value = response.error || 'Unknown error occurred';
-      }
+      response = await hubApi.testRuleset(props.rulesetId, data);
+    }
+
+    if (response.success) {
+      testResults.value = response.results || [];
+    } else {
+      testError.value = response.error || 'Unknown error occurred';
     }
   } catch (e) {
     testError.value = e.message || 'Failed to test ruleset';
