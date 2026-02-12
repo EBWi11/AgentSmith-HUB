@@ -329,9 +329,10 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 		}
 
 		// Check if the absence timeout triggers the sequence
-		if seq.Condition.CheckAbsenceTimeout(state, nowMs) {
+		absencePath := seq.Condition.FindAbsenceCompletionPath(state, nowMs)
+		if absencePath != nil {
 			// Build result data from the stored stage match snapshots
-			resultData := r.buildAbsenceResult(state, &seq)
+			resultData := r.buildAbsenceResult(state, &seq, absencePath)
 			if resultData != nil {
 				// Execute post-sequence operations (append/plugin/del/modify)
 				// that follow the sequence in the rule's operation queue
@@ -404,7 +405,7 @@ func (r *Ruleset) executePostSequenceOps(rule *Rule, seqOpID int, data map[strin
 }
 
 // buildAbsenceResult constructs the result data for a sequence triggered by absence timeout.
-func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[string]interface{} {
+func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence, path *CompletionPath) map[string]interface{} {
 	// Find the last non-absence stage match data to use as base
 	var baseData map[string]interface{}
 	for i := len(seq.Condition.Stages) - 1; i >= 0; i-- {
@@ -414,7 +415,14 @@ func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[st
 		}
 		matches, exists := state.StageMatches[i]
 		if exists && len(matches) > 0 {
-			if resolved := r.resolveStageMatchData(matches[0]); resolved != nil {
+			// Use the match from the completion path when available.
+			matchIdx := 0
+			if path != nil {
+				if idx, ok := path.MatchIndices[i]; ok && idx < len(matches) {
+					matchIdx = idx
+				}
+			}
+			if resolved := r.resolveStageMatchData(matches[matchIdx]); resolved != nil {
 				baseData = resolved
 			}
 			break
@@ -426,7 +434,7 @@ func (r *Ruleset) buildAbsenceResult(state *SequenceState, seq *Sequence) map[st
 	}
 
 	result := common.MapDeepCopy(baseData)
-	r.enrichSequenceResultData(result, state, seq)
+	r.enrichSequenceResultData(result, state, seq, path)
 	return result
 }
 
@@ -1024,13 +1032,16 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 		return false, nil
 	}
 
-	// Step 1: Match incoming event against all event definitions
+	// Step 1: Match incoming event against all event definitions (checks only).
+	// Thresholds are skipped in the first pass to avoid double-counting side effects;
+	// the full evaluation (including thresholds) runs in the second pass after
+	// sequence context (_@) is loaded.
 	matchMap := make(map[string]bool, len(seq.Events))
 	matchedEventIDs := make([]string, 0, 2) // Track which events matched (for group_by extraction)
 
 	for _, eventID := range seq.EventOrder {
 		eventDef := seq.Events[eventID]
-		matched := r.evaluateEventDef(eventDef, data, ruleCache)
+		matched := r.evaluateEventDefChecksOnly(eventDef, data, ruleCache)
 		matchMap[eventID] = matched
 		if matched {
 			matchedEventIDs = append(matchedEventIDs, eventID)
@@ -1157,8 +1168,9 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 
 	// Step 7: Check if the sequence is now complete
 	if seq.Condition.CheckComplete(state) {
-		// Sequence completed - build enriched data and clean up
-		enrichedData := r.buildSequenceResult(state, &seq, data)
+		// Sequence completed - find the actual match path and build enriched data
+		path := seq.Condition.FindCompletionPath(state)
+		enrichedData := r.buildSequenceResult(state, &seq, data, path)
 		r.cleanupStateValueRefs(state)
 		r.seqStateManager.DeleteState(stateKey)
 		sequenceCompleted = true
@@ -1304,6 +1316,27 @@ func (r *Ruleset) cleanupStateValueRefs(state *SequenceState) {
 	}
 }
 
+// evaluateEventDefChecksOnly evaluates an event definition's checks and checklists
+// only, WITHOUT evaluating thresholds. Used in the first-pass correlation key
+// extraction to avoid double-counting threshold side effects when the second
+// pass (with sequence context) re-evaluates the same event definitions.
+func (r *Ruleset) evaluateEventDefChecksOnly(eventDef *EventDef, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	for i := range eventDef.CheckNodes {
+		if !r.executeCheckNode(&eventDef.CheckNodes[i], data, ruleCache) {
+			return false
+		}
+	}
+	for i := range eventDef.Checklists {
+		cl := &eventDef.Checklists[i]
+		if !r.evaluateEventChecklist(cl, data, ruleCache) {
+			return false
+		}
+	}
+	// Thresholds are intentionally skipped; the full evaluation (including
+	// thresholds) happens in the second pass after sequence context is loaded.
+	return true
+}
+
 // evaluateEventDef checks if the incoming data matches a single event definition.
 // All checks within an event must pass (AND logic).
 func (r *Ruleset) evaluateEventDef(eventDef *EventDef, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
@@ -1327,7 +1360,7 @@ func (r *Ruleset) evaluateEventDef(eventDef *EventDef, data map[string]interface
 		threshold := &eventDef.Thresholds[i]
 		tempThresholdMap := map[int]Threshold{1: *threshold}
 		tempRule := &Rule{
-			ID:           "cep_event_threshold",
+			ID:           fmt.Sprintf("cep_%s_th%d", eventDef.ID, i),
 			ThresholdMap: tempThresholdMap,
 		}
 		if !r.executeThreshold(tempRule, 1, data, ruleCache) {
@@ -1361,7 +1394,7 @@ func (r *Ruleset) evaluateEventChecklist(cl *Checklist, data map[string]interfac
 		}
 		tempThresholdMap := map[int]Threshold{1: thresholdNode}
 		tempRule := &Rule{
-			ID:           "cep_event_threshold",
+			ID:           "cep_cl_th_" + thresholdID,
 			ThresholdMap: tempThresholdMap,
 		}
 		result := r.executeThreshold(tempRule, 1, data, ruleCache)
@@ -1612,9 +1645,9 @@ func (r *Ruleset) snapshotEventData(data map[string]interface{}, matchedEventIDs
 //   - "#<event_id>" keys: per-event snapshots for cross-event field references (_$#event_id.field)
 //   - "_sequence_events" key: a map[event_id] -> raw data for all events in the sequence,
 //     providing downstream consumers a single structured view of the entire sequence
-func (r *Ruleset) buildSequenceResult(state *SequenceState, seq *Sequence, currentData map[string]interface{}) map[string]interface{} {
+func (r *Ruleset) buildSequenceResult(state *SequenceState, seq *Sequence, currentData map[string]interface{}, path *CompletionPath) map[string]interface{} {
 	result := common.MapDeepCopy(currentData)
-	r.enrichSequenceResultData(result, state, seq)
+	r.enrichSequenceResultData(result, state, seq, path)
 	return result
 }
 
@@ -1635,7 +1668,7 @@ func (r *Ruleset) resolveStageMatchData(match StageMatch) map[string]interface{}
 // enrichSequenceResultData adds sequence metadata to the result.
 // Internal "#<event_id>" fields are kept during rule execution for cross-event references
 // and removed before data is emitted downstream by sanitizeOutputData.
-func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state *SequenceState, seq *Sequence) {
+func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state *SequenceState, seq *Sequence, path *CompletionPath) {
 	sequenceEvents := make(map[string]interface{})
 
 	for stageIdx, stage := range seq.Condition.Stages {
@@ -1645,20 +1678,29 @@ func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state 
 			continue
 		}
 
-		firstData := r.resolveStageMatchData(matches[0])
-		if firstData == nil {
+		// Use the match that was actually part of the completion path (Bug 2 fix).
+		// Falls back to matches[0] when path is nil (e.g. legacy / absence timeout).
+		matchIdx := 0
+		if path != nil {
+			if idx, ok := path.MatchIndices[stageIdx]; ok && idx < len(matches) {
+				matchIdx = idx
+			}
+		}
+
+		matchData := r.resolveStageMatchData(matches[matchIdx])
+		if matchData == nil {
 			continue
 		}
 
-		boundEventIDs := matches[0].MatchedEventIDs
-		if !matches[0].MatchedEventIDsSet && len(boundEventIDs) == 0 {
+		boundEventIDs := matches[matchIdx].MatchedEventIDs
+		if !matches[matchIdx].MatchedEventIDsSet && len(boundEventIDs) == 0 {
 			boundEventIDs = stage.EventIDs
 		}
-		// Keep first match under "#<event_id>" for internal cross-event references,
+		// Keep match under "#<event_id>" for internal cross-event references,
 		// and add to _sequence_events for structured output consumption.
 		for _, eventID := range boundEventIDs {
-			result["#"+eventID] = firstData
-			sequenceEvents[eventID] = firstData
+			result["#"+eventID] = matchData
+			sequenceEvents[eventID] = matchData
 		}
 	}
 

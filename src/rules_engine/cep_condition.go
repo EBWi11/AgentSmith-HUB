@@ -99,6 +99,12 @@ func NewSequenceState(createdAt, expiresAt int64) *SequenceState {
 	}
 }
 
+// CompletionPath records which match index was used for each non-absence stage
+// when a sequence completes. Used by enrichment to report the correct event data.
+type CompletionPath struct {
+	MatchIndices map[int]int // stageIdx -> index into StageMatches[stageIdx]
+}
+
 // AddMatch records a stage match. Maintains timestamp-sorted order.
 func (s *SequenceState) AddMatch(stageIdx int, match StageMatch) {
 	matches := s.StageMatches[stageIdx]
@@ -652,7 +658,14 @@ func (c *CEPCondition) checkCompleteFromStage(state *SequenceState, stageIdx int
 				}
 			}
 		}
-		// No match found after prevTimestamp -> absence satisfied
+		// No match found after prevTimestamp -> absence condition met for now.
+		// However, if all remaining stages (including this one) are absence stages,
+		// we cannot confirm them without a timeout — the absent event might still
+		// arrive within the time window. Defer to CheckAbsenceTimeout.
+		if !c.hasNonAbsenceStageAfter(stageIdx) {
+			memo[memoKey] = false
+			return false
+		}
 		// Continue to next stage with the same prevTimestamp
 		// (absence doesn't advance the time cursor)
 		result = c.checkCompleteFromStage(state, stageIdx+1, prevTimestamp, memo)
@@ -746,6 +759,131 @@ func (c *CEPCondition) checkAbsenceFromStage(state *SequenceState, stageIdx int,
 
 	memo[memoKey] = result
 	return result
+}
+
+// hasNonAbsenceStageAfter returns true if there is at least one non-absence stage
+// after the given stageIdx. Used to determine if trailing absence stages need
+// timeout confirmation rather than immediate completion.
+func (c *CEPCondition) hasNonAbsenceStageAfter(stageIdx int) bool {
+	for i := stageIdx + 1; i < len(c.Stages); i++ {
+		if !c.Stages[i].IsAbsent {
+			return true
+		}
+	}
+	return false
+}
+
+// ============================================================================
+// Completion Path (Phase 3b: find which matches were used)
+// ============================================================================
+
+// FindCompletionPath checks if the sequence is complete and returns the specific
+// match indices used for each non-absence stage. Returns nil if not complete.
+// Unlike CheckComplete, this does not use memoization (only called once when
+// CheckComplete already confirmed completion).
+func (c *CEPCondition) FindCompletionPath(state *SequenceState) *CompletionPath {
+	if state == nil || len(state.StageMatches) == 0 {
+		return nil
+	}
+	path := &CompletionPath{MatchIndices: make(map[int]int)}
+	if c.findPathFromStage(state, 0, 0, path) {
+		return path
+	}
+	return nil
+}
+
+func (c *CEPCondition) findPathFromStage(state *SequenceState, stageIdx int, prevTimestamp int64, path *CompletionPath) bool {
+	if stageIdx >= len(c.Stages) {
+		return true
+	}
+
+	stage := c.Stages[stageIdx]
+
+	if stage.IsAbsent {
+		matches, exists := state.StageMatches[stageIdx]
+		if exists {
+			for _, m := range matches {
+				if m.Timestamp > prevTimestamp {
+					return false
+				}
+			}
+		}
+		// Trailing absence needs timeout, not immediate completion.
+		if !c.hasNonAbsenceStageAfter(stageIdx) {
+			return false
+		}
+		return c.findPathFromStage(state, stageIdx+1, prevTimestamp, path)
+	}
+
+	// Normal stage
+	matches, exists := state.StageMatches[stageIdx]
+	if !exists || len(matches) == 0 {
+		return false
+	}
+
+	for i, m := range matches {
+		if m.Timestamp > prevTimestamp {
+			path.MatchIndices[stageIdx] = i
+			if c.findPathFromStage(state, stageIdx+1, m.Timestamp, path) {
+				return true
+			}
+			delete(path.MatchIndices, stageIdx)
+		}
+	}
+
+	return false
+}
+
+// FindAbsenceCompletionPath checks if the sequence can complete due to absence
+// timeout and returns the match indices used. Returns nil if not triggerable.
+func (c *CEPCondition) FindAbsenceCompletionPath(state *SequenceState, nowMs int64) *CompletionPath {
+	if state == nil || nowMs < state.ExpiresAt {
+		return nil
+	}
+	path := &CompletionPath{MatchIndices: make(map[int]int)}
+	if c.findAbsencePathFromStage(state, 0, 0, path) {
+		return path
+	}
+	return nil
+}
+
+func (c *CEPCondition) findAbsencePathFromStage(state *SequenceState, stageIdx int, prevTimestamp int64, path *CompletionPath) bool {
+	if stageIdx >= len(c.Stages) {
+		return true
+	}
+
+	stage := c.Stages[stageIdx]
+
+	if stage.IsAbsent {
+		matches, exists := state.StageMatches[stageIdx]
+		if exists {
+			for _, m := range matches {
+				if m.Timestamp > prevTimestamp {
+					return false
+				}
+			}
+		}
+		// Absence confirmed (timed out, event never appeared)
+		return c.findAbsencePathFromStage(state, stageIdx+1, prevTimestamp, path)
+	}
+
+	// Normal stage: must have a match
+	matches, exists := state.StageMatches[stageIdx]
+	if !exists || len(matches) == 0 {
+		return false
+	}
+
+	for i, m := range matches {
+		if m.Timestamp > prevTimestamp {
+			path.MatchIndices[stageIdx] = i
+			if c.findAbsencePathFromStage(state, stageIdx+1, m.Timestamp, path) {
+				return true
+			}
+			delete(path.MatchIndices, stageIdx)
+		}
+	}
+
+	return false
 }
 
 // HasAbsenceStages returns true if any stage in the condition is an absence stage.
