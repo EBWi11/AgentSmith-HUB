@@ -73,6 +73,9 @@ type StageMatch struct {
 	Timestamp int64                  // Unix nanoseconds (from event_time or detection time)
 	Data      map[string]interface{} // Optional inline snapshot (used by Redis mode/fallback)
 	ValueRef  string                 // Optional external value-store reference (local cache mode)
+	// MatchedEventIDsSet indicates MatchedEventIDs has been intentionally resolved
+	// for this match (including the case of an empty binding).
+	MatchedEventIDsSet bool
 	// MatchedEventIDs records which event IDs in the stage expression actually
 	// satisfied this stage for this match (important for OR branches).
 	MatchedEventIDs []string

@@ -1106,13 +1106,14 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 		return false, nil
 	}
 	stageBindings := seq.Condition.EvaluateEventBindings(matchMap)
+	selectedMatchedEventIDs := buildSelectedMatchedEventIDs(seq, matchedStages, stageBindings)
 
 	// Apply per-event append side effects for sequence context ("_@...") once
 	// matched event definitions are finalized for this input event.
-	r.applySequenceEventAppends(&seq, matchedEventIDs, seqEvalData, state, ruleCache)
+	r.applySequenceEventAppends(&seq, selectedMatchedEventIDs, seqEvalData, state, ruleCache)
 
 	// Step 5: Extract event timestamp
-	eventTimestamp := r.extractEventTimestamp(&seq, matchedEventIDs, data, ruleCache)
+	eventTimestamp := r.extractEventTimestamp(&seq, selectedMatchedEventIDs, data, ruleCache)
 
 	// Step 6: Record stage matches
 	// For absence stages, recording a match means the absent event WAS observed,
@@ -1129,15 +1130,16 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 		}
 	}
 	for _, stageIdx := range matchedStages {
-		matchedIDs := stageBindings[stageIdx]
-		if len(matchedIDs) == 0 {
+		matchedIDs, bindingExists := stageBindings[stageIdx]
+		if !bindingExists {
 			matchedIDs = seq.Condition.Stages[stageIdx].EventIDs
 		}
 		state.AddMatch(stageIdx, StageMatch{
-			Timestamp:       eventTimestamp,
-			Data:            dataSnapshot,
-			ValueRef:        valueRef,
-			MatchedEventIDs: matchedIDs,
+			Timestamp:          eventTimestamp,
+			Data:               dataSnapshot,
+			ValueRef:           valueRef,
+			MatchedEventIDsSet: bindingExists,
+			MatchedEventIDs:    matchedIDs,
 		})
 	}
 
@@ -1189,6 +1191,40 @@ func setSequenceContextValue(ctx map[string]interface{}, path []string, value in
 		cur = nm
 	}
 	cur[path[len(path)-1]] = value
+}
+
+func buildSelectedMatchedEventIDs(seq Sequence, matchedStages []int, stageBindings map[int][]string) []string {
+	if len(matchedStages) == 0 {
+		return nil
+	}
+
+	selectedSet := make(map[string]struct{}, len(matchedStages))
+	for _, stageIdx := range matchedStages {
+		if ids, ok := stageBindings[stageIdx]; ok {
+			for _, id := range ids {
+				selectedSet[id] = struct{}{}
+			}
+			continue
+		}
+
+		// Defensive fallback: if bindings are unavailable, keep previous behavior.
+		stage := seq.Condition.Stages[stageIdx]
+		for _, id := range stage.EventIDs {
+			selectedSet[id] = struct{}{}
+		}
+	}
+
+	if len(selectedSet) == 0 {
+		return nil
+	}
+
+	ordered := make([]string, 0, len(selectedSet))
+	for _, eventID := range seq.EventOrder {
+		if _, ok := selectedSet[eventID]; ok {
+			ordered = append(ordered, eventID)
+		}
+	}
+	return ordered
 }
 
 func (r *Ruleset) applySequenceEventAppends(seq *Sequence, matchedEventIDs []string, data map[string]interface{}, state *SequenceState, ruleCache map[string]common.CheckCoreCache) {
@@ -1543,7 +1579,7 @@ func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state 
 		}
 
 		boundEventIDs := matches[0].MatchedEventIDs
-		if len(boundEventIDs) == 0 {
+		if !matches[0].MatchedEventIDsSet && len(boundEventIDs) == 0 {
 			boundEventIDs = stage.EventIDs
 		}
 		// Keep first match under "#<event_id>" for internal cross-event references,

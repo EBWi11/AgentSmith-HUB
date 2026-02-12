@@ -834,6 +834,116 @@ func TestCEP_Execute_OrBranch_OverlappingEvents_BindsSingleBranch(t *testing.T) 
 	}
 }
 
+func TestCEP_Execute_OrBranch_OverlappingEvents_OnlyBoundBranchAppliesContextAppend(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="test" name="test">
+			<sequence within="5m" group_by="agent_id" local_cache="true">
+				<event id="login">
+					<check type="EQU" field="event_type">login</check>
+				</event>
+				<event id="exfil1">
+					<check type="EQU" field="event_type">file_transfer</check>
+					<append field="_@branch">left</append>
+				</event>
+				<event id="exfil2">
+					<check type="EQU" field="event_type">file_transfer</check>
+					<append field="_@branch">right</append>
+				</event>
+				<event id="exec">
+					<check type="EQU" field="event_type">exec</check>
+					<check type="EQU" field="branch">_@branch</check>
+				</event>
+				<condition>login -> (exfil1 or exfil2) -> exec</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	// Stage 1
+	res := rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "login",
+	})
+	if len(res) != 0 {
+		t.Fatalf("expected 0 results after login, got %d", len(res))
+	}
+
+	// Stage 2, both exfil definitions overlap by checks.
+	res = rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "file_transfer",
+	})
+	if len(res) != 0 {
+		t.Fatalf("expected 0 results after second stage, got %d", len(res))
+	}
+
+	// Stage 3 should read left-branch context value.
+	res = rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "exec",
+		"branch":     "left",
+	})
+	if len(res) != 1 {
+		t.Fatalf("expected 1 result after exec, got %d", len(res))
+	}
+}
+
+func TestCEP_Execute_OrBranch_OverlappingEvents_EventTimeUsesBoundBranch(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="test" name="test">
+			<sequence within="5m" group_by="agent_id" local_cache="true">
+				<event id="login" event_time="login_ts">
+					<check type="EQU" field="event_type">login</check>
+				</event>
+				<event id="exfil1" event_time="left_ts">
+					<check type="EQU" field="event_type">file_transfer</check>
+				</event>
+				<event id="exfil2" event_time="right_ts">
+					<check type="EQU" field="event_type">file_transfer</check>
+				</event>
+				<event id="exec">
+					<check type="EQU" field="event_type">exec</check>
+				</event>
+				<condition>login -> (exfil1 or exfil2) -> exec</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	// Stage 1 with small event_time
+	res := rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "login",
+		"login_ts":   "2",
+	})
+	if len(res) != 0 {
+		t.Fatalf("expected 0 results after login, got %d", len(res))
+	}
+
+	// Stage 2 overlaps both branches. Bound branch is exfil1 (left-first), which has missing left_ts.
+	// It must not incorrectly use right_ts from exfil2.
+	res = rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "file_transfer",
+		"right_ts":   "1",
+	})
+	if len(res) != 0 {
+		t.Fatalf("expected 0 results after second stage, got %d", len(res))
+	}
+
+	// Stage 3 should complete. If stage 2 had incorrectly used right_ts=1 (older than login_ts=2),
+	// the sequence would be blocked by temporal ordering and this would return 0.
+	res = rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "exec",
+	})
+	if len(res) != 1 {
+		t.Fatalf("expected 1 result after exec, got %d", len(res))
+	}
+}
+
 func TestCEP_Execute_SequenceContextReference_WithAtPrefix(t *testing.T) {
 	xml := `<root name="test" type="DETECTION">
 		<rule id="r1" name="ctx ref test">
