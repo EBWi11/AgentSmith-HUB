@@ -775,6 +775,65 @@ func TestCEP_Execute_SequenceWithAppend(t *testing.T) {
 	}
 }
 
+func TestCEP_Execute_OrBranch_OverlappingEvents_BindsSingleBranch(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="test" name="test">
+			<sequence within="5m" group_by="agent_id" local_cache="true">
+				<event id="login" event_time="timestamp">
+					<check type="EQU" field="event_type">login</check>
+				</event>
+				<event id="exfil1" event_time="timestamp">
+					<check type="EQU" field="event_type">file_transfer</check>
+				</event>
+				<event id="exfil2" event_time="timestamp">
+					<check type="EQU" field="event_type">file_transfer</check>
+				</event>
+				<condition>login -> (exfil1 or exfil2)</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	// Stage 1
+	res := rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "login",
+		"timestamp":  "1770868609",
+	})
+	if len(res) != 0 {
+		t.Fatalf("expected 0 results after login, got %d", len(res))
+	}
+
+	// Stage 2 (matches both exfil1 and exfil2 definitions by condition, but OR branch should bind one)
+	res = rs.EngineCheck(map[string]interface{}{
+		"agent_id":   "a1b2",
+		"event_type": "file_transfer",
+		"timestamp":  "1770868619",
+	})
+	if len(res) != 1 {
+		t.Fatalf("expected 1 result after exfil event, got %d", len(res))
+	}
+
+	seqEventsRaw, ok := res[0]["_sequence_events"]
+	if !ok {
+		t.Fatal("expected _sequence_events in output")
+	}
+	seqEvents, ok := seqEventsRaw.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected _sequence_events to be map[string]interface{}")
+	}
+	if _, ok := seqEvents["login"]; !ok {
+		t.Fatal("expected login key in _sequence_events")
+	}
+	if _, ok := seqEvents["exfil1"]; !ok {
+		t.Fatal("expected exfil1 key in _sequence_events")
+	}
+	if _, ok := seqEvents["exfil2"]; ok {
+		t.Fatal("did not expect exfil2 key for OR first-branch binding")
+	}
+}
+
 func TestCEP_Execute_SequenceContextReference_WithAtPrefix(t *testing.T) {
 	xml := `<root name="test" type="DETECTION">
 		<rule id="r1" name="ctx ref test">

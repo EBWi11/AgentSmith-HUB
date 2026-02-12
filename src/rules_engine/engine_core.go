@@ -1105,6 +1105,7 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	if len(matchedStages) == 0 {
 		return false, nil
 	}
+	stageBindings := seq.Condition.EvaluateEventBindings(matchMap)
 
 	// Apply per-event append side effects for sequence context ("_@...") once
 	// matched event definitions are finalized for this input event.
@@ -1128,10 +1129,15 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 		}
 	}
 	for _, stageIdx := range matchedStages {
+		matchedIDs := stageBindings[stageIdx]
+		if len(matchedIDs) == 0 {
+			matchedIDs = seq.Condition.Stages[stageIdx].EventIDs
+		}
 		state.AddMatch(stageIdx, StageMatch{
-			Timestamp: eventTimestamp,
-			Data:      dataSnapshot,
-			ValueRef:  valueRef,
+			Timestamp:       eventTimestamp,
+			Data:            dataSnapshot,
+			ValueRef:        valueRef,
+			MatchedEventIDs: matchedIDs,
 		})
 	}
 
@@ -1536,9 +1542,13 @@ func (r *Ruleset) enrichSequenceResultData(result map[string]interface{}, state 
 			continue
 		}
 
+		boundEventIDs := matches[0].MatchedEventIDs
+		if len(boundEventIDs) == 0 {
+			boundEventIDs = stage.EventIDs
+		}
 		// Keep first match under "#<event_id>" for internal cross-event references,
 		// and add to _sequence_events for structured output consumption.
-		for _, eventID := range stage.EventIDs {
+		for _, eventID := range boundEventIDs {
 			result["#"+eventID] = firstData
 			sequenceEvents[eventID] = firstData
 		}

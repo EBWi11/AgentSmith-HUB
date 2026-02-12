@@ -73,6 +73,9 @@ type StageMatch struct {
 	Timestamp int64                  // Unix nanoseconds (from event_time or detection time)
 	Data      map[string]interface{} // Optional inline snapshot (used by Redis mode/fallback)
 	ValueRef  string                 // Optional external value-store reference (local cache mode)
+	// MatchedEventIDs records which event IDs in the stage expression actually
+	// satisfied this stage for this match (important for OR branches).
+	MatchedEventIDs []string
 }
 
 // SequenceState tracks the accumulated matches for one correlation key.
@@ -514,6 +517,81 @@ func evaluateStageExpr(expr ExprAST, matchMap map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+// EvaluateEventBindings returns stage -> matched event IDs for stages satisfied by this event.
+// For OR expressions, the first satisfied branch (left-first) is selected.
+func (c *CEPCondition) EvaluateEventBindings(matchMap map[string]bool) map[int][]string {
+	bindings := make(map[int][]string, len(c.Stages))
+	for i, stage := range c.Stages {
+		ids, ok := matchedEventIDsForStageExpr(stage.Expr, matchMap)
+		if ok {
+			bindings[i] = ids
+		}
+	}
+	return bindings
+}
+
+func matchedEventIDsForStageExpr(expr ExprAST, matchMap map[string]bool) ([]string, bool) {
+	switch node := expr.(type) {
+	case NumberExprAST:
+		if matchMap[node.Val] {
+			return []string{node.Val}, true
+		}
+		return nil, false
+	case BinaryExprAST:
+		switch node.Op {
+		case CEPOpAnd:
+			leftIDs, leftOK := matchedEventIDsForStageExpr(node.Lhs, matchMap)
+			if !leftOK {
+				return nil, false
+			}
+			rightIDs, rightOK := matchedEventIDsForStageExpr(node.Rhs, matchMap)
+			if !rightOK {
+				return nil, false
+			}
+			return mergeEventIDs(leftIDs, rightIDs), true
+		case CEPOpOr:
+			// OR binding policy: first satisfied branch wins (left-first).
+			if leftIDs, leftOK := matchedEventIDsForStageExpr(node.Lhs, matchMap); leftOK {
+				return leftIDs, true
+			}
+			return matchedEventIDsForStageExpr(node.Rhs, matchMap)
+		default:
+			// "->" is not expected inside a single stage expression.
+			return nil, false
+		}
+	case UnaryExprAST:
+		if node.Op == CEPOpNot {
+			operandIDs, operandOK := matchedEventIDsForStageExpr(node.Operand, matchMap)
+			if !operandOK {
+				// "!expr" satisfied -> no positive event binding.
+				return nil, true
+			}
+			// Operand matched means "!expr" not satisfied.
+			_ = operandIDs
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
+func mergeEventIDs(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]bool, len(a)+len(b))
+	for _, v := range a {
+		if !seen[v] {
+			out = append(out, v)
+			seen[v] = true
+		}
+	}
+	for _, v := range b {
+		if !seen[v] {
+			out = append(out, v)
+			seen[v] = true
+		}
+	}
+	return out
 }
 
 // ============================================================================
