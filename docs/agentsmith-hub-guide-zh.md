@@ -441,6 +441,10 @@ oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # 必须在 IdP 客�
 oidc_username_claim: "preferred_username"           # 可选，默认优先 preferred_username，否则 email
 oidc_allowed_users: ["alice@example.com", "bob"]    # 可选，限制允许访问的用户名（为空表示禁止任何人登录）
 oidc_scope: "openid profile email"                   # 可选，默认为 openid profile email
+
+# 可选：启用内置 llmCall 插件，用于单次 LLM 调用（兼容 OpenAI 接口）
+llm_api_key: "sk-..."           # 配置后才会注册 llmCall 插件
+llm_base_url: "https://api.openai.com/v1"   # 可选，默认如上
 ```
 
 也可通过环境变量覆盖（优先级更高）：
@@ -1415,6 +1419,18 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | `virusTotal` | VirusTotal查询 | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
 | `shodan` | Shodan查询 | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
 | `threatBook` | 微步在线查询 | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
+
+#### LLM 插件（可选内置）
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `llmCall` | 单次 LLM 调用（兼容 OpenAI 的接口） | systemPrompt (string, 必填), userMessage (string, 可选), model (string, 可选), maxTokens (int, 可选) | `llmCall("你是摘要助手。", "请用一句话概括。")` |
+
+**说明：** 仅在 `config.yaml` 中配置了 `llm_api_key` 时才会注册 `llmCall` 插件。API Key 与 Base URL 从 config 读取，不作为插件参数。配置示例：
+
+```yaml
+llm_api_key: "sk-..."           # 必填，用于启用 llmCall
+llm_base_url: "https://api.openai.com/v1"   # 可选，默认为 OpenAI
+```
 
 **注意插件参数格式**：
 - 当引用数据中的字段时，无需使用 `_$` 前缀，直接使用字段名：`source_ip`

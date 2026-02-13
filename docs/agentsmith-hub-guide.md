@@ -444,6 +444,10 @@ oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # Must be allowed in
 oidc_username_claim: "preferred_username"           # Optional; default prefers preferred_username, else email
 oidc_allowed_users: ["alice@example.com", "bob"]    # Optional allowlist; empty means nobody will allow
 oidc_scope: "openid profile email"                   # Optional; default openid profile email
+
+# Optional: enable builtin llmCall plugin for single-shot LLM calls (OpenAI-compatible)
+llm_api_key: "sk-..."           # If set, llmCall plugin is registered
+llm_base_url: "https://api.openai.com/v1"   # Optional; default above
 ```
 
 You can also override via environment variables (higher priority):
@@ -1421,6 +1425,18 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 | `virusTotal` | VirusTotal query | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
 | `shodan` | Shodan query | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
 | `threatBook` | ThreatBook query | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
+
+#### LLM Plugin (optional builtin)
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `llmCall` | Single-shot LLM call (OpenAI-compatible API) | systemPrompt (string, required), userMessage (string, optional), model (string, optional), maxTokens (int, optional) | `llmCall("You are a summarizer.", "Summarize in one sentence.")` |
+
+**Note:** The `llmCall` plugin is only registered when `llm_api_key` is set in `config.yaml`. API key and base URL are read from config, not from plugin arguments. Example config:
+
+```yaml
+llm_api_key: "sk-..."           # required to enable llmCall
+llm_base_url: "https://api.openai.com/v1"   # optional; default OpenAI
+```
 
 **Note on plugin parameter format**:
 - When referencing fields in data, no need to use `_$` prefix, just use field name directly: `source_ip`
