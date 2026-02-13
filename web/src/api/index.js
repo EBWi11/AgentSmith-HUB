@@ -267,17 +267,38 @@ export const hubApi = {
     return response.data;
   },
 
-  async createRuleset(id, raw) {
-    console.log('hubApi.createRuleset: Making API call', { 
-      id, 
-      rawLength: raw?.length, 
-      rawType: typeof raw,
-      rawIsNull: raw === null,
-      rawIsUndefined: raw === undefined,
-      rawPreview: raw?.substring(0, 100) + '...'
-    })
-    const response = await api.post('/rulesets', { id, raw });
-    console.log('hubApi.createRuleset: API response', { status: response.status, data: response.data })
+  async createRuleset(id, raw, folder = '') {
+    const response = await api.post('/rulesets', { id, raw, folder: folder || '' });
+    return response.data;
+  },
+
+  // Ruleset folder management
+  async getRulesetFolders() {
+    try {
+      const response = await api.get('/ruleset-folders');
+      return response.data || [];
+    } catch (error) {
+      return handleApiError(error, 'Error fetching ruleset folders:', true);
+    }
+  },
+
+  async createRulesetFolder(name) {
+    const response = await api.post('/ruleset-folders', { name });
+    return response.data;
+  },
+
+  async renameRulesetFolder(oldName, newName) {
+    const response = await api.put(`/ruleset-folders/${oldName}`, { new_name: newName });
+    return response.data;
+  },
+
+  async deleteRulesetFolder(name) {
+    const response = await api.delete(`/ruleset-folders/${name}`);
+    return response.data;
+  },
+
+  async moveRuleset(id, folder) {
+    const response = await api.put(`/rulesets/${id}/move`, { folder: folder || '' });
     return response.data;
   },
 

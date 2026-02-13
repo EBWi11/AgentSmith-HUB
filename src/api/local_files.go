@@ -545,7 +545,11 @@ func getLocalChanges(c echo.Context) error {
 
 	// Check for deleted rulesets
 	project.ForEachRuleset(func(id string, ruleset *rules_engine.Ruleset) bool {
-		rulesetPath := filepath.Join(configRoot, "ruleset", id+".xml")
+		// Use the stored path for the ruleset (folder-aware)
+		rulesetPath := ruleset.Path
+		if rulesetPath == "" {
+			rulesetPath = filepath.Join(configRoot, "ruleset", id+".xml")
+		}
 		if _, err := os.Stat(rulesetPath); os.IsNotExist(err) {
 			changes = append(changes, map[string]interface{}{
 				"type":           "ruleset",
@@ -867,7 +871,8 @@ func loadSingleLocalChange(c echo.Context) error {
 	case "output":
 		filePath = filepath.Join(configRoot, "output", req.ID+".yaml")
 	case "ruleset":
-		filePath = filepath.Join(configRoot, "ruleset", req.ID+".xml")
+		// Use folder-aware path resolution for rulesets
+		filePath, _ = findRulesetPaths(req.ID)
 	case "project":
 		filePath = filepath.Join(configRoot, "project", req.ID+".yaml")
 	case "plugin":

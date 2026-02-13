@@ -321,6 +321,9 @@ func getRulesets(c echo.Context) error {
 		ruleCount := countRulesInXML(rawConfig)
 		rulesetType := extractRulesetType(rawConfig)
 
+		// Extract folder from path
+		folder := getRulesetFolderFromPath(r.Path)
+
 		rulesetData := map[string]interface{}{
 			"id":               r.RulesetID,
 			"hasTemp":          hasTemp,
@@ -330,6 +333,7 @@ func getRulesets(c echo.Context) error {
 			"used_by_projects": usedByProjects,
 			"project_count":    len(usedByProjects),
 			"status":           string(r.Status),
+			"folder":           folder,
 		}
 
 		// Include error information if component has errors
@@ -355,6 +359,10 @@ func getRulesets(c echo.Context) error {
 			ruleCount := countRulesInXML(tempRaw)
 			rulesetType := extractRulesetType(tempRaw)
 
+			// For temp-only rulesets, derive folder from the temp file path
+			_, tempPath := findRulesetPaths(id)
+			folder := getRulesetFolderFromPath(tempPath)
+
 			rulesetData := map[string]interface{}{
 				"id":               id,
 				"hasTemp":          true,
@@ -363,6 +371,7 @@ func getRulesets(c echo.Context) error {
 				"rule_count":       ruleCount,
 				"used_by_projects": []string{}, // No projects use temp rulesets
 				"project_count":    0,
+				"folder":           folder,
 			}
 			rulesets = append(rulesets, rulesetData)
 		}
@@ -375,7 +384,7 @@ func getRuleset(c echo.Context) error {
 
 	r_raw, ok := project.GetRulesetNew(id)
 	if ok {
-		tempPath, _ := GetComponentPath("ruleset", id, true)
+		_, tempPath := findRulesetPaths(id)
 		// Get sample data for this ruleset (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
@@ -393,7 +402,7 @@ func getRuleset(c echo.Context) error {
 	r, exists := project.GetRuleset(id)
 
 	if exists {
-		formalPath, _ := GetComponentPath("ruleset", id, false)
+		formalPath, _ := findRulesetPaths(id)
 		// Get sample data for this ruleset (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
@@ -1002,8 +1011,9 @@ func getOutput(c echo.Context) error {
 
 func createComponent(componentType string, c echo.Context) error {
 	var request struct {
-		ID  string `json:"id"`
-		Raw string `json:"raw"`
+		ID     string `json:"id"`
+		Raw    string `json:"raw"`
+		Folder string `json:"folder"` // Optional folder for rulesets
 	}
 
 	if err := c.Bind(&request); err != nil {
@@ -1017,16 +1027,75 @@ func createComponent(componentType string, c echo.Context) error {
 
 	// Normalize ID by trimming spaces
 	request.ID = strings.TrimSpace(request.ID)
+	request.Folder = strings.TrimSpace(request.Folder)
 
-	// Check file existence without lock (file system operations are atomic)
-	filtPath, exist := GetComponentPath(componentType, request.ID, true)
-	if exist {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
-	}
+	var filtPath string
+	var exist bool
 
-	_, exist = GetComponentPath(componentType, request.ID, false)
-	if exist {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+	if componentType == "ruleset" && request.Folder != "" {
+		// For rulesets with a folder, check uniqueness across all folders
+		if _, existsInMemory := project.GetRuleset(request.ID); existsInMemory {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists"})
+		}
+		if _, existsNew := project.GetRulesetNew(request.ID); existsNew {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists"})
+		}
+
+		// Check in the target folder
+		formalPath, tempPath := findRulesetPathInFolder(request.ID, request.Folder)
+		if _, err := os.Stat(formalPath); err == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
+		if _, err := os.Stat(tempPath); err == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
+
+		// Also check root and other folders for name uniqueness
+		baseDir := getRulesetBaseDir()
+		rootFormal := filepath.Join(baseDir, request.ID+RULESET_EXT)
+		rootTemp := filepath.Join(baseDir, request.ID+RULESET_EXT_NEW)
+		if _, err := os.Stat(rootFormal); err == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists in another location"})
+		}
+		if _, err := os.Stat(rootTemp); err == nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists in another location"})
+		}
+
+		// Ensure folder directory exists
+		folderDir := filepath.Join(baseDir, request.Folder)
+		if err := os.MkdirAll(folderDir, 0755); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create folder directory"})
+		}
+
+		filtPath = tempPath
+	} else if componentType == "ruleset" {
+		// For rulesets without folder, also check cross-folder uniqueness
+		if _, existsInMemory := project.GetRuleset(request.ID); existsInMemory {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists"})
+		}
+		if _, existsNew := project.GetRulesetNew(request.ID); existsNew {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "a ruleset with this name already exists"})
+		}
+
+		// Check file existence
+		filtPath, exist = GetComponentPath(componentType, request.ID, true)
+		if exist {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
+		_, exist = GetComponentPath(componentType, request.ID, false)
+		if exist {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
+	} else {
+		// Non-ruleset component types - original logic
+		filtPath, exist = GetComponentPath(componentType, request.ID, true)
+		if exist {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
+		_, exist = GetComponentPath(componentType, request.ID, false)
+		if exist {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "this file already exists"})
+		}
 	}
 
 	// Only use default templates if no raw content is provided or content is effectively empty
@@ -1115,34 +1184,34 @@ func createPlugin(c echo.Context) error {
 func deleteComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
 
-	var suffix string
-	var dir string
+	var componentPath string
+	var tempPath string
 
 	switch componentType {
 	case "ruleset":
-		suffix = ".xml"
-		dir = "ruleset"
+		// Use folder-aware path resolution for rulesets
+		componentPath, tempPath = findRulesetPaths(id)
 	case "input":
-		suffix = ".yaml"
-		dir = "input"
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "input", id+".yaml")
+		tempPath = componentPath + ".new"
 	case "output":
-		suffix = ".yaml"
-		dir = "output"
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "output", id+".yaml")
+		tempPath = componentPath + ".new"
 	case "project":
-		suffix = ".yaml"
-		dir = "project"
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "project", id+".yaml")
+		tempPath = componentPath + ".new"
 	case "plugin":
-		suffix = ".go"
-		dir = "plugin"
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "plugin", id+".go")
+		tempPath = componentPath + ".new"
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid component type",
 		})
 	}
-
-	configRoot := common.Config.ConfigRoot
-	componentPath := filepath.Join(configRoot, dir, id+suffix)
-	tempPath := filepath.Join(configRoot, dir, id+suffix+".new")
 
 	// Check if files exist
 	_, formalErr := os.Stat(componentPath)
@@ -1443,7 +1512,17 @@ func updateComponent(componentType string, c echo.Context) error {
 	}
 
 	// Content is different, create or update temporary file
-	tempPath, _ = GetComponentPath(componentType, id, true)
+	if componentType == "ruleset" {
+		// For rulesets, use folder-aware path resolution
+		_, rulesetTempPath := findRulesetPaths(id)
+		tempPath = rulesetTempPath
+		// Ensure directory exists
+		if dirPath := filepath.Dir(tempPath); dirPath != "" {
+			os.MkdirAll(dirPath, 0755)
+		}
+	} else {
+		tempPath, _ = GetComponentPath(componentType, id, true)
+	}
 	err = WriteComponentFile(tempPath, req.Raw)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to write config file: " + err.Error()})
@@ -1656,9 +1735,9 @@ func cancelRulesetUpgrade(c echo.Context) error {
 	// Lock for memory operations
 	project.DeleteRulesetNew(id)
 
-	// Delete temp file if exists (without holding lock)
-	tempPath, tempExists := GetComponentPath("ruleset", id, true)
-	if tempExists {
+	// Delete temp file if exists (without holding lock) - use folder-aware path
+	_, tempPath := findRulesetPaths(id)
+	if _, err := os.Stat(tempPath); err == nil {
 		_ = os.Remove(tempPath)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "ruleset upgrade cancelled"})
@@ -2421,9 +2500,12 @@ func deleteRulesetRule(c echo.Context) error {
 		tempRuleset = nil
 	}
 
-	// Save to temp file
-	tempPath, _ := GetComponentPath("ruleset", rulesetId, true)
-	err = WriteComponentFile(tempPath, updatedXML)
+	// Save to temp file - use folder-aware path
+	_, rulesetTempPath := findRulesetPaths(rulesetId)
+	if dirPath := filepath.Dir(rulesetTempPath); dirPath != "" {
+		os.MkdirAll(dirPath, 0755)
+	}
+	err = WriteComponentFile(rulesetTempPath, updatedXML)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save updated ruleset: " + err.Error()})
 	}
@@ -2545,9 +2627,12 @@ func addRulesetRule(c echo.Context) error {
 	}
 
 	// If we reach here, the rule is completely valid
-	// Now save to temp file and update memory using existing logic
-	tempPath, _ := GetComponentPath("ruleset", rulesetId, true)
-	err = WriteComponentFile(tempPath, updatedXML)
+	// Now save to temp file and update memory using existing logic - folder-aware
+	_, addRuleTempPath := findRulesetPaths(rulesetId)
+	if dirPath := filepath.Dir(addRuleTempPath); dirPath != "" {
+		os.MkdirAll(dirPath, 0755)
+	}
+	err = WriteComponentFile(addRuleTempPath, updatedXML)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save updated ruleset: " + err.Error()})
 	}
