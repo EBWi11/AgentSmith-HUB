@@ -108,6 +108,27 @@ func init() {
 	logger.Info("plugin_init", "plugins_count", len(Plugins))
 }
 
+// RegisterLLMCallIfConfigured registers the llmCall builtin plugin when config has llm_api_key set.
+// Must be called after loadHubConfig (e.g. from main).
+func RegisterLLMCallIfConfigured() {
+	if !local_plugin.RegisterLLMCallIfConfigured() {
+		return
+	}
+	f := local_plugin.LocalPluginInterfaceAndBoolRes["llmCall"]
+	p := &Plugin{
+		Name:       "llmCall",
+		Type:       LOCAL_PLUGIN,
+		Payload:    nil,
+		f:          reflect.ValueOf(f),
+		ReturnType: "interface{}",
+	}
+	p.parsePluginParameters()
+	PluginsMu.Lock()
+	Plugins["llmCall"] = p
+	PluginsMu.Unlock()
+	logger.Info("plugin_init", "llmCall registered (config llm_api_key set)")
+}
+
 func Verify(path string, raw string, name string) error {
 	// Use common file reading function
 	content, err := common.ReadContentFromPathOrRaw(path, raw)
