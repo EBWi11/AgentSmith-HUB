@@ -1,24 +1,278 @@
-<root>
-    <rule id="reverse_shell_01" name="反弹shell检测">
-        <checklist condition="a and (b or c) ">
-            <check id="a" type="INCL" field="data" logic="or" delimiter="|">_$test1|test2</check>
-            <check id="b" type="INCL" field="data" logic="or" delimiter="|">test1|test2</check>
-            <check id="b" type="REGEX" field="data">abc</check>
-            <check id="c" type="PLUGIN">plugin_name(_$ORIDATA)</check>
+<!-- ============================================================================
+     AgentSmith-HUB Ruleset Syntax Reference (Complete Demo)
+     ============================================================================
+     This file demonstrates ALL ruleset features. It is a syntax reference,
+     not a runnable ruleset (plugin names are illustrative).
+
+     Root attributes:
+       type   = "DETECTION" (default) | "EXCLUDE"
+       name   = ruleset display name
+       author = author name
+     ============================================================================ -->
+
+<!-- ==================== DETECTION Ruleset ==================== -->
+<root type="DETECTION" name="full_syntax_demo" author="AgentSmith">
+
+    <!-- ================================================================
+         Rule 1 — Check Types & Checklist Condition
+         Demonstrates: all check types, checklist condition, logic/delimiter,
+                       dynamic reference (_$), nested field access (a.b.c)
+         ================================================================ -->
+    <rule id="check_types_demo" name="All check types showcase">
+
+        <checklist condition="c1 and (c2 or c3) and not c4">
+            <!-- EQU: exact match -->
+            <check id="c1" type="EQU" field="action">login</check>
+
+            <!-- NEQU: not equal -->
+            <check id="c2" type="NEQU" field="status">success</check>
+
+            <!-- INCL: value contains substring; logic="or" + delimiter for multi-match -->
+            <check id="c3" type="INCL" field="cmd" logic="or" delimiter="|">whoami|id|passwd</check>
+
+            <!-- EXCL: value does NOT contain substring -->
+            <check id="c4" type="EXCL" field="user_agent">curl</check>
         </checklist>
 
-        <threshold group_by="exe,data_type" range="30s" local_cache="true" count_type="CLASSIFY" count_field="dip">5</threshold>
+        <!-- Standalone checks (no checklist): executed in document order -->
 
-        <append field="data_type">10</append>
-        <append type="PLUGIN" field="data_type">plugin_name(_$ORIDATA)</append>
-        <append type="PLUGIN" field="data_type">plugin_name("test", 123 , pid)</append>
+        <!-- REGEX: Rust-backed regex match -->
+        <check type="REGEX" field="url">^/api/v[0-9]+/admin</check>
 
-        <plugin>plugin_name(_$ORIDATA)</plugin>>
+        <!-- GT / LT / GTE / LTE: numeric comparison -->
+        <check type="GT" field="response_code">399</check>
+        <check type="LTE" field="bytes_sent">10485760</check>
 
-        <check type="INCL" field="a.b">test</check>
-        <check type="EQU" field="a.b.c">123</check>
+        <!-- STARTSWITH / ENDSWITH / CONTAINS -->
+        <check type="STARTSWITH" field="path">/etc/</check>
+        <check type="ENDSWITH" field="filename">.exe</check>
+        <check type="CONTAINS" field="message">permission denied</check>
 
-        <del>sport,dport</del>
-        <plugin>plugin_name(_$ORIDATA)</plugin>>
+        <!-- ISNULL / NOTNULL -->
+        <check type="NOTNULL" field="src_ip"></check>
+        <check type="ISNULL" field="proxy_ip"></check>
+
+        <!-- Dynamic reference: _$field reads value from raw data at runtime -->
+        <check type="EQU" field="dst_ip">_$src_ip</check>
+
+        <!-- Nested field access: dot notation -->
+        <check type="EQU" field="event.category">network</check>
+
+        <!-- logic="and" + delimiter: ALL substrings must be present -->
+        <check type="INCL" field="tags" logic="and" delimiter=",">critical,production</check>
     </rule>
+
+    <!-- ================================================================
+         Rule 2 — Append / Modify / Del / Plugin
+         Demonstrates: data enrichment, modification, deletion, plugin calls,
+                       flexible execution order (enrich → filter → respond)
+         ================================================================ -->
+    <rule id="enrich_and_respond" name="Enrich, filter, respond">
+
+        <!-- Step 1: Append static value -->
+        <append field="alert_level">high</append>
+
+        <!-- Step 2: Append with dynamic reference (copy field value) -->
+        <append field="original_ip">_$src_ip</append>
+
+        <!-- Step 3: Append via plugin (enrichment) -->
+        <append type="PLUGIN" field="geo_info">geoMatch(_$src_ip)</append>
+
+        <!-- Step 4: Check AFTER enrichment — flexible execution order -->
+        <check type="NEQU" field="geo_info">CN</check>
+
+        <!-- Step 5: Modify existing field value (static) -->
+        <modify field="severity">critical</modify>
+
+        <!-- Step 6: Modify via plugin -->
+        <modify type="PLUGIN" field="domain">extractDomain(_$url)</modify>
+
+        <!-- Step 7: Standalone plugin execution (side-effect only, no field assignment) -->
+        <plugin>suppressOnce(_$alert_id, "3600")</plugin>
+
+        <!-- Step 8: Delete fields -->
+        <del>raw_payload,debug_info,temp_field</del>
+    </rule>
+
+    <!-- ================================================================
+         Rule 3 — Threshold (Count / SUM / CLASSIFY)
+         Demonstrates: all three threshold modes, group_by, range, local_cache
+         ================================================================ -->
+    <rule id="threshold_count" name="Brute force detection (Count mode)">
+        <check type="EQU" field="event_type">login_failed</check>
+        <!-- Default count mode: fire when >= 10 events within 5 minutes -->
+        <threshold group_by="src_ip,dst_ip" range="5m" local_cache="true">10</threshold>
+    </rule>
+
+    <rule id="threshold_sum" name="Large data transfer detection (SUM mode)">
+        <check type="EQU" field="event_type">file_transfer</check>
+        <!-- SUM mode: fire when sum of bytes_sent >= 104857600 (100MB) within 1 hour -->
+        <threshold group_by="src_ip" range="1h" local_cache="true" count_type="SUM" count_field="bytes_sent">104857600</threshold>
+    </rule>
+
+    <rule id="threshold_classify" name="Port scan detection (CLASSIFY mode)">
+        <check type="EQU" field="event_type">connection</check>
+        <!-- CLASSIFY mode: fire when >= 100 distinct dst_port values within 2 minutes -->
+        <threshold group_by="src_ip" range="2m" local_cache="true" count_type="CLASSIFY" count_field="dst_port">100</threshold>
+    </rule>
+
+    <!-- ================================================================
+         Rule 4 — Iterator (ANY / ALL)
+         Demonstrates: iterating over array fields with variable binding
+         ================================================================ -->
+    <rule id="iterator_any" name="Malicious process in container (ANY match)">
+        <!-- Iterator ANY: at least ONE element in the array must match all checks -->
+        <iterator type="ANY" field="processes" variable="proc">
+            <check type="INCL" field="_$proc.name" logic="or" delimiter="|">nc|ncat|socat|curl</check>
+            <check type="EQU" field="_$proc.user">root</check>
+        </iterator>
+        <append field="alert_type">suspicious_process</append>
+    </rule>
+
+    <rule id="iterator_all_with_checklist" name="All DNS queries to private IPs (ALL match)">
+        <!-- Iterator ALL: EVERY element must match -->
+        <iterator type="ALL" field="dns_answers" variable="ans">
+            <checklist condition="ip_check">
+                <check id="ip_check" type="PLUGIN">isPrivateIP(_$ans.ip)</check>
+            </checklist>
+        </iterator>
+    </rule>
+
+    <!-- ================================================================
+         Rule 5 — Sequence / CEP (Complex Event Processing)
+         Demonstrates: temporal operators (->), absence (!), and/or,
+                       group_by correlation, event_time, cross-event reference
+         ================================================================ -->
+    <rule id="cep_lateral_movement" name="Lateral movement detection">
+        <!--
+            Detect: login → privilege_escalation → file_exfiltration
+            All events must share the same user within 30 minutes.
+        -->
+        <sequence within="30m" group_by="user" local_cache="true">
+            <event id="login" event_time="timestamp">
+                <check type="EQU" field="event_type">authentication</check>
+                <check type="EQU" field="result">success</check>
+            </event>
+
+            <event id="privesc" event_time="timestamp">
+                <check type="EQU" field="event_type">privilege_change</check>
+                <check type="INCL" field="new_role" logic="or" delimiter="|">admin|root|superuser</check>
+            </event>
+
+            <event id="exfil" event_time="timestamp">
+                <check type="EQU" field="event_type">file_transfer</check>
+                <check type="GT" field="file_size">10485760</check>
+            </event>
+
+            <!-- Temporal condition: strict order -->
+            <condition>login -> privesc -> exfil</condition>
+        </sequence>
+
+        <!-- Enrichment after sequence matches -->
+        <append field="attack_stage">lateral_movement</append>
+        <append field="severity">critical</append>
+    </rule>
+
+    <rule id="cep_absence" name="Login without MFA (absence detection)">
+        <!--
+            Detect: login happened but NO mfa_verify within the time window.
+            The ! operator marks an absence (negation) stage.
+        -->
+        <sequence within="5m" group_by="user" local_cache="true">
+            <event id="login" event_time="timestamp">
+                <check type="EQU" field="event_type">login</check>
+            </event>
+
+            <event id="mfa" event_time="timestamp">
+                <check type="EQU" field="event_type">mfa_verify</check>
+            </event>
+
+            <!-- login happened, mfa did NOT happen -->
+            <condition>login -> !mfa</condition>
+        </sequence>
+    </rule>
+
+    <rule id="cep_with_event_enrichment" name="CEP with per-event append and cross-event reference">
+        <sequence within="10m" group_by="host" local_cache="true">
+            <event id="scan" event_time="ts">
+                <check type="EQU" field="action">port_scan</check>
+                <!-- Per-event append: write to sequence context via _@ -->
+                <append field="_@scan_source">_$src_ip</append>
+            </event>
+
+            <event id="exploit" event_time="ts">
+                <check type="EQU" field="action">exploit_attempt</check>
+            </event>
+
+            <condition>scan -> exploit</condition>
+        </sequence>
+
+        <!-- Cross-event reference: _$#event_id.field retrieves matched event's data -->
+        <append field="scanner_ip">_$#scan.src_ip</append>
+        <append field="exploit_target">_$#exploit.dst_ip</append>
+    </rule>
+
+    <!-- ================================================================
+         Rule 6 — Per-event group_by override in CEP
+         Demonstrates: different correlation fields per event
+         ================================================================ -->
+    <rule id="cep_per_event_groupby" name="Cross-host attack correlation">
+        <sequence within="15m" local_cache="true">
+            <event id="recon" event_time="timestamp" group_by="src_ip">
+                <check type="EQU" field="event_type">network_scan</check>
+            </event>
+
+            <event id="attack" event_time="timestamp" group_by="dst_ip">
+                <check type="EQU" field="event_type">exploit</check>
+            </event>
+
+            <condition>recon -> attack</condition>
+        </sequence>
+    </rule>
+
+    <!-- ================================================================
+         Rule 7 — Mixed operations: flexible order showcase
+         Demonstrates: plugin → append → check → threshold → del
+         Any order is valid; short-circuits on first check/threshold failure.
+         ================================================================ -->
+    <rule id="flexible_order" name="Flexible execution order">
+        <!-- 1. Plugin first: parse raw JSON into structured fields -->
+        <modify type="PLUGIN" field="parsed">parseJSON(_$raw_body)</modify>
+
+        <!-- 2. Append to create a computed field -->
+        <append field="request_key">_$parsed.method</append>
+
+        <!-- 3. Check on the computed field — this works because append ran first -->
+        <check type="EQU" field="request_key">DELETE</check>
+
+        <!-- 4. Threshold on the filtered data -->
+        <threshold group_by="parsed.user_id" range="10m" local_cache="true">50</threshold>
+
+        <!-- 5. Clean up temp fields -->
+        <del>raw_body,parsed</del>
+    </rule>
+
 </root>
+
+
+<!-- ==================== EXCLUDE Ruleset (separate file in practice) ====================
+     EXCLUDE type: matched data is DROPPED (filtered out).
+     Unmatched data passes downstream. Multiple rules = OR (any match drops the data).
+
+<root type="EXCLUDE" name="noise_filter" author="AgentSmith">
+
+    <rule id="exclude_healthcheck" name="Drop health check logs">
+        <check type="EQU" field="url">/health</check>
+    </rule>
+
+    <rule id="exclude_internal_scanner" name="Drop internal vulnerability scanner traffic">
+        <check type="PLUGIN">cidrMatch(_$src_ip, "10.0.100.0/24")</check>
+        <check type="INCL" field="user_agent">Nessus</check>
+    </rule>
+
+    <rule id="exclude_debug_logs" name="Drop debug-level logs">
+        <check type="EQU" field="log_level">DEBUG</check>
+    </rule>
+
+</root>
+-->
