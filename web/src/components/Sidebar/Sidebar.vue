@@ -88,15 +88,35 @@
               </template>
             </button>
             <div v-if="!props.collapsed" class="relative mr-3 flex items-center space-x-1">
-              <!-- Create folder button for rulesets -->
-              <button v-if="type === 'rulesets'" @click="openFolderModal('create')" 
-                      class="p-1 rounded-full hover:bg-yellow-100 text-gray-400 hover:text-yellow-600 transition flex items-center justify-center w-6 h-6"
-                      title="Create Folder">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-                </svg>
-              </button>
-              <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
+              <!-- For rulesets: dropdown with Add Ruleset / Create Folder -->
+              <template v-if="type === 'rulesets' && !section.children">
+                <button @click.stop="showRulesetAddDropdown = !showRulesetAddDropdown" 
+                        class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                </button>
+                <div v-if="showRulesetAddDropdown" 
+                     class="absolute right-0 top-full mt-1 w-44 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                     @click.stop>
+                  <div class="py-1">
+                    <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                       @click.prevent.stop="showRulesetAddDropdown = false; openAddModal('rulesets')">
+                      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-3-3v6"></path>
+                      </svg>
+                      Add Ruleset
+                    </a>
+                    <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                       @click.prevent.stop="showRulesetAddDropdown = false; openFolderModal('create')">
+                      <svg class="w-4 h-4 mr-2 text-yellow-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                      </svg>
+                      Create Folder
+                    </a>
+                  </div>
+                </div>
+              </template>
+              <!-- For other types: direct add button -->
+              <button v-else-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
               </button>
             </div>
@@ -395,12 +415,15 @@
               <template v-else-if="type === 'rulesets'">
                 <!-- Folders -->
                 <div v-for="(folderItems, folderName) in getOrganizedRulesets().folders" :key="'folder-' + folderName" class="relative">
+                  <!-- Vertical line spanning entire folder wrapper (header + expanded content) to connect to next sibling -->
+                  <div class="absolute left-5 top-0 bottom-0 w-px bg-gray-300" v-if="getOrganizedRulesets().rootRulesets.length > 0 || Object.keys(getOrganizedRulesets().folders).indexOf(folderName) < Object.keys(getOrganizedRulesets().folders).length - 1"></div>
                   <!-- Folder header -->
                   <div class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                        @click="toggleFolderCollapse(folderName)">
-                    <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="getOrganizedRulesets().rootRulesets.length > 0 || Object.keys(getOrganizedRulesets().folders).indexOf(folderName) < Object.keys(getOrganizedRulesets().folders).length - 1"></div>
-                    <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                    <!-- Top to center vertical line -->
                     <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                    <!-- Horizontal branch -->
+                    <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
                     
                     <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
                       <svg class="w-3 h-3 mr-1.5 transition-transform duration-200 flex-shrink-0 text-yellow-600"
@@ -408,8 +431,8 @@
                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                       </svg>
-                      <svg class="w-4 h-4 mr-1.5 flex-shrink-0 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                      <svg class="w-4 h-4 mr-1.5 flex-shrink-0 text-yellow-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                       </svg>
                       <span class="text-sm font-medium text-gray-700 truncate">{{ folderName }}</span>
                       <span class="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{{ folderItems.length }}</span>
@@ -531,8 +554,8 @@
                             <a v-for="target in getMoveTargetFolders(item.folder)" :key="'move-' + target.name"
                                href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 pl-6"
                                @click.prevent.stop="moveRulesetToFolder(item.id, target.name)">
-                              <svg class="w-4 h-4 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                              <svg class="w-4 h-4 mr-2 text-yellow-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                               </svg>
                               {{ target.label }}
                             </a>
@@ -628,8 +651,8 @@
                         <a v-for="target in getMoveTargetFolders('')" :key="'move-' + target.name"
                            href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 pl-6"
                            @click.prevent.stop="moveRulesetToFolder(item.id, target.name)">
-                          <svg class="w-4 h-4 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                          <svg class="w-4 h-4 mr-2 text-yellow-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                           </svg>
                           {{ target.label }}
                         </a>
@@ -1958,6 +1981,9 @@ const folderError = ref('')
 const showFolderDeleteConfirm = ref(false)
 const folderToDelete = ref('')
 
+// Ruleset add dropdown (+ button dropdown for rulesets)
+const showRulesetAddDropdown = ref(false)
+
 // Folder context menu
 const folderMenuOpen = ref(null) // Which folder's menu is open
 // projectRefreshInterval removed - using unified projectStatusRefreshInterval
@@ -2870,6 +2896,8 @@ function closeAllMenus() {
   })
   // Close folder menus
   folderMenuOpen.value = null
+  // Close ruleset add dropdown
+  showRulesetAddDropdown.value = false
 }
 
 // Implement connection check function
