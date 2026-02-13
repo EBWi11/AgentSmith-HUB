@@ -45,6 +45,11 @@ import (
 	suppress "AgentSmith-HUB/local_plugin/suppress"
 	threatbook "AgentSmith-HUB/local_plugin/threatbook"
 	virustotal "AgentSmith-HUB/local_plugin/virustotal"
+
+	llmcall "AgentSmith-HUB/local_plugin/llm_call"
+
+	"AgentSmith-HUB/common"
+	"strings"
 )
 
 // for checknode
@@ -93,6 +98,17 @@ var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{
 	"virusTotal": virustotal.Eval,
 	"shodan":     shodan.Eval,
 	"threatBook": threatbook.Eval,
+}
+
+// RegisterLLMCallIfConfigured registers the llmCall plugin when config has llm_api_key set.
+// Called from plugin package after loadHubConfig. Not registered in init so that config is available.
+func RegisterLLMCallIfConfigured() bool {
+	if common.Config == nil || strings.TrimSpace(common.Config.LLMApiKey) == "" {
+		return false
+	}
+	LocalPluginInterfaceAndBoolRes["llmCall"] = llmcall.Eval
+	LocalPluginDesc["llmCall"] = "Append: single-shot LLM call. System prompt as first argument; optional userMessage, model, maxTokens. API key and base URL from config (llm_api_key, llm_base_url). Args: systemPrompt string (required), userMessage string (optional), model string (optional), maxTokens int (optional)."
+	return true
 }
 
 var LocalPluginDesc = map[string]string{

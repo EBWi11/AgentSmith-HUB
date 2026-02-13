@@ -52,6 +52,8 @@ func main() {
 		logger.Error("load hub config", "error", err)
 		return
 	}
+	// Register llmCall builtin plugin only when config has llm_api_key set
+	plugin.RegisterLLMCallIfConfigured()
 
 	if *isLeader {
 		// Initialize Redis-based sample manager (stores component data samples)

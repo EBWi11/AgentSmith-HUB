@@ -40,6 +40,9 @@ type HubConfig struct {
 	OIDCAllowedUsers  []string `yaml:"oidc_allowed_users"`
 	OIDCRedirectURI   string   `yaml:"oidc_redirect_uri"`
 	OIDCScope         string   `yaml:"oidc_scope"`
+	// LLM plugin (builtin): if llm_api_key is set, llmCall plugin is registered
+	LLMApiKey  string `yaml:"llm_api_key,omitempty"`
+	LLMBaseURL string `yaml:"llm_base_url,omitempty"`
 }
 
 // Operation types for project operations
