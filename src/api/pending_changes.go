@@ -607,7 +607,8 @@ func CancelPendingChange(c echo.Context) error {
 	case "output":
 		tempPath = path.Join(configRoot, "output", id+".yaml.new")
 	case "ruleset":
-		tempPath = path.Join(configRoot, "ruleset", id+".xml.new")
+		// Use folder-aware path resolution for rulesets
+		_, tempPath = findRulesetPaths(id)
 	case "project":
 		tempPath = path.Join(configRoot, "project", id+".yaml.new")
 	}
@@ -667,7 +668,8 @@ func CancelAllPendingChanges(c echo.Context) error {
 		case "output":
 			tempPath = path.Join(configRoot, "output", change.ID+".yaml.new")
 		case "ruleset":
-			tempPath = path.Join(configRoot, "ruleset", change.ID+".xml.new")
+			// Use folder-aware path resolution for rulesets
+			_, tempPath = findRulesetPaths(change.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", change.ID+".yaml.new")
 		}
@@ -754,7 +756,8 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		case "output":
 			filePath = path.Join(configRoot, "output", req.ID+".yaml")
 		case "ruleset":
-			filePath = path.Join(configRoot, "ruleset", req.ID+".xml")
+			// Use folder-aware path resolution for rulesets
+			filePath, _ = findRulesetPaths(req.ID)
 		case "project":
 			filePath = path.Join(configRoot, "project", req.ID+".yaml")
 		case "plugin":
@@ -779,7 +782,8 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		case "output":
 			tempPath = path.Join(configRoot, "output", req.ID+".yaml.new")
 		case "ruleset":
-			tempPath = path.Join(configRoot, "ruleset", req.ID+".xml.new")
+			// Use folder-aware path resolution for rulesets
+			_, tempPath = findRulesetPaths(req.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
 		}
@@ -1120,8 +1124,8 @@ func CreateTempFile(c echo.Context) error {
 		}
 
 	case "ruleset":
-		originalPath = path.Join(configRoot, "ruleset", id+".xml")
-		tempPath = originalPath + ".new"
+		// Use folder-aware path resolution for rulesets
+		originalPath, tempPath = findRulesetPaths(id)
 
 		if ruleset, ok := project.GetRuleset(id); ok {
 			content = ruleset.RawConfig

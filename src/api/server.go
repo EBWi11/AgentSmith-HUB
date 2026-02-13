@@ -103,6 +103,13 @@ func ServerStart(listener string) error {
 	auth.DELETE("/rulesets/:id/rules/:ruleId", deleteRulesetRule)
 	auth.POST("/rulesets/:id/rules", addRulesetRule)
 
+	// Ruleset folder management endpoints - REQUIRE AUTH
+	auth.GET("/ruleset-folders", getRulesetFolders)
+	auth.POST("/ruleset-folders", createRulesetFolder)
+	auth.PUT("/ruleset-folders/:name", renameRulesetFolder)
+	auth.DELETE("/ruleset-folders/:name", deleteRulesetFolder)
+	auth.PUT("/rulesets/:id/move", moveRuleset)
+
 	// Ruleset templates and documentation - REQUIRE AUTH (Updated to use MCP module)
 	auth.GET("/ruleset-templates", mcp.GetRulesetTemplates)
 	auth.GET("/ruleset-syntax-guide", mcp.GetRulesetSyntaxGuide)

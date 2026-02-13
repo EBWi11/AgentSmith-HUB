@@ -139,7 +139,30 @@ func extractComponentInfo(filePath string) (string, string) {
 
 	// Get the component type from the directory name
 	// The path structure is: ConfigRoot/componentType/filename
+	// or: ConfigRoot/componentType/folder/filename (for rulesets with folders)
 	componentType := filepath.Base(basePath)
+
+	// If the directory is a subfolder of a component type (e.g., ruleset subfolder),
+	// we need to go up one more level to get the actual component type
+	configRoot := common.Config.ConfigRoot
+	parentDir := filepath.Dir(basePath)
+	parentDirName := filepath.Base(parentDir)
+
+	// Check if the parent directory is a known component type directory
+	knownTypes := map[string]bool{"input": true, "output": true, "ruleset": true, "project": true, "plugin": true}
+	if knownTypes[parentDirName] {
+		// This is a subfolder path: ConfigRoot/componentType/subfolder/filename
+		componentType = parentDirName
+	} else if !knownTypes[componentType] {
+		// Try relative path from config root
+		relPath, err := filepath.Rel(configRoot, filePath)
+		if err == nil {
+			parts := strings.SplitN(relPath, string(filepath.Separator), 3)
+			if len(parts) >= 2 && knownTypes[parts[0]] {
+				componentType = parts[0]
+			}
+		}
+	}
 
 	// Determine ID based on file extension
 	var id string

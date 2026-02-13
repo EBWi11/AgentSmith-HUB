@@ -87,7 +87,15 @@
                 </div>
               </template>
             </button>
-            <div v-if="!props.collapsed" class="relative mr-3">
+            <div v-if="!props.collapsed" class="relative mr-3 flex items-center space-x-1">
+              <!-- Create folder button for rulesets -->
+              <button v-if="type === 'rulesets'" @click="openFolderModal('create')" 
+                      class="p-1 rounded-full hover:bg-yellow-100 text-gray-400 hover:text-yellow-600 transition flex items-center justify-center w-6 h-6"
+                      title="Create Folder">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                </svg>
+              </button>
               <button v-if="!section.children" @click="openAddModal(type)" class="p-1 rounded-full hover:bg-primary/10 text-primary transition flex items-center justify-center w-6 h-6">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
               </button>
@@ -383,7 +391,263 @@
                   </div>
                 </div>
               </template>
-              <!-- Normal component list for non-plugin types -->
+              <!-- Rulesets with folder support -->
+              <template v-else-if="type === 'rulesets'">
+                <!-- Folders -->
+                <div v-for="(folderItems, folderName) in getOrganizedRulesets().folders" :key="'folder-' + folderName" class="relative">
+                  <!-- Folder header -->
+                  <div class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                       @click="toggleFolderCollapse(folderName)">
+                    <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="getOrganizedRulesets().rootRulesets.length > 0 || Object.keys(getOrganizedRulesets().folders).indexOf(folderName) < Object.keys(getOrganizedRulesets().folders).length - 1"></div>
+                    <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                    <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                    
+                    <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                      <svg class="w-3 h-3 mr-1.5 transition-transform duration-200 flex-shrink-0 text-yellow-600"
+                           :class="{ 'rotate-90': !collapsedFolders[folderName] }"
+                           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                      </svg>
+                      <svg class="w-4 h-4 mr-1.5 flex-shrink-0 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                      </svg>
+                      <span class="text-sm font-medium text-gray-700 truncate">{{ folderName }}</span>
+                      <span class="ml-2 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">{{ folderItems.length }}</span>
+                    </div>
+                    <!-- Folder actions -->
+                    <div class="relative mr-3">
+                      <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                              @click.stop="toggleFolderMenu(folderName)">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                        </svg>
+                      </button>
+                      <div v-if="folderMenuOpen === folderName" 
+                           class="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                           @click.stop>
+                        <div class="py-1">
+                          <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                             @click.prevent.stop="openAddRulesetInFolder(folderName)">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                            </svg>
+                            Add Ruleset
+                          </a>
+                          <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                             @click.prevent.stop="openFolderModal('rename', folderName)">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                            </svg>
+                            Rename Folder
+                          </a>
+                          <div class="border-t border-gray-100 my-1"></div>
+                          <a href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                             @click.prevent.stop="openFolderDeleteConfirm(folderName)">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete Folder
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <!-- Folder contents (rulesets inside) -->
+                  <div v-if="!collapsedFolders[folderName]" class="relative">
+                    <div v-for="(item, index) in folderItems" :key="item.id"
+                         class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                         :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === 'rulesets' }"
+                         @click="handleItemClick('rulesets', item)"
+                         @dblclick="handleItemDoubleClick('rulesets', item)">
+                      <div class="absolute left-8 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < folderItems.length - 1"></div>
+                      <div class="absolute left-8 top-1/2 w-2 h-px bg-gray-300"></div>
+                      <div class="absolute left-8 top-0 h-1/2 w-px bg-gray-300"></div>
+                      
+                      <div class="flex items-center min-w-0 flex-1 pl-11 pr-3">
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center">
+                            <span class="text-sm truncate">{{ item.id }}</span>
+                          </div>
+                        </div>
+                        <span v-if="getRulesetTypeInfo(item)" 
+                              class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
+                              :class="getRulesetTypeInfo(item).color"
+                              @mouseenter="showTooltip($event, getRulesetTypeInfo(item).tooltip)"
+                              @mouseleave="hideTooltip">
+                          {{ getRulesetTypeInfo(item).icon }}
+                        </span>
+                        <span v-if="item.hasTemp" 
+                              class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                              @mouseenter="showTooltip($event, 'Temporary Version')"
+                              @mouseleave="hideTooltip">
+                          T
+                        </span>
+                      </div>
+                      <!-- Actions menu for folder rulesets -->
+                      <div class="relative mr-3">
+                        <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                                @click.stop="toggleMenu(item)">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                          </svg>
+                        </button>
+                        <div v-if="item.menuOpen" 
+                             class="absolute right-0 mt-1 w-52 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                             @click.stop>
+                          <div class="py-1">
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                               @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type: 'rulesets', id: item.id, isEdit: true })">
+                              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                              </svg>
+                              Edit
+                            </a>
+                            <a v-if="!item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                               @click.prevent.stop="openSampleDataModal(item)">
+                              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                              View Sample Data
+                            </a>
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                               @click.prevent.stop="openTestRuleset(item)">
+                              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                              </svg>
+                              Test Ruleset
+                            </a>
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                               @click.prevent.stop="copyName(item)">
+                              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                              </svg>
+                              Copy Name
+                            </a>
+                            <!-- Move to folder submenu -->
+                            <div v-if="getMoveTargetFolders(item.folder).length > 0" class="border-t border-gray-100 my-1"></div>
+                            <div v-if="getMoveTargetFolders(item.folder).length > 0" class="px-4 py-1 text-xs text-gray-500 font-medium">Move to...</div>
+                            <a v-for="target in getMoveTargetFolders(item.folder)" :key="'move-' + target.name"
+                               href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 pl-6"
+                               @click.prevent.stop="moveRulesetToFolder(item.id, target.name)">
+                              <svg class="w-4 h-4 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                              </svg>
+                              {{ target.label }}
+                            </a>
+                            <div class="border-t border-gray-100 my-1"></div>
+                            <a href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
+                               @click.prevent.stop="openDeleteModal('rulesets', item)">
+                              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Delete
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Root rulesets (not in any folder) -->
+                <div v-for="(item, index) in getOrganizedRulesets().rootRulesets" :key="item.id"
+                     class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
+                     :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === 'rulesets' }"
+                     @click="handleItemClick('rulesets', item)"
+                     @dblclick="handleItemDoubleClick('rulesets', item)">
+                  <div class="absolute left-5 top-1/2 bottom-0 w-px bg-gray-300" v-if="index < getOrganizedRulesets().rootRulesets.length - 1"></div>
+                  <div class="absolute left-5 top-1/2 w-2 h-px bg-gray-300"></div>
+                  <div class="absolute left-5 top-0 h-1/2 w-px bg-gray-300"></div>
+                  
+                  <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center">
+                        <span class="text-sm truncate">{{ item.id }}</span>
+                      </div>
+                    </div>
+                    <span v-if="getRulesetTypeInfo(item)" 
+                          class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
+                          :class="getRulesetTypeInfo(item).color"
+                          @mouseenter="showTooltip($event, getRulesetTypeInfo(item).tooltip)"
+                          @mouseleave="hideTooltip">
+                      {{ getRulesetTypeInfo(item).icon }}
+                    </span>
+                    <span v-if="item.hasTemp" 
+                          class="ml-2 text-xs bg-blue-100 text-blue-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
+                          @mouseenter="showTooltip($event, 'Temporary Version')"
+                          @mouseleave="hideTooltip">
+                      T
+                    </span>
+                  </div>
+                  <!-- Actions menu for root rulesets -->
+                  <div class="relative mr-3">
+                    <button class="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-200 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity menu-toggle-button w-6 h-6 flex items-center justify-center"
+                            @click.stop="toggleMenu(item)">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+                      </svg>
+                    </button>
+                    <div v-if="item.menuOpen" 
+                         class="absolute right-0 mt-1 w-52 bg-white rounded-md shadow-lg z-10 dropdown-menu"
+                         @click.stop>
+                      <div class="py-1">
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="closeAllMenus(); $emit('open-editor', { type: 'rulesets', id: item.id, isEdit: true })">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                          </svg>
+                          Edit
+                        </a>
+                        <a v-if="!item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openSampleDataModal(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                          View Sample Data
+                        </a>
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="openTestRuleset(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                          Test Ruleset
+                        </a>
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                           @click.prevent.stop="copyName(item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                          </svg>
+                          Copy Name
+                        </a>
+                        <!-- Move to folder submenu -->
+                        <div v-if="getMoveTargetFolders('').length > 0" class="border-t border-gray-100 my-1"></div>
+                        <div v-if="getMoveTargetFolders('').length > 0" class="px-4 py-1 text-xs text-gray-500 font-medium">Move to...</div>
+                        <a v-for="target in getMoveTargetFolders('')" :key="'move-' + target.name"
+                           href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 pl-6"
+                           @click.prevent.stop="moveRulesetToFolder(item.id, target.name)">
+                          <svg class="w-4 h-4 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+                          </svg>
+                          {{ target.label }}
+                        </a>
+                        <div class="border-t border-gray-100 my-1"></div>
+                        <a href="#" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50" 
+                           @click.prevent.stop="openDeleteModal('rulesets', item)">
+                          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Normal component list for non-plugin and non-ruleset types -->
               <div v-else v-for="(item, index) in filteredItems(type)" :key="item.id" 
                    class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                    :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === type }"
@@ -423,19 +687,6 @@
                       Line {{ item.searchMatch.lineNumber }}: {{ item.searchMatch.lineContent }}
                     </div>
                   </div>
-                  <!-- Plugin function type badge for plugins -->
-                  <span v-if="type === 'plugins' && isCheckNodeType(item)" 
-                        class="ml-2 text-xs bg-green-100 text-green-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                        @mouseenter="showTooltip($event, 'Check Node Plugin')"
-                        @mouseleave="hideTooltip">
-                    C
-                  </span>
-                  <span v-else-if="type === 'plugins' && isPluginNodeType(item)" 
-                        class="ml-2 text-xs bg-purple-100 text-purple-800 w-5 h-5 flex items-center justify-center rounded-full cursor-help"
-                        @mouseenter="showTooltip($event, 'Plugin Node')"
-                        @mouseleave="hideTooltip">
-                    P
-                  </span>
 
                   <!-- Input type badge for inputs -->
                   <span v-if="type === 'inputs' && getInputTypeInfo(item)" 
@@ -453,15 +704,6 @@
                         @mouseenter="showTooltip($event, getOutputTypeInfo(item).tooltip)"
                         @mouseleave="hideTooltip">
                     {{ getOutputTypeInfo(item).icon }}
-                  </span>
-
-                  <!-- Ruleset type badge for rulesets -->
-                  <span v-if="type === 'rulesets' && getRulesetTypeInfo(item)" 
-                        class="ml-2 text-xs w-auto min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full cursor-help"
-                        :class="getRulesetTypeInfo(item).color"
-                        @mouseenter="showTooltip($event, getRulesetTypeInfo(item).tooltip)"
-                        @mouseleave="hideTooltip">
-                    {{ getRulesetTypeInfo(item).icon }}
                   </span>
 
                   <!-- Temporary file badge -->
@@ -709,6 +951,14 @@
             ref="addNameInput"
           />
         </div>
+        <!-- Folder selector for rulesets -->
+        <div v-if="addType === 'rulesets' && rulesetFolders.length > 0" class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Folder</label>
+          <select v-model="addFolder" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm">
+            <option value="">(Root)</option>
+            <option v-for="f in rulesetFolders" :key="f.name" :value="f.name">{{ f.name }}</option>
+          </select>
+        </div>
         <div class="flex justify-end space-x-3">
           <button @click="closeAddModal" class="btn btn-secondary btn-sm">Cancel</button>
           <button 
@@ -720,6 +970,47 @@
           </button>
         </div>
         <div v-if="addError" class="mt-3 text-sm text-red-500">{{ addError }}</div>
+      </div>
+    </div>
+
+    <!-- Folder Create/Rename Modal -->
+    <div v-if="showFolderModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">{{ folderModalMode === 'create' ? 'Create Folder' : 'Rename Folder' }}</h3>
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
+          <input 
+            type="text" 
+            v-model="folderName"
+            @keyup.enter="confirmFolderAction"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 folder-modal-input" 
+            placeholder="Enter folder name"
+          />
+          <p class="text-xs text-gray-400 mt-1">Letters, numbers, underscores, and hyphens only</p>
+        </div>
+        <div class="flex justify-end space-x-3">
+          <button @click="closeFolderModal" class="btn btn-secondary btn-sm">Cancel</button>
+          <button 
+            @click="confirmFolderAction" 
+            :disabled="!folderName || !folderName.trim()"
+            class="btn btn-primary btn-sm"
+          >
+            {{ folderModalMode === 'create' ? 'Create' : 'Rename' }}
+          </button>
+        </div>
+        <div v-if="folderError" class="mt-3 text-sm text-red-500">{{ folderError }}</div>
+      </div>
+    </div>
+
+    <!-- Folder Delete Confirmation Modal -->
+    <div v-if="showFolderDeleteConfirm" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Delete Folder</h3>
+        <p class="text-sm text-gray-600 mb-4">Are you sure you want to delete the folder <strong>{{ folderToDelete }}</strong>? The folder must be empty.</p>
+        <div class="flex justify-end space-x-3">
+          <button @click="showFolderDeleteConfirm = false" class="btn btn-secondary btn-sm">Cancel</button>
+          <button @click="confirmDeleteFolder" class="btn bg-red-500 hover:bg-red-600 text-white btn-sm">Delete</button>
+        </div>
       </div>
     </div>
 
@@ -1654,6 +1945,21 @@ const addType = ref('')
 const addName = ref('')
 const addRaw = ref('')
 const addError = ref('')
+const addFolder = ref('') // Folder for new rulesets
+
+// Ruleset folder management
+const rulesetFolders = ref([])
+const collapsedFolders = reactive({}) // Track collapsed state per folder
+const showFolderModal = ref(false)
+const folderModalMode = ref('create') // 'create' or 'rename'
+const folderName = ref('')
+const folderRenameOld = ref('')
+const folderError = ref('')
+const showFolderDeleteConfirm = ref(false)
+const folderToDelete = ref('')
+
+// Folder context menu
+const folderMenuOpen = ref(null) // Which folder's menu is open
 // projectRefreshInterval removed - using unified projectStatusRefreshInterval
 
 // Connection check related reactive variables
@@ -1979,6 +2285,7 @@ watch(search, (newVal) => {
 function openAddModal(type) {
   addType.value = type
   addName.value = ''
+  addFolder.value = ''
   addError.value = ''
   showAddModal.value = true
   activeModal.value = 'add'
@@ -2016,6 +2323,10 @@ async function toggleCollapse(type) {
         await refreshProjectStatus()
       } else {
         await fetchItems(type)
+        // Also fetch folders for rulesets
+        if (type === 'rulesets') {
+          await fetchRulesetFolders()
+        }
       }
     }
   }
@@ -2180,7 +2491,8 @@ async function fetchItems(type) {
             type: item.type,
             status: item.status,
             hasTemp: item.hasTemp,
-            errorMessage: item.errorMessage || ''
+            errorMessage: item.errorMessage || '',
+            folder: item.folder || '' // Folder for rulesets
           }
         }
       }).filter(Boolean) // Filter out null items
@@ -2246,6 +2558,162 @@ async function fetchProjectsComplete() {
   }
 }
 
+// --- Ruleset folder management functions ---
+async function fetchRulesetFolders() {
+  try {
+    rulesetFolders.value = await hubApi.getRulesetFolders()
+  } catch (err) {
+    console.error('Failed to fetch ruleset folders:', err)
+    rulesetFolders.value = []
+  }
+}
+
+function getOrganizedRulesets() {
+  const allRulesets = filteredItems('rulesets')
+  const folders = {}
+  const rootRulesets = []
+
+  for (const item of allRulesets) {
+    const folder = item.folder || ''
+    if (folder) {
+      if (!folders[folder]) folders[folder] = []
+      folders[folder].push(item)
+    } else {
+      rootRulesets.push(item)
+    }
+  }
+
+  // Include empty folders from rulesetFolders
+  for (const f of rulesetFolders.value) {
+    if (!folders[f.name]) {
+      folders[f.name] = []
+    }
+  }
+
+  return { folders, rootRulesets }
+}
+
+function openFolderModal(mode, oldName = '') {
+  folderModalMode.value = mode
+  folderName.value = mode === 'rename' ? oldName : ''
+  folderRenameOld.value = oldName
+  folderError.value = ''
+  showFolderModal.value = true
+  closeFolderMenu()
+  nextTick(() => {
+    const input = document.querySelector('.folder-modal-input')
+    if (input) input.focus()
+  })
+}
+
+function closeFolderModal() {
+  showFolderModal.value = false
+  folderError.value = ''
+}
+
+async function confirmFolderAction() {
+  const name = folderName.value.trim()
+  if (!name) {
+    folderError.value = 'Folder name cannot be empty'
+    return
+  }
+  
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    folderError.value = 'Folder name can only contain letters, numbers, underscores, and hyphens'
+    return
+  }
+
+  try {
+    if (folderModalMode.value === 'create') {
+      await hubApi.createRulesetFolder(name)
+    } else if (folderModalMode.value === 'rename') {
+      await hubApi.renameRulesetFolder(folderRenameOld.value, name)
+    }
+    closeFolderModal()
+    await fetchRulesetFolders()
+    await fetchItems('rulesets')
+  } catch (err) {
+    folderError.value = err.response?.data?.error || err.message || 'Operation failed'
+  }
+}
+
+function openFolderDeleteConfirm(folderName) {
+  folderToDelete.value = folderName
+  showFolderDeleteConfirm.value = true
+  closeFolderMenu()
+}
+
+async function confirmDeleteFolder() {
+  try {
+    await hubApi.deleteRulesetFolder(folderToDelete.value)
+    showFolderDeleteConfirm.value = false
+    folderToDelete.value = ''
+    await fetchRulesetFolders()
+    await fetchItems('rulesets')
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message || 'Failed to delete folder'
+    if (window.$toast) window.$toast.show(msg, 'error')
+  }
+}
+
+async function moveRulesetToFolder(rulesetId, targetFolder) {
+  try {
+    await hubApi.moveRuleset(rulesetId, targetFolder)
+    await fetchItems('rulesets')
+    closeAllMenus()
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message || 'Failed to move ruleset'
+    if (window.$toast) window.$toast.show(msg, 'error')
+  }
+}
+
+function toggleFolderCollapse(folderName) {
+  collapsedFolders[folderName] = !collapsedFolders[folderName]
+}
+
+function toggleFolderMenu(folderName) {
+  if (folderMenuOpen.value === folderName) {
+    folderMenuOpen.value = null
+  } else {
+    folderMenuOpen.value = folderName
+  }
+}
+
+function closeFolderMenu() {
+  folderMenuOpen.value = null
+}
+
+function openAddRulesetInFolder(folder) {
+  addType.value = 'rulesets'
+  addName.value = ''
+  addFolder.value = folder
+  addError.value = ''
+  showAddModal.value = true
+  activeModal.value = 'add'
+  closeFolderMenu()
+  addEscKeyListener()
+  nextTick(() => {
+    const inputElement = document.querySelector('input[ref="addNameInput"]') || 
+                        document.querySelector('.bg-white input[type="text"]')
+    if (inputElement) inputElement.focus()
+  })
+}
+
+// Get available folder options for the move menu
+function getMoveTargetFolders(currentFolder) {
+  const allFolders = Object.keys(getOrganizedRulesets().folders)
+  const targets = []
+  if (currentFolder) {
+    targets.push({ name: '', label: '(Root)' })
+  }
+  for (const f of allFolders) {
+    if (f !== currentFolder) {
+      targets.push({ name: f, label: f })
+    }
+  }
+  return targets
+}
+
 async function confirmAddName() {
   if (!addName.value || addName.value.trim() === '') {
     addError.value = 'Name cannot be empty'
@@ -2265,7 +2733,7 @@ async function confirmAddName() {
         await hubApi.createOutput(addName.value, raw)
         break
       case 'rulesets':
-        await hubApi.createRuleset(addName.value, raw)
+        await hubApi.createRuleset(addName.value, raw, addFolder.value)
         break
       case 'projects':
         await hubApi.createProject(addName.value, raw)
@@ -2400,6 +2868,8 @@ function closeAllMenus() {
       })
     }
   })
+  // Close folder menus
+  folderMenuOpen.value = null
 }
 
 // Implement connection check function
@@ -2676,6 +3146,10 @@ function getArgumentTypeHint() {
             promises.push(refreshProjectStatus())
           } else {
             promises.push(fetchItems(type))
+            // Also refresh folders for rulesets
+            if (type === 'rulesets') {
+              promises.push(fetchRulesetFolders())
+            }
           }
         }
       })

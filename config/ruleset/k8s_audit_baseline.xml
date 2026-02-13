@@ -1,0 +1,307 @@
+<!-- ============================================================================
+     K8s Audit — Baseline Security Check
+     ============================================================================
+     Type:     DETECTION
+     Purpose:  Detect Kubernetes workload & RBAC configurations that violate
+               security best practices. Focus on medium/high severity issues
+               with extremely low false-positive rate.
+
+     Data source: Kubernetes audit log (RequestResponse level)
+
+     Conventions:
+       - Every rule gates on stage=ResponseComplete + HTTP 2xx to avoid
+         duplicate/failed-request noise.
+       - System controllers (kube-system service accounts) are excluded
+         where appropriate to prevent false positives.
+       - Each rule appends MITRE ATT&CK context for downstream triage.
+     ============================================================================ -->
+
+<root type="DETECTION" name="k8s_audit_baseline" author="AgentSmith">
+
+    <!-- ================================================================
+         B001 — Privileged Container: Pod
+         Severity: HIGH
+         A container with privileged:true has full host access,
+         equivalent to root on the node.
+         ================================================================ -->
+    <rule id="B001" name="Privileged container created (Pod)">
+        <!-- Gate: successful pod create/update -->
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <!-- Exclude system controllers that legitimately create privileged pods -->
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <!-- Any container with privileged:true -->
+        <iterator type="ANY" field="requestObject.spec.containers" variable="c">
+            <check type="EQU" field="c.securityContext.privileged">true</check>
+        </iterator>
+
+        <append field="alert_id">B001</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Privileged container created — container has full host-level access</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B002 — Privileged Container: Deployment
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="B002" name="Privileged container created (Deployment)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">deployments</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+
+        <iterator type="ANY" field="requestObject.spec.template.spec.containers" variable="c">
+            <check type="EQU" field="c.securityContext.privileged">true</check>
+        </iterator>
+
+        <append field="alert_id">B002</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Deployment with privileged container — all replicas get full host access</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B003 — Privileged Container: DaemonSet
+         Severity: HIGH
+         DaemonSets run on EVERY node — privileged DaemonSet = cluster-wide root.
+         ================================================================ -->
+    <rule id="B003" name="Privileged container created (DaemonSet)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">daemonsets</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+
+        <iterator type="ANY" field="requestObject.spec.template.spec.containers" variable="c">
+            <check type="EQU" field="c.securityContext.privileged">true</check>
+        </iterator>
+
+        <append field="alert_id">B003</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">DaemonSet with privileged container — impacts every node in the cluster</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B004 — Host Namespace Sharing: Pod
+         Severity: HIGH
+         hostNetwork / hostPID / hostIPC breaks pod isolation.
+         hostPID allows process injection; hostNetwork exposes node traffic.
+         ================================================================ -->
+    <rule id="B004" name="Pod with host namespace sharing">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <!-- Any one of hostNetwork/hostPID/hostIPC = true -->
+        <checklist condition="net or pid or ipc">
+            <check id="net" type="EQU" field="requestObject.spec.hostNetwork">true</check>
+            <check id="pid" type="EQU" field="requestObject.spec.hostPID">true</check>
+            <check id="ipc" type="EQU" field="requestObject.spec.hostIPC">true</check>
+        </checklist>
+
+        <append field="alert_id">B004</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Pod uses host namespace (Network/PID/IPC) — breaks container isolation</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B005 — Host Namespace Sharing: Deployment / DaemonSet
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="B005" name="Deployment/DaemonSet with host namespace sharing">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">deployments|daemonsets</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+
+        <checklist condition="net or pid or ipc">
+            <check id="net" type="EQU" field="requestObject.spec.template.spec.hostNetwork">true</check>
+            <check id="pid" type="EQU" field="requestObject.spec.template.spec.hostPID">true</check>
+            <check id="ipc" type="EQU" field="requestObject.spec.template.spec.hostIPC">true</check>
+        </checklist>
+
+        <append field="alert_id">B005</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Deployment/DaemonSet with host namespace — all pods break container isolation</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B006 — Docker Socket / Container Runtime Socket Mount
+         Severity: HIGH
+         Mounting docker.sock or containerd.sock = full container escape.
+         ================================================================ -->
+    <rule id="B006" name="Container runtime socket mounted (Pod)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <iterator type="ANY" field="requestObject.spec.volumes" variable="vol">
+            <check type="REGEX" field="vol.hostPath.path">/var/run/(docker|containerd|crio)\.sock</check>
+        </iterator>
+
+        <append field="alert_id">B006</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Container runtime socket mounted — allows container escape and full node control</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B007 — Sensitive HostPath Mount
+         Severity: HIGH
+         Mounting /, /etc, /proc, /sys, /root gives direct host filesystem access.
+         ================================================================ -->
+    <rule id="B007" name="Sensitive host path mounted (Pod)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <!-- Match mounts to /, /etc, /proc, /sys, /root, /var/log (info leak) -->
+        <iterator type="ANY" field="requestObject.spec.volumes" variable="vol">
+            <check type="REGEX" field="vol.hostPath.path">^/(etc|proc|sys|root)(/|$)|^/$|^/var/log(/|$)</check>
+        </iterator>
+
+        <append field="alert_id">B007</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Sensitive host path mounted — direct access to host filesystem</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B008 — Dangerous Capabilities: SYS_ADMIN
+         Severity: HIGH
+         CAP_SYS_ADMIN is almost equivalent to privileged mode.
+         Only check SYS_ADMIN for high-confidence (other caps may have legit uses).
+         ================================================================ -->
+    <rule id="B008" name="Container with SYS_ADMIN capability (Pod)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <!-- capabilities.add is a JSON array, serialized as ["SYS_ADMIN",...] by AnyToString -->
+        <iterator type="ANY" field="requestObject.spec.containers" variable="c">
+            <check type="CONTAINS" field="c.securityContext.capabilities.add">SYS_ADMIN</check>
+        </iterator>
+
+        <append field="alert_id">B008</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Container requests CAP_SYS_ADMIN — near-equivalent to privileged mode</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+    <!-- ================================================================
+         B009 — Wildcard ClusterRole
+         Severity: HIGH
+         ClusterRole with resources:["*"] or verbs:["*"] grants unrestricted access.
+         ================================================================ -->
+    <rule id="B009" name="ClusterRole with wildcard permissions">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">clusterroles</check>
+        <!-- Exclude built-in system roles (managed by kube-apiserver) -->
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <!-- rules[] is an array; each element has verbs[] and resources[] -->
+        <!-- When serialized, ["*"] becomes a string containing "*" -->
+        <iterator type="ANY" field="requestObject.rules" variable="r">
+            <checklist condition="wild_verb or wild_res">
+                <check id="wild_verb" type="CONTAINS" field="r.verbs">*</check>
+                <check id="wild_res" type="CONTAINS" field="r.resources">*</check>
+            </checklist>
+        </iterator>
+
+        <append field="alert_id">B009</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">ClusterRole with wildcard permissions created — grants unrestricted cluster access</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1098.001</append>
+    </rule>
+
+    <!-- ================================================================
+         B010 — cluster-admin ClusterRoleBinding
+         Severity: HIGH
+         Binding any subject to cluster-admin = full cluster compromise.
+         ================================================================ -->
+    <rule id="B010" name="ClusterRoleBinding to cluster-admin">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">clusterrolebindings</check>
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <check type="EQU" field="requestObject.roleRef.name">cluster-admin</check>
+
+        <append field="alert_id">B010</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Subject bound to cluster-admin role — grants full administrative access to entire cluster</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1098.001</append>
+    </rule>
+
+    <!-- ================================================================
+         B011 — Sensitive HostPath Mount: Deployment / DaemonSet
+         Severity: HIGH
+         Same as B006/B007 but for controller resources.
+         ================================================================ -->
+    <rule id="B011" name="Container runtime socket mounted (Deployment/DaemonSet)">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">deployments|daemonsets</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+
+        <iterator type="ANY" field="requestObject.spec.template.spec.volumes" variable="vol">
+            <check type="REGEX" field="vol.hostPath.path">/var/run/(docker|containerd|crio)\.sock</check>
+        </iterator>
+
+        <append field="alert_id">B011</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Deployment/DaemonSet mounts container runtime socket</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1611</append>
+    </rule>
+
+</root>

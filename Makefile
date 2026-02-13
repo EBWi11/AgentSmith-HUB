@@ -29,7 +29,12 @@ endif
 
 # Default target architecture (can be overridden)
 TARGET_GOARCH ?= $(HOST_ARCH)
-LIB_PATH=lib/linux/$(TARGET_GOARCH)
+# On Darwin use lib/darwin for local dev build; on Linux use lib/linux/arch
+ifeq ($(UNAME_S),Darwin)
+	LIB_PATH=lib/darwin
+else
+	LIB_PATH=lib/linux/$(TARGET_GOARCH)
+endif
 
 .PHONY: all clean backend backend-docker frontend package deploy install-deps help build-all-arch
 
@@ -49,7 +54,11 @@ backend:
 	@echo "Building backend for Linux $(TARGET_GOARCH)..."
 	mkdir -p $(BUILD_DIR)
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		echo "Cross-compiling from macOS to Linux $(TARGET_GOARCH)..."; \
+		if [ -d "lib/darwin" ] && [ -f "lib/darwin/librure.a" -o -f "lib/darwin/librure.dylib" -o -f "lib/darwin/librure.so" ]; then \
+			echo "Building for macOS (native) using lib/darwin..."; \
+			cd $(BACKEND_DIR) && CGO_ENABLED=1 CGO_LDFLAGS="-L$(PWD)/lib/darwin -lrure" go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME) .; \
+		else \
+			echo "Cross-compiling from macOS to Linux $(TARGET_GOARCH)..."; \
 		echo "Note: This project requires CGO and librure library for regex functionality"; \
 		echo "Cross-compilation from macOS with CGO is complex, using Docker is recommended"; \
 		echo "Attempting cross-compilation (may fail)..."; \
@@ -65,6 +74,7 @@ backend:
 			CGO_ENABLED=0 GOOS=$(TARGET_GOOS) GOARCH=$(TARGET_GOARCH) \
 			go build $(LDFLAGS) -o ../$(BUILD_DIR)/$(BINARY_NAME)-$(TARGET_GOARCH) . || \
 			(echo "Cross-compilation failed as expected. Please use: make backend-docker TARGET_GOARCH=$(TARGET_GOARCH)" && exit 1); \
+		fi; \
 		fi; \
 	else \
 		echo "Building on Linux natively for $(TARGET_GOARCH)..."; \
@@ -224,7 +234,11 @@ clean:
 
 dev-backend:
 	@echo "Starting backend in development mode (current platform)..."
-	cd $(BACKEND_DIR) && go run $(LDFLAGS) . -config_root ../config
+	@if [ "$(UNAME_S)" = "Darwin" ] && [ -d "lib/darwin" ]; then \
+		cd $(BACKEND_DIR) && CGO_ENABLED=1 CGO_LDFLAGS="-L../lib/darwin -lrure" go run $(LDFLAGS) . -config_root ../config; \
+	else \
+		cd $(BACKEND_DIR) && go run $(LDFLAGS) . -config_root ../config; \
+	fi
 
 dev-frontend:
 	@echo "Starting frontend in development mode..."

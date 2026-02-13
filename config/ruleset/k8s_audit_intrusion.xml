@@ -1,0 +1,382 @@
+<!-- ============================================================================
+     K8s Audit — Intrusion Detection
+     ============================================================================
+     Type:     DETECTION
+     Purpose:  Detect highly suspicious operations in Kubernetes that indicate
+               active intrusion, lateral movement, or post-exploitation activity.
+               Every rule requires multiple conditions to ensure high confidence.
+
+     Data source: Kubernetes audit log (RequestResponse level)
+
+     Design principles:
+       - Each rule requires multi-signal correlation to minimize false positives.
+       - System-level controllers are explicitly excluded.
+       - Threshold rules use local_cache for standalone evaluation.
+     ============================================================================ -->
+
+<root type="DETECTION" name="k8s_audit_intrusion" author="AgentSmith">
+
+    <!-- ================================================================
+         I001 — Exec/Attach into kube-system Pod
+         Severity: HIGH
+         Exec into system-critical pods by a non-system user is a strong
+         indicator of lateral movement or container escape attempt.
+         ================================================================ -->
+    <rule id="I001" name="Exec/Attach into kube-system pod by non-system user">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="INCL" field="objectRef.subresource" logic="or" delimiter="|">exec|attach</check>
+        <check type="EQU" field="objectRef.namespace">kube-system</check>
+
+        <!-- Exclude legitimate system accounts -->
+        <check type="EXCL" field="user.username">system:serviceaccount:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+        <check type="EXCL" field="user.username">system:kube-</check>
+
+        <append field="alert_id">I001</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Non-system user exec/attach into kube-system pod — possible lateral movement</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1609</append>
+    </rule>
+
+    <!-- ================================================================
+         I002 — Cluster-wide Secrets Enumeration
+         Severity: HIGH
+         Listing secrets across all namespaces (empty namespace = cluster-wide)
+         is a classic post-compromise reconnaissance step.
+         ================================================================ -->
+    <rule id="I002" name="Cluster-wide secrets enumeration">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">list|watch</check>
+        <check type="EQU" field="objectRef.resource">secrets</check>
+        <!-- Cluster-wide: namespace is empty or absent -->
+        <check type="ISNULL" field="objectRef.namespace"></check>
+
+        <!-- Exclude controllers that legitimately list secrets cluster-wide -->
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+        <check type="EXCL" field="user.username">system:apiserver</check>
+
+        <append field="alert_id">I002</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Secrets listed across all namespaces — possible credential harvesting</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1552.007</append>
+    </rule>
+
+    <!-- ================================================================
+         I003 — RBAC Binding for system:anonymous
+         Severity: HIGH
+         Granting any role to system:anonymous opens unauthenticated access.
+         Essentially zero legitimate use cases.
+         ================================================================ -->
+    <rule id="I003" name="RBAC binding granted to anonymous user">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">clusterrolebindings|rolebindings</check>
+
+        <!-- subjects[] contains system:anonymous or system:unauthenticated -->
+        <iterator type="ANY" field="requestObject.subjects" variable="subj">
+            <checklist condition="anon or unauth">
+                <check id="anon" type="EQU" field="subj.name">system:anonymous</check>
+                <check id="unauth" type="EQU" field="subj.name">system:unauthenticated</check>
+            </checklist>
+        </iterator>
+
+        <append field="alert_id">I003</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Role bound to anonymous/unauthenticated user — opens unauthenticated cluster access</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1098</append>
+    </rule>
+
+    <!-- ================================================================
+         I004 — Admission Webhook Tampering
+         Severity: HIGH
+         Creating or modifying MutatingWebhookConfiguration can intercept and
+         alter ALL resource creation — a powerful persistence/backdoor technique.
+         ================================================================ -->
+    <rule id="I004" name="Mutating admission webhook created or modified">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">mutatingwebhookconfigurations</check>
+
+        <!-- Exclude common legitimate webhook managers -->
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <append field="alert_id">I004</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">MutatingWebhookConfiguration modified — can silently alter all incoming resources</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1546</append>
+    </rule>
+
+    <!-- ================================================================
+         I005 — Workload Created in kube-system by External User
+         Severity: HIGH
+         Non-system users deploying pods/deployments/daemonsets into kube-system
+         is a strong indicator of backdoor deployment.
+         ================================================================ -->
+    <rule id="I005" name="Workload created in kube-system by external user">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">create</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">pods|deployments|daemonsets|statefulsets|jobs|cronjobs</check>
+        <check type="EQU" field="objectRef.namespace">kube-system</check>
+
+        <!-- Only external users (not system controllers) -->
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+        <check type="EXCL" field="user.username">system:kube-</check>
+
+        <append field="alert_id">I005</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">External user deployed workload to kube-system — possible backdoor deployment</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1610</append>
+    </rule>
+
+    <!-- ================================================================
+         I006 — ValidatingWebhookConfiguration Deletion
+         Severity: HIGH
+         Deleting validating webhooks removes security guardrails (OPA/Gatekeeper,
+         Kyverno, etc.) — common pre-attack step to disable defenses.
+         ================================================================ -->
+    <rule id="I006" name="Validating admission webhook deleted">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">delete</check>
+        <check type="EQU" field="objectRef.resource">validatingwebhookconfigurations</check>
+
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <append field="alert_id">I006</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">ValidatingWebhookConfiguration deleted — security policy enforcement disabled</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.001</append>
+    </rule>
+
+    <!-- ================================================================
+         I007 — Node Proxy Access
+         Severity: HIGH
+         Accessing a node's proxy subresource (nodes/proxy) allows direct
+         kubelet API access, bypassing RBAC — used for container escape.
+         ================================================================ -->
+    <rule id="I007" name="Node proxy subresource accessed">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="objectRef.resource">nodes</check>
+        <check type="EQU" field="objectRef.subresource">proxy</check>
+
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+        <check type="EXCL" field="user.username">system:kube-scheduler</check>
+
+        <append field="alert_id">I007</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Direct node proxy access — bypasses RBAC for kubelet API operations</append>
+        <append field="mitre_tactic">Lateral Movement</append>
+        <append field="mitre_technique_id">T1599</append>
+    </rule>
+
+    <!-- ================================================================
+         I008 — Service Account Token Impersonation
+         Severity: HIGH
+         Using impersonation headers (impersonatedUser) to act as another
+         identity is a post-compromise privilege escalation technique.
+         ================================================================ -->
+    <rule id="I008" name="User impersonation detected">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="NOTNULL" field="impersonatedUser.username"></check>
+
+        <!-- Exclude legitimate impersonation by apiserver / front-proxy -->
+        <check type="EXCL" field="user.username">system:apiserver</check>
+        <check type="EXCL" field="user.username">system:admin</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <append field="alert_id">I008</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">User impersonation detected — attacker may be assuming another identity</append>
+        <append field="mitre_tactic">Privilege Escalation</append>
+        <append field="mitre_technique_id">T1134.001</append>
+    </rule>
+
+    <!-- ================================================================
+         I009 — ConfigMap/Secret Deletion in kube-system
+         Severity: MEDIUM
+         Deleting secrets or configmaps in kube-system can disrupt cluster
+         operations and is a sabotage or defense-evasion indicator.
+         ================================================================ -->
+    <rule id="I009" name="Secret/ConfigMap deleted in kube-system">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">delete</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">secrets|configmaps</check>
+        <check type="EQU" field="objectRef.namespace">kube-system</check>
+
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <append field="alert_id">I009</append>
+        <append field="severity">medium</append>
+        <append field="category">intrusion</append>
+        <append field="description">Secret/ConfigMap deleted in kube-system — possible sabotage or credential rotation disruption</append>
+        <append field="mitre_tactic">Impact</append>
+        <append field="mitre_technique_id">T1485</append>
+    </rule>
+
+    <!-- ================================================================
+         I010 — Excessive Secret Access (Threshold)
+         Severity: MEDIUM
+         A single user reading ≥ 20 distinct secrets in 5 minutes indicates
+         automated credential harvesting (normal ops rarely reads this many).
+         ================================================================ -->
+    <rule id="I010" name="Excessive secret access by single user">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">get</check>
+        <check type="EQU" field="objectRef.resource">secrets</check>
+
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+        <check type="EXCL" field="user.username">system:apiserver</check>
+
+        <!-- ≥20 distinct secret names accessed by the same user in 5 minutes -->
+        <threshold group_by="user.username" range="5m" local_cache="true" count_type="CLASSIFY" count_field="objectRef.name">20</threshold>
+
+        <append field="alert_id">I010</append>
+        <append field="severity">medium</append>
+        <append field="category">intrusion</append>
+        <append field="description">User accessed 20+ distinct secrets in 5 minutes — possible credential harvesting</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1552.007</append>
+    </rule>
+
+    <!-- ================================================================
+         I011 — Exec Brute-Force / Shell Spray
+         Severity: HIGH
+         ≥10 exec operations by a single user across different pods in 3 min
+         indicates lateral movement / reconnaissance inside the cluster.
+         ================================================================ -->
+    <rule id="I011" name="Rapid exec across multiple pods">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="objectRef.resource">pods</check>
+        <check type="EQU" field="objectRef.subresource">exec</check>
+
+        <check type="EXCL" field="user.username">system:serviceaccount:</check>
+        <check type="EXCL" field="user.username">system:node:</check>
+
+        <!-- ≥10 distinct pods exec'd by same user in 3 minutes -->
+        <threshold group_by="user.username" range="3m" local_cache="true" count_type="CLASSIFY" count_field="objectRef.name">10</threshold>
+
+        <append field="alert_id">I011</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">User exec into 10+ different pods in 3 minutes — possible lateral movement</append>
+        <append field="mitre_tactic">Lateral Movement</append>
+        <append field="mitre_technique_id">T1609</append>
+    </rule>
+
+    <!-- ================================================================
+         I012 — ServiceAccount Token Creation for Privileged SA
+         Severity: HIGH
+         Creating tokens for service accounts in kube-system from outside
+         the namespace — likely credential theft for persistence.
+         ================================================================ -->
+    <rule id="I012" name="Token created for kube-system service account">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">create</check>
+        <check type="EQU" field="objectRef.resource">serviceaccounts</check>
+        <check type="EQU" field="objectRef.subresource">token</check>
+        <check type="EQU" field="objectRef.namespace">kube-system</check>
+
+        <!-- Not from kube-system itself -->
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+        <check type="EXCL" field="user.username">system:kube-controller-manager</check>
+
+        <append field="alert_id">I012</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Token requested for kube-system service account from outside — possible credential theft</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1528</append>
+    </rule>
+
+    <!-- ================================================================
+         I013 — CronJob Created with Suspicious Command
+         Severity: HIGH
+         CronJob with reverse shell patterns or known attack tool commands.
+         Extremely high confidence — these patterns have no legitimate use.
+         ================================================================ -->
+    <rule id="I013" name="CronJob with reverse shell or attack tool command">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="INCL" field="verb" logic="or" delimiter="|">create|update|patch</check>
+        <check type="EQU" field="objectRef.resource">cronjobs</check>
+
+        <iterator type="ANY" field="requestObject.spec.jobTemplate.spec.template.spec.containers" variable="c">
+            <checklist condition="revshell or nc_shell or bash_tcp or known_tool">
+                <!-- bash -i >& /dev/tcp/ -->
+                <check id="revshell" type="REGEX" field="c.command">/dev/tcp/|/dev/udp/</check>
+                <!-- nc/ncat reverse shell -->
+                <check id="nc_shell" type="REGEX" field="c.command">n(c|cat)\s+.*-e\s+/(bin|usr)</check>
+                <!-- bash -c with base64 decode (common obfuscation) -->
+                <check id="bash_tcp" type="REGEX" field="c.command">bash\s+-c\s+.*base64\s+-d</check>
+                <!-- Known attack tool images -->
+                <check id="known_tool" type="REGEX" field="c.image">(kalilinux|metasploit|cobalt.*strike|xmrig|minerd|cryptonight)</check>
+            </checklist>
+        </iterator>
+
+        <append field="alert_id">I013</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">CronJob with reverse shell or known attack tool — active exploitation</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1053.007</append>
+    </rule>
+
+    <!-- ================================================================
+         I014 — Pod with Suspicious Image (Attack Tools)
+         Severity: HIGH
+         Deployment of known offensive security / crypto-mining images.
+         ================================================================ -->
+    <rule id="I014" name="Pod with known attack tool or crypto-miner image">
+        <check type="EQU" field="stage">ResponseComplete</check>
+        <check type="LT" field="responseStatus.code">300</check>
+        <check type="EQU" field="verb">create</check>
+        <check type="INCL" field="objectRef.resource" logic="or" delimiter="|">pods|deployments|daemonsets|jobs|cronjobs</check>
+        <check type="EXCL" field="user.username">system:serviceaccount:kube-system:</check>
+
+        <!-- Check container images for known attack tools and crypto miners -->
+        <iterator type="ANY" field="requestObject.spec.containers" variable="c">
+            <check type="REGEX" field="c.image">(kalilinux|parrotsec|metasploit|cobaltstrike|xmrig|minerd|cryptonight|moneroocean|nanopool)</check>
+        </iterator>
+
+        <append field="alert_id">I014</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Container with known attack tool or crypto-miner image deployed</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1610</append>
+    </rule>
+
+</root>

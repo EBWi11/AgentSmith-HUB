@@ -10,6 +10,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/smith_agent"
 	"context"
 	"flag"
 	"fmt"
@@ -52,8 +53,6 @@ func main() {
 		logger.Error("load hub config", "error", err)
 		return
 	}
-	// Register llmCall builtin plugin only when config has llm_api_key set
-	plugin.RegisterLLMCallIfConfigured()
 
 	if *isLeader {
 		// Initialize Redis-based sample manager (stores component data samples)
@@ -68,6 +67,22 @@ func main() {
 		logger.Error("failed to connect redis, hub will exit", "error", err)
 		os.Exit(1)
 	}
+
+	// Sync LLM config in cluster: leader writes from config to Redis, followers read from Redis
+	if *isLeader {
+		if strings.TrimSpace(common.Config.LLMApiKey) != "" {
+			_ = api.WriteLLMConfigToRedis(common.Config.LLMApiKey, common.Config.LLMBaseURL)
+		}
+	} else {
+		if ak, bu, err := api.ReadLLMConfigFromRedis(); err == nil && strings.TrimSpace(ak) != "" {
+			common.Config.LLMApiKey = ak
+			if bu != "" {
+				common.Config.LLMBaseURL = bu
+			}
+		}
+	}
+	plugin.RegisterLLMCallIfConfigured()
+	smith_agent.InitIfLLMAvailable()
 
 	// Detect local IP & init cluster manager
 	ip, _ := common.GetLocalIP()
@@ -170,6 +185,8 @@ func main() {
 
 		loadLocalComponents()
 		loadLocalProjects()
+
+		smith_agent.StartInputAnalysisLoop()
 
 		common.InitClusterSystemManager()
 		_ = cluster.GlobalClusterManager.Start()
