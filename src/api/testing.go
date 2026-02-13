@@ -194,8 +194,13 @@ func testRuleset(c echo.Context) error {
 	}()
 
 	// Send test data in order to preserve sequence semantics.
-	for _, event := range testEvents {
+	// For batched inputs, add a small inter-event delay to better simulate
+	// real stream ingestion timing in test mode.
+	for i, event := range testEvents {
 		inputCh <- event
+		if i < len(testEvents)-1 {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 	// Collect results with timeout
