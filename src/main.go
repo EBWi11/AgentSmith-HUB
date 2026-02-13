@@ -10,6 +10,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/smith_agent"
 	"context"
 	"flag"
 	"fmt"
@@ -81,6 +82,7 @@ func main() {
 		}
 	}
 	plugin.RegisterLLMCallIfConfigured()
+	smith_agent.InitIfLLMAvailable()
 
 	// Detect local IP & init cluster manager
 	ip, _ := common.GetLocalIP()
@@ -183,6 +185,8 @@ func main() {
 
 		loadLocalComponents()
 		loadLocalProjects()
+
+		smith_agent.StartInputAnalysisLoop()
 
 		common.InitClusterSystemManager()
 		_ = cluster.GlobalClusterManager.Start()
