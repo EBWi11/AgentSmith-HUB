@@ -2003,6 +2003,10 @@ func (r *Ruleset) cleanup() {
 		r.CacheForClassify.Close()
 		r.CacheForClassify = nil
 	}
+	if r.SequenceCache != nil {
+		r.SequenceCache.Close()
+		r.SequenceCache = nil
+	}
 	if r.cepValueStore != nil {
 		_ = r.cepValueStore.Close()
 		r.cepValueStore = nil
@@ -2121,6 +2125,55 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 
 	// Initialize regex result cache
 	newRuleset.RegexResultCache = NewRegexResultCache(1000) // Default capacity: 1000 entries
+
+	// Initialize CEP state manager if any rule has sequences
+	hasSequences := false
+	seqUseLocal := -1 // -1=unset, 0=false, 1=true
+	for _, rule := range newRuleset.Rules {
+		for _, seq := range rule.SequenceMap {
+			hasSequences = true
+			localVal := 0
+			if seq.LocalCache {
+				localVal = 1
+			}
+			if seqUseLocal == -1 {
+				seqUseLocal = localVal
+			}
+		}
+	}
+	if hasSequences {
+		useLocalCache := seqUseLocal == 1
+		if useLocalCache && newRuleset.SequenceCache == nil {
+			var err error
+			newRuleset.SequenceCache, err = ristretto.NewCache(&ristretto.Config[string, *SequenceState]{
+				NumCounters: 1_000_000,
+				MaxCost:     1024 * 1024 * 32, // 32MB
+				BufferItems: 64,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sequence local cache: %w", err)
+			}
+		}
+		newRuleset.seqStateManager = NewCEPStateManager(useLocalCache, newRuleset.SequenceCache)
+		if useLocalCache {
+			var err error
+			newRuleset.cepValueStore, err = NewPebbleCEPValueStore(newRuleset.RulesetID)
+			if err != nil {
+				if newRuleset.SequenceCache != nil {
+					newRuleset.SequenceCache.Close()
+					newRuleset.SequenceCache = nil
+				}
+				return nil, fmt.Errorf("failed to initialize local CEP value store: %w", err)
+			}
+		}
+	}
+
+	// Copy absence sequence flag and build rule lookup map
+	newRuleset.hasAbsenceSequences = existing.hasAbsenceSequences
+	newRuleset.ruleByID = make(map[string]*Rule, len(newRuleset.Rules))
+	for i := range newRuleset.Rules {
+		newRuleset.ruleByID[newRuleset.Rules[i].ID] = &newRuleset.Rules[i]
+	}
 
 	return newRuleset, nil
 }
