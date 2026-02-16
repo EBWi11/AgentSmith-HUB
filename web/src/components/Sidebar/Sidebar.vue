@@ -427,7 +427,7 @@
                     
                     <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
                       <svg class="w-3 h-3 mr-1.5 transition-transform duration-200 flex-shrink-0 text-yellow-600"
-                           :class="{ 'rotate-90': !collapsedFolders[folderName] }"
+                           :class="{ 'rotate-90': collapsedFolders[folderName] === false }"
                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                       </svg>
@@ -477,7 +477,7 @@
                   </div>
                   
                   <!-- Folder contents (rulesets inside) -->
-                  <div v-if="!collapsedFolders[folderName]" class="relative">
+                  <div v-if="collapsedFolders[folderName] === false" class="relative">
                     <div v-for="(item, index) in folderItems" :key="item.id"
                          class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                          :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === 'rulesets' }"
@@ -2236,6 +2236,9 @@ onMounted(async () => {
     search.value = restoredState.search
   }
   
+  // Restore ruleset folder collapse state
+  restoreFolderCollapseState()
+  
   // Listen for cache clear events to refresh data immediately
   const handleCacheCleared = (event) => {
     const { reason } = event.detail || {};
@@ -2694,7 +2697,28 @@ async function moveRulesetToFolder(rulesetId, targetFolder) {
 }
 
 function toggleFolderCollapse(folderName) {
-  collapsedFolders[folderName] = !collapsedFolders[folderName]
+  collapsedFolders[folderName] = collapsedFolders[folderName] === false ? true : false
+  saveFolderCollapseState()
+}
+
+function saveFolderCollapseState() {
+  try {
+    localStorage.setItem('agentsmith_folder_collapsed', JSON.stringify({ ...collapsedFolders }))
+  } catch (e) {
+    // Silently ignore storage errors
+  }
+}
+
+function restoreFolderCollapseState() {
+  try {
+    const saved = localStorage.getItem('agentsmith_folder_collapsed')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      Object.assign(collapsedFolders, parsed)
+    }
+  } catch (e) {
+    // Silently ignore parse errors
+  }
 }
 
 function toggleFolderMenu(folderName) {
