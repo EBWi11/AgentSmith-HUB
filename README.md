@@ -17,7 +17,7 @@ Process, enrich, detect, and respond — all in one place, with simple XML-based
 If you work in security operations, you probably deal with massive volumes of raw logs and alerts every day. You need to normalize, enrich, correlate, and route them — and ideally detect threats in real time. AgentSmith-HUB is built to handle all of this in a single platform:
 
 - **No coding required** — Write detection and processing logic in simple, readable XML rules
-- **Blazing fast** — 40,000+ messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md))
+- **Blazing fast** — 3.90M messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md))
 - **All-in-one pipeline** — Input, detection, enrichment, transformation, and output in a unified flow
 - **CEP built-in** — Detect ordered event sequences, absence patterns, and multi-source correlations over time
 - **Scale horizontally** — Built-in cluster mode with leader/follower architecture
@@ -237,6 +237,8 @@ K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
 
 - [Complete Guide](docs/agentsmith-hub-guide.md) | [Guide (Chinese)](docs/agentsmith-hub-guide-zh.md)
 - [Performance Testing Report](docs/performance-testing-report.md)
+- [Performance Test Scripts](scripts/README.md) - Kafka producer performance testing tools
+- [Grafana Dashboard](grafana-kafka-dashboard.json) - Monitor Kafka QPS and lag
 
 ## License
 

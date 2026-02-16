@@ -113,7 +113,7 @@ RULESET.test -> RULESET.test_exclude
 ## Performance Test Results
 
 ### Throughput Performance
-- **Average QPS**: 40,000 messages per second
+- **Average QPS**: 3.90M messages per second (3,900,000 msg/s)
 - **Average CPU Utilization**: 200%
-- **Average Memory Usage**: 350MB
+- **Average Memory Usage**: 85MB
 - **Latency**: Sub-millisecond processing time per message (with minor variations) 
