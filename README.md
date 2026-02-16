@@ -237,8 +237,6 @@ K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
 
 - [Complete Guide](docs/agentsmith-hub-guide.md) | [Guide (Chinese)](docs/agentsmith-hub-guide-zh.md)
 - [Performance Testing Report](docs/performance-testing-report.md)
-- [Performance Test Script](docs/kafka_producer_perf_test.py) - Kafka producer performance testing tool
-- [Grafana Dashboard](docs/grafana-kafka-dashboard.json) - Monitor Kafka QPS and lag
 
 ## License
 
