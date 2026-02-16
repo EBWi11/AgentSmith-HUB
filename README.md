@@ -236,7 +236,6 @@ K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
 ## Documentation
 
 - [Complete Guide](docs/agentsmith-hub-guide.md) | [Guide (Chinese)](docs/agentsmith-hub-guide-zh.md)
-- [CEP Sequence Design](docs/cep-sequence-design.md)
 - [Performance Testing Report](docs/performance-testing-report.md)
 
 ## License
