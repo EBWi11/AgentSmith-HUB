@@ -304,6 +304,8 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 
 		state := r.seqStateManager.GetState(key)
 		if state == nil {
+			logger.Warn("Absence scanner: state already evicted from cache",
+				"rulesetID", r.RulesetID, "ruleID", info.RuleID, "key", key)
 			r.seqStateManager.UnlockKey(key)
 			r.seqStateManager.CleanupKeyLock(key)
 			continue // Already cleaned up
@@ -1145,7 +1147,10 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 	dataSnapshot := r.snapshotEventData(data, matchedEventIDs, &seq)
 	var valueRef string
 	if seq.LocalCache && r.cepValueStore != nil {
-		expiresAtNs := state.ExpiresAt * int64(time.Millisecond)
+		// Add grace period so the absence scanner can still read the snapshot
+		// after the sequence window expires (same reason as ristretto TTL grace).
+		expiresAtMs := state.ExpiresAt + int64(localCacheTTLGracePeriod)*1000
+		expiresAtNs := expiresAtMs * int64(time.Millisecond)
 		if ref, err := r.cepValueStore.PutSnapshot(dataSnapshot, expiresAtNs); err == nil {
 			valueRef = ref
 			// Keep only pointer in memory for local_cache mode.

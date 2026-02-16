@@ -237,7 +237,14 @@ func (m *CEPStateManager) DeleteState(key string) {
 }
 
 func timingWheelSlot(expiresAtMs int64) int {
-	slot := (expiresAtMs / 1000) % int64(TimingWheelSlots)
+	// Round up to the next second boundary so the scanner processes this slot
+	// AFTER the key has definitely expired. Without rounding up, the key lands
+	// in the slot for the truncated second, and the scanner may visit that slot
+	// while nowMs < ExpiresAt (because ExpiresAt has sub-second precision).
+	// By the next second the scanner moves to a different slot and the key is
+	// never found.
+	sec := (expiresAtMs + 999) / 1000
+	slot := sec % int64(TimingWheelSlots)
 	if slot < 0 {
 		slot += int64(TimingWheelSlots)
 	}
@@ -511,7 +518,11 @@ func (m *CEPStateManager) setLocalState(key string, state *SequenceState, ttlSec
 	if m.cache == nil {
 		return
 	}
-	m.cache.SetWithTTL(key, state, 1, time.Duration(ttlSeconds)*time.Second)
+	// Add grace period so the absence scanner can still read the state after
+	// the sequence window expires. Without this, ristretto evicts the entry
+	// at exactly the same moment the scanner tries to read it.
+	cacheTTL := time.Duration(ttlSeconds+localCacheTTLGracePeriod) * time.Second
+	m.cache.SetWithTTL(key, state, 1, cacheTTL)
 	m.cache.Wait()
 }
 
@@ -587,6 +598,13 @@ const (
 
 	// MaxPartialMatchesWarning logs a warning when partial matches exceed this count.
 	MaxPartialMatchesWarning = 10000
+
+	// localCacheTTLGracePeriod is extra seconds added to ristretto cache TTL beyond the
+	// sequence's "within" duration. This ensures the absence scanner (which fires at
+	// ExpiresAt) can still read the state from cache before ristretto evicts it.
+	// Without this grace period, the cache TTL and ExpiresAt expire simultaneously,
+	// causing a race where the absence scanner finds the state already evicted.
+	localCacheTTLGracePeriod = 30
 )
 
 // GetOrCreateState atomically gets or creates a SequenceState for the given key.
@@ -595,6 +613,16 @@ func (m *CEPStateManager) GetOrCreateState(key string, withinMs int64, ttlSecond
 	if m.useLocalCache {
 		// Per-key lock is held by caller; no global lock needed for local cache.
 		state := m.getLocalState(key)
+		if state != nil && time.Now().UnixMilli() > state.ExpiresAt {
+			// The sequence window has expired. The ristretto entry still exists
+			// due to the grace period (kept longer for the absence scanner), but
+			// new events should not match against a stale state. Delete and
+			// create a fresh state. The absence scanner uses GetState (not
+			// GetOrCreateState), so it will still see the entry if it runs
+			// before this point.
+			m.deleteLocalState(key)
+			state = nil
+		}
 		if state == nil {
 			nowMs := time.Now().UnixMilli()
 			state = NewSequenceState(nowMs, nowMs+withinMs)
