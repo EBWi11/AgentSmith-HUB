@@ -427,7 +427,7 @@
                     
                     <div class="flex items-center min-w-0 flex-1 pl-8 pr-3">
                       <svg class="w-3 h-3 mr-1.5 transition-transform duration-200 flex-shrink-0 text-yellow-600"
-                           :class="{ 'rotate-90': collapsedFolders[folderName] === false }"
+                           :class="{ 'rotate-90': collapsedFolders[folderName] === false || (search && search.trim() && folderItems.length > 0) }"
                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                       </svg>
@@ -477,7 +477,7 @@
                   </div>
                   
                   <!-- Folder contents (rulesets inside) -->
-                  <div v-if="collapsedFolders[folderName] === false" class="relative">
+                  <div v-if="collapsedFolders[folderName] === false || (search && search.trim() && folderItems.length > 0)" class="relative">
                     <div v-for="(item, index) in folderItems" :key="item.id"
                          class="relative flex items-center justify-between py-1 hover:bg-gray-100 rounded-md cursor-pointer group"
                          :class="{ 'bg-blue-50': selected && selected.id === item.id && selected.type === 'rulesets' }"
@@ -2612,10 +2612,27 @@ function getOrganizedRulesets() {
     }
   }
 
-  // Include empty folders from rulesetFolders
-  for (const f of rulesetFolders.value) {
-    if (!folders[f.name]) {
-      folders[f.name] = []
+  // When searching, also include all rulesets from folders whose name matches the query
+  if (search.value && search.value.trim()) {
+    const query = search.value.toLowerCase()
+    const unfilteredRulesets = items.rulesets || []
+    for (const item of unfilteredRulesets) {
+      const folder = item.folder || ''
+      if (folder && folder.toLowerCase().includes(query)) {
+        if (!folders[folder]) folders[folder] = []
+        if (!folders[folder].some(existing => (existing.id || existing.name) === (item.id || item.name))) {
+          folders[folder].push(item)
+        }
+      }
+    }
+  }
+
+  // Include empty folders from rulesetFolders (only when not searching)
+  if (!search.value || !search.value.trim()) {
+    for (const f of rulesetFolders.value) {
+      if (!folders[f.name]) {
+        folders[f.name] = []
+      }
     }
   }
 
