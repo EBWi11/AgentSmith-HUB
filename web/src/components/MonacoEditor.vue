@@ -3309,6 +3309,34 @@ function getXmlAttributeValueCompletions(context, range) {
     });
   }
   
+  // append field attribute inside <event> - suggest _@ prefix for sequence context
+  else if (context.currentTag === 'append' && context.currentAttribute === 'field' &&
+           context.parentTags.includes('event')) {
+    suggestions.push({
+      label: '_@key',
+      kind: monaco.languages.CompletionItemKind.Reference,
+      documentation: 'Write to sequence context — saves a value that later events can read with _@key in their <check> values. Use dot notation for nested keys (e.g. _@file.current)',
+      insertText: '_@',
+      range: range,
+      sortText: '00_seq_ctx'
+    });
+    // Also provide regular field suggestions
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach(field => {
+        if (!suggestions.some(s => s.label === field)) {
+          suggestions.push({
+            label: field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Sample data field: ${field}`,
+            insertText: field,
+            range: range,
+            sortText: `1_${field}`
+          });
+        }
+      });
+    }
+  }
+
   // Field name suggestions (common fields + dynamic fields from sample data)
   // Handle multiple field-related attributes
   else if (context.currentAttribute === 'field' || 
@@ -3788,7 +3816,7 @@ function getXmlTagNameCompletions(context, range, fullText) {
     ];
     suggestions.push(...sequenceChildTags);
   } else if (parentTag === 'event') {
-    // event内部 - check, checklist, threshold标签
+    // event内部 - check, checklist, threshold, append标签
     const eventChildTags = [
       {
         label: 'check',
@@ -3813,6 +3841,14 @@ function getXmlTagNameCompletions(context, range, fullText) {
         insertText: 'threshold group_by="user_id" range="5m">10</threshold',
         range: range,
         sortText: '3_threshold'
+      },
+      {
+        label: 'append',
+        kind: monaco.languages.CompletionItemKind.Property,
+        documentation: 'Write to sequence context (use _@ prefix for cross-event field sharing, e.g. _@key)',
+        insertText: 'append field="_@key">_$field_name</append',
+        range: range,
+        sortText: '4_append'
       }
     ];
     suggestions.push(...eventChildTags);
@@ -3969,6 +4005,40 @@ function getXmlTagContentCompletions(context, range, fullText) {
         insertText: '_$' + dynamicFieldKeys.value[0],
         range: range,
         sortText: '01_field_ref'
+      });
+    }
+
+    // Sequence context reference (only meaningful inside <event>)
+    if (context.parentTags.includes('event')) {
+      suggestions.push({
+        label: '_@context_key',
+        kind: monaco.languages.CompletionItemKind.Reference,
+        documentation: 'Read from sequence context — use to match a value saved by a previous event\'s <append field="_@key">. E.g. _@file.current',
+        insertText: '_@',
+        range: range,
+        sortText: '02_seq_ctx_ref'
+      });
+    }
+  }
+
+  // append标签内容建议 - 在event内部时提供sequence context相关提示
+  if (context.currentTag === 'append') {
+    // _$ field reference (always useful)
+    suggestions.push(
+      { label: '_$ORIDATA', kind: monaco.languages.CompletionItemKind.Variable, documentation: 'Original data reference', insertText: '_$ORIDATA', range: range, sortText: '00_ORIDATA' }
+    );
+    if (dynamicFieldKeys.value && dynamicFieldKeys.value.length > 0) {
+      dynamicFieldKeys.value.forEach((field, index) => {
+        if (!suggestions.some(s => s.label === '_$' + field)) {
+          suggestions.push({
+            label: '_$' + field,
+            kind: monaco.languages.CompletionItemKind.Field,
+            documentation: `Reference current event field: ${field}`,
+            insertText: '_$' + field,
+            range: range,
+            sortText: `01_${String(index).padStart(3, '0')}_${field}`
+          });
+        }
       });
     }
   }

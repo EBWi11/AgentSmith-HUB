@@ -2677,3 +2677,258 @@ func TestCEP_Execute_PebbleValueRef_Integration(t *testing.T) {
 		t.Errorf("expected transfer dest=external-server, got %v", transferEvt["dest"])
 	}
 }
+
+// TestCEP_AbsenceScanner_RealTimer_EndToEnd tests the full absence pipeline
+// by directly calling EngineCheck + scanAbsenceTimeouts (no goroutines/tickers).
+func TestCEP_AbsenceScanner_RealTimer_EndToEnd(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="r1" name="absence real timer">
+			<sequence within="6s" group_by="ip" local_cache="true">
+				<event id="test1">
+					<check type="EQU" field="city">Chicago</check>
+				</event>
+				<event id="test2">
+					<check type="EQU" field="city">Houston</check>
+				</event>
+				<condition>test1 -> !test2</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	if !rs.hasAbsenceSequences {
+		t.Fatal("expected hasAbsenceSequences=true")
+	}
+	if rs.seqStateManager == nil {
+		t.Fatal("expected seqStateManager to be initialized")
+	}
+	if rs.ruleByID == nil || rs.ruleByID["r1"] == nil {
+		t.Fatal("expected ruleByID to contain r1")
+	}
+
+	// Set up downstream channel to capture absence alerts
+	outputCh := make(chan map[string]interface{}, 100)
+	rs.DownStream = map[string]*chan map[string]interface{}{"test_out": &outputCh}
+
+	// Step 1: Send event directly via EngineCheck
+	results := rs.EngineCheck(map[string]interface{}{
+		"city": "Chicago",
+		"ip":   "10.0.0.1",
+	})
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results after Chicago event, got %d", len(results))
+	}
+	time.Sleep(50 * time.Millisecond) // ristretto async
+
+	// Initialize the scanner's lastProcessedSecond BEFORE waiting.
+	// In production, the scanner runs via ticker from Start(), so
+	// lastProcessedSecond gets initialized early. Here we simulate that.
+	rs.scanAbsenceTimeouts()
+
+	// Step 2: Verify state was created
+	stateKey := BuildStateKey("test_ruleset:r1", "10.0.0.1|")
+	state := rs.seqStateManager.GetState(stateKey)
+	if state == nil {
+		t.Fatal("expected state to exist after Chicago event")
+	}
+	t.Logf("State ExpiresAt=%d, now=%d, diff=%dms",
+		state.ExpiresAt, time.Now().UnixMilli(), state.ExpiresAt-time.Now().UnixMilli())
+
+	// Step 3: Wait for the within window to expire
+	waitMs := state.ExpiresAt - time.Now().UnixMilli() + 1500 // 1.5s extra
+	if waitMs > 0 {
+		t.Logf("Waiting %dms for within window to expire...", waitMs)
+		time.Sleep(time.Duration(waitMs) * time.Millisecond)
+	}
+
+	nowMs := time.Now().UnixMilli()
+	t.Logf("After wait: now=%d, ExpiresAt=%d, expired=%v", nowMs, state.ExpiresAt, nowMs >= state.ExpiresAt)
+
+	// Step 4: Verify state still exists in cache (grace period)
+	stateCheck := rs.seqStateManager.GetState(stateKey)
+	if stateCheck == nil {
+		t.Fatal("State was evicted from cache before scanner could read it (TTL too short)")
+	}
+	t.Log("State still in cache after within expired (grace period working)")
+
+	// Step 5: Directly call scanAbsenceTimeouts
+	t.Log("Calling scanAbsenceTimeouts directly...")
+	rs.scanAbsenceTimeouts()
+
+	// Step 6: Check if alert was sent to downstream
+	select {
+	case res := <-outputCh:
+		t.Logf("SUCCESS: Got absence alert: %v", res)
+	default:
+		// Check if the key was even found by GetExpiredAbsenceKeys
+		nowMs2 := time.Now().UnixMilli()
+		expired := rs.seqStateManager.GetExpiredAbsenceKeys(nowMs2)
+		t.Logf("GetExpiredAbsenceKeys returned %d keys", len(expired))
+		stateAfter := rs.seqStateManager.GetState(stateKey)
+		t.Logf("State after scan: %v", stateAfter)
+		t.Fatal("FAIL: No absence alert received on downstream channel")
+	}
+}
+
+// TestCEP_AbsenceScanner_FullStart_EndToEnd tests the absence pipeline
+// with Start() running the real scanner ticker + goroutines.
+func TestCEP_AbsenceScanner_FullStart_EndToEnd(t *testing.T) {
+	xml := `<root name="test" type="DETECTION">
+		<rule id="r1" name="absence full start">
+			<sequence within="6s" group_by="ip" local_cache="true">
+				<event id="test1">
+					<check type="EQU" field="city">Chicago</check>
+				</event>
+				<event id="test2">
+					<check type="EQU" field="city">Houston</check>
+				</event>
+				<condition>test1 -> !test2</condition>
+			</sequence>
+		</rule>
+	</root>`
+
+	rs := buildTestRuleset(t, xml)
+
+	inputCh := make(chan map[string]interface{}, 100)
+	outputCh := make(chan map[string]interface{}, 100)
+	rs.UpStream = map[string]*chan map[string]interface{}{"test_in": &inputCh}
+	rs.DownStream = map[string]*chan map[string]interface{}{"test_out": &outputCh}
+
+	err := rs.Start()
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer rs.Stop()
+
+	// Send event matching stage 1
+	inputCh <- map[string]interface{}{
+		"city": "Chicago",
+		"ip":   "10.0.0.1",
+	}
+
+	// Wait for within window + scanner tick + buffer
+	timeout := time.After(12 * time.Second)
+	select {
+	case res := <-outputCh:
+		t.Logf("SUCCESS: Got absence alert via full Start(): %v", res)
+		if res["city"] != "Chicago" {
+			t.Errorf("expected city=Chicago, got %v", res["city"])
+		}
+	case <-timeout:
+		t.Fatal("TIMEOUT: No absence alert received via full Start()")
+	}
+}
+
+// TestCEP_AbsenceScanner_NewFromExisting_EndToEnd tests the absence pipeline
+// using NewFromExisting (the production path for PNS instances).
+func TestCEP_AbsenceScanner_NewFromExisting_EndToEnd(t *testing.T) {
+	xmlBytes := []byte(`<root name="test" type="DETECTION">
+		<rule id="r1" name="absence via NewFromExisting">
+			<sequence within="6s" group_by="ip" local_cache="true">
+				<event id="test1">
+					<check type="EQU" field="city">Chicago</check>
+				</event>
+				<event id="test2">
+					<check type="EQU" field="city">Houston</check>
+				</event>
+				<condition>test1 -> !test2</condition>
+			</sequence>
+		</rule>
+	</root>`)
+
+	// Step 1: Parse and build the "existing" ruleset (same as production)
+	existing, err := ParseRuleset(xmlBytes)
+	if err != nil {
+		t.Fatalf("ParseRuleset failed: %v", err)
+	}
+	existing.RulesetID = "test_ruleset"
+	existing.IsDetection = true
+	existing.RawConfig = string(xmlBytes)
+
+	err = RulesetBuild(existing)
+	if err != nil {
+		t.Fatalf("RulesetBuild failed: %v", err)
+	}
+	t.Cleanup(func() { existing.cleanup() })
+
+	// Verify existing ruleset has absence flag
+	t.Logf("existing: hasAbsenceSequences=%v, seqStateManager=%v, ruleByID=%v, cepValueStore=%v",
+		existing.hasAbsenceSequences, existing.seqStateManager != nil,
+		len(existing.ruleByID), existing.cepValueStore != nil)
+
+	// Step 2: Create instance via NewFromExisting (the production path)
+	instance, err := NewFromExisting(existing, "TEST.project1")
+	if err != nil {
+		t.Fatalf("NewFromExisting failed: %v", err)
+	}
+	t.Cleanup(func() { instance.cleanup() })
+
+	// Verify the instance has all necessary CEP components
+	t.Logf("instance: hasAbsenceSequences=%v, seqStateManager=%v, ruleByID=%v, cepValueStore=%v",
+		instance.hasAbsenceSequences, instance.seqStateManager != nil,
+		len(instance.ruleByID), instance.cepValueStore != nil)
+
+	if !instance.hasAbsenceSequences {
+		t.Fatal("instance: hasAbsenceSequences should be true")
+	}
+	if instance.seqStateManager == nil {
+		t.Fatal("instance: seqStateManager should not be nil")
+	}
+	if instance.ruleByID == nil || instance.ruleByID["r1"] == nil {
+		t.Fatal("instance: ruleByID should contain r1")
+	}
+	if instance.cepValueStore == nil {
+		t.Fatal("instance: cepValueStore should not be nil")
+	}
+
+	// Verify rule's SequenceMap is accessible
+	rule := instance.ruleByID["r1"]
+	seqCount := 0
+	for seqID, seq := range rule.SequenceMap {
+		seqCount++
+		t.Logf("instance rule r1: seqID=%d, condition=%q, hasAbsence=%v, localCache=%v, withinMs=%d",
+			seqID, seq.Condition.Raw, seq.Condition.HasAbsenceStages(), seq.LocalCache, seq.WithinMs)
+	}
+	if seqCount == 0 {
+		t.Fatal("instance: rule r1 has no sequences in SequenceMap")
+	}
+
+	// Step 3: Set up channels and start
+	inputCh := make(chan map[string]interface{}, 100)
+	outputCh := make(chan map[string]interface{}, 100)
+	instance.UpStream = map[string]*chan map[string]interface{}{"test_in": &inputCh}
+	instance.DownStream = map[string]*chan map[string]interface{}{"test_out": &outputCh}
+
+	err = instance.Start()
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer instance.Stop()
+
+	// Step 4: Send event
+	inputCh <- map[string]interface{}{
+		"city": "Chicago",
+		"ip":   "10.0.0.1",
+	}
+
+	// Step 5: Wait for absence alert
+	timeout := time.After(12 * time.Second)
+	select {
+	case res := <-outputCh:
+		t.Logf("SUCCESS: Got absence alert via NewFromExisting: %v", res)
+		if res["city"] != "Chicago" {
+			t.Errorf("expected city=Chicago, got %v", res["city"])
+		}
+	case <-timeout:
+		// Debug: check state
+		stateKey := BuildStateKey("test_ruleset:r1", "10.0.0.1|")
+		state := instance.seqStateManager.GetState(stateKey)
+		if state == nil {
+			t.Log("DEBUG: state is nil (evicted or never created)")
+		} else {
+			t.Logf("DEBUG: state exists, ExpiresAt=%d, now=%d", state.ExpiresAt, time.Now().UnixMilli())
+		}
+		t.Fatal("TIMEOUT: No absence alert received via NewFromExisting")
+	}
+}
