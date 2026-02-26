@@ -1740,6 +1740,46 @@ func TestCEP_Execute_SequenceContextReference_WithAtPrefix(t *testing.T) {
 	}
 }
 
+func TestCEP_SequenceContext_PluginAppendWriteRead(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="ctx plugin append"><sequence within="10m" group_by="user_id" local_cache="true"><event id="download"><check type="EQU" field="event_type">download</check><append type="PLUGIN" field="_@file.encoded">base64Encode(file_path)</append></event><event id="exec"><check type="EQU" field="event_type">exec</check><check type="EQU" field="encoded_path">_@file.encoded</check></event><condition>download -> exec</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	if out := rs.EngineCheck(map[string]interface{}{"user_id": "u-p1", "event_type": "download", "file_path": "/tmp/a"}); len(out) != 0 {
+		t.Fatalf("expected no hit after stage1, got %d", len(out))
+	}
+	out := rs.EngineCheck(map[string]interface{}{"user_id": "u-p1", "event_type": "exec", "encoded_path": "L3RtcC9h"})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 hit when plugin-written _@ matches, got %d", len(out))
+	}
+}
+
+func TestCEP_SequenceContext_GroupByLookupWhenFirstPassHasNoMatches(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="ctx first pass empty"><sequence within="10m" group_by="user_id" local_cache="true"><event id="a"><check type="EQU" field="event_type">a</check><append field="_@token">_$token</append></event><event id="b"><check type="EQU" field="token_in">_@token</check></event><condition>a -> b</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"user_id": "u-fallback-1", "event_type": "a", "token": "tok-1"})
+	out := rs.EngineCheck(map[string]interface{}{"user_id": "u-fallback-1", "token_in": "tok-1"})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 hit when state is recovered by group_by lookup, got %d", len(out))
+	}
+}
+
+func TestCEP_SequenceContext_ClearedAfterSequenceCompletion(t *testing.T) {
+	xml := `<root name="test" type="DETECTION"><rule id="r1" name="ctx cleanup"><sequence within="10m" group_by="user_id" local_cache="true"><event id="download"><check type="EQU" field="event_type">download</check><append field="_@file.current">_$file_path</append></event><event id="exec"><check type="EQU" field="event_type">exec</check><check type="EQU" field="file_path">_@file.current</check></event><condition>download -> exec</condition></sequence></rule></root>`
+	rs := buildTestRuleset(t, xml)
+
+	rs.EngineCheck(map[string]interface{}{"user_id": "u-clean-1", "event_type": "download", "file_path": "/tmp/clean-a"})
+	firstHit := rs.EngineCheck(map[string]interface{}{"user_id": "u-clean-1", "event_type": "exec", "file_path": "/tmp/clean-a"})
+	if len(firstHit) != 1 {
+		t.Fatalf("expected 1 hit for first completion, got %d", len(firstHit))
+	}
+
+	secondHit := rs.EngineCheck(map[string]interface{}{"user_id": "u-clean-1", "event_type": "exec", "file_path": "/tmp/clean-a"})
+	if len(secondHit) != 0 {
+		t.Fatalf("expected 0 hits after completion cleanup, got %d", len(secondHit))
+	}
+}
+
 // ############################################################################
 //
 //  PART 4: Value Store (Pebble)
