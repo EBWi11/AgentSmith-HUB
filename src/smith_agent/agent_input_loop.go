@@ -7,6 +7,7 @@ import (
 	"AgentSmith-HUB/project"
 	"context"
 	"encoding/json"
+	"sort"
 	"time"
 )
 
@@ -124,13 +125,13 @@ func runProgressiveAnalysis(startedAt time.Time) {
 	stored := 0
 
 	project.ForEachInput(func(inputId string, _ *input.Input) bool {
-		latest, count := getLatestInputSample(inputId)
+		samples, count := getInputSamplesForAnalysis(inputId)
 		decision := shouldAnalyzeInput(startedAt, now, inputId, count)
 		if !decision.ShouldAnalyze {
 			return true
 		}
 
-		if analyzeAndStoreInput(ctx, inputId, latest, count, decision.Stage) {
+		if analyzeAndStoreInput(ctx, inputId, samples, count, decision.Stage) {
 			stored++
 			logger.Info("smith_agent input analysis: updated",
 				"input", inputId,
@@ -244,7 +245,7 @@ func normalizeStage(stage string, sampleCount int) analysisStage {
 	}
 }
 
-func getLatestInputSample(inputId string) (*common.SampleData, int) {
+func getInputSamplesForAnalysis(inputId string) ([]common.SampleData, int) {
 	sampler := common.GetSampler("input." + inputId)
 	if sampler == nil {
 		return nil, 0
@@ -255,29 +256,42 @@ func getLatestInputSample(inputId string) (*common.SampleData, int) {
 		return nil, 0
 	}
 
-	// Find the latest sample across all sequences
-	var latest *common.SampleData
+	all := make([]common.SampleData, 0, 128)
 	total := 0
 	for _, list := range samplesBySeq {
 		total += len(list)
-		for i := range list {
-			s := &list[i]
-			if latest == nil || s.Timestamp.After(latest.Timestamp) {
-				latest = s
-			}
-		}
+		all = append(all, list...)
 	}
-	return latest, total
+	if len(all) == 0 {
+		return nil, total
+	}
+
+	// Keep deterministic chronological order for LLM context.
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Timestamp.Before(all[j].Timestamp)
+	})
+	return all, total
 }
 
-// analyzeAndStoreInput runs architect analysis on a sample of an input
+// analyzeAndStoreInput runs architect analysis on samples of an input
 // and stores the result in Redis. Returns true if analysis was stored successfully.
-func analyzeAndStoreInput(ctx context.Context, inputId string, latest *common.SampleData, sampleCount int, stage analysisStage) bool {
-	if latest == nil || latest.Data == nil {
+func analyzeAndStoreInput(ctx context.Context, inputId string, samples []common.SampleData, sampleCount int, stage analysisStage) bool {
+	if len(samples) == 0 {
 		return false
 	}
 
-	sampleJSON, err := json.Marshal(latest.Data)
+	// Pass all collected samples to help the model infer stable field semantics.
+	samplePayload := make([]interface{}, 0, len(samples))
+	for i := range samples {
+		if samples[i].Data != nil {
+			samplePayload = append(samplePayload, samples[i].Data)
+		}
+	}
+	if len(samplePayload) == 0 {
+		return false
+	}
+
+	sampleJSON, err := json.Marshal(samplePayload)
 	if err != nil {
 		logger.Warn("smith_agent input analysis: marshal sample failed", "input", inputId, "error", err)
 		return false

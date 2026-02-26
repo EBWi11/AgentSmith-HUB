@@ -49,7 +49,7 @@ func Ready() bool {
 
 // AnalysisResult holds the architect analysis output.
 type AnalysisResult struct {
-	ArchitectOutput string // Summary, field meanings, classification
+	ArchitectOutput string // Field meanings output for engineers
 }
 
 // AnalyzeData runs the architect data analysis (single step).

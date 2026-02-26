@@ -11,6 +11,13 @@ Your task is to understand each log precisely and produce structured context for
 2) Describe each field in JSON, <=20 words per field, concise and factual.
 3) Classify the log using the taxonomy below.
 
+Execution guidance (important):
+- Field understanding is the top priority. Keep field_meanings accurate and practical for engineers.
+- Infer field semantics from ALL provided samples, not a single event.
+- For fields with varying values (e.g., status/action/code), explain what the field represents, not one specific value.
+- Prefer explicit, domain-meaningful definitions over generic wording.
+- Use dot notation for nested fields (e.g., nginx.status, nginx.request_time).
+
 Classification taxonomy (category -> subcategory examples):
 - Network Traffic: Flow, Firewall, Proxy, DNS, HTTP, TLS, NetFlow, VPN, ZTNA, Bastion, RDP Gateway
 - Host Runtime: Process, CommandLine, Module, Kernel, Driver, Socket, Syslog
