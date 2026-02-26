@@ -576,8 +576,10 @@ export const useDataCacheStore = defineStore('dataCache', {
         
         if (cachedComponent) {
           // If it's a basic list item, we still need full details
-          // But we can skip the request if we already have full data
-          if (cachedComponent.raw) {
+          // But we can skip the request if we already have full data.
+          // Inputs carry dynamic llm_analysis data, so always fetch input detail
+          // to avoid serving stale cached rows from the list API.
+          if (cachedComponent.raw && type !== 'inputs') {
             return cachedComponent
           }
         }
