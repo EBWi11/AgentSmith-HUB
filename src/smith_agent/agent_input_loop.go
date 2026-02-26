@@ -13,49 +13,82 @@ import (
 const (
 	redisKeyPrefixInputAnalysis = "smith_agent:analysis:input:"
 	inputAnalysisTTLSeconds     = 30 * 24 * 3600 // 30 days
-	inputAnalysisInterval       = 24 * time.Hour
-	inputAnalysisNoDataInterval = 5 * time.Minute  // cold-start poll interval
-	inputAnalysisStartDelay     = 1 * time.Minute  // first run shortly after start
-	coldStartSampleThreshold    = 100              // require 100 samples before first analysis
+	inputAnalysisInterval       = 24 * time.Hour // full refresh interval
+	inputAnalysisPollInterval   = 5 * time.Minute
+	inputAnalysisStartDelay     = 1 * time.Minute
+
+	// Progressive cold-start strategy:
+	// - First result appears quickly with a small sample size.
+	// - If data is sparse, force first analysis after max wait.
+	firstAnalysisMinSamples = 5
+	firstAnalysisMaxWait    = 30 * time.Minute
+
+	// Progressive enhancement thresholds.
+	enhancedStageThreshold = 30
+	stableStageThreshold   = 100
+
+	// Re-analyze earlier when sample volume grows materially.
+	inputAnalysisEnhancementMinInterval = 1 * time.Hour
+	inputAnalysisSampleGrowthStep       = 10
 )
 
-// StartInputAnalysisLoop starts a goroutine that, when LLM is ready and node is leader,
-// runs a two-phase analysis loop:
-//
-// Phase 1 (Cold Start): For each input WITHOUT existing analysis in Redis, poll every 5 min
-// until >= 100 sample data points are accumulated, then run analysis and store.
-// Inputs that already have analysis in Redis are skipped (they'll be refreshed in Phase 2).
-//
-// Phase 2 (Steady State): Sleep 24h, then re-analyze ALL inputs with fresh sample data. Repeat.
+type analysisStage string
+
+const (
+	analysisStageInitial  analysisStage = "initial"
+	analysisStageEnhanced analysisStage = "enhanced"
+	analysisStageStable   analysisStage = "stable"
+)
+
+type inputAnalysisCache struct {
+	ArchitectOutput string `json:"ArchitectOutput"`
+	AnalyzedAt      string `json:"analyzed_at,omitempty"`
+	Stage           string `json:"stage,omitempty"`
+	SampleCount     int    `json:"sample_count,omitempty"`
+}
+
+func (c inputAnalysisCache) analyzedAtTime() time.Time {
+	if c.AnalyzedAt == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, c.AnalyzedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+type analyzeDecision struct {
+	ShouldAnalyze bool
+	Stage         analysisStage
+	Reason        string
+}
+
+// StartInputAnalysisLoop runs a progressive analysis loop:
+// 1) quick first analysis (small sample threshold or max wait),
+// 2) incremental enhancement as sample size grows,
+// 3) periodic full refresh every 24h.
 func StartInputAnalysisLoop() {
 	go func() {
 		time.Sleep(inputAnalysisStartDelay)
+		startedAt := time.Now()
 
-		// Phase 1: Cold start — for inputs without existing analysis,
-		// wait until they accumulate enough samples, then analyze.
 		for {
 			if !Ready() || !common.IsCurrentNodeLeader() {
-				time.Sleep(inputAnalysisNoDataInterval)
+				time.Sleep(inputAnalysisPollInterval)
 				continue
 			}
-			if runColdStartAnalysis() {
-				break // all inputs now have analysis (or no inputs exist)
-			}
-			time.Sleep(inputAnalysisNoDataInterval)
-		}
-
-		logger.Info("smith_agent: cold start complete, entering 24h steady-state cycle")
-
-		// Phase 2: Steady state — re-analyze all inputs every 24h.
-		for {
-			time.Sleep(inputAnalysisInterval)
-			if !Ready() || !common.IsCurrentNodeLeader() {
-				continue
-			}
-			runFullAnalysis()
+			runProgressiveAnalysis(startedAt)
+			time.Sleep(inputAnalysisPollInterval)
 		}
 	}()
-	logger.Info("smith_agent: input analysis loop started (cold start: wait for 100 samples; steady state: every 24h)")
+	logger.Info("smith_agent: input analysis loop started (progressive mode)",
+		"first_min_samples", firstAnalysisMinSamples,
+		"first_max_wait", firstAnalysisMaxWait.String(),
+		"poll_interval", inputAnalysisPollInterval.String(),
+		"enhanced_threshold", enhancedStageThreshold,
+		"stable_threshold", stableStageThreshold,
+		"full_refresh_interval", inputAnalysisInterval.String())
 }
 
 // GetInputAnalysis returns the cached LLM analysis JSON for an input, if any.
@@ -70,85 +103,163 @@ func GetInputAnalysis(inputId string) (string, bool) {
 	return s, true
 }
 
-// runColdStartAnalysis processes only inputs that have NO existing analysis in Redis.
-// For each such input, it checks whether sample data count >= coldStartSampleThreshold.
-// If yes, it runs analysis and stores the result.
-// Returns true when every input has analysis (either pre-existing or just created),
-// meaning the cold-start phase is complete.
-func runColdStartAnalysis() bool {
-	ctx := context.Background()
-	allCovered := true
-
-	project.ForEachInput(func(inputId string, _ *input.Input) bool {
-		if _, exists := GetInputAnalysis(inputId); exists {
-			return true // already has analysis, skip
-		}
-
-		count := countInputSamples(inputId)
-		if count < coldStartSampleThreshold {
-			logger.Debug("smith_agent: cold start waiting for samples",
-				"input", inputId, "current", count, "need", coldStartSampleThreshold)
-			allCovered = false
-			return true
-		}
-
-		// Enough samples accumulated — analyze
-		if analyzeAndStoreInput(ctx, inputId) {
-			logger.Info("smith_agent: cold start analysis complete", "input", inputId, "samples", count)
-		}
-		return true
-	})
-
-	return allCovered
+func getInputAnalysisCache(inputId string) (inputAnalysisCache, bool) {
+	raw, ok := GetInputAnalysis(inputId)
+	if !ok || raw == "" {
+		return inputAnalysisCache{}, false
+	}
+	var cached inputAnalysisCache
+	if err := json.Unmarshal([]byte(raw), &cached); err != nil {
+		return inputAnalysisCache{}, false
+	}
+	if cached.ArchitectOutput == "" {
+		return inputAnalysisCache{}, false
+	}
+	return cached, true
 }
 
-// runFullAnalysis re-analyzes all inputs with the latest sample data (24h steady-state cycle).
-func runFullAnalysis() {
+func runProgressiveAnalysis(startedAt time.Time) {
 	ctx := context.Background()
+	now := time.Now()
 	stored := 0
 
 	project.ForEachInput(func(inputId string, _ *input.Input) bool {
-		if analyzeAndStoreInput(ctx, inputId) {
+		latest, count := getLatestInputSample(inputId)
+		decision := shouldAnalyzeInput(startedAt, now, inputId, count)
+		if !decision.ShouldAnalyze {
+			return true
+		}
+
+		if analyzeAndStoreInput(ctx, inputId, latest, count, decision.Stage) {
 			stored++
+			logger.Info("smith_agent input analysis: updated",
+				"input", inputId,
+				"samples", count,
+				"stage", string(decision.Stage),
+				"reason", decision.Reason)
 		}
 		return true
 	})
 
 	if stored > 0 {
-		logger.Info("smith_agent: steady-state analysis cycle complete", "stored", stored)
+		logger.Info("smith_agent: progressive analysis cycle complete", "stored", stored)
 	}
 }
 
-// countInputSamples returns the total number of sample data points across all
-// project-node-sequences for the given input.
-func countInputSamples(inputId string) int {
-	sampler := common.GetSampler("input." + inputId)
-	if sampler == nil {
-		return 0
+func shouldAnalyzeInput(startedAt, now time.Time, inputId string, sampleCount int) analyzeDecision {
+	if sampleCount <= 0 {
+		return analyzeDecision{ShouldAnalyze: false}
 	}
-	samplesBySeq := sampler.GetSamples()
-	total := 0
-	for _, list := range samplesBySeq {
-		total += len(list)
+
+	targetStage := stageBySampleCount(sampleCount)
+	cached, hasCached := getInputAnalysisCache(inputId)
+	if !hasCached {
+		if sampleCount >= firstAnalysisMinSamples {
+			return analyzeDecision{
+				ShouldAnalyze: true,
+				Stage:         targetStage,
+				Reason:        "first_analysis_min_samples",
+			}
+		}
+		if now.Sub(startedAt) >= firstAnalysisMaxWait {
+			return analyzeDecision{
+				ShouldAnalyze: true,
+				Stage:         targetStage,
+				Reason:        "first_analysis_max_wait",
+			}
+		}
+		logger.Debug("smith_agent: waiting for first analysis",
+			"input", inputId,
+			"current", sampleCount,
+			"need", firstAnalysisMinSamples,
+			"max_wait_remaining", firstAnalysisMaxWait-now.Sub(startedAt))
+		return analyzeDecision{ShouldAnalyze: false}
 	}
-	return total
+
+	currentStage := normalizeStage(cached.Stage, cached.SampleCount)
+	lastAnalyzedAt := cached.analyzedAtTime()
+
+	if stageRank(targetStage) > stageRank(currentStage) && sampleCount > cached.SampleCount {
+		return analyzeDecision{
+			ShouldAnalyze: true,
+			Stage:         targetStage,
+			Reason:        "stage_upgrade",
+		}
+	}
+
+	if !lastAnalyzedAt.IsZero() && now.Sub(lastAnalyzedAt) >= inputAnalysisInterval {
+		return analyzeDecision{
+			ShouldAnalyze: true,
+			Stage:         targetStage,
+			Reason:        "periodic_full_refresh",
+		}
+	}
+
+	// Same-stage enrichment: if sample volume increases materially, refresh earlier.
+	if sampleCount >= cached.SampleCount+inputAnalysisSampleGrowthStep {
+		if lastAnalyzedAt.IsZero() || now.Sub(lastAnalyzedAt) >= inputAnalysisEnhancementMinInterval {
+			nextStage := currentStage
+			if stageRank(targetStage) > stageRank(currentStage) {
+				nextStage = targetStage
+			}
+			return analyzeDecision{
+				ShouldAnalyze: true,
+				Stage:         nextStage,
+				Reason:        "sample_growth_refresh",
+			}
+		}
+	}
+
+	return analyzeDecision{ShouldAnalyze: false}
 }
 
-// analyzeAndStoreInput runs architect analysis on the latest sample of an input
-// and stores the result in Redis. Returns true if analysis was stored successfully.
-func analyzeAndStoreInput(ctx context.Context, inputId string) bool {
+func stageBySampleCount(sampleCount int) analysisStage {
+	if sampleCount >= stableStageThreshold {
+		return analysisStageStable
+	}
+	if sampleCount >= enhancedStageThreshold {
+		return analysisStageEnhanced
+	}
+	return analysisStageInitial
+}
+
+func stageRank(stage analysisStage) int {
+	switch stage {
+	case analysisStageStable:
+		return 3
+	case analysisStageEnhanced:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func normalizeStage(stage string, sampleCount int) analysisStage {
+	switch analysisStage(stage) {
+	case analysisStageInitial, analysisStageEnhanced, analysisStageStable:
+		return analysisStage(stage)
+	default:
+		// Backward compatibility for old payloads without stage metadata.
+		return stageBySampleCount(sampleCount)
+	}
+}
+
+func getLatestInputSample(inputId string) (*common.SampleData, int) {
 	sampler := common.GetSampler("input." + inputId)
 	if sampler == nil {
-		return false
+		return nil, 0
 	}
+
 	samplesBySeq := sampler.GetSamples()
 	if len(samplesBySeq) == 0 {
-		return false
+		return nil, 0
 	}
 
 	// Find the latest sample across all sequences
 	var latest *common.SampleData
+	total := 0
 	for _, list := range samplesBySeq {
+		total += len(list)
 		for i := range list {
 			s := &list[i]
 			if latest == nil || s.Timestamp.After(latest.Timestamp) {
@@ -156,6 +267,12 @@ func analyzeAndStoreInput(ctx context.Context, inputId string) bool {
 			}
 		}
 	}
+	return latest, total
+}
+
+// analyzeAndStoreInput runs architect analysis on a sample of an input
+// and stores the result in Redis. Returns true if analysis was stored successfully.
+func analyzeAndStoreInput(ctx context.Context, inputId string, latest *common.SampleData, sampleCount int, stage analysisStage) bool {
 	if latest == nil || latest.Data == nil {
 		return false
 	}
@@ -175,6 +292,8 @@ func analyzeAndStoreInput(ctx context.Context, inputId string) bool {
 	payload := map[string]interface{}{
 		"ArchitectOutput": result.ArchitectOutput,
 		"analyzed_at":     time.Now().UTC().Format(time.RFC3339),
+		"sample_count":    sampleCount,
+		"stage":           string(stage),
 	}
 	resultJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -189,6 +308,5 @@ func analyzeAndStoreInput(ctx context.Context, inputId string) bool {
 		return false
 	}
 
-	logger.Info("smith_agent input analysis: stored", "input", inputId)
 	return true
 }

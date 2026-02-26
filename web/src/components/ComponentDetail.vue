@@ -555,16 +555,28 @@
     <MonacoEditor :value="detail.raw" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="true" class="flex-1 min-h-0" :component-id="props.item?.id" :component-type="props.item?.type" />
     <!-- LLM analysis (input read-only only) -->
     <div v-if="isInput && detail.llm_analysis && detail.llm_analysis.ArchitectOutput" class="flex-shrink-0 border-t border-gray-200 bg-gray-50 rounded-b">
-      <div class="px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+      <div class="px-4 py-2 border-b border-gray-200 flex items-center justify-between gap-3">
         <h3 class="text-sm font-medium text-gray-700 flex items-center">
           <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
           LLM Analysis
         </h3>
-        <span v-if="detail.llm_analysis.analyzed_at" class="text-xs text-gray-500">
-          {{ formatAnalyzedAt(detail.llm_analysis.analyzed_at) }}
-        </span>
+        <div class="flex items-center gap-2 text-xs text-gray-500">
+          <span
+            v-if="detail.llm_analysis.stage"
+            class="inline-flex items-center px-2 py-0.5 rounded-full font-medium"
+            :class="analysisStageClass(detail.llm_analysis.stage)"
+          >
+            {{ formatAnalysisStage(detail.llm_analysis.stage) }}
+          </span>
+          <span v-if="detail.llm_analysis.sample_count > 0">
+            {{ detail.llm_analysis.sample_count }} samples
+          </span>
+          <span v-if="detail.llm_analysis.analyzed_at">
+            {{ formatAnalyzedAt(detail.llm_analysis.analyzed_at) }}
+          </span>
+        </div>
       </div>
       <div class="p-4 overflow-auto max-h-52">
         <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">{{ detail.llm_analysis.ArchitectOutput }}</pre>
@@ -714,6 +726,31 @@ function formatAnalyzedAt(isoString) {
     return d.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
   } catch {
     return isoString
+  }
+}
+
+function formatAnalysisStage(stage) {
+  if (!stage) return ''
+  switch (String(stage).toLowerCase()) {
+    case 'stable':
+      return 'Stable'
+    case 'enhanced':
+      return 'Enhanced'
+    case 'initial':
+      return 'Initial'
+    default:
+      return stage
+  }
+}
+
+function analysisStageClass(stage) {
+  switch (String(stage || '').toLowerCase()) {
+    case 'stable':
+      return 'bg-green-100 text-green-700'
+    case 'enhanced':
+      return 'bg-blue-100 text-blue-700'
+    default:
+      return 'bg-amber-100 text-amber-700'
   }
 }
 
