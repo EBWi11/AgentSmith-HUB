@@ -71,13 +71,16 @@ func main() {
 	// Sync LLM config in cluster: leader writes from config to Redis, followers read from Redis
 	if *isLeader {
 		if strings.TrimSpace(common.Config.LLMApiKey) != "" {
-			_ = api.WriteLLMConfigToRedis(common.Config.LLMApiKey, common.Config.LLMBaseURL)
+			_ = api.WriteLLMConfigToRedis(common.Config.LLMApiKey, common.Config.LLMBaseURL, common.Config.LLMModel)
 		}
 	} else {
-		if ak, bu, err := api.ReadLLMConfigFromRedis(); err == nil && strings.TrimSpace(ak) != "" {
+		if ak, bu, model, err := api.ReadLLMConfigFromRedis(); err == nil && strings.TrimSpace(ak) != "" {
 			common.Config.LLMApiKey = ak
 			if bu != "" {
 				common.Config.LLMBaseURL = bu
+			}
+			if model != "" {
+				common.Config.LLMModel = model
 			}
 		}
 	}

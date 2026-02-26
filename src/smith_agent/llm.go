@@ -55,7 +55,10 @@ func callChat(systemPrompt, userMessage, model string, maxTokens int, timeout ti
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	if model == "" {
-		model = defaultModel
+		model = strings.TrimSpace(common.Config.LLMModel)
+		if model == "" {
+			model = defaultModel
+		}
 	}
 	if maxTokens <= 0 {
 		maxTokens = defaultMaxTokens
@@ -106,4 +109,30 @@ func callChat(systemPrompt, userMessage, model string, maxTokens int, timeout ti
 		return "", fmt.Errorf("LLM API returned no choices")
 	}
 	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+}
+
+// isLLMConfigurationError returns true for non-retriable model/auth/permission misconfiguration errors.
+func isLLMConfigurationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	keywords := []string{
+		"not found the model",
+		"model not found",
+		"permission denied",
+		"access denied",
+		"forbidden",
+		"unauthorized",
+		"invalid api key",
+		"incorrect api key",
+		"does not have access",
+		"insufficient permissions",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
 }

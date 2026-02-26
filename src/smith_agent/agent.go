@@ -29,7 +29,11 @@ func InitIfLLMAvailable() {
 	// Probe: minimal chat to verify endpoint and key work
 	_, err := callChat("You are a helpful assistant.", "Reply with exactly: OK", "", 16, probeTimeout)
 	if err != nil {
-		logger.Warn("smith_agent: LLM probe failed, agent not initialized", "error", err)
+		if isLLMConfigurationError(err) {
+			logger.Error("smith_agent: LLM probe failed, agent not initialized", "error", err)
+		} else {
+			logger.Warn("smith_agent: LLM probe failed, agent not initialized", "error", err)
+		}
 		return
 	}
 	ready = true

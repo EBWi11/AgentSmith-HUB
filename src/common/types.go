@@ -43,6 +43,7 @@ type HubConfig struct {
 	// LLM plugin (builtin): if llm_api_key is set, llmCall plugin is registered
 	LLMApiKey  string `yaml:"llm_api_key,omitempty"`
 	LLMBaseURL string `yaml:"llm_base_url,omitempty"`
+	LLMModel   string `yaml:"llm_model,omitempty"`
 }
 
 // Operation types for project operations

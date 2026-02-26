@@ -20,9 +20,9 @@ const (
 
 // chatRequest is OpenAI-compatible chat completions request body
 type chatRequest struct {
-	Model    string    `json:"model"`
-	Messages []message `json:"messages"`
-	MaxTokens int      `json:"max_tokens,omitempty"`
+	Model     string    `json:"model"`
+	Messages  []message `json:"messages"`
+	MaxTokens int       `json:"max_tokens,omitempty"`
 }
 
 type message struct {
@@ -56,7 +56,10 @@ func callLLM(systemPrompt, userMessage, model string, maxTokens int) (string, er
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	if model == "" {
-		model = defaultModel
+		model = strings.TrimSpace(common.Config.LLMModel)
+		if model == "" {
+			model = defaultModel
+		}
 	}
 	if maxTokens <= 0 {
 		maxTokens = defaultMaxTokens

@@ -285,7 +285,11 @@ func analyzeAndStoreInput(ctx context.Context, inputId string, latest *common.Sa
 
 	result, err := AnalyzeData(ctx, inputId, string(sampleJSON))
 	if err != nil {
-		logger.Warn("smith_agent input analysis: analyze failed", "input", inputId, "error", err)
+		if isLLMConfigurationError(err) {
+			logger.Error("smith_agent input analysis: analyze failed", "input", inputId, "error", err)
+		} else {
+			logger.Warn("smith_agent input analysis: analyze failed", "input", inputId, "error", err)
+		}
 		return false
 	}
 
