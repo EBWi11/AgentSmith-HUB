@@ -132,7 +132,21 @@ Detects highly suspicious operations that indicate active intrusion, lateral mov
 
 </details>
 
-> **Quick start:** Import the rulesets from `config/ruleset/k8s_security/`, connect your K8s audit log source, and you have production-grade Kubernetes threat detection running in minutes — no tuning needed.
+> **Quick start:** Import the built-in rulesets from `config/ruleset/` (`k8s_audit_baseline.xml` and `k8s_audit_intrusion.xml`), connect your K8s audit log source, and you have production-grade Kubernetes threat detection running in minutes — no tuning needed.
+
+### Built-in K8s Ruleset Files
+
+AgentSmith-HUB includes Kubernetes security rulesets out of the box. You can use them directly without writing custom XML first:
+
+- `config/ruleset/k8s_audit_baseline.xml`
+- `config/ruleset/k8s_audit_intrusion.xml`
+
+Recommended onboarding flow:
+
+1. Import both built-in rulesets.
+2. Route Kubernetes audit logs to these rulesets in your Project.
+3. Verify detections in test mode with real sample events.
+4. Tune thresholds (if needed) for your cluster's normal behavior.
 
 More built-in rulesets for additional data sources are on the roadmap. Contributions are welcome!
 
