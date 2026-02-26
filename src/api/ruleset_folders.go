@@ -20,6 +20,11 @@ import (
 // Regex for valid folder names: alphanumeric, underscore, hyphen
 var validFolderNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+func isValidRulesetFolderName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && validFolderNameRegex.MatchString(name)
+}
+
 // getRulesetBaseDir returns the base directory for rulesets
 func getRulesetBaseDir() string {
 	return filepath.Join(common.Config.ConfigRoot, "ruleset")
@@ -196,7 +201,7 @@ func createRulesetFolder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "folder name cannot be empty"})
 	}
 
-	if !validFolderNameRegex.MatchString(req.Name) {
+	if !isValidRulesetFolderName(req.Name) {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "folder name can only contain letters, numbers, underscores, and hyphens",
 		})
@@ -226,7 +231,12 @@ func createRulesetFolder(c echo.Context) error {
 
 // renameRulesetFolder renames a folder in the ruleset directory
 func renameRulesetFolder(c echo.Context) error {
-	oldName := c.Param("name")
+	oldName := strings.TrimSpace(c.Param("name"))
+	if !isValidRulesetFolderName(oldName) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "invalid folder name",
+		})
+	}
 
 	var req struct {
 		NewName string `json:"new_name"`
@@ -240,7 +250,7 @@ func renameRulesetFolder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "new folder name cannot be empty"})
 	}
 
-	if !validFolderNameRegex.MatchString(req.NewName) {
+	if !isValidRulesetFolderName(req.NewName) {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "folder name can only contain letters, numbers, underscores, and hyphens",
 		})
@@ -291,7 +301,12 @@ func renameRulesetFolder(c echo.Context) error {
 
 // deleteRulesetFolder deletes an empty folder from the ruleset directory
 func deleteRulesetFolder(c echo.Context) error {
-	name := c.Param("name")
+	name := strings.TrimSpace(c.Param("name"))
+	if !isValidRulesetFolderName(name) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "invalid folder name",
+		})
+	}
 
 	baseDir := getRulesetBaseDir()
 	folderPath := filepath.Join(baseDir, name)
@@ -342,7 +357,7 @@ func moveRuleset(c echo.Context) error {
 	req.Folder = strings.TrimSpace(req.Folder)
 
 	// Validate folder name if not empty
-	if req.Folder != "" && !validFolderNameRegex.MatchString(req.Folder) {
+	if req.Folder != "" && !isValidRulesetFolderName(req.Folder) {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "folder name can only contain letters, numbers, underscores, and hyphens",
 		})
@@ -370,18 +385,42 @@ func moveRuleset(c echo.Context) error {
 	if _, err := os.Stat(newFormal); err == nil {
 		return c.JSON(http.StatusConflict, map[string]string{"error": "a file already exists at the target location"})
 	}
+	if _, err := os.Stat(newTemp); err == nil {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "a temp file already exists at the target location"})
+	}
+
+	currentFormalExists := false
+	if _, err := os.Stat(currentFormal); err == nil {
+		currentFormalExists = true
+	}
+	currentTempExists := false
+	if _, err := os.Stat(currentTemp); err == nil {
+		currentTempExists = true
+	}
+	if !currentFormalExists && !currentTempExists {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "ruleset files not found"})
+	}
 
 	// Move formal file if it exists
-	if _, err := os.Stat(currentFormal); err == nil {
+	formalMoved := false
+	if currentFormalExists {
 		if err := os.Rename(currentFormal, newFormal); err != nil {
 			logger.Error("failed to move ruleset file", "from", currentFormal, "to", newFormal, "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to move ruleset file"})
 		}
+		formalMoved = true
 	}
 
 	// Move temp file if it exists
-	if _, err := os.Stat(currentTemp); err == nil {
+	if currentTempExists {
 		if err := os.Rename(currentTemp, newTemp); err != nil {
+			// Roll back formal file movement to avoid partial moves.
+			if formalMoved {
+				if rollbackErr := os.Rename(newFormal, currentFormal); rollbackErr != nil {
+					logger.Error("failed to rollback moved ruleset file",
+						"from", newFormal, "to", currentFormal, "error", rollbackErr)
+				}
+			}
 			logger.Error("failed to move ruleset temp file", "from", currentTemp, "to", newTemp, "error", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to move ruleset temp file"})
 		}

@@ -1029,6 +1029,12 @@ func createComponent(componentType string, c echo.Context) error {
 	request.ID = strings.TrimSpace(request.ID)
 	request.Folder = strings.TrimSpace(request.Folder)
 
+	if componentType == "ruleset" && request.Folder != "" && !isValidRulesetFolderName(request.Folder) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "folder name can only contain letters, numbers, underscores, and hyphens",
+		})
+	}
+
 	var filtPath string
 	var exist bool
 
