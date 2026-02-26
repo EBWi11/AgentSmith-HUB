@@ -120,8 +120,10 @@ func getProjects(c echo.Context) error {
 
 	// Use safe accessor to iterate over projects
 	project.ForEachProject(func(projId string, proj *project.Project) bool {
-		// Check if there is a temporary file
-		tempRaw, hasTemp := project.GetProjectNew(proj.Id)
+		// Treat project temp as valid only when both in-memory temp content and .new file exist.
+		tempRaw, hasTempInMemory := project.GetProjectNew(proj.Id)
+		_, hasTempFile := GetComponentPath("project", proj.Id, true)
+		hasTemp := hasTempInMemory && hasTempFile
 
 		// Get component lists
 		inputList := make([]string, 0, len(proj.Inputs))
@@ -183,7 +185,8 @@ func getProjects(c echo.Context) error {
 	// Add components that only exist in temporary files
 	allProjectsNew := project.GetAllProjectsNew()
 	for id, tempRaw := range allProjectsNew {
-		if !processedIDs[id] {
+		_, hasTempFile := GetComponentPath("project", id, true)
+		if !processedIDs[id] && hasTempFile {
 			projectData := map[string]interface{}{
 				"id":      id,
 				"status":  common.StatusStopped,
@@ -211,8 +214,8 @@ func getProject(c echo.Context) error {
 	id := c.Param("id")
 
 	p_raw, ok := project.GetProjectNew(id)
-	if ok {
-		tempPath, _ := GetComponentPath("project", id, true)
+	tempPath, hasTempFile := GetComponentPath("project", id, true)
+	if ok && hasTempFile {
 		// Get sample data for this project (for MCP interface optimization)
 		sampleData, dataSource, err := getSampleDataForProject(id)
 		response := map[string]interface{}{
