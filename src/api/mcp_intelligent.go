@@ -706,6 +706,12 @@ func extractTargetComponent(req IntelligentSampleDataRequest, context ProjectCon
 
 // Get sample data from a specific component
 func getSampleDataFromComponent(componentName string) []interface{} {
+	return getSampleDataFromComponentWithFilter(componentName, nil)
+}
+
+// getSampleDataFromComponentWithFilter gets sample data from a component with optional
+// project-node-sequence filtering.
+func getSampleDataFromComponentWithFilter(componentName string, allowPNS func(string) bool) []interface{} {
 	samples := make([]interface{}, 0)
 
 	sampler := common.GetSampler(componentName)
@@ -713,6 +719,9 @@ func getSampleDataFromComponent(componentName string) []interface{} {
 		samplerData := sampler.GetSamples()
 
 		for projectNodeSequence, sampleDataList := range samplerData {
+			if allowPNS != nil && !allowPNS(projectNodeSequence) {
+				continue
+			}
 			for _, sample := range sampleDataList {
 				convertedSample := map[string]interface{}{
 					"data":                  sample.Data,
@@ -818,13 +827,17 @@ func getSampleDataForRuleset(rulesetID string) (map[string]interface{}, string, 
 
 // Get sample data for a specific input component (simplified using PNS)
 func getSampleDataForInput(inputID string) (map[string]interface{}, string, error) {
-	// Direct sample data from the input component using PNS
-	inputSamples := getSampleDataFromComponent("input." + inputID)
+	// Show only input-stage samples (PNS ends with INPUT.<inputID>), excluding
+	// downstream RULESET/OUTPUT stage samples that may share the same sampler.
+	targetSuffix := strings.ToUpper("INPUT." + inputID)
+	inputSamples := getSampleDataFromComponentWithFilter("input."+inputID, func(pns string) bool {
+		return strings.HasSuffix(strings.ToUpper(strings.TrimSpace(pns)), targetSuffix)
+	})
 	if len(inputSamples) > 0 {
 		result := map[string]interface{}{
 			fmt.Sprintf("input.%s", inputID): inputSamples,
 		}
-		dataSource := fmt.Sprintf("input.%s (PNS)", inputID)
+		dataSource := fmt.Sprintf("input.%s (input-stage PNS)", inputID)
 		return result, dataSource, nil
 	}
 
