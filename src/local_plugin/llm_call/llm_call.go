@@ -121,7 +121,7 @@ func callLLM(systemPrompt, userMessage, model string, maxTokens int) (string, er
 
 // Eval performs a single LLM call with system prompt as parameter.
 // apiKey and baseURL are read from config (llm_api_key, llm_base_url); plugin is only registered when llm_api_key is set.
-// Args: systemPrompt string (required), userMessage string (optional), model string (optional), maxTokens int (optional).
+// Args: systemPrompt string (required), userMessage string|object (optional), model string (optional), maxTokens int (optional).
 func Eval(args ...interface{}) (interface{}, bool, error) {
 	if len(args) < 1 {
 		return nil, false, fmt.Errorf("llmCall requires at least 1 argument: systemPrompt string")
@@ -139,6 +139,13 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 	if len(args) >= 2 {
 		if u, ok := args[1].(string); ok {
 			userMessage = strings.TrimSpace(u)
+		} else if args[1] != nil {
+			// Support object/map inputs like _$ORIDATA by JSON-serializing them.
+			raw, err := json.Marshal(args[1])
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to serialize userMessage: %w", err)
+			}
+			userMessage = string(raw)
 		}
 	}
 	model := ""
