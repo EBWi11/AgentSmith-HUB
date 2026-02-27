@@ -2676,6 +2676,7 @@ async function confirmFolderAction() {
       await hubApi.renameRulesetFolder(folderRenameOld.value, name)
     }
     closeFolderModal()
+    dataCache.clearComponentCache('rulesets')
     await fetchRulesetFolders()
     await fetchItems('rulesets')
   } catch (err) {
@@ -2694,6 +2695,7 @@ async function confirmDeleteFolder() {
     await hubApi.deleteRulesetFolder(folderToDelete.value)
     showFolderDeleteConfirm.value = false
     folderToDelete.value = ''
+    dataCache.clearComponentCache('rulesets')
     await fetchRulesetFolders()
     await fetchItems('rulesets')
   } catch (err) {
@@ -2705,6 +2707,8 @@ async function confirmDeleteFolder() {
 async function moveRulesetToFolder(rulesetId, targetFolder) {
   try {
     await hubApi.moveRuleset(rulesetId, targetFolder)
+    dataCache.clearComponentCache('rulesets')
+    await fetchRulesetFolders()
     await fetchItems('rulesets')
     closeAllMenus()
   } catch (err) {
