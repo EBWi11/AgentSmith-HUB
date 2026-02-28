@@ -189,8 +189,6 @@ func main() {
 		loadLocalComponents()
 		loadLocalProjects()
 
-		smith_agent.StartInputAnalysisLoop()
-
 		common.InitClusterSystemManager()
 		_ = cluster.GlobalClusterManager.Start()
 

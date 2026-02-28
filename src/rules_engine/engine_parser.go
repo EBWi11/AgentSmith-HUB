@@ -310,12 +310,12 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					currentChecklist = nil
 				}
 
-			case "rule":
-				if currentRule != nil {
-					// Convert to final rule structure
-					ruleset.Rules = append(ruleset.Rules, *currentRule)
-					currentRule = nil
-				}
+		case "rule":
+			if currentRule != nil {
+				currentRule.HitFields = collectHitFields(currentRule)
+				ruleset.Rules = append(ruleset.Rules, *currentRule)
+				currentRule = nil
+			}
 			}
 		}
 	}

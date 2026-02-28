@@ -15,6 +15,7 @@ import (
 )
 
 const HitRuleIdFieldName = "_hub_hit_rule_id"
+const HitFieldsFieldName = "_hub_hit_fields"
 
 // parseProjectInfoFromPNS parses project information from ProjectNodeSequence
 // Format: "INPUT.api_sec.RULESET.test.OUTPUT.print_demo" -> project: "api_sec", ruleset: "test"
@@ -667,6 +668,9 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				sb.WriteString(rule.ID)
 				addHitRuleID(modifiedData, sb.String())
 				stringBuilderPool.Put(sb)
+				if len(rule.HitFields) > 0 {
+					modifiedData[HitFieldsFieldName] = rule.HitFields
+				}
 				// Add to final result
 				finalRes = append(finalRes, modifiedData)
 			}
@@ -2244,6 +2248,106 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 		data[HitRuleIdFieldName] = sb.String()
 		stringBuilderPool.Put(sb)
 	}
+}
+
+// collectHitFields walks through all operators in a rule and collects field names
+// that are relevant to the rule's matching logic (check, threshold, iterator, sequence).
+// Called once during parsing; the result is stored in Rule.HitFields for zero-cost
+// injection at runtime.
+func collectHitFields(rule *Rule) []string {
+	seen := make(map[string]struct{}, 8)
+	add := func(field string) {
+		if field == "" {
+			return
+		}
+		if _, ok := seen[field]; !ok {
+			seen[field] = struct{}{}
+		}
+	}
+
+	addFromCheckNodes := func(nodes []CheckNodes) {
+		for i := range nodes {
+			add(nodes[i].Field)
+		}
+	}
+
+	addFromThresholds := func(thresholds []Threshold) {
+		for i := range thresholds {
+			if thresholds[i].group_by != "" {
+				for _, f := range strings.Split(thresholds[i].group_by, ",") {
+					add(strings.TrimSpace(f))
+				}
+			}
+			add(thresholds[i].CountField)
+		}
+	}
+
+	addFromChecklists := func(checklists map[int]Checklist) {
+		for _, cl := range checklists {
+			addFromCheckNodes(cl.CheckNodes)
+			addFromThresholds(cl.ThresholdNodes)
+		}
+	}
+
+	// Standalone checks
+	for _, cn := range rule.CheckMap {
+		add(cn.Field)
+	}
+
+	// Checklists
+	addFromChecklists(rule.ChecklistMap)
+
+	// Thresholds
+	for _, th := range rule.ThresholdMap {
+		if th.group_by != "" {
+			for _, f := range strings.Split(th.group_by, ",") {
+				add(strings.TrimSpace(f))
+			}
+		}
+		add(th.CountField)
+	}
+
+	// Iterators
+	for _, iter := range rule.IteratorMap {
+		add(iter.Field)
+		addFromCheckNodes(iter.CheckNodes)
+		addFromThresholds(iter.ThresholdNodes)
+		for _, cl := range iter.Checklists {
+			addFromCheckNodes(cl.CheckNodes)
+			addFromThresholds(cl.ThresholdNodes)
+		}
+	}
+
+	// Sequences
+	for _, seq := range rule.SequenceMap {
+		if seq.GroupBy != "" {
+			for _, f := range strings.Split(seq.GroupBy, ",") {
+				add(strings.TrimSpace(f))
+			}
+		}
+		for _, ev := range seq.Events {
+			if ev.GroupBy != "" {
+				for _, f := range strings.Split(ev.GroupBy, ",") {
+					add(strings.TrimSpace(f))
+				}
+			}
+			addFromCheckNodes(ev.CheckNodes)
+			addFromThresholds(ev.Thresholds)
+			for _, cl := range ev.Checklists {
+				addFromCheckNodes(cl.CheckNodes)
+				addFromThresholds(cl.ThresholdNodes)
+			}
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+	fields := make([]string, 0, len(seen))
+	for f := range seen {
+		fields = append(fields, f)
+	}
+	return fields
 }
 
 // GetProcessTotal returns the total processed message count.

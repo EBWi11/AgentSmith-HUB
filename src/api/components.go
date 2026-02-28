@@ -10,8 +10,6 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
-	"AgentSmith-HUB/smith_agent"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -550,7 +548,6 @@ func getInput(c echo.Context) error {
 			response["sample_data"] = sampleData
 			response["data_source"] = dataSource
 		}
-		setInputLLMAnalysis(response, id)
 		return c.JSON(http.StatusOK, response)
 	}
 
@@ -569,26 +566,11 @@ func getInput(c echo.Context) error {
 			response["sample_data"] = sampleData
 			response["data_source"] = dataSource
 		}
-		setInputLLMAnalysis(response, id)
 		return c.JSON(http.StatusOK, response)
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
 
-// setInputLLMAnalysis sets response["llm_analysis"] from Redis cache if present.
-func setInputLLMAnalysis(response map[string]interface{}, inputId string) {
-	analysisJSON, ok := smith_agent.GetInputAnalysis(inputId)
-	if !ok || analysisJSON == "" {
-		response["llm_analysis"] = nil
-		return
-	}
-	var obj interface{}
-	if err := json.Unmarshal([]byte(analysisJSON), &obj); err != nil {
-		response["llm_analysis"] = nil
-		return
-	}
-	response["llm_analysis"] = obj
-}
 
 // getPlugins returns plugin information with configurable detail level
 // Query parameters:
