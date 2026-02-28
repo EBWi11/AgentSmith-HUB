@@ -216,7 +216,7 @@ func getProject(c echo.Context) error {
 	p_raw, ok := project.GetProjectNew(id)
 	tempPath, hasTempFile := GetComponentPath("project", id, true)
 	if ok && hasTempFile {
-		// Get sample data for this project (for MCP interface optimization)
+		// Get sample data for this project
 		sampleData, dataSource, err := getSampleDataForProject(id)
 		response := map[string]interface{}{
 			"id":     id,
@@ -237,7 +237,7 @@ func getProject(c echo.Context) error {
 	}
 
 	formalPath, _ := GetComponentPath("project", id, false)
-	// Get sample data for this project (for MCP interface optimization)
+	// Get sample data for this project
 	sampleData, dataSource, err := getSampleDataForProject(id)
 	response := map[string]interface{}{
 		"id":                p.Id,
@@ -388,7 +388,7 @@ func getRuleset(c echo.Context) error {
 	r_raw, ok := project.GetRulesetNew(id)
 	if ok {
 		_, tempPath := findRulesetPaths(id)
-		// Get sample data for this ruleset (for MCP interface optimization)
+		// Get sample data for this ruleset
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -406,7 +406,7 @@ func getRuleset(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := findRulesetPaths(id)
-		// Get sample data for this ruleset (for MCP interface optimization)
+		// Get sample data for this ruleset
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
 			"id":   r.RulesetID,
@@ -539,7 +539,7 @@ func getInput(c echo.Context) error {
 	in_raw, ok := project.GetInputNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("input", id, true)
-		// Get sample data for this input (for MCP interface optimization)
+		// Get sample data for this input
 		sampleData, dataSource, err := getSampleDataForInput(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -558,7 +558,7 @@ func getInput(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := GetComponentPath("input", id, false)
-		// Get sample data for this input (for MCP interface optimization)
+		// Get sample data for this input
 		sampleData, dataSource, err := getSampleDataForInput(id)
 		response := map[string]interface{}{
 			"id":   in.Id,
@@ -976,7 +976,7 @@ func getOutput(c echo.Context) error {
 		tempPath, _ := GetComponentPath("output", id, true)
 		// Parse type from temporary file content
 		outputType := parseOutputType(out_raw)
-		// Get sample data for this output (for MCP interface optimization)
+		// Get sample data for this output
 		sampleData, dataSource, err := getSampleDataForOutput(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -995,7 +995,7 @@ func getOutput(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := GetComponentPath("output", id, false)
-		// Get sample data for this output (for MCP interface optimization)
+		// Get sample data for this output
 		sampleData, dataSource, err := getSampleDataForOutput(id)
 		response := map[string]interface{}{
 			"id":   out.Id,

@@ -731,7 +731,7 @@ func getSampleDataFromComponentWithFilter(componentName string, allowPNS func(st
 				}
 				samples = append(samples, convertedSample)
 
-				// Limit to 3 samples to save MCP context space
+				// Limit to 3 samples to save context space
 				if len(samples) >= 3 {
 					return samples
 				}

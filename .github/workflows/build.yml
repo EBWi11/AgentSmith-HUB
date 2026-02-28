@@ -154,7 +154,6 @@ jobs:
         
         # Copy configuration files
         cp -r config "$ARCHIVE_DIR/"
-        cp -r mcp_config "$ARCHIVE_DIR/"
         
         # Copy nginx configuration
         mkdir -p "$ARCHIVE_DIR/nginx"

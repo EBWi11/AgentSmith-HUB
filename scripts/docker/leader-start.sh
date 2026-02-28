@@ -16,12 +16,6 @@ if [ ! -f "$CONFIG_ROOT/config.yaml" ]; then
     cp config/config.yaml "$CONFIG_ROOT/"
 fi
 
-# Copy default MCP config if not exists
-if [ ! -f "$CONFIG_ROOT/mcp_config.json" ]; then
-    echo "Creating default MCP config..."
-    cp mcp_config/cline_mcp_settings.json "$CONFIG_ROOT/mcp_config.json"
-fi
-
 # Start nginx for web frontend
 echo "Starting nginx web server..."
 mkdir -p /tmp/nginx

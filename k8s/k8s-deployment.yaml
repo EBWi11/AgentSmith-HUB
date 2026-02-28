@@ -61,20 +61,6 @@ data:
       max_size: 100
       max_backups: 3
       max_age: 7
-    
-    # MCP settings
-    mcp:
-      enabled: true
-      config_path: "/opt/mcp_config"
-
-  # MCP configuration
-  mcp_config.json: |
-    {
-      "mcp_settings": {
-        "enabled": true,
-        "config_path": "/opt/mcp_config"
-      }
-    }
 
 ---
 # Redis Deployment
@@ -203,9 +189,6 @@ spec:
           readOnly: false
         - name: logs
           mountPath: /tmp/hub_logs
-        - name: mcp-config
-          mountPath: /opt/mcp_config
-          readOnly: true
         livenessProbe:
           httpGet:
             path: /ping
@@ -235,12 +218,6 @@ spec:
           claimName: agentsmith-hub-leader-config
       - name: logs
         emptyDir: {}
-      - name: mcp-config
-        configMap:
-          name: agentsmith-hub-config
-          items:
-          - key: mcp_config.json
-            path: mcp_config.json
 
 ---
 # Leader Service
@@ -326,9 +303,6 @@ spec:
           readOnly: false
         - name: logs
           mountPath: /tmp/hub_logs
-        - name: mcp-config
-          mountPath: /opt/mcp_config
-          readOnly: true
         livenessProbe:
           httpGet:
             path: /ping
@@ -358,12 +332,6 @@ spec:
           name: agentsmith-hub-config
       - name: logs
         emptyDir: {}
-      - name: mcp-config
-        configMap:
-          name: agentsmith-hub-config
-          items:
-          - key: mcp_config.json
-            path: mcp_config.json
 
 ---
 # Follower Service

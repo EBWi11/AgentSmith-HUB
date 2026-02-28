@@ -2,7 +2,6 @@ package api
 
 import (
 	"AgentSmith-HUB/logger"
-	"AgentSmith-HUB/mcp"
 	"errors"
 	"net/http"
 
@@ -110,11 +109,6 @@ func ServerStart(listener string) error {
 	auth.DELETE("/ruleset-folders/:name", deleteRulesetFolder)
 	auth.PUT("/rulesets/:id/move", moveRuleset)
 
-	// Ruleset templates and documentation - REQUIRE AUTH (Updated to use MCP module)
-	auth.GET("/ruleset-templates", mcp.GetRulesetTemplates)
-	auth.GET("/ruleset-syntax-guide", mcp.GetRulesetSyntaxGuide)
-	auth.GET("/rule-templates", mcp.GetRuleTemplates)
-
 	// Input endpoints (use plural form for consistency) - REQUIRE AUTH
 	auth.GET("/inputs", getInputs)
 	auth.GET("/inputs/:id", getInput)
@@ -207,24 +201,6 @@ func ServerStart(listener string) error {
 	auth.GET("/operations-history/nodes", GetOperationsHistoryNodes)
 	auth.GET("/cluster-operations-history", GetClusterOperationsHistory)
 	auth.GET("/operations-stats", GetOperationsStats)
-
-	// MCP (Model Context Protocol) endpoints - REQUIRE AUTH
-	auth.POST("/mcp", handleMCP)              // Main MCP JSON-RPC endpoint
-	auth.GET("/mcp", handleMCP)               // MCP SSE endpoint (for Cline and similar clients)
-	auth.DELETE("/mcp", handleMCP)            // MCP session termination endpoint
-	auth.POST("/mcp/batch", handleMCPBatch)   // Batch MCP requests
-	auth.GET("/mcp/info", getMCPInfo)         // MCP server information
-	auth.GET("/mcp/manifest", getMCPManifest) // MCP server manifest
-	auth.GET("/mcp/stats", getMCPStats)       // MCP statistics
-	auth.GET("/mcp/health", mcpHealthCheck)   // MCP health check
-	auth.GET("/mcp/ws", handleMCPWebSocket)   // WebSocket endpoint (future)
-
-	// MCP Configuration endpoints - REQUIRE AUTH
-	auth.GET("/mcp/prompts", mcp.GetMCPPrompts) // MCP prompts configuration
-	auth.GET("/mcp/configs", mcp.GetMCPConfigs) // All MCP configurations
-
-	// MCP Installation endpoints (public access for easy setup)
-	e.GET("/mcp/install", getMCPInstallConfig) // MCP installation configuration
 
 	// Plugin statistics endpoint - REQUIRE AUTH
 	auth.GET("/plugin-stats", GetPluginStats)
