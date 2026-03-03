@@ -1120,6 +1120,7 @@ async function fetchDashboardData() {
         if (projStates && projStates.project_states) {
           const stateMap = {}
           Object.values(projStates.project_states).forEach(list => {
+            if (!Array.isArray(list)) return
             list.forEach(p => {
               if (!stateMap[p.id]) stateMap[p.id] = new Set()
               stateMap[p.id].add(p.status)

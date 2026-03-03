@@ -358,6 +358,216 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT 语法说明
+
+AGENT 是一个基于 LLM 的处理组件，和 Ruleset 一样位于数据管道中。Agent 接收事件批次，调用 LLM（支持 Tool Call），并将处理后的结果转发到下游。
+
+#### 配置说明
+
+```yaml
+model: gpt-4o-mini                # LLM 模型名称（OpenAI 兼容）
+temperature: 0.1                   # 采样温度
+max_tokens: 1024                   # LLM 单次响应最大 token 数
+
+system_prompt: |                   # 发送给 LLM 的系统提示词
+  You are a security analyst. For each alert, add llm_confidence and llm_analysis fields.
+
+skills:                            # 挂载的 Skill 组件 ID 列表
+  - hub_ruleset_expert
+
+tools: all                         # 暴露给 LLM 的插件工具："all" 或指定名称列表
+
+batch:
+  size: 5                          # 每批事件数量（默认: 10）
+  timeout: 30s                     # 不完整批次的最大等待时间（默认: 30s）
+  max_rounds: 3                    # 每批次最大 ReAct 工具调用轮数（默认: 5）
+
+distributed:
+  mode: independent                # "independent"（默认）或 "leader_only"
+  rate_limit_rps: 2                # 单实例 LLM 请求速率限制，每秒请求数（0 = 不限制）
+```
+
+#### 字段参考
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `model` | 否 | LLM 模型标识符。默认取决于 LLM 提供商配置。 |
+| `temperature` | 否 | 控制随机性，越低越确定。默认 `0.3`。 |
+| `max_tokens` | 否 | LLM 响应最大 token 数。默认 `4096`。 |
+| `system_prompt` | **是** | 发送给 LLM 的系统级指令。 |
+| `skills` | 否 | 挂载的 Skill ID 列表，为 Agent 提供工具和知识。 |
+| `tools` | 否 | `"all"` 暴露所有已注册插件为 LLM 工具，或提供具体的插件名称列表。 |
+| `batch.size` | 否 | 每批事件数。默认 `10`。 |
+| `batch.timeout` | 否 | 时间字符串（如 `30s`、`1m`），不完整批次的刷新超时。默认 `30s`。 |
+| `batch.max_rounds` | 否 | 最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
+| `distributed.mode` | 否 | `independent`: 每个节点独立运行。`leader_only`: 仅 Leader 节点运行。默认 `independent`。 |
+| `distributed.rate_limit_rps` | 否 | 单实例 LLM API 调用速率限制。`0` = 不限制。 |
+
+#### 工作原理
+
+1. 事件从上游（Input 或 Ruleset）流入，在批次缓冲区中累积。
+2. 当达到 `batch.size` 或 `batch.timeout` 到期时，批次被刷新。
+3. Agent 将批次以 JSON 格式连同 `system_prompt` 和可用工具定义发送给 LLM。
+4. LLM 可以直接响应，或在 **ReAct 循环**中调用工具（Skills + Plugins），最多 `max_rounds` 轮。
+5. 最终 LLM 输出被解析为 JSON 并转发到下游。
+6. 如果 LLM 失败或超过最大轮数，原始批次将原样透传。
+
+#### 在 Project 中使用
+
+Agent 在 Project 中的引用方式和其他组件一样：
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+Agent 可以与 Ruleset 链式组合：
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### 分布式模式
+
+| 模式 | 行为 |
+|------|------|
+| `independent` | 每个 HUB 实例运行自己的 Agent 副本，处理本地数据流。适用于数据在节点间分区的场景。 |
+| `leader_only` | 仅 Leader 节点运行 Agent，Follower 节点完全跳过。适用于汇总、报告等集中式任务。 |
+
+#### 示例：告警富化 Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 1024
+
+system_prompt: |
+  You are a senior SOC analyst. For EACH alert in the batch, output the original event
+  with two fields added:
+  - "llm_confidence": float 0-1 (how likely this is a true positive)
+  - "llm_analysis": one-sentence reasoning (max 30 words)
+  Output ONLY a JSON array, no markdown.
+
+skills: []
+tools: all
+
+batch:
+  size: 5
+  timeout: 30s
+  max_rounds: 3
+
+distributed:
+  mode: independent
+  rate_limit_rps: 2
+```
+
+### 1.5 SKILL 语法说明
+
+SKILL 是一个可复用的能力模块，Agent 可以引用 Skill 来获得工具和知识。Skill 采用**渐进披露**模式 —— LLM 预先看到工具描述，但只在需要时才获取完整内容。
+
+#### Skill 类型
+
+| 类型 | 说明 | 适用场景 |
+|------|------|----------|
+| `knowledge` | 配置驱动的知识库。暴露一个 `get_reference` 工具，按需返回完整内容。 | 领域知识、参考文档、操作手册 |
+| `builtin` | Go 实现的内置技能，提供自定义函数。 | 系统集成（如读写 Ruleset） |
+
+#### Knowledge Skill 配置
+
+```yaml
+type: knowledge
+
+description: |
+  对该 Skill 提供内容的简短描述。
+  LLM 在工具描述中会看到这段文字。
+
+content: |
+  当 LLM 调用 get_reference 时返回的完整参考内容。
+  可以任意长 —— 不会包含在初始提示词中。
+  仅在 LLM 明确请求时才加载。
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `type` | **是** | 必须是 `knowledge`。 |
+| `description` | **是** | 简短描述，作为工具描述展示给 LLM。 |
+| `content` | **是** | 完整知识内容，通过 `get_reference` 按需返回。 |
+
+**工作原理：** Knowledge Skill 注册一个 `get_reference` 工具，以 `description` 字段作为工具描述。当 Agent 的 LLM 判断需要这些知识时，主动调用该工具获取完整 `content`。这保持了初始上下文精简，同时使深度知识按需可用。
+
+#### Builtin Skill 配置
+
+```yaml
+type: builtin
+builtin_ref: hub_ruleset_editor    # 引用 Go 实现的内置技能
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # 可选配置，传递给内置技能工厂
+  read_only: false
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `type` | **是** | 必须是 `builtin`。 |
+| `builtin_ref` | **是** | 内置 Go 实现的名称。 |
+| `description` | 否 | 可读的描述信息。 |
+| `config` | 否 | 传递给内置工厂的键值对配置。 |
+
+#### 可用的 Builtin Skills
+
+| builtin_ref | 函数 | 说明 |
+|-------------|------|------|
+| `hub_ruleset_editor` | `list_rulesets`、`read_ruleset`、`verify_ruleset`、`write_ruleset` | 读取、验证和编辑 HUB Ruleset。写入操作会创建待审核的变更。设置 `config.read_only: true` 可禁用写入。 |
+
+#### 示例：Ruleset 编写知识 Skill
+
+```yaml
+type: knowledge
+
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  （完整参考内容）
+```
+
+#### 示例：挂载 Skills 的 Agent
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: 规则引擎参考知识
+  - hub_ruleset_editor     # builtin skill: Ruleset 读写操作
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+在此配置中，Agent 同时拥有知识（规则引擎参考文档）和操作能力（Ruleset CRUD）。LLM 可以通过 `get_reference` 查阅语法，列出/读取现有 Ruleset，验证 XML，以及写入变更 —— 全部在 ReAct 循环中完成。
+
 ## 🔧 第二部分：基本操作指南
 
 ### 2.1 临时文件和正式文件

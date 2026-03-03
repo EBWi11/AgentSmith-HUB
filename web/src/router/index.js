@@ -94,6 +94,28 @@ const routes = [
         meta: { requiresAuth: true, componentType: 'projects' }
       },
       {
+        path: 'skills/:id',
+        name: 'SkillDetail',
+        component: ComponentDetail,
+        props: route => ({ 
+          id: route.params.id,
+          type: 'skills',
+          isEdit: true
+        }),
+        meta: { requiresAuth: true, componentType: 'skills' }
+      },
+      {
+        path: 'agents/:id',
+        name: 'AgentDetail',
+        component: ComponentDetail,
+        props: route => ({ 
+          id: route.params.id,
+          type: 'agents',
+          isEdit: true
+        }),
+        meta: { requiresAuth: true, componentType: 'agents' }
+      },
+      {
         path: 'cluster',
         name: 'Cluster',
         component: () => import('../components/ClusterStatus.vue'),

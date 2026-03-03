@@ -258,6 +258,36 @@ index: "metrics-{YYYY.MM}"        # metrics-2024.01
 index: "hourly-{YYYY.MM.DD}-{HH}" # hourly-2024.01.15-14
 ```
 
+##### ClickHouse
+```yaml
+type: clickhouse
+clickhouse:
+  hosts:
+    - "http://localhost:8123"
+  database: "default"
+  table: "security_events"
+  batch_size: 1000  # Batch insert size (default: 1000)
+  flush_dur: "3s"   # Flush interval (default: 3s)
+  # Authentication (optional)
+  auth:
+    username: "default"
+    password: "password"
+  # TLS Configuration (optional)
+  tls:
+    enable: true
+    insecure_skip_verify: false
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/client-cert.pem"
+    key_file: "/path/to/client-key.pem"
+```
+
+**Notes:**
+- Uses ClickHouse HTTP interface for data ingestion (default port: 8123, HTTPS: 8443)
+- Data is inserted in `JSONEachRow` format — ClickHouse handles type coercion automatically
+- Supports multiple hosts for load balancing (round-robin)
+- The target table must be created in ClickHouse beforehand
+- For HTTPS, use `https://` prefix in hosts and enable TLS configuration
+
 ### 1.3 PROJECT Syntax Description
 
 PROJECT defines the overall configuration of a project using simple arrow syntax to describe data flow.
@@ -328,6 +358,216 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT Syntax Description
+
+AGENT is an LLM-powered processing component that sits inside the data pipeline alongside rulesets. Agents receive batches of events, call an LLM (with optional tool use), and forward the enriched results downstream.
+
+#### Configuration
+
+```yaml
+model: gpt-4o-mini                # LLM model name (OpenAI-compatible)
+temperature: 0.1                   # Sampling temperature
+max_tokens: 1024                   # Max tokens per LLM response
+
+system_prompt: |                   # System prompt sent to the LLM
+  You are a security analyst. For each alert, add llm_confidence and llm_analysis fields.
+
+skills:                            # List of skill component IDs to attach
+  - hub_ruleset_expert
+
+tools: all                         # Plugin tools exposed to the LLM: "all" or a list of names
+
+batch:
+  size: 5                          # Number of events per batch (default: 10)
+  timeout: 30s                     # Max wait before flushing an incomplete batch (default: 30s)
+  max_rounds: 3                    # Max ReAct tool-call rounds per batch (default: 5)
+
+distributed:
+  mode: independent                # "independent" (default) or "leader_only"
+  rate_limit_rps: 2                # Per-instance LLM requests/sec limit (0 = unlimited)
+```
+
+#### Field Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `model` | No | LLM model identifier. Default depends on your LLM provider config. |
+| `temperature` | No | Controls randomness. Lower = more deterministic. Default `0.3`. |
+| `max_tokens` | No | Maximum tokens in LLM response. Default `4096`. |
+| `system_prompt` | **Yes** | The system-level instruction sent to the LLM. |
+| `skills` | No | List of skill IDs to attach. Skills provide tools/knowledge to the agent. |
+| `tools` | No | `"all"` exposes all registered plugins as LLM tools, or provide a list of specific plugin names. |
+| `batch.size` | No | Events per batch. Default `10`. |
+| `batch.timeout` | No | Duration string (e.g. `30s`, `1m`). Flush timeout for incomplete batches. Default `30s`. |
+| `batch.max_rounds` | No | Max ReAct rounds (tool-call loops). Default `5`. |
+| `distributed.mode` | No | `independent`: every node runs the agent. `leader_only`: only the leader node runs it. Default `independent`. |
+| `distributed.rate_limit_rps` | No | Per-instance rate limit for LLM API calls. `0` = unlimited. |
+
+#### How It Works
+
+1. Events flow in from upstream (input or ruleset) and accumulate in a batch buffer.
+2. When `batch.size` is reached or `batch.timeout` expires, the batch is flushed.
+3. The agent sends the batch as JSON to the LLM along with the `system_prompt` and available tool definitions.
+4. The LLM may respond directly or invoke tools (skills + plugins) in a **ReAct loop**, up to `max_rounds`.
+5. The final LLM output is parsed as JSON and forwarded downstream.
+6. If the LLM fails or exceeds max rounds, the original batch is passed through unchanged.
+
+#### Using in a Project
+
+Agents are referenced in project content just like other components:
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+Agents can be chained with rulesets:
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### Distributed Modes
+
+| Mode | Behavior |
+|------|----------|
+| `independent` | Each HUB instance runs its own copy of the agent, processing its local data stream. Use when data is partitioned across nodes. |
+| `leader_only` | Only the cluster leader runs the agent. Followers skip it entirely. Use for centralized tasks like summarization or reporting. |
+
+#### Example: Alert Enrichment Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 1024
+
+system_prompt: |
+  You are a senior SOC analyst. For EACH alert in the batch, output the original event
+  with two fields added:
+  - "llm_confidence": float 0-1 (how likely this is a true positive)
+  - "llm_analysis": one-sentence reasoning (max 30 words)
+  Output ONLY a JSON array, no markdown.
+
+skills: []
+tools: all
+
+batch:
+  size: 5
+  timeout: 30s
+  max_rounds: 3
+
+distributed:
+  mode: independent
+  rate_limit_rps: 2
+```
+
+### 1.5 SKILL Syntax Description
+
+SKILL is a reusable capability module that agents can reference. Skills provide tools and knowledge to the LLM through a **progressive disclosure** pattern — the LLM sees tool descriptions upfront but only fetches full content on demand.
+
+#### Skill Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `knowledge` | Config-driven knowledge base. Exposes a `get_reference` tool that returns the full content. | Domain expertise, reference docs, playbooks |
+| `builtin` | Go-implemented skill with custom functions. | System integration (e.g., reading/writing rulesets) |
+
+#### Knowledge Skill Configuration
+
+```yaml
+type: knowledge
+
+description: |
+  Brief description of what this skill provides.
+  The LLM sees this in the tool description.
+
+content: |
+  The full reference content returned when the LLM calls get_reference.
+  Can be arbitrarily long — it is NOT included in the initial prompt.
+  Only loaded when the LLM explicitly requests it.
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | **Yes** | Must be `knowledge`. |
+| `description` | **Yes** | Short description shown to the LLM as the tool description. |
+| `content` | **Yes** | Full knowledge content returned on demand via `get_reference`. |
+
+**How it works:** The knowledge skill registers a single tool `get_reference` with the description field as its tool description. When the agent's LLM decides it needs this knowledge, it calls the tool and receives the full `content`. This keeps the initial context lean while making deep knowledge available on demand.
+
+#### Builtin Skill Configuration
+
+```yaml
+type: builtin
+builtin_ref: hub_ruleset_editor    # Reference to a Go-implemented skill
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # Optional config passed to the builtin
+  read_only: false
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | **Yes** | Must be `builtin`. |
+| `builtin_ref` | **Yes** | Name of the built-in Go implementation. |
+| `description` | No | Human-readable description. |
+| `config` | No | Key-value config passed to the builtin factory. |
+
+#### Available Builtin Skills
+
+| builtin_ref | Functions | Description |
+|-------------|-----------|-------------|
+| `hub_ruleset_editor` | `list_rulesets`, `read_ruleset`, `verify_ruleset`, `write_ruleset` | Read, verify, and edit HUB rulesets. Write creates pending changes for human review. Set `config.read_only: true` to disable writes. |
+
+#### Example: Knowledge Skill for Ruleset Authoring
+
+```yaml
+type: knowledge
+
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  (full reference content here)
+```
+
+#### Example: Agent with Skills
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: rules engine reference
+  - hub_ruleset_editor     # builtin skill: read/write rulesets
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+In this setup, the agent has access to both knowledge (rules engine reference docs) and action (ruleset CRUD). The LLM can look up syntax via `get_reference`, list/read existing rulesets, verify XML, and write changes — all within the ReAct loop.
+
 ## 🔧 Part 2: Basic Operating Instructions
 
 ### 2.1 Temporary and Official Files
@@ -391,6 +631,10 @@ oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # Must be allowed in
 oidc_username_claim: "preferred_username"           # Optional; default prefers preferred_username, else email
 oidc_allowed_users: ["alice@example.com", "bob"]    # Optional allowlist; empty means nobody will allow
 oidc_scope: "openid profile email"                   # Optional; default openid profile email
+
+# Optional: enable builtin llmCall plugin for single-shot LLM calls (OpenAI-compatible)
+llm_api_key: "sk-..."           # If set, llmCall plugin is registered
+llm_base_url: "https://api.openai.com/v1"   # Optional; default above
 ```
 
 You can also override via environment variables (higher priority):
@@ -1001,6 +1245,196 @@ When you need to check if a field matches multiple values, you can use multi-val
 - Use OR logic: Any extension matches is sufficient
 - Use | as separator
 
+### 4.4 CEP Sequence Detection (Complex Event Processing)
+
+The `<sequence>` element enables detection of ordered patterns across multiple events within a time window. Unlike single-event matching, sequence detection correlates separate events by shared fields and checks temporal ordering.
+
+**Recommendation:** For CEP-heavy workloads, prefer `local_cache="true"`. The engine keeps sequence keys/state in memory and stores event snapshots on local Pebble disk, which is usually a better balance of throughput and memory usage.
+
+**Typical Use Cases:**
+
+| Scenario | Pattern | Description |
+|----------|---------|-------------|
+| Brute force then lateral movement | `brute -> login_success -> rdp` | Multiple failed logins, then success, then RDP session |
+| Login without MFA | `login -> !mfa` | Login occurred but MFA verification never followed |
+| Post-login data exfiltration | `login -> exfil` | Login followed by large file transfer |
+| Attack chain detection | `recon -> exploit -> persist -> exfil` | Full kill chain detection |
+
+#### Basic Structure
+
+```xml
+<rule id="rule_id" name="Rule Name">
+    <!-- Optional: pre-filter checks (applied to every incoming event) -->
+    <check type="..." field="...">value</check>
+
+    <!-- Sequence detection -->
+    <sequence within="TIME_WINDOW" group_by="FIELD" local_cache="true|false">
+        <event id="EVENT_ID" event_time="FIELD" group_by="FIELD">
+            <!-- Event matching criteria: check / checklist / threshold -->
+        </event>
+
+        <event id="EVENT_ID" event_time="FIELD">
+            <!-- Event matching criteria -->
+        </event>
+
+        <condition>EXPRESSION</condition>
+    </sequence>
+
+    <!-- Optional: post-match operations (only execute when sequence completes) -->
+    <append field="...">value</append>
+</rule>
+```
+
+#### Element Reference
+
+**`<sequence>` Attributes:**
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `within` | Yes | Time window (e.g., `30s`, `5m`, `1h`, `1d`) |
+| `group_by` | No | Default correlation field(s), comma-separated |
+| `local_cache` | No | `true` for local cache (in-memory key/state + Pebble value snapshots, recommended), `false` for Redis |
+
+**`<event>` Attributes:**
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `id` | Yes | Unique identifier, referenced in `<condition>` |
+| `event_time` | No | Field containing the event's timestamp |
+| `group_by` | No | Per-event correlation field(s), overrides sequence default |
+
+**`<condition>` Operators:**
+
+| Operator | Meaning | Example |
+|----------|---------|---------|
+| `->` | Sequence (A followed by B) | `a -> b` |
+| `and` | Both conditions on same event | `a and b` |
+| `or` | Either condition on same event | `a or b` |
+| `!` | Absence (must NOT occur) | `a -> !b` |
+| `()` | Grouping | `a -> (b or c)` |
+
+#### Example 1: Basic Sequence
+
+```xml
+<rule id="login_then_exfil" name="Post-login data exfiltration">
+    <sequence within="10m" group_by="source_ip" local_cache="true">
+        <event id="login" event_time="timestamp">
+            <check type="EQU" field="event_type">login</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <event id="exfil" event_time="timestamp">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+        <condition>login -> exfil</condition>
+    </sequence>
+    <append field="alert_type">post_login_data_exfiltration</append>
+</rule>
+```
+
+#### Example 2: Absence Detection (Login Without MFA)
+
+```xml
+<rule id="login_no_mfa" name="Login without MFA verification">
+    <sequence within="2m" group_by="user_id">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+    <append field="alert_type">missing_mfa</append>
+</rule>
+```
+
+Triggers when a login occurs and no MFA verification follows within 2 minutes.
+
+#### Example 3: Multi-Source Correlation
+
+When events come from different sources with different field names:
+
+```xml
+<rule id="multi_source" name="Firewall block then auth bypass">
+    <sequence within="5m">
+        <event id="fw_block" group_by="src_ip" event_time="fw_timestamp">
+            <check type="EQU" field="action">block</check>
+        </event>
+        <event id="auth_success" group_by="client_ip" event_time="auth_time">
+            <check type="EQU" field="event_type">authentication</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <condition>fw_block -> auth_success</condition>
+    </sequence>
+</rule>
+```
+
+The engine correlates by positional mapping: `fw_block.src_ip` corresponds to `auth_success.client_ip`.
+
+#### Example 4: Branch Pattern (OR)
+
+```xml
+<rule id="login_suspicious" name="Post-login suspicious activity">
+    <sequence within="15m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="priv_esc">
+            <check type="EQU" field="event_type">privilege_escalation</check>
+        </event>
+        <event id="data_access">
+            <check type="EQU" field="event_type">sensitive_data_access</check>
+        </event>
+        <condition>login -> (priv_esc or data_access)</condition>
+    </sequence>
+</rule>
+```
+
+#### Cross-Event Field References
+
+When a sequence completes, fields from earlier events can be accessed using `_$#event_id.field` syntax:
+
+```xml
+<append field="initial_login_ip">_$#login.source_ip</append>
+<append field="exfil_dest">_$dest_ip</append>  <!-- current event field -->
+```
+
+#### Sequence Context (`_@`) References
+
+Inside `<sequence>`, `_@` reads sequence-scoped context values:
+
+- Read: `_@path.to.key`
+- Write: `<append field="_@path.to.key">...</append>` inside an `<event>`
+
+Example:
+
+```xml
+<sequence within="10m" group_by="user_id" local_cache="true">
+    <event id="download">
+        <check type="EQU" field="event_type">download</check>
+        <append field="_@file.current">_$file_path</append>
+    </event>
+    <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+        <check type="EQU" field="file_path">_@file.current</check>
+    </event>
+    <condition>download -> exec</condition>
+</sequence>
+```
+
+#### Event Time and Out-of-Order Events
+
+By default, the engine uses processing time. Specify `event_time` to use the event's own timestamp, enabling correct ordering even when events arrive out of order:
+
+```xml
+<event id="login" event_time="timestamp">
+    <!-- Engine reads the "timestamp" field from event data for ordering -->
+</event>
+```
+
+Supported formats: Unix epoch (seconds/milliseconds), ISO 8601, RFC 3339.
+
 ## 🔧 Part 5: Advanced Features Detailed Explanation
 
 ### 5.1 Three Modes of Threshold Detection
@@ -1178,6 +1612,18 @@ AgentSmith-HUB provides rich built-in plugins that can be used without additiona
 | `virusTotal` | VirusTotal query | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
 | `shodan` | Shodan query | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
 | `threatBook` | ThreatBook query | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
+
+#### LLM Plugin (optional builtin)
+| Plugin | Function | Parameters | Example |
+|--------|----------|------------|---------|
+| `llmCall` | Single-shot LLM call (OpenAI-compatible API) | systemPrompt (string, required), userMessage (string, optional), model (string, optional), maxTokens (int, optional) | `llmCall("You are a summarizer.", "Summarize in one sentence.")` |
+
+**Note:** The `llmCall` plugin is only registered when `llm_api_key` is set in `config.yaml`. API key and base URL are read from config, not from plugin arguments. Example config:
+
+```yaml
+llm_api_key: "sk-..."           # required to enable llmCall
+llm_base_url: "https://api.openai.com/v1"   # optional; default OpenAI
+```
 
 **Note on plugin parameter format**:
 - When referencing fields in data, no need to use `_$` prefix, just use field name directly: `source_ip`

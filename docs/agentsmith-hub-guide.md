@@ -358,6 +358,216 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT Syntax Description
+
+AGENT is an LLM-powered processing component that sits inside the data pipeline alongside rulesets. Agents receive batches of events, call an LLM (with optional tool use), and forward the enriched results downstream.
+
+#### Configuration
+
+```yaml
+model: gpt-4o-mini                # LLM model name (OpenAI-compatible)
+temperature: 0.1                   # Sampling temperature
+max_tokens: 1024                   # Max tokens per LLM response
+
+system_prompt: |                   # System prompt sent to the LLM
+  You are a security analyst. For each alert, add llm_confidence and llm_analysis fields.
+
+skills:                            # List of skill component IDs to attach
+  - hub_ruleset_expert
+
+tools: all                         # Plugin tools exposed to the LLM: "all" or a list of names
+
+batch:
+  size: 5                          # Number of events per batch (default: 10)
+  timeout: 30s                     # Max wait before flushing an incomplete batch (default: 30s)
+  max_rounds: 3                    # Max ReAct tool-call rounds per batch (default: 5)
+
+distributed:
+  mode: independent                # "independent" (default) or "leader_only"
+  rate_limit_rps: 2                # Per-instance LLM requests/sec limit (0 = unlimited)
+```
+
+#### Field Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `model` | No | LLM model identifier. Default depends on your LLM provider config. |
+| `temperature` | No | Controls randomness. Lower = more deterministic. Default `0.3`. |
+| `max_tokens` | No | Maximum tokens in LLM response. Default `4096`. |
+| `system_prompt` | **Yes** | The system-level instruction sent to the LLM. |
+| `skills` | No | List of skill IDs to attach. Skills provide tools/knowledge to the agent. |
+| `tools` | No | `"all"` exposes all registered plugins as LLM tools, or provide a list of specific plugin names. |
+| `batch.size` | No | Events per batch. Default `10`. |
+| `batch.timeout` | No | Duration string (e.g. `30s`, `1m`). Flush timeout for incomplete batches. Default `30s`. |
+| `batch.max_rounds` | No | Max ReAct rounds (tool-call loops). Default `5`. |
+| `distributed.mode` | No | `independent`: every node runs the agent. `leader_only`: only the leader node runs it. Default `independent`. |
+| `distributed.rate_limit_rps` | No | Per-instance rate limit for LLM API calls. `0` = unlimited. |
+
+#### How It Works
+
+1. Events flow in from upstream (input or ruleset) and accumulate in a batch buffer.
+2. When `batch.size` is reached or `batch.timeout` expires, the batch is flushed.
+3. The agent sends the batch as JSON to the LLM along with the `system_prompt` and available tool definitions.
+4. The LLM may respond directly or invoke tools (skills + plugins) in a **ReAct loop**, up to `max_rounds`.
+5. The final LLM output is parsed as JSON and forwarded downstream.
+6. If the LLM fails or exceeds max rounds, the original batch is passed through unchanged.
+
+#### Using in a Project
+
+Agents are referenced in project content just like other components:
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+Agents can be chained with rulesets:
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### Distributed Modes
+
+| Mode | Behavior |
+|------|----------|
+| `independent` | Each HUB instance runs its own copy of the agent, processing its local data stream. Use when data is partitioned across nodes. |
+| `leader_only` | Only the cluster leader runs the agent. Followers skip it entirely. Use for centralized tasks like summarization or reporting. |
+
+#### Example: Alert Enrichment Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 1024
+
+system_prompt: |
+  You are a senior SOC analyst. For EACH alert in the batch, output the original event
+  with two fields added:
+  - "llm_confidence": float 0-1 (how likely this is a true positive)
+  - "llm_analysis": one-sentence reasoning (max 30 words)
+  Output ONLY a JSON array, no markdown.
+
+skills: []
+tools: all
+
+batch:
+  size: 5
+  timeout: 30s
+  max_rounds: 3
+
+distributed:
+  mode: independent
+  rate_limit_rps: 2
+```
+
+### 1.5 SKILL Syntax Description
+
+SKILL is a reusable capability module that agents can reference. Skills provide tools and knowledge to the LLM through a **progressive disclosure** pattern — the LLM sees tool descriptions upfront but only fetches full content on demand.
+
+#### Skill Types
+
+| Type | Description | Use Case |
+|------|-------------|----------|
+| `knowledge` | Config-driven knowledge base. Exposes a `get_reference` tool that returns the full content. | Domain expertise, reference docs, playbooks |
+| `builtin` | Go-implemented skill with custom functions. | System integration (e.g., reading/writing rulesets) |
+
+#### Knowledge Skill Configuration
+
+```yaml
+type: knowledge
+
+description: |
+  Brief description of what this skill provides.
+  The LLM sees this in the tool description.
+
+content: |
+  The full reference content returned when the LLM calls get_reference.
+  Can be arbitrarily long — it is NOT included in the initial prompt.
+  Only loaded when the LLM explicitly requests it.
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | **Yes** | Must be `knowledge`. |
+| `description` | **Yes** | Short description shown to the LLM as the tool description. |
+| `content` | **Yes** | Full knowledge content returned on demand via `get_reference`. |
+
+**How it works:** The knowledge skill registers a single tool `get_reference` with the description field as its tool description. When the agent's LLM decides it needs this knowledge, it calls the tool and receives the full `content`. This keeps the initial context lean while making deep knowledge available on demand.
+
+#### Builtin Skill Configuration
+
+```yaml
+type: builtin
+builtin_ref: hub_ruleset_editor    # Reference to a Go-implemented skill
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # Optional config passed to the builtin
+  read_only: false
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | **Yes** | Must be `builtin`. |
+| `builtin_ref` | **Yes** | Name of the built-in Go implementation. |
+| `description` | No | Human-readable description. |
+| `config` | No | Key-value config passed to the builtin factory. |
+
+#### Available Builtin Skills
+
+| builtin_ref | Functions | Description |
+|-------------|-----------|-------------|
+| `hub_ruleset_editor` | `list_rulesets`, `read_ruleset`, `verify_ruleset`, `write_ruleset` | Read, verify, and edit HUB rulesets. Write creates pending changes for human review. Set `config.read_only: true` to disable writes. |
+
+#### Example: Knowledge Skill for Ruleset Authoring
+
+```yaml
+type: knowledge
+
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  (full reference content here)
+```
+
+#### Example: Agent with Skills
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: rules engine reference
+  - hub_ruleset_editor     # builtin skill: read/write rulesets
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+In this setup, the agent has access to both knowledge (rules engine reference docs) and action (ruleset CRUD). The LLM can look up syntax via `get_reference`, list/read existing rulesets, verify XML, and write changes — all within the ReAct loop.
+
 ## 🔧 Part 2: Basic Operating Instructions
 
 ### 2.1 Temporary and Official Files
