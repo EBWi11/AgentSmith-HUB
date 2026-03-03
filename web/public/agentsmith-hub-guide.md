@@ -372,30 +372,7 @@ Each running component will collect Sample Data, we can select “View Sample Da
   ![OperationsHistory.png](png/OperationsHistory.png)
 
 
-### 2.5 MCP
-
-AgentSmith-HUB supports MCP, with tokens shared on the server. The following is the Cline configuration:
-
-```json
-{
-  "mcpServers": {
-    "agentsmith-hub": {
-      "disabled": false,
-      "timeout": 60,
-      "type": "streamableHttp",
-      "url": "http://192.168.124.5/mcp",
-      "headers": {
-        "token": "your-hub-token"
-      }
-    }
-  }
-}
-```
-
-Currently, MCP covers most use cases, including policy editing, etc.
-![MCP.png](png/MCP.png)
-
-### 2.6 Authentication and Login (OIDC SSO)
+### 2.5 Authentication and Login (OIDC SSO)
 
 AgentSmith-HUB supports two authentication methods:
 
@@ -434,7 +411,7 @@ Notes:
 - `oidc_redirect_uri` must exactly match the IdP client configuration. If Hub is behind a reverse proxy or served under a subpath, set the full callback URL accordingly (e.g., `https://hub.example.com/subpath/oidc/callback`) and allow it at the IdP.
 - Username resolution prefers `preferred_username`, then falls back to `email`; override with `oidc_username_claim` if needed.
 - If `oidc_allowed_users` is set, only listed users can access; leave empty to deny anyone.
-- Legacy Token remains supported for MCP and automation via the `token` header.
+- Legacy Token remains supported for automation via the `token` header.
 
 Frontend:
 

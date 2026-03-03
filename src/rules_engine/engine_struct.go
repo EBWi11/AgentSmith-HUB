@@ -138,6 +138,8 @@ type Rule struct {
 	ModifyMap    map[int]Modify
 	DelMap       map[int][][]string
 	SequenceMap  map[int]Sequence
+
+	HitFields []string // Pre-collected field names relevant to this rule's matching logic
 }
 
 type Ruleset struct {

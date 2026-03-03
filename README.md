@@ -23,7 +23,6 @@ If you work in security operations, you probably deal with massive volumes of ra
 - **Scale horizontally** — Built-in cluster mode with leader/follower architecture
 - **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, and more
 - **Modern Web UI** — Visual rule editing, project orchestration, real-time testing, and log search
-- **MCP support** — Integrate with AI-powered tools for intelligent rule management
 
 ## How It Works
 
@@ -207,13 +206,6 @@ More built-in rulesets for additional data sources are on the roadmap. Contribut
 **Error Logs & Operations History**
 
 ![ErrlogOperations](docs/GIF/ErrlogOperations.gif)
-
-</td>
-<td>
-
-**MCP Integration**
-
-![MCP](docs/png/MCP.png)
 
 </td>
 </tr>

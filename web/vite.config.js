@@ -73,10 +73,6 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '')
       },
-      '/mcp': {
-        target: 'http://localhost:8080',
-        changeOrigin: true
-      },
       '/ping': {
         target: 'http://localhost:8080',
         changeOrigin: true

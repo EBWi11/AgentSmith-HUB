@@ -179,8 +179,6 @@ package-arch:
 	cp -r $(LIB_PATH)/* $(DIST_DIR)/$(TARGET_GOARCH)/lib/
 	@echo "Copying config directory..."
 	cp -r config $(DIST_DIR)/$(TARGET_GOARCH)/
-	@echo "Copying MCP config directory..."
-	cp -r mcp_config $(DIST_DIR)/$(TARGET_GOARCH)/
 	@echo "Creating scripts..."
 	./script/create_scripts.sh $(DIST_DIR)/$(TARGET_GOARCH) $(TARGET_GOARCH)
 	@echo "Copying LICENSE file..."

@@ -10,8 +10,6 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
-	"AgentSmith-HUB/smith_agent"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -216,7 +214,7 @@ func getProject(c echo.Context) error {
 	p_raw, ok := project.GetProjectNew(id)
 	tempPath, hasTempFile := GetComponentPath("project", id, true)
 	if ok && hasTempFile {
-		// Get sample data for this project (for MCP interface optimization)
+		// Get sample data for this project
 		sampleData, dataSource, err := getSampleDataForProject(id)
 		response := map[string]interface{}{
 			"id":     id,
@@ -237,7 +235,7 @@ func getProject(c echo.Context) error {
 	}
 
 	formalPath, _ := GetComponentPath("project", id, false)
-	// Get sample data for this project (for MCP interface optimization)
+	// Get sample data for this project
 	sampleData, dataSource, err := getSampleDataForProject(id)
 	response := map[string]interface{}{
 		"id":                p.Id,
@@ -388,7 +386,7 @@ func getRuleset(c echo.Context) error {
 	r_raw, ok := project.GetRulesetNew(id)
 	if ok {
 		_, tempPath := findRulesetPaths(id)
-		// Get sample data for this ruleset (for MCP interface optimization)
+		// Get sample data for this ruleset
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -406,7 +404,7 @@ func getRuleset(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := findRulesetPaths(id)
-		// Get sample data for this ruleset (for MCP interface optimization)
+		// Get sample data for this ruleset
 		sampleData, dataSource, err := getSampleDataForRuleset(id)
 		response := map[string]interface{}{
 			"id":   r.RulesetID,
@@ -539,7 +537,7 @@ func getInput(c echo.Context) error {
 	in_raw, ok := project.GetInputNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("input", id, true)
-		// Get sample data for this input (for MCP interface optimization)
+		// Get sample data for this input
 		sampleData, dataSource, err := getSampleDataForInput(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -550,7 +548,6 @@ func getInput(c echo.Context) error {
 			response["sample_data"] = sampleData
 			response["data_source"] = dataSource
 		}
-		setInputLLMAnalysis(response, id)
 		return c.JSON(http.StatusOK, response)
 	}
 
@@ -558,7 +555,7 @@ func getInput(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := GetComponentPath("input", id, false)
-		// Get sample data for this input (for MCP interface optimization)
+		// Get sample data for this input
 		sampleData, dataSource, err := getSampleDataForInput(id)
 		response := map[string]interface{}{
 			"id":   in.Id,
@@ -569,26 +566,11 @@ func getInput(c echo.Context) error {
 			response["sample_data"] = sampleData
 			response["data_source"] = dataSource
 		}
-		setInputLLMAnalysis(response, id)
 		return c.JSON(http.StatusOK, response)
 	}
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
 
-// setInputLLMAnalysis sets response["llm_analysis"] from Redis cache if present.
-func setInputLLMAnalysis(response map[string]interface{}, inputId string) {
-	analysisJSON, ok := smith_agent.GetInputAnalysis(inputId)
-	if !ok || analysisJSON == "" {
-		response["llm_analysis"] = nil
-		return
-	}
-	var obj interface{}
-	if err := json.Unmarshal([]byte(analysisJSON), &obj); err != nil {
-		response["llm_analysis"] = nil
-		return
-	}
-	response["llm_analysis"] = obj
-}
 
 // getPlugins returns plugin information with configurable detail level
 // Query parameters:
@@ -976,7 +958,7 @@ func getOutput(c echo.Context) error {
 		tempPath, _ := GetComponentPath("output", id, true)
 		// Parse type from temporary file content
 		outputType := parseOutputType(out_raw)
-		// Get sample data for this output (for MCP interface optimization)
+		// Get sample data for this output
 		sampleData, dataSource, err := getSampleDataForOutput(id)
 		response := map[string]interface{}{
 			"id":   id,
@@ -995,7 +977,7 @@ func getOutput(c echo.Context) error {
 
 	if exists {
 		formalPath, _ := GetComponentPath("output", id, false)
-		// Get sample data for this output (for MCP interface optimization)
+		// Get sample data for this output
 		sampleData, dataSource, err := getSampleDataForOutput(id)
 		response := map[string]interface{}{
 			"id":   out.Id,

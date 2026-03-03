@@ -370,30 +370,7 @@ Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时�
 ![Errors.png](png/Errors.png)
 ![OperationsHistory.png](png/OperationsHistory.png)
 
-### 2.5 MCP
-
-AgentSmith-HUB 支持 MCP，Token 于 Server 共同，以下是 Cline 配置：
-
-```json
-{
-  "mcpServers": {
-    "agentsmith-hub": {
-      "disabled": false,
-      "timeout": 60,
-      "type": "streamableHttp",
-      "url": "http://192.168.124.5/mcp",
-      "headers": {
-         "token": "your-hub-token"
-      }
-    }
-  }
-}
-```
-
-目前可以通过 MCP 覆盖了大部分使用场景，包括策略编辑等。
-![MCP.png](png/MCP.png)
-
-### 2.6 认证与登录（OIDC 单点登录）
+### 2.5 认证与登录（OIDC 单点登录）
 
 AgentSmith-HUB 支持两种认证方式：
 
@@ -432,7 +409,7 @@ OIDC_SCOPE="openid profile email"
 - `oidc_redirect_uri` 必须与 IdP 客户端配置完全一致；如 Hub 位于反向代理/子路径下，请据实设置完整回调地址（例如 `https://hub.example.com/subpath/oidc/callback`），并在 IdP 端放行；
 - 用户名判定优先使用 `preferred_username`，找不到则使用 `email`；可通过 `oidc_username_claim` 显式指定；
 - 如配置了 `oidc_allowed_users`，仅名单内用户可访问；为空表示禁止任何人登录；
-- 传统 Token 方式仍受支持，MCP 与脚本集成可继续使用 `token` 请求头。
+- 传统 Token 方式仍受支持，脚本集成可继续使用 `token` 请求头。
 
 前端说明：前端默认从后端 `GET /auth/config` 动态获取 OIDC 配置，一般无需在前端写死;
 
