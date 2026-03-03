@@ -24,7 +24,7 @@ func WriteTokenToRedis(token string) error {
 
 	err := common.GetRedisClient().Set(ctx, tokenRedisKey, token, 0).Err() // No expiration
 	if err != nil {
-		logger.Error("Failed to write token to Redis: %v", err)
+		logger.Error("Failed to write token to Redis", "error", err)
 		return err
 	}
 
@@ -39,7 +39,7 @@ func ReadTokenFromRedis() (string, error) {
 
 	token, err := common.GetRedisClient().Get(ctx, tokenRedisKey).Result()
 	if err != nil {
-		logger.Error("Failed to read token from Redis: %v", err)
+		logger.Error("Failed to read token from Redis", "error", err)
 		return "", err
 	}
 
@@ -57,18 +57,18 @@ func WriteLLMConfigToRedis(apiKey, baseURL, model string) error {
 	defer cancel()
 	client := common.GetRedisClient()
 	if err := client.Set(ctx, llmAPIKeyRedisKey, apiKey, 0).Err(); err != nil {
-		logger.Error("Failed to write LLM API key to Redis: %v", err)
+		logger.Error("Failed to write LLM API key to Redis", "error", err)
 		return err
 	}
 	if baseURL != "" {
 		if err := client.Set(ctx, llmBaseURLRedisKey, baseURL, 0).Err(); err != nil {
-			logger.Error("Failed to write LLM base URL to Redis: %v", err)
+			logger.Error("Failed to write LLM base URL to Redis", "error", err)
 			return err
 		}
 	}
 	if model != "" {
 		if err := client.Set(ctx, llmModelRedisKey, model, 0).Err(); err != nil {
-			logger.Error("Failed to write LLM model to Redis: %v", err)
+			logger.Error("Failed to write LLM model to Redis", "error", err)
 			return err
 		}
 	}

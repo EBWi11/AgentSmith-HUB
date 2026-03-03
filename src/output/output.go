@@ -377,7 +377,7 @@ func (out *Output) StartForTesting() error {
 							case *out.TestCollectionChan <- enhancedMsg:
 								// Message sent successfully
 							default:
-								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
+								logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
 							}
 						}
 					default:
@@ -534,7 +534,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
 								}
 							}
 
@@ -544,7 +544,7 @@ func (out *Output) Start() error {
 								// Message sent successfully
 							default:
 								// Channel is full, log warning and continue
-								logger.Warn("Kafka producer channel full, dropping message", "id", out.Id)
+								logger.Error("Kafka producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 							// No message available from this channel, continue to next
@@ -665,7 +665,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
 								}
 							}
 
@@ -675,7 +675,7 @@ func (out *Output) Start() error {
 								// Message sent successfully
 							default:
 								// Channel is full, log warning and continue
-								logger.Warn("Elasticsearch producer channel full, dropping message", "id", out.Id)
+								logger.Error("Elasticsearch producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 							// No message available from this channel, continue to next
@@ -757,7 +757,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- msgWithId:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "print")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "print")
 								}
 							}
 
@@ -876,14 +876,14 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
 								}
 							}
 
 							select {
 							case msgChan <- enhancedMsg:
 							default:
-								logger.Warn("ClickHouse producer channel full, dropping message", "id", out.Id)
+								logger.Error("ClickHouse producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 						}
@@ -928,7 +928,7 @@ func (out *Output) Stop() error {
 		close(out.stopChan)
 		out.stopChan = nil
 	} else {
-		logger.Warn("stopChan is nil during stop", "id", out.Id)
+		logger.Error("stopChan is nil during stop", "id", out.Id)
 	}
 
 	// Step 2: Stop producers after signaling goroutines to prevent them from receiving new messages
@@ -962,11 +962,11 @@ func (out *Output) Stop() error {
 	case <-waitDone:
 		logger.Info("Output stopped gracefully", "id", out.Id)
 	case <-time.After(10 * time.Second): // Increased timeout to allow for network operations and retries
-		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
+		logger.Error("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
 
 		// Try to get more information about pending messages for debugging
 		pendingCount := out.GetPendingMessageCount()
-		logger.Warn("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
+		logger.Error("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
 
 		stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 	}

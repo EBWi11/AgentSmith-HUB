@@ -187,7 +187,7 @@ func testRuleset(c echo.Context) error {
 	// Ensure ruleset cleanup on function exit
 	defer func() {
 		if stopErr := tempRuleset.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop temporary ruleset: %v", stopErr)
+			logger.Error("Failed to stop temporary ruleset", "error", stopErr)
 		}
 		// Explicitly set to nil to help GC
 		tempRuleset = nil
@@ -590,7 +590,7 @@ done:
 	// Stop the output
 	err = tempOutput.Stop()
 	if err != nil {
-		logger.Warn("Failed to stop temporary output: %v", err)
+		logger.Error("Failed to stop temporary output", "error", err)
 	}
 
 	// Return the results with timeout information
@@ -750,7 +750,7 @@ func testProject(c echo.Context) error {
 
 		// Stop the project (this will handle component cleanup)
 		if stopErr := tempProject.Stop(true); stopErr != nil {
-			logger.Warn("Failed to stop test project: %v", stopErr)
+			logger.Error("Failed to stop test project", "error", stopErr)
 		}
 
 		logger.Info("Test project cleanup completed", "project", testProjectId)

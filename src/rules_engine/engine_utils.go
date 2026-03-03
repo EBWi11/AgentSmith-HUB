@@ -32,7 +32,7 @@ func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (b
 			if groupByValue > int64(threshold) {
 				res = true
 				if err := common.RedisDel(groupByKey); err != nil {
-					logger.Error("failed to delete Redis key %s: %v", groupByKey, err)
+					logger.Error("Failed to delete Redis key", "key", groupByKey, "error", err)
 				}
 			}
 		}
@@ -105,7 +105,7 @@ func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold 
 		res = true
 		for i := range tmpRes {
 			if err := common.RedisDel(tmpRes[i]); err != nil {
-				logger.Error("failed to delete Redis key %s: %v", tmpRes[i], err)
+				logger.Error("Failed to delete Redis key", "key", tmpRes[i], "error", err)
 			}
 		}
 	}

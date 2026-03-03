@@ -23,7 +23,7 @@ func ServerStartFollower(listenAddr string) error {
 	var err error
 	followerToken, err = ReadTokenFromRedis()
 	if err != nil {
-		logger.Error("Failed to read token from Redis, follower server will not start: %v", err)
+		logger.Error("Failed to read token from Redis, follower server will not start", "error", err)
 		return err
 	}
 
@@ -136,10 +136,10 @@ func ServerStartFollower(listenAddr string) error {
 	e.DELETE("/*", blockWriteOperation)
 	e.PATCH("/*", blockWriteOperation)
 
-	logger.Info("Starting follower API server on %s", listenAddr)
+	logger.Info("Starting follower API server", "addr", listenAddr)
 
 	if err := e.Start(listenAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("Follower API server failed to start: %v", err)
+		logger.Error("Follower API server failed to start", "error", err)
 		return err
 	}
 	return nil

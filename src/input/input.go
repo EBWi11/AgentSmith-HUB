@@ -291,7 +291,7 @@ func (in *Input) cleanup() {
 
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
-			logger.Warn("Failed to close sls consumer during cleanup", "input", in.Id, "error", err)
+			logger.Error("Failed to close sls consumer during cleanup", "input", in.Id, "error", err)
 		}
 		in.slsConsumer = nil
 	}
@@ -601,7 +601,7 @@ func (in *Input) Stop() error {
 	}
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
-			logger.Warn("Failed to close sls consumer", "input", in.Id, "error", err)
+			logger.Error("Failed to close sls consumer", "input", in.Id, "error", err)
 		}
 		in.slsConsumer = nil
 	}
@@ -643,8 +643,8 @@ func (in *Input) Stop() error {
 
 			// Check for timeout
 			if time.Since(drainStartTime) > channelDrainTimeout {
-				logger.Warn("Timeout waiting for internal channel to drain, proceeding with shutdown",
-					"input", in.Id, "remaining_messages", channelLen)
+			logger.Error("Timeout waiting for internal channel to drain, proceeding with shutdown",
+				"input", in.Id, "remaining_messages", channelLen)
 				stopError = fmt.Errorf("timeout waiting for internal channel to drain")
 				break
 			}
@@ -673,7 +673,7 @@ func (in *Input) Stop() error {
 	case <-waitDone:
 		logger.Info("Input stopped gracefully", "id", in.Id)
 	case <-time.After(10 * time.Second):
-		logger.Warn("Input stop timeout, forcing cleanup", "id", in.Id)
+		logger.Error("Input stop timeout, forcing cleanup", "id", in.Id)
 		if stopError == nil {
 			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 		}

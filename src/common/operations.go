@@ -464,7 +464,7 @@ func GetOperationsFromRedisWithFilter(filter OperationHistoryFilter) ([]Operatio
 	for _, line := range redisLines {
 		var op OperationRecord
 		if err := json.Unmarshal([]byte(line), &op); err != nil {
-			logger.Warn("Failed to unmarshal operation record", "error", err)
+			logger.Error("Failed to unmarshal operation record", "error", err)
 			continue
 		}
 

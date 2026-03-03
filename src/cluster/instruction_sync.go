@@ -290,7 +290,7 @@ func (im *InstructionManager) CompactAndSaveInstructions(new *Instruction) error
 	// Timeout is 45s (execution flag TTL is 30s, plus 15s buffer)
 	kickedFollowers := false
 	if err := im.WaitForAllFollowersIdle(45 * time.Second); err != nil {
-		logger.Warn("Timeout waiting for followers to complete sync, will kick out slow followers", "error", err)
+		logger.Error("Timeout waiting for followers to complete sync, will kick out slow followers", "error", err)
 
 		// Get the list of slow/stuck followers
 		activeFollowers, _ := im.GetActiveFollowers()
@@ -542,7 +542,7 @@ func (im *InstructionManager) PublishProjectsRestart(projectNames []string, reas
 	}
 
 	if len(errors) > 0 {
-		logger.Warn("Batch restart completed with some failures",
+		logger.Error("Batch restart completed with some failures",
 			"total", len(projectNames),
 			"success", successCount,
 			"failed", len(errors))
@@ -586,7 +586,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 					for v := int64(1); v <= oldCurrentVersion; v++ {
 						key := fmt.Sprintf("cluster:instruction:%d", v)
 						if delErr := common.RedisDel(key); delErr != nil {
-							logger.Warn("Failed to delete old instruction", "version", v, "error", delErr)
+							logger.Error("Failed to delete old instruction", "version", v, "error", delErr)
 						}
 					}
 					logger.Info("Old instructions cleaned up successfully", "cleaned_count", oldCurrentVersion)
@@ -766,7 +766,7 @@ func (im *InstructionManager) KickFollowerForResync(followerID string) error {
 	// Clear the execution flag so leader thinks it's idle
 	executionFlagKey := fmt.Sprintf("cluster:execution_flag:%s", followerID)
 	if err := common.RedisDel(executionFlagKey); err != nil {
-		logger.Warn("Failed to clear execution flag for kicked follower", "follower_id", followerID, "error", err)
+		logger.Error("Failed to clear execution flag for kicked follower", "follower_id", followerID, "error", err)
 	}
 
 	// Mark follower for full resync (24 hour TTL)
@@ -793,7 +793,7 @@ func (im *InstructionManager) WaitForAllFollowersIdle(timeout time.Duration) err
 	for time.Now().Before(deadline) {
 		activeFollowers, err := im.GetActiveFollowers()
 		if err != nil {
-			logger.Warn("Failed to check active followers", "error", err)
+			logger.Error("Failed to check active followers", "error", err)
 			time.Sleep(checkInterval)
 			continue
 		}
@@ -821,7 +821,7 @@ func (im *InstructionManager) Stop() {
 		case <-im.workerStopped:
 			logger.Info("Instruction queue worker stopped")
 		case <-time.After(5 * time.Second):
-			logger.Warn("Timeout waiting for instruction queue worker to stop")
+			logger.Error("Timeout waiting for instruction queue worker to stop")
 		}
 	}
 

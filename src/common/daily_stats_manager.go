@@ -267,7 +267,7 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 					case <-done:
 						// Collection completed successfully
 					case <-time.After(4 * time.Second): // Timeout at 4 seconds to prevent overlap
-						logger.Warn("Statistics collection timed out, may have missed some data")
+						logger.Error("Statistics collection timed out, may have missed some data")
 					}
 				}()
 			} else {
