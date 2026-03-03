@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
@@ -8,6 +9,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -279,7 +281,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		if err != nil {
 			// Record missing instruction
 			missingInstructions = append(missingInstructions, version)
-			logger.Warn("Instruction not found in Redis",
+			logger.Error("Instruction not found in Redis",
 				"version", version,
 				"error", err)
 			continue
@@ -333,15 +335,17 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	var processedInstructions []string
 	var failedInstructions []string
 
-	// Sort instructions: non-projects first, then projects
+	// Sort instructions by dependency order: skills -> agents -> projects (rest by version)
+	componentOrder := map[string]int{
+		"skill": 0, "plugin": 1, "input": 2, "output": 2, "ruleset": 2,
+		"agent": 3, "project": 4,
+	}
 	slices.SortStableFunc(instructions, func(a, b Instruction) int {
-		if a.ComponentType == "project" && b.ComponentType != "project" {
-			return 1
-		} else if a.ComponentType != "project" && b.ComponentType == "project" {
-			return -1
-		} else {
-			return int(a.Version) - int(b.Version)
+		oa, ob := componentOrder[a.ComponentType], componentOrder[b.ComponentType]
+		if oa != ob {
+			return oa - ob
 		}
+		return int(a.Version) - int(b.Version)
 	})
 
 	// Execute all instructions
@@ -490,7 +494,7 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 				return fmt.Errorf("failed to restart affected project %s: %w", projectName, err)
 			}
 		} else {
-			logger.Warn("Follower: Project to restart not found", "project", projectName)
+			logger.Error("Follower: Project to restart not found", "project", projectName)
 		}
 	}
 
@@ -520,9 +524,9 @@ func (sl *SyncListener) clearAllLocalComponents() {
 
 		// Force stop regardless of current status
 		if err := proj.Stop(true); err != nil {
-			logger.Warn("Failed to stop project during cleanup, will force delete anyway",
-				"project", proj.Id,
-				"error", err)
+		logger.Error("Failed to stop project during cleanup, will force delete anyway",
+			"project", proj.Id,
+			"error", err)
 			failedCount++
 		} else {
 			stoppedCount++
@@ -533,7 +537,7 @@ func (sl *SyncListener) clearAllLocalComponents() {
 	}
 
 	// Step 2: Collect all component IDs before deletion
-	var projectIDs, inputIDs, outputIDs, rulesetIDs, pluginIDs []string
+	var projectIDs, inputIDs, outputIDs, rulesetIDs, pluginIDs, agentIDs, skillIDs []string
 
 	project.ForEachProject(func(projectName string, _ *project.Project) bool {
 		projectIDs = append(projectIDs, projectName)
@@ -552,17 +556,34 @@ func (sl *SyncListener) clearAllLocalComponents() {
 		rulesetIDs = append(rulesetIDs, id)
 	}
 
-	// Also collect plugins
 	common.ForEachRawConfig("plugin", func(pluginID, _ string) bool {
 		pluginIDs = append(pluginIDs, pluginID)
 		return true
 	})
 
+	project.ForEachAgent(func(id string, _ *agent.Agent) bool {
+		agentIDs = append(agentIDs, id)
+		return true
+	})
+
+	project.ForEachSkill(func(id string, _ *skill.Skill) bool {
+		skillIDs = append(skillIDs, id)
+		return true
+	})
+
 	// Step 3: Delete all component instances
-	// Order matters: delete projects first, then inputs/outputs/rulesets
+	// Order: projects first, then agents, then skills, then the rest
 
 	for _, id := range projectIDs {
 		project.DeleteProject(id)
+	}
+
+	for _, id := range agentIDs {
+		project.DeleteAgent(id)
+	}
+
+	for _, id := range skillIDs {
+		project.DeleteSkill(id)
 	}
 
 	for _, id := range inputIDs {
@@ -576,8 +597,6 @@ func (sl *SyncListener) clearAllLocalComponents() {
 	for _, id := range rulesetIDs {
 		project.DeleteRuleset(id)
 	}
-
-	// Note: Plugins don't have running state, they will be cleaned by ClearAllRawConfigsForAllTypes
 
 	// Step 4: Clear all raw config maps (memory cleanup)
 	// This includes plugins, inputs, outputs, rulesets, projects
@@ -625,12 +644,24 @@ func (sl *SyncListener) createComponentInstance(componentType, componentName, co
 		project.SetProject(componentName, proj)
 
 	case "plugin":
-		// For plugins, we just store the content as plugins are handled differently
-		// Import the plugin package at the top if not already imported
 		err := plugin.NewPlugin("", content, componentName, plugin.YAEGI_PLUGIN)
 		if err != nil {
 			return fmt.Errorf("failed to create plugin instance %s: %w", componentName, err)
 		}
+
+	case "skill":
+		s, err := skill.NewSkill("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create skill instance %s: %w", componentName, err)
+		}
+		project.SetSkill(componentName, s)
+
+	case "agent":
+		a, err := agent.NewAgent("", content, componentName)
+		if err != nil {
+			return fmt.Errorf("failed to create agent instance %s: %w", componentName, err)
+		}
+		project.SetAgent(componentName, a)
 
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)
@@ -665,9 +696,19 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		logger.Debug("Deleted project instance", "name", componentName)
 
 	case "plugin":
-		// For plugins, we need to handle differently based on the plugin system
-		// This might need specific plugin cleanup logic
 		logger.Debug("Deleted plugin instance", "name", componentName)
+
+	case "skill":
+		if _, err := project.SafeDeleteSkillComponent(componentName); err != nil {
+			return fmt.Errorf("failed to delete skill %s: %w", componentName, err)
+		}
+		logger.Debug("Deleted skill instance", "name", componentName)
+
+	case "agent":
+		if _, err := project.SafeDeleteAgentComponent(componentName); err != nil {
+			return fmt.Errorf("failed to delete agent %s: %w", componentName, err)
+		}
+		logger.Debug("Deleted agent instance", "name", componentName)
 
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)
@@ -680,7 +721,7 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 func (sl *SyncListener) updateComponentInstance(componentType, componentName, content string) error {
 	// For updates, we delete the old instance and create a new one
 	if err := sl.deleteComponentInstance(componentType, componentName); err != nil {
-		logger.Warn("Failed to delete old component instance during update", "type", componentType, "name", componentName, "error", err)
+		logger.Error("Failed to delete old component instance during update", "type", componentType, "name", componentName, "error", err)
 	}
 
 	return sl.createComponentInstance(componentType, componentName, content)

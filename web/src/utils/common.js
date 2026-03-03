@@ -29,6 +29,18 @@ export const COMPONENT_TYPES = {
     language: 'go',
     supportsConnectCheck: false
   },
+  skills: {
+    label: 'Skill',
+    icon: '🧩',
+    language: 'yaml',
+    supportsConnectCheck: false
+  },
+  agents: {
+    label: 'Agent',
+    icon: '🤖',
+    language: 'yaml',
+    supportsConnectCheck: false
+  },
   projects: {
     label: 'Project',
     icon: '📁',
@@ -69,7 +81,9 @@ export function getApiComponentType(type) {
     output: 'outputs', 
     ruleset: 'rulesets',
     project: 'projects',
-    plugin: 'plugins'
+    plugin: 'plugins',
+    skill: 'skills',
+    agent: 'agents'
   }
   return mapping[type] || (type.endsWith('s') ? type : type + 's')
 }

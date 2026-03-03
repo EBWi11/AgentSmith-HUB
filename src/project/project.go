@@ -1,12 +1,14 @@
 package project
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -254,6 +256,39 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 			"affected_rulesets", len(affectedRulesets),
 			"affected_projects", len(affectedProjects))
 			
+	case "agent":
+		ForEachProject(func(projectID string, p *Project) bool {
+			if p.CheckExist("AGENT", componentID) {
+				if checkShouldRestart(projectID, p) {
+					affectedProjects[projectID] = struct{}{}
+				}
+			}
+			return true
+		})
+	case "skill":
+		// Skill change -> find agents that reference this skill -> find projects using those agents
+		var affectedAgentIDs []string
+		ForEachAgent(func(agentID string, a *agent.Agent) bool {
+			if a.Config != nil {
+				for _, sid := range a.Config.Skills {
+					if sid == componentID {
+						affectedAgentIDs = append(affectedAgentIDs, agentID)
+						break
+					}
+				}
+			}
+			return true
+		})
+		for _, agentID := range affectedAgentIDs {
+			ForEachProject(func(projectID string, p *Project) bool {
+				if p.CheckExist("AGENT", agentID) {
+					if checkShouldRestart(projectID, p) {
+						affectedProjects[projectID] = struct{}{}
+					}
+				}
+				return true
+			})
+		}
 	case "project":
 		// For project changes, check if user wants this project to be running
 		if p, exists := GetProject(componentID); exists {
@@ -409,7 +444,7 @@ func checkAllProjectComponentsImpl() []common.ProjectComponentError {
 func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectComponentError) {
 	proj, exists := GetProject(projectID)
 	if !exists {
-		logger.Warn("Cannot set error status for non-existent project", "project", projectID)
+		logger.Error("Cannot set error status for non-existent project", "project", projectID)
 		return
 	}
 
@@ -440,14 +475,42 @@ func init() {
 	GlobalProject.Inputs = make(map[string]*input.Input)
 	GlobalProject.Outputs = make(map[string]*output.Output)
 	GlobalProject.Rulesets = make(map[string]*rules_engine.Ruleset)
+	GlobalProject.Agents = make(map[string]*agent.Agent)
+	GlobalProject.Skills = make(map[string]*skill.Skill)
 
 	GlobalProject.PNSOutputs = make(map[string]*output.Output)
 	GlobalProject.PNSRulesets = make(map[string]*rules_engine.Ruleset)
+	GlobalProject.PNSAgents = make(map[string]*agent.Agent)
 
 	GlobalProject.ProjectsNew = make(map[string]string)
 	GlobalProject.InputsNew = make(map[string]string)
 	GlobalProject.OutputsNew = make(map[string]string)
 	GlobalProject.RulesetsNew = make(map[string]string)
+	GlobalProject.AgentsNew = make(map[string]string)
+	GlobalProject.SkillsNew = make(map[string]string)
+
+	// Register skill resolver for agents to look up skill components
+	agent.RegisterSkillResolver(func(id string) (*skill.Skill, bool) {
+		return GetSkill(id)
+	})
+
+	// Register agent ruleset accessor to avoid circular imports
+	skill.RegisterRulesetAccessor(&skill.RulesetAccessor{
+		GetAllRulesets: func() map[string]string {
+			result := make(map[string]string)
+			common.ForEachRawConfig("ruleset", func(id, config string) bool {
+				result[id] = config
+				return true
+			})
+			return result
+		},
+		GetRuleset: func(id string) (string, bool) {
+			return common.GetRawConfig("ruleset", id)
+		},
+		SetRulesetNew: func(id string, content string) {
+			SetRulesetNew(id, content)
+		},
+	})
 
 	// AllProjectRawConfig is now managed through common.SetRawConfig functions
 	common.SetStatsCollector(collectAllComponentStats)
@@ -576,11 +639,12 @@ func NewProject(path string, raw string, id string, test bool) (*Project, error)
 
 	p := &Project{
 		Id:          cfg.Id,
-		Status:      common.StatusStopped, // Default to stopped status, will be started by StartAllProject
+		Status:      common.StatusStopped,
 		Config:      &cfg,
 		Inputs:      make(map[string]*input.Input),
 		Outputs:     make(map[string]*output.Output),
 		Rulesets:    make(map[string]*rules_engine.Ruleset),
+		Agents:      make(map[string]*agent.Agent),
 		MsgChannels: make(map[string]*chan map[string]interface{}, 0),
 		Testing:     test,
 	}
@@ -868,7 +932,7 @@ func parseNode(s string) (string, string) {
 	componentID := strings.TrimSpace(parts[1])
 
 	// Validate component type
-	if componentType != "INPUT" && componentType != "OUTPUT" && componentType != "RULESET" {
+	if componentType != "INPUT" && componentType != "OUTPUT" && componentType != "RULESET" && componentType != "AGENT" {
 		return "", ""
 	}
 
@@ -991,7 +1055,7 @@ func (p *Project) validateComponent(componentType, componentID string, lineNum i
 	// Check formal components using safe accessors
 	exists, tempExists := ValidateComponent(componentType, componentID)
 
-	if componentType != "INPUT" && componentType != "OUTPUT" && componentType != "RULESET" {
+	if componentType != "INPUT" && componentType != "OUTPUT" && componentType != "RULESET" && componentType != "AGENT" {
 		return fmt.Errorf("unknown component type '%s' at line %d (%s)", componentType, lineNum, position)
 	}
 
@@ -1131,7 +1195,7 @@ func (p *Project) Stop(lock bool) error {
 		// CRITICAL: Timeout occurred but goroutine may still be running
 		// Force cleanup and set status to stopped to allow restart
 		// The goroutine will eventually finish but we don't wait
-		logger.Warn("Stop operation timed out, forcing cleanup and stopped status (goroutine may still be running)", "project", p.Id)
+		logger.Error("Stop operation timed out, forcing cleanup and stopped status (goroutine may still be running)", "project", p.Id)
 		p.cleanup()
 		p.SetProjectStatus(common.StatusStopped, nil)
 
@@ -1282,6 +1346,14 @@ func (p *Project) areAllComponentsRunning() bool {
 		}
 	}
 
+	// Check agent components
+	for _, a := range p.Agents {
+		if a.Status != common.StatusRunning {
+			logger.Warn("Agent component not running", "project", p.Id, "agent", a.Id, "status", a.Status)
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -1332,6 +1404,21 @@ func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.D
 				stopErrors = append(stopErrors, fmt.Errorf("ruleset %s: %w", rs.RulesetID, stopErr))
 			} else {
 				logger.Info("Stopped ruleset", "project", p.Id, "ruleset", rs.RulesetID)
+			}
+		}
+	}
+
+	agentComponents := p.GetProjectAgents()
+	logger.Info("Step 4b: Stopping agents", "project", p.Id, "count", len(agentComponents))
+	for id, a := range agentComponents {
+		DeletePNSAgent(id)
+		if CalculateRefCount(id, p.Id) == 0 {
+			stopErr := a.Stop()
+			if stopErr != nil {
+				logger.Error("Failed to stop agent", "project", p.Id, "agent", a.Id, "error", stopErr)
+				stopErrors = append(stopErrors, fmt.Errorf("agent %s: %w", a.Id, stopErr))
+			} else {
+				logger.Info("Stopped agent", "project", p.Id, "agent", a.Id)
 			}
 		}
 	}
@@ -1422,6 +1509,7 @@ func (p *Project) cleanup() {
 	p.Inputs = make(map[string]*input.Input)
 	p.Outputs = make(map[string]*output.Output)
 	p.Rulesets = make(map[string]*rules_engine.Ruleset)
+	p.Agents = make(map[string]*agent.Agent)
 	p.MsgChannels = make(map[string]*chan map[string]interface{}, 0)
 
 	// Reset stop channel state for next start/stop cycle
@@ -1479,7 +1567,7 @@ func (p *Project) stopInputComponents() []error {
 					}
 				}
 			} else {
-				logger.Warn("Global input not found during stop", "project", p.Id, "input", in.Id)
+				logger.Error("Global input not found during stop", "project", p.Id, "input", in.Id)
 				stopErrors = append(stopErrors, fmt.Errorf("input %s: global input not found", in.Id))
 			}
 		} else {
@@ -1588,6 +1676,12 @@ func (p *Project) cleanupRulesetChannel() {
 				}
 			}
 		}
+
+		if node.FromType == "AGENT" {
+			if CalculateRefCount(node.FromPNS, p.Id) > 0 {
+				SafeDeleteAgentDownstream(node.FromPNS, node.ToPNS)
+			}
+		}
 	}
 }
 
@@ -1604,6 +1698,11 @@ func (p *Project) initComponents() error {
 			DeletePNSRuleset(pns)
 		}
 
+		// Clean up created PNS agents
+		for pns := range p.Agents {
+			DeletePNSAgent(pns)
+		}
+
 		// Clean up created PNS outputs (only if not in testing mode)
 		if !p.Testing {
 			for pns := range p.Outputs {
@@ -1615,6 +1714,7 @@ func (p *Project) initComponents() error {
 		p.Inputs = make(map[string]*input.Input)
 		p.Outputs = make(map[string]*output.Output)
 		p.Rulesets = make(map[string]*rules_engine.Ruleset)
+		p.Agents = make(map[string]*agent.Agent)
 		p.MsgChannels = make(map[string]*chan map[string]interface{}, 0)
 
 		// Reset node initialization flags
@@ -1732,6 +1832,35 @@ func (p *Project) initComponents() error {
 					o.UpStream[node.ToPNS] = &c
 				}
 			}
+		case "AGENT":
+			a, exists := GetPNSAgent(node.ToPNS)
+			if exists {
+				p.Agents[node.ToPNS] = a
+				nodeChannelStatus[node.ToPNS] = false
+			} else {
+				originalAgent, exists := GetAgent(node.ToID)
+				if !exists {
+					cleanup()
+					return fmt.Errorf("agent component not found: %s", node.ToID)
+				}
+
+				a, err := agent.NewFromExisting(originalAgent, node.ToPNS)
+				if err != nil {
+					if originalAgent != nil {
+						originalAgent.SetStatus(common.StatusError, fmt.Errorf("failed to create PNS instance: %w", err))
+					}
+					cleanup()
+					return fmt.Errorf("failed to create agent from existing: %s %w", node.ToPNS, err)
+				}
+
+				SetPNSAgent(node.ToPNS, a)
+				p.Agents[node.ToPNS] = a
+
+				nodeChannelStatus[node.ToPNS] = true
+				c := make(chan map[string]interface{}, 512)
+				p.MsgChannels[node.ToPNS] = &c
+				a.UpStream[node.ToPNS] = &c
+			}
 		}
 		node.ToInit = true
 	}
@@ -1805,6 +1934,29 @@ func (p *Project) initComponents() error {
 				}
 				p.Inputs[node.FromPNS] = originalInput
 			}
+		case "AGENT":
+			a, exists := GetPNSAgent(node.FromPNS)
+			if exists {
+				p.Agents[node.FromPNS] = a
+			} else {
+				originalAgent, exists := GetAgent(node.FromID)
+				if !exists {
+					cleanup()
+					return fmt.Errorf("agent component not found: %s", node.FromID)
+				}
+
+				a, err := agent.NewFromExisting(originalAgent, node.FromPNS)
+				if err != nil {
+					if originalAgent != nil {
+						originalAgent.SetStatus(common.StatusError, fmt.Errorf("failed to create PNS instance: %w", err))
+					}
+					cleanup()
+					return fmt.Errorf("failed to create agent from existing: %s %w", node.FromPNS, err)
+				}
+
+				SetPNSAgent(node.FromPNS, a)
+				p.Agents[node.FromPNS] = a
+			}
 		}
 		node.FromInit = true
 	}
@@ -1835,12 +1987,43 @@ func (p *Project) initComponents() error {
 								fromRs.DownStream[node.ToPNS] = sharedChannel
 							}
 						}
+					} else if node.ToType == "AGENT" {
+						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
+							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
+								fromRs.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					}
+				}
+			}
+		case "AGENT":
+			if fromAgent, exists := p.Agents[node.FromPNS]; exists {
+				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
+					fromAgent.DownStream[node.ToPNS] = toChannel
+				} else {
+					if node.ToType == "OUTPUT" {
+						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
+							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
+								fromAgent.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					} else if node.ToType == "RULESET" {
+						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
+							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
+								fromAgent.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
+					} else if node.ToType == "AGENT" {
+						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
+							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
+								fromAgent.DownStream[node.ToPNS] = sharedChannel
+							}
+						}
 					}
 				}
 			}
 		case "INPUT":
 			if fromInput, exists := p.Inputs[node.FromPNS]; exists {
-				// Always try to establish connection
 				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
 					fromInput.DownStream[node.ToPNS] = toChannel
 					logger.Info("Input downstream connection established",
@@ -1850,7 +2033,6 @@ func (p *Project) initComponents() error {
 						"to_pns", node.ToPNS,
 						"to_type", node.ToType)
 				} else {
-					// If no local channel, try to find existing channel in shared PNS component
 					if node.ToType == "OUTPUT" {
 						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
 							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
@@ -1873,13 +2055,24 @@ func (p *Project) initComponents() error {
 									"to_pns", node.ToPNS)
 							}
 						}
+					} else if node.ToType == "AGENT" {
+						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
+							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
+								fromInput.DownStream[node.ToPNS] = sharedChannel
+								logger.Info("Input downstream connection established to shared agent",
+									"project", p.Id,
+									"input", fromInput.Id,
+									"from_pns", node.FromPNS,
+									"to_pns", node.ToPNS)
+							}
+						}
 					}
 				}
 			} else {
-				logger.Warn("Input component not found for connection",
-					"project", p.Id,
-					"from_pns", node.FromPNS,
-					"from_id", node.FromID)
+			logger.Error("Input component not found for connection",
+				"project", p.Id,
+				"from_pns", node.FromPNS,
+				"from_id", node.FromID)
 			}
 		}
 	}
@@ -1887,17 +2080,19 @@ func (p *Project) initComponents() error {
 	logger.Info("Components initialized successfully", "project", p.Id,
 		"inputs", len(p.Inputs),
 		"outputs", len(p.Outputs),
-		"rulesets", len(p.Rulesets))
+		"rulesets", len(p.Rulesets),
+		"agents", len(p.Agents))
 
 	return nil
 }
 
 func (p *Project) runComponents() error {
-	// Start components in reverse dependency order: outputs -> rulesets -> inputs
+	// Start components in reverse dependency order: outputs -> agents -> rulesets -> inputs
 	// This ensures downstream components are ready before upstream starts producing data
 
 	// Track started components for cleanup on failure
 	var startedOutputs []*output.Output
+	var startedAgents []*agent.Agent
 	var startedRulesets []*rules_engine.Ruleset
 	var startedInputs []*input.Input
 
@@ -1905,7 +2100,6 @@ func (p *Project) runComponents() error {
 	cleanup := func() {
 		logger.Info("Cleaning up started components due to error", "project", p.Id)
 
-		// Stop inputs first (stop data flow)
 		for _, in := range startedInputs {
 			if p.Testing {
 				_ = in.StopForTesting()
@@ -1914,12 +2108,14 @@ func (p *Project) runComponents() error {
 			}
 		}
 
-		// Stop rulesets
 		for _, rs := range startedRulesets {
 			_ = rs.Stop()
 		}
 
-		// Stop outputs last
+		for _, a := range startedAgents {
+			_ = a.Stop()
+		}
+
 		for _, out := range startedOutputs {
 			if p.Testing {
 				_ = out.StopForTesting()
@@ -1948,7 +2144,18 @@ func (p *Project) runComponents() error {
 		startedOutputs = append(startedOutputs, out)
 	}
 
-	// 2. Start ruleset components (middle components in the pipeline)
+	// 2. Start agent components
+	agents := p.GetProjectAgents()
+	for _, a := range agents {
+		err := a.Start()
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("failed to start agent component %s: %w", a.Id, err)
+		}
+		startedAgents = append(startedAgents, a)
+	}
+
+	// 3. Start ruleset components (middle components in the pipeline)
 	rulesets := p.GetProjectRulesets()
 	for _, rs := range rulesets {
 		err := rs.Start()
@@ -1959,7 +2166,7 @@ func (p *Project) runComponents() error {
 		startedRulesets = append(startedRulesets, rs)
 	}
 
-	// 3. Start input components last (they will begin producing data immediately)
+	// 4. Start input components last (they will begin producing data immediately)
 	inputs := p.GetProjectInputs()
 	for _, in := range inputs {
 		var err error
@@ -1980,6 +2187,7 @@ func (p *Project) runComponents() error {
 
 	logger.Info("All components started successfully", "project", p.Id,
 		"outputs", len(startedOutputs),
+		"agents", len(startedAgents),
 		"rulesets", len(startedRulesets),
 		"inputs", len(startedInputs))
 

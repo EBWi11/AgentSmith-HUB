@@ -52,6 +52,8 @@ func ServerStart(listener string) error {
 	e.GET("/token-check", tokenCheck)
 	// Authentication config for frontend
 	e.GET("/auth/config", getAuthConfig)
+	// Feature flags for frontend
+	e.GET("/features", getFeatures)
 
 	// Statistics and metrics endpoints (public access for monitoring)
 	e.GET("/daily-messages", getDailyMessages)
@@ -134,6 +136,19 @@ func ServerStart(listener string) error {
 	auth.GET("/plugin-parameters", GetBatchPluginParameters)
 	auth.GET("/plugins/:id/usage", getPluginUsage)
 
+	// Agent endpoints - REQUIRE AUTH
+	auth.GET("/agents", getAgents)
+	auth.GET("/agents/:id", getAgentDetail)
+	auth.POST("/agents", createAgent)
+	auth.PUT("/agents/:id", updateAgent)
+	auth.DELETE("/agents/:id", deleteAgentHandler)
+
+	auth.GET("/skills", getSkills)
+	auth.GET("/skills/:id", getSkillDetail)
+	auth.POST("/skills", createSkill)
+	auth.PUT("/skills/:id", updateSkill)
+	auth.DELETE("/skills/:id", deleteSkillHandler)
+
 	// Component verification and testing - REQUIRE AUTH
 	auth.POST("/verify/:type/:id", verifyComponent)
 	auth.GET("/connect-check/:type/:id", connectCheck)
@@ -178,6 +193,8 @@ func ServerStart(listener string) error {
 	auth.POST("/cancel-upgrade/outputs/:id", cancelOutputUpgrade)
 	auth.POST("/cancel-upgrade/projects/:id", cancelProjectUpgrade)
 	auth.POST("/cancel-upgrade/plugins/:id", cancelPluginUpgrade)
+	auth.POST("/cancel-upgrade/agents/:id", cancelAgentUpgrade)
+	auth.POST("/cancel-upgrade/skills/:id", cancelSkillUpgrade)
 
 	// Component usage analysis - REQUIRE AUTH
 	auth.GET("/component-usage/:type/:id", GetComponentUsage)

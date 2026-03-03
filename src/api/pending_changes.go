@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
@@ -9,6 +10,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"fmt"
 	"net/http"
 	"os"
@@ -102,6 +104,7 @@ func (pcm *PendingChangeManager) AddChange(changeType, id, newContent, oldConten
 	// Validate component type
 	validTypes := map[string]bool{
 		"plugin": true, "input": true, "output": true, "ruleset": true, "project": true,
+		"agent": true, "skill": true,
 	}
 	if !validTypes[changeType] {
 		logger.Error("Invalid component type", "type", changeType)
@@ -192,6 +195,10 @@ func (pcm *PendingChangeManager) VerifyChange(changeType, id string) error {
 		err = rules_engine.Verify("", change.NewContent)
 	case "project":
 		err = project.Verify("", change.NewContent)
+	case "agent":
+		err = agent.Verify("", change.NewContent)
+	case "skill":
+		err = skill.Verify("", change.NewContent)
 	default:
 		err = fmt.Errorf("unsupported component type: %s", changeType)
 	}
@@ -261,6 +268,8 @@ func syncLegacyToEnhancedManager() {
 	syncOutputsToEnhancedManager()
 	syncRulesetsToEnhancedManager()
 	syncProjectsToEnhancedManager()
+	syncAgentsToEnhancedManager()
+	syncSkillsToEnhancedManager()
 	cleanupObsoleteChanges()
 }
 
@@ -410,6 +419,48 @@ func syncProjectsToEnhancedManager() {
 	}
 }
 
+func syncAgentsToEnhancedManager() {
+	agentsData := project.GetAllAgentsNew()
+	for id, newContent := range agentsData {
+		var oldContent string
+		isNew := true
+
+		if a, ok := project.GetAgent(id); ok {
+			oldContent = a.RawConfig
+			isNew = false
+		}
+
+		if existingChange, exists := globalPendingChangeManager.GetChange("agent", id); exists {
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("agent", id, newContent, oldContent, isNew)
+			}
+		} else {
+			globalPendingChangeManager.AddChange("agent", id, newContent, oldContent, isNew)
+		}
+	}
+}
+
+func syncSkillsToEnhancedManager() {
+	skillsData := project.GetAllSkillsNew()
+	for id, newContent := range skillsData {
+		var oldContent string
+		isNew := true
+
+		if s, ok := project.GetSkill(id); ok {
+			oldContent = s.RawConfig
+			isNew = false
+		}
+
+		if existingChange, exists := globalPendingChangeManager.GetChange("skill", id); exists {
+			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
+				globalPendingChangeManager.AddChange("skill", id, newContent, oldContent, isNew)
+			}
+		} else {
+			globalPendingChangeManager.AddChange("skill", id, newContent, oldContent, isNew)
+		}
+	}
+}
+
 // Helper functions for safe access to plugin data
 func getPendingPluginChange(id string) (string, bool) {
 	common.GlobalMu.RLock()
@@ -455,6 +506,14 @@ func cleanupObsoleteChanges() {
 
 	for id := range project.GetAllProjectsNew() {
 		shouldExist[fmt.Sprintf("project:%s", id)] = true
+	}
+
+	for id := range project.GetAllAgentsNew() {
+		shouldExist[fmt.Sprintf("agent:%s", id)] = true
+	}
+
+	for id := range project.GetAllSkillsNew() {
+		shouldExist[fmt.Sprintf("skill:%s", id)] = true
 	}
 
 	// Clean up obsolete changes that no longer exist in legacy storage
@@ -562,6 +621,7 @@ func CancelPendingChange(c echo.Context) error {
 	// Validate component type
 	validTypes := map[string]bool{
 		"plugin": true, "input": true, "output": true, "ruleset": true, "project": true,
+		"agent": true, "skill": true,
 	}
 	if !validTypes[changeType] {
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -594,6 +654,10 @@ func CancelPendingChange(c echo.Context) error {
 		project.DeleteRulesetNew(id)
 	case "project":
 		project.DeleteProjectNew(id)
+	case "agent":
+		project.DeleteAgentNew(id)
+	case "skill":
+		project.DeleteSkillNew(id)
 	}
 
 	// Remove .new file if it exists
@@ -607,17 +671,20 @@ func CancelPendingChange(c echo.Context) error {
 	case "output":
 		tempPath = path.Join(configRoot, "output", id+".yaml.new")
 	case "ruleset":
-		// Use folder-aware path resolution for rulesets
 		_, tempPath = findRulesetPaths(id)
 	case "project":
 		tempPath = path.Join(configRoot, "project", id+".yaml.new")
+	case "agent":
+		tempPath = path.Join(configRoot, "agent", id+".yaml.new")
+	case "skill":
+		tempPath = path.Join(configRoot, "skill", id+".yaml.new")
 	}
 
 	if tempPath != "" {
 		if _, err := os.Stat(tempPath); err == nil {
 			err = os.Remove(tempPath)
 			if err != nil {
-				logger.Warn("Failed to remove temp file", "path", tempPath, "error", err)
+				logger.Error("Failed to remove temp file", "path", tempPath, "error", err)
 			} else {
 				logger.Info("Temp file removed", "path", tempPath)
 			}
@@ -655,6 +722,10 @@ func CancelAllPendingChanges(c echo.Context) error {
 			project.DeleteRulesetNew(change.ID)
 		case "project":
 			project.DeleteProjectNew(change.ID)
+		case "agent":
+			project.DeleteAgentNew(change.ID)
+		case "skill":
+			project.DeleteSkillNew(change.ID)
 		}
 
 		// Remove .new file if it exists
@@ -668,17 +739,20 @@ func CancelAllPendingChanges(c echo.Context) error {
 		case "output":
 			tempPath = path.Join(configRoot, "output", change.ID+".yaml.new")
 		case "ruleset":
-			// Use folder-aware path resolution for rulesets
 			_, tempPath = findRulesetPaths(change.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", change.ID+".yaml.new")
+		case "agent":
+			tempPath = path.Join(configRoot, "agent", change.ID+".yaml.new")
+		case "skill":
+			tempPath = path.Join(configRoot, "skill", change.ID+".yaml.new")
 		}
 
 		if tempPath != "" {
 			if _, err := os.Stat(tempPath); err == nil {
 				err = os.Remove(tempPath)
 				if err != nil {
-					logger.Warn("Failed to remove temp file", "path", tempPath, "error", err)
+					logger.Error("Failed to remove temp file", "path", tempPath, "error", err)
 				}
 			}
 		}
@@ -736,8 +810,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			verifyErr = rules_engine.Verify("", req.NewContent)
 		case "project":
 			verifyErr = project.Verify("", req.NewContent)
-		default:
-			return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+	case "agent":
+		verifyErr = agent.Verify("", req.NewContent)
+	case "skill":
+		verifyErr = skill.Verify("", req.NewContent)
+	default:
+		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
 		}
 
 		if verifyErr != nil {
@@ -762,8 +840,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			filePath = path.Join(configRoot, "project", req.ID+".yaml")
 		case "plugin":
 			filePath = path.Join(configRoot, "plugin", req.ID+".go")
-		default:
-			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
+	case "agent":
+		filePath = path.Join(configRoot, "agent", req.ID+".yaml")
+	case "skill":
+		filePath = path.Join(configRoot, "skill", req.ID+".yaml")
+	default:
+		return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
 		}
 
 		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
@@ -786,13 +868,17 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			_, tempPath = findRulesetPaths(req.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
-		}
+	case "agent":
+		tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
+	case "skill":
+		tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
+	}
 
 		if tempPath != "" {
 			if _, err := os.Stat(tempPath); err == nil {
 				err = os.Remove(tempPath)
 				if err != nil {
-					logger.Warn("Failed to remove temp file after successful apply", "path", tempPath, "error", err)
+					logger.Error("Failed to remove temp file after successful apply", "path", tempPath, "error", err)
 				} else {
 					logger.Info("Temp file removed after successful apply", "path", tempPath)
 				}
@@ -868,7 +954,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			logger.Info("Stopping old project before reload to release components", "project", req.ID)
 			stopErr := oldProject.Stop(false)
 			if stopErr != nil {
-				logger.Warn("Failed to stop old project, continuing anyway", "project", req.ID, "error", stopErr)
+				logger.Error("Failed to stop old project, continuing anyway", "project", req.ID, "error", stopErr)
 			}
 			// Sleep to ensure components fully stopped
 			time.Sleep(2 * time.Second)
@@ -916,6 +1002,39 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		plugin.DeletePluginNew(req.ID)
 
 		affectedProjects = project.GetAffectedProjects("plugin", req.ID)
+
+	case "agent":
+		var newAgent *agent.Agent
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newAgent, err = agent.NewAgent(filePath, "", req.ID)
+		} else {
+			newAgent, err = agent.NewAgent("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create agent: %w", err)
+		}
+
+		project.SetAgent(req.ID, newAgent)
+		project.DeleteAgentNew(req.ID)
+
+		affectedProjects = project.GetAffectedProjects("agent", req.ID)
+
+	case "skill":
+		var newSkill *skill.Skill
+		var err error
+		if req.WriteToFile && filePath != "" {
+			newSkill, err = skill.NewSkill(filePath, "", req.ID)
+		} else {
+			newSkill, err = skill.NewSkill("", req.NewContent, req.ID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to create skill: %w", err)
+		}
+
+		project.SetSkill(req.ID, newSkill)
+		project.DeleteSkillNew(req.ID)
+		affectedProjects = project.GetAffectedProjects("skill", req.ID)
 
 	default:
 		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
@@ -1005,6 +1124,20 @@ func ApplySingleChange(c echo.Context) error {
 		if found {
 			if proj, exists := project.GetProject(req.ID); exists {
 				oldContent = proj.Config.RawConfig
+			}
+		}
+	case "agent":
+		content, found = project.GetAgentNew(req.ID)
+		if found {
+			if a, exists := project.GetAgent(req.ID); exists {
+				oldContent = a.RawConfig
+			}
+		}
+	case "skill":
+		content, found = project.GetSkillNew(req.ID)
+		if found {
+			if s, exists := project.GetSkill(req.ID); exists {
+				oldContent = s.RawConfig
 			}
 		}
 	default:
@@ -1155,6 +1288,28 @@ func CreateTempFile(c echo.Context) error {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "plugin not found"})
 		}
 
+	case "agent":
+		originalPath = path.Join(configRoot, "agent", id+".yaml")
+		tempPath = originalPath + ".new"
+
+		if a, ok := project.GetAgent(id); ok {
+			content = a.RawConfig
+		} else {
+			logger.Error("Agent not found", "id", id)
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "agent not found"})
+		}
+
+	case "skill":
+		originalPath = path.Join(configRoot, "skill", id+".yaml")
+		tempPath = originalPath + ".new"
+
+		if s, ok := project.GetSkill(id); ok {
+			content = s.RawConfig
+		} else {
+			logger.Error("Skill not found", "id", id)
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "skill not found"})
+		}
+
 	default:
 		logger.Error("Unsupported component type", "type", componentType)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
@@ -1208,6 +1363,10 @@ func CreateTempFile(c echo.Context) error {
 		project.SetProjectNew(id, content)
 	case "plugin":
 		plugin.SetPluginNew(id, content)
+	case "agent":
+		project.SetAgentNew(id, content)
+	case "skill":
+		project.SetSkillNew(id, content)
 	}
 
 	logger.Info("Temp file created successfully", "path", tempPath)
@@ -1275,7 +1434,7 @@ func DeleteTempFile(c echo.Context) error {
 		})
 	}
 
-	// Remove tempo`rary file content from memory using safe accessors
+	// Remove temporary file content from memory using safe accessors
 	switch singularType {
 	case "input":
 		project.DeleteInputNew(id)
@@ -1287,6 +1446,10 @@ func DeleteTempFile(c echo.Context) error {
 		project.DeleteProjectNew(id)
 	case "plugin":
 		plugin.DeletePluginNew(id)
+	case "agent":
+		project.DeleteAgentNew(id)
+	case "skill":
+		project.DeleteSkillNew(id)
 	}
 
 	logger.Info("Temp file deleted successfully", "path", tempPath)

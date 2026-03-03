@@ -191,6 +191,73 @@
       </div>
     </div>
 
+    <!-- Agent Overview (only when LLM is available) -->
+    <div v-if="llmAvailable && agentList.length > 0" class="bg-white rounded-lg shadow-sm p-4 relative">
+      <h3 class="text-lg font-medium text-gray-900 mb-3">Agent Overview</h3>
+      
+      <!-- Summary Stats -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Total Agents</p>
+          <p class="text-lg font-bold text-indigo-600">{{ agentStats.total }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Running</p>
+          <p class="text-lg font-bold text-green-600">{{ agentStats.running }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Stopped</p>
+          <p class="text-lg font-bold text-gray-500">{{ agentStats.stopped }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Messages Processed</p>
+          <p class="text-lg font-bold text-blue-600">{{ formatNumber(agentStats.totalProcessed) }}</p>
+        </div>
+      </div>
+
+      <!-- Individual Agent Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div v-for="ag in agentList" :key="ag.id"
+             class="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
+             @click="navigateToAgent(ag.id)">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center">
+              <span class="w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0"
+                    :class="{
+                      'bg-green-500': ag.status === 'running',
+                      'bg-red-500': ag.status === 'error',
+                      'bg-gray-400': ag.status === 'stopped',
+                      'bg-blue-500 animate-pulse': ag.status === 'starting'
+                    }"></span>
+              <p class="font-medium text-gray-900 text-sm truncate">{{ ag.id }}</p>
+            </div>
+            <span class="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ml-2"
+                  :class="{
+                    'bg-indigo-100 text-indigo-700': ag.distributed?.mode === 'leader_only',
+                    'bg-gray-100 text-gray-600': ag.distributed?.mode !== 'leader_only'
+                  }">
+              {{ ag.distributed?.mode === 'leader_only' ? 'leader' : 'all nodes' }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="p-1.5 bg-indigo-50 rounded">
+              <p class="text-[10px] text-indigo-600 font-medium">Model</p>
+              <p class="text-xs font-bold text-indigo-800 truncate" :title="ag.model">{{ ag.model || '-' }}</p>
+            </div>
+            <div class="p-1.5 bg-purple-50 rounded">
+              <p class="text-[10px] text-purple-600 font-medium">Skills</p>
+              <p class="text-xs font-bold text-purple-800">{{ (ag.skills || []).length }}</p>
+            </div>
+            <div class="p-1.5 bg-blue-50 rounded">
+              <p class="text-[10px] text-blue-600 font-medium">Processed</p>
+              <p class="text-xs font-bold text-blue-800">{{ formatNumber(ag.process_total || 0) }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Third Row: Project Status Overview and Cluster Nodes -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Project Status Chart -->
@@ -403,6 +470,8 @@ const router = useRouter()
 // Data cache store
 const dataCache = useDataCacheStore()
 
+const llmAvailable = computed(() => dataCache.llmAvailable)
+
 // Reactive state
 const loading = reactive({
   projects: false,
@@ -420,6 +489,7 @@ const systemData = ref({})
 const pendingChanges = ref([])
 const localChanges = ref([])
 const pluginStatsData = ref({})
+const agentList = ref([])
 const lastUpdated = ref('')
 // Removed independent timers, using smart refresh only
 
@@ -515,6 +585,15 @@ const clusterStats = computed(() => {
   const total = clusterNodes.value.length
   const active = clusterNodes.value.filter(n => n.status === 'active').length
   return { total, active }
+})
+
+const agentStats = computed(() => {
+  const total = agentList.value.length
+  const running = agentList.value.filter(a => a.status === 'running').length
+  const stopped = agentList.value.filter(a => a.status === 'stopped').length
+  const error = agentList.value.filter(a => a.status === 'error').length
+  const totalProcessed = agentList.value.reduce((sum, a) => sum + (a.process_total || 0), 0)
+  return { total, running, stopped, error, totalProcessed }
 })
 
 // Leader and follower nodes
@@ -922,6 +1001,10 @@ function navigateToPlugin(pluginName) {
   router.push(`/app/plugins/${pluginName}`)
 }
 
+function navigateToAgent(agentId) {
+  router.push(`/app/agents/${agentId}`)
+}
+
 // Version-related helper functions moved to ClusterHeatmap component
 
 // Fast refresh for stats and numbers only - now uses caching
@@ -930,15 +1013,22 @@ async function refreshStats() {
     loading.stats = true
     
     // Use cached data with smart refresh
-    const [messageResponse, systemResponse, pluginStatsResponse] = await Promise.all([
+    const fetchPromises = [
       dataCache.fetchMessageStats(),
       dataCache.fetchSystemMetrics(),
-      dataCache.fetchPluginStats(new Date().toISOString().split('T')[0])
-    ])
+      dataCache.fetchPluginStats(new Date().toISOString().split('T')[0]),
+    ]
+    if (llmAvailable.value) {
+      fetchPromises.push(dataCache.fetchComponents('agents'))
+    }
+    const results = await Promise.all(fetchPromises)
 
-    messageData.value = messageResponse || {}
-    systemData.value = systemResponse || {}
-    pluginStatsData.value = pluginStatsResponse || {}
+    messageData.value = results[0] || {}
+    systemData.value = results[1] || {}
+    pluginStatsData.value = results[2] || {}
+    if (llmAvailable.value) {
+      agentList.value = results[3] || []
+    }
 
     // Fetch cluster system metrics for node display (if current node is leader)
     if (clusterInfo.value.status === 'leader') {
@@ -1182,7 +1272,8 @@ function handleKeyDown(event) {
 // Error handling is now managed by smart refresh system automatically
 
 // Lifecycle
-onMounted(() => {
+onMounted(async () => {
+  await dataCache.fetchFeatures()
   fetchDashboardData()
   startAutoRefresh()
   

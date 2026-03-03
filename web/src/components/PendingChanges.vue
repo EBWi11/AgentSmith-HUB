@@ -411,7 +411,9 @@ async function applySingleChange(change) {
       dataCache.fetchComponents('outputs', true),
       dataCache.fetchComponents('rulesets', true),
       dataCache.fetchComponents('projects', true),
-      dataCache.fetchComponents('plugins', true)
+      dataCache.fetchComponents('plugins', true),
+      dataCache.fetchComponents('agents', true),
+      dataCache.fetchComponents('skills', true)
     ])
     
     // Refresh the list to remove the applied change
@@ -461,7 +463,9 @@ async function cancelUpgrade(change) {
       dataCache.fetchComponents('outputs', true),
       dataCache.fetchComponents('rulesets', true),
       dataCache.fetchComponents('projects', true),
-      dataCache.fetchComponents('plugins', true)
+      dataCache.fetchComponents('plugins', true),
+      dataCache.fetchComponents('agents', true),
+      dataCache.fetchComponents('skills', true)
     ])
     
     // Refresh the list to remove the cancelled change
@@ -590,7 +594,9 @@ async function cancelAllChanges() {
       dataCache.fetchComponents('outputs', true),
       dataCache.fetchComponents('rulesets', true),
       dataCache.fetchComponents('projects', true),
-      dataCache.fetchComponents('plugins', true)
+      dataCache.fetchComponents('plugins', true),
+      dataCache.fetchComponents('agents', true),
+      dataCache.fetchComponents('skills', true)
     ])
     
     // Refresh the list to remove all cancelled changes

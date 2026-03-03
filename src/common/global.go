@@ -11,6 +11,8 @@ var AllOutputsRawConfig map[string]string
 var AllRulesetsRawConfig map[string]string
 var AllProjectRawConfig map[string]string
 var AllPluginsRawConfig map[string]string
+var AllAgentsRawConfig map[string]string
+var AllSkillsRawConfig map[string]string
 
 // Dedicated lock for AllRawConfig variables
 var RawConfigMu sync.RWMutex
@@ -59,6 +61,12 @@ func GetRawConfig(componentType, id string) (string, bool) {
 	case "plugin":
 		config, exists := AllPluginsRawConfig[id]
 		return config, exists
+	case "agent":
+		config, exists := AllAgentsRawConfig[id]
+		return config, exists
+	case "skill":
+		config, exists := AllSkillsRawConfig[id]
+		return config, exists
 	default:
 		return "", false
 	}
@@ -95,6 +103,16 @@ func SetRawConfig(componentType, id, config string) {
 			AllPluginsRawConfig = make(map[string]string)
 		}
 		AllPluginsRawConfig[id] = config
+	case "agent":
+		if AllAgentsRawConfig == nil {
+			AllAgentsRawConfig = make(map[string]string)
+		}
+		AllAgentsRawConfig[id] = config
+	case "skill":
+		if AllSkillsRawConfig == nil {
+			AllSkillsRawConfig = make(map[string]string)
+		}
+		AllSkillsRawConfig[id] = config
 	}
 }
 
@@ -114,10 +132,14 @@ func DeleteRawConfig(componentType, id string) {
 		delete(AllProjectRawConfig, id)
 	case "plugin":
 		delete(AllPluginsRawConfig, id)
+	case "agent":
+		delete(AllAgentsRawConfig, id)
+	case "skill":
+		delete(AllSkillsRawConfig, id)
 	}
 }
 
-// DeleteRawConfig removes raw configuration by type and ID
+// DeleteRawConfigUnsafe removes raw configuration by type and ID without locking
 func DeleteRawConfigUnsafe(componentType, id string) {
 	switch componentType {
 	case "input":
@@ -130,6 +152,10 @@ func DeleteRawConfigUnsafe(componentType, id string) {
 		delete(AllProjectRawConfig, id)
 	case "plugin":
 		delete(AllPluginsRawConfig, id)
+	case "agent":
+		delete(AllAgentsRawConfig, id)
+	case "skill":
+		delete(AllSkillsRawConfig, id)
 	}
 }
 
@@ -143,6 +169,8 @@ func ClearAllRawConfigsForAllTypes() {
 	AllRulesetsRawConfig = make(map[string]string)
 	AllProjectRawConfig = make(map[string]string)
 	AllPluginsRawConfig = make(map[string]string)
+	AllAgentsRawConfig = make(map[string]string)
+	AllSkillsRawConfig = make(map[string]string)
 }
 
 // ForEachRawConfig safely iterates over all raw configurations for a specific type
@@ -163,6 +191,10 @@ func ForEachRawConfig(componentType string, fn func(id, config string) bool) {
 		targetMap = AllProjectRawConfig
 	case "plugin":
 		targetMap = AllPluginsRawConfig
+	case "agent":
+		targetMap = AllAgentsRawConfig
+	case "skill":
+		targetMap = AllSkillsRawConfig
 	default:
 		return
 	}
@@ -238,4 +270,6 @@ func init() {
 	AllRulesetsRawConfig = make(map[string]string, 0)
 	AllProjectRawConfig = make(map[string]string, 0)
 	AllPluginsRawConfig = make(map[string]string, 0)
+	AllAgentsRawConfig = make(map[string]string, 0)
+	AllSkillsRawConfig = make(map[string]string, 0)
 }

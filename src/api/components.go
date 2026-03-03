@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
@@ -10,6 +11,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -1102,7 +1104,11 @@ func createComponent(componentType string, c echo.Context) error {
 			request.Raw = NewRulesetData
 		case "project":
 			request.Raw = NewProjectData
-		}
+	case "agent":
+		request.Raw = NewAgentData
+	case "skill":
+		request.Raw = NewSkillData
+	}
 	}
 
 	// Write file without lock (file system operations are atomic)
@@ -1122,6 +1128,10 @@ func createComponent(componentType string, c echo.Context) error {
 		project.SetRulesetNew(request.ID, request.Raw)
 	case "project":
 		project.SetProjectNew(request.ID, request.Raw)
+	case "agent":
+		project.SetAgentNew(request.ID, request.Raw)
+	case "skill":
+		project.SetSkillNew(request.ID, request.Raw)
 	}
 
 	// Record component creation operation history (for leader visibility)
@@ -1198,6 +1208,14 @@ func deleteComponent(componentType string, c echo.Context) error {
 		configRoot := common.Config.ConfigRoot
 		componentPath = filepath.Join(configRoot, "plugin", id+".go")
 		tempPath = componentPath + ".new"
+	case "agent":
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "agent", id+".yaml")
+		tempPath = componentPath + ".new"
+	case "skill":
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "skill", id+".yaml")
+		tempPath = componentPath + ".new"
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid component type",
@@ -1231,6 +1249,10 @@ func deleteComponent(componentType string, c echo.Context) error {
 		affectedProjects, deletionErr = project.SafeDeleteProject(id)
 	case "plugin":
 		affectedProjects, deletionErr = plugin.SafeDeletePlugin(id)
+	case "agent":
+		affectedProjects, deletionErr = project.SafeDeleteAgentComponent(id)
+	case "skill":
+		affectedProjects, deletionErr = project.SafeDeleteSkillComponent(id)
 	default:
 		deletionErr = fmt.Errorf("unsupported component type: %s", componentType)
 	}
@@ -1268,7 +1290,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 		if componentType == "project" {
 			// Delete project config from Redis
 			if err := common.DeleteProjectConfig(id); err != nil {
-				logger.Warn("Failed to delete project config from Redis", "project", id, "error", err)
+				logger.Error("Failed to delete project config from Redis", "project", id, "error", err)
 			}
 
 			// Publish project deletion instruction
@@ -1316,7 +1338,7 @@ func deleteProject(c echo.Context) error {
 	// API-side persistence: Remove project user intention from Redis when deleted
 	// Use global user intention key (not per-node)
 	if err := common.SetProjectUserIntention(id, false); err != nil {
-		logger.Warn("Failed to remove project user intention from Redis during deletion", "project", id, "error", err)
+		logger.Error("Failed to remove project user intention from Redis during deletion", "project", id, "error", err)
 	}
 
 	return deleteComponent("project", c)
@@ -1490,6 +1512,47 @@ func updateComponent(componentType string, c echo.Context) error {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 			}
 		}
+	case "skill":
+		if s, exists := project.GetSkill(id); exists {
+			originalContent = s.RawConfig
+		} else if s_raw, ok := project.GetSkillNew(id); ok {
+			originalContent = s_raw
+		} else {
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+			if formalExists {
+				if content, err := os.ReadFile(formalPath); err == nil {
+					originalContent = string(content)
+				}
+			}
+			if tempExists {
+				if content, err := os.ReadFile(tempPath); err == nil {
+					originalContent = string(content)
+				}
+			}
+		}
+	case "agent":
+		if a, exists := project.GetAgent(id); exists {
+			originalContent = a.RawConfig
+		} else if a_raw, ok := project.GetAgentNew(id); ok {
+			originalContent = a_raw
+		} else {
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
+		}
 	default:
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 	}
@@ -1530,6 +1593,10 @@ func updateComponent(componentType string, c echo.Context) error {
 		project.SetProjectNew(id, req.Raw)
 	case "plugin":
 		plugin.SetPluginNew(id, req.Raw)
+	case "agent":
+		project.SetAgentNew(id, req.Raw)
+	case "skill":
+		project.SetSkillNew(id, req.Raw)
 	}
 
 	// Record component update operation history (for leader visibility)
@@ -1586,6 +1653,10 @@ func verifyComponent(c echo.Context) error {
 		singularType = "project"
 	case "plugins":
 		singularType = "plugin"
+	case "agents":
+		singularType = "agent"
+	case "skills":
+		singularType = "skill"
 	}
 
 	// If no raw content provided in request, try to read from temporary or formal files
@@ -1694,6 +1765,22 @@ func verifyComponent(c echo.Context) error {
 		})
 	case "plugin":
 		err := plugin.Verify("", req.Raw, id)
+		result := createSimpleResult(err)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
+		})
+	case "agent":
+		err := agent.Verify("", req.Raw)
+		result := createSimpleResult(err)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
+		})
+	case "skill":
+		err := skill.Verify("", req.Raw)
 		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":    result.IsValid,
@@ -2296,7 +2383,7 @@ func searchComponentsConfig(c echo.Context) error {
 	}
 
 	// Component types to search
-	componentTypes := []string{"input", "output", "ruleset", "project", "plugin"}
+	componentTypes := []string{"input", "output", "ruleset", "project", "plugin", "agent", "skill"}
 	var allResults []SearchResult
 
 	for _, componentType := range componentTypes {
@@ -2347,6 +2434,10 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 			componentMap = project.GetAllProjectsNew()
 		case "plugin":
 			componentMap = plugin.PluginsNew
+		case "agent":
+			componentMap = project.GetAllAgentsNew()
+		case "skill":
+			componentMap = project.GetAllSkillsNew()
 		}
 	} else {
 		// For formal files, we need to read from the actual component instances
@@ -2377,12 +2468,21 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 				if comp.Type == plugin.YAEGI_PLUGIN {
 					componentMap[comp.Name] = string(comp.Payload)
 				} else if comp.Type == plugin.LOCAL_PLUGIN {
-					// Try to read local plugin source
 					if source, err := readLocalPluginSource(comp.Name); err == nil {
 						componentMap[comp.Name] = source
 					}
 				}
 			}
+		case "agent":
+			project.ForEachAgent(func(id string, comp *agent.Agent) bool {
+				componentMap[comp.Id] = comp.RawConfig
+				return true
+			})
+		case "skill":
+			project.ForEachSkill(func(id string, comp *skill.Skill) bool {
+				componentMap[comp.Id] = comp.RawConfig
+				return true
+			})
 		}
 	}
 

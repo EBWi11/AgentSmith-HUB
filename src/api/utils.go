@@ -1,14 +1,23 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/project"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
 
 func ping(c echo.Context) error {
 	return c.String(http.StatusOK, "pong")
+}
+
+func getFeatures(c echo.Context) error {
+	llmAvailable := common.Config != nil && strings.TrimSpace(common.Config.LLMApiKey) != ""
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"llm_available": llmAvailable,
+	})
 }
 
 // GetComponentUsage returns usage information for a component

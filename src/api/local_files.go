@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
@@ -8,6 +9,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"crypto/md5"
 	"fmt"
 	"io/fs"
@@ -212,6 +214,80 @@ func getLocalChangesCount(c echo.Context) error {
 			if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
 				memoryContent = tempContent
 			}
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	agentDir := filepath.Join(configRoot, "agent")
+	if _, err := os.Stat(agentDir); err == nil {
+		if err := filepath.WalkDir(agentDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			_, exists := project.GetAgent(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			raw, _ := common.GetRawConfig("agent", id)
+			memoryContent := raw
+
+			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				count++
+			}
+
+			return nil
+		}); err != nil {
+			// Continue even if there's an error
+		}
+	}
+
+	skillDir := filepath.Join(configRoot, "skill")
+	if _, err := os.Stat(skillDir); err == nil {
+		if err := filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			_, exists := project.GetSkill(id)
+			if !exists {
+				count++
+				return nil
+			}
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			raw, _ := common.GetRawConfig("skill", id)
+			memoryContent := raw
 
 			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
 				count++
@@ -500,6 +576,108 @@ func getLocalChanges(c echo.Context) error {
 		}
 	}
 
+	agentDir := filepath.Join(configRoot, "agent")
+	if _, err := os.Stat(agentDir); err == nil {
+		if err := filepath.WalkDir(agentDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			_, exists := project.GetAgent(id)
+			var memoryContent string
+			if exists {
+				raw, _ := common.GetRawConfig("agent", id)
+				memoryContent = raw
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "agent",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
+	}
+
+	skillDir := filepath.Join(configRoot, "skill")
+	if _, err := os.Stat(skillDir); err == nil {
+		if err := filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+
+			filename := d.Name()
+			id := strings.TrimSuffix(filename, ".yaml")
+
+			fileContent, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			_, exists := project.GetSkill(id)
+			var memoryContent string
+			if exists {
+				raw, _ := common.GetRawConfig("skill", id)
+				memoryContent = raw
+			}
+
+			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+				changeType := "modified"
+				if !exists {
+					changeType = "new"
+				}
+
+				changes = append(changes, map[string]interface{}{
+					"type":           "skill",
+					"id":             id,
+					"change_type":    changeType,
+					"file_path":      path,
+					"file_size":      len(fileContent),
+					"checksum":       fmt.Sprintf("%x", md5.Sum(fileContent)),
+					"local_content":  string(fileContent),
+					"memory_content": memoryContent,
+					"has_local":      true,
+					"has_memory":     exists,
+				})
+			}
+
+			return nil
+		}); err != nil {
+			// Continue
+		}
+	}
+
 	// Check for components that exist in memory but not in local files (deleted locally)
 	// configRoot is already defined above
 
@@ -609,6 +787,46 @@ func getLocalChanges(c echo.Context) error {
 			})
 		}
 	}
+
+	project.ForEachAgent(func(id string, a *agent.Agent) bool {
+		agentPath := filepath.Join(configRoot, "agent", id+".yaml")
+		if _, err := os.Stat(agentPath); os.IsNotExist(err) {
+			raw, _ := common.GetRawConfig("agent", id)
+			changes = append(changes, map[string]interface{}{
+				"type":           "agent",
+				"id":             id,
+				"change_type":    "deleted",
+				"file_path":      agentPath,
+				"file_size":      0,
+				"checksum":       "",
+				"local_content":  "",
+				"memory_content": raw,
+				"has_local":      false,
+				"has_memory":     true,
+			})
+		}
+		return true
+	})
+
+	project.ForEachSkill(func(id string, s *skill.Skill) bool {
+		skillPath := filepath.Join(configRoot, "skill", id+".yaml")
+		if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+			raw, _ := common.GetRawConfig("skill", id)
+			changes = append(changes, map[string]interface{}{
+				"type":           "skill",
+				"id":             id,
+				"change_type":    "deleted",
+				"file_path":      skillPath,
+				"file_size":      0,
+				"checksum":       "",
+				"local_content":  "",
+				"memory_content": raw,
+				"has_local":      false,
+				"has_memory":     true,
+			})
+		}
+		return true
+	})
 
 	return c.JSON(http.StatusOK, changes)
 }
@@ -787,6 +1005,70 @@ func loadLocalChanges(c echo.Context) error {
 		return nil
 	})
 
+	agentDir := filepath.Join(configRoot, "agent")
+	filepath.WalkDir(agentDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+			return nil
+		}
+
+		filename := d.Name()
+		id := strings.TrimSuffix(filename, ".yaml")
+
+		fileContent, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		_, exists := project.GetAgent(id)
+		var memoryContent string
+		if exists {
+			raw, _ := common.GetRawConfig("agent", id)
+			memoryContent = raw
+		}
+
+		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+			changes = append(changes, map[string]interface{}{
+				"type":         "agent",
+				"id":           id,
+				"file_path":    path,
+				"file_content": string(fileContent),
+			})
+		}
+		return nil
+	})
+
+	skillDir := filepath.Join(configRoot, "skill")
+	filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+			return nil
+		}
+
+		filename := d.Name()
+		id := strings.TrimSuffix(filename, ".yaml")
+
+		fileContent, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		_, exists := project.GetSkill(id)
+		var memoryContent string
+		if exists {
+			raw, _ := common.GetRawConfig("skill", id)
+			memoryContent = raw
+		}
+
+		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+			changes = append(changes, map[string]interface{}{
+				"type":         "skill",
+				"id":           id,
+				"file_path":    path,
+				"file_content": string(fileContent),
+			})
+		}
+		return nil
+	})
+
 	// Load all changes directly into official memory (bypassing temporary storage)
 	results := make([]map[string]interface{}, 0)
 	successfullyLoaded := make([]map[string]string, 0)
@@ -877,6 +1159,10 @@ func loadSingleLocalChange(c echo.Context) error {
 		filePath = filepath.Join(configRoot, "project", req.ID+".yaml")
 	case "plugin":
 		filePath = filepath.Join(configRoot, "plugin", req.ID+".go")
+	case "agent":
+		filePath = filepath.Join(configRoot, "agent", req.ID+".yaml")
+	case "skill":
+		filePath = filepath.Join(configRoot, "skill", req.ID+".yaml")
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unsupported component type"})
 	}

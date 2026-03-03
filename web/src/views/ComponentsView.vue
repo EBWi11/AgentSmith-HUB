@@ -9,7 +9,7 @@ const router = useRouter()
 
 // 在组件挂载时获取所有组件列表
 onMounted(async () => {
-  const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+  const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects']
   await Promise.all(componentTypes.map(type => dataCache.fetchComponents(type)))
 })
 

@@ -127,6 +127,10 @@ func updateInMemoryCache(filePath string, content string) {
 		project.SetProjectNew(id, content)
 	case "plugin":
 		plugin.SetPluginNew(id, content)
+	case "agent":
+		project.SetAgentNew(id, content)
+	case "skill":
+		project.SetSkillNew(id, content)
 	}
 }
 
@@ -149,7 +153,7 @@ func extractComponentInfo(filePath string) (string, string) {
 	parentDirName := filepath.Base(parentDir)
 
 	// Check if the parent directory is a known component type directory
-	knownTypes := map[string]bool{"input": true, "output": true, "ruleset": true, "project": true, "plugin": true}
+	knownTypes := map[string]bool{"input": true, "output": true, "ruleset": true, "project": true, "plugin": true, "agent": true, "skill": true}
 	if knownTypes[parentDirName] {
 		// This is a subfolder path: ConfigRoot/componentType/subfolder/filename
 		componentType = parentDirName
