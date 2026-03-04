@@ -307,6 +307,7 @@ function setupMonacoTheme() {
       { token: 'project.input', foreground: '1a7f37', fontStyle: 'bold' },    // Rich green
       { token: 'project.output', foreground: 'd1242f', fontStyle: 'bold' },   // Modern red
       { token: 'project.ruleset', foreground: '8250df', fontStyle: 'bold' },  // Deep purple
+      { token: 'project.agent', foreground: 'bf8700', fontStyle: 'bold' },    // Amber
       
       // YAML specific tokens
       { token: 'key', foreground: '0969da', fontStyle: 'bold' },
@@ -463,10 +464,11 @@ function registerLanguageProviders() {
     // Token patterns
     tokenizer: {
       root: [
-        // Project component references - INPUT/OUTPUT/RULESET (must be followed by dot)
+        // Project component references - INPUT/OUTPUT/RULESET/AGENT (must be followed by dot)
         [/\bINPUT(?=\.)/, 'project.input'],
         [/\bOUTPUT(?=\.)/, 'project.output'],
         [/\bRULESET(?=\.)/, 'project.ruleset'],
+        [/\bAGENT(?=\.)/, 'project.agent'],
         
         // Comments
         [/#.*$/, 'comment'],
@@ -3157,8 +3159,8 @@ function getAgentCompletions(fullText, lineText, range, position) {
       { key: 'system_prompt', doc: 'System prompt for the agent', snippet: 'system_prompt: |\n  ' },
       { key: 'skills', doc: 'List of skill component IDs', snippet: 'skills:\n  - ' },
       { key: 'tools', doc: 'Plugin tools: "all" or list of plugin names', snippet: 'tools: all' },
-      { key: 'batch', doc: 'Batch processing config', snippet: 'batch:\n  size: 10\n  timeout: 30s\n  max_rounds: 5' },
-      { key: 'distributed', doc: 'Distributed execution config', snippet: 'distributed:\n  mode: independent\n  rate_limit_rps: 0' },
+      { key: 'max_rounds', doc: 'Max ReAct loop rounds per message (default: 5)', snippet: 'max_rounds: 5' },
+      { key: 'timeout', doc: 'Per-message processing timeout (default: 30s)', snippet: 'timeout: 30s' },
     ];
 
     agentKeys.forEach(({ key, doc, snippet }) => {
@@ -3183,21 +3185,6 @@ function getAgentCompletions(fullText, lineText, range, position) {
       documentation: 'Use all available plugins as tools',
       insertText: 'all',
       range
-    });
-  }
-
-  // "distributed.mode:" value completion
-  if (/^\s*mode:\s*/.test(lineText)) {
-    ['independent', 'leader_only'].forEach(mode => {
-      suggestions.push({
-        label: mode,
-        kind: monaco.languages.CompletionItemKind.EnumMember,
-        documentation: mode === 'independent' 
-          ? 'Each HUB instance processes its own stream independently'
-          : 'Only the cluster leader runs this agent',
-        insertText: mode,
-        range
-      });
     });
   }
 
@@ -4802,6 +4789,12 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
 .monaco-editor .token.project\.ruleset,
 .monaco-diff-editor .token.project\.ruleset {
   color: #6f42c1 !important;
+  font-weight: bold !important;
+}
+
+.monaco-editor .token.project\.agent,
+.monaco-diff-editor .token.project\.agent {
+  color: #bf8700 !important;
   font-weight: bold !important;
 }
 

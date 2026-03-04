@@ -29,27 +29,12 @@ type AgentConfig struct {
 	Temperature  float64               `yaml:"temperature"`
 	MaxTokens    int                   `yaml:"max_tokens"`
 	SystemPrompt string                `yaml:"system_prompt"`
-	Skills       []string              `yaml:"skills"`
-	Tools        interface{}           `yaml:"tools"` // "all" or []string
-	Batch        AgentBatchConfig      `yaml:"batch"`
-	Distributed  AgentDistributedConfig `yaml:"distributed"`
-	RawConfig    string                `yaml:"-"`
-	Path         string                `yaml:"-"`
-}
-
-type AgentBatchConfig struct {
-	Size      int    `yaml:"size"`
-	Timeout   string `yaml:"timeout"`
-	MaxRounds int    `yaml:"max_rounds"`
-}
-
-// AgentDistributedConfig controls how the agent behaves across multiple HUB instances.
-type AgentDistributedConfig struct {
-	// Mode: "independent" (default) - each instance processes its own stream independently.
-	//       "leader_only" - only the cluster leader runs this agent.
-	Mode string `yaml:"mode"`
-	// RateLimitRPS: per-instance LLM request rate limit (requests per second). 0 = unlimited.
-	RateLimitRPS float64 `yaml:"rate_limit_rps"`
+	Skills    []string    `yaml:"skills"`
+	Tools     interface{} `yaml:"tools"` // "all" or []string
+	MaxRounds int         `yaml:"max_rounds"`
+	Timeout   string      `yaml:"timeout"`
+	RawConfig string      `yaml:"-"`
+	Path      string      `yaml:"-"`
 }
 
 type Agent struct {
@@ -68,10 +53,9 @@ type Agent struct {
 
 	skills            map[string]*SkillAdapter
 	toolDefs          []ToolDefinition
-	processTotal      uint64
-	sampler           *common.Sampler
-	rateLimitInterval time.Duration
-	RawConfig         string `json:"-"`
+	processTotal uint64
+	sampler      *common.Sampler
+	RawConfig    string `json:"-"`
 
 	ProjectNodeSequence string `json:"project_node_sequence,omitempty"`
 }
@@ -169,9 +153,9 @@ func Verify(filePath, raw string) error {
 		}
 	}
 
-	if cfg.Batch.Timeout != "" {
-		if _, err := time.ParseDuration(cfg.Batch.Timeout); err != nil {
-			return fmt.Errorf("invalid batch.timeout: %w", err)
+	if cfg.Timeout != "" {
+		if _, err := time.ParseDuration(cfg.Timeout); err != nil {
+			return fmt.Errorf("invalid timeout: %w", err)
 		}
 	}
 
@@ -236,17 +220,11 @@ func applyDefaults(cfg *AgentConfig) {
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = 4096
 	}
-	if cfg.Batch.Size == 0 {
-		cfg.Batch.Size = 10
+	if cfg.MaxRounds == 0 {
+		cfg.MaxRounds = 5
 	}
-	if cfg.Batch.Timeout == "" {
-		cfg.Batch.Timeout = "30s"
-	}
-	if cfg.Batch.MaxRounds == 0 {
-		cfg.Batch.MaxRounds = 5
-	}
-	if cfg.Distributed.Mode == "" {
-		cfg.Distributed.Mode = "independent"
+	if cfg.Timeout == "" {
+		cfg.Timeout = "30s"
 	}
 }
 

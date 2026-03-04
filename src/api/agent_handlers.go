@@ -16,25 +16,18 @@ temperature: 0.3
 max_tokens: 4096
 
 system_prompt: |
-  You are a security analyst. For each batch of events:
+  You are a security analyst. For each event:
   1. Classify the threat level (critical/high/medium/low/info)
   2. Add a "threat_analysis" field with your reasoning
-  3. Filter out benign events
-  Output a JSON array of enriched events.
+  Output the enriched JSON object.
 
 # Reference skill component IDs here
 skills: []
 
 tools: all
 
-batch:
-  size: 10
-  timeout: 30s
-  max_rounds: 5
-
-distributed:
-  mode: independent
-  rate_limit_rps: 0
+max_rounds: 5
+timeout: 30s
 `
 
 func getAgents(c echo.Context) error {
@@ -57,7 +50,6 @@ func getAgents(c echo.Context) error {
 			"model":         a.Config.Model,
 			"process_total": a.GetProcessTotal(),
 			"skills":        a.Config.Skills,
-			"distributed":   a.Config.Distributed,
 		}
 
 		if a.Status == common.StatusError && a.Err != nil {

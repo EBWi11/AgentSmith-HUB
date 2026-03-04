@@ -231,13 +231,6 @@
                     }"></span>
               <p class="font-medium text-gray-900 text-sm truncate">{{ ag.id }}</p>
             </div>
-            <span class="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ml-2"
-                  :class="{
-                    'bg-indigo-100 text-indigo-700': ag.distributed?.mode === 'leader_only',
-                    'bg-gray-100 text-gray-600': ag.distributed?.mode !== 'leader_only'
-                  }">
-              {{ ag.distributed?.mode === 'leader_only' ? 'leader' : 'all nodes' }}
-            </span>
           </div>
 
           <div class="grid grid-cols-3 gap-2 text-center">

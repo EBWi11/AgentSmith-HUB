@@ -3,133 +3,30 @@ package agent
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// BatchBuffer accumulates messages and flushes them as a batch.
-type BatchBuffer struct {
-	messages []map[string]interface{}
-	size     int
-	timeout  time.Duration
-	mu       sync.Mutex
-	timer    *time.Timer
-	flushCh  chan []map[string]interface{}
-	stopCh   chan struct{}
-}
-
-func newBatchBuffer(size int, timeout time.Duration) *BatchBuffer {
-	return &BatchBuffer{
-		size:    size,
-		timeout: timeout,
-		flushCh: make(chan []map[string]interface{}, 4),
-		stopCh:  make(chan struct{}),
-	}
-}
-
-func (b *BatchBuffer) add(msg map[string]interface{}) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.messages = append(b.messages, msg)
-
-	if len(b.messages) >= b.size {
-		b.flushLocked()
-		return
-	}
-
-	if b.timer == nil {
-		b.timer = time.AfterFunc(b.timeout, func() {
-			b.mu.Lock()
-			defer b.mu.Unlock()
-			if len(b.messages) > 0 {
-				b.flushLocked()
-			}
-		})
-	}
-}
-
-func (b *BatchBuffer) flushLocked() {
-	batch := b.messages
-	b.messages = nil
-	if b.timer != nil {
-		b.timer.Stop()
-		b.timer = nil
-	}
-	select {
-	case b.flushCh <- batch:
-	case <-b.stopCh:
-	}
-}
-
-func (b *BatchBuffer) flushRemaining() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.messages) > 0 {
-		batch := b.messages
-		b.messages = nil
-		if b.timer != nil {
-			b.timer.Stop()
-			b.timer = nil
-		}
-		b.flushCh <- batch
-	}
-}
-
-func (b *BatchBuffer) stop() {
-	close(b.stopCh)
-	b.mu.Lock()
-	if b.timer != nil {
-		b.timer.Stop()
-		b.timer = nil
-	}
-	b.mu.Unlock()
-}
-
-// Start launches goroutines for each upstream channel.
+// Start launches a goroutine for each upstream channel.
+// Each message is treated as an independent event.
 func (a *Agent) Start() error {
 	if a.Status == common.StatusRunning {
 		return nil
 	}
 
-	// In leader_only mode, skip starting on non-leader nodes
-	if a.Config.Distributed.Mode == "leader_only" && !common.IsLeader {
-		logger.Info("Agent skipped on non-leader node", "id", a.Id, "mode", "leader_only")
-		a.SetStatus(common.StatusStopped, nil)
-		return nil
-	}
-
 	a.SetStatus(common.StatusStarting, nil)
-
-	batchTimeout, err := time.ParseDuration(a.Config.Batch.Timeout)
-	if err != nil {
-		batchTimeout = 30 * time.Second
-	}
 
 	a.stopChan = make(chan struct{})
 	a.sampler = common.GetSampler(a.Id)
 
-	// Set up per-instance rate limiter if configured
-	if a.Config.Distributed.RateLimitRPS > 0 {
-		a.rateLimitInterval = time.Duration(float64(time.Second) / a.Config.Distributed.RateLimitRPS)
-	}
-
 	for pns, upCh := range a.UpStream {
-		buf := newBatchBuffer(a.Config.Batch.Size, batchTimeout)
+		a.wg.Add(1)
 
-		a.wg.Add(2)
-
-		// Reader goroutine: reads from upstream and adds to buffer
-		go func(pns string, ch *chan map[string]interface{}, buffer *BatchBuffer) {
+		go func(pns string, ch *chan map[string]interface{}) {
 			defer a.wg.Done()
-			defer func() {
-				buffer.stop()
-				buffer.flushRemaining()
-				close(buffer.flushCh)
-			}()
 			for {
 				select {
 				case <-a.stopChan:
@@ -138,21 +35,10 @@ func (a *Agent) Start() error {
 					if !ok {
 						return
 					}
-					buffer.add(msg)
+					a.processAndForward(msg)
 				}
 			}
-		}(pns, upCh, buf)
-
-		// Processor goroutine: reads batches and runs ReAct loop
-		go func(pns string, buffer *BatchBuffer) {
-			defer a.wg.Done()
-			for batch := range buffer.flushCh {
-				if len(batch) == 0 {
-					continue
-				}
-				a.processAndForward(batch)
-			}
-		}(pns, buf)
+		}(pns, upCh)
 	}
 
 	a.SetStatus(common.StatusRunning, nil)
@@ -161,21 +47,19 @@ func (a *Agent) Start() error {
 	return nil
 }
 
-func (a *Agent) processAndForward(batch []map[string]interface{}) {
-	results := a.processBatch(batch)
-	atomic.AddUint64(&a.processTotal, uint64(len(batch)))
+func (a *Agent) processAndForward(msg map[string]interface{}) {
+	result := a.processMessage(msg)
+	atomic.AddUint64(&a.processTotal, 1)
 
-	for _, result := range results {
-		if a.sampler != nil {
-			a.sampler.Sample(result, a.ProjectNodeSequence)
-		}
-		for dsPNS, dsCh := range a.DownStream {
-			select {
-			case *dsCh <- result:
-			default:
+	if a.sampler != nil {
+		a.sampler.Sample(result, a.ProjectNodeSequence)
+	}
+	for dsPNS, dsCh := range a.DownStream {
+		select {
+		case *dsCh <- result:
+		default:
 			logger.Error("Agent downstream channel full, dropping message",
 				"agent", a.Id, "downstream", dsPNS)
-			}
 		}
 	}
 }
@@ -194,20 +78,25 @@ func (a *Agent) Stop() error {
 	return nil
 }
 
-func (a *Agent) processBatch(batch []map[string]interface{}) []map[string]interface{} {
-	if len(batch) == 0 {
-		return nil
+func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{} {
+	timeout, err := time.ParseDuration(a.Config.Timeout)
+	if err != nil {
+		timeout = 30 * time.Second
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	conversation := []Message{
 		{Role: "system", Content: a.Config.SystemPrompt},
-		{Role: "user", Content: formatBatchAsJSON(batch)},
+		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()
 
-	for round := 0; round < a.Config.Batch.MaxRounds; round++ {
-		if a.rateLimitInterval > 0 {
-			time.Sleep(a.rateLimitInterval)
+	for round := 0; round < a.Config.MaxRounds; round++ {
+		if ctx.Err() != nil {
+			logger.Error("Agent processing timed out, passing through original message",
+				"agent", a.Id, "timeout", a.Config.Timeout)
+			return msg
 		}
 
 		resp, err := callChatWithTools(
@@ -216,7 +105,7 @@ func (a *Agent) processBatch(batch []map[string]interface{}) []map[string]interf
 		)
 		if err != nil {
 			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)
-			return batch // pass through original on error
+			return msg
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -228,68 +117,56 @@ func (a *Agent) processBatch(batch []map[string]interface{}) []map[string]interf
 			continue
 		}
 
-		output := parseOutputMessages(resp.Content)
-		if len(output) > 0 {
+		output := parseOutputMessage(resp.Content)
+		if output != nil {
 			return output
 		}
-		return batch
+		return msg
 	}
 
-	logger.Error("Agent max ReAct rounds exceeded, passing through original batch",
-		"agent", a.Id, "max_rounds", a.Config.Batch.MaxRounds)
-	return batch
+	logger.Error("Agent max ReAct rounds exceeded, passing through original message",
+		"agent", a.Id, "max_rounds", a.Config.MaxRounds)
+	return msg
 }
 
-func formatBatchAsJSON(batch []map[string]interface{}) string {
-	data, err := json.Marshal(batch)
+func formatMessageAsJSON(msg map[string]interface{}) string {
+	data, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Sprintf("[%d messages]", len(batch))
+		return fmt.Sprintf("%v", msg)
 	}
 	return string(data)
 }
 
-func parseOutputMessages(content string) []map[string]interface{} {
-	content = extractJSONArray(content)
+func parseOutputMessage(content string) map[string]interface{} {
+	content = extractJSON(content)
 
-	var messages []map[string]interface{}
-	if err := json.Unmarshal([]byte(content), &messages); err != nil {
-		// Try wrapping in a single-element array
-		var single map[string]interface{}
-		if err2 := json.Unmarshal([]byte(content), &single); err2 == nil {
-			return []map[string]interface{}{single}
-		}
-		return nil
+	var single map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &single); err == nil {
+		return single
 	}
-	return messages
+
+	var arr []map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &arr); err == nil && len(arr) > 0 {
+		return arr[0]
+	}
+
+	return nil
 }
 
-// extractJSONArray tries to extract a JSON array from LLM output
+// extractJSON tries to extract a JSON object or array from LLM output
 // that may contain markdown fences or extra text.
-func extractJSONArray(s string) string {
-	// Try to find JSON array directly
+func extractJSON(s string) string {
 	start := -1
 	for i, c := range s {
-		if c == '[' {
+		if c == '{' || c == '[' {
 			start = i
 			break
 		}
 	}
 	if start == -1 {
-		// Try finding JSON object
-		for i, c := range s {
-			if c == '{' {
-				start = i
-				break
-			}
-		}
-		if start == -1 {
-			return s
-		}
+		return s
 	}
 
-	// Find matching close bracket
-	depth := 0
-	end := -1
 	openChar := rune(s[start])
 	var closeChar rune
 	if openChar == '[' {
@@ -298,6 +175,8 @@ func extractJSONArray(s string) string {
 		closeChar = '}'
 	}
 
+	depth := 0
+	end := -1
 	for i := start; i < len(s); i++ {
 		ch := rune(s[i])
 		if ch == openChar {
