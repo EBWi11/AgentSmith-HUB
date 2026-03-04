@@ -980,6 +980,34 @@ export const hubApi = {
     }
   },
 
+  async testAgent(id, data) {
+    try {
+      if (!id) throw new Error('Agent ID is required');
+      if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
+      const response = await api.post(`/test-agent/${id}`, { data });
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.data) {
+        return { success: false, error: error.response.data.error || 'Server error', results: [] };
+      }
+      return { success: false, error: error.message || 'Network error', results: [] };
+    }
+  },
+
+  async testAgentContent(content, data) {
+    try {
+      if (!content) throw new Error('Agent content is required');
+      if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
+      const response = await api.post('/test-agent-content', { content, data });
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.data) {
+        return { success: false, error: error.response.data.error || 'Server error', results: [] };
+      }
+      return { success: false, error: error.message || 'Network error', results: [] };
+    }
+  },
+
   // Test plugin content
   async testPluginContent(content, data) {
     try {

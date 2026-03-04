@@ -66,6 +66,16 @@
         </svg>
         Test Output
       </button>
+      <button 
+        v-if="isAgent"
+        @click="showTestModal = true" 
+        class="btn btn-test-ruleset btn-md"
+      >
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Agent
+      </button>
       
       <!-- Verify Buttons -->
       <button 
@@ -343,6 +353,17 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
         Test Output
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
+      </button>
+      <button 
+        v-if="isAgent"
+        @click="showTestModal = true" 
+        class="btn btn-test-ruleset btn-sm"
+      >
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Agent
         <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
       
@@ -632,12 +653,13 @@
     </div>
   </div>
 
-  <!-- Test Modal -->
+  <!-- Test Modal (Rulesets & Agents) -->
   <RulesetTestModal 
-    v-if="props.item && props.item.type === 'rulesets'" 
+    v-if="props.item && (props.item.type === 'rulesets' || props.item.type === 'agents')" 
     :show="showTestModal" 
     :rulesetId="props.item?.originalId || props.item?.id" 
     :rulesetContent="editorValue"
+    :componentType="props.item?.type"
     @close="showTestModal = false" 
   />
 
@@ -1043,6 +1065,10 @@ function handleTestShortcut() {
   // Test output if it's an output
   else if (isOutput.value) {
     showOutputTestModal.value = true;
+  }
+  // Test agent if it's an agent
+  else if (isAgent.value) {
+    showTestModal.value = true;
   }
 }
 

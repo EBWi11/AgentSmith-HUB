@@ -157,6 +157,8 @@ func ServerStart(listener string) error {
 	auth.POST("/test-plugin-content", testPlugin)
 	auth.POST("/test-ruleset/:id", testRuleset)
 	auth.POST("/test-ruleset-content", testRuleset)
+	auth.POST("/test-agent/:id", testAgent)
+	auth.POST("/test-agent-content", testAgent)
 	auth.POST("/test-output/:id", testOutput)
 	auth.POST("/test-project/:id", testProject)
 	auth.POST("/test-project-content/:inputNode", testProject)

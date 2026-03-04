@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
@@ -250,6 +251,128 @@ done:
 	// Add timeout warning if needed
 	if timedOut {
 		response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
+	}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+func testAgent(c echo.Context) error {
+	id := c.Param("id")
+
+	var req struct {
+		Data    map[string]interface{} `json:"data"`
+		Content string                 `json:"content,omitempty"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Invalid request body: " + err.Error(),
+			"results": []interface{}{},
+		})
+	}
+
+	if req.Data == nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Input data is required",
+			"results": []interface{}{},
+		})
+	}
+
+	var agentContent string
+
+	if req.Content != "" {
+		agentContent = req.Content
+	} else if id != "" {
+		tempPath, tempExists := GetComponentPath("agent", id, true)
+		if tempExists {
+			content, err := ReadComponent(tempPath)
+			if err == nil {
+				agentContent = content
+			}
+		}
+
+		if agentContent == "" {
+			if raw, ok := project.GetAgentNew(id); ok {
+				agentContent = raw
+			} else if a, exists := project.GetAgent(id); exists {
+				agentContent = a.RawConfig
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]interface{}{
+					"success": false,
+					"error":   "Agent not found: " + id,
+					"results": []interface{}{},
+				})
+			}
+		}
+	} else {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Either agent ID or content must be provided",
+			"results": []interface{}{},
+		})
+	}
+
+	tempAgent, err := agent.NewAgent("", agentContent, "temp_test_"+fmt.Sprintf("%d", time.Now().UnixNano()))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to parse agent: " + err.Error(),
+			"results": []interface{}{},
+		})
+	}
+
+	inputCh := make(chan map[string]interface{}, 10)
+	outputCh := make(chan map[string]interface{}, 10)
+
+	tempAgent.UpStream = map[string]*chan map[string]interface{}{
+		"test": &inputCh,
+	}
+	tempAgent.DownStream = map[string]*chan map[string]interface{}{
+		"test": &outputCh,
+	}
+
+	if err := tempAgent.Start(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"error":   "Failed to start agent: " + err.Error(),
+			"results": []interface{}{},
+		})
+	}
+
+	defer func() {
+		if stopErr := tempAgent.Stop(); stopErr != nil {
+			logger.Error("Failed to stop temporary agent", "error", stopErr)
+		}
+	}()
+
+	inputCh <- req.Data
+
+	var results []map[string]interface{}
+	var timedOut bool
+	timeout := time.After(60 * time.Second)
+
+	for {
+		select {
+		case result := <-outputCh:
+			results = append(results, result)
+			goto done
+		case <-timeout:
+			timedOut = true
+			goto done
+		}
+	}
+done:
+
+	response := map[string]interface{}{
+		"success": true,
+		"results": results,
+		"timeout": timedOut,
+	}
+
+	if timedOut {
+		response["warning"] = "Test timed out after 60 seconds. The LLM may be slow or unreachable."
 	}
 
 	return c.JSON(http.StatusOK, response)
