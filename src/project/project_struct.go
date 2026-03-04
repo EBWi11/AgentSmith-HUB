@@ -650,6 +650,36 @@ func ForEachAgent(fn func(id string, a *agent.Agent) bool) {
 	}
 }
 
+// GetAggregatedAgentDailyStats returns aggregated daily call count and average latency (ms)
+// across all PNS instances of the given agent id. If no PNS instances exist, returns the
+// template agent's daily stats.
+func GetAggregatedAgentDailyStats(agentID string) (dailyCallCount uint64, dailyAvgLatencyMs float64) {
+	var instances []*agent.Agent
+	common.GlobalMu.RLock()
+	for _, a := range GlobalProject.PNSAgents {
+		if a != nil && a.Id == agentID {
+			instances = append(instances, a)
+		}
+	}
+	template := GlobalProject.Agents[agentID]
+	common.GlobalMu.RUnlock()
+
+	var totalCalls uint64
+	var weightedMs float64
+	for _, a := range instances {
+		c := a.GetDailyCallCount()
+		totalCalls += c
+		weightedMs += a.GetDailyAvgLatencyMs() * float64(c)
+	}
+	if totalCalls > 0 {
+		return totalCalls, weightedMs / float64(totalCalls)
+	}
+	if template != nil {
+		return template.GetDailyCallCount(), template.GetDailyAvgLatencyMs()
+	}
+	return 0, 0
+}
+
 // SafeDeleteAgent safely deletes an agent with all necessary validations and locking
 func SafeDeleteAgentComponent(id string) ([]string, error) {
 	var componentToStop *agent.Agent

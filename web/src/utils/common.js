@@ -102,6 +102,15 @@ export function formatNumber(num) {
 }
 
 /**
+ * Format latency in milliseconds (e.g. 1234.5 -> "1.23s", 89 -> "89ms")
+ */
+export function formatLatencyMs(ms) {
+  if (typeof ms !== 'number' || isNaN(ms) || ms < 0) return '-'
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + 's'
+  return Math.round(ms) + 'ms'
+}
+
+/**
  * Format percentage
  */
 export function formatPercent(num) {

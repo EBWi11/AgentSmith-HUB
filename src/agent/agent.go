@@ -53,9 +53,16 @@ type Agent struct {
 
 	skills            map[string]*SkillAdapter
 	toolDefs          []ToolDefinition
-	processTotal uint64
-	sampler      *common.Sampler
-	RawConfig    string `json:"-"`
+	processTotal      uint64
+	processLatencyNs  uint64 // cumulative nanoseconds for processed messages (for avg latency)
+	sampler           *common.Sampler
+	RawConfig         string `json:"-"`
+
+	// Daily stats (reset when date changes); protected by dailyMu
+	dailyMu        sync.Mutex
+	dailyDate      string
+	dailyCount     uint64
+	dailyLatencyNs uint64
 
 	ProjectNodeSequence string `json:"project_node_sequence,omitempty"`
 }
@@ -171,6 +178,52 @@ func (a *Agent) SetStatus(status common.Status, err error) {
 
 func (a *Agent) GetProcessTotal() uint64 {
 	return atomic.LoadUint64(&a.processTotal)
+}
+
+// GetAvgLatencyMs returns average processing latency in milliseconds (0 if no messages processed).
+func (a *Agent) GetAvgLatencyMs() float64 {
+	total := atomic.LoadUint64(&a.processTotal)
+	if total == 0 {
+		return 0
+	}
+	ns := atomic.LoadUint64(&a.processLatencyNs)
+	return float64(ns) / float64(total) / 1e6
+}
+
+// RecordDailyStats adds one call and latency to today's daily stats. Call from processAndForward.
+func (a *Agent) RecordDailyStats(latencyNs uint64) {
+	today := time.Now().Format("2006-01-02")
+	a.dailyMu.Lock()
+	defer a.dailyMu.Unlock()
+	if a.dailyDate != today {
+		a.dailyDate = today
+		a.dailyCount = 0
+		a.dailyLatencyNs = 0
+	}
+	a.dailyCount++
+	a.dailyLatencyNs += latencyNs
+}
+
+// GetDailyCallCount returns the number of agent calls today (0 if none or date changed).
+func (a *Agent) GetDailyCallCount() uint64 {
+	today := time.Now().Format("2006-01-02")
+	a.dailyMu.Lock()
+	defer a.dailyMu.Unlock()
+	if a.dailyDate != today {
+		return 0
+	}
+	return a.dailyCount
+}
+
+// GetDailyAvgLatencyMs returns average latency in ms for today's calls (0 if none).
+func (a *Agent) GetDailyAvgLatencyMs() float64 {
+	today := time.Now().Format("2006-01-02")
+	a.dailyMu.Lock()
+	defer a.dailyMu.Unlock()
+	if a.dailyDate != today || a.dailyCount == 0 {
+		return 0
+	}
+	return float64(a.dailyLatencyNs) / float64(a.dailyCount) / 1e6
 }
 
 func (a *Agent) resolveSkills() error {

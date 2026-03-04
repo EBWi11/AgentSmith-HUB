@@ -48,8 +48,12 @@ func (a *Agent) Start() error {
 }
 
 func (a *Agent) processAndForward(msg map[string]interface{}) {
+	start := time.Now()
 	result := a.processMessage(msg)
+	elapsedNs := time.Since(start).Nanoseconds()
 	atomic.AddUint64(&a.processTotal, 1)
+	atomic.AddUint64(&a.processLatencyNs, uint64(elapsedNs))
+	a.RecordDailyStats(uint64(elapsedNs))
 
 	if a.sampler != nil {
 		a.sampler.Sample(result, a.ProjectNodeSequence)
@@ -119,11 +123,11 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 
 		output := parseOutputMessage(resp.Content)
 		if output != nil {
+			llmMap := make(map[string]interface{}, len(output)+1)
 			for k, v := range output {
-				msg[k] = v
+				llmMap[k] = v
 			}
-			// Mark which agent produced the LLM annotations
-			msg["llm_agent"] = a.Id
+			msg[a.Id] = llmMap
 			return msg
 		}
 		return msg

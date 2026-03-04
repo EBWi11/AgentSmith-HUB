@@ -44,14 +44,18 @@ func getAgents(c echo.Context) error {
 			rawConfig = tempRaw
 		}
 
+		dailyCalls, dailyAvgMs := project.GetAggregatedAgentDailyStats(id)
 		agentData := map[string]interface{}{
-			"id":            id,
-			"hasTemp":       hasTemp,
-			"raw":           rawConfig,
-			"status":        string(a.Status),
-			"model":         a.Config.Model,
-			"process_total": a.GetProcessTotal(),
-			"skills":        a.Config.Skills,
+			"id":                   id,
+			"hasTemp":              hasTemp,
+			"raw":                  rawConfig,
+			"status":               string(a.Status),
+			"model":                a.Config.Model,
+			"process_total":        a.GetProcessTotal(),
+			"avg_latency_ms":       a.GetAvgLatencyMs(),
+			"daily_call_count":     dailyCalls,
+			"daily_avg_latency_ms": dailyAvgMs,
+			"skills":               a.Config.Skills,
 		}
 
 		if a.Status == common.StatusError && a.Err != nil {
