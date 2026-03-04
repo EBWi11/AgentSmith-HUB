@@ -137,6 +137,17 @@ func NewFromExisting(existing *Agent, pns string) (*Agent, error) {
 	return a, nil
 }
 
+// ParseSkillIDsFromRaw parses agent raw YAML and returns the skill ID list (for reference checks).
+func ParseSkillIDsFromRaw(raw string) ([]string, error) {
+	var cfg struct {
+		Skills []string `yaml:"skills"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, err
+	}
+	return cfg.Skills, nil
+}
+
 func Verify(filePath, raw string) error {
 	configData, err := loadConfig(filePath, raw)
 	if err != nil {

@@ -349,10 +349,17 @@ func testAgent(c echo.Context) error {
 
 	inputCh <- req.Data
 
+	// Test timeout: at least 60s, or agent timeout + 30s margin (for slow LLM)
+	testTimeout := 60 * time.Second
+	if d, err := time.ParseDuration(tempAgent.Config.Timeout); err == nil && d > 0 {
+		if margin := d + 30*time.Second; margin > testTimeout {
+			testTimeout = margin
+		}
+	}
+	timeout := time.After(testTimeout)
+
 	var results []map[string]interface{}
 	var timedOut bool
-	timeout := time.After(60 * time.Second)
-
 	for {
 		select {
 		case result := <-outputCh:
@@ -372,7 +379,7 @@ done:
 	}
 
 	if timedOut {
-		response["warning"] = "Test timed out after 60 seconds. The LLM may be slow or unreachable."
+		response["warning"] = fmt.Sprintf("Test timed out after %v. The LLM may be slow or unreachable.", testTimeout)
 	}
 
 	return c.JSON(http.StatusOK, response)
@@ -1041,6 +1048,21 @@ func testProject(c echo.Context) error {
 				}
 
 				if allChannelsEmpty && allTasksComplete {
+					// When project has agents, allow time for last agent output to reach outputs
+					if len(tempProject.Agents) > 0 {
+						time.Sleep(2 * time.Second)
+						for outputId, outputChan := range outputChannels {
+							for {
+								select {
+								case msg := <-outputChan:
+									outputResults[outputId] = append(outputResults[outputId], msg)
+								default:
+									goto nextOutput
+								}
+							}
+						nextOutput:
+						}
+					}
 					timedOut = false
 					goto done
 				}
@@ -1473,18 +1495,21 @@ func extractComponentsFromProject(proj *project.Project) map[string]interface{} 
 		"inputs":   0,
 		"outputs":  0,
 		"rulesets": 0,
+		"agents":   0,
 	}
 
 	components := map[string][]string{
-		"inputs":   []string{},
-		"outputs":  []string{},
-		"rulesets": []string{},
+		"inputs":   {},
+		"outputs":  {},
+		"rulesets": {},
+		"agents":   {},
 	}
 
 	// Extract unique component names from FlowNodes
 	inputNames := make(map[string]bool)
 	outputNames := make(map[string]bool)
 	rulesetNames := make(map[string]bool)
+	agentNames := make(map[string]bool)
 
 	for _, node := range proj.FlowNodes {
 		if node.FromType == "INPUT" {
@@ -1496,6 +1521,9 @@ func extractComponentsFromProject(proj *project.Project) map[string]interface{} 
 		if node.FromType == "RULESET" {
 			rulesetNames[node.FromID] = true
 		}
+		if node.FromType == "AGENT" {
+			agentNames[node.FromID] = true
+		}
 
 		if node.ToType == "INPUT" {
 			inputNames[node.ToID] = true
@@ -1505,6 +1533,9 @@ func extractComponentsFromProject(proj *project.Project) map[string]interface{} 
 		}
 		if node.ToType == "RULESET" {
 			rulesetNames[node.ToID] = true
+		}
+		if node.ToType == "AGENT" {
+			agentNames[node.ToID] = true
 		}
 	}
 
@@ -1518,18 +1549,23 @@ func extractComponentsFromProject(proj *project.Project) map[string]interface{} 
 	for name := range rulesetNames {
 		components["rulesets"] = append(components["rulesets"], name)
 	}
+	for name := range agentNames {
+		components["agents"] = append(components["agents"], name)
+	}
 
 	// Sort component lists
 	sort.Strings(components["inputs"])
 	sort.Strings(components["outputs"])
 	sort.Strings(components["rulesets"])
+	sort.Strings(components["agents"])
 
 	// Update counts
 	componentCounts["inputs"] = len(components["inputs"])
 	componentCounts["outputs"] = len(components["outputs"])
 	componentCounts["rulesets"] = len(components["rulesets"])
+	componentCounts["agents"] = len(components["agents"])
 
-	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"]
+	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"] + componentCounts["agents"]
 
 	return map[string]interface{}{
 		"totalComponents": totalComponents,
@@ -1556,6 +1592,7 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 	inputNames := make(map[string]bool)
 	outputNames := make(map[string]bool)
 	rulesetNames := make(map[string]bool)
+	agentNames := make(map[string]bool)
 
 	for i, line := range lines {
 		actualLineNum := i + 1
@@ -1594,6 +1631,8 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 			outputNames[fromID] = true
 		case "RULESET":
 			rulesetNames[fromID] = true
+		case "AGENT":
+			agentNames[fromID] = true
 		}
 
 		switch toType {
@@ -1603,14 +1642,17 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 			outputNames[toID] = true
 		case "RULESET":
 			rulesetNames[toID] = true
+		case "AGENT":
+			agentNames[toID] = true
 		}
 	}
 
 	// Convert to sorted slices
 	components := map[string][]string{
-		"inputs":   []string{},
-		"outputs":  []string{},
-		"rulesets": []string{},
+		"inputs":   {},
+		"outputs":  {},
+		"rulesets": {},
+		"agents":   {},
 	}
 
 	for name := range inputNames {
@@ -1622,20 +1664,25 @@ func parseProjectComponentsDirect(projectContent string) (map[string]interface{}
 	for name := range rulesetNames {
 		components["rulesets"] = append(components["rulesets"], name)
 	}
+	for name := range agentNames {
+		components["agents"] = append(components["agents"], name)
+	}
 
 	// Sort component lists
 	sort.Strings(components["inputs"])
 	sort.Strings(components["outputs"])
 	sort.Strings(components["rulesets"])
+	sort.Strings(components["agents"])
 
 	// Calculate counts
 	componentCounts := map[string]int{
 		"inputs":   len(components["inputs"]),
 		"outputs":  len(components["outputs"]),
 		"rulesets": len(components["rulesets"]),
+		"agents":   len(components["agents"]),
 	}
 
-	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"]
+	totalComponents := componentCounts["inputs"] + componentCounts["outputs"] + componentCounts["rulesets"] + componentCounts["agents"]
 
 	return map[string]interface{}{
 		"totalComponents": totalComponents,
@@ -1838,6 +1885,7 @@ func extractSequencesFromProject(proj *project.Project) map[string]map[string][]
 		"input":   make(map[string][]string),
 		"output":  make(map[string][]string),
 		"ruleset": make(map[string][]string),
+		"agent":   make(map[string][]string),
 	}
 
 	// Collect all PNS sequences from FlowNodes
@@ -1855,7 +1903,7 @@ func extractSequencesFromProject(proj *project.Project) map[string]map[string][]
 			fromPNS = strings.TrimPrefix(fromPNS, "TEST_"+proj.Id+"_")
 		}
 
-		if fromType == "input" || fromType == "output" || fromType == "ruleset" {
+		if fromType == "input" || fromType == "output" || fromType == "ruleset" || fromType == "agent" {
 			if allSequences[fromType] == nil {
 				allSequences[fromType] = make(map[string]map[string]bool)
 			}
@@ -1875,7 +1923,7 @@ func extractSequencesFromProject(proj *project.Project) map[string]map[string][]
 			toPNS = strings.TrimPrefix(toPNS, "TEST_"+proj.Id+"_")
 		}
 
-		if toType == "input" || toType == "output" || toType == "ruleset" {
+		if toType == "input" || toType == "output" || toType == "ruleset" || toType == "agent" {
 			if allSequences[toType] == nil {
 				allSequences[toType] = make(map[string]map[string]bool)
 			}
@@ -1975,6 +2023,7 @@ func parseProjectSequencesDirect(projectContent string) (map[string]map[string][
 		"input":   make(map[string][]string),
 		"output":  make(map[string][]string),
 		"ruleset": make(map[string][]string),
+		"agent":   make(map[string][]string),
 	}
 
 	allSequences := make(map[string]map[string]map[string]bool)
@@ -1985,7 +2034,7 @@ func parseProjectSequencesDirect(projectContent string) (map[string]map[string][
 		fromId := node.FromID
 		fromPNS := node.FromPNS
 
-		if fromType == "input" || fromType == "output" || fromType == "ruleset" {
+		if fromType == "input" || fromType == "output" || fromType == "ruleset" || fromType == "agent" {
 			if allSequences[fromType] == nil {
 				allSequences[fromType] = make(map[string]map[string]bool)
 			}
@@ -2000,7 +2049,7 @@ func parseProjectSequencesDirect(projectContent string) (map[string]map[string][
 		toId := node.ToID
 		toPNS := node.ToPNS
 
-		if toType == "input" || toType == "output" || toType == "ruleset" {
+		if toType == "input" || toType == "output" || toType == "ruleset" || toType == "agent" {
 			if allSequences[toType] == nil {
 				allSequences[toType] = make(map[string]map[string]bool)
 			}

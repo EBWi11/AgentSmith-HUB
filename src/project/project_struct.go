@@ -701,15 +701,22 @@ func SafeDeleteAgentComponent(id string) ([]string, error) {
 		return []string{}, nil
 	}
 
+	// Check all projects (running or not) that reference this agent in flow
+	var referringProjects []string
 	for projectID, proj := range GlobalProject.Projects {
-		if proj.Status != common.StatusRunning {
+		if proj == nil {
 			continue
 		}
-		agents := proj.GetProjectAgentsUnsafe()
-		if _, inUse := agents[id]; inUse {
-			common.GlobalMu.Unlock()
-			return nil, fmt.Errorf("agent %s is currently in use by project %s", id, projectID)
+		for _, node := range proj.FlowNodes {
+			if (node.FromType == "AGENT" && node.FromID == id) || (node.ToType == "AGENT" && node.ToID == id) {
+				referringProjects = append(referringProjects, projectID)
+				break
+			}
 		}
+	}
+	if len(referringProjects) > 0 {
+		common.GlobalMu.Unlock()
+		return nil, fmt.Errorf("agent %s is referenced by project(s): %v", id, referringProjects)
 	}
 
 	if a, exists := GlobalProject.Agents[id]; exists {
@@ -831,6 +838,36 @@ func SafeDeleteSkillComponent(id string) ([]string, error) {
 		common.GlobalMu.Unlock()
 		common.DeleteRawConfigUnsafe("skill", id)
 		return []string{}, nil
+	}
+
+	// Check if any agent references this skill (formal config or temp)
+	var referringAgents []string
+	for agentID, a := range GlobalProject.Agents {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		for _, sk := range a.Config.Skills {
+			if sk == id {
+				referringAgents = append(referringAgents, agentID)
+				break
+			}
+		}
+	}
+	for agentID, raw := range GlobalProject.AgentsNew {
+		skillIDs, err := agent.ParseSkillIDsFromRaw(raw)
+		if err != nil {
+			continue
+		}
+		for _, sk := range skillIDs {
+			if sk == id {
+				referringAgents = append(referringAgents, agentID)
+				break
+			}
+		}
+	}
+	if len(referringAgents) > 0 {
+		common.GlobalMu.Unlock()
+		return nil, fmt.Errorf("skill %s is referenced by agent(s): %v", id, referringAgents)
 	}
 
 	delete(GlobalProject.Skills, id)

@@ -48,12 +48,22 @@ func (a *Agent) Start() error {
 }
 
 func (a *Agent) processAndForward(msg map[string]interface{}) {
+	if msg == nil {
+		logger.Error("Agent received nil message, skipping", "agent", a.Id)
+		return
+	}
 	start := time.Now()
 	result := a.processMessage(msg)
 	elapsedNs := time.Since(start).Nanoseconds()
 	atomic.AddUint64(&a.processTotal, 1)
 	atomic.AddUint64(&a.processLatencyNs, uint64(elapsedNs))
 	a.RecordDailyStats(uint64(elapsedNs))
+
+	if topLlm, ok := result["llm"].(map[string]interface{}); ok {
+		if agentLlm, ok := topLlm[a.Id].(map[string]interface{}); ok {
+			agentLlm["processing_time_ms"] = float64(elapsedNs) / 1e6
+		}
+	}
 
 	if a.sampler != nil {
 		a.sampler.Sample(result, a.ProjectNodeSequence)
@@ -68,14 +78,17 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 	}
 }
 
-// Stop gracefully stops the agent.
+// Stop gracefully stops the agent. Safe to call even if Start was never called.
 func (a *Agent) Stop() error {
 	if a.Status != common.StatusRunning && a.Status != common.StatusStarting {
 		return nil
 	}
 
 	a.SetStatus(common.StatusStopping, nil)
-	close(a.stopChan)
+	if a.stopChan != nil {
+		close(a.stopChan)
+		a.stopChan = nil
+	}
 	a.wg.Wait()
 	a.SetStatus(common.StatusStopped, nil)
 	logger.Info("Agent stopped", "id", a.Id)
@@ -123,11 +136,15 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 
 		output := parseOutputMessage(resp.Content)
 		if output != nil {
-			llmMap := make(map[string]interface{}, len(output)+1)
+			llmMap := make(map[string]interface{}, len(output)+2)
 			for k, v := range output {
 				llmMap[k] = v
 			}
-			msg[a.Id] = llmMap
+			llmMap["agent"] = a.Id
+			if msg["llm"] == nil {
+				msg["llm"] = make(map[string]interface{})
+			}
+			msg["llm"].(map[string]interface{})[a.Id] = llmMap
 			return msg
 		}
 		return msg
