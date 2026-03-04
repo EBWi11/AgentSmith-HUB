@@ -329,7 +329,7 @@ content: |
 **基本规则**：
  - 1.使用 `->` 箭头表示数据流向
  - 2.组件引用格式：`类型.组件名`
- - 3.支持的类型：`INPUT`、`RULESET`、`OUTPUT`
+ - 3.支持的类型：`INPUT`、`RULESET`、`AGENT`、`OUTPUT`
  - 4.每行一个数据流定义
  - 5.支持注释（以 `#` 开头）
 
@@ -470,18 +470,11 @@ distributed:
 
 SKILL 是一个可复用的能力模块，Agent 可以引用 Skill 来获得工具和知识。Skill 采用**渐进披露**模式 —— LLM 预先看到工具描述，但只在需要时才获取完整内容。
 
-#### Skill 类型
+Skill 实现由配置推断：**二选一**填写 `builtin_ref` 或 `content`，全部通过外挂 YAML 配置。
 
-| 类型 | 说明 | 适用场景 |
-|------|------|----------|
-| `knowledge` | 配置驱动的知识库。暴露一个 `get_reference` 工具，按需返回完整内容。 | 领域知识、参考文档、操作手册 |
-| `builtin` | Go 实现的内置技能，提供自定义函数。 | 系统集成（如读写 Ruleset） |
-
-#### Knowledge Skill 配置
+#### 知识型 Skill（content）
 
 ```yaml
-type: knowledge
-
 description: |
   对该 Skill 提供内容的简短描述。
   LLM 在工具描述中会看到这段文字。
@@ -494,16 +487,14 @@ content: |
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `type` | **是** | 必须是 `knowledge`。 |
 | `description` | **是** | 简短描述，作为工具描述展示给 LLM。 |
 | `content` | **是** | 完整知识内容，通过 `get_reference` 按需返回。 |
 
-**工作原理：** Knowledge Skill 注册一个 `get_reference` 工具，以 `description` 字段作为工具描述。当 Agent 的 LLM 判断需要这些知识时，主动调用该工具获取完整 `content`。这保持了初始上下文精简，同时使深度知识按需可用。
+**工作原理：** 该 Skill 注册一个 `get_reference` 工具，以 `description` 字段作为工具描述。当 Agent 的 LLM 判断需要这些知识时，主动调用该工具获取完整 `content`。这保持了初始上下文精简，同时使深度知识按需可用。
 
-#### Builtin Skill 配置
+#### 内置引用型 Skill（builtin_ref）
 
 ```yaml
-type: builtin
 builtin_ref: hub_ruleset_editor    # 引用 Go 实现的内置技能
 
 description: |
@@ -515,7 +506,6 @@ config:                             # 可选配置，传递给内置技能工厂
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `type` | **是** | 必须是 `builtin`。 |
 | `builtin_ref` | **是** | 内置 Go 实现的名称。 |
 | `description` | 否 | 可读的描述信息。 |
 | `config` | 否 | 传递给内置工厂的键值对配置。 |
@@ -526,11 +516,9 @@ config:                             # 可选配置，传递给内置技能工厂
 |-------------|------|------|
 | `hub_ruleset_editor` | `list_rulesets`、`read_ruleset`、`verify_ruleset`、`write_ruleset` | 读取、验证和编辑 HUB Ruleset。写入操作会创建待审核的变更。设置 `config.read_only: true` 可禁用写入。 |
 
-#### 示例：Ruleset 编写知识 Skill
+#### 示例：Ruleset 编写知识型 Skill
 
 ```yaml
-type: knowledge
-
 description: |
   AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
   of HUB rules engine syntax, semantics, and best practices.

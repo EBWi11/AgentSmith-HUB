@@ -11,9 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const NewSkillData = `type: knowledge
-
-description: |
+const NewSkillData = `description: |
   Describe what expertise or reference material this skill provides.
 
 content: |
@@ -38,10 +36,8 @@ func getSkills(c echo.Context) error {
 			"hasTemp": hasTemp,
 			"raw":     rawConfig,
 			"status":  string(s.Status),
-			"type":    s.SkillConfig.Type,
 		}
-
-		if s.SkillConfig.Type == "builtin" {
+		if s.SkillConfig.BuiltinRef != "" {
 			skillData["builtin_ref"] = s.SkillConfig.BuiltinRef
 		}
 
@@ -93,14 +89,16 @@ func getSkillDetail(c echo.Context) error {
 		rawConfig = s.RawConfig
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"id":          id,
-		"raw":         rawConfig,
-		"hasTemp":     false,
-		"status":      string(s.Status),
-		"type":        s.SkillConfig.Type,
-		"builtin_ref": s.SkillConfig.BuiltinRef,
-	})
+	resp := map[string]interface{}{
+		"id":      id,
+		"raw":     rawConfig,
+		"hasTemp": false,
+		"status":  string(s.Status),
+	}
+	if s.SkillConfig.BuiltinRef != "" {
+		resp["builtin_ref"] = s.SkillConfig.BuiltinRef
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func createSkill(c echo.Context) error {

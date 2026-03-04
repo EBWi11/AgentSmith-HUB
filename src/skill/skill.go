@@ -11,11 +11,11 @@ import (
 )
 
 // SkillConfig is the YAML configuration for a skill component.
+// Implementation is inferred: builtin_ref set → Go implementation; otherwise content → knowledge (reference text).
 type SkillConfig struct {
-	Type        string                 `yaml:"type"`        // "builtin" or "knowledge"
-	BuiltinRef  string                 `yaml:"builtin_ref"` // for type=builtin: reference to Go implementation
+	BuiltinRef  string                 `yaml:"builtin_ref"` // optional: reference to Go implementation
 	Description string                 `yaml:"description"`
-	Content     string                 `yaml:"content"`     // for type=knowledge: the reference/prompt text
+	Content     string                 `yaml:"content"`     // optional: reference/prompt text (knowledge)
 	Config      map[string]interface{} `yaml:"config"`
 }
 
@@ -101,15 +101,15 @@ func Verify(filePath, raw string) error {
 		return fmt.Errorf("invalid YAML: %w", err)
 	}
 
-	if cfg.Type == "" {
-		return fmt.Errorf("type is required (builtin or knowledge)")
+	hasBuiltin := strings.TrimSpace(cfg.BuiltinRef) != ""
+	hasContent := strings.TrimSpace(cfg.Content) != ""
+	if hasBuiltin && hasContent {
+		return fmt.Errorf("set either builtin_ref or content, not both")
 	}
-
-	switch cfg.Type {
-	case "builtin":
-		if cfg.BuiltinRef == "" {
-			return fmt.Errorf("builtin_ref is required when type is builtin")
-		}
+	if !hasBuiltin && !hasContent {
+		return fmt.Errorf("set either builtin_ref or content")
+	}
+	if hasBuiltin {
 		if _, ok := builtinRegistry[cfg.BuiltinRef]; !ok {
 			available := make([]string, 0, len(builtinRegistry))
 			for k := range builtinRegistry {
@@ -117,14 +117,7 @@ func Verify(filePath, raw string) error {
 			}
 			return fmt.Errorf("unknown builtin_ref: %s (available: %v)", cfg.BuiltinRef, available)
 		}
-	case "knowledge":
-		if strings.TrimSpace(cfg.Content) == "" {
-			return fmt.Errorf("content is required when type is knowledge")
-		}
-	default:
-		return fmt.Errorf("unsupported skill type: %s (supported: builtin, knowledge)", cfg.Type)
 	}
-
 	return nil
 }
 
@@ -137,21 +130,16 @@ func (s *Skill) SetStatus(status common.Status, err error) {
 
 func (s *Skill) resolveImplementation() error {
 	cfg := s.SkillConfig
-
-	switch cfg.Type {
-	case "builtin":
+	if strings.TrimSpace(cfg.BuiltinRef) != "" {
 		factory, ok := builtinRegistry[cfg.BuiltinRef]
 		if !ok {
 			return fmt.Errorf("unknown builtin skill: %s", cfg.BuiltinRef)
 		}
 		s.impl = factory(cfg.Config)
 		return nil
-	case "knowledge":
-		s.impl = newKnowledgeSkill(s.Id, cfg.Description, cfg.Content)
-		return nil
-	default:
-		return fmt.Errorf("unsupported skill type: %s", cfg.Type)
 	}
+	s.impl = newKnowledgeSkill(s.Id, cfg.Description, cfg.Content)
+	return nil
 }
 
 func loadConfig(filePath, raw string) (string, error) {

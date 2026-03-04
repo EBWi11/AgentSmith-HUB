@@ -329,7 +329,7 @@ content: |
 **Basic Rules**:
 - Use `->` arrows to indicate data flow direction
 - Component reference format: `type.component_name`
-- Supported types: `INPUT`, `RULESET`, `OUTPUT`
+- Supported types: `INPUT`, `RULESET`, `AGENT`, `OUTPUT`
 - One data flow definition per line
 - Support comments (starting with `#`)
 
@@ -470,18 +470,11 @@ distributed:
 
 SKILL is a reusable capability module that agents can reference. Skills provide tools and knowledge to the LLM through a **progressive disclosure** pattern — the LLM sees tool descriptions upfront but only fetches full content on demand.
 
-#### Skill Types
+Skill implementation is inferred from config: set **either** `builtin_ref` **or** `content` (mutually exclusive). All skills are defined by external YAML config.
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| `knowledge` | Config-driven knowledge base. Exposes a `get_reference` tool that returns the full content. | Domain expertise, reference docs, playbooks |
-| `builtin` | Go-implemented skill with custom functions. | System integration (e.g., reading/writing rulesets) |
-
-#### Knowledge Skill Configuration
+#### Knowledge-style Skill (content)
 
 ```yaml
-type: knowledge
-
 description: |
   Brief description of what this skill provides.
   The LLM sees this in the tool description.
@@ -494,16 +487,14 @@ content: |
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `type` | **Yes** | Must be `knowledge`. |
 | `description` | **Yes** | Short description shown to the LLM as the tool description. |
 | `content` | **Yes** | Full knowledge content returned on demand via `get_reference`. |
 
-**How it works:** The knowledge skill registers a single tool `get_reference` with the description field as its tool description. When the agent's LLM decides it needs this knowledge, it calls the tool and receives the full `content`. This keeps the initial context lean while making deep knowledge available on demand.
+**How it works:** This skill registers a single tool `get_reference` with the description field as its tool description. When the agent's LLM decides it needs this knowledge, it calls the tool and receives the full `content`. This keeps the initial context lean while making deep knowledge available on demand.
 
-#### Builtin Skill Configuration
+#### Builtin-ref Skill (Go implementation)
 
 ```yaml
-type: builtin
 builtin_ref: hub_ruleset_editor    # Reference to a Go-implemented skill
 
 description: |
@@ -515,7 +506,6 @@ config:                             # Optional config passed to the builtin
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `type` | **Yes** | Must be `builtin`. |
 | `builtin_ref` | **Yes** | Name of the built-in Go implementation. |
 | `description` | No | Human-readable description. |
 | `config` | No | Key-value config passed to the builtin factory. |
@@ -526,11 +516,9 @@ config:                             # Optional config passed to the builtin
 |-------------|-----------|-------------|
 | `hub_ruleset_editor` | `list_rulesets`, `read_ruleset`, `verify_ruleset`, `write_ruleset` | Read, verify, and edit HUB rulesets. Write creates pending changes for human review. Set `config.read_only: true` to disable writes. |
 
-#### Example: Knowledge Skill for Ruleset Authoring
+#### Example: Knowledge-style Skill for Ruleset Authoring
 
 ```yaml
-type: knowledge
-
 description: |
   AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
   of HUB rules engine syntax, semantics, and best practices.
