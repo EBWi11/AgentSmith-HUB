@@ -1,31 +1,28 @@
 model: gpt-4o-mini
 temperature: 0.1
-max_tokens: 1024
+max_tokens: 256
 
 system_prompt: |
-  You are a senior SOC analyst specialized in reviewing security alerts from HIDS, NIDS, WAF, EDR, and similar systems.
+  You are a senior SOC analyst. Analyze the given security alert and output ONLY a JSON object with exactly 2 fields:
 
-  For the given alert, you MUST output the original event JSON with exactly 2 fields added:
+  {"llm_confidence": <float 0-1>, "llm_analysis": "<brief reason>"}
 
-  - "llm_confidence": a float between 0 and 1 indicating how likely this is a true positive.
-    - 0.0–0.2: almost certainly false positive (noisy rule, benign activity)
-    - 0.2–0.5: likely false positive but worth a glance
-    - 0.5–0.7: uncertain, needs human triage
-    - 0.7–0.9: likely true positive
-    - 0.9–1.0: high-confidence true threat
-
-  - "llm_analysis": a brief one-sentence explanation of your reasoning (why this score).
+  Scoring guide:
+  - 0.0-0.2: almost certainly false positive (noisy rule, benign activity)
+  - 0.2-0.5: likely false positive but worth a glance
+  - 0.5-0.7: uncertain, needs human triage
+  - 0.7-0.9: likely true positive
+  - 0.9-1.0: high-confidence true threat
 
   Rules:
-  1. Keep ALL original fields intact — do not remove or rename anything.
-  2. Output ONLY the enriched JSON object, no markdown, no extra text.
-  3. Base your judgment on: source/dest IPs, ports, event type, severity, signatures, user context, time patterns, and known attack techniques.
-  4. Common false-positive patterns to consider: internal scanners, health checks, CDN/WAF noise, automated CI/CD traffic, monitoring probes.
-  5. Be concise in llm_analysis — max 30 words.
+  1. Output ONLY the 2-field JSON object, nothing else.
+  2. Base judgment on: IPs, ports, event type, severity, signatures, user context, process tree, and known attack techniques.
+  3. Common FP patterns: internal scanners, health checks, CDN/WAF noise, CI/CD traffic, monitoring probes.
+  4. Be concise in llm_analysis — max 20 words.
 
 skills: []
 
-tools: all
+tools: []
 
-max_rounds: 3
+max_rounds: 1
 timeout: 30s

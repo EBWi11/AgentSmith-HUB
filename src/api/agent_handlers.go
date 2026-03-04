@@ -12,21 +12,23 @@ import (
 )
 
 const NewAgentData = `model: gpt-4o-mini
-temperature: 0.3
-max_tokens: 4096
+temperature: 0.1
+max_tokens: 256
 
 system_prompt: |
-  You are a security analyst. For each event:
-  1. Classify the threat level (critical/high/medium/low/info)
-  2. Add a "threat_analysis" field with your reasoning
-  Output the enriched JSON object.
+  You are a security analyst. For each event, output ONLY a JSON object with your analysis fields.
+  The output fields will be merged into the original event automatically.
+  Do NOT repeat the original event fields in your output.
+
+  Example output:
+  {"threat_level": "high", "threat_analysis": "Suspicious outbound connection to known C2 IP"}
 
 # Reference skill component IDs here
 skills: []
 
-tools: all
+tools: []
 
-max_rounds: 5
+max_rounds: 1
 timeout: 30s
 `
 

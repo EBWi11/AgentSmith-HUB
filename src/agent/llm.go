@@ -3,6 +3,7 @@ package agent
 import (
 	"AgentSmith-HUB/common"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,7 +98,7 @@ func ToolResultMessage(toolCallID, content string) Message {
 }
 
 func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
-	maxTokens int, temperature float64) (*ChatResult, error) {
+	maxTokens int, temperature float64, ctx ...context.Context) (*ChatResult, error) {
 
 	if common.Config == nil || strings.TrimSpace(common.Config.LLMApiKey) == "" {
 		return nil, fmt.Errorf("LLM API key not configured")
@@ -136,16 +137,26 @@ func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
 	}
 
 	url := baseURL + "/chat/completions"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(raw))
+
+	var reqCtx context.Context
+	if len(ctx) > 0 && ctx[0] != nil {
+		reqCtx = ctx[0]
+	} else {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+	}
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("User-Agent", "AgentSmith-HUB/agent")
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("User-Agent", "AgentSmith-HUB/agent")
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(req)
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("LLM request: %w", err)
 	}

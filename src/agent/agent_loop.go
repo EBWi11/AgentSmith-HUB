@@ -101,7 +101,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 
 		resp, err := callChatWithTools(
 			a.Config.Model, conversation, toolDefs,
-			a.Config.MaxTokens, a.Config.Temperature,
+			a.Config.MaxTokens, a.Config.Temperature, ctx,
 		)
 		if err != nil {
 			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)
@@ -119,7 +119,12 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 
 		output := parseOutputMessage(resp.Content)
 		if output != nil {
-			return output
+			for k, v := range output {
+				msg[k] = v
+			}
+			// Mark which agent produced the LLM annotations
+			msg["llm_agent"] = a.Id
+			return msg
 		}
 		return msg
 	}
