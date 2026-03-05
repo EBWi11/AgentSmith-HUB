@@ -165,6 +165,9 @@ func main() {
 		}
 
 		common.Config.Leader = ip
+		if err := api.WriteLeaderNodeIDToRedis(ip); err != nil {
+			logger.Error("Failed to write leader node ID to Redis", "error", err)
+		}
 		token, err := readToken(true)
 		if err != nil {
 			logger.Error("Failed to read or create leader token", "error", err)

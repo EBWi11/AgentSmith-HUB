@@ -46,6 +46,7 @@ import (
 	threatbook "AgentSmith-HUB/local_plugin/threatbook"
 	virustotal "AgentSmith-HUB/local_plugin/virustotal"
 
+	addrule "AgentSmith-HUB/local_plugin/add_rule"
 	llmcall "AgentSmith-HUB/local_plugin/llm_call"
 
 	"AgentSmith-HUB/common"
@@ -63,6 +64,7 @@ var LocalPluginBoolRes = map[string]func(...interface{}) (bool, error){
 
 // for append or other usage
 var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{}, bool, error){
+	"addRule":   addrule.Eval,
 	"parseJSON": parse_json_data.Eval,
 
 	// time helpers
@@ -112,6 +114,9 @@ func RegisterLLMCallIfConfigured() bool {
 }
 
 var LocalPluginDesc = map[string]string{
+	// hub API tool (for agent)
+	"addRule": "Tool: add a rule to a ruleset via Hub API. Args: rulesetId string, ruleContent string (full rule XML). Returns API response; on verify error agent can fix and retry. Change is pending until apply_changes.",
+
 	// check node
 	"isPrivateIP":  "Check node: true if IP is private RFC1918/loopback/link-local. Args: ip string.",
 	"cidrMatch":    "Check node: true if IP within CIDR. Args: ip string, cidr string.",

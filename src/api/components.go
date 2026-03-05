@@ -2686,6 +2686,16 @@ func addRulesetRule(c echo.Context) error {
 	// Ensure the rule contains an <append field="desc"> element with the rule's descriptive name
 	processedRuleRaw := addDescAppendToRule(request.RuleRaw, ruleName)
 
+	// Check if the same rule (normalized content) already exists in current/pending ruleset
+	if pendingRuleDuplicate(currentRawConfig, processedRuleRaw) {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message":  "Rule already present in current ruleset (or pending); no change made",
+			"rule_id":  ruleId,
+			"status":   "already_added",
+			"note":     "A rule with the same normalized content already exists. Apply pending changes if needed.",
+		})
+	}
+
 	// Create a temporary ruleset with the new (possibly augmented) rule to do complete validation
 	updatedXML, err := addRuleToXML(currentRawConfig, processedRuleRaw)
 	if err != nil {
@@ -2798,6 +2808,114 @@ func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
+}
+
+// simpleRuleFingerprintFromRule builds a coarse, order-insensitive fingerprint for a rule's basic logic.
+// 当前版本只关注 checklist 和 standalone check，忽略 ConditionAST、本地/CEP 复杂结构等，用于「已存在」检测的近似判断。
+// 如果两条 rule 的指纹相同，可以认为在当前实现下“足够接近”，适合作为「已经添加过了」的判断依据。
+func simpleRuleFingerprintFromRule(rule *rules_engine.Rule) string {
+	if rule == nil || rule.Queue == nil {
+		return ""
+	}
+
+	var parts []string
+
+	for _, op := range *rule.Queue {
+		switch op.Type {
+		case rules_engine.T_CheckList:
+			cl, ok := rule.ChecklistMap[op.ID]
+			if !ok {
+				continue
+			}
+			// Checklist: condition 字符串 + 无序的 check/threshold 集合
+			segment := []string{"CL", "cond=" + strings.TrimSpace(cl.Condition)}
+
+			// Check nodes 指纹（忽略顺序）
+			if len(cl.CheckNodes) > 0 {
+				checkParts := make([]string, 0, len(cl.CheckNodes))
+				for _, cn := range cl.CheckNodes {
+					checkParts = append(checkParts, fmt.Sprintf(
+						"id=%s;type=%s;field=%s;logic=%s;delimiter=%s;value=%s",
+						strings.TrimSpace(cn.ID),
+						strings.TrimSpace(cn.Type),
+						strings.TrimSpace(cn.Field),
+						strings.TrimSpace(cn.Logic),
+						strings.TrimSpace(cn.Delimiter),
+						strings.TrimSpace(cn.Value),
+					))
+				}
+				sort.Strings(checkParts)
+				segment = append(segment, "checks="+strings.Join(checkParts, "|"))
+			}
+
+			// Threshold nodes 指纹（同样忽略顺序）
+			// 为简化实现，这里暂不把 threshold 的字段纳入指纹（只靠 checklist condition + checks）。
+			// 如有需要再根据 Threshold 结构补充。
+
+			parts = append(parts, strings.Join(segment, ";"))
+
+		case rules_engine.T_Check:
+			// Standalone check：保留关键字段
+			cn, ok := rule.CheckMap[op.ID]
+			if !ok {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf(
+				"C;id=%s;type=%s;field=%s;logic=%s;delimiter=%s;value=%s",
+				strings.TrimSpace(cn.ID),
+				strings.TrimSpace(cn.Type),
+				strings.TrimSpace(cn.Field),
+				strings.TrimSpace(cn.Logic),
+				strings.TrimSpace(cn.Delimiter),
+				strings.TrimSpace(cn.Value),
+			))
+
+		default:
+			// 其它算子暂时只记录类型，避免把结构明显不同的 rule 误判成一样
+			parts = append(parts, fmt.Sprintf("OP[%d]", op.Type))
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "||")
+}
+
+// simpleRuleFingerprintFromXML 解析单条 rule XML 并计算指纹。
+// 忽略 ConditionAST，仅基于结构和字段内容。
+func simpleRuleFingerprintFromXML(ruleXML string) (string, error) {
+	// 包一层 root 复用 ParseRuleset
+	tempXML := fmt.Sprintf("<root>\n%s\n</root>", ruleXML)
+	rs, err := rules_engine.ParseRuleset([]byte(tempXML))
+	if err != nil {
+		return "", err
+	}
+	if rs == nil || len(rs.Rules) != 1 {
+		return "", fmt.Errorf("expected exactly one rule, got %d", len(rs.Rules))
+	}
+	return simpleRuleFingerprintFromRule(&rs.Rules[0]), nil
+}
+
+// pendingRuleDuplicate 使用 rules_engine 解析后的结构来做近似“逻辑等价”判断（忽略 ConditionAST）。
+func pendingRuleDuplicate(currentXML, newRuleRaw string) bool {
+	newFP, err := simpleRuleFingerprintFromXML(newRuleRaw)
+	if err != nil || newFP == "" {
+		return false
+	}
+
+	// 解析当前（含 pending）的完整 ruleset
+	rs, err := rules_engine.ParseRuleset([]byte(currentXML))
+	if err != nil || rs == nil || len(rs.Rules) == 0 {
+		return false
+	}
+
+	for i := range rs.Rules {
+		if simpleRuleFingerprintFromRule(&rs.Rules[i]) == newFP {
+			return true
+		}
+	}
+	return false
 }
 
 // ruleExistsInXML checks if a rule with the specified ID exists in the XML
