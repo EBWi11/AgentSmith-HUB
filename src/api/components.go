@@ -2810,9 +2810,28 @@ func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
 	return strings.Join(result, "\n"), nil
 }
 
+// thresholdFingerprint returns an order-insensitive string fingerprint for a single Threshold node.
+func thresholdFingerprint(t rules_engine.Threshold) string {
+	// GroupByList keys represent the group-by fields; sort for order-insensitivity.
+	groupByKeys := make([]string, 0, len(t.GroupByList))
+	for k := range t.GroupByList {
+		groupByKeys = append(groupByKeys, k)
+	}
+	sort.Strings(groupByKeys)
+	return fmt.Sprintf("id=%s;groupby=%s;range=%s;count_type=%s;count_field=%s;value=%d;local_cache=%v",
+		strings.TrimSpace(t.ID),
+		strings.Join(groupByKeys, ","),
+		strings.TrimSpace(t.Range),
+		strings.TrimSpace(t.CountType),
+		strings.TrimSpace(t.CountField),
+		t.Value,
+		t.LocalCache,
+	)
+}
+
 // simpleRuleFingerprintFromRule builds a coarse, order-insensitive fingerprint for a rule's basic logic.
-// 当前版本只关注 checklist 和 standalone check，忽略 ConditionAST、本地/CEP 复杂结构等，用于「已存在」检测的近似判断。
-// 如果两条 rule 的指纹相同，可以认为在当前实现下“足够接近”，适合作为「已经添加过了」的判断依据。
+// 覆盖 checklist（含 threshold 节点）和 standalone check，忽略 ConditionAST、CEP 复杂结构等，用于已存在检测的近似判断。
+// 如果两条 rule 的指纹相同，可以认为逻辑等价，适合作为已经添加过了的判断依据。
 func simpleRuleFingerprintFromRule(rule *rules_engine.Rule) string {
 	if rule == nil || rule.Queue == nil {
 		return ""
@@ -2827,7 +2846,7 @@ func simpleRuleFingerprintFromRule(rule *rules_engine.Rule) string {
 			if !ok {
 				continue
 			}
-			// Checklist: condition 字符串 + 无序的 check/threshold 集合
+			// Checklist: condition 字符串 + 无序的 check 集合 + 无序的 threshold 集合
 			segment := []string{"CL", "cond=" + strings.TrimSpace(cl.Condition)}
 
 			// Check nodes 指纹（忽略顺序）
@@ -2848,9 +2867,15 @@ func simpleRuleFingerprintFromRule(rule *rules_engine.Rule) string {
 				segment = append(segment, "checks="+strings.Join(checkParts, "|"))
 			}
 
-			// Threshold nodes 指纹（同样忽略顺序）
-			// 为简化实现，这里暂不把 threshold 的字段纳入指纹（只靠 checklist condition + checks）。
-			// 如有需要再根据 Threshold 结构补充。
+			// Threshold nodes 指纹（忽略顺序）
+			if len(cl.ThresholdNodes) > 0 {
+				threshParts := make([]string, 0, len(cl.ThresholdNodes))
+				for _, th := range cl.ThresholdNodes {
+					threshParts = append(threshParts, thresholdFingerprint(th))
+				}
+				sort.Strings(threshParts)
+				segment = append(segment, "thresholds="+strings.Join(threshParts, "|"))
+			}
 
 			parts = append(parts, strings.Join(segment, ";"))
 
@@ -2897,7 +2922,7 @@ func simpleRuleFingerprintFromXML(ruleXML string) (string, error) {
 	return simpleRuleFingerprintFromRule(&rs.Rules[0]), nil
 }
 
-// pendingRuleDuplicate 使用 rules_engine 解析后的结构来做近似“逻辑等价”判断（忽略 ConditionAST）。
+// pendingRuleDuplicate 使用 rules_engine 解析后的结构来做近似"逻辑等价"判断（忽略 ConditionAST）。
 func pendingRuleDuplicate(currentXML, newRuleRaw string) bool {
 	newFP, err := simpleRuleFingerprintFromXML(newRuleRaw)
 	if err != nil || newFP == "" {

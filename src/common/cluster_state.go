@@ -52,21 +52,30 @@ func RequireLeader() error {
 	return nil
 }
 
-const defaultLeaderAPIPort = "8080"
+const (
+	// LeaderNodeIDRedisKey is the Redis key where the leader writes its node ID (IP) on startup,
+	// so followers and plugins can discover the leader API address.
+	LeaderNodeIDRedisKey    = "cluster:leader:node_id"
+	defaultLeaderAPIPort    = "8080"
+)
 
 // GetLeaderAPIBaseURL returns the base URL for the leader's API (e.g. http://<leader_ip>:8080).
-// On leader: uses current node ID from memory. On follower: reads cluster:leader:node_id from Redis (written by leader at startup).
+// On leader: uses current node ID from memory. On follower: reads LeaderNodeIDRedisKey from Redis (written by leader at startup).
 func GetLeaderAPIBaseURL() string {
+	port := defaultLeaderAPIPort
+	if Config != nil && Config.APIPort != "" {
+		port = Config.APIPort
+	}
 	if IsCurrentNodeLeader() {
 		nodeID := strings.TrimSpace(GetNodeID())
 		if nodeID != "" {
-			return "http://" + nodeID + ":" + defaultLeaderAPIPort
+			return "http://" + nodeID + ":" + port
 		}
 		return ""
 	}
-	nodeID, err := RedisGet("cluster:leader:node_id")
+	nodeID, err := RedisGet(LeaderNodeIDRedisKey)
 	if err != nil || strings.TrimSpace(nodeID) == "" {
 		return ""
 	}
-	return "http://" + strings.TrimSpace(nodeID) + ":" + defaultLeaderAPIPort
+	return "http://" + strings.TrimSpace(nodeID) + ":" + port
 }

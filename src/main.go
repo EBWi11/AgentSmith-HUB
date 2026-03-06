@@ -15,6 +15,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -53,6 +54,11 @@ func main() {
 	if err := loadHubConfig(*cfgRoot); err != nil {
 		logger.Error("load hub config", "error", err)
 		return
+	}
+
+	// Persist the API listen port in Config so cluster internals (e.g. GetLeaderAPIBaseURL) can use it.
+	if _, port, err := net.SplitHostPort(*apiListen); err == nil && port != "" {
+		common.Config.APIPort = port
 	}
 
 	if *isLeader {

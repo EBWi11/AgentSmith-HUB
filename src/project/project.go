@@ -494,24 +494,6 @@ func init() {
 		return GetSkill(id)
 	})
 
-	// Register agent ruleset accessor to avoid circular imports
-	skill.RegisterRulesetAccessor(&skill.RulesetAccessor{
-		GetAllRulesets: func() map[string]string {
-			result := make(map[string]string)
-			common.ForEachRawConfig("ruleset", func(id, config string) bool {
-				result[id] = config
-				return true
-			})
-			return result
-		},
-		GetRuleset: func(id string) (string, bool) {
-			return common.GetRawConfig("ruleset", id)
-		},
-		SetRulesetNew: func(id string, content string) {
-			SetRulesetNew(id, content)
-		},
-	})
-
 	// AllProjectRawConfig is now managed through common.SetRawConfig functions
 	common.SetStatsCollector(collectAllComponentStats)
 

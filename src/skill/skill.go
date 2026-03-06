@@ -4,19 +4,16 @@ import (
 	"AgentSmith-HUB/common"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // SkillConfig is the YAML configuration for a skill component.
-// Implementation is inferred: builtin_ref set → Go implementation; otherwise content → knowledge (reference text).
+// A skill is defined entirely by its content field (reference text / prompt).
 type SkillConfig struct {
-	BuiltinRef  string                 `yaml:"builtin_ref"` // optional: reference to Go implementation
-	Description string                 `yaml:"description"`
-	Content     string                 `yaml:"content"`     // optional: reference/prompt text (knowledge)
-	Config      map[string]interface{} `yaml:"config"`
+	Description string `yaml:"description"`
+	Content     string `yaml:"content"`
 }
 
 // Skill is a top-level component (like Input, Ruleset, Agent).
@@ -33,7 +30,6 @@ type Skill struct {
 }
 
 // SkillImplementation is the interface that every skill backend must satisfy.
-// Agents consume skills through this interface.
 type SkillImplementation interface {
 	Name() string
 	Description() string
@@ -80,10 +76,7 @@ func NewSkill(filePath, raw, id string) (*Skill, error) {
 		Path:        filePath,
 		RawConfig:   configData,
 		SkillConfig: &cfg,
-	}
-
-	if err := s.resolveImplementation(); err != nil {
-		return nil, fmt.Errorf("resolve skill implementation: %w", err)
+		impl:        newKnowledgeSkill(id, cfg.Description, cfg.Content),
 	}
 
 	s.SetStatus(common.StatusStopped, nil)
@@ -100,23 +93,8 @@ func Verify(filePath, raw string) error {
 	if err := yaml.Unmarshal([]byte(configData), &cfg); err != nil {
 		return fmt.Errorf("invalid YAML: %w", err)
 	}
-
-	hasBuiltin := strings.TrimSpace(cfg.BuiltinRef) != ""
-	hasContent := strings.TrimSpace(cfg.Content) != ""
-	if hasBuiltin && hasContent {
-		return fmt.Errorf("set either builtin_ref or content, not both")
-	}
-	if !hasBuiltin && !hasContent {
-		return fmt.Errorf("set either builtin_ref or content")
-	}
-	if hasBuiltin {
-		if _, ok := builtinRegistry[cfg.BuiltinRef]; !ok {
-			available := make([]string, 0, len(builtinRegistry))
-			for k := range builtinRegistry {
-				available = append(available, k)
-			}
-			return fmt.Errorf("unknown builtin_ref: %s (available: %v)", cfg.BuiltinRef, available)
-		}
+	if cfg.Content == "" {
+		return fmt.Errorf("content is required")
 	}
 	return nil
 }
@@ -126,20 +104,6 @@ func (s *Skill) SetStatus(status common.Status, err error) {
 	s.Status = status
 	t := time.Now()
 	s.StatusChangedAt = &t
-}
-
-func (s *Skill) resolveImplementation() error {
-	cfg := s.SkillConfig
-	if strings.TrimSpace(cfg.BuiltinRef) != "" {
-		factory, ok := builtinRegistry[cfg.BuiltinRef]
-		if !ok {
-			return fmt.Errorf("unknown builtin skill: %s", cfg.BuiltinRef)
-		}
-		s.impl = factory(cfg.Config)
-		return nil
-	}
-	s.impl = newKnowledgeSkill(s.Id, cfg.Description, cfg.Content)
-	return nil
 }
 
 func loadConfig(filePath, raw string) (string, error) {

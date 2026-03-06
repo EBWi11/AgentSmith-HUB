@@ -37,10 +37,6 @@ func getSkills(c echo.Context) error {
 			"raw":     rawConfig,
 			"status":  string(s.Status),
 		}
-		if s.SkillConfig.BuiltinRef != "" {
-			skillData["builtin_ref"] = s.SkillConfig.BuiltinRef
-		}
-
 		if s.Status == common.StatusError && s.Err != nil {
 			skillData["errorMessage"] = s.Err.Error()
 		}
@@ -94,9 +90,6 @@ func getSkillDetail(c echo.Context) error {
 		"raw":     rawConfig,
 		"hasTemp": false,
 		"status":  string(s.Status),
-	}
-	if s.SkillConfig.BuiltinRef != "" {
-		resp["builtin_ref"] = s.SkillConfig.BuiltinRef
 	}
 	return c.JSON(http.StatusOK, resp)
 }

@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	tokenRedisKey       = "cluster:leader:token"
-	leaderNodeIDRedisKey = "cluster:leader:node_id"
-	llmAPIKeyRedisKey   = "cluster:hub_config:llm_api_key"
+	tokenRedisKey     = "cluster:leader:token"
+	llmAPIKeyRedisKey = "cluster:hub_config:llm_api_key"
 	llmBaseURLRedisKey = "cluster:hub_config:llm_base_url"
 	llmModelRedisKey   = "cluster:hub_config:llm_model"
 )
@@ -41,20 +40,13 @@ func WriteLeaderNodeIDToRedis(nodeID string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := common.GetRedisClient().Set(ctx, leaderNodeIDRedisKey, nodeID, 0).Err()
+	err := common.GetRedisClient().Set(ctx, common.LeaderNodeIDRedisKey, nodeID, 0).Err()
 	if err != nil {
 		logger.Error("Failed to write leader node ID to Redis", "error", err)
 		return err
 	}
 	logger.Info("Leader node ID written to Redis", "node_id", nodeID)
 	return nil
-}
-
-// ReadLeaderNodeIDFromRedis reads the leader's node ID from Redis (for followers).
-func ReadLeaderNodeIDFromRedis() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return common.GetRedisClient().Get(ctx, leaderNodeIDRedisKey).Result()
 }
 
 // ReadTokenFromRedis reads the token from Redis (called by follower on startup)
