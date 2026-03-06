@@ -409,6 +409,9 @@ timeout: 30s                       # 单条消息处理超时（如 30s、1m）
   - LLM 返回的字段（如 `llm_confidence`、`llm_analysis`）。
   - `agent`：产生该结果的 agent id。
   - `processing_time_ms`：处理耗时（毫秒）。
+  - 可选控制字段（由 LLM 输出决定）：
+    - `_no_forward`：布尔值。为 `true` 时，这条消息不会再被转发到下游组件（仅本 Agent 内部消费）。
+    - `_no_oridata`：布尔值。为 `true` 时，下游只能看到合并后的 `llm` 区块，原始事件字段会被去除。
 
 单 Agent 示例：
 

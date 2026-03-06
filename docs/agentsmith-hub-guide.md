@@ -410,6 +410,9 @@ All LLM-derived data for an agent is stored in a single map per agent:
   - Fields from the LLM (e.g. `llm_confidence`, `llm_analysis`).
   - `agent`: the agent id that produced this result.
   - `processing_time_ms`: processing time in milliseconds.
+  - Optional control fields (set by the LLM output):
+    - `_no_forward`: boolean. When `true`, this message is **not** forwarded to any downstream components (it is only consumed inside this agent).
+    - `_no_oridata`: boolean. When `true`, downstream components only see the merged `llm` block; original event fields are stripped.
 
 Example with one agent:
 

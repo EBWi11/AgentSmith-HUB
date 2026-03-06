@@ -59,15 +59,53 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 	atomic.AddUint64(&a.processLatencyNs, uint64(elapsedNs))
 	a.RecordDailyStats(uint64(elapsedNs))
 
+	// Attach processing time to this agent's LLM block if present.
 	if topLlm, ok := result["llm"].(map[string]interface{}); ok {
 		if agentLlm, ok := topLlm[a.Id].(map[string]interface{}); ok {
 			agentLlm["processing_time_ms"] = float64(elapsedNs) / 1e6
 		}
 	}
 
+	// Optional control tags from agent output:
+	// - _no_forward: do not send this message to any downstream components.
+	// - _no_oridata: strip original data, only keep the merged llm block.
+	//
+	// These flags are expected to be set in the JSON object that the LLM
+	// returns for this agent (i.e. inside msg["llm"][agentId]).
+	var noForward, noOriData bool
+	if topLlm, ok := result["llm"].(map[string]interface{}); ok {
+		if agentLlm, ok := topLlm[a.Id].(map[string]interface{}); ok {
+			if v, ok := agentLlm["_no_forward"].(bool); ok && v {
+				noForward = true
+			}
+			if v, ok := agentLlm["_no_oridata"].(bool); ok && v {
+				noOriData = true
+			}
+		}
+	}
+
+	// When _no_oridata is true, drop all original fields and only keep the
+	// aggregated LLM results block for downstream components.
+	if noOriData {
+		if llmVal, ok := result["llm"]; ok {
+			result = map[string]interface{}{
+				"llm": llmVal,
+			}
+		} else {
+			// No llm block; fall back to empty map to avoid leaking original data.
+			result = map[string]interface{}{}
+		}
+	}
+
 	if a.sampler != nil {
 		a.sampler.Sample(result, a.ProjectNodeSequence)
 	}
+
+	// If _no_forward is set, stop after sampling and metrics.
+	if noForward {
+		return
+	}
+
 	for dsPNS, dsCh := range a.DownStream {
 		select {
 		case *dsCh <- result:
