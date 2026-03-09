@@ -650,6 +650,58 @@ func ForEachAgent(fn func(id string, a *agent.Agent) bool) {
 	}
 }
 
+// GetAggregatedAgentStatus returns an aggregated runtime status for the given agent ID
+// across all PNS instances and the template agent. This is primarily used for UI display
+// (e.g., dashboard) so that an agent is shown as "running" if any of its PNS instances
+// are running in any project.
+func GetAggregatedAgentStatus(agentID string) common.Status {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	var hasTemplate bool
+	var templateStatus common.Status
+	if tmpl, exists := GlobalProject.Agents[agentID]; exists && tmpl != nil {
+		hasTemplate = true
+		templateStatus = tmpl.Status
+	}
+
+	var hasRunning, hasStarting, hasStopping, hasError bool
+	for _, a := range GlobalProject.PNSAgents {
+		if a == nil || a.Id != agentID {
+			continue
+		}
+		switch a.Status {
+		case common.StatusRunning:
+			hasRunning = true
+		case common.StatusStarting:
+			hasStarting = true
+		case common.StatusStopping:
+			hasStopping = true
+		case common.StatusError:
+			hasError = true
+		}
+	}
+
+	// Determine aggregated status with a simple priority:
+	// error > running > starting > stopping > template/else (default stopped)
+	if hasError || (hasTemplate && templateStatus == common.StatusError) {
+		return common.StatusError
+	}
+	if hasRunning || (hasTemplate && templateStatus == common.StatusRunning) {
+		return common.StatusRunning
+	}
+	if hasStarting || (hasTemplate && templateStatus == common.StatusStarting) {
+		return common.StatusStarting
+	}
+	if hasStopping || (hasTemplate && templateStatus == common.StatusStopping) {
+		return common.StatusStopping
+	}
+	if hasTemplate {
+		return templateStatus
+	}
+	return common.StatusStopped
+}
+
 // GetAggregatedAgentDailyStats returns aggregated daily call count and average latency (ms)
 // across all PNS instances of the given agent id. If no PNS instances exist, returns the
 // template agent's daily stats.

@@ -45,11 +45,12 @@ func getAgents(c echo.Context) error {
 		}
 
 		dailyCalls, dailyAvgMs := project.GetAggregatedAgentDailyStats(id)
+		aggregatedStatus := project.GetAggregatedAgentStatus(id)
 		agentData := map[string]interface{}{
 			"id":                   id,
 			"hasTemp":              hasTemp,
 			"raw":                  rawConfig,
-			"status":               string(a.Status),
+			"status":               string(aggregatedStatus),
 			"model":                a.Config.Model,
 			"process_total":        a.GetProcessTotal(),
 			"avg_latency_ms":       a.GetAvgLatencyMs(),
@@ -110,7 +111,7 @@ func getAgentDetail(c echo.Context) error {
 		"id":      id,
 		"raw":     rawConfig,
 		"hasTemp": false,
-		"status":  string(a.Status),
+		"status":  string(project.GetAggregatedAgentStatus(id)),
 		"model":   a.Config.Model,
 	})
 }
