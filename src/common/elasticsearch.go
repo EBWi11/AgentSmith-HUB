@@ -139,8 +139,11 @@ func (p *ElasticsearchProducer) run() {
 				default:
 				}
 			}
-			// Don't flush remaining batch during shutdown to avoid blocking
-			// Just return immediately to ensure fast shutdown
+			// Flush any remaining batch before shutdown so that short-lived
+			// test runs (e.g. /test-output) still send their data to ES.
+			if len(batch) > 0 {
+				p.flush(batch)
+			}
 			return
 		case msg, ok := <-p.MsgChan:
 			if !ok {
