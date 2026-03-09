@@ -1941,15 +1941,17 @@ func GetSamplerData(c echo.Context) error {
 		_, componentExists = project.GetOutput(componentId)
 	case "ruleset":
 		_, componentExists = project.GetRuleset(componentId)
+	case "agent":
+		_, componentExists = project.GetAgent(componentId)
 	default:
 		logger.Error("Unsupported component type in GetSamplerData",
 			"componentType", componentType,
 			"normalizedType", normalizedType,
 			"componentId", componentId,
 			"nodeSequence", nodeSequence,
-			"supportedTypes", []string{"input", "output", "ruleset"})
+			"supportedTypes", []string{"input", "output", "ruleset", "agent"})
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("Unsupported component type: '%s'. Supported types: input, output, ruleset", componentType),
+			"error": fmt.Sprintf("Unsupported component type: '%s'. Supported types: input, output, ruleset, agent", componentType),
 		})
 	}
 
@@ -1982,6 +1984,11 @@ func GetSamplerData(c echo.Context) error {
 	})
 	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
+		return true
+	})
+	// Agents use sampler name equal to agent ID (set in agent.Start).
+	project.ForEachAgent(func(agentId string, _ *agent.Agent) bool {
+		samplerNames = append(samplerNames, agentId)
 		return true
 	})
 

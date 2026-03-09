@@ -210,11 +210,11 @@
           <p class="text-lg font-bold text-gray-500">{{ agentStats.stopped }}</p>
         </div>
         <div class="text-center">
-          <p class="text-xs text-gray-600">今日调用次数</p>
+          <p class="text-xs text-gray-600">Today's Calls</p>
           <p class="text-lg font-bold text-blue-600">{{ formatNumber(agentStats.dailyCallTotal) }}</p>
         </div>
         <div class="text-center">
-          <p class="text-xs text-gray-600">今日平均延迟</p>
+          <p class="text-xs text-gray-600">Today's Avg Latency</p>
           <p class="text-lg font-bold text-amber-600">{{ agentStats.dailyAvgLatencyMs != null ? formatLatencyMs(agentStats.dailyAvgLatencyMs) : '-' }}</p>
         </div>
       </div>
@@ -247,11 +247,11 @@
               <p class="text-xs font-bold text-purple-800">{{ (ag.skills || []).length }}</p>
             </div>
             <div class="p-1.5 bg-blue-50 rounded">
-              <p class="text-[10px] text-blue-600 font-medium">今日调用</p>
+              <p class="text-[10px] text-blue-600 font-medium">Today's Calls</p>
               <p class="text-xs font-bold text-blue-800">{{ formatNumber(ag.daily_call_count || 0) }}</p>
             </div>
             <div class="p-1.5 bg-amber-50 rounded">
-              <p class="text-[10px] text-amber-600 font-medium">今日平均延迟</p>
+              <p class="text-[10px] text-amber-600 font-medium">Today's Avg Latency</p>
               <p class="text-xs font-bold text-amber-800">{{ (ag.daily_call_count || 0) > 0 ? formatLatencyMs(ag.daily_avg_latency_ms) : '-' }}</p>
             </div>
           </div>

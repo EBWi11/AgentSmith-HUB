@@ -51,10 +51,12 @@ type Agent struct {
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
-	skills            map[string]*SkillAdapter
-	toolDefs          []ToolDefinition
-	processTotal      uint64
-	processLatencyNs  uint64 // cumulative nanoseconds for processed messages (for avg latency)
+	skills           map[string]*SkillAdapter
+	toolDefs         []ToolDefinition
+	processTotal     uint64
+	processLatencyNs uint64 // cumulative nanoseconds for processed messages (for avg latency)
+	// lastReportedTotal is used for incremental statistics collection (QPS / MSG/D)
+	lastReportedTotal uint64
 	sampler           *common.Sampler
 	RawConfig         string `json:"-"`
 
@@ -199,6 +201,21 @@ func (a *Agent) GetAvgLatencyMs() float64 {
 	}
 	ns := atomic.LoadUint64(&a.processLatencyNs)
 	return float64(ns) / float64(total) / 1e6
+}
+
+// GetIncrementAndUpdate returns the increment in processed messages since last call
+// and updates the baseline. This mirrors the behavior of Input/Output/Ruleset
+// components so that the daily stats manager can treat agents uniformly.
+func (a *Agent) GetIncrementAndUpdate() uint64 {
+	current := atomic.LoadUint64(&a.processTotal)
+	last := atomic.LoadUint64(&a.lastReportedTotal)
+
+	// Use CAS to atomically update lastReportedTotal
+	// If CAS fails, we simply return 0 - one missed stat collection is not critical
+	if atomic.CompareAndSwapUint64(&a.lastReportedTotal, last, current) {
+		return current - last
+	}
+	return 0
 }
 
 // RecordDailyStats adds one call and latency to today's daily stats. Call from processAndForward.

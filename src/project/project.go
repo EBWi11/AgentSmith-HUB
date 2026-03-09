@@ -80,6 +80,20 @@ func collectAllComponentStats() []common.DailyStatsData {
 				})
 			}
 		}
+
+		// Collect agent statistics
+		for _, a := range proj.GetProjectAgents() {
+			increment := a.GetIncrementAndUpdate()
+			if increment > 0 {
+				components = append(components, common.DailyStatsData{
+					ProjectID:           proj.Id,
+					ComponentID:         a.Id,
+					ComponentType:       "agent",
+					ProjectNodeSequence: a.ProjectNodeSequence,
+					TotalMessages:       increment,
+				})
+			}
+		}
 	}
 
 	// Collect plugin statistics (plugins are global, no project lock needed)
