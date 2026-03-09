@@ -758,7 +758,7 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
-		// Test actual connectivity to Kafka brokers
+		// Test actual connectivity to Kafka brokers (basic TCP / TLS / auth).
 		err := common.TestKafkaConnection(in.kafkaCfg.Brokers, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "error"
@@ -770,25 +770,26 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 			return result
 		}
 
-		// Test if topic exists
-		topicExists, err := common.TestKafkaTopicExists(in.kafkaCfg.Brokers, in.kafkaCfg.Topic, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
-		if err != nil {
+		// Test consumer-side connectivity using a temporary group.
+		// This exercises the real consume path and works even for some Kafka-compatible
+		// services that do not fully support admin APIs like ListTopics.
+		consumerErr := common.TestKafkaConsumerConnectivity(
+			in.kafkaCfg.Brokers,
+			in.kafkaCfg.Group,
+			in.kafkaCfg.Topic,
+			in.kafkaCfg.SASL,
+			in.kafkaCfg.TLS,
+		)
+		if consumerErr != nil {
 			result["status"] = "warning"
-			result["message"] = "Connected to Kafka but failed to verify topic"
-			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_unknown"
+			result["message"] = "Connected to Kafka brokers but consumer test reported an issue"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_consumer_warning"
 			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
-				{"message": fmt.Sprintf("Could not verify topic existence: %v", err), "severity": "warning"},
-			}
-		} else if !topicExists {
-			result["status"] = "error"
-			result["message"] = "Connected to Kafka but topic does not exist"
-			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_missing"
-			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-				{"message": fmt.Sprintf("Topic '%s' does not exist", in.kafkaCfg.Topic), "severity": "error"},
+				{"message": consumerErr.Error(), "severity": "warning"},
 			}
 		} else {
 			result["details"].(map[string]interface{})["connection_status"] = "connected"
-			result["message"] = "Successfully connected to Kafka and verified topic"
+			result["message"] = "Successfully connected to Kafka and passed consumer connectivity test"
 		}
 
 		// Add consumer metrics if available
