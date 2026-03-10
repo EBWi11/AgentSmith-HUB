@@ -157,7 +157,8 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 
 		resp, err := callChatWithTools(
 			a.Config.Model, conversation, toolDefs,
-			a.Config.MaxTokens, a.Config.Temperature, ctx,
+			a.Config.MaxTokens, a.Config.Temperature,
+			a.Config.ReasoningMode, a.Config.ReasoningBudgetTokens, ctx,
 		)
 		if err != nil {
 			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)

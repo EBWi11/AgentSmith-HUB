@@ -25,16 +25,25 @@ func RegisterSkillResolver(fn func(id string) (*skill.Skill, bool)) {
 }
 
 type AgentConfig struct {
-	Model        string                `yaml:"model"`
-	Temperature  float64               `yaml:"temperature"`
-	MaxTokens    int                   `yaml:"max_tokens"`
-	SystemPrompt string                `yaml:"system_prompt"`
-	Skills    []string    `yaml:"skills"`
-	Tools     interface{} `yaml:"tools"` // "all" or []string
-	MaxRounds int         `yaml:"max_rounds"`
-	Timeout   string      `yaml:"timeout"`
-	RawConfig string      `yaml:"-"`
-	Path      string      `yaml:"-"`
+	Model        string      `yaml:"model"`
+	Temperature  float64     `yaml:"temperature"`
+	MaxTokens    int         `yaml:"max_tokens"`
+	SystemPrompt string      `yaml:"system_prompt"`
+	Skills       []string    `yaml:"skills"`
+	Tools        interface{} `yaml:"tools"` // "all" or []string
+	MaxRounds    int         `yaml:"max_rounds"`
+	Timeout      string      `yaml:"timeout"`
+
+	// Reasoning / thinking configuration for models that support it (e.g. kimi-k2.5).
+	// reasoning_mode:
+	//   - "disabled" (default): never send provider-specific reasoning params
+	//   - "enabled"           : always send reasoning params for supported models
+	//   - "auto"              : enable reasoning based on model name heuristics
+	ReasoningMode          string `yaml:"reasoning_mode"`
+	ReasoningBudgetTokens  int    `yaml:"reasoning_budget_tokens"`
+
+	RawConfig string `yaml:"-"`
+	Path      string `yaml:"-"`
 }
 
 type Agent struct {
@@ -259,8 +268,14 @@ func applyDefaults(cfg *AgentConfig) {
 	if cfg.MaxRounds == 0 {
 		cfg.MaxRounds = 5
 	}
-	if cfg.Timeout == "" {
-		cfg.Timeout = "30s"
+	if strings.TrimSpace(cfg.Timeout) == "" {
+		cfg.Timeout = "60s"
+	}
+
+	// Normalize reasoning mode; default to "disabled" for safety if empty.
+	cfg.ReasoningMode = strings.ToLower(strings.TrimSpace(cfg.ReasoningMode))
+	if cfg.ReasoningMode == "" {
+		cfg.ReasoningMode = "disabled"
 	}
 }
 

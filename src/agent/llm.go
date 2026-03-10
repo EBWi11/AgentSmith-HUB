@@ -41,28 +41,33 @@ type ToolCall struct {
 	} `json:"function"`
 }
 
-// Message is an OpenAI chat message supporting tool roles.
+// Message is an OpenAI-compatible chat message supporting tool roles.
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	// Optional reasoning / thinking fields for providers that support them
+	// (e.g. kimi-k2.5, Claude with thinking blocks). These are passed through
+	// transparently when present so multi-turn tool calls work correctly.
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ThinkingBlocks   json.RawMessage `json:"thinking_blocks,omitempty"`
 }
 
-type chatRequestWithTools struct {
-	Model       string           `json:"model"`
-	Messages    []Message        `json:"messages"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Temperature float64          `json:"temperature,omitempty"`
-	Tools       []ToolDefinition `json:"tools,omitempty"`
-}
+// chatRequestWithTools is a flexible request map so we can attach
+// provider-specific fields (e.g. thinking / reasoning options) when needed.
+type chatRequestWithTools map[string]interface{}
 
 type chatResponseWithTools struct {
 	Choices []struct {
 		Message struct {
-			Role      string     `json:"role"`
-			Content   string     `json:"content"`
-			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+			Role       string          `json:"role"`
+			Content    string          `json:"content"`
+			ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+			// Provider-specific reasoning fields (if returned)
+			ReasoningContent string          `json:"reasoning_content,omitempty"`
+			ThinkingBlocks   json.RawMessage `json:"thinking_blocks,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -74,17 +79,21 @@ type chatResponseWithTools struct {
 
 // ChatResult is the parsed response from a tool-aware LLM call.
 type ChatResult struct {
-	Content   string
-	ToolCalls []ToolCall
-	Role      string
+	Content          string
+	ToolCalls        []ToolCall
+	Role             string
+	ReasoningContent string
+	ThinkingBlocks   json.RawMessage
 }
 
 // AssistantMessage converts the ChatResult back into a Message for the conversation.
 func (r *ChatResult) AssistantMessage() Message {
 	return Message{
-		Role:      "assistant",
-		Content:   r.Content,
-		ToolCalls: r.ToolCalls,
+		Role:             "assistant",
+		Content:          r.Content,
+		ToolCalls:        r.ToolCalls,
+		ReasoningContent: r.ReasoningContent,
+		ThinkingBlocks:   r.ThinkingBlocks,
 	}
 }
 
@@ -97,8 +106,13 @@ func ToolResultMessage(toolCallID, content string) Message {
 	}
 }
 
+// callChatWithTools performs a single tool-aware LLM call.
+// reasoningMode:
+//   - "disabled": never send provider-specific reasoning params
+//   - "enabled" : always send reasoning params for supported models
+//   - "auto"    : enable reasoning based on model name heuristics
 func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
-	maxTokens int, temperature float64, ctx ...context.Context) (*ChatResult, error) {
+	maxTokens int, temperature float64, reasoningMode string, reasoningBudgetTokens int, ctx ...context.Context) (*ChatResult, error) {
 
 	if common.Config == nil || strings.TrimSpace(common.Config.LLMApiKey) == "" {
 		return nil, fmt.Errorf("LLM API key not configured")
@@ -122,13 +136,31 @@ func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
 	}
 
 	reqBody := chatRequestWithTools{
-		Model:       model,
-		Messages:    messages,
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
+		"model":    model,
+		"messages": messages,
+	}
+	if maxTokens > 0 {
+		reqBody["max_tokens"] = maxTokens
+	}
+	if temperature > 0 {
+		// Only send temperature when explicitly configured; leaving it out
+		// lets the backend apply its own sensible default.
+		reqBody["temperature"] = temperature
 	}
 	if len(tools) > 0 {
-		reqBody.Tools = tools
+		reqBody["tools"] = tools
+	}
+
+	// Attach provider-specific reasoning / thinking parameters when requested.
+	reasoningMode = strings.ToLower(strings.TrimSpace(reasoningMode))
+	if shouldEnableKimiThinking(model, reasoningMode) {
+		thinking := map[string]interface{}{
+			"type": "enabled",
+		}
+		if reasoningBudgetTokens > 0 {
+			thinking["budget_tokens"] = reasoningBudgetTokens
+		}
+		reqBody["thinking"] = thinking
 	}
 
 	raw, err := json.Marshal(reqBody)
@@ -184,8 +216,33 @@ func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
 
 	choice := chatResp.Choices[0]
 	return &ChatResult{
-		Content:   strings.TrimSpace(choice.Message.Content),
-		ToolCalls: choice.Message.ToolCalls,
-		Role:      choice.Message.Role,
+		Content:          strings.TrimSpace(choice.Message.Content),
+		ToolCalls:        choice.Message.ToolCalls,
+		Role:             choice.Message.Role,
+		ReasoningContent: choice.Message.ReasoningContent,
+		ThinkingBlocks:   choice.Message.ThinkingBlocks,
 	}, nil
+}
+
+// shouldEnableKimiThinking determines whether to attach Kimi-style "thinking" params.
+// This is intentionally conservative and only triggers when explicitly requested
+// or when reasoningMode is "auto" and the model name matches known patterns.
+func shouldEnableKimiThinking(model, reasoningMode string) bool {
+	modelLower := strings.ToLower(strings.TrimSpace(model))
+	if modelLower == "" {
+		return false
+	}
+
+	switch reasoningMode {
+	case "disabled":
+		return false
+	case "enabled":
+		return true
+	case "auto":
+		// Heuristic: enable for kimi-k2.5 family by default in auto mode.
+		if strings.Contains(modelLower, "kimi-k2.5") {
+			return true
+		}
+	}
+	return false
 }

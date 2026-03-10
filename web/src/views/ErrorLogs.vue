@@ -119,13 +119,13 @@
         {{ error }}
       </div>
       
-      <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
+      <div v-else-if="!displayLogs.length" class="flex-1 flex items-center justify-center text-gray-500">
         No error logs found
       </div>
       
       <div v-else class="space-y-2 p-4">
         <div
-          v-for="(log, index) in logs"
+          v-for="(log, index) in displayLogs"
           :key="`${log.node_id}-${log.source}-${log.timestamp}-${index}`"
           class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
         >
@@ -284,6 +284,17 @@ const filters = reactive({
 // Computed properties
 const isClusterMode = computed(() => {
   return availableNodes.value.length > 1
+})
+
+// Only show real errors in Error Logs view.
+// Agent INFO logs are still available in Agent Tools Logs view.
+const displayLogs = computed(() => {
+  return logs.value.filter((log) => {
+    if (log.source === 'agent') {
+      return log.level === 'ERROR' || log.level === 'FATAL'
+    }
+    return true
+  })
 })
 
 const totalPages = computed(() => Math.ceil(totalCount.value / pageSize.value))
