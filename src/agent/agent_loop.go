@@ -57,7 +57,8 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 	elapsedNs := time.Since(start).Nanoseconds()
 	atomic.AddUint64(&a.processTotal, 1)
 	atomic.AddUint64(&a.processLatencyNs, uint64(elapsedNs))
-	a.RecordDailyStats(uint64(elapsedNs))
+	// Record per-agent daily statistics in Redis for cluster-wide aggregation.
+	_ = common.IncrementAgentDailyStats(a.Id, uint64(elapsedNs))
 
 	// Attach processing time to this agent's LLM block if present.
 	if topLlm, ok := result["llm"].(map[string]interface{}); ok {

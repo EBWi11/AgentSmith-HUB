@@ -876,8 +876,8 @@
                         View Sample Data
                       </a>
                       
-                      <!-- 添加查看使用情况选项，仅对已保存的input、output和ruleset类型显示 -->
-                      <a v-if="(type === 'inputs' || type === 'outputs' || type === 'rulesets') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- View Usage option for inputs, outputs, rulesets, agents, and skills (only for saved components) -->
+                      <a v-if="(type === 'inputs' || type === 'outputs' || type === 'rulesets' || type === 'agents' || type === 'skills') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openUsageModal(type, item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />

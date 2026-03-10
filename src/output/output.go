@@ -54,7 +54,7 @@ type KafkaOutputConfig struct {
 type ElasticsearchOutputConfig struct {
 	Hosts     []string                        `yaml:"hosts"`
 	Index     string                          `yaml:"index"`
-	Version   string                          `yaml:"version,omitempty"`    // elasticsearch version: v7, v8, v9 (default v9)
+	Version   string                          `yaml:"version,omitempty"`    // elasticsearch version: v7, v8, v9 (default auto-detect, fallback v8)
 	BatchSize int                             `yaml:"batch_size,omitempty"` // batch size per bulk request
 	FlushDur  string                          `yaml:"flush_dur,omitempty"`  // flush interval, e.g. "5s"
 	Auth      *common.ElasticsearchAuthConfig `yaml:"auth,omitempty"`

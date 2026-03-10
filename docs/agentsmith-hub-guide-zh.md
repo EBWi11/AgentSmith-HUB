@@ -219,7 +219,7 @@ elasticsearch:
     - "http://localhost:9200"
     - "https://localhost:9201"
   index: "security-events-{YYYY.MM.DD}"  # 支持时间模式
-  # Elasticsearch 服务器版本：v7、v8、v9（可选，默认：自动探测 → 失败时回退 v9）
+  # Elasticsearch 服务器版本：v7、v8、v9（可选，默认：自动探测 → 失败时回退 v8）
   # version: "v9"
   batch_size: 1000  # 批量写入大小
   flush_dur: "5s"   # 刷新间隔
@@ -236,7 +236,7 @@ elasticsearch:
 
 **Elasticsearch 版本选择（v7/v8/v9）：**
 - 当未配置 `version` 时，AgentSmith HUB 会尝试从 ES 根接口自动探测集群主版本，并选择对应客户端（v7/v8/v9）。
-- 如果探测失败（如经过代理），会回退为使用 v9 客户端。
+- 如果探测失败（如经过代理），会回退为使用 v8 客户端。
 - 当你需要严格控制版本（混合环境、兼容性限制等）时，可以显式配置 `version: "v7" | "v8" | "v9"`。
 
 **支持的索引名称时间模式：**

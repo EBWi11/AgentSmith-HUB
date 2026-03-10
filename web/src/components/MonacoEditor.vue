@@ -2491,7 +2491,7 @@ function getOutputKeyCompletions(context, range, fullText) {
             '  hosts:',
             '    - "https://localhost:9200"',
             '  index: "index-name"',
-            '  # elasticsearch version: v7, v8, v9 (default v9)',
+            '  # elasticsearch version: v7, v8, v9 (default auto-detect, fallback v8)',
             '  version: "v9"',
             '  batch_size: 1000',
             '  flush_dur: "5s"',

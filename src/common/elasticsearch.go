@@ -72,7 +72,7 @@ func replaceTimePatterns(indexTemplate string) string {
 }
 
 // normalizeElasticsearchVersion maps user-provided version string to internal version key.
-// Supported values: "7"/"v7", "8"/"v8", otherwise default to "v9".
+// Supported values: "7"/"v7", "8"/"v8", otherwise default to "v8".
 func normalizeElasticsearchVersion(version string) string {
 	v := strings.ToLower(strings.TrimSpace(version))
 	switch v {
@@ -83,8 +83,8 @@ func normalizeElasticsearchVersion(version string) string {
 	case "9", "v9", "es9", "elasticsearch9":
 		return "v9"
 	default:
-		// Default to v9 for backward compatibility with current usage
-		return "v9"
+		// Default to v8 for broader compatibility when detection is not possible
+		return "v8"
 	}
 }
 
@@ -184,7 +184,7 @@ func DetectElasticsearchVersion(hosts []string, auth *ElasticsearchAuthConfig) (
 // detectOrDefaultElasticsearchVersion returns:
 // - normalized explicit version if provided
 // - otherwise, tries to detect from cluster root
-// - on detection failure, falls back to v9
+// - on detection failure, falls back to v8
 func detectOrDefaultElasticsearchVersion(hosts []string, explicit string, auth *ElasticsearchAuthConfig) string {
 	if strings.TrimSpace(explicit) != "" {
 		return normalizeElasticsearchVersion(explicit)
@@ -192,12 +192,12 @@ func detectOrDefaultElasticsearchVersion(hosts []string, explicit string, auth *
 	if v, err := DetectElasticsearchVersion(hosts, auth); err == nil {
 		return v
 	}
-	// Fallback to v9 behavior if detection fails
-	return "v9"
+	// Fallback to v8 behavior if detection fails
+	return "v8"
 }
 
 // NewElasticsearchProducer creates a new Elasticsearch producer
-// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v9)
+// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v8)
 func NewElasticsearchProducer(hosts []string, index string, version string, msgChan chan map[string]interface{}, batchSize int, flushDur time.Duration, auth *ElasticsearchAuthConfig) (*ElasticsearchProducer, error) {
 	normVersion := detectOrDefaultElasticsearchVersion(hosts, version, auth)
 
@@ -512,7 +512,7 @@ func (p *ElasticsearchProducer) Close() {
 
 // TestElasticsearchConnection tests the connection to Elasticsearch cluster
 // This method creates a temporary client to test connectivity without affecting the main producer
-// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v9)
+// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v8)
 func TestElasticsearchConnection(hosts []string, version string, auth *ElasticsearchAuthConfig) error {
 	normVersion := detectOrDefaultElasticsearchVersion(hosts, version, auth)
 
@@ -649,7 +649,7 @@ func TestElasticsearchConnection(hosts []string, version string, auth *Elasticse
 }
 
 // TestElasticsearchIndexExists tests if a specific index exists in Elasticsearch
-// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v9)
+// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v8)
 func TestElasticsearchIndexExists(hosts []string, index string, version string, auth *ElasticsearchAuthConfig) (bool, error) {
 	normVersion := detectOrDefaultElasticsearchVersion(hosts, version, auth)
 
@@ -792,7 +792,7 @@ func TestElasticsearchIndexExists(hosts []string, index string, version string, 
 }
 
 // GetElasticsearchClusterInfo gets basic cluster information
-// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v9)
+// version: "v7", "v8", or "v9" (empty => auto-detect, fallback v8)
 func GetElasticsearchClusterInfo(hosts []string, version string, auth *ElasticsearchAuthConfig) (map[string]interface{}, error) {
 	normVersion := detectOrDefaultElasticsearchVersion(hosts, version, auth)
 

@@ -60,12 +60,6 @@ type Agent struct {
 	sampler           *common.Sampler
 	RawConfig         string `json:"-"`
 
-	// Daily stats (reset when date changes); protected by dailyMu
-	dailyMu        sync.Mutex
-	dailyDate      string
-	dailyCount     uint64
-	dailyLatencyNs uint64
-
 	ProjectNodeSequence string `json:"project_node_sequence,omitempty"`
 }
 
@@ -216,42 +210,6 @@ func (a *Agent) GetIncrementAndUpdate() uint64 {
 		return current - last
 	}
 	return 0
-}
-
-// RecordDailyStats adds one call and latency to today's daily stats. Call from processAndForward.
-func (a *Agent) RecordDailyStats(latencyNs uint64) {
-	today := time.Now().Format("2006-01-02")
-	a.dailyMu.Lock()
-	defer a.dailyMu.Unlock()
-	if a.dailyDate != today {
-		a.dailyDate = today
-		a.dailyCount = 0
-		a.dailyLatencyNs = 0
-	}
-	a.dailyCount++
-	a.dailyLatencyNs += latencyNs
-}
-
-// GetDailyCallCount returns the number of agent calls today (0 if none or date changed).
-func (a *Agent) GetDailyCallCount() uint64 {
-	today := time.Now().Format("2006-01-02")
-	a.dailyMu.Lock()
-	defer a.dailyMu.Unlock()
-	if a.dailyDate != today {
-		return 0
-	}
-	return a.dailyCount
-}
-
-// GetDailyAvgLatencyMs returns average latency in ms for today's calls (0 if none).
-func (a *Agent) GetDailyAvgLatencyMs() float64 {
-	today := time.Now().Format("2006-01-02")
-	a.dailyMu.Lock()
-	defer a.dailyMu.Unlock()
-	if a.dailyDate != today || a.dailyCount == 0 {
-		return 0
-	}
-	return float64(a.dailyLatencyNs) / float64(a.dailyCount) / 1e6
 }
 
 func (a *Agent) resolveSkills() error {
