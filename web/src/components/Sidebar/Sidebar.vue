@@ -908,6 +908,15 @@
                         </svg>
                         Test Ruleset
                       </a>
+
+                      <!-- Test Agent -->
+                      <a v-if="type === 'agents'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestAgent(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Agent
+                      </a>
                       
                       <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openTestOutput(item)">
@@ -3068,6 +3077,16 @@ function openTestRuleset(item) {
   };
   emit('test-ruleset', payload);
   // Ensure menus are closed
+  closeAllMenus();
+}
+
+// Open test agent modal (reuse ruleset test modal with componentType='agents')
+function openTestAgent(item) {
+  const payload = {
+    type: 'agents',
+    id: item.id || item.name
+  };
+  emit('test-ruleset', payload);
   closeAllMenus();
 }
 
