@@ -54,8 +54,9 @@ type KafkaOutputConfig struct {
 type ElasticsearchOutputConfig struct {
 	Hosts     []string                        `yaml:"hosts"`
 	Index     string                          `yaml:"index"`
-	BatchSize int                             `yaml:"batch_size,omitempty"`
-	FlushDur  string                          `yaml:"flush_dur,omitempty"`
+	Version   string                          `yaml:"version,omitempty"`    // elasticsearch version: v7, v8, v9 (default v9)
+	BatchSize int                             `yaml:"batch_size,omitempty"` // batch size per bulk request
+	FlushDur  string                          `yaml:"flush_dur,omitempty"`  // flush interval, e.g. "5s"
 	Auth      *common.ElasticsearchAuthConfig `yaml:"auth,omitempty"`
 }
 
@@ -586,6 +587,7 @@ func (out *Output) Start() error {
 		producer, err := common.NewElasticsearchProducer(
 			out.elasticsearchCfg.Hosts,
 			out.elasticsearchCfg.Index,
+			out.elasticsearchCfg.Version,
 			msgChan,
 			batchSize,
 			flushDur,
@@ -1143,13 +1145,14 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 
 		// Set connection info
 		connectionInfo := map[string]interface{}{
-			"hosts": out.elasticsearchCfg.Hosts,
-			"index": out.elasticsearchCfg.Index,
+			"hosts":   out.elasticsearchCfg.Hosts,
+			"index":   out.elasticsearchCfg.Index,
+			"version": common.NormalizeElasticsearchVersionForDisplay(out.elasticsearchCfg.Version),
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
-		// Test actual connectivity to Elasticsearch cluster
-		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
+		// Test actual connectivity to Elasticsearch cluster (respect configured version)
+		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "error"
 			result["message"] = "Failed to connect to Elasticsearch cluster"
@@ -1161,7 +1164,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Test if index exists (this is optional for ES as indices can be auto-created)
-		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index, out.elasticsearchCfg.Auth)
+		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "warning"
 			result["message"] = "Connected to Elasticsearch but failed to verify index"
@@ -1182,7 +1185,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Get cluster info for additional details
-		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
+		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err == nil {
 			result["details"].(map[string]interface{})["cluster_info"] = clusterInfo
 		}

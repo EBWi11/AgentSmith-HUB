@@ -360,61 +360,77 @@ content: |
 
 ### 1.4 AGENT 语法说明
 
-AGENT 是一个基于 LLM 的处理组件，和 Ruleset 一样位于数据管道中。Agent 接收事件批次，调用 LLM（支持 Tool Call），并将处理后的结果转发到下游。
+AGENT 是数据管道中基于 LLM 的处理组件。**每条消息独立处理**：Agent 将事件发给 LLM（可选使用 tools/skills），解析 LLM 输出后，按 agent id 合并到事件的统一 `llm` 映射下，再转发到下游。仅当 HUB 配置了 LLM API 时，Agent 相关能力（侧栏、仪表盘、测试）才会展示。
 
 #### 配置说明
 
 ```yaml
 model: gpt-4o-mini                # LLM 模型名称（OpenAI 兼容）
 temperature: 0.1                   # 采样温度
-max_tokens: 1024                   # LLM 单次响应最大 token 数
+max_tokens: 256                    # 单次 LLM 输出最大 token 数（若只输出少量字段可设小）
 
 system_prompt: |                   # 发送给 LLM 的系统提示词
-  You are a security analyst. For each alert, add llm_confidence and llm_analysis fields.
+  你是安全分析员。仅输出分析字段的 JSON（如 llm_confidence、llm_analysis），这些字段会自动合并回原始事件。
 
-skills:                            # 挂载的 Skill 组件 ID 列表
-  - hub_ruleset_expert
+skills: []                         # 挂载的 Skill 组件 ID 列表
+tools: []                          # 插件工具："all" 或名称列表；用 [] 可避免下发大量工具定义
 
-tools: all                         # 暴露给 LLM 的插件工具："all" 或指定名称列表
-
-batch:
-  size: 5                          # 每批事件数量（默认: 10）
-  timeout: 30s                     # 不完整批次的最大等待时间（默认: 30s）
-  max_rounds: 3                    # 每批次最大 ReAct 工具调用轮数（默认: 5）
-
-distributed:
-  mode: independent                # "independent"（默认）或 "leader_only"
-  rate_limit_rps: 2                # 单实例 LLM 请求速率限制，每秒请求数（0 = 不限制）
+max_rounds: 1                      # 每条消息最大 ReAct 工具调用轮数（默认: 5）
+timeout: 30s                       # 单条消息处理超时（如 30s、1m）
 ```
 
 #### 字段参考
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `model` | 否 | LLM 模型标识符。默认取决于 LLM 提供商配置。 |
-| `temperature` | 否 | 控制随机性，越低越确定。默认 `0.3`。 |
-| `max_tokens` | 否 | LLM 响应最大 token 数。默认 `4096`。 |
-| `system_prompt` | **是** | 发送给 LLM 的系统级指令。 |
-| `skills` | 否 | 挂载的 Skill ID 列表，为 Agent 提供工具和知识。 |
-| `tools` | 否 | `"all"` 暴露所有已注册插件为 LLM 工具，或提供具体的插件名称列表。 |
-| `batch.size` | 否 | 每批事件数。默认 `10`。 |
-| `batch.timeout` | 否 | 时间字符串（如 `30s`、`1m`），不完整批次的刷新超时。默认 `30s`。 |
-| `batch.max_rounds` | 否 | 最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
-| `distributed.mode` | 否 | `independent`: 每个节点独立运行。`leader_only`: 仅 Leader 节点运行。默认 `independent`。 |
-| `distributed.rate_limit_rps` | 否 | 单实例 LLM API 调用速率限制。`0` = 不限制。 |
+| `model` | 否 | LLM 模型标识。默认取决于 LLM 提供商配置。 |
+| `temperature` | 否 | 采样温度。默认 `0.3`。 |
+| `max_tokens` | 否 | LLM **输出**最大 token 数。默认 `4096`。 |
+| `system_prompt` | **是** | 发给 LLM 的系统指令。建议让 LLM 只输出少量 JSON 字段，由框架合并到事件中。 |
+| `skills` | 否 | Skill ID 列表，为 Agent 提供工具和知识。 |
+| `tools` | 否 | `"all"` 暴露所有插件为工具；`[]` 或名称列表可限制。不需要工具时用 `[]` 可降低延迟。 |
+| `max_rounds` | 否 | 每条消息最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
+| `timeout` | 否 | 时间字符串。若处理超过此时长会中止 LLM 调用。默认 `30s`。 |
 
 #### 工作原理
 
-1. 事件从上游（Input 或 Ruleset）流入，在批次缓冲区中累积。
-2. 当达到 `batch.size` 或 `batch.timeout` 到期时，批次被刷新。
-3. Agent 将批次以 JSON 格式连同 `system_prompt` 和可用工具定义发送给 LLM。
-4. LLM 可以直接响应，或在 **ReAct 循环**中调用工具（Skills + Plugins），最多 `max_rounds` 轮。
-5. 最终 LLM 输出被解析为 JSON 并转发到下游。
-6. 如果 LLM 失败或超过最大轮数，原始批次将原样透传。
+1. **每条事件单独处理**（无批次聚合）。
+2. Agent 将事件以 JSON 形式与 `system_prompt` 及（若配置）skills/plugins 的工具定义一并发送给 LLM。
+3. LLM 可直接返回 JSON，或在 **ReAct 循环**中调用工具，最多 `max_rounds` 轮。
+4. LLM 输出的 JSON 会合并到事件的 **`msg["llm"][agentId]`** 下，因此同一流中多个 Agent 不会互相覆盖。框架还会在该映射中写入 `agent`（agent id）和 `processing_time_ms`（毫秒）。
+5. 若 LLM 失败或超时，原始事件会原样透传。
+
+#### LLM 结果结构
+
+每个 Agent 的 LLM 相关数据都放在按 agent 维度的单一映射中：
+
+- **顶层**：`msg["llm"]` 为映射，键为 **agent id**，值为该 Agent 的结果映射。
+- **单 Agent 映射**（如 `msg["llm"]["alert_reviewer"]`）包含：
+  - LLM 返回的字段（如 `llm_confidence`、`llm_analysis`）。
+  - `agent`：产生该结果的 agent id。
+  - `processing_time_ms`：处理耗时（毫秒）。
+  - 可选控制字段（由 LLM 输出决定）：
+    - `_no_forward`：布尔值。为 `true` 时，这条消息不会再被转发到下游组件（仅本 Agent 内部消费）。
+    - `_no_oridata`：布尔值。为 `true` 时，下游只能看到合并后的 `llm` 区块，原始事件字段会被去除。
+
+单 Agent 示例：
+
+```json
+"llm": {
+  "alert_reviewer": {
+    "llm_confidence": 0.15,
+    "llm_analysis": "典型误报：CI 脚本，无外联。",
+    "agent": "alert_reviewer",
+    "processing_time_ms": 3245.6
+  }
+}
+```
+
+管道中存在多个 Agent 时，每个 Agent 在 `msg["llm"]` 下各占一个键，互不冲突。
 
 #### 在 Project 中使用
 
-Agent 在 Project 中的引用方式和其他组件一样：
+在 Project 中像其他组件一样引用 Agent：
 
 ```yaml
 content: |
@@ -422,7 +438,7 @@ content: |
   AGENT.alert_reviewer -> OUTPUT.enriched_alerts
 ```
 
-Agent 可以与 Ruleset 链式组合：
+与 Ruleset 链式组合：
 
 ```yaml
 content: |
@@ -432,38 +448,32 @@ content: |
   RULESET.post_process -> OUTPUT.elasticsearch
 ```
 
-#### 分布式模式
+#### 仪表盘与统计
 
-| 模式 | 行为 |
-|------|------|
-| `independent` | 每个 HUB 实例运行自己的 Agent 副本，处理本地数据流。适用于数据在节点间分区的场景。 |
-| `leader_only` | 仅 Leader 节点运行 Agent，Follower 节点完全跳过。适用于汇总、报告等集中式任务。 |
+- **仪表盘**（在配置 LLM 后）：Agent 总览展示总数/运行/停止、**今日调用次数**、**今日平均延迟**，含汇总与按 Agent 维度。
+- **当日统计**：仅按 Agent 维度存储当日调用次数与延迟，不跨日持久化。
 
-#### 示例：告警富化 Agent
+#### 测试
+
+Agent 支持与 Ruleset 相同的测试流程：打开 Agent 组件，点击测试按钮或使用 **Cmd+D**，填写输入 JSON 后执行。测试会启动临时 Agent 并返回完整事件（原始数据 + `llm` 块），便于核对合并结果。
+
+#### 示例：告警审核 Agent
 
 ```yaml
 model: gpt-4o-mini
 temperature: 0.1
-max_tokens: 1024
+max_tokens: 256
 
 system_prompt: |
-  You are a senior SOC analyst. For EACH alert in the batch, output the original event
-  with two fields added:
-  - "llm_confidence": float 0-1 (how likely this is a true positive)
-  - "llm_analysis": one-sentence reasoning (max 30 words)
-  Output ONLY a JSON array, no markdown.
+  你是资深 SOC 分析员。对给定安全告警仅输出一个 JSON，包含 2 个字段：
+  {"llm_confidence": <0-1 浮点数>, "llm_analysis": "<简短原因>"}
+  评分：0-0.2 误报，0.2-0.5 可能误报，0.5-0.7 不确定，0.7-1 可能/确定真实告警。
+  仅输出该 2 字段 JSON，不要其他内容。
 
 skills: []
-tools: all
-
-batch:
-  size: 5
-  timeout: 30s
-  max_rounds: 3
-
-distributed:
-  mode: independent
-  rate_limit_rps: 2
+tools: []
+max_rounds: 1
+timeout: 30s
 ```
 
 ### 1.5 SKILL 语法说明
@@ -576,7 +586,7 @@ batch:
 
 ### 2.3 灵活使用测试和查看 Sample Data
 
-Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
+Output、Ruleset、Plugin、Agent、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
 ![PluginTest.png](png/PluginTest.png)
 ![RulesetTest.png](png/RulesetTest.png)
 ![ProjectTest.png](png/ProjectTest.png)

@@ -2326,6 +2326,25 @@ function getOutputValueCompletions(context, range, fullText) {
     });
   }
 
+  // Elasticsearch version value completion (v7/v8/v9)
+  else if (context.currentKey === 'version' && context.currentSection === 'elasticsearch') {
+    const versions = ['v7', 'v8', 'v9'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+
+    versions.forEach(ver => {
+      if (!currentValue || ver.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: ver,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: `Elasticsearch server version: ${ver}`,
+          insertText: ver,
+          range: range,
+          sortText: ver.toLowerCase().startsWith(currentValue) ? `0_${ver}` : `1_${ver}`
+        });
+      }
+    });
+  }
+
   // ES auth type属性值补全
   else if (context.currentKey === 'type' && context.currentSection === 'auth') {
     const authTypes = ['basic', 'api_key', 'bearer'];
@@ -2466,12 +2485,14 @@ function getOutputKeyCompletions(context, range, fullText) {
         suggestions.push({
           label: 'elasticsearch',
           kind: monaco.languages.CompletionItemKind.Module,
-          documentation: 'Elasticsearch output configuration section with auth example',
+          documentation: 'Elasticsearch output configuration section with auth and version example',
           insertText: [
             'elasticsearch:',
             '  hosts:',
             '    - "https://localhost:9200"',
             '  index: "index-name"',
+            '  # elasticsearch version: v7, v8, v9 (default v9)',
+            '  version: "v9"',
             '  batch_size: 1000',
             '  flush_dur: "5s"',
             '  # auth:',
