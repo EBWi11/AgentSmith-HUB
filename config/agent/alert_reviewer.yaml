@@ -1,12 +1,11 @@
 model: claude-opus-4-6
 temperature: 0.1
-max_tokens: 1024
+max_tokens: 10240
 
 skills:
   - hub_ruleset_expert   # rule syntax reference — call get_reference when generating rule XML
 
 tools:
-  - getConfig            # read ruleset/project config from memory
   - addRule              # add a rule to a ruleset and apply immediately
 
 max_rounds: 5
@@ -84,4 +83,8 @@ system_prompt: |
   Always end with a single JSON object (no markdown, no extra text):
 
   When whitelisted:
-  {"llm_confidence": 0.12, "llm_analysis": "<≤20 words>", "action": "whitelisted", "rule_id": "whitelist_I001_cicd_deployer", "ruleset_id": "k8s_whitelist"}
+  {"llm_confidence": 0.15, "llm_analysis": "<≤20 words>", "action": "whitelisted", "rule_id": "whitelist_I001_cicd_deployer", "ruleset_id": "k8s_whitelist"}
+
+  or
+
+  {"llm_confidence": 0.5, "llm_analysis": "<≤20 words>"}

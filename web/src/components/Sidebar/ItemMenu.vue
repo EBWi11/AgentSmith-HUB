@@ -98,6 +98,13 @@
       />
       
       <MenuItem 
+        v-if="type === 'agents'"
+        icon="test"
+        text="Test Agent"
+        @click="$emit('action', 'test-ruleset', { type: 'agents', id: item.id || item.name })"
+      />
+      
+      <MenuItem 
         v-if="type === 'outputs'"
         icon="test"
         text="Test Output"

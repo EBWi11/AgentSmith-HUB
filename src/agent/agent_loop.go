@@ -152,7 +152,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 		if ctx.Err() != nil {
 			logger.Error("Agent processing timed out, passing through original message",
 				"agent", a.Id, "timeout", a.Config.Timeout)
-			return msg
+			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout))
 		}
 
 		resp, err := callChatWithTools(
@@ -161,7 +161,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 		)
 		if err != nil {
 			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)
-			return msg
+			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent LLM call failed: %v", err))
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -186,11 +186,37 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 			msg["llm"].(map[string]interface{})[a.Id] = llmMap
 			return msg
 		}
-		return msg
+		// LLM 返回内容无法解析为有效 JSON，视为错误
+		return a.attachLlmErrorAndNoForward(msg, "agent LLM response could not be parsed as JSON")
 	}
 
 	logger.Error("Agent max ReAct rounds exceeded, passing through original message",
 		"agent", a.Id, "max_rounds", a.Config.MaxRounds)
+	return a.attachLlmErrorAndNoForward(msg, "agent max ReAct rounds exceeded")
+}
+
+// attachLlmErrorAndNoForward annotates the message with an llm error block for this agent
+// and sets _no_forward=true so downstream components will not receive this message.
+func (a *Agent) attachLlmErrorAndNoForward(msg map[string]interface{}, errMsg string) map[string]interface{} {
+	// Ensure llm map exists
+	llmAny, ok := msg["llm"]
+	var llm map[string]interface{}
+	if ok {
+		if m, ok2 := llmAny.(map[string]interface{}); ok2 {
+			llm = m
+		}
+	}
+	if llm == nil {
+		llm = make(map[string]interface{})
+		msg["llm"] = llm
+	}
+
+	agentLlm := map[string]interface{}{
+		"agent":       a.Id,
+		"error":       errMsg,
+		"_no_forward": true,
+	}
+	llm[a.Id] = agentLlm
 	return msg
 }
 

@@ -43,11 +43,12 @@
       </main>
     </div>
     
-    <!-- Test Ruleset Modal -->
+    <!-- Test Ruleset / Agent Modal -->
     <RulesetTestModal 
       :show="showTestRulesetModal"
       :rulesetId="testRulesetId"
       :rulesetContent="testRulesetContent"
+      :componentType="testComponentType"
       @close="closeTestRulesetModal"
     />
     
@@ -93,6 +94,7 @@ const sidebarCollapsed = ref(false)
 const showTestRulesetModal = ref(false)
 const testRulesetId = ref('')
 const testRulesetContent = ref('')
+const testComponentType = ref('rulesets')
 const showTestOutputModal = ref(false)
 const testOutputId = ref('')
 const showTestProjectModal = ref(false)
@@ -371,7 +373,8 @@ onBeforeUnmount(() => {
 // Open the ruleset test modal
 function onTestRuleset(payload) {
   testRulesetId.value = payload.id;
-  
+  testComponentType.value = payload.type || 'rulesets';
+
   // Try to get editor content if the same ruleset is currently being edited
   testRulesetContent.value = '';
   if (selected.value && 

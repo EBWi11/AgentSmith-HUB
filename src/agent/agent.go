@@ -253,9 +253,6 @@ func readFile(path string) ([]byte, error) {
 }
 
 func applyDefaults(cfg *AgentConfig) {
-	if cfg.Temperature == 0 {
-		cfg.Temperature = 0.3
-	}
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = 4096
 	}
