@@ -40,6 +40,7 @@
             <option value="all">All Sources</option>
             <option value="hub">Hub</option>
             <option value="plugin">Plugin</option>
+            <option value="agent">Agent Tools</option>
           </select>
         </div>
 
@@ -134,7 +135,9 @@
               <div class="flex items-center space-x-2">
                 <!-- Source Icon -->
                 <div class="flex items-center justify-center w-8 h-8 rounded-full" :class="getSourceClass(log.source)">
-                  <span class="text-white text-xs font-medium">{{ log.source === 'hub' ? 'H' : 'P' }}</span>
+                  <span class="text-white text-xs font-medium">
+                    {{ log.source === 'hub' ? 'H' : (log.source === 'plugin' ? 'P' : 'A') }}
+                  </span>
                 </div>
                 
                 <!-- Log Info -->
@@ -530,7 +533,8 @@ function nextPage() {
 function getSourceClass(source) {
   const classes = {
     'hub': 'bg-blue-500',
-    'plugin': 'bg-purple-500'
+    'plugin': 'bg-purple-500',
+    'agent': 'bg-green-500'
   }
   return classes[source] || 'bg-gray-500'
 }

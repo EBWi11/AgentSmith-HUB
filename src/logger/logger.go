@@ -18,6 +18,7 @@ import (
 var l *slog.Logger
 var accessLogger *lumberjack.Logger
 var pluginLogger *slog.Logger
+var agentLogger *slog.Logger
 
 // getLogDir returns the appropriate log directory based on the operating system
 func getLogDir() string {
@@ -249,6 +250,95 @@ func GetPluginLogger() *slog.Logger {
 		pluginLogger = InitPluginLogger()
 	}
 	return pluginLogger
+}
+
+// InitAgentLogger initializes the agent tool-call logger
+func InitAgentLogger() *slog.Logger {
+	return initAgentLoggerWithRedis(nil)
+}
+
+// InitAgentLoggerWithRedisAndNodeID initializes agent logger with Redis error log writing capability and specific NodeID
+func InitAgentLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	return initAgentLoggerWithRedisAndNodeID(nodeID, redisWriter)
+}
+
+func initAgentLoggerWithRedis(redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	nodeID := detectLocalIP()
+	return initAgentLoggerWithRedisAndNodeID(nodeID, redisWriter)
+}
+
+func initAgentLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErrorLogEntry) error) *slog.Logger {
+	// Get current working directory for debugging
+	pwd, _ := os.Getwd()
+	logDir := getLogDir()
+	agentLogPath := filepath.Join(logDir, "agent_tools.log")
+
+	if l != nil {
+		l.Info("initializing agent logger", "working_directory", pwd, "target_path", agentLogPath)
+	}
+
+	// Ensure log directory exists
+	if err := ensureLogDir(); err != nil {
+		if l != nil {
+			l.Error("failed to create log directory for agent logger", "error", err, "working_directory", pwd, "log_dir", logDir)
+		}
+		// Fallback to local directory
+		if _, err := os.Stat("./logs"); os.IsNotExist(err) {
+			if err := os.MkdirAll("./logs", 0755); err != nil {
+				// Return a logger that writes to stderr as fallback
+				fileHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+					Level: slog.LevelInfo,
+				})
+
+				var handler slog.Handler = fileHandler
+				if redisWriter != nil {
+					handler = NewRedisErrorLogHandler(fileHandler, "agent", nodeID, redisWriter)
+				}
+
+				logger := slog.New(handler)
+				agentLogger = logger
+				return logger
+			}
+		}
+		agentLogPath = "./logs/agent_tools.log"
+	}
+
+	agentLogFile := &lumberjack.Logger{
+		Filename:   agentLogPath,
+		MaxSize:    100,
+		MaxBackups: 30,
+		MaxAge:     15,
+		Compress:   false,
+	}
+
+	fileHandler := slog.NewJSONHandler(agentLogFile, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	var handler slog.Handler = fileHandler
+	if redisWriter != nil {
+		// Use source "agent" so frontend can filter these logs
+		handler = NewRedisErrorLogHandler(fileHandler, "agent", nodeID, redisWriter)
+	}
+
+	base := slog.New(handler)
+	logger := base.With("node_ip", nodeID)
+
+	agentLogger = logger
+
+	if l != nil {
+		l.Info("agent logger initialized", "filename", agentLogPath, "working_directory", pwd)
+	}
+
+	return logger
+}
+
+// GetAgentLogger returns the agent tool-call logger instance
+func GetAgentLogger() *slog.Logger {
+	if agentLogger == nil {
+		agentLogger = InitAgentLogger()
+	}
+	return agentLogger
 }
 
 // InitAccessLogger initializes the access logger for API requests

@@ -2422,7 +2422,9 @@ function filteredItems(type) {
                             type === 'outputs' ? 'output' :
                             type === 'rulesets' ? 'ruleset' :
                             type === 'projects' ? 'project' :
-                            type === 'plugins' ? 'plugin' : ''
+                            type === 'plugins' ? 'plugin' :
+                            type === 'agents' ? 'agent' :
+                            type === 'skills' ? 'skill' : ''
         return result.component_type === componentType
       })
       .map(result => {

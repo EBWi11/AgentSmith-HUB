@@ -289,8 +289,10 @@ func jsonError(msg string) string {
 }
 
 func (a *Agent) executeFunctionCall(call ToolCall) string {
+	toolLogger := logger.GetAgentLogger()
 	name := call.Function.Name
-	args := parseJSONArgs(call.Function.Arguments)
+	rawArgs := call.Function.Arguments
+	args := parseJSONArgs(rawArgs)
 
 	if strings.HasPrefix(name, "skill__") {
 		trimmed := strings.TrimPrefix(name, "skill__")
@@ -299,11 +301,40 @@ func (a *Agent) executeFunctionCall(call ToolCall) string {
 			skillID := parts[0]
 			funcName := parts[1]
 			if sk, ok := a.skills[skillID]; ok {
+				start := time.Now()
+				toolLogger.Info("Agent tool call start",
+					"agent", a.Id,
+					"project_node_sequence", a.ProjectNodeSequence,
+					"kind", "skill",
+					"skill", skillID,
+					"function", funcName,
+					"tool_call_id", call.ID,
+					"args", truncateForLog(rawArgs),
+				)
+
 				result, err := sk.Execute(funcName, args)
 				if err != nil {
-					logger.Error("Skill execution failed", "skill", skillID, "function", funcName, "error", err)
+					toolLogger.Error("Skill execution failed",
+						"agent", a.Id,
+						"project_node_sequence", a.ProjectNodeSequence,
+						"skill", skillID,
+						"function", funcName,
+						"tool_call_id", call.ID,
+						"error", err,
+						"duration_ms", time.Since(start).Milliseconds(),
+					)
 					return jsonError(err.Error())
 				}
+				toolLogger.Info("Agent tool call success",
+					"agent", a.Id,
+					"project_node_sequence", a.ProjectNodeSequence,
+					"kind", "skill",
+					"skill", skillID,
+					"function", funcName,
+					"tool_call_id", call.ID,
+					"duration_ms", time.Since(start).Milliseconds(),
+					"result", truncateForLog(result),
+				)
 				return result
 			}
 		}
@@ -312,13 +343,49 @@ func (a *Agent) executeFunctionCall(call ToolCall) string {
 
 	if strings.HasPrefix(name, "tool_") {
 		pluginName := strings.TrimPrefix(name, "tool_")
+		start := time.Now()
+		toolLogger.Info("Agent tool call start",
+			"agent", a.Id,
+			"project_node_sequence", a.ProjectNodeSequence,
+			"kind", "plugin",
+			"plugin", pluginName,
+			"tool_call_id", call.ID,
+			"args", truncateForLog(rawArgs),
+		)
+
 		result, err := executePlugin(pluginName, args)
 		if err != nil {
-			logger.Error("Tool execution failed", "plugin", pluginName, "error", err)
+			toolLogger.Error("Tool execution failed",
+				"agent", a.Id,
+				"project_node_sequence", a.ProjectNodeSequence,
+				"plugin", pluginName,
+				"tool_call_id", call.ID,
+				"error", err,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 			return jsonError(err.Error())
 		}
+		toolLogger.Info("Agent tool call success",
+			"agent", a.Id,
+			"project_node_sequence", a.ProjectNodeSequence,
+			"kind", "plugin",
+			"plugin", pluginName,
+			"tool_call_id", call.ID,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"result", truncateForLog(result),
+		)
 		return result
 	}
 
 	return jsonError("unknown function")
+}
+
+const maxToolLogPayloadLen = 2048
+
+// truncateForLog limits long argument / result payloads so logs remain readable.
+func truncateForLog(s string) string {
+	if len(s) <= maxToolLogPayloadLen {
+		return s
+	}
+	return s[:maxToolLogPayloadLen] + fmt.Sprintf("... (truncated, %d bytes total)", len(s))
 }
