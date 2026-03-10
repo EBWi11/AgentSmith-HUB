@@ -36,6 +36,7 @@
         />
         <OperationsHistory v-else-if="selected && selected.type === 'operations-history'" />
         <ErrorLogs v-else-if="selected && selected.type === 'error-logs'" />
+        <AgentToolsLogs v-else-if="selected && selected.type === 'agent-tools-logs'" />
         <router-view v-else-if="selected && selected.type === 'tutorial'" />
         <!-- Fallback: render any unmatched child route (e.g., tutorial before selected is set) -->
         <router-view v-else />
@@ -77,6 +78,7 @@ import PendingChanges from '../components/PendingChanges.vue'
 import LoadLocalComponents from '../components/LoadLocalComponents.vue'
 import OperationsHistory from '../components/OperationsHistory.vue'
 import ErrorLogs from '../views/ErrorLogs.vue'
+import AgentToolsLogs from '../views/AgentToolsLogs.vue'
 import RulesetTestModal from '../components/RulesetTestModal.vue'
 import OutputTestModal from '../components/OutputTestModal.vue'
 import ProjectTestModal from '../components/ProjectTestModal.vue'

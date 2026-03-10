@@ -514,8 +514,16 @@ func (h *RedisErrorLogHandler) Handle(ctx context.Context, record slog.Record) e
 		return err
 	}
 
-	// Only write ERROR and FATAL levels to Redis
-	if record.Level >= slog.LevelError && h.redisWriter != nil {
+		// For most sources, only write ERROR and FATAL levels to Redis.
+		// For agent tool-call logs, write INFO and above so that all calls are visible in Agent Tools UI.
+		shouldWrite := false
+		if h.source == "agent" {
+			shouldWrite = record.Level >= slog.LevelInfo
+		} else {
+			shouldWrite = record.Level >= slog.LevelError
+		}
+
+		if shouldWrite && h.redisWriter != nil {
 		entry := RedisErrorLogEntry{
 			Timestamp: record.Time,
 			Level:     record.Level.String(),
