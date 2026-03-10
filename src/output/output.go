@@ -604,6 +604,12 @@ func (out *Output) Start() error {
 			out.stopChan = make(chan struct{})
 		}
 
+		upstreamCount := len(out.UpStream)
+		logger.Info("Elasticsearch output starting", "output", out.Id, "index", out.elasticsearchCfg.Index, "upstream_count", upstreamCount)
+		if upstreamCount == 0 {
+			logger.Warn("Elasticsearch output has no upstream connections; no data will be written until project connects input/ruleset/agent to this output", "output", out.Id)
+		}
+
 		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
 		out.wg.Add(1)
 		go func() {

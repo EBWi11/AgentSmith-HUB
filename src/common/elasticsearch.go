@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"AgentSmith-HUB/logger"
 	es7 "github.com/elastic/go-elasticsearch/v7"
 	es8 "github.com/elastic/go-elasticsearch/v8"
 	es9 "github.com/elastic/go-elasticsearch/v9"
@@ -398,12 +399,12 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 			},
 		}
 		if err := json.NewEncoder(&buf).Encode(meta); err != nil {
-			fmt.Printf("Failed to encode meta: %v\n", err)
+			logger.Error("Elasticsearch failed to encode bulk meta", "error", err)
 			continue
 		}
 		// Add document
 		if err := json.NewEncoder(&buf).Encode(doc); err != nil {
-			fmt.Printf("Failed to encode document: %v\n", err)
+			logger.Error("Elasticsearch failed to encode document", "error", err)
 			continue
 		}
 	}
@@ -434,7 +435,7 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 		case "v7":
 			if p.Client7 == nil {
 				cancel()
-				fmt.Println("Elasticsearch v7 client is not initialized")
+				logger.Error("Elasticsearch v7 client is not initialized")
 				return
 			}
 			r, errBulk := p.Client7.Bulk(bytes.NewReader(buf.Bytes()), p.Client7.Bulk.WithContext(ctx))
@@ -443,7 +444,7 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 		case "v8":
 			if p.Client8 == nil {
 				cancel()
-				fmt.Println("Elasticsearch v8 client is not initialized")
+				logger.Error("Elasticsearch v8 client is not initialized")
 				return
 			}
 			r, errBulk := p.Client8.Bulk(bytes.NewReader(buf.Bytes()), p.Client8.Bulk.WithContext(ctx))
@@ -452,7 +453,7 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 		default: // "v9"
 			if p.Client9 == nil {
 				cancel()
-				fmt.Println("Elasticsearch v9 client is not initialized")
+				logger.Error("Elasticsearch v9 client is not initialized")
 				return
 			}
 			r, errBulk := p.Client9.Bulk(bytes.NewReader(buf.Bytes()), p.Client9.Bulk.WithContext(ctx))
@@ -464,7 +465,7 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 
 		if err != nil {
 			if i == p.maxRetries {
-				fmt.Printf("Failed to send batch to ES after %d retries: %v\n", p.maxRetries, err)
+				logger.Error("Elasticsearch failed to send batch after retries", "retries", p.maxRetries, "error", err)
 				return
 			}
 			// Check stop signal before retry delay
@@ -477,7 +478,7 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 		}
 		if res != nil && res.IsError() {
 			if i == p.maxRetries {
-				fmt.Printf("ES returned error after %d retries: %s\n", p.maxRetries, res.String())
+				logger.Error("Elasticsearch returned error after retries", "retries", p.maxRetries, "response", res.String())
 				return
 			}
 			// Check stop signal before retry delay
