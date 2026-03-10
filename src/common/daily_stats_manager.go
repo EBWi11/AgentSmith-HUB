@@ -34,7 +34,7 @@ func ParseProjectNodeSequence(sequence string) []ComponentInfo {
 
 		// Handle special cases
 		switch componentType {
-		case "input", "output", "ruleset":
+		case "input", "output", "ruleset", "agent":
 			if i+1 < len(parts) {
 				components = append(components, ComponentInfo{
 					Type: componentType,
@@ -90,6 +90,8 @@ func GetComponentTypeFromSequence(sequence, fallbackType string) string {
 			return "output"
 		case "RULESET":
 			return "ruleset"
+		case "AGENT":
+			return "agent"
 		case "SUCCESS":
 			// Plugin success - need to verify there's a PLUGIN earlier
 			for j := i - 1; j >= 0; j-- {
@@ -267,7 +269,7 @@ func (dsm *DailyStatsManager) persistenceLoop() {
 					case <-done:
 						// Collection completed successfully
 					case <-time.After(4 * time.Second): // Timeout at 4 seconds to prevent overlap
-						logger.Warn("Statistics collection timed out, may have missed some data")
+						logger.Error("Statistics collection timed out, may have missed some data")
 					}
 				}()
 			} else {

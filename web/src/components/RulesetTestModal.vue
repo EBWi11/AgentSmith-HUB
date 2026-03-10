@@ -2,7 +2,7 @@
   <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
     <div class="bg-white rounded shadow-lg p-6 w-[1200px] max-h-[90vh] overflow-hidden flex flex-col">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-lg">Test Ruleset: {{ rulesetId }}</h3>
+        <h3 class="font-bold text-lg">Test {{ componentLabel }}: {{ componentId }}</h3>
         <button @click="closeModal" class="text-gray-400 hover:text-gray-600">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -49,9 +49,9 @@
             </div>
             
             <div v-else-if="testResults.length === 0" class="text-center py-8 px-3 text-gray-500">
-              <p>No results yet. Click "Run Test" to execute the ruleset.</p>
+              <p>No results yet. Click "Run Test" to execute.</p>
               <p v-if="testExecuted" class="mt-2 text-sm text-yellow-600">
-                No output was generated. The ruleset may not have matched any rules.
+                No output was generated.
               </p>
             </div>
             
@@ -102,8 +102,16 @@ import { useDataCacheStore } from '../stores/dataCache';
 const props = defineProps({
   show: Boolean,
   rulesetId: String,
-  rulesetContent: String  // Optional: if provided, test this content instead of saved ruleset
+  rulesetContent: String,  // Optional: if provided, test this content instead of saved component
+  componentType: {          // 'rulesets' or 'agents'
+    type: String,
+    default: 'rulesets'
+  }
 });
+
+const componentId = computed(() => props.rulesetId);
+const componentLabel = computed(() => props.componentType === 'agents' ? 'Agent' : 'Ruleset');
+const isAgent = computed(() => props.componentType === 'agents');
 
 // Emits
 const emit = defineEmits(['close']);
@@ -199,12 +207,19 @@ async function runTest() {
       return;
     }
     
-    // Send a single request for both single object and array inputs.
     let response;
-    if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
-      response = await hubApi.testRulesetContent(props.rulesetContent, data);
+    if (isAgent.value) {
+      if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
+        response = await hubApi.testAgentContent(props.rulesetContent, data);
+      } else {
+        response = await hubApi.testAgent(props.rulesetId, data);
+      }
     } else {
-      response = await hubApi.testRuleset(props.rulesetId, data);
+      if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
+        response = await hubApi.testRulesetContent(props.rulesetContent, data);
+      } else {
+        response = await hubApi.testRuleset(props.rulesetId, data);
+      }
     }
 
     if (response.success) {
@@ -213,7 +228,7 @@ async function runTest() {
       testError.value = response.error || 'Unknown error occurred';
     }
   } catch (e) {
-    testError.value = e.message || 'Failed to test ruleset';
+    testError.value = e.message || `Failed to test ${componentLabel.value.toLowerCase()}`;
   } finally {
     testLoading.value = false;
   }
@@ -232,7 +247,7 @@ function formatTestResult() {
 // Save test data when it changes
 function onInputDataChange(newValue) {
   if (props.rulesetId && newValue && newValue.trim() !== '') {
-    dataCache.setTestCache('rulesets', props.rulesetId, newValue);
+    dataCache.setTestCache(props.componentType, props.rulesetId, newValue);
   }
 }
 
@@ -241,47 +256,43 @@ function onInputDataChange(newValue) {
 // Load test data for the current ruleset
 async function loadTestData() {
   if (props.rulesetId) {
-    // First try to load cached test data
-    const cachedData = dataCache.getTestCache('rulesets', props.rulesetId);
+    const cachedData = dataCache.getTestCache(props.componentType, props.rulesetId);
     if (cachedData) {
       inputData.value = cachedData;
       return;
     }
     
-    // If no cached data, try to get sample data from backend
-    try {
-      // Ensure we don't duplicate the 'ruleset.' prefix
-      const projectNodeSequence = props.rulesetId.startsWith('ruleset.') ? props.rulesetId : `ruleset.${props.rulesetId}`;
-      const sampleDataResponse = await hubApi.getSamplerData('ruleset', projectNodeSequence);
-      if (sampleDataResponse && sampleDataResponse.ruleset && Object.keys(sampleDataResponse.ruleset).length > 0) {
-        // Extract the first sample data from the response
-        let firstSampleData = null;
-        for (const [flowPath, samples] of Object.entries(sampleDataResponse.ruleset)) {
-          if (Array.isArray(samples) && samples.length > 0) {
-            // Take only the first sample from the first flow path that has data
-            const firstSample = samples[0];
-            if (firstSample && firstSample.data) {
-              firstSampleData = firstSample.data;
-              break; // Stop after finding the first sample
+    if (!isAgent.value) {
+      try {
+        const projectNodeSequence = props.rulesetId.startsWith('ruleset.') ? props.rulesetId : `ruleset.${props.rulesetId}`;
+        const sampleDataResponse = await hubApi.getSamplerData('ruleset', projectNodeSequence);
+        if (sampleDataResponse && sampleDataResponse.ruleset && Object.keys(sampleDataResponse.ruleset).length > 0) {
+          let firstSampleData = null;
+          for (const [flowPath, samples] of Object.entries(sampleDataResponse.ruleset)) {
+            if (Array.isArray(samples) && samples.length > 0) {
+              const firstSample = samples[0];
+              if (firstSample && firstSample.data) {
+                firstSampleData = firstSample.data;
+                break;
+              }
             }
           }
-        }
-        
-                  if (firstSampleData) {
-            // Use the first sample data as test data
+          
+          if (firstSampleData) {
             const sampleJson = JSON.stringify(firstSampleData, null, 2);
             inputData.value = sampleJson;
-            
-            // Cache the sample data for future use
             dataCache.setTestCache('rulesets', props.rulesetId, sampleJson);
           } else {
+            inputData.value = defaultTestData;
+          }
+        } else {
           inputData.value = defaultTestData;
         }
-      } else {
+      } catch (error) {
+        console.warn(`Failed to load sample data for ruleset ${props.rulesetId}:`, error);
         inputData.value = defaultTestData;
       }
-    } catch (error) {
-      console.warn(`Failed to load sample data for ruleset ${props.rulesetId}:`, error);
+    } else {
       inputData.value = defaultTestData;
     }
   } else {

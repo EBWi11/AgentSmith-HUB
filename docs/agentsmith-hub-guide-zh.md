@@ -219,6 +219,8 @@ elasticsearch:
     - "http://localhost:9200"
     - "https://localhost:9201"
   index: "security-events-{YYYY.MM.DD}"  # 支持时间模式
+  # Elasticsearch 服务器版本：v7、v8、v9（可选，默认：自动探测 → 失败时回退 v8）
+  # version: "v9"
   batch_size: 1000  # 批量写入大小
   flush_dur: "5s"   # 刷新间隔
   # 认证配置（可选）
@@ -231,6 +233,11 @@ elasticsearch:
     # 或者使用Bearer Token
     # token: "your-bearer-token"
 ```
+
+**Elasticsearch 版本选择（v7/v8/v9）：**
+- 当未配置 `version` 时，AgentSmith HUB 会尝试从 ES 根接口自动探测集群主版本，并选择对应客户端（v7/v8/v9）。
+- 如果探测失败（如经过代理），会回退为使用 v8 客户端。
+- 当你需要严格控制版本（混合环境、兼容性限制等）时，可以显式配置 `version: "v7" | "v8" | "v9"`。
 
 **支持的索引名称时间模式：**
 - `{YYYY}` - 完整年份 (例如: 2024)
@@ -329,7 +336,7 @@ content: |
 **基本规则**：
  - 1.使用 `->` 箭头表示数据流向
  - 2.组件引用格式：`类型.组件名`
- - 3.支持的类型：`INPUT`、`RULESET`、`OUTPUT`
+ - 3.支持的类型：`INPUT`、`RULESET`、`AGENT`、`OUTPUT`
  - 4.每行一个数据流定义
  - 5.支持注释（以 `#` 开头）
 
@@ -358,6 +365,214 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT 语法说明
+
+AGENT 是数据管道中基于 LLM 的处理组件。**每条消息独立处理**：Agent 将事件发给 LLM（可选使用 tools/skills），解析 LLM 输出后，按 agent id 合并到事件的统一 `llm` 映射下，再转发到下游。仅当 HUB 配置了 LLM API 时，Agent 相关能力（侧栏、仪表盘、测试）才会展示。
+
+#### 配置说明
+
+```yaml
+model: gpt-4o-mini                # LLM 模型名称（OpenAI 兼容）
+temperature: 0.1                   # 采样温度
+max_tokens: 256                    # 单次 LLM 输出最大 token 数（若只输出少量字段可设小）
+
+system_prompt: |                   # 发送给 LLM 的系统提示词
+  你是安全分析员。仅输出分析字段的 JSON（如 llm_confidence、llm_analysis），这些字段会自动合并回原始事件。
+
+skills: []                         # 挂载的 Skill 组件 ID 列表
+tools: []                          # 插件工具："all" 或名称列表；用 [] 可避免下发大量工具定义
+
+max_rounds: 1                      # 每条消息最大 ReAct 工具调用轮数（默认: 5）
+timeout: 30s                       # 单条消息处理超时（如 30s、1m）
+```
+
+#### 字段参考
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `model` | 否 | LLM 模型标识。默认取决于 LLM 提供商配置。 |
+| `temperature` | 否 | 采样温度。默认 `0.3`。 |
+| `max_tokens` | 否 | LLM **输出**最大 token 数。默认 `4096`。 |
+| `system_prompt` | **是** | 发给 LLM 的系统指令。建议让 LLM 只输出少量 JSON 字段，由框架合并到事件中。 |
+| `skills` | 否 | Skill ID 列表，为 Agent 提供工具和知识。 |
+| `tools` | 否 | `"all"` 暴露所有插件为工具；`[]` 或名称列表可限制。不需要工具时用 `[]` 可降低延迟。 |
+| `max_rounds` | 否 | 每条消息最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
+| `timeout` | 否 | 时间字符串。若处理超过此时长会中止 LLM 调用。默认 `30s`。 |
+
+#### 工作原理
+
+1. **每条事件单独处理**（无批次聚合）。
+2. Agent 将事件以 JSON 形式与 `system_prompt` 及（若配置）skills/plugins 的工具定义一并发送给 LLM。
+3. LLM 可直接返回 JSON，或在 **ReAct 循环**中调用工具，最多 `max_rounds` 轮。
+4. LLM 输出的 JSON 会合并到事件的 **`msg["llm"][agentId]`** 下，因此同一流中多个 Agent 不会互相覆盖。框架还会在该映射中写入 `agent`（agent id）和 `processing_time_ms`（毫秒）。
+5. 若 LLM 失败或超时，原始事件会原样透传。
+
+#### LLM 结果结构
+
+每个 Agent 的 LLM 相关数据都放在按 agent 维度的单一映射中：
+
+- **顶层**：`msg["llm"]` 为映射，键为 **agent id**，值为该 Agent 的结果映射。
+- **单 Agent 映射**（如 `msg["llm"]["alert_reviewer"]`）包含：
+  - LLM 返回的字段（如 `llm_confidence`、`llm_analysis`）。
+  - `agent`：产生该结果的 agent id。
+  - `processing_time_ms`：处理耗时（毫秒）。
+  - 可选控制字段（由 LLM 输出决定）：
+    - `_no_forward`：布尔值。为 `true` 时，这条消息不会再被转发到下游组件（仅本 Agent 内部消费）。
+    - `_no_oridata`：布尔值。为 `true` 时，下游只能看到合并后的 `llm` 区块，原始事件字段会被去除。
+
+单 Agent 示例：
+
+```json
+"llm": {
+  "alert_reviewer": {
+    "llm_confidence": 0.15,
+    "llm_analysis": "典型误报：CI 脚本，无外联。",
+    "agent": "alert_reviewer",
+    "processing_time_ms": 3245.6
+  }
+}
+```
+
+管道中存在多个 Agent 时，每个 Agent 在 `msg["llm"]` 下各占一个键，互不冲突。
+
+#### 在 Project 中使用
+
+在 Project 中像其他组件一样引用 Agent：
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+与 Ruleset 链式组合：
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### 仪表盘与统计
+
+- **仪表盘**（在配置 LLM 后）：Agent 总览展示总数/运行/停止、**今日调用次数**、**今日平均延迟**，含汇总与按 Agent 维度。
+- **当日统计**：仅按 Agent 维度存储当日调用次数与延迟，不跨日持久化。
+
+#### 测试
+
+Agent 支持与 Ruleset 相同的测试流程：打开 Agent 组件，点击测试按钮或使用 **Cmd+D**，填写输入 JSON 后执行。测试会启动临时 Agent 并返回完整事件（原始数据 + `llm` 块），便于核对合并结果。
+
+#### 示例：告警审核 Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 256
+
+system_prompt: |
+  你是资深 SOC 分析员。对给定安全告警仅输出一个 JSON，包含 2 个字段：
+  {"llm_confidence": <0-1 浮点数>, "llm_analysis": "<简短原因>"}
+  评分：0-0.2 误报，0.2-0.5 可能误报，0.5-0.7 不确定，0.7-1 可能/确定真实告警。
+  仅输出该 2 字段 JSON，不要其他内容。
+
+skills: []
+tools: []
+max_rounds: 1
+timeout: 30s
+```
+
+### 1.5 SKILL 语法说明
+
+SKILL 是一个可复用的能力模块，Agent 可以引用 Skill 来获得工具和知识。Skill 采用**渐进披露**模式 —— LLM 预先看到工具描述，但只在需要时才获取完整内容。
+
+Skill 实现由配置推断：**二选一**填写 `builtin_ref` 或 `content`，全部通过外挂 YAML 配置。
+
+#### 知识型 Skill（content）
+
+```yaml
+description: |
+  对该 Skill 提供内容的简短描述。
+  LLM 在工具描述中会看到这段文字。
+
+content: |
+  当 LLM 调用 get_reference 时返回的完整参考内容。
+  可以任意长 —— 不会包含在初始提示词中。
+  仅在 LLM 明确请求时才加载。
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `description` | **是** | 简短描述，作为工具描述展示给 LLM。 |
+| `content` | **是** | 完整知识内容，通过 `get_reference` 按需返回。 |
+
+**工作原理：** 该 Skill 注册一个 `get_reference` 工具，以 `description` 字段作为工具描述。当 Agent 的 LLM 判断需要这些知识时，主动调用该工具获取完整 `content`。这保持了初始上下文精简，同时使深度知识按需可用。
+
+#### 内置引用型 Skill（builtin_ref）
+
+```yaml
+builtin_ref: hub_ruleset_editor    # 引用 Go 实现的内置技能
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # 可选配置，传递给内置技能工厂
+  read_only: false
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `builtin_ref` | **是** | 内置 Go 实现的名称。 |
+| `description` | 否 | 可读的描述信息。 |
+| `config` | 否 | 传递给内置工厂的键值对配置。 |
+
+#### 可用的 Builtin Skills
+
+| builtin_ref | 函数 | 说明 |
+|-------------|------|------|
+| `hub_ruleset_editor` | `list_rulesets`、`read_ruleset`、`verify_ruleset`、`write_ruleset` | 读取、验证和编辑 HUB Ruleset。写入操作会创建待审核的变更。设置 `config.read_only: true` 可禁用写入。 |
+
+#### 示例：Ruleset 编写知识型 Skill
+
+```yaml
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  （完整参考内容）
+```
+
+#### 示例：挂载 Skills 的 Agent
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: 规则引擎参考知识
+  - hub_ruleset_editor     # builtin skill: Ruleset 读写操作
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+在此配置中，Agent 同时拥有知识（规则引擎参考文档）和操作能力（Ruleset CRUD）。LLM 可以通过 `get_reference` 查阅语法，列出/读取现有 Ruleset，验证 XML，以及写入变更 —— 全部在 ReAct 循环中完成。
+
 ## 🔧 第二部分：基本操作指南
 
 ### 2.1 临时文件和正式文件
@@ -378,7 +593,7 @@ content: |
 
 ### 2.3 灵活使用测试和查看 Sample Data
 
-Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
+Output、Ruleset、Plugin、Agent、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
 ![PluginTest.png](png/PluginTest.png)
 ![RulesetTest.png](png/RulesetTest.png)
 ![ProjectTest.png](png/ProjectTest.png)

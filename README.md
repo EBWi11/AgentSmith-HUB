@@ -4,9 +4,9 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0%20with%20Commons%20Clause-blue)](./LICENSE)
 
 
-**A high-performance security data pipeline platform with a built-in real-time rules engine.**
+**A high-performance security data pipeline platform with a built-in real-time rules engine and LLM-powered agents.**
 
-Process, enrich, detect, and respond — all in one place, with simple XML-based rules.
+Process, enrich, detect, and respond — all in one place, with simple XML-based rules and AI-powered analysis.
 
 ![Dashboard](docs/png/Dashboard.png)
 
@@ -21,6 +21,8 @@ If you work in security operations, you probably deal with massive volumes of ra
 - **All-in-one pipeline** — Input, detection, enrichment, transformation, and output in a unified flow
 - **CEP built-in** — Detect ordered event sequences, absence patterns, and multi-source correlations over time
 - **Scale horizontally** — Built-in cluster mode with leader/follower architecture
+- **LLM Agents** — Embed AI-powered agents in the pipeline for alert triage, enrichment, and autonomous rule authoring
+- **Skills system** — Modular knowledge and tool capabilities for agents via progressive disclosure
 - **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, and more
 - **Modern Web UI** — Visual rule editing, project orchestration, real-time testing, and log search
 
@@ -30,9 +32,11 @@ AgentSmith-HUB uses a straightforward pipeline model:
 
 ```
 INPUT (Kafka / SLS / ...) → RULESET (detect & transform) → OUTPUT (Kafka / ES / ClickHouse / SLS / ...)
+                                    ↕
+                              AGENT (LLM-powered)
 ```
 
-Multiple rulesets can be chained together within a **Project**, giving you full control over data flow:
+Rulesets and agents can be freely chained within a **Project**, giving you full control over data flow:
 
 ![ExampleProject](docs/png/ExampleProject.png)
 
@@ -42,7 +46,7 @@ The rules engine uses seven intuitive XML elements:
 
 | Element | Purpose | Example |
 |---------|---------|---------|
-| `<check>` | Detection — regex, string match, numeric comparison, plugin | `<check type="REGEX" field="src_ip">^10\..*</check>` |
+| `<check>` | Detection — regex, string match, numeric comparison, plugin | `<check type="REGEX" field="src_ip">^10\\..*</check>` |
 | `<checklist>` | Logical combination of checks (AND / OR / NOT) | `<checklist condition="a and (b or c)">` |
 | `<threshold>` | Frequency-based detection with time windows | Detect brute-force: 5 failures in 60s |
 | `<sequence>` | CEP — detect ordered event patterns across time | `login -> !mfa` (login without MFA) |
@@ -81,6 +85,35 @@ Detect **event sequences** across time with CEP:
 
 ![ExampleRule01](docs/png/ExampleRule01.png)
 ![ExampleRule02](docs/png/ExampleRule02.png)
+
+### LLM Agents & Skills
+
+Agents are LLM-powered components that sit in the pipeline alongside rulesets. They receive event batches, call an LLM with tool-use support, and forward enriched results downstream.
+
+```yaml
+# Agent: AI-powered alert triage
+model: gpt-4o-mini
+system_prompt: |
+  For each alert, add llm_confidence (0-1) and llm_analysis fields.
+skills:
+  - hub_ruleset_expert    # Knowledge skill: rules engine reference
+tools: all                # Expose all plugins as LLM tools
+batch:
+  size: 5
+  timeout: 30s
+```
+
+**Skills** provide modular capabilities to agents:
+- **Knowledge skills** — Reference docs loaded on-demand (progressive disclosure)
+- **Builtin skills** — Go-implemented tools (e.g., `hub_ruleset_editor` for reading/writing rulesets)
+
+Use agents in your project like any other component:
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
 
 ## Built-in Detection Rulesets
 

@@ -40,6 +40,9 @@ const inputComponents = computed(() => dataCache.getComponentData('inputs') || [
 const outputComponents = computed(() => dataCache.getComponentData('outputs') || []);
 const rulesetComponents = computed(() => dataCache.getComponentData('rulesets') || []);
 const pluginComponents = computed(() => dataCache.getComponentData('plugins') || []);
+const llmAvailable = computed(() => dataCache.llmAvailable);
+const agentComponents = computed(() => llmAvailable.value ? (dataCache.getComponentData('agents') || []) : []);
+const skillComponents = computed(() => llmAvailable.value ? (dataCache.getComponentData('skills') || []) : []);
 
 // Smart plugin parameters cache - globally shared, supports event-driven cleanup
 const globalPluginParametersCache = ref({});
@@ -189,12 +192,20 @@ watch(
 onMounted(async () => {
   // Preload component data for autocomplete
   try {
-    await Promise.all([
+    await dataCache.fetchFeatures();
+    const preloadPromises = [
       dataCache.fetchComponents('inputs'),
       dataCache.fetchComponents('outputs'),
       dataCache.fetchComponents('rulesets'),
-      dataCache.fetchComponents('plugins')
-    ]);
+      dataCache.fetchComponents('plugins'),
+    ];
+    if (dataCache.llmAvailable) {
+      preloadPromises.push(
+        dataCache.fetchComponents('agents'),
+        dataCache.fetchComponents('skills')
+      );
+    }
+    await Promise.all(preloadPromises);
       } catch (error) {
       // console.warn('Failed to preload component data for Monaco:', error);
     }
@@ -296,6 +307,7 @@ function setupMonacoTheme() {
       { token: 'project.input', foreground: '1a7f37', fontStyle: 'bold' },    // Rich green
       { token: 'project.output', foreground: 'd1242f', fontStyle: 'bold' },   // Modern red
       { token: 'project.ruleset', foreground: '8250df', fontStyle: 'bold' },  // Deep purple
+      { token: 'project.agent', foreground: 'bf8700', fontStyle: 'bold' },    // Amber
       
       // YAML specific tokens
       { token: 'key', foreground: '0969da', fontStyle: 'bold' },
@@ -452,10 +464,11 @@ function registerLanguageProviders() {
     // Token patterns
     tokenizer: {
       root: [
-        // Project component references - INPUT/OUTPUT/RULESET (must be followed by dot)
+        // Project component references - INPUT/OUTPUT/RULESET/AGENT (must be followed by dot)
         [/\bINPUT(?=\.)/, 'project.input'],
         [/\bOUTPUT(?=\.)/, 'project.output'],
         [/\bRULESET(?=\.)/, 'project.ruleset'],
+        [/\bAGENT(?=\.)/, 'project.agent'],
         
         // Comments
         [/#.*$/, 'comment'],
@@ -544,11 +557,13 @@ function registerLanguageProviders() {
           // Check if this is a project flow definition (in content area)
           if (textUntilPosition.includes('content:') || lineUntilPosition.includes('->') || 
               lineUntilPosition.includes('INPUT.') || lineUntilPosition.includes('OUTPUT.') || 
-              lineUntilPosition.includes('RULESET.')) {
+              lineUntilPosition.includes('RULESET.') || lineUntilPosition.includes('AGENT.')) {
             result = getProjectFlowCompletions(textUntilPosition, lineUntilPosition, range, position);
           } else {
             result = getProjectCompletions(textUntilPosition, lineUntilPosition, range, position);
           }
+        } else if (componentType === 'agent' || componentType === 'agents') {
+          result = getAgentCompletions(textUntilPosition, lineUntilPosition, range, position);
         } else {
           // Fallback to empty suggestions for unknown types
           result = { suggestions: [] };
@@ -567,8 +582,10 @@ function registerLanguageProviders() {
     // Include starting letters of common prefixes to trigger suggestions quickly
     triggerCharacters: [' ', ':', '\n', '\t', '-', '|', '.',
       'I','i','O','o','R','r',  // component prefixes
+      'A','a',                  // agent
       'C','c',                  // content
-      'T','t',                  // type
+      'T','t',                  // type, tools
+      'S','s',                  // skills
       'G','g'                   // grok_pattern
     ]
   });
@@ -2309,6 +2326,25 @@ function getOutputValueCompletions(context, range, fullText) {
     });
   }
 
+  // Elasticsearch version value completion (v7/v8/v9)
+  else if (context.currentKey === 'version' && context.currentSection === 'elasticsearch') {
+    const versions = ['v7', 'v8', 'v9'];
+    const currentValue = context.currentValue ? context.currentValue.toLowerCase() : '';
+
+    versions.forEach(ver => {
+      if (!currentValue || ver.toLowerCase().includes(currentValue)) {
+        suggestions.push({
+          label: ver,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          documentation: `Elasticsearch server version: ${ver}`,
+          insertText: ver,
+          range: range,
+          sortText: ver.toLowerCase().startsWith(currentValue) ? `0_${ver}` : `1_${ver}`
+        });
+      }
+    });
+  }
+
   // ES auth type属性值补全
   else if (context.currentKey === 'type' && context.currentSection === 'auth') {
     const authTypes = ['basic', 'api_key', 'bearer'];
@@ -2449,12 +2485,14 @@ function getOutputKeyCompletions(context, range, fullText) {
         suggestions.push({
           label: 'elasticsearch',
           kind: monaco.languages.CompletionItemKind.Module,
-          documentation: 'Elasticsearch output configuration section with auth example',
+          documentation: 'Elasticsearch output configuration section with auth and version example',
           insertText: [
             'elasticsearch:',
             '  hosts:',
             '    - "https://localhost:9200"',
             '  index: "index-name"',
+            '  # elasticsearch version: v7, v8, v9 (default auto-detect, fallback v8)',
+            '  version: "v9"',
             '  batch_size: 1000',
             '  flush_dur: "5s"',
             '  # auth:',
@@ -2917,8 +2955,7 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         // After processing RULESET components, return directly
         return { suggestions };
       
-    } else if (prefix === 'OUTPUT' && outputComponents.value.length > 0) {
-      // 计算正确的range，只替换点号后面的部分
+    } else if (prefix === 'OUTPUT') {
       const dotIndex = currentWord.indexOf('.');
       const replaceRange = {
         startLineNumber: position.lineNumber,
@@ -2927,23 +2964,63 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
         endColumn: position.column
       };
       
-      // Suggest all OUTPUT components (including those with temporary versions)
-      outputComponents.value.forEach(output => {
-        const matches = !partial || output.id.toLowerCase().includes(partialLower);
-        const alreadyExists = suggestions.some(s => s.label === output.id);
-        
-        if (matches && !alreadyExists) {
-          suggestions.push({
-            label: output.id,
-            kind: monaco.languages.CompletionItemKind.Reference,
-            documentation: `Output component: ${output.id}`,
-            insertText: output.id,
-            range: replaceRange
-          });
-        }
-      });
+      if (outputComponents.value.length > 0) {
+        outputComponents.value.forEach(output => {
+          const matches = !partial || output.id.toLowerCase().includes(partialLower);
+          const alreadyExists = suggestions.some(s => s.label === output.id);
+          if (matches && !alreadyExists) {
+            suggestions.push({
+              label: output.id,
+              kind: monaco.languages.CompletionItemKind.Reference,
+              documentation: `Output component: ${output.id}`,
+              insertText: output.id,
+              range: replaceRange
+            });
+          }
+        });
+      } else {
+        suggestions.push({
+          label: 'No output components available',
+          kind: monaco.languages.CompletionItemKind.Text,
+          documentation: 'No output components found. Please create output components first.',
+          insertText: '',
+          range: replaceRange
+        });
+      }
+      return { suggestions };
+
+    } else if (prefix === 'AGENT') {
+      const dotIndex = currentWord.indexOf('.');
+      const replaceRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: position.column - (currentWord.length - dotIndex - 1),
+        endColumn: position.column
+      };
       
-      // After processing OUTPUT components, return directly
+      if (agentComponents.value.length > 0) {
+        agentComponents.value.forEach(ag => {
+          const matches = !partial || ag.id.toLowerCase().includes(partialLower);
+          const alreadyExists = suggestions.some(s => s.label === ag.id);
+          if (matches && !alreadyExists) {
+            suggestions.push({
+              label: ag.id,
+              kind: monaco.languages.CompletionItemKind.Reference,
+              documentation: `Agent component: ${ag.id}` + (ag.model ? ` (model: ${ag.model})` : ''),
+              insertText: ag.id,
+              range: replaceRange
+            });
+          }
+        });
+      } else {
+        suggestions.push({
+          label: 'No agent components available',
+          kind: monaco.languages.CompletionItemKind.Text,
+          documentation: 'No agent components found. Please create agent components first.',
+          insertText: '',
+          range: replaceRange
+        });
+      }
       return { suggestions };
     }
     
@@ -2971,20 +3048,23 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
     // Determine which suggestions to provide based on context
     const arrowIndex = lineText.lastIndexOf('->');
     const isAfterArrow = arrowIndex !== -1 && position.column > arrowIndex + 2;
-    const hasCompleteComponentRef = /\b(INPUT|RULESET|OUTPUT)\.\w+/.test(lineText);
+    const hasCompleteComponentRef = /\b(INPUT|RULESET|OUTPUT|AGENT)\.\w+/.test(lineText);
     const isLineBeginning = lineText.trim() === '';
 
     if (isAfterArrow) {
-      // After arrow: can only be RULESET or OUTPUT
       addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET', '1_ruleset');
-      addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT', '2_output');
+      if (llmAvailable.value) {
+        addSuggestion('AGENT', monaco.languages.CompletionItemKind.Module, 'Agent component reference (LLM processing)', 'AGENT', '2_agent');
+      }
+      addSuggestion('OUTPUT', monaco.languages.CompletionItemKind.Module, 'Output component reference', 'OUTPUT', '3_output');
     } else if (hasCompleteComponentRef) {
-      // After complete component reference: should be arrow operator
       addSuggestion('->', monaco.languages.CompletionItemKind.Operator, 'Flow operator', '-> ', '0_arrow');
     } else if (isLineBeginning) {
-      // Line beginning: can be INPUT or RULESET
       addSuggestion('INPUT', monaco.languages.CompletionItemKind.Module, 'Input component reference', 'INPUT', '1_input');
       addSuggestion('RULESET', monaco.languages.CompletionItemKind.Module, 'Ruleset component reference', 'RULESET', '2_ruleset');
+      if (llmAvailable.value) {
+        addSuggestion('AGENT', monaco.languages.CompletionItemKind.Module, 'Agent component reference (LLM processing)', 'AGENT', '3_agent');
+      }
     }
 
     // Convert Map suggestions to array and sort by sortText
@@ -3013,6 +3093,123 @@ function getProjectFlowCompletions(fullText, lineText, range, position) {
   });
   
   return { suggestions: finalSuggestions };
+}
+
+// Agent YAML completions — skills list + tools list
+function getAgentCompletions(fullText, lineText, range, position) {
+  const suggestions = [];
+  const trimmedLine = lineText.trim();
+
+  // Detect if we're inside a skills list (line starts with "- " under skills:)
+  const inSkillsList = /^\s*skills:\s*$/.test(fullText.split('\n').slice(0, position.lineNumber).reverse().find(l => /^\s*skills:/.test(l)) || '')
+    || (() => {
+      const lines = fullText.split('\n');
+      for (let i = position.lineNumber - 2; i >= 0; i--) {
+        const l = lines[i];
+        if (/^\s*skills:/.test(l)) return true;
+        if (/^\S/.test(l) && !/^\s*-/.test(l) && l.trim() !== '') return false;
+      }
+      return false;
+    })();
+
+  // Detect if we're inside a tools list
+  const inToolsList = (() => {
+    const lines = fullText.split('\n');
+    for (let i = position.lineNumber - 2; i >= 0; i--) {
+      const l = lines[i];
+      if (/^\s*tools:/.test(l)) return true;
+      if (/^\S/.test(l) && !/^\s*-/.test(l) && l.trim() !== '') return false;
+    }
+    return false;
+  })();
+
+  if (inSkillsList && (trimmedLine === '-' || trimmedLine === '- ' || trimmedLine.startsWith('- '))) {
+    // Suggest available skill component IDs
+    const partial = trimmedLine.replace(/^-\s*/, '').toLowerCase();
+    skillComponents.value.forEach(sk => {
+      if (!partial || sk.id.toLowerCase().includes(partial)) {
+        suggestions.push({
+          label: sk.id,
+          kind: monaco.languages.CompletionItemKind.Reference,
+          documentation: `Skill: ${sk.id}` + (sk.type ? ` (${sk.type})` : ''),
+          insertText: sk.id,
+          range
+        });
+      }
+    });
+    if (suggestions.length === 0) {
+      suggestions.push({
+        label: 'No skills available',
+        kind: monaco.languages.CompletionItemKind.Text,
+        documentation: 'Create skill components first, then reference them here.',
+        insertText: '',
+        range
+      });
+    }
+    return { suggestions };
+  }
+
+  if (inToolsList && (trimmedLine === '-' || trimmedLine === '- ' || trimmedLine.startsWith('- '))) {
+    // Suggest available plugin names as tools
+    const partial = trimmedLine.replace(/^-\s*/, '').toLowerCase();
+    pluginComponents.value.forEach(p => {
+      if (!partial || p.id.toLowerCase().includes(partial)) {
+        suggestions.push({
+          label: p.id,
+          kind: monaco.languages.CompletionItemKind.Function,
+          documentation: `Plugin tool: ${p.id}`,
+          insertText: p.id,
+          range
+        });
+      }
+    });
+    return { suggestions };
+  }
+
+  // Top-level key completions for agent YAML
+  if (/^\s*$/.test(trimmedLine) || /^\w/.test(trimmedLine)) {
+    const existingKeys = fullText.split('\n')
+      .map(l => l.match(/^(\w[\w_]*):/))
+      .filter(Boolean)
+      .map(m => m[1]);
+
+    const agentKeys = [
+      { key: 'model', doc: 'LLM model name (e.g. gpt-4o-mini)', snippet: 'model: ' },
+      { key: 'temperature', doc: 'LLM temperature (0-1)', snippet: 'temperature: 0.3' },
+      { key: 'max_tokens', doc: 'Max tokens per LLM response', snippet: 'max_tokens: 4096' },
+      { key: 'system_prompt', doc: 'System prompt for the agent', snippet: 'system_prompt: |\n  ' },
+      { key: 'skills', doc: 'List of skill component IDs', snippet: 'skills:\n  - ' },
+      { key: 'tools', doc: 'Plugin tools: "all" or list of plugin names', snippet: 'tools: all' },
+      { key: 'max_rounds', doc: 'Max ReAct loop rounds per message (default: 5)', snippet: 'max_rounds: 5' },
+      { key: 'timeout', doc: 'Per-message processing timeout (default: 30s)', snippet: 'timeout: 30s' },
+    ];
+
+    agentKeys.forEach(({ key, doc, snippet }) => {
+      if (!existingKeys.includes(key)) {
+        suggestions.push({
+          label: key,
+          kind: monaco.languages.CompletionItemKind.Property,
+          documentation: doc,
+          insertText: snippet,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range
+        });
+      }
+    });
+  }
+
+  // "tools:" value completion — suggest "all"
+  if (/^\s*tools:\s*/.test(lineText)) {
+    suggestions.push({
+      label: 'all',
+      kind: monaco.languages.CompletionItemKind.Keyword,
+      documentation: 'Use all available plugins as tools',
+      insertText: 'all',
+      range
+    });
+  }
+
+  return { suggestions };
 }
 
 // 获取当前光标位置的单词
@@ -4613,6 +4810,12 @@ const getPluginSuggestions = (range, isInCheckNode = false) => {
 .monaco-editor .token.project\.ruleset,
 .monaco-diff-editor .token.project\.ruleset {
   color: #6f42c1 !important;
+  font-weight: bold !important;
+}
+
+.monaco-editor .token.project\.agent,
+.monaco-diff-editor .token.project\.agent {
+  color: #bf8700 !important;
   font-weight: bold !important;
 }
 

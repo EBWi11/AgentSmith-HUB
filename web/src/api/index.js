@@ -155,6 +155,11 @@ export const hubApi = {
     return response.data;
   },
 
+  async getFeatures() {
+    const response = await publicApi.get('/features');
+    return response.data;
+  },
+
   setBearer(idToken) {
     localStorage.setItem('auth_bearer', idToken);
     api.defaults.headers.Authorization = `Bearer ${idToken}`;
@@ -175,6 +180,8 @@ export const hubApi = {
         case 'rulesets':
         case 'plugins':
         case 'projects':
+        case 'agents':
+        case 'skills':
           response = await fetchComponentsByType(type, `/${type}`);
           break;
         case 'cluster':
@@ -369,6 +376,56 @@ export const hubApi = {
     // Dispatch global event for component changes
     window.dispatchEvent(new CustomEvent('componentChanged', { 
       detail: { action: 'deleted', type: 'plugins', id, timestamp: Date.now() }
+    }));
+    return response;
+  },
+
+  // Agent CRUD
+  async getAgent(id) {
+    const response = await api.get(`/agents/${id}`);
+    return response.data;
+  },
+
+  async createAgent(id, raw) {
+    const response = await api.post('/agents', { id, raw });
+    return response.data;
+  },
+
+  async updateAgent(id, raw) {
+    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
+    const response = await api.put(`/agents/${id}`, { raw: rawString });
+    return response.data;
+  },
+
+  async deleteAgent(id) {
+    const response = await this.deleteComponent('agents', id);
+    window.dispatchEvent(new CustomEvent('componentChanged', {
+      detail: { action: 'deleted', type: 'agents', id, timestamp: Date.now() }
+    }));
+    return response;
+  },
+
+  // Skill CRUD
+  async getSkill(id) {
+    const response = await api.get(`/skills/${id}`);
+    return response.data;
+  },
+
+  async createSkill(id, raw) {
+    const response = await api.post('/skills', { id, raw });
+    return response.data;
+  },
+
+  async updateSkill(id, raw) {
+    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
+    const response = await api.put(`/skills/${id}`, { raw: rawString });
+    return response.data;
+  },
+
+  async deleteSkill(id) {
+    const response = await this.deleteComponent('skills', id);
+    window.dispatchEvent(new CustomEvent('componentChanged', {
+      detail: { action: 'deleted', type: 'skills', id, timestamp: Date.now() }
     }));
     return response;
   },
@@ -589,6 +646,12 @@ export const hubApi = {
           case 'plugins':
             componentData = await this.getPlugin(id);
             break;
+          case 'agents':
+            componentData = await this.getAgent(id);
+            break;
+          case 'skills':
+            componentData = await this.getSkill(id);
+            break;
           default:
             return {
               data: {
@@ -648,6 +711,12 @@ export const hubApi = {
       case 'plugins':
         response = await this.updatePlugin(id, raw);
         break;
+      case 'agents':
+        response = await this.updateAgent(id, raw);
+        break;
+      case 'skills':
+        response = await this.updateSkill(id, raw);
+        break;
       default:
         throw new Error('Unsupported component type');
     }
@@ -678,6 +747,12 @@ export const hubApi = {
         break;
       case 'plugins':
         response = await this.createPlugin(id, raw);
+        break;
+      case 'agents':
+        response = await this.createAgent(id, raw);
+        break;
+      case 'skills':
+        response = await this.createSkill(id, raw);
         break;
       default:
         throw new Error('Unsupported component type');
@@ -905,6 +980,34 @@ export const hubApi = {
     }
   },
 
+  async testAgent(id, data) {
+    try {
+      if (!id) throw new Error('Agent ID is required');
+      if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
+      const response = await api.post(`/test-agent/${id}`, { data });
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.data) {
+        return { success: false, error: error.response.data.error || 'Server error', results: [] };
+      }
+      return { success: false, error: error.message || 'Network error', results: [] };
+    }
+  },
+
+  async testAgentContent(content, data) {
+    try {
+      if (!content) throw new Error('Agent content is required');
+      if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
+      const response = await api.post('/test-agent-content', { content, data });
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.data) {
+        return { success: false, error: error.response.data.error || 'Server error', results: [] };
+      }
+      return { success: false, error: error.message || 'Network error', results: [] };
+    }
+  },
+
   // Test plugin content
   async testPluginContent(content, data) {
     try {
@@ -1128,6 +1231,12 @@ export const hubApi = {
           break;
         case 'plugins':
           endpoint = `/plugins/${id}`;
+          break;
+        case 'agents':
+          endpoint = `/agents/${id}`;
+          break;
+        case 'skills':
+          endpoint = `/skills/${id}`;
           break;
         default:
           return { hasTemp: false };

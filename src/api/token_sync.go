@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	tokenRedisKey      = "cluster:leader:token"
-	llmAPIKeyRedisKey  = "cluster:hub_config:llm_api_key"
+	tokenRedisKey     = "cluster:leader:token"
+	llmAPIKeyRedisKey = "cluster:hub_config:llm_api_key"
 	llmBaseURLRedisKey = "cluster:hub_config:llm_base_url"
 	llmModelRedisKey   = "cluster:hub_config:llm_model"
 )
@@ -24,11 +24,28 @@ func WriteTokenToRedis(token string) error {
 
 	err := common.GetRedisClient().Set(ctx, tokenRedisKey, token, 0).Err() // No expiration
 	if err != nil {
-		logger.Error("Failed to write token to Redis: %v", err)
+		logger.Error("Failed to write token to Redis", "error", err)
 		return err
 	}
 
 	logger.Info("Token written to Redis successfully")
+	return nil
+}
+
+// WriteLeaderNodeIDToRedis writes the leader's node ID (IP/host) to Redis so followers and plugins can reach the leader API.
+// Called by leader on startup.
+func WriteLeaderNodeIDToRedis(nodeID string) error {
+	if nodeID == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := common.GetRedisClient().Set(ctx, common.LeaderNodeIDRedisKey, nodeID, 0).Err()
+	if err != nil {
+		logger.Error("Failed to write leader node ID to Redis", "error", err)
+		return err
+	}
+	logger.Info("Leader node ID written to Redis", "node_id", nodeID)
 	return nil
 }
 
@@ -39,7 +56,7 @@ func ReadTokenFromRedis() (string, error) {
 
 	token, err := common.GetRedisClient().Get(ctx, tokenRedisKey).Result()
 	if err != nil {
-		logger.Error("Failed to read token from Redis: %v", err)
+		logger.Error("Failed to read token from Redis", "error", err)
 		return "", err
 	}
 
@@ -57,18 +74,18 @@ func WriteLLMConfigToRedis(apiKey, baseURL, model string) error {
 	defer cancel()
 	client := common.GetRedisClient()
 	if err := client.Set(ctx, llmAPIKeyRedisKey, apiKey, 0).Err(); err != nil {
-		logger.Error("Failed to write LLM API key to Redis: %v", err)
+		logger.Error("Failed to write LLM API key to Redis", "error", err)
 		return err
 	}
 	if baseURL != "" {
 		if err := client.Set(ctx, llmBaseURLRedisKey, baseURL, 0).Err(); err != nil {
-			logger.Error("Failed to write LLM base URL to Redis: %v", err)
+			logger.Error("Failed to write LLM base URL to Redis", "error", err)
 			return err
 		}
 	}
 	if model != "" {
 		if err := client.Set(ctx, llmModelRedisKey, model, 0).Err(); err != nil {
-			logger.Error("Failed to write LLM model to Redis: %v", err)
+			logger.Error("Failed to write LLM model to Redis", "error", err)
 			return err
 		}
 	}

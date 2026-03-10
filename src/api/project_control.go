@@ -39,7 +39,7 @@ func syncProjectOperationToFollowers(projectID, action string) {
 			logger.Error("Failed to publish project restart", "project", projectID, "err", err)
 		}
 	default:
-		logger.Warn("Unknown project action", "action", action, "project", projectID)
+		logger.Error("Unknown project action", "action", action, "project", projectID)
 	}
 }
 
@@ -62,7 +62,7 @@ func StartProject(c echo.Context) error {
 	// API-side persistence: Save project states in Redis
 	// proj_states: User intention (what user wants the project to be)
 	if err := common.SetProjectUserIntention(req.ProjectID, true); err != nil {
-		logger.Warn("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
+		logger.Error("Failed to persist project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
 	// Sync operation to follower nodes FIRST - ensure cluster consistency regardless of local result
@@ -121,7 +121,7 @@ func StopProject(c echo.Context) error {
 	// API-side persistence: Update project states in Redis
 	// proj_states: User intention (user wants project to be stopped)
 	if err := common.SetProjectUserIntention(req.ProjectID, false); err != nil {
-		logger.Warn("Failed to update project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
+		logger.Error("Failed to update project user intention to Redis (proj_states)", "project", req.ProjectID, "error", err)
 	}
 
 	// Record successful operation

@@ -291,7 +291,7 @@ func (in *Input) cleanup() {
 
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
-			logger.Warn("Failed to close sls consumer during cleanup", "input", in.Id, "error", err)
+			logger.Error("Failed to close sls consumer during cleanup", "input", in.Id, "error", err)
 		}
 		in.slsConsumer = nil
 	}
@@ -601,7 +601,7 @@ func (in *Input) Stop() error {
 	}
 	if in.slsConsumer != nil {
 		if err := in.slsConsumer.Close(); err != nil {
-			logger.Warn("Failed to close sls consumer", "input", in.Id, "error", err)
+			logger.Error("Failed to close sls consumer", "input", in.Id, "error", err)
 		}
 		in.slsConsumer = nil
 	}
@@ -643,8 +643,8 @@ func (in *Input) Stop() error {
 
 			// Check for timeout
 			if time.Since(drainStartTime) > channelDrainTimeout {
-				logger.Warn("Timeout waiting for internal channel to drain, proceeding with shutdown",
-					"input", in.Id, "remaining_messages", channelLen)
+			logger.Error("Timeout waiting for internal channel to drain, proceeding with shutdown",
+				"input", in.Id, "remaining_messages", channelLen)
 				stopError = fmt.Errorf("timeout waiting for internal channel to drain")
 				break
 			}
@@ -673,7 +673,7 @@ func (in *Input) Stop() error {
 	case <-waitDone:
 		logger.Info("Input stopped gracefully", "id", in.Id)
 	case <-time.After(10 * time.Second):
-		logger.Warn("Input stop timeout, forcing cleanup", "id", in.Id)
+		logger.Error("Input stop timeout, forcing cleanup", "id", in.Id)
 		if stopError == nil {
 			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 		}
@@ -758,7 +758,7 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
-		// Test actual connectivity to Kafka brokers
+		// Test actual connectivity to Kafka brokers (basic TCP / TLS / auth).
 		err := common.TestKafkaConnection(in.kafkaCfg.Brokers, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
 		if err != nil {
 			result["status"] = "error"
@@ -770,25 +770,26 @@ func (in *Input) CheckConnectivity() map[string]interface{} {
 			return result
 		}
 
-		// Test if topic exists
-		topicExists, err := common.TestKafkaTopicExists(in.kafkaCfg.Brokers, in.kafkaCfg.Topic, in.kafkaCfg.SASL, in.kafkaCfg.TLS)
-		if err != nil {
+		// Test consumer-side connectivity using a temporary group.
+		// This exercises the real consume path and works even for some Kafka-compatible
+		// services that do not fully support admin APIs like ListTopics.
+		consumerErr := common.TestKafkaConsumerConnectivity(
+			in.kafkaCfg.Brokers,
+			in.kafkaCfg.Group,
+			in.kafkaCfg.Topic,
+			in.kafkaCfg.SASL,
+			in.kafkaCfg.TLS,
+		)
+		if consumerErr != nil {
 			result["status"] = "warning"
-			result["message"] = "Connected to Kafka but failed to verify topic"
-			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_unknown"
+			result["message"] = "Connected to Kafka brokers but consumer test reported an issue"
+			result["details"].(map[string]interface{})["connection_status"] = "connected_consumer_warning"
 			result["details"].(map[string]interface{})["connection_warnings"] = []map[string]interface{}{
-				{"message": fmt.Sprintf("Could not verify topic existence: %v", err), "severity": "warning"},
-			}
-		} else if !topicExists {
-			result["status"] = "error"
-			result["message"] = "Connected to Kafka but topic does not exist"
-			result["details"].(map[string]interface{})["connection_status"] = "connected_topic_missing"
-			result["details"].(map[string]interface{})["connection_errors"] = []map[string]interface{}{
-				{"message": fmt.Sprintf("Topic '%s' does not exist", in.kafkaCfg.Topic), "severity": "error"},
+				{"message": consumerErr.Error(), "severity": "warning"},
 			}
 		} else {
 			result["details"].(map[string]interface{})["connection_status"] = "connected"
-			result["message"] = "Successfully connected to Kafka and verified topic"
+			result["message"] = "Successfully connected to Kafka and passed consumer connectivity test"
 		}
 
 		// Add consumer metrics if available

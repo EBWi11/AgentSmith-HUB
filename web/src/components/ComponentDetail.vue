@@ -66,6 +66,16 @@
         </svg>
         Test Output
       </button>
+      <button 
+        v-if="isAgent"
+        @click="showTestModal = true" 
+        class="btn btn-test-ruleset btn-md"
+      >
+        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Agent
+      </button>
       
       <!-- Verify Buttons -->
       <button 
@@ -94,6 +104,30 @@
       </button>
       <button 
         v-if="isInput"
+        @click="verifyCurrentComponent" 
+        class="btn btn-verify btn-md"
+        :disabled="verifyLoading"
+      >
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
+        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {{ verifyLoading ? 'Verifying...' : 'Verify' }}
+      </button>
+      <button 
+        v-if="isAgent"
+        @click="verifyCurrentComponent" 
+        class="btn btn-verify btn-md"
+        :disabled="verifyLoading"
+      >
+        <span v-if="verifyLoading" class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
+        <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {{ verifyLoading ? 'Verifying...' : 'Verify' }}
+      </button>
+      <button 
+        v-if="isSkill"
         @click="verifyCurrentComponent" 
         class="btn btn-verify btn-md"
         :disabled="verifyLoading"
@@ -138,7 +172,7 @@
   <!-- Edit Mode -->
   <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col relative">
     <!-- Floating Validation Status (for Rulesets, Projects, Plugins, Outputs, and Inputs) -->
-    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
+    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput || isAgent || isSkill) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
          class="absolute top-4 right-4 z-50 max-w-lg bg-white/95 border border-gray-200/60 rounded-xl shadow-2xl backdrop-blur-md">
       <!-- Validation Errors -->
       <div v-if="validationResult.errors.length > 0" class="validation-errors p-4 bg-red-50/60 border-l-4 border-red-400/70 text-red-800 rounded-t-xl backdrop-blur-sm">
@@ -183,7 +217,7 @@
     </div>
 
     <!-- Validation Status Indicator -->
-    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && !showValidationPanel"
+    <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput || isAgent || isSkill) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && !showValidationPanel"
          class="absolute top-4 right-4 z-50">
       <button @click="showValidationPanel = true" 
               class="flex items-center space-x-1 px-2 py-1 rounded-full text-white text-xs shadow-lg transition-all hover:scale-105"
@@ -321,6 +355,17 @@
         Test Output
         <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
       </button>
+      <button 
+        v-if="isAgent"
+        @click="showTestModal = true" 
+        class="btn btn-test-ruleset btn-sm"
+      >
+        <svg class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Test Agent
+        <span class="ml-1 text-xs opacity-50">{{ isMac ? '⌘D' : 'Ctrl+D' }}</span>
+      </button>
       
       <!-- Verify Buttons -->
       <button 
@@ -373,6 +418,30 @@
       </button>
       <button 
         v-if="isInput"
+        @click="verifyCurrentComponent" 
+        class="btn btn-verify btn-sm"
+        :disabled="verifyLoading"
+      >
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {{ verifyLoading ? 'Verifying...' : 'Verify' }}
+      </button>
+      <button 
+        v-if="isAgent"
+        @click="verifyCurrentComponent" 
+        class="btn btn-verify btn-sm"
+        :disabled="verifyLoading"
+      >
+        <span v-if="verifyLoading" class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1.5"></span>
+        <svg v-else class="w-3 h-3 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {{ verifyLoading ? 'Verifying...' : 'Verify' }}
+      </button>
+      <button 
+        v-if="isSkill"
         @click="verifyCurrentComponent" 
         class="btn btn-verify btn-sm"
         :disabled="verifyLoading"
@@ -584,12 +653,13 @@
     </div>
   </div>
 
-  <!-- Test Modal -->
+  <!-- Test Modal (Rulesets & Agents) -->
   <RulesetTestModal 
-    v-if="props.item && props.item.type === 'rulesets'" 
+    v-if="props.item && (props.item.type === 'rulesets' || props.item.type === 'agents')" 
     :show="showTestModal" 
     :rulesetId="props.item?.originalId || props.item?.id" 
     :rulesetContent="editorValue"
+    :componentType="props.item?.type"
     @close="showTestModal = false" 
   />
 
@@ -712,6 +782,12 @@ const isProject = computed(() => {
 })
 const isInput = computed(() => {
   return props.item?.type === 'inputs'
+})
+const isAgent = computed(() => {
+  return props.item?.type === 'agents'
+})
+const isSkill = computed(() => {
+  return props.item?.type === 'skills'
 })
 
 // Platform detection for shortcut display
@@ -990,6 +1066,10 @@ function handleTestShortcut() {
   else if (isOutput.value) {
     showOutputTestModal.value = true;
   }
+  // Test agent if it's an agent
+  else if (isAgent.value) {
+    showTestModal.value = true;
+  }
 }
 
 // All specific verification functions replaced with generic verifyCurrentComponent()
@@ -1096,7 +1176,7 @@ onMounted(async () => {
   
   // If component type is project, fetch all components list
   if (props.item && props.item.type === 'projects') {
-    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects']
     await Promise.all(componentTypes.map(type => dataCache.fetchComponents(type)))
   }
   

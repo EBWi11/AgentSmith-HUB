@@ -127,7 +127,7 @@ func AuthenticateRequest(c echo.Context) error {
 
 	claims, err := VerifyOIDCToken(c.Request().Context(), raw)
 	if err != nil {
-		logger.Warn("OIDC token verification failed", "error", err)
+		logger.Error("OIDC token verification failed", "error", err)
 		return errors.New("authentication failed")
 	}
 	if !isUserAllowed(claims) {

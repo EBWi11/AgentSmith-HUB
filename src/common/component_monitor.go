@@ -74,7 +74,7 @@ func (cm *ComponentMonitor) Stop() error {
 		logger.Info("Component monitor stopped successfully")
 		return nil
 	case <-time.After(30 * time.Second):
-		logger.Warn("Component monitor stop timeout, forcing shutdown")
+		logger.Error("Component monitor stop timeout, forcing shutdown")
 		return fmt.Errorf("timeout waiting for component monitor to stop")
 	}
 }
@@ -103,7 +103,7 @@ func (cm *ComponentMonitor) performHealthCheck() {
 
 	// Process each project with errors
 	for projectID, errors := range projectErrors {
-		logger.Warn("Component errors detected in project",
+		logger.Error("Component errors detected in project",
 			"project", projectID,
 			"error_count", len(errors))
 

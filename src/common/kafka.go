@@ -519,7 +519,7 @@ func (c *KafkaConsumer) drainRemainingMessages() {
 				case c.MsgChan <- m:
 					drainCount++
 				default:
-					logger.Warn("[KafkaConsumer] message channel closed during drain, dropping message")
+					logger.Error("[KafkaConsumer] message channel closed during drain, dropping message")
 				}
 			})
 
@@ -537,7 +537,7 @@ func (c *KafkaConsumer) Close() {
 	c.Client.Close()
 }
 
-// TestConnection tests the connection to Kafka brokers
+// TestKafkaConnection tests the connection to Kafka brokers
 // This method creates a temporary client to test connectivity without affecting the main producer
 func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig) error {
 	opts := []kgo.Opt{
@@ -583,6 +583,63 @@ func TestKafkaConnection(brokers []string, saslCfg *KafkaSASLConfig, tlsCfg *Kaf
 		return fmt.Errorf("failed to connect to Kafka brokers: %w", err)
 	}
 
+	return nil
+}
+
+// TestKafkaConsumerConnectivity tries to connect to the given topic using a temporary
+// consumer group. This exercises the "real" consumer path instead of only relying
+// on admin APIs such as ListTopics, which may not be fully supported by some
+// Kafka-compatible providers.
+func TestKafkaConsumerConnectivity(brokers []string, group, topic string, saslCfg *KafkaSASLConfig, tlsCfg *KafkaTLSConfig) error {
+	// Use a temporary, unique group ID so we do not interfere with the real group offsets.
+	tmpGroup := fmt.Sprintf("%s-connectivity-test-%d", group, time.Now().UnixNano())
+
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.ConsumerGroup(tmpGroup),
+		kgo.ConsumeTopics(topic),
+		kgo.DisableAutoCommit(),                     // avoid committing offsets for this tmp group
+		kgo.RequestTimeoutOverhead(5 * time.Second), // keep test reasonably fast
+	}
+
+	// Add SASL if enabled
+	if saslCfg != nil && saslCfg.Enable {
+		mechanism, err := getSASLMechanism(saslCfg)
+		if err != nil {
+			return fmt.Errorf("failed to configure SASL for consumer connectivity test: %w", err)
+		}
+		if mechanism != nil {
+			opts = append(opts, kgo.SASL(mechanism))
+		}
+	}
+
+	// Add TLS if enabled
+	if tlsCfg != nil {
+		tlsOpt, err := getTLSDialOpt(tlsCfg)
+		if err != nil {
+			return fmt.Errorf("failed to configure TLS for consumer connectivity test: %w", err)
+		}
+		opts = append(opts, tlsOpt)
+	}
+
+	cl, err := kgo.NewClient(opts...)
+	if err != nil {
+		return fmt.Errorf("failed to create consumer test client: %w", err)
+	}
+	defer cl.Close()
+
+	// Poll once with a timeout to force group join and topic subscription.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	fetches := cl.PollFetches(ctx)
+	if errs := fetches.Errors(); len(errs) > 0 {
+		// If there are fetch errors, return the first one as a connectivity failure.
+		fe := errs[0]
+		return fmt.Errorf("consumer connectivity test fetch error for topic %s: %w", topic, fe.Err)
+	}
+
+	// If we reach here without fatal errors, consider consumer connectivity successful.
 	return nil
 }
 

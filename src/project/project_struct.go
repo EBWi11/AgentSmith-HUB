@@ -1,11 +1,13 @@
 package project
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"fmt"
 	"sync"
 	"time"
@@ -28,14 +30,19 @@ type GlobalProjectInfo struct {
 	Inputs   map[string]*input.Input
 	Outputs  map[string]*output.Output
 	Rulesets map[string]*rules_engine.Ruleset
+	Agents   map[string]*agent.Agent
+	Skills   map[string]*skill.Skill
 
 	PNSOutputs  map[string]*output.Output
 	PNSRulesets map[string]*rules_engine.Ruleset
+	PNSAgents   map[string]*agent.Agent
 
 	ProjectsNew map[string]string
 	InputsNew   map[string]string
 	OutputsNew  map[string]string
 	RulesetsNew map[string]string
+	AgentsNew   map[string]string
+	SkillsNew   map[string]string
 }
 
 // CalculateRefCount dynamically calculates how many running projects are using the given PNS
@@ -109,6 +116,7 @@ type Project struct {
 	Inputs   map[string]*input.Input          `json:"-"`
 	Outputs  map[string]*output.Output        `json:"-"`
 	Rulesets map[string]*rules_engine.Ruleset `json:"-"`
+	Agents   map[string]*agent.Agent          `json:"-"`
 
 	// Data flow
 	MsgChannels map[string]*chan map[string]interface{} `json:"-"` // Channels for message passing between components
@@ -494,6 +502,417 @@ func DeletePNSRuleset(pns string) {
 	delete(GlobalProject.PNSRulesets, pns)
 }
 
+// Agent accessors
+func GetAgent(id string) (*agent.Agent, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	a, exists := GlobalProject.Agents[id]
+	return a, exists
+}
+
+func SetAgent(id string, a *agent.Agent) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.Agents == nil {
+		GlobalProject.Agents = make(map[string]*agent.Agent)
+	}
+	GlobalProject.Agents[id] = a
+}
+
+func DeleteAgent(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Agents, id)
+}
+
+func GetAllAgents() map[string]*agent.Agent {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	agents := make(map[string]*agent.Agent)
+	for id, a := range GlobalProject.Agents {
+		agents[id] = a
+	}
+	return agents
+}
+
+func GetAgentsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Agents)
+}
+
+// PNS Agent accessors
+func GetPNSAgent(pns string) (*agent.Agent, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	a, exists := GlobalProject.PNSAgents[pns]
+	return a, exists
+}
+
+func SetPNSAgent(pns string, a *agent.Agent) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.PNSAgents == nil {
+		GlobalProject.PNSAgents = make(map[string]*agent.Agent)
+	}
+	GlobalProject.PNSAgents[pns] = a
+}
+
+func DeletePNSAgent(pns string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.PNSAgents, pns)
+}
+
+// Agent New accessors
+func GetAgentNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.AgentsNew[id]
+	return content, exists
+}
+
+func SetAgentNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.AgentsNew == nil {
+		GlobalProject.AgentsNew = make(map[string]string)
+	}
+	GlobalProject.AgentsNew[id] = content
+}
+
+func DeleteAgentNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.AgentsNew, id)
+}
+
+func GetAllAgentsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	result := make(map[string]string)
+	for id, content := range GlobalProject.AgentsNew {
+		result[id] = content
+	}
+	return result
+}
+
+func SafeDeleteAgentDownstream(agentPNS, downstreamID string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if a, exists := GlobalProject.PNSAgents[agentPNS]; exists {
+		delete(a.DownStream, downstreamID)
+	}
+}
+
+// GetProjectAgents returns all agents used by this project, dynamically calculated from FlowNodes
+func (p *Project) GetProjectAgents() map[string]*agent.Agent {
+	agents := make(map[string]*agent.Agent)
+	for _, node := range p.FlowNodes {
+		if node.ToType == "AGENT" && node.ToInit {
+			if a, exists := GetPNSAgent(node.ToPNS); exists {
+				agents[node.ToPNS] = a
+			}
+		}
+		if node.FromType == "AGENT" && node.FromInit {
+			if a, exists := GetPNSAgent(node.FromPNS); exists {
+				agents[node.FromPNS] = a
+			}
+		}
+	}
+	return agents
+}
+
+func (p *Project) GetProjectAgentsUnsafe() map[string]*agent.Agent {
+	agents := make(map[string]*agent.Agent)
+	for _, node := range p.FlowNodes {
+		if node.ToType == "AGENT" && node.ToInit {
+			if a, exists := GlobalProject.PNSAgents[node.ToPNS]; exists {
+				agents[node.ToPNS] = a
+			}
+		}
+		if node.FromType == "AGENT" && node.FromInit {
+			if a, exists := GlobalProject.PNSAgents[node.FromPNS]; exists {
+				agents[node.FromPNS] = a
+			}
+		}
+	}
+	return agents
+}
+
+func ForEachAgent(fn func(id string, a *agent.Agent) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	for id, a := range GlobalProject.Agents {
+		if !fn(id, a) {
+			break
+		}
+	}
+}
+
+// GetAggregatedAgentStatus returns an aggregated runtime status for the given agent ID
+// across all PNS instances and the template agent. This is primarily used for UI display
+// (e.g., dashboard) so that an agent is shown as "running" if any of its PNS instances
+// are running in any project.
+func GetAggregatedAgentStatus(agentID string) common.Status {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	var hasTemplate bool
+	var templateStatus common.Status
+	if tmpl, exists := GlobalProject.Agents[agentID]; exists && tmpl != nil {
+		hasTemplate = true
+		templateStatus = tmpl.Status
+	}
+
+	var hasRunning, hasStarting, hasStopping, hasError bool
+	for _, a := range GlobalProject.PNSAgents {
+		if a == nil || a.Id != agentID {
+			continue
+		}
+		switch a.Status {
+		case common.StatusRunning:
+			hasRunning = true
+		case common.StatusStarting:
+			hasStarting = true
+		case common.StatusStopping:
+			hasStopping = true
+		case common.StatusError:
+			hasError = true
+		}
+	}
+
+	// Determine aggregated status with a simple priority:
+	// error > running > starting > stopping > template/else (default stopped)
+	if hasError || (hasTemplate && templateStatus == common.StatusError) {
+		return common.StatusError
+	}
+	if hasRunning || (hasTemplate && templateStatus == common.StatusRunning) {
+		return common.StatusRunning
+	}
+	if hasStarting || (hasTemplate && templateStatus == common.StatusStarting) {
+		return common.StatusStarting
+	}
+	if hasStopping || (hasTemplate && templateStatus == common.StatusStopping) {
+		return common.StatusStopping
+	}
+	if hasTemplate {
+		return templateStatus
+	}
+	return common.StatusStopped
+}
+
+// GetAggregatedAgentDailyStats returns aggregated daily call count and average latency (ms)
+// for the given agent id, based on Redis-stored per-agent daily statistics. This is
+// aggregated across all nodes and projects in the cluster.
+func GetAggregatedAgentDailyStats(agentID string) (dailyCallCount uint64, dailyAvgLatencyMs float64) {
+	stats, err := common.GetAgentDailyStats("", agentID)
+	if err != nil {
+		logger.Error("Failed to get agent daily stats from Redis", "agent", agentID, "error", err)
+		return 0, 0
+	}
+	return stats.CallCount, stats.AvgLatencyMs
+}
+
+// SafeDeleteAgent safely deletes an agent with all necessary validations and locking
+func SafeDeleteAgentComponent(id string) ([]string, error) {
+	var componentToStop *agent.Agent
+	var shouldStop bool
+
+	common.GlobalMu.Lock()
+
+	_, componentExists := GlobalProject.Agents[id]
+	if !componentExists {
+		_, tempExists := GlobalProject.AgentsNew[id]
+		common.GlobalMu.Unlock()
+		if !tempExists {
+			return nil, fmt.Errorf("agent not found: %s", id)
+		}
+		common.GlobalMu.Lock()
+		delete(GlobalProject.AgentsNew, id)
+		common.GlobalMu.Unlock()
+		common.DeleteRawConfigUnsafe("agent", id)
+		return []string{}, nil
+	}
+
+	// Check all projects (running or not) that reference this agent in flow
+	var referringProjects []string
+	for projectID, proj := range GlobalProject.Projects {
+		if proj == nil {
+			continue
+		}
+		for _, node := range proj.FlowNodes {
+			if (node.FromType == "AGENT" && node.FromID == id) || (node.ToType == "AGENT" && node.ToID == id) {
+				referringProjects = append(referringProjects, projectID)
+				break
+			}
+		}
+	}
+	if len(referringProjects) > 0 {
+		common.GlobalMu.Unlock()
+		return nil, fmt.Errorf("agent %s is referenced by project(s): %v", id, referringProjects)
+	}
+
+	if a, exists := GlobalProject.Agents[id]; exists {
+		if CalculateRefCountUnsafe(id) == 0 {
+			componentToStop = a
+			shouldStop = true
+			logger.Info("Scheduling agent component for deletion", "id", id)
+		}
+	}
+
+	if shouldStop {
+		delete(GlobalProject.Agents, id)
+		delete(GlobalProject.AgentsNew, id)
+	}
+
+	common.GlobalMu.Unlock()
+
+	if shouldStop && componentToStop != nil {
+		_ = componentToStop.Stop()
+		common.DeleteRawConfigUnsafe("agent", id)
+	}
+
+	return []string{}, nil
+}
+
+// Skill accessors
+func GetSkill(id string) (*skill.Skill, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	s, exists := GlobalProject.Skills[id]
+	return s, exists
+}
+
+func SetSkill(id string, s *skill.Skill) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.Skills == nil {
+		GlobalProject.Skills = make(map[string]*skill.Skill)
+	}
+	GlobalProject.Skills[id] = s
+}
+
+func DeleteSkill(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.Skills, id)
+}
+
+func GetAllSkills() map[string]*skill.Skill {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	skills := make(map[string]*skill.Skill)
+	for id, s := range GlobalProject.Skills {
+		skills[id] = s
+	}
+	return skills
+}
+
+func GetSkillsCount() int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	return len(GlobalProject.Skills)
+}
+
+func GetSkillNew(id string) (string, bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	content, exists := GlobalProject.SkillsNew[id]
+	return content, exists
+}
+
+func SetSkillNew(id string, content string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if GlobalProject.SkillsNew == nil {
+		GlobalProject.SkillsNew = make(map[string]string)
+	}
+	GlobalProject.SkillsNew[id] = content
+}
+
+func DeleteSkillNew(id string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	delete(GlobalProject.SkillsNew, id)
+}
+
+func GetAllSkillsNew() map[string]string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	result := make(map[string]string)
+	for id, content := range GlobalProject.SkillsNew {
+		result[id] = content
+	}
+	return result
+}
+
+func ForEachSkill(fn func(id string, s *skill.Skill) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+	for id, s := range GlobalProject.Skills {
+		if !fn(id, s) {
+			break
+		}
+	}
+}
+
+func SafeDeleteSkillComponent(id string) ([]string, error) {
+	common.GlobalMu.Lock()
+
+	_, componentExists := GlobalProject.Skills[id]
+	if !componentExists {
+		_, tempExists := GlobalProject.SkillsNew[id]
+		common.GlobalMu.Unlock()
+		if !tempExists {
+			return nil, fmt.Errorf("skill not found: %s", id)
+		}
+		common.GlobalMu.Lock()
+		delete(GlobalProject.SkillsNew, id)
+		common.GlobalMu.Unlock()
+		common.DeleteRawConfigUnsafe("skill", id)
+		return []string{}, nil
+	}
+
+	// Check if any agent references this skill (formal config or temp)
+	var referringAgents []string
+	for agentID, a := range GlobalProject.Agents {
+		if a == nil || a.Config == nil {
+			continue
+		}
+		for _, sk := range a.Config.Skills {
+			if sk == id {
+				referringAgents = append(referringAgents, agentID)
+				break
+			}
+		}
+	}
+	for agentID, raw := range GlobalProject.AgentsNew {
+		skillIDs, err := agent.ParseSkillIDsFromRaw(raw)
+		if err != nil {
+			continue
+		}
+		for _, sk := range skillIDs {
+			if sk == id {
+				referringAgents = append(referringAgents, agentID)
+				break
+			}
+		}
+	}
+	if len(referringAgents) > 0 {
+		common.GlobalMu.Unlock()
+		return nil, fmt.Errorf("skill %s is referenced by agent(s): %v", id, referringAgents)
+	}
+
+	delete(GlobalProject.Skills, id)
+	delete(GlobalProject.SkillsNew, id)
+
+	common.GlobalMu.Unlock()
+
+	common.DeleteRawConfigUnsafe("skill", id)
+	return []string{}, nil
+}
+
 // New/Temporary content accessors
 func GetProjectNew(id string) (string, bool) {
 	common.GlobalMu.RLock()
@@ -598,6 +1017,9 @@ func ValidateComponent(componentType, componentID string) (exists bool, tempExis
 	case "RULESET":
 		_, exists = GlobalProject.Rulesets[componentID]
 		_, tempExists = GlobalProject.RulesetsNew[componentID]
+	case "AGENT":
+		_, exists = GlobalProject.Agents[componentID]
+		_, tempExists = GlobalProject.AgentsNew[componentID]
 	}
 	return exists, tempExists
 }
@@ -970,7 +1392,7 @@ func SafeDeleteProject(id string) ([]string, error) {
 
 		// Note: Project.Stop() already includes final statistics collection
 		if err := proj.Stop(true); err != nil {
-			logger.Error("failed to stop project before deletion: %v", err)
+			logger.Error("Failed to stop project before deletion", "error", err)
 		}
 
 		// Re-acquire lock after stop

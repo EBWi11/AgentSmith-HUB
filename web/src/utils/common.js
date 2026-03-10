@@ -29,6 +29,18 @@ export const COMPONENT_TYPES = {
     language: 'go',
     supportsConnectCheck: false
   },
+  skills: {
+    label: 'Skill',
+    icon: '🧩',
+    language: 'yaml',
+    supportsConnectCheck: false
+  },
+  agents: {
+    label: 'Agent',
+    icon: '🤖',
+    language: 'yaml',
+    supportsConnectCheck: false
+  },
   projects: {
     label: 'Project',
     icon: '📁',
@@ -69,7 +81,9 @@ export function getApiComponentType(type) {
     output: 'outputs', 
     ruleset: 'rulesets',
     project: 'projects',
-    plugin: 'plugins'
+    plugin: 'plugins',
+    skill: 'skills',
+    agent: 'agents'
   }
   return mapping[type] || (type.endsWith('s') ? type : type + 's')
 }
@@ -85,6 +99,15 @@ export function formatNumber(num) {
     return (num / 1000).toFixed(1) + 'K'
   }
   return num.toString()
+}
+
+/**
+ * Format latency in milliseconds (e.g. 1234.5 -> "1.23s", 89 -> "89ms")
+ */
+export function formatLatencyMs(ms) {
+  if (typeof ms !== 'number' || isNaN(ms) || ms < 0) return '-'
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + 's'
+  return Math.round(ms) + 'ms'
 }
 
 /**

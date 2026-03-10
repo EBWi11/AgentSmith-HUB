@@ -49,6 +49,8 @@ const colors = computed(() => {
       return { header: '#dcfce7', border: '#bbf7d0', text: '#166534' };
     case 'RULESET':
       return { header: '#f3e8ff', border: '#e9d5ff', text: '#581c87' };
+    case 'AGENT':
+      return { header: '#fef3c7', border: '#fde68a', text: '#92400e' };
     case 'CHECK':
       return { header: '#fef2f2', border: '#fecaca', text: '#7f1d1d', bold: true };
     case 'APPEND':

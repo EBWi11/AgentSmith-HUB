@@ -534,7 +534,7 @@ func getInstructionStats(c echo.Context) error {
 	// Get active followers
 	activeFollowers, err := cluster.GlobalInstructionManager.GetActiveFollowers()
 	if err != nil {
-		logger.Warn("Failed to get active followers", "error", err)
+		logger.Error("Failed to get active followers", "error", err)
 		activeFollowers = []string{}
 	}
 

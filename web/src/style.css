@@ -1,6 +1,10 @@
 @tailwind base;
 @tailwind components;
 
+body {
+  zoom: 0.9;
+}
+
 /* ===========================
    AgentSmith-HUB Button System
    Modern, Professional, Consistent

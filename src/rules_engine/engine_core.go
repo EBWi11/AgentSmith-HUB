@@ -491,7 +491,7 @@ func (r *Ruleset) Stop() error {
 		for {
 			select {
 			case <-upstreamTimeout:
-				logger.Warn("Timeout waiting for upstream channels, forcing shutdown", "ruleset", r.RulesetID)
+				logger.Error("Timeout waiting for upstream channels, forcing shutdown", "ruleset", r.RulesetID)
 				stopError = fmt.Errorf("timeout waiting for upstream channels to drain")
 				break waitUpstream
 			default:
@@ -546,7 +546,7 @@ func (r *Ruleset) Stop() error {
 	case <-stopCompleted:
 		logger.Info("Ruleset channels drained successfully", "ruleset", r.RulesetID)
 	case <-overallTimeout:
-		logger.Warn("Ruleset stop timeout exceeded, forcing shutdown", "ruleset", r.RulesetID)
+		logger.Error("Ruleset stop timeout exceeded, forcing shutdown", "ruleset", r.RulesetID)
 		if stopError == nil {
 			stopError = fmt.Errorf("overall stop operation timeout")
 		}
@@ -564,7 +564,7 @@ func (r *Ruleset) Stop() error {
 	case <-waitDone:
 		logger.Info("Ruleset stopped gracefully", "ruleset", r.RulesetID)
 	case <-time.After(10 * time.Second):
-		logger.Warn("Timeout waiting for ruleset goroutines, forcing cleanup", "ruleset", r.RulesetID)
+		logger.Error("Timeout waiting for ruleset goroutines, forcing cleanup", "ruleset", r.RulesetID)
 		if stopError == nil {
 			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 		}
@@ -578,7 +578,7 @@ func (r *Ruleset) Stop() error {
 		for {
 			select {
 			case <-poolWaitTimeout:
-				logger.Warn("Thread pool timeout, forcing cleanup", "ruleset", r.RulesetID)
+				logger.Error("Thread pool timeout, forcing cleanup", "ruleset", r.RulesetID)
 				if stopError == nil {
 					stopError = fmt.Errorf("timeout waiting for thread pool to finish")
 				}

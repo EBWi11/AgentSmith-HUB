@@ -32,10 +32,20 @@ onMounted(() => {
 <style>
 /* Using local fonts to avoid network timeouts */
 @import url('./assets/fonts/inter-local.css');
-html { 
-  font-family: 'Inter', sans-serif; 
+html {
+  font-family: 'Inter', sans-serif;
+  background-color: #f9fafb; /* Tailwind gray-50, align with Dashboard background */
 }
+
+body, #app {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #f9fafb; /* Prevent white bars when zooming / resizing */
+}
+
 @supports (font-variation-settings: normal) {
-  html { font-family: 'InterVariable', sans-serif; }
+  html {
+    font-family: 'InterVariable', sans-serif;
+  }
 }
 </style> 

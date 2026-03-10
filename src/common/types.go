@@ -27,6 +27,7 @@ type HubConfig struct {
 	RedisPassword string `yaml:"redis_password,omitempty"`
 	PprofEnable   bool   `yaml:"pprof_enable"`
 	PprofPort     string `yaml:"pprof_port"`
+	APIPort       string // populated at runtime from -api_listen flag (not from yaml)
 	SIMDEnabled   bool   `yaml:"simd_enabled"`
 	ConfigRoot    string
 	Leader        string

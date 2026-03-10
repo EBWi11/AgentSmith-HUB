@@ -85,7 +85,7 @@ func init() {
 			p.parsePluginParameters()
 			Plugins[name] = p
 		} else {
-			logger.PluginError("plugin_init error", "plugin name conflict: %s already exists", name)
+			logger.PluginError("plugin_init error: plugin name conflict, already exists", "plugin", name)
 		}
 	}
 
@@ -101,7 +101,7 @@ func init() {
 			p.parsePluginParameters()
 			Plugins[name] = p
 		} else {
-			logger.PluginError("plugin_init error", "plugin name conflict: %s already exists", name)
+			logger.PluginError("plugin_init error: plugin name conflict, already exists", "plugin", name)
 		}
 	}
 
@@ -529,7 +529,7 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 
 				result, success, err = f(funcArgs...)
 				if err != nil {
-					logger.PluginError("local plugin %s returned error:", "plugin", p.Name, "error", err)
+					logger.PluginError("Local plugin returned error", "plugin", p.Name, "error", err)
 				}
 			}()
 

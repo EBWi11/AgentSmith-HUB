@@ -15,7 +15,7 @@ const envConfig = {
   // Use Vite's environment variables
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 
               (import.meta.env.DEV 
-                ? 'http://localhost:8080' 
+                ? 'http://10.20.103.140/api'
                 : '/api'),
   apiTimeout: import.meta.env.VITE_API_TIMEOUT ? parseInt(import.meta.env.VITE_API_TIMEOUT) : 30000
 };

@@ -258,6 +258,35 @@ index: "metrics-{YYYY.MM}"        # metrics-2024.01
 index: "hourly-{YYYY.MM.DD}-{HH}" # hourly-2024.01.15-14
 ```
 
+##### ClickHouse
+```yaml
+type: clickhouse
+clickhouse:
+  hosts:
+    - "http://localhost:8123"
+  database: "default"
+  table: "security_events"
+  batch_size: 1000  # 批量写入大小（默认：1000）
+  flush_dur: "3s"   # 刷新间隔（默认：3s）
+  # 认证配置（可选）
+  auth:
+    username: "default"
+    password: "password"
+  # TLS 配置（可选）
+  tls:
+    enable: true
+    insecure_skip_verify: false
+    ca_file: "/path/to/ca.pem"
+    cert_file: "/path/to/client-cert.pem"
+    key_file: "/path/to/client-key.pem"
+```
+
+**说明：**
+- 使用 ClickHouse HTTP 接口进行数据写入（默认端口：8123，HTTPS：8443）
+- 数据以 `JSONEachRow` 格式写入，ClickHouse 自动处理类型转换
+- 支持多个 hosts 进行负载均衡（轮询方式）
+- 目标表需要在 ClickHouse 中预先创建
+- 使用 HTTPS 时，hosts 中使用 `https://` 前缀并启用 TLS 配置
 
 ### 1.3 PROJECT 语法说明
 
@@ -300,7 +329,7 @@ content: |
 **基本规则**：
  - 1.使用 `->` 箭头表示数据流向
  - 2.组件引用格式：`类型.组件名`
- - 3.支持的类型：`INPUT`、`RULESET`、`OUTPUT`
+ - 3.支持的类型：`INPUT`、`RULESET`、`AGENT`、`OUTPUT`
  - 4.每行一个数据流定义
  - 5.支持注释（以 `#` 开头）
 
@@ -329,6 +358,214 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT 语法说明
+
+AGENT 是数据管道中基于 LLM 的处理组件。**每条消息独立处理**：Agent 将事件发给 LLM（可选使用 tools/skills），解析 LLM 输出后，按 agent id 合并到事件的统一 `llm` 映射下，再转发到下游。仅当 HUB 配置了 LLM API 时，Agent 相关能力（侧栏、仪表盘、测试）才会展示。
+
+#### 配置说明
+
+```yaml
+model: gpt-4o-mini                # LLM 模型名称（OpenAI 兼容）
+temperature: 0.1                   # 采样温度
+max_tokens: 256                    # 单次 LLM 输出最大 token 数（若只输出少量字段可设小）
+
+system_prompt: |                   # 发送给 LLM 的系统提示词
+  你是安全分析员。仅输出分析字段的 JSON（如 llm_confidence、llm_analysis），这些字段会自动合并回原始事件。
+
+skills: []                         # 挂载的 Skill 组件 ID 列表
+tools: []                          # 插件工具："all" 或名称列表；用 [] 可避免下发大量工具定义
+
+max_rounds: 1                      # 每条消息最大 ReAct 工具调用轮数（默认: 5）
+timeout: 30s                       # 单条消息处理超时（如 30s、1m）
+```
+
+#### 字段参考
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `model` | 否 | LLM 模型标识。默认取决于 LLM 提供商配置。 |
+| `temperature` | 否 | 采样温度。默认 `0.3`。 |
+| `max_tokens` | 否 | LLM **输出**最大 token 数。默认 `4096`。 |
+| `system_prompt` | **是** | 发给 LLM 的系统指令。建议让 LLM 只输出少量 JSON 字段，由框架合并到事件中。 |
+| `skills` | 否 | Skill ID 列表，为 Agent 提供工具和知识。 |
+| `tools` | 否 | `"all"` 暴露所有插件为工具；`[]` 或名称列表可限制。不需要工具时用 `[]` 可降低延迟。 |
+| `max_rounds` | 否 | 每条消息最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
+| `timeout` | 否 | 时间字符串。若处理超过此时长会中止 LLM 调用。默认 `30s`。 |
+
+#### 工作原理
+
+1. **每条事件单独处理**（无批次聚合）。
+2. Agent 将事件以 JSON 形式与 `system_prompt` 及（若配置）skills/plugins 的工具定义一并发送给 LLM。
+3. LLM 可直接返回 JSON，或在 **ReAct 循环**中调用工具，最多 `max_rounds` 轮。
+4. LLM 输出的 JSON 会合并到事件的 **`msg["llm"][agentId]`** 下，因此同一流中多个 Agent 不会互相覆盖。框架还会在该映射中写入 `agent`（agent id）和 `processing_time_ms`（毫秒）。
+5. 若 LLM 失败或超时，原始事件会原样透传。
+
+#### LLM 结果结构
+
+每个 Agent 的 LLM 相关数据都放在按 agent 维度的单一映射中：
+
+- **顶层**：`msg["llm"]` 为映射，键为 **agent id**，值为该 Agent 的结果映射。
+- **单 Agent 映射**（如 `msg["llm"]["alert_reviewer"]`）包含：
+  - LLM 返回的字段（如 `llm_confidence`、`llm_analysis`）。
+  - `agent`：产生该结果的 agent id。
+  - `processing_time_ms`：处理耗时（毫秒）。
+  - 可选控制字段（由 LLM 输出决定）：
+    - `_no_forward`：布尔值。为 `true` 时，这条消息不会再被转发到下游组件（仅本 Agent 内部消费）。
+    - `_no_oridata`：布尔值。为 `true` 时，下游只能看到合并后的 `llm` 区块，原始事件字段会被去除。
+
+单 Agent 示例：
+
+```json
+"llm": {
+  "alert_reviewer": {
+    "llm_confidence": 0.15,
+    "llm_analysis": "典型误报：CI 脚本，无外联。",
+    "agent": "alert_reviewer",
+    "processing_time_ms": 3245.6
+  }
+}
+```
+
+管道中存在多个 Agent 时，每个 Agent 在 `msg["llm"]` 下各占一个键，互不冲突。
+
+#### 在 Project 中使用
+
+在 Project 中像其他组件一样引用 Agent：
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+与 Ruleset 链式组合：
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### 仪表盘与统计
+
+- **仪表盘**（在配置 LLM 后）：Agent 总览展示总数/运行/停止、**今日调用次数**、**今日平均延迟**，含汇总与按 Agent 维度。
+- **当日统计**：仅按 Agent 维度存储当日调用次数与延迟，不跨日持久化。
+
+#### 测试
+
+Agent 支持与 Ruleset 相同的测试流程：打开 Agent 组件，点击测试按钮或使用 **Cmd+D**，填写输入 JSON 后执行。测试会启动临时 Agent 并返回完整事件（原始数据 + `llm` 块），便于核对合并结果。
+
+#### 示例：告警审核 Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 256
+
+system_prompt: |
+  你是资深 SOC 分析员。对给定安全告警仅输出一个 JSON，包含 2 个字段：
+  {"llm_confidence": <0-1 浮点数>, "llm_analysis": "<简短原因>"}
+  评分：0-0.2 误报，0.2-0.5 可能误报，0.5-0.7 不确定，0.7-1 可能/确定真实告警。
+  仅输出该 2 字段 JSON，不要其他内容。
+
+skills: []
+tools: []
+max_rounds: 1
+timeout: 30s
+```
+
+### 1.5 SKILL 语法说明
+
+SKILL 是一个可复用的能力模块，Agent 可以引用 Skill 来获得工具和知识。Skill 采用**渐进披露**模式 —— LLM 预先看到工具描述，但只在需要时才获取完整内容。
+
+Skill 实现由配置推断：**二选一**填写 `builtin_ref` 或 `content`，全部通过外挂 YAML 配置。
+
+#### 知识型 Skill（content）
+
+```yaml
+description: |
+  对该 Skill 提供内容的简短描述。
+  LLM 在工具描述中会看到这段文字。
+
+content: |
+  当 LLM 调用 get_reference 时返回的完整参考内容。
+  可以任意长 —— 不会包含在初始提示词中。
+  仅在 LLM 明确请求时才加载。
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `description` | **是** | 简短描述，作为工具描述展示给 LLM。 |
+| `content` | **是** | 完整知识内容，通过 `get_reference` 按需返回。 |
+
+**工作原理：** 该 Skill 注册一个 `get_reference` 工具，以 `description` 字段作为工具描述。当 Agent 的 LLM 判断需要这些知识时，主动调用该工具获取完整 `content`。这保持了初始上下文精简，同时使深度知识按需可用。
+
+#### 内置引用型 Skill（builtin_ref）
+
+```yaml
+builtin_ref: hub_ruleset_editor    # 引用 Go 实现的内置技能
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # 可选配置，传递给内置技能工厂
+  read_only: false
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `builtin_ref` | **是** | 内置 Go 实现的名称。 |
+| `description` | 否 | 可读的描述信息。 |
+| `config` | 否 | 传递给内置工厂的键值对配置。 |
+
+#### 可用的 Builtin Skills
+
+| builtin_ref | 函数 | 说明 |
+|-------------|------|------|
+| `hub_ruleset_editor` | `list_rulesets`、`read_ruleset`、`verify_ruleset`、`write_ruleset` | 读取、验证和编辑 HUB Ruleset。写入操作会创建待审核的变更。设置 `config.read_only: true` 可禁用写入。 |
+
+#### 示例：Ruleset 编写知识型 Skill
+
+```yaml
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  （完整参考内容）
+```
+
+#### 示例：挂载 Skills 的 Agent
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: 规则引擎参考知识
+  - hub_ruleset_editor     # builtin skill: Ruleset 读写操作
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+在此配置中，Agent 同时拥有知识（规则引擎参考文档）和操作能力（Ruleset CRUD）。LLM 可以通过 `get_reference` 查阅语法，列出/读取现有 Ruleset，验证 XML，以及写入变更 —— 全部在 ReAct 循环中完成。
+
 ## 🔧 第二部分：基本操作指南
 
 ### 2.1 临时文件和正式文件
@@ -349,7 +586,7 @@ content: |
 
 ### 2.3 灵活使用测试和查看 Sample Data
 
-Output、Ruleset、Plugin、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
+Output、Ruleset、Plugin、Agent、Project 均支持测试，其中 Project 测试时选择Input数据输入，展示原来需要通过 Output 输出的数据（不会真的流入Output组件），Cmd+D 是测试快捷键，可以快速唤起测试。
 ![PluginTest.png](png/PluginTest.png)
 ![RulesetTest.png](png/RulesetTest.png)
 ![ProjectTest.png](png/ProjectTest.png)
@@ -389,6 +626,10 @@ oidc_redirect_uri: "https://hub.example.com/oidc/callback"  # 必须在 IdP 客�
 oidc_username_claim: "preferred_username"           # 可选，默认优先 preferred_username，否则 email
 oidc_allowed_users: ["alice@example.com", "bob"]    # 可选，限制允许访问的用户名（为空表示禁止任何人登录）
 oidc_scope: "openid profile email"                   # 可选，默认为 openid profile email
+
+# 可选：启用内置 llmCall 插件，用于单次 LLM 调用（兼容 OpenAI 接口）
+llm_api_key: "sk-..."           # 配置后才会注册 llmCall 插件
+llm_base_url: "https://api.openai.com/v1"   # 可选，默认如上
 ```
 
 也可通过环境变量覆盖（优先级更高）：
@@ -996,6 +1237,196 @@ OIDC_SCOPE="openid profile email"
 - 使用 OR 逻辑：任一扩展名匹配即可；
 - 使用 | 作为分隔符。
 
+### 4.4 CEP 序列检测（复杂事件处理）
+
+`<sequence>` 元素用于在时间窗口内检测多个事件的有序模式。与单事件匹配不同，序列检测通过共享字段关联不同事件，并检查时间顺序。
+
+**建议：** CEP 规则较多或吞吐较高时，优先使用 `local_cache="true"`。引擎会把序列 key/state 放在内存，把事件快照 value 存在本地 Pebble 磁盘中，通常能更好地平衡性能与内存占用。
+
+**典型应用场景：**
+
+| 场景 | 模式 | 描述 |
+|------|------|------|
+| 暴力破解后横向移动 | `brute -> login_success -> rdp` | 多次登录失败，然后成功，接着 RDP 会话 |
+| 登录未做 MFA | `login -> !mfa` | 登录后未进行 MFA 验证 |
+| 登录后数据外泄 | `login -> exfil` | 登录后出现大文件传输 |
+| 攻击链检测 | `recon -> exploit -> persist -> exfil` | 完整杀伤链检测 |
+
+#### 基本结构
+
+```xml
+<rule id="rule_id" name="规则名称">
+    <!-- 可选：前置过滤（应用于每个入站事件） -->
+    <check type="..." field="...">value</check>
+
+    <!-- 序列检测 -->
+    <sequence within="时间窗口" group_by="字段" local_cache="true|false">
+        <event id="事件ID" event_time="时间字段" group_by="字段">
+            <!-- 事件匹配条件：check / checklist / threshold -->
+        </event>
+
+        <event id="事件ID" event_time="时间字段">
+            <!-- 事件匹配条件 -->
+        </event>
+
+        <condition>表达式</condition>
+    </sequence>
+
+    <!-- 可选：序列完成后的操作 -->
+    <append field="...">value</append>
+</rule>
+```
+
+#### 元素参考
+
+**`<sequence>` 属性：**
+
+| 属性 | 必填 | 描述 |
+|------|------|------|
+| `within` | 是 | 时间窗口（如 `30s`、`5m`、`1h`、`1d`） |
+| `group_by` | 否 | 默认关联字段，多个用逗号分隔 |
+| `local_cache` | 否 | `true` 使用本地缓存（内存 key/state + Pebble 磁盘 value 快照，推荐），`false` 使用 Redis |
+
+**`<event>` 属性：**
+
+| 属性 | 必填 | 描述 |
+|------|------|------|
+| `id` | 是 | 唯一标识符，在 `<condition>` 中引用 |
+| `event_time` | 否 | 包含事件时间戳的字段名 |
+| `group_by` | 否 | 每事件关联字段，覆盖序列级默认值 |
+
+**`<condition>` 操作符：**
+
+| 操作符 | 含义 | 示例 |
+|--------|------|------|
+| `->` | 序列（A 后接 B） | `a -> b` |
+| `and` | 同一事件满足两个条件 | `a and b` |
+| `or` | 同一事件满足其一 | `a or b` |
+| `!` | 缺席（不能出现） | `a -> !b` |
+| `()` | 分组 | `a -> (b or c)` |
+
+#### 示例 1：基本序列
+
+```xml
+<rule id="login_then_exfil" name="登录后数据外泄">
+    <sequence within="10m" group_by="source_ip" local_cache="true">
+        <event id="login" event_time="timestamp">
+            <check type="EQU" field="event_type">login</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <event id="exfil" event_time="timestamp">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+        <condition>login -> exfil</condition>
+    </sequence>
+    <append field="alert_type">post_login_data_exfiltration</append>
+</rule>
+```
+
+#### 示例 2：缺席检测（登录未做 MFA）
+
+```xml
+<rule id="login_no_mfa" name="登录后未验证MFA">
+    <sequence within="2m" group_by="user_id">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+    <append field="alert_type">missing_mfa</append>
+</rule>
+```
+
+当登录发生后 2 分钟内没有 MFA 验证时触发。
+
+#### 示例 3：多数据源关联
+
+当事件来自不同数据源且字段名不同时：
+
+```xml
+<rule id="multi_source" name="防火墙拦截后认证绕过">
+    <sequence within="5m">
+        <event id="fw_block" group_by="src_ip" event_time="fw_timestamp">
+            <check type="EQU" field="action">block</check>
+        </event>
+        <event id="auth_success" group_by="client_ip" event_time="auth_time">
+            <check type="EQU" field="event_type">authentication</check>
+            <check type="EQU" field="result">success</check>
+        </event>
+        <condition>fw_block -> auth_success</condition>
+    </sequence>
+</rule>
+```
+
+引擎按位置映射进行关联：`fw_block.src_ip` 对应 `auth_success.client_ip`。
+
+#### 示例 4：分支模式（OR）
+
+```xml
+<rule id="login_suspicious" name="登录后可疑活动">
+    <sequence within="15m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="priv_esc">
+            <check type="EQU" field="event_type">privilege_escalation</check>
+        </event>
+        <event id="data_access">
+            <check type="EQU" field="event_type">sensitive_data_access</check>
+        </event>
+        <condition>login -> (priv_esc or data_access)</condition>
+    </sequence>
+</rule>
+```
+
+#### 跨事件字段引用
+
+序列完成后，可以通过 `_$#event_id.field` 语法访问之前事件的字段：
+
+```xml
+<append field="initial_login_ip">_$#login.source_ip</append>
+<append field="exfil_dest">_$dest_ip</append>  <!-- 当前事件字段 -->
+```
+
+#### Sequence Context（`_@`）引用
+
+在 `<sequence>` 内，`_@` 用于读取序列级上下文：
+
+- 读取：`_@path.to.key`
+- 写入：在 `<event>` 内使用 `<append field="_@path.to.key">...</append>`
+
+示例：
+
+```xml
+<sequence within="10m" group_by="user_id" local_cache="true">
+    <event id="download">
+        <check type="EQU" field="event_type">download</check>
+        <append field="_@file.current">_$file_path</append>
+    </event>
+    <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+        <check type="EQU" field="file_path">_@file.current</check>
+    </event>
+    <condition>download -> exec</condition>
+</sequence>
+```
+
+#### 事件时间与乱序处理
+
+默认使用处理时间。指定 `event_time` 可使用事件自带的时间戳，即使事件乱序到达也能正确排序：
+
+```xml
+<event id="login" event_time="timestamp">
+    <!-- 引擎从事件数据的 "timestamp" 字段读取时间用于排序 -->
+</event>
+```
+
+支持格式：Unix 时间戳（秒/毫秒）、ISO 8601、RFC 3339。
+
 ## 🔧 第五部分：高级特性详解
 
 ### 5.1 阈值检测的三种模式
@@ -1173,6 +1604,18 @@ AgentSmith-HUB 提供了丰富的内置插件，无需额外开发即可使用�
 | `virusTotal` | VirusTotal查询 | hash (string), apiKey (string, optional) | `virusTotal(file_hash)` |
 | `shodan` | Shodan查询 | ip (string), apiKey (string, optional) | `shodan(ip_address)` |
 | `threatBook` | 微步在线查询 | queryValue (string), queryType (string), apiKey (string, optional) | `threatBook(ip, "ip")` |
+
+#### LLM 插件（可选内置）
+| 插件 | 功能 | 参数 | 示例 |
+|------|------|------|------|
+| `llmCall` | 单次 LLM 调用（兼容 OpenAI 的接口） | systemPrompt (string, 必填), userMessage (string, 可选), model (string, 可选), maxTokens (int, 可选) | `llmCall("你是摘要助手。", "请用一句话概括。")` |
+
+**说明：** 仅在 `config.yaml` 中配置了 `llm_api_key` 时才会注册 `llmCall` 插件。API Key 与 Base URL 从 config 读取，不作为插件参数。配置示例：
+
+```yaml
+llm_api_key: "sk-..."           # 必填，用于启用 llmCall
+llm_base_url: "https://api.openai.com/v1"   # 可选，默认为 OpenAI
+```
 
 **注意插件参数格式**：
 - 当引用数据中的字段时，无需使用 `_$` 前缀，直接使用字段名：`source_ip`

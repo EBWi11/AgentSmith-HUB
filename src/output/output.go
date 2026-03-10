@@ -54,8 +54,9 @@ type KafkaOutputConfig struct {
 type ElasticsearchOutputConfig struct {
 	Hosts     []string                        `yaml:"hosts"`
 	Index     string                          `yaml:"index"`
-	BatchSize int                             `yaml:"batch_size,omitempty"`
-	FlushDur  string                          `yaml:"flush_dur,omitempty"`
+	Version   string                          `yaml:"version,omitempty"`    // elasticsearch version: v7, v8, v9 (default auto-detect, fallback v8)
+	BatchSize int                             `yaml:"batch_size,omitempty"` // batch size per bulk request
+	FlushDur  string                          `yaml:"flush_dur,omitempty"`  // flush interval, e.g. "5s"
 	Auth      *common.ElasticsearchAuthConfig `yaml:"auth,omitempty"`
 }
 
@@ -377,7 +378,7 @@ func (out *Output) StartForTesting() error {
 							case *out.TestCollectionChan <- enhancedMsg:
 								// Message sent successfully
 							default:
-								logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
+								logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
 							}
 						}
 					default:
@@ -534,7 +535,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
 								}
 							}
 
@@ -544,7 +545,7 @@ func (out *Output) Start() error {
 								// Message sent successfully
 							default:
 								// Channel is full, log warning and continue
-								logger.Warn("Kafka producer channel full, dropping message", "id", out.Id)
+								logger.Error("Kafka producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 							// No message available from this channel, continue to next
@@ -586,6 +587,7 @@ func (out *Output) Start() error {
 		producer, err := common.NewElasticsearchProducer(
 			out.elasticsearchCfg.Hosts,
 			out.elasticsearchCfg.Index,
+			out.elasticsearchCfg.Version,
 			msgChan,
 			batchSize,
 			flushDur,
@@ -600,6 +602,12 @@ func (out *Output) Start() error {
 		// Initialize stop channel for this output (if not already initialized)
 		if out.stopChan == nil {
 			out.stopChan = make(chan struct{})
+		}
+
+		upstreamCount := len(out.UpStream)
+		logger.Info("Elasticsearch output starting", "output", out.Id, "index", out.elasticsearchCfg.Index, "upstream_count", upstreamCount)
+		if upstreamCount == 0 {
+			logger.Warn("Elasticsearch output has no upstream connections; no data will be written until project connects input/ruleset/agent to this output", "output", out.Id)
 		}
 
 		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
@@ -665,7 +673,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
 								}
 							}
 
@@ -675,7 +683,7 @@ func (out *Output) Start() error {
 								// Message sent successfully
 							default:
 								// Channel is full, log warning and continue
-								logger.Warn("Elasticsearch producer channel full, dropping message", "id", out.Id)
+								logger.Error("Elasticsearch producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 							// No message available from this channel, continue to next
@@ -757,7 +765,7 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- msgWithId:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "print")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "print")
 								}
 							}
 
@@ -876,14 +884,14 @@ func (out *Output) Start() error {
 								select {
 								case *out.TestCollectionChan <- enhancedMsg:
 								default:
-									logger.Warn("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
+									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
 								}
 							}
 
 							select {
 							case msgChan <- enhancedMsg:
 							default:
-								logger.Warn("ClickHouse producer channel full, dropping message", "id", out.Id)
+								logger.Error("ClickHouse producer channel full, dropping message", "id", out.Id)
 							}
 						default:
 						}
@@ -928,7 +936,7 @@ func (out *Output) Stop() error {
 		close(out.stopChan)
 		out.stopChan = nil
 	} else {
-		logger.Warn("stopChan is nil during stop", "id", out.Id)
+		logger.Error("stopChan is nil during stop", "id", out.Id)
 	}
 
 	// Step 2: Stop producers after signaling goroutines to prevent them from receiving new messages
@@ -962,11 +970,11 @@ func (out *Output) Stop() error {
 	case <-waitDone:
 		logger.Info("Output stopped gracefully", "id", out.Id)
 	case <-time.After(10 * time.Second): // Increased timeout to allow for network operations and retries
-		logger.Warn("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
+		logger.Error("Timeout waiting for output goroutines, forcing cleanup", "id", out.Id)
 
 		// Try to get more information about pending messages for debugging
 		pendingCount := out.GetPendingMessageCount()
-		logger.Warn("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
+		logger.Error("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
 
 		stopError = fmt.Errorf("timeout waiting for goroutines to finish")
 	}
@@ -1143,13 +1151,14 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 
 		// Set connection info
 		connectionInfo := map[string]interface{}{
-			"hosts": out.elasticsearchCfg.Hosts,
-			"index": out.elasticsearchCfg.Index,
+			"hosts":   out.elasticsearchCfg.Hosts,
+			"index":   out.elasticsearchCfg.Index,
+			"version": common.NormalizeElasticsearchVersionForDisplay(out.elasticsearchCfg.Version),
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
-		// Test actual connectivity to Elasticsearch cluster
-		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
+		// Test actual connectivity to Elasticsearch cluster (respect configured version)
+		err := common.TestElasticsearchConnection(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "error"
 			result["message"] = "Failed to connect to Elasticsearch cluster"
@@ -1161,7 +1170,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Test if index exists (this is optional for ES as indices can be auto-created)
-		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index, out.elasticsearchCfg.Auth)
+		indexExists, err := common.TestElasticsearchIndexExists(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Index, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err != nil {
 			result["status"] = "warning"
 			result["message"] = "Connected to Elasticsearch but failed to verify index"
@@ -1182,7 +1191,7 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Get cluster info for additional details
-		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Auth)
+		clusterInfo, err := common.GetElasticsearchClusterInfo(out.elasticsearchCfg.Hosts, out.elasticsearchCfg.Version, out.elasticsearchCfg.Auth)
 		if err == nil {
 			result["details"].(map[string]interface{})["cluster_info"] = clusterInfo
 		}

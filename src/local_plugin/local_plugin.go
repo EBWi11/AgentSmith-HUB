@@ -46,7 +46,9 @@ import (
 	threatbook "AgentSmith-HUB/local_plugin/threatbook"
 	virustotal "AgentSmith-HUB/local_plugin/virustotal"
 
-	llmcall "AgentSmith-HUB/local_plugin/llm_call"
+	addrule   "AgentSmith-HUB/local_plugin/add_rule"
+	getconfig "AgentSmith-HUB/local_plugin/get_config"
+	llmcall   "AgentSmith-HUB/local_plugin/llm_call"
 
 	"AgentSmith-HUB/common"
 	"strings"
@@ -63,6 +65,8 @@ var LocalPluginBoolRes = map[string]func(...interface{}) (bool, error){
 
 // for append or other usage
 var LocalPluginInterfaceAndBoolRes = map[string]func(...interface{}) (interface{}, bool, error){
+	"addRule":   addrule.Eval,
+	"getConfig": getconfig.Eval,
 	"parseJSON": parse_json_data.Eval,
 
 	// time helpers
@@ -112,6 +116,18 @@ func RegisterLLMCallIfConfigured() bool {
 }
 
 var LocalPluginDesc = map[string]string{
+	// hub API tools (for agent)
+	"addRule": "Tool: add a single rule to a ruleset. " +
+		"Args: rulesetId string, ruleContent string (one <rule>...</rule> XML), autoApply bool (optional, default true). " +
+		"When autoApply=true the rule is validated and takes effect immediately. " +
+		"When autoApply=false the rule is staged as a pending change for human review. " +
+		"On verify error the response body contains the validation details — fix the XML and retry.",
+	"getConfig": "Tool: read component configuration from in-process memory (fast, no HTTP). " +
+		"Args: componentType string (\"ruleset\"|\"input\"|\"output\"|\"project\"), id string (optional). " +
+		"With id: returns the raw config string for that component. " +
+		"Without id: returns JSON {count, items: {id: config}} listing all components of that type. " +
+		"Use this to inspect existing rulesets before writing a new rule, or to understand the pipeline topology.",
+
 	// check node
 	"isPrivateIP":  "Check node: true if IP is private RFC1918/loopback/link-local. Args: ip string.",
 	"cidrMatch":    "Check node: true if IP within CIDR. Args: ip string, cidr string.",

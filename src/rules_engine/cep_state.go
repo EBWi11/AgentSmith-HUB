@@ -478,7 +478,7 @@ func (m *CEPStateManager) setRedisAbsenceTracker(stateKey string, info absenceKe
 	ttlSec := int(ttlMs / 1000)
 
 	if _, err := common.RedisSet(absKey, string(data), ttlSec); err != nil {
-		logger.Warn("Failed to set absence tracker in Redis", "key", absKey, "error", err)
+		logger.Error("Failed to set absence tracker in Redis", "key", absKey, "error", err)
 	}
 }
 
@@ -553,7 +553,7 @@ func (m *CEPStateManager) getRedisState(key string) *SequenceState {
 
 	state, err := decompressState(val)
 	if err != nil {
-		logger.Warn("Failed to deserialize CEP state from Redis", "key", key, "error", err)
+		logger.Error("Failed to deserialize CEP state from Redis", "key", key, "error", err)
 		return nil
 	}
 	return state
@@ -563,19 +563,19 @@ func (m *CEPStateManager) getRedisState(key string) *SequenceState {
 func (m *CEPStateManager) setRedisState(key string, state *SequenceState, ttlSeconds int) {
 	data, err := serializeState(state)
 	if err != nil {
-		logger.Warn("Failed to serialize CEP state for Redis", "key", key, "error", err)
+		logger.Error("Failed to serialize CEP state for Redis", "key", key, "error", err)
 		return
 	}
 
 	if _, err := common.RedisSet(key, data, ttlSeconds); err != nil {
-		logger.Warn("Failed to set CEP state in Redis", "key", key, "error", err)
+		logger.Error("Failed to set CEP state in Redis", "key", key, "error", err)
 	}
 }
 
 func (m *CEPStateManager) deleteRedisState(key string) {
 	// Delete main state key
 	if err := common.RedisDel(key); err != nil {
-		logger.Warn("Failed to delete CEP state from Redis", "key", key, "error", err)
+		logger.Error("Failed to delete CEP state from Redis", "key", key, "error", err)
 	}
 	// Delete absence tracking key
 	absKey := CEPAbsenceKeyPrefix + key
@@ -696,7 +696,7 @@ func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64
 
 	serialized, err := serializeState(newState)
 	if err != nil {
-		logger.Warn("Failed to serialize new CEP state", "key", key, "error", err)
+		logger.Error("Failed to serialize new CEP state", "key", key, "error", err)
 		return newState
 	}
 
@@ -729,7 +729,7 @@ func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64
 func (m *CEPStateManager) updateRedisStateAtomic(key string, state *SequenceState, ttlSeconds int) {
 	serialized, err := serializeState(state)
 	if err != nil {
-		logger.Warn("Failed to serialize CEP state for atomic update", "key", key, "error", err)
+		logger.Error("Failed to serialize CEP state for atomic update", "key", key, "error", err)
 		return
 	}
 

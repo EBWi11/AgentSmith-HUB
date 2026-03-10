@@ -1,6 +1,7 @@
 package main
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/api"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
@@ -10,10 +11,11 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
-	"AgentSmith-HUB/smith_agent"
+	"AgentSmith-HUB/skill"
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -54,6 +56,11 @@ func main() {
 		return
 	}
 
+	// Persist the API listen port in Config so cluster internals (e.g. GetLeaderAPIBaseURL) can use it.
+	if _, port, err := net.SplitHostPort(*apiListen); err == nil && port != "" {
+		common.Config.APIPort = port
+	}
+
 	if *isLeader {
 		// Initialize Redis-based sample manager (stores component data samples)
 		common.InitRedisSampleManager()
@@ -85,7 +92,6 @@ func main() {
 		}
 	}
 	plugin.RegisterLLMCallIfConfigured()
-	smith_agent.InitIfLLMAvailable()
 
 	// Detect local IP & init cluster manager
 	ip, _ := common.GetLocalIP()
@@ -165,6 +171,9 @@ func main() {
 		}
 
 		common.Config.Leader = ip
+		if err := api.WriteLeaderNodeIDToRedis(ip); err != nil {
+			logger.Error("Failed to write leader node ID to Redis", "error", err)
+		}
 		token, err := readToken(true)
 		if err != nil {
 			logger.Error("Failed to read or create leader token", "error", err)
@@ -174,7 +183,7 @@ func main() {
 
 		// Store leader token in Redis for followers to use (no TTL)
 		if err := api.WriteTokenToRedis(token); err != nil {
-			logger.Warn("Failed to store leader token in Redis", "error", err)
+			logger.Error("Failed to store leader token in Redis", "error", err)
 		}
 
 		// Verify Redis connection before loading projects
@@ -450,6 +459,70 @@ func loadLocalComponents() {
 			logger.Error("Failed to load new ruleset", "file", f, "error", err)
 		} else {
 			project.SetRulesetNew(id, string(content))
+		}
+	}
+
+	// skills (load before agents since agents reference skills)
+	for _, f := range traverseComponents(path.Join(root, "skill"), ".yaml") {
+		id := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			common.SetRawConfig("skill", id, string(content))
+		}
+		if s, err := skill.NewSkill(f, "", id); err != nil {
+			logger.Error("Failed to load skill", "file", f, "error", err)
+			errorSkill := &skill.Skill{
+				Id:     id,
+				Path:   f,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				errorSkill.RawConfig = string(content)
+			}
+			project.SetSkill(id, errorSkill)
+		} else {
+			project.SetSkill(id, s)
+		}
+	}
+	// Load skill .new files
+	for _, f := range traverseComponents(path.Join(root, "skill"), ".yaml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new skill", "file", f, "error", err)
+		} else {
+			project.SetSkillNew(id, string(content))
+		}
+	}
+
+	// agents
+	for _, f := range traverseComponents(path.Join(root, "agent"), ".yaml") {
+		id := common.GetFileNameWithoutExt(f)
+		if content, err := os.ReadFile(f); err == nil {
+			common.SetRawConfig("agent", id, string(content))
+		}
+		if a, err := agent.NewAgent(f, "", id); err != nil {
+			logger.Error("Failed to load agent", "file", f, "error", err)
+			errorAgent := &agent.Agent{
+				Id:     id,
+				Path:   f,
+				Status: common.StatusError,
+				Err:    err,
+			}
+			if content, readErr := os.ReadFile(f); readErr == nil {
+				errorAgent.RawConfig = string(content)
+			}
+			project.SetAgent(id, errorAgent)
+		} else {
+			project.SetAgent(id, a)
+		}
+	}
+	// Load agent .new files
+	for _, f := range traverseComponents(path.Join(root, "agent"), ".yaml.new") {
+		id := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".yaml")
+		if content, err := os.ReadFile(f); err != nil {
+			logger.Error("Failed to load new agent", "file", f, "error", err)
+		} else {
+			project.SetAgentNew(id, string(content))
 		}
 	}
 

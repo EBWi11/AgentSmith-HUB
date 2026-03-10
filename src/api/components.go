@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
@@ -10,6 +11,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"AgentSmith-HUB/skill"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -1102,7 +1104,11 @@ func createComponent(componentType string, c echo.Context) error {
 			request.Raw = NewRulesetData
 		case "project":
 			request.Raw = NewProjectData
-		}
+	case "agent":
+		request.Raw = NewAgentData
+	case "skill":
+		request.Raw = NewSkillData
+	}
 	}
 
 	// Write file without lock (file system operations are atomic)
@@ -1122,6 +1128,10 @@ func createComponent(componentType string, c echo.Context) error {
 		project.SetRulesetNew(request.ID, request.Raw)
 	case "project":
 		project.SetProjectNew(request.ID, request.Raw)
+	case "agent":
+		project.SetAgentNew(request.ID, request.Raw)
+	case "skill":
+		project.SetSkillNew(request.ID, request.Raw)
 	}
 
 	// Record component creation operation history (for leader visibility)
@@ -1198,6 +1208,14 @@ func deleteComponent(componentType string, c echo.Context) error {
 		configRoot := common.Config.ConfigRoot
 		componentPath = filepath.Join(configRoot, "plugin", id+".go")
 		tempPath = componentPath + ".new"
+	case "agent":
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "agent", id+".yaml")
+		tempPath = componentPath + ".new"
+	case "skill":
+		configRoot := common.Config.ConfigRoot
+		componentPath = filepath.Join(configRoot, "skill", id+".yaml")
+		tempPath = componentPath + ".new"
 	default:
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "Invalid component type",
@@ -1231,6 +1249,10 @@ func deleteComponent(componentType string, c echo.Context) error {
 		affectedProjects, deletionErr = project.SafeDeleteProject(id)
 	case "plugin":
 		affectedProjects, deletionErr = plugin.SafeDeletePlugin(id)
+	case "agent":
+		affectedProjects, deletionErr = project.SafeDeleteAgentComponent(id)
+	case "skill":
+		affectedProjects, deletionErr = project.SafeDeleteSkillComponent(id)
 	default:
 		deletionErr = fmt.Errorf("unsupported component type: %s", componentType)
 	}
@@ -1268,7 +1290,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 		if componentType == "project" {
 			// Delete project config from Redis
 			if err := common.DeleteProjectConfig(id); err != nil {
-				logger.Warn("Failed to delete project config from Redis", "project", id, "error", err)
+				logger.Error("Failed to delete project config from Redis", "project", id, "error", err)
 			}
 
 			// Publish project deletion instruction
@@ -1316,7 +1338,7 @@ func deleteProject(c echo.Context) error {
 	// API-side persistence: Remove project user intention from Redis when deleted
 	// Use global user intention key (not per-node)
 	if err := common.SetProjectUserIntention(id, false); err != nil {
-		logger.Warn("Failed to remove project user intention from Redis during deletion", "project", id, "error", err)
+		logger.Error("Failed to remove project user intention from Redis during deletion", "project", id, "error", err)
 	}
 
 	return deleteComponent("project", c)
@@ -1490,6 +1512,47 @@ func updateComponent(componentType string, c echo.Context) error {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 			}
 		}
+	case "skill":
+		if s, exists := project.GetSkill(id); exists {
+			originalContent = s.RawConfig
+		} else if s_raw, ok := project.GetSkillNew(id); ok {
+			originalContent = s_raw
+		} else {
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+			if formalExists {
+				if content, err := os.ReadFile(formalPath); err == nil {
+					originalContent = string(content)
+				}
+			}
+			if tempExists {
+				if content, err := os.ReadFile(tempPath); err == nil {
+					originalContent = string(content)
+				}
+			}
+		}
+	case "agent":
+		if a, exists := project.GetAgent(id); exists {
+			originalContent = a.RawConfig
+		} else if a_raw, ok := project.GetAgentNew(id); ok {
+			originalContent = a_raw
+		} else {
+			formalPath, formalExists := GetComponentPath(componentType, id, false)
+			tempPath, tempExists = GetComponentPath(componentType, id, true)
+			if formalExists {
+				originalContent, err = ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read original file: " + err.Error()})
+				}
+			} else if tempExists {
+				originalContent, err = ReadComponent(tempPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read temporary file: " + err.Error()})
+				}
+			} else {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
+			}
+		}
 	default:
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "component config not found"})
 	}
@@ -1530,6 +1593,10 @@ func updateComponent(componentType string, c echo.Context) error {
 		project.SetProjectNew(id, req.Raw)
 	case "plugin":
 		plugin.SetPluginNew(id, req.Raw)
+	case "agent":
+		project.SetAgentNew(id, req.Raw)
+	case "skill":
+		project.SetSkillNew(id, req.Raw)
 	}
 
 	// Record component update operation history (for leader visibility)
@@ -1586,6 +1653,10 @@ func verifyComponent(c echo.Context) error {
 		singularType = "project"
 	case "plugins":
 		singularType = "plugin"
+	case "agents":
+		singularType = "agent"
+	case "skills":
+		singularType = "skill"
 	}
 
 	// If no raw content provided in request, try to read from temporary or formal files
@@ -1694,6 +1765,22 @@ func verifyComponent(c echo.Context) error {
 		})
 	case "plugin":
 		err := plugin.Verify("", req.Raw, id)
+		result := createSimpleResult(err)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
+		})
+	case "agent":
+		err := agent.Verify("", req.Raw)
+		result := createSimpleResult(err)
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"valid":    result.IsValid,
+			"errors":   result.Errors,
+			"warnings": result.Warnings,
+		})
+	case "skill":
+		err := skill.Verify("", req.Raw)
 		result := createSimpleResult(err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":    result.IsValid,
@@ -1854,15 +1941,17 @@ func GetSamplerData(c echo.Context) error {
 		_, componentExists = project.GetOutput(componentId)
 	case "ruleset":
 		_, componentExists = project.GetRuleset(componentId)
+	case "agent":
+		_, componentExists = project.GetAgent(componentId)
 	default:
 		logger.Error("Unsupported component type in GetSamplerData",
 			"componentType", componentType,
 			"normalizedType", normalizedType,
 			"componentId", componentId,
 			"nodeSequence", nodeSequence,
-			"supportedTypes", []string{"input", "output", "ruleset"})
+			"supportedTypes", []string{"input", "output", "ruleset", "agent"})
 		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("Unsupported component type: '%s'. Supported types: input, output, ruleset", componentType),
+			"error": fmt.Sprintf("Unsupported component type: '%s'. Supported types: input, output, ruleset, agent", componentType),
 		})
 	}
 
@@ -1895,6 +1984,11 @@ func GetSamplerData(c echo.Context) error {
 	})
 	project.ForEachOutput(func(outputId string, _ *output.Output) bool {
 		samplerNames = append(samplerNames, "output."+outputId)
+		return true
+	})
+	// Agents use sampler name equal to agent ID (set in agent.Start).
+	project.ForEachAgent(func(agentId string, _ *agent.Agent) bool {
+		samplerNames = append(samplerNames, agentId)
 		return true
 	})
 
@@ -2296,7 +2390,7 @@ func searchComponentsConfig(c echo.Context) error {
 	}
 
 	// Component types to search
-	componentTypes := []string{"input", "output", "ruleset", "project", "plugin"}
+	componentTypes := []string{"input", "output", "ruleset", "project", "plugin", "agent", "skill"}
 	var allResults []SearchResult
 
 	for _, componentType := range componentTypes {
@@ -2347,6 +2441,10 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 			componentMap = project.GetAllProjectsNew()
 		case "plugin":
 			componentMap = plugin.PluginsNew
+		case "agent":
+			componentMap = project.GetAllAgentsNew()
+		case "skill":
+			componentMap = project.GetAllSkillsNew()
 		}
 	} else {
 		// For formal files, we need to read from the actual component instances
@@ -2377,12 +2475,21 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 				if comp.Type == plugin.YAEGI_PLUGIN {
 					componentMap[comp.Name] = string(comp.Payload)
 				} else if comp.Type == plugin.LOCAL_PLUGIN {
-					// Try to read local plugin source
 					if source, err := readLocalPluginSource(comp.Name); err == nil {
 						componentMap[comp.Name] = source
 					}
 				}
 			}
+		case "agent":
+			project.ForEachAgent(func(id string, comp *agent.Agent) bool {
+				componentMap[comp.Id] = comp.RawConfig
+				return true
+			})
+		case "skill":
+			project.ForEachSkill(func(id string, comp *skill.Skill) bool {
+				componentMap[comp.Id] = comp.RawConfig
+				return true
+			})
 		}
 	}
 
@@ -2586,6 +2693,16 @@ func addRulesetRule(c echo.Context) error {
 	// Ensure the rule contains an <append field="desc"> element with the rule's descriptive name
 	processedRuleRaw := addDescAppendToRule(request.RuleRaw, ruleName)
 
+	// Check if the same rule (normalized content) already exists in current/pending ruleset
+	if pendingRuleDuplicate(currentRawConfig, processedRuleRaw) {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"message":  "Rule already present in current ruleset (or pending); no change made",
+			"rule_id":  ruleId,
+			"status":   "already_added",
+			"note":     "A rule with the same normalized content already exists. Apply pending changes if needed.",
+		})
+	}
+
 	// Create a temporary ruleset with the new (possibly augmented) rule to do complete validation
 	updatedXML, err := addRuleToXML(currentRawConfig, processedRuleRaw)
 	if err != nil {
@@ -2698,6 +2815,139 @@ func removeRuleFromXML(xmlContent, ruleId string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
+}
+
+// thresholdFingerprint returns an order-insensitive string fingerprint for a single Threshold node.
+func thresholdFingerprint(t rules_engine.Threshold) string {
+	// GroupByList keys represent the group-by fields; sort for order-insensitivity.
+	groupByKeys := make([]string, 0, len(t.GroupByList))
+	for k := range t.GroupByList {
+		groupByKeys = append(groupByKeys, k)
+	}
+	sort.Strings(groupByKeys)
+	return fmt.Sprintf("id=%s;groupby=%s;range=%s;count_type=%s;count_field=%s;value=%d;local_cache=%v",
+		strings.TrimSpace(t.ID),
+		strings.Join(groupByKeys, ","),
+		strings.TrimSpace(t.Range),
+		strings.TrimSpace(t.CountType),
+		strings.TrimSpace(t.CountField),
+		t.Value,
+		t.LocalCache,
+	)
+}
+
+// simpleRuleFingerprintFromRule builds a coarse, order-insensitive fingerprint for a rule's basic logic.
+// 覆盖 checklist（含 threshold 节点）和 standalone check，忽略 ConditionAST、CEP 复杂结构等，用于已存在检测的近似判断。
+// 如果两条 rule 的指纹相同，可以认为逻辑等价，适合作为已经添加过了的判断依据。
+func simpleRuleFingerprintFromRule(rule *rules_engine.Rule) string {
+	if rule == nil || rule.Queue == nil {
+		return ""
+	}
+
+	var parts []string
+
+	for _, op := range *rule.Queue {
+		switch op.Type {
+		case rules_engine.T_CheckList:
+			cl, ok := rule.ChecklistMap[op.ID]
+			if !ok {
+				continue
+			}
+			// Checklist: condition 字符串 + 无序的 check 集合 + 无序的 threshold 集合
+			segment := []string{"CL", "cond=" + strings.TrimSpace(cl.Condition)}
+
+			// Check nodes 指纹（忽略顺序）
+			if len(cl.CheckNodes) > 0 {
+				checkParts := make([]string, 0, len(cl.CheckNodes))
+				for _, cn := range cl.CheckNodes {
+					checkParts = append(checkParts, fmt.Sprintf(
+						"id=%s;type=%s;field=%s;logic=%s;delimiter=%s;value=%s",
+						strings.TrimSpace(cn.ID),
+						strings.TrimSpace(cn.Type),
+						strings.TrimSpace(cn.Field),
+						strings.TrimSpace(cn.Logic),
+						strings.TrimSpace(cn.Delimiter),
+						strings.TrimSpace(cn.Value),
+					))
+				}
+				sort.Strings(checkParts)
+				segment = append(segment, "checks="+strings.Join(checkParts, "|"))
+			}
+
+			// Threshold nodes 指纹（忽略顺序）
+			if len(cl.ThresholdNodes) > 0 {
+				threshParts := make([]string, 0, len(cl.ThresholdNodes))
+				for _, th := range cl.ThresholdNodes {
+					threshParts = append(threshParts, thresholdFingerprint(th))
+				}
+				sort.Strings(threshParts)
+				segment = append(segment, "thresholds="+strings.Join(threshParts, "|"))
+			}
+
+			parts = append(parts, strings.Join(segment, ";"))
+
+		case rules_engine.T_Check:
+			// Standalone check：保留关键字段
+			cn, ok := rule.CheckMap[op.ID]
+			if !ok {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf(
+				"C;id=%s;type=%s;field=%s;logic=%s;delimiter=%s;value=%s",
+				strings.TrimSpace(cn.ID),
+				strings.TrimSpace(cn.Type),
+				strings.TrimSpace(cn.Field),
+				strings.TrimSpace(cn.Logic),
+				strings.TrimSpace(cn.Delimiter),
+				strings.TrimSpace(cn.Value),
+			))
+
+		default:
+			// 其它算子暂时只记录类型，避免把结构明显不同的 rule 误判成一样
+			parts = append(parts, fmt.Sprintf("OP[%d]", op.Type))
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "||")
+}
+
+// simpleRuleFingerprintFromXML 解析单条 rule XML 并计算指纹。
+// 忽略 ConditionAST，仅基于结构和字段内容。
+func simpleRuleFingerprintFromXML(ruleXML string) (string, error) {
+	// 包一层 root 复用 ParseRuleset
+	tempXML := fmt.Sprintf("<root>\n%s\n</root>", ruleXML)
+	rs, err := rules_engine.ParseRuleset([]byte(tempXML))
+	if err != nil {
+		return "", err
+	}
+	if rs == nil || len(rs.Rules) != 1 {
+		return "", fmt.Errorf("expected exactly one rule, got %d", len(rs.Rules))
+	}
+	return simpleRuleFingerprintFromRule(&rs.Rules[0]), nil
+}
+
+// pendingRuleDuplicate 使用 rules_engine 解析后的结构来做近似"逻辑等价"判断（忽略 ConditionAST）。
+func pendingRuleDuplicate(currentXML, newRuleRaw string) bool {
+	newFP, err := simpleRuleFingerprintFromXML(newRuleRaw)
+	if err != nil || newFP == "" {
+		return false
+	}
+
+	// 解析当前（含 pending）的完整 ruleset
+	rs, err := rules_engine.ParseRuleset([]byte(currentXML))
+	if err != nil || rs == nil || len(rs.Rules) == 0 {
+		return false
+	}
+
+	for i := range rs.Rules {
+		if simpleRuleFingerprintFromRule(&rs.Rules[i]) == newFP {
+			return true
+		}
+	}
+	return false
 }
 
 // ruleExistsInXML checks if a rule with the specified ID exists in the XML

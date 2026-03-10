@@ -110,7 +110,7 @@ func initLoggerWithRedisAndNodeID(nodeID string, redisWriter func(entry RedisErr
 				logger := slog.New(handler)
 				slog.SetDefault(logger)
 				l = logger // Update global logger variable
-				logger.Warn("Failed to create any log directory, logging to stderr", "local_dir_error", err.Error())
+				logger.Error("Failed to create any log directory, logging to stderr", "local_dir_error", err.Error())
 				return logger
 			}
 		}

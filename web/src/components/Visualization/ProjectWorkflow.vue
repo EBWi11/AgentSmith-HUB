@@ -13,7 +13,10 @@
       @node-context-menu="onNodeContextMenu"
     >
       <template #node-custom="nodeProps">
-        <div @click="() => handleNodeClick(nodeProps)" @contextmenu.prevent="(event) => handleNodeContextMenu(event, nodeProps)">
+        <div @click="() => handleNodeClick(nodeProps)" @contextmenu.prevent="(event) => handleNodeContextMenu(event, nodeProps)"
+             @mouseenter="(e) => showAgentTooltip(e, nodeProps.data)"
+             @mouseleave="hideAgentTooltip"
+             @mousemove="moveAgentTooltip">
           <CustomNode 
             :node-type="nodeProps.data.nodeType" 
             :node-name="nodeProps.data.nodeName"
@@ -94,6 +97,12 @@
         </div>
       </div>
     </div>
+
+    <!-- Agent system_prompt tooltip -->
+    <div v-if="agentTooltip.visible" class="agent-tooltip" :style="{ top: agentTooltip.y + 'px', left: agentTooltip.x + 'px' }">
+      <div class="agent-tooltip-header">System Prompt</div>
+      <div class="agent-tooltip-body">{{ agentTooltip.content }}</div>
+    </div>
   </div>
 </template>
 
@@ -136,6 +145,10 @@ const messageRefreshInterval = ref(null);
 
 // Component sequences data
 const componentSequences = ref({});
+
+// Agent tooltip
+const agentSystemPrompts = ref({});
+const agentTooltip = ref({ visible: false, content: '', x: 0, y: 0 });
 
 // Right-click menu related
 const showContextMenu = ref(false);
@@ -192,6 +205,15 @@ function handleNodeClick(nodeProps) {
       break;
     case 'ruleset':
       routePath = `/app/rulesets/${id}`;
+      break;
+    case 'agent':
+      routePath = `/app/agents/${id}`;
+      break;
+    case 'skill':
+      routePath = `/app/skills/${id}`;
+      break;
+    case 'plugin':
+      routePath = `/app/plugins/${id}`;
       break;
     default:
       console.warn('Unsupported node type:', type);
@@ -408,6 +430,50 @@ function closeSampleModal() {
   sampleDataRaw.value = {};
 }
 
+// Fetch system_prompt for all AGENT nodes
+async function fetchAgentSystemPrompts() {
+  const agentNodes = nodes.value.filter(n => n.data.nodeType === 'AGENT');
+  if (agentNodes.length === 0) return;
+
+  const promises = agentNodes.map(async (node) => {
+    const id = node.data.componentId;
+    if (agentSystemPrompts.value[id] !== undefined) return;
+    try {
+      const resp = await hubApi.getAgent(id);
+      const raw = resp?.raw || resp;
+      if (typeof raw === 'string') {
+        const doc = yaml.load(raw);
+        agentSystemPrompts.value[id] = doc?.system_prompt || '';
+      }
+    } catch (e) {
+      agentSystemPrompts.value[id] = '';
+    }
+  });
+  await Promise.all(promises);
+}
+
+function showAgentTooltip(event, nodeData) {
+  if (nodeData.nodeType !== 'AGENT') return;
+  const prompt = agentSystemPrompts.value[nodeData.componentId];
+  if (!prompt) return;
+  agentTooltip.value = {
+    visible: true,
+    content: prompt,
+    x: event.clientX + 12,
+    y: event.clientY + 12
+  };
+}
+
+function hideAgentTooltip() {
+  agentTooltip.value.visible = false;
+}
+
+function moveAgentTooltip(event) {
+  if (!agentTooltip.value.visible) return;
+  agentTooltip.value.x = event.clientX + 12;
+  agentTooltip.value.y = event.clientY + 12;
+}
+
 const parseAndLayoutWorkflow = (rawProjectContent) => {
   if (!rawProjectContent) {
     nodes.value = [];
@@ -494,6 +560,8 @@ const parseAndLayoutWorkflow = (rawProjectContent) => {
       // Set basic project node sequences for components even without message data
       setBasicProjectNodeSequences();
     }
+
+    fetchAgentSystemPrompts();
 
   } catch (e) {
     console.error('Error parsing workflow:', e);
@@ -703,5 +771,38 @@ function stopMessageRefresh() {
 .vue-flow__controls .vue-flow__controls-button {
   display: inline-block !important;
   margin-right: 5px !important;
+}
+
+.agent-tooltip {
+  position: fixed;
+  z-index: 9999;
+  max-width: 420px;
+  max-height: 320px;
+  background: #1e293b;
+  color: #f1f5f9;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  pointer-events: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-tooltip-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  border-bottom: 1px solid #334155;
+  flex-shrink: 0;
+}
+
+.agent-tooltip-body {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
 }
 </style> 

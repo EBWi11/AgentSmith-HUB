@@ -54,7 +54,8 @@
       </div>
       <!-- Navigation -->
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <div v-for="(section, type) in sections" :key="type" class="mb-4">
+        <div v-for="(section, type) in sections" :key="type" class="mb-4"
+             v-show="!llmOnlySections.has(type) || llmAvailable">
         <!-- Regular sections -->
         <div>
           <div class="flex items-center justify-between mb-1.5">
@@ -864,9 +865,19 @@
                         </svg>
                         View Sample Data
                       </a>
+
+                      <!-- View Sample Data for agents (only for saved components) -->
+                      <a v-if="type === 'agents' && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openSampleDataModal(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        View Sample Data
+                      </a>
                       
-                      <!-- 添加查看使用情况选项，仅对已保存的input、output和ruleset类型显示 -->
-                      <a v-if="(type === 'inputs' || type === 'outputs' || type === 'rulesets') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                      <!-- View Usage option for inputs, outputs, rulesets, agents, and skills (only for saved components) -->
+                      <a v-if="(type === 'inputs' || type === 'outputs' || type === 'rulesets' || type === 'agents' || type === 'skills') && !item.hasTemp" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openUsageModal(type, item)">
                         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -1870,6 +1881,9 @@ const router = useRouter()
 // Data cache store
 const dataCache = useDataCacheStore()
 
+const llmAvailable = computed(() => dataCache.llmAvailable)
+const llmOnlySections = new Set(['agents', 'skills'])
+
 // Props
 const props = defineProps({
   selected: Object,
@@ -1900,6 +1914,8 @@ const loading = reactive({
   outputs: false,
   rulesets: false,
   plugins: false,
+  skills: false,
+  agents: false,
   projects: false
 })
 
@@ -1908,6 +1924,8 @@ const error = reactive({
   outputs: null,
   rulesets: null,
   plugins: null,
+  skills: null,
+  agents: null,
   projects: null
 })
 
@@ -1916,6 +1934,8 @@ const items = reactive({
   outputs: [],
   rulesets: [],
   plugins: [],
+  skills: [],
+  agents: [],
   projects: []
 })
 
@@ -1924,6 +1944,8 @@ const collapsed = reactive({
   outputs: true,
   rulesets: true,
   plugins: true,
+  skills: true,
+  agents: true,
   projects: true,
   settings: true,
   builtinPlugins: true // New state for built-in plugins submenu
@@ -1945,6 +1967,14 @@ const sections = reactive({
   plugins: { 
     title: 'Plugin', 
     icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>' 
+  },
+  skills: {
+    title: 'Skill',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/></svg>'
+  },
+  agents: {
+    title: 'Agent',
+    icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"/></svg>'
   },
   projects: { 
     title: 'Project', 
@@ -2211,8 +2241,9 @@ function closeActiveModal() {
 
 // Lifecycle hooks
 onMounted(async () => {
+  await dataCache.fetchFeatures()
   await fetchAllItems()
-  
+
   // Start cluster consistency checking
   await loadClusterConsistencyData()
   
@@ -2245,8 +2276,9 @@ onMounted(async () => {
     console.log(`[Sidebar] Cache cleared: ${reason}, refreshing sidebar data`);
     
     // Refresh all visible component types
-    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects'];
+    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects'];
     componentTypes.forEach(type => {
+      if (llmOnlySections.has(type) && !llmAvailable.value) return
       if (!collapsed[type]) {
         if (type === 'projects') {
           refreshProjectStatus();
@@ -2479,7 +2511,8 @@ function isCheckNodeType(item) {
 }
 
 async function fetchAllItems() {
-  const types = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+  const allTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects']
+  const types = allTypes.filter(t => !llmOnlySections.has(t) || llmAvailable.value)
   await Promise.all(types.map(type => fetchItems(type)))
 }
 
@@ -2812,6 +2845,12 @@ async function confirmAddName() {
       case 'plugins':
         await hubApi.createPlugin(addName.value, raw)
         break
+      case 'agents':
+        await hubApi.createAgent(addName.value, raw)
+        break
+      case 'skills':
+        await hubApi.createSkill(addName.value, raw)
+        break
       default:
         throw new Error('Unsupported type')
     }
@@ -2897,6 +2936,8 @@ async function confirmDelete() {
     else if (type === 'rulesets') await hubApi.deleteRuleset(item.id)
     else if (type === 'projects') await hubApi.deleteProject(item.id)
     else if (type === 'plugins') await hubApi.deletePlugin(item.id)
+    else if (type === 'agents') await hubApi.deleteAgent(item.id)
+    else if (type === 'skills') await hubApi.deleteSkill(item.id)
     
     // Refresh the list - for project deletion, we need to rebuild the list structure
     if (type === 'projects') {
@@ -3210,10 +3251,11 @@ function getArgumentTypeHint() {
   const refreshSidebar = async () => {
     try {
       // Refresh expanded component types (including project status)
-      const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'projects']
+      const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects']
       const promises = []
       
       componentTypes.forEach(type => {
+        if (llmOnlySections.has(type) && !llmAvailable.value) return
         if (!collapsed[type]) {
           if (type === 'projects') {
             promises.push(refreshProjectStatus())

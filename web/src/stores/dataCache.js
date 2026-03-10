@@ -16,6 +16,8 @@ export const useDataCacheStore = defineStore('dataCache', {
       outputs: { data: [], timestamp: 0, loading: false },
       rulesets: { data: [], timestamp: 0, loading: false },
       plugins: { data: [], timestamp: 0, loading: false },
+      skills: { data: [], timestamp: 0, loading: false },
+      agents: { data: [], timestamp: 0, loading: false },
       projects: { data: [], timestamp: 0, loading: false }
     },
     
@@ -59,6 +61,8 @@ export const useDataCacheStore = defineStore('dataCache', {
         outputs: true,
         rulesets: true,
         plugins: true,
+        agents: true,
+        skills: true,
         projects: true,
         settings: true,
         builtinPlugins: true
@@ -103,6 +107,13 @@ export const useDataCacheStore = defineStore('dataCache', {
       loading: false
     },
     
+    // Feature flags (e.g. LLM availability)
+    features: {
+      data: { llm_available: false },
+      timestamp: 0,
+      loading: false
+    },
+
     // Event cleanup functions
     _eventCleanupFunctions: []
   }),
@@ -125,6 +136,10 @@ export const useDataCacheStore = defineStore('dataCache', {
       const cache = state.components[type]
       if (!cache) return true
       return Date.now() - cache.timestamp > ttl
+    },
+
+    llmAvailable: (state) => {
+      return state.features.data?.llm_available === true
     }
   },
   
@@ -469,6 +484,15 @@ export const useDataCacheStore = defineStore('dataCache', {
       )
     },
 
+    async fetchFeatures(forceRefresh = false) {
+      return this.fetchWithCache(
+        'features',
+        () => hubApi.getFeatures(),
+        300000, // 5min TTL — rarely changes at runtime
+        forceRefresh
+      )
+    },
+
     // Get cluster project states (leader only)
     async fetchClusterProjectStates(forceRefresh = false) {
       return this.fetchWithCache(
@@ -622,6 +646,12 @@ export const useDataCacheStore = defineStore('dataCache', {
               break
             case 'plugins':
               data = await hubApi.getPlugin(id)
+              break
+            case 'agents':
+              data = await hubApi.getAgent(id)
+              break
+            case 'skills':
+              data = await hubApi.getSkill(id)
               break
             default:
               throw new Error(`Unsupported component type: ${type}`)
@@ -974,6 +1004,8 @@ export const useDataCacheStore = defineStore('dataCache', {
         outputs: true,
         rulesets: true,
         plugins: true,
+        agents: true,
+        skills: true,
         projects: true,
         settings: true,
         builtinPlugins: true

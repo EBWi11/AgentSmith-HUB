@@ -219,6 +219,8 @@ elasticsearch:
     - "http://localhost:9200"
     - "https://localhost:9201"
   index: "security-events-{YYYY.MM.DD}"  # Supports time patterns
+  # Elasticsearch server version: v7, v8, v9 (optional, default: auto-detect → fallback v8)
+  # version: "v9"
   batch_size: 1000  # Batch write size
   flush_dur: "5s"   # Flush interval
   # Authentication configuration (optional)
@@ -231,6 +233,11 @@ elasticsearch:
     # Or use Bearer Token
     # token: "your-bearer-token"
 ```
+
+**Elasticsearch version selection (v7/v8/v9):**
+- If `version` is omitted, AgentSmith HUB will try to auto-detect the cluster major version from the root endpoint and choose the matching client (v7/v8/v9).
+- If detection fails (e.g., behind a proxy), it falls back to the v8 client.
+- You can set `version: "v7" | "v8" | "v9"` explicitly when you want strict control (mixed environments, compatibility constraints, etc.).
 
 **Supported Time Patterns for Index Names:**
 - `{YYYY}` - Full year (e.g., 2024)
@@ -329,7 +336,7 @@ content: |
 **Basic Rules**:
 - Use `->` arrows to indicate data flow direction
 - Component reference format: `type.component_name`
-- Supported types: `INPUT`, `RULESET`, `OUTPUT`
+- Supported types: `INPUT`, `RULESET`, `AGENT`, `OUTPUT`
 - One data flow definition per line
 - Support comments (starting with `#`)
 
@@ -358,6 +365,215 @@ content: |
   RULESET.behavior_analysis -> OUTPUT.debug_print
 ```
 
+### 1.4 AGENT Syntax Description
+
+AGENT is an LLM-powered processing component in the data pipeline. Each message is processed **one at a time**: the agent sends the event to the LLM (with optional tools/skills), parses the LLM output, merges it into the event under a single `llm` map keyed by agent id, and forwards the result downstream. Agent features (sidebar, dashboard, tests) are only available when the HUB has LLM API configured.
+
+#### Configuration
+
+```yaml
+model: gpt-4o-mini                # LLM model name (OpenAI-compatible)
+temperature: 0.1                   # Sampling temperature
+max_tokens: 256                    # Max tokens per LLM response (keep small if output is only a few fields)
+
+system_prompt: |                   # System prompt sent to the LLM
+  You are a security analyst. Output ONLY a JSON object with your analysis fields (e.g. llm_confidence, llm_analysis).
+  Those fields will be merged into the original event automatically.
+
+skills: []                         # List of skill component IDs to attach
+tools: []                          # Plugin tools: "all" or list of names; use [] to avoid sending many tool defs
+
+max_rounds: 1                      # Max ReAct tool-call rounds per message (default: 5)
+timeout: 30s                       # Per-message processing timeout (e.g. 30s, 1m)
+```
+
+#### Field Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `model` | No | LLM model identifier. Default depends on your LLM provider config. |
+| `temperature` | No | Sampling temperature. Default `0.3`. |
+| `max_tokens` | No | Maximum tokens in LLM **output**. Default `4096`. |
+| `system_prompt` | **Yes** | System instruction for the LLM. Prefer prompts that ask for a small JSON (e.g. 2–3 fields) so the agent merges into the event without re-emitting the whole payload. |
+| `skills` | No | List of skill IDs. Skills provide tools/knowledge to the agent. |
+| `tools` | No | `"all"` exposes all plugins as tools; `[]` or a list of names to limit. Use `[]` when the agent does not need tools to reduce latency. |
+| `max_rounds` | No | Max ReAct rounds (tool-call loops) per message. Default `5`. |
+| `timeout` | No | Duration string. Aborts the LLM call if processing exceeds this. Default `30s`. |
+
+#### How It Works
+
+1. Each event is processed **independently** (no batching).
+2. The agent sends the event as JSON to the LLM with `system_prompt` and (if configured) tool definitions from skills and plugins.
+3. The LLM may respond with a JSON object or invoke tools in a **ReAct loop**, up to `max_rounds`.
+4. The LLM’s JSON output is merged into the event under **`msg["llm"][agentId]`**, so multiple agents in the same flow do not overwrite each other. The framework also adds `agent` (agent id) and `processing_time_ms` (milliseconds) into that same map.
+5. If the LLM fails or times out, the original event is passed through unchanged.
+
+#### LLM Result Shape
+
+All LLM-derived data for an agent is stored in a single map per agent:
+
+- **Top-level**: `msg["llm"]` is a map whose keys are **agent ids** and values are that agent’s result map.
+- **Per-agent map** (e.g. `msg["llm"]["alert_reviewer"]`) contains:
+  - Fields from the LLM (e.g. `llm_confidence`, `llm_analysis`).
+  - `agent`: the agent id that produced this result.
+  - `processing_time_ms`: processing time in milliseconds.
+  - Optional control fields (set by the LLM output):
+    - `_no_forward`: boolean. When `true`, this message is **not** forwarded to any downstream components (it is only consumed inside this agent).
+    - `_no_oridata`: boolean. When `true`, downstream components only see the merged `llm` block; original event fields are stripped.
+
+Example with one agent:
+
+```json
+"llm": {
+  "alert_reviewer": {
+    "llm_confidence": 0.15,
+    "llm_analysis": "Classic false positive: CI script, no egress.",
+    "agent": "alert_reviewer",
+    "processing_time_ms": 3245.6
+  }
+}
+```
+
+With multiple agents in the pipeline, each gets its own key under `msg["llm"]`, so there is no conflict.
+
+#### Using in a Project
+
+Reference agents in project content like other components:
+
+```yaml
+content: |
+  INPUT.kafka_alerts -> AGENT.alert_reviewer
+  AGENT.alert_reviewer -> OUTPUT.enriched_alerts
+```
+
+Chaining with rulesets:
+
+```yaml
+content: |
+  INPUT.kafka -> RULESET.prefilter
+  RULESET.prefilter -> AGENT.analyzer
+  AGENT.analyzer -> RULESET.post_process
+  RULESET.post_process -> OUTPUT.elasticsearch
+```
+
+#### Dashboard and Statistics
+
+- **Dashboard** (when LLM is configured): Agent overview shows total/running/stopped, **today’s call count** (今日调用次数), and **today’s average latency** (今日平均延迟), both as aggregates and per-agent.
+- **Daily stats**: Stored per agent for the current day only (call count and latency); no persistence across days.
+
+#### Testing
+
+Agents support the same test flow as rulesets: open the agent component, use the test button or **Cmd+D**, provide input JSON, and run. The test runs a temporary agent and returns the full event (original + `llm` block) so you can verify the merged result.
+
+#### Example: Alert Review Agent
+
+```yaml
+model: gpt-4o-mini
+temperature: 0.1
+max_tokens: 256
+
+system_prompt: |
+  You are a senior SOC analyst. Analyze the given security alert and output ONLY a JSON object with exactly 2 fields:
+  {"llm_confidence": <float 0-1>, "llm_analysis": "<brief reason>"}
+  Scoring: 0-0.2 false positive, 0.2-0.5 likely FP, 0.5-0.7 uncertain, 0.7-1 likely/true positive.
+  Output ONLY the 2-field JSON, nothing else.
+
+skills: []
+tools: []
+max_rounds: 1
+timeout: 30s
+```
+
+### 1.5 SKILL Syntax Description
+
+SKILL is a reusable capability module that agents can reference. Skills provide tools and knowledge to the LLM through a **progressive disclosure** pattern — the LLM sees tool descriptions upfront but only fetches full content on demand.
+
+Skill implementation is inferred from config: set **either** `builtin_ref` **or** `content` (mutually exclusive). All skills are defined by external YAML config.
+
+#### Knowledge-style Skill (content)
+
+```yaml
+description: |
+  Brief description of what this skill provides.
+  The LLM sees this in the tool description.
+
+content: |
+  The full reference content returned when the LLM calls get_reference.
+  Can be arbitrarily long — it is NOT included in the initial prompt.
+  Only loaded when the LLM explicitly requests it.
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | **Yes** | Short description shown to the LLM as the tool description. |
+| `content` | **Yes** | Full knowledge content returned on demand via `get_reference`. |
+
+**How it works:** This skill registers a single tool `get_reference` with the description field as its tool description. When the agent's LLM decides it needs this knowledge, it calls the tool and receives the full `content`. This keeps the initial context lean while making deep knowledge available on demand.
+
+#### Builtin-ref Skill (Go implementation)
+
+```yaml
+builtin_ref: hub_ruleset_editor    # Reference to a Go-implemented skill
+
+description: |
+  View and edit AgentSmith-HUB rulesets.
+
+config:                             # Optional config passed to the builtin
+  read_only: false
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `builtin_ref` | **Yes** | Name of the built-in Go implementation. |
+| `description` | No | Human-readable description. |
+| `config` | No | Key-value config passed to the builtin factory. |
+
+#### Available Builtin Skills
+
+| builtin_ref | Functions | Description |
+|-------------|-----------|-------------|
+| `hub_ruleset_editor` | `list_rulesets`, `read_ruleset`, `verify_ruleset`, `write_ruleset` | Read, verify, and edit HUB rulesets. Write creates pending changes for human review. Set `config.read_only: true` to disable writes. |
+
+#### Example: Knowledge-style Skill for Ruleset Authoring
+
+```yaml
+description: |
+  AgentSmith-HUB Ruleset authoring expert. Provides complete knowledge
+  of HUB rules engine syntax, semantics, and best practices.
+
+content: |
+  You are an AgentSmith-HUB Ruleset Expert...
+  ## 1. Ruleset Structure
+  ...
+  (full reference content here)
+```
+
+#### Example: Agent with Skills
+
+```yaml
+model: gpt-4o
+temperature: 0.2
+max_tokens: 4096
+
+system_prompt: |
+  You are a security rules engineer for AgentSmith-HUB.
+  When asked to create or modify detection rules, use your skills
+  to reference the rules engine syntax and interact with rulesets.
+
+skills:
+  - hub_ruleset_expert     # knowledge skill: rules engine reference
+  - hub_ruleset_editor     # builtin skill: read/write rulesets
+
+tools: all
+
+batch:
+  size: 1
+  timeout: 60s
+  max_rounds: 10
+```
+
+In this setup, the agent has access to both knowledge (rules engine reference docs) and action (ruleset CRUD). The LLM can look up syntax via `get_reference`, list/read existing rulesets, verify XML, and write changes — all within the ReAct loop.
+
 ## 🔧 Part 2: Basic Operating Instructions
 
 ### 2.1 Temporary and Official Files
@@ -380,7 +596,7 @@ The HUB will automatically restart the affected projects after the changes are c
 
 ### 2.3 Flexible Use of Tests and Viewing Sample Data
 
-Output, Ruleset, Plugin, and Project all support testing. For Project testing, you can select Input data input to display the data that needs to be output through Output (it will not really flow into Output component), and Cmd+D is the test shortcut key to quickly wake up the test.
+Output, Ruleset, Plugin, Agent, and Project all support testing. For Project testing, you can select Input data input to display the data that needs to be output through Output (it will not really flow into Output component), and Cmd+D is the test shortcut key to quickly wake up the test.
 ![PluginTest.png](png/PluginTest.png)
 ![RulesetTest.png](png/RulesetTest.png)
 ![ProjectTest.png](png/ProjectTest.png)
