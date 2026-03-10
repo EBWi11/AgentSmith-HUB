@@ -490,6 +490,16 @@ func (p *ElasticsearchProducer) sendBatch(batch []map[string]interface{}) {
 			continue
 		}
 
+		// Bulk returns HTTP 200 even when item-level errors occur; check body
+		if res != nil {
+			bodyStr := res.String()
+			var bulkResp struct {
+				Errors bool `json:"errors"`
+			}
+			if json.Unmarshal([]byte(bodyStr), &bulkResp) == nil && bulkResp.Errors {
+				logger.Error("Elasticsearch bulk reported item errors (HTTP 200)", "response", bodyStr)
+			}
+		}
 		// Success
 		return
 	}
