@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+// ToolCallTraceStep represents one step in the agent's tool-call process (for test UI).
+type ToolCallTraceStep struct {
+	Round      int                `json:"round"`
+	Role       string             `json:"role"` // "assistant" | "tool"
+	Content    string             `json:"content,omitempty"`
+	ToolCalls  []ToolCallTraceItem `json:"tool_calls,omitempty"`
+	ToolCallID string             `json:"tool_call_id,omitempty"`
+	ToolName   string             `json:"tool_name,omitempty"`
+	Arguments  string             `json:"arguments,omitempty"`
+	Result     string             `json:"result,omitempty"`
+}
+
+// ToolCallTraceItem is one tool call in an assistant step.
+type ToolCallTraceItem struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 // Start launches a goroutine for each upstream channel.
 // Each message is treated as an independent event.
 func (a *Agent) Start() error {
@@ -194,6 +213,90 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 	logger.Error("Agent max ReAct rounds exceeded, passing through original message",
 		"agent", a.Id, "max_rounds", a.Config.MaxRounds)
 	return a.attachLlmErrorAndNoForward(msg, "agent max ReAct rounds exceeded")
+}
+
+// ProcessMessageWithTrace runs one message through the agent and returns the result
+// plus a trace of all tool-call steps (assistant tool_calls and tool results).
+// Used by the test API to show the full tool-call process in the UI.
+// If no tool calls occurred, trace is nil or empty.
+func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[string]interface{}, trace []ToolCallTraceStep) {
+	timeout, err := time.ParseDuration(a.Config.Timeout)
+	if err != nil {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	conversation := []Message{
+		{Role: "system", Content: a.Config.SystemPrompt},
+		{Role: "user", Content: formatMessageAsJSON(msg)},
+	}
+	toolDefs := a.buildAllToolDefinitions()
+	trace = make([]ToolCallTraceStep, 0)
+
+	for round := 0; round < a.Config.MaxRounds; round++ {
+		if ctx.Err() != nil {
+			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout)), trace
+		}
+
+		resp, err := callChatWithTools(
+			a.Config.Model, conversation, toolDefs,
+			a.Config.MaxTokens, a.Config.Temperature,
+			a.Config.ReasoningMode, a.Config.ReasoningBudgetTokens, ctx,
+		)
+		if err != nil {
+			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent LLM call failed: %v", err)), trace
+		}
+
+		if len(resp.ToolCalls) > 0 {
+			// Record assistant step with tool_calls
+			items := make([]ToolCallTraceItem, 0, len(resp.ToolCalls))
+			for _, c := range resp.ToolCalls {
+				items = append(items, ToolCallTraceItem{
+					ID:        c.ID,
+					Name:      c.Function.Name,
+					Arguments: c.Function.Arguments,
+				})
+			}
+			trace = append(trace, ToolCallTraceStep{
+				Round:     round + 1,
+				Role:      "assistant",
+				Content:   resp.Content,
+				ToolCalls: items,
+			})
+			conversation = append(conversation, resp.AssistantMessage())
+			for _, call := range resp.ToolCalls {
+				toolResult := a.executeFunctionCall(call)
+				conversation = append(conversation, ToolResultMessage(call.ID, toolResult))
+				trace = append(trace, ToolCallTraceStep{
+					Round:      round + 1,
+					Role:       "tool",
+					ToolCallID: call.ID,
+					ToolName:   call.Function.Name,
+					Arguments:  call.Function.Arguments,
+					Result:     toolResult,
+				})
+			}
+			continue
+		}
+
+		output := parseOutputMessage(resp.Content)
+		if output != nil {
+			llmMap := make(map[string]interface{}, len(output)+2)
+			for k, v := range output {
+				llmMap[k] = v
+			}
+			llmMap["agent"] = a.Id
+			if msg["llm"] == nil {
+				msg["llm"] = make(map[string]interface{})
+			}
+			msg["llm"].(map[string]interface{})[a.Id] = llmMap
+			return msg, trace
+		}
+		return a.attachLlmErrorAndNoForward(msg, "agent LLM response could not be parsed as JSON"), trace
+	}
+
+	return a.attachLlmErrorAndNoForward(msg, "agent max ReAct rounds exceeded"), trace
 }
 
 // attachLlmErrorAndNoForward annotates the message with an llm error block for this agent

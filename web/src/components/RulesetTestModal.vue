@@ -56,6 +56,39 @@
             </div>
             
             <div v-else class="space-y-4">
+              <!-- Agent: full tool-call process (only when present) -->
+              <div v-if="isAgent && toolCallsTrace.length > 0" class="mb-4">
+                <h5 class="text-sm font-medium text-gray-700 mb-2">Tool call process</h5>
+                <div class="space-y-2 border border-gray-200 rounded-lg overflow-hidden bg-white">
+                  <div
+                    v-for="(step, stepIndex) in toolCallsTrace"
+                    :key="stepIndex"
+                    class="border-b border-gray-100 last:border-b-0 p-3 text-left"
+                    :class="step.role === 'assistant' ? 'bg-blue-50/50' : 'bg-green-50/50'"
+                  >
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-xs font-semibold text-gray-500">Round {{ step.round }}</span>
+                      <span class="text-xs font-medium rounded px-1.5 py-0.5"
+                        :class="step.role === 'assistant' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'">
+                        {{ step.role }}
+                      </span>
+                      <span v-if="step.role === 'tool'" class="text-xs text-gray-700">{{ step.tool_name }}</span>
+                    </div>
+                    <template v-if="step.role === 'assistant' && step.tool_calls && step.tool_calls.length">
+                      <div class="text-xs text-gray-600 space-y-1">
+                        <div v-for="(tc, i) in step.tool_calls" :key="i" class="flex flex-wrap gap-x-2 gap-y-0.5">
+                          <span class="font-medium">{{ tc.name }}</span>
+                          <span class="text-gray-500 truncate max-w-md" :title="tc.arguments">{{ tc.arguments }}</span>
+                        </div>
+                      </div>
+                      <p v-if="step.content" class="text-xs text-gray-500 mt-1 truncate max-w-full" :title="step.content">{{ step.content }}</p>
+                    </template>
+                    <template v-else-if="step.role === 'tool'">
+                      <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words mt-1 max-h-24 overflow-y-auto bg-white/60 p-2 rounded border border-gray-100">{{ step.result }}</pre>
+                    </template>
+                  </div>
+                </div>
+              </div>
               <div v-for="(result, index) in testResults" :key="index" class="bg-gray-50 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center space-x-2">
@@ -123,6 +156,7 @@ const dataCache = useDataCacheStore();
 const showModal = ref(false);
 const inputData = ref('');
 const testResults = ref([]);
+const toolCallsTrace = ref([]);
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
@@ -156,6 +190,7 @@ watch(() => props.rulesetId, async (newVal, oldVal) => {
     await loadTestData();
     // Reset test results when ruleset changes
     testResults.value = [];
+    toolCallsTrace.value = [];
     testError.value = null;
     testExecuted.value = false;
   }
@@ -182,6 +217,7 @@ async function runTest() {
   testLoading.value = true;
   testError.value = null;
   testResults.value = [];
+  toolCallsTrace.value = [];
   testExecuted.value = true;
   jsonError.value = null;
   jsonErrorLine.value = null;
@@ -224,8 +260,10 @@ async function runTest() {
 
     if (response.success) {
       testResults.value = response.results || [];
+      toolCallsTrace.value = response.tool_calls_trace || [];
     } else {
       testError.value = response.error || 'Unknown error occurred';
+      toolCallsTrace.value = [];
     }
   } catch (e) {
     testError.value = e.message || `Failed to test ${componentLabel.value.toLowerCase()}`;
@@ -303,6 +341,7 @@ async function loadTestData() {
 async function resetState() {
   // Reset test results and errors
   testResults.value = [];
+  toolCallsTrace.value = [];
   testError.value = null;
   testExecuted.value = false;
   jsonError.value = null;

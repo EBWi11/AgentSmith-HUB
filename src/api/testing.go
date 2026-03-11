@@ -323,63 +323,22 @@ func testAgent(c echo.Context) error {
 		})
 	}
 
-	inputCh := make(chan map[string]interface{}, 10)
-	outputCh := make(chan map[string]interface{}, 10)
+	// Run one message through the agent and capture tool-call trace for the UI.
+	result, toolCallTrace := tempAgent.ProcessMessageWithTrace(req.Data)
 
-	tempAgent.UpStream = map[string]*chan map[string]interface{}{
-		"test": &inputCh,
+	results := []map[string]interface{}{}
+	if result != nil {
+		results = append(results, result)
 	}
-	tempAgent.DownStream = map[string]*chan map[string]interface{}{
-		"test": &outputCh,
-	}
-
-	if err := tempAgent.Start(); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-			"success": false,
-			"error":   "Failed to start agent: " + err.Error(),
-			"results": []interface{}{},
-		})
-	}
-
-	defer func() {
-		if stopErr := tempAgent.Stop(); stopErr != nil {
-			logger.Error("Failed to stop temporary agent", "error", stopErr)
-		}
-	}()
-
-	inputCh <- req.Data
-
-	// Test timeout: at least 60s, or agent timeout + 30s margin (for slow LLM)
-	testTimeout := 60 * time.Second
-	if d, err := time.ParseDuration(tempAgent.Config.Timeout); err == nil && d > 0 {
-		if margin := d + 30*time.Second; margin > testTimeout {
-			testTimeout = margin
-		}
-	}
-	timeout := time.After(testTimeout)
-
-	var results []map[string]interface{}
-	var timedOut bool
-	for {
-		select {
-		case result := <-outputCh:
-			results = append(results, result)
-			goto done
-		case <-timeout:
-			timedOut = true
-			goto done
-		}
-	}
-done:
 
 	response := map[string]interface{}{
 		"success": true,
 		"results": results,
-		"timeout": timedOut,
 	}
 
-	if timedOut {
-		response["warning"] = fmt.Sprintf("Test timed out after %v. The LLM may be slow or unreachable.", testTimeout)
+	// Include full tool-call process when present (for agent test UI).
+	if len(toolCallTrace) > 0 {
+		response["tool_calls_trace"] = toolCallTrace
 	}
 
 	return c.JSON(http.StatusOK, response)
