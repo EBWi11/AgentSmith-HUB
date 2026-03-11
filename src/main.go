@@ -133,6 +133,23 @@ func main() {
 		return common.WriteErrorLogToRedis(commonEntry)
 	})
 
+	// Initialize agent tool-call logger with Redis error log writing capability and correct NodeID
+	logger.InitAgentLoggerWithRedisAndNodeID(ip, func(entry logger.RedisErrorLogEntry) error {
+		commonEntry := common.ErrorLogEntry{
+			Timestamp: entry.Timestamp,
+			Level:     entry.Level,
+			Message:   entry.Message,
+			Source:    entry.Source, // "agent"
+			NodeID:    entry.NodeID,
+			Function:  entry.Function,
+			File:      entry.File,
+			Line:      entry.Line,
+			Error:     entry.Error,
+			Details:   entry.Details,
+		}
+		return common.WriteErrorLogToRedis(commonEntry)
+	})
+
 	// Initialize daily statistics manager (tracks real message counts)
 	common.InitDailyStatsManager()
 

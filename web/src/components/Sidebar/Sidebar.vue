@@ -908,6 +908,15 @@
                         </svg>
                         Test Ruleset
                       </a>
+
+                      <!-- Test Agent -->
+                      <a v-if="type === 'agents'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
+                         @click.prevent.stop="openTestAgent(item)">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Test Agent
+                      </a>
                       
                       <a v-if="type === 'outputs'" href="#" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" 
                          @click.prevent.stop="openTestOutput(item)">
@@ -1988,6 +1997,7 @@ const sections = reactive({
       { type: 'load-local-components', title: 'Load Local Components' },
       { type: 'cluster', title: 'Cluster', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12a7 7 0 1114 0 7 7 0 01-14 0zM12 8v4l3 3"></path></svg>' },
       { type: 'operations-history', title: 'Operations History', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' },
+      { type: 'agent-tools-logs', title: 'Agent Tools Logs', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 11c1.38 0 2.5-1.12 2.5-2.5S13.38 6 12 6 9.5 7.12 9.5 8.5 10.62 11 12 11zm0 2c-2.21 0-4 1.79-4 4v1h8v-1c0-2.21-1.79-4-4-4z"></path></svg>' },
       { type: 'error-logs', title: 'Error Logs', icon: '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>' }
     ]
   }
@@ -2422,7 +2432,9 @@ function filteredItems(type) {
                             type === 'outputs' ? 'output' :
                             type === 'rulesets' ? 'ruleset' :
                             type === 'projects' ? 'project' :
-                            type === 'plugins' ? 'plugin' : ''
+                            type === 'plugins' ? 'plugin' :
+                            type === 'agents' ? 'agent' :
+                            type === 'skills' ? 'skill' : ''
         return result.component_type === componentType
       })
       .map(result => {
@@ -3065,6 +3077,16 @@ function openTestRuleset(item) {
   };
   emit('test-ruleset', payload);
   // Ensure menus are closed
+  closeAllMenus();
+}
+
+// Open test agent modal (reuse ruleset test modal with componentType='agents')
+function openTestAgent(item) {
+  const payload = {
+    type: 'agents',
+    id: item.id || item.name
+  };
+  emit('test-ruleset', payload);
   closeAllMenus();
 }
 

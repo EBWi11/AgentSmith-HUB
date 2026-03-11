@@ -1056,13 +1056,16 @@ export const useDataCacheStore = defineStore('dataCache', {
           }
         }
 
-        // Get error logs count for last hour
+        // Get error logs count for last hour (hub-level errors only)
         let errorCount = 0
         try {
           const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
           const params = {
             start_time: oneHourAgo,
-            limit: '1000'
+            limit: '1000',
+            // Only count hub-level error logs for the badge/red dot.
+            // Agent tool INFO logs should not affect this indicator.
+            source: 'hub'
           }
           
           const errorData = await hubApi.getErrorLogs(params)

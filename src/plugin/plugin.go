@@ -72,6 +72,10 @@ var Plugins = make(map[string]*Plugin)
 var PluginsNew = make(map[string]string)
 var PluginsMu sync.RWMutex
 
+// AgentToolParameters overrides Parameters for plugins used by the agent when the
+// plugin has variadic Eval(args ...interface{}) so the LLM gets named args (e.g. rulesetId, ruleContent).
+var AgentToolParameters = make(map[string][]PluginParameter)
+
 func init() {
 	for name, f := range local_plugin.LocalPluginBoolRes {
 		if _, ok := Plugins[name]; !ok {
@@ -103,6 +107,17 @@ func init() {
 		} else {
 			logger.PluginError("plugin_init error: plugin name conflict, already exists", "plugin", name)
 		}
+	}
+
+	// Agent-facing local plugins use variadic Eval(...interface{}); give them explicit params for the LLM.
+	AgentToolParameters["addRule"] = []PluginParameter{
+		{Name: "rulesetId", Type: "string", Required: true},
+		{Name: "ruleContent", Type: "string", Required: true},
+		{Name: "autoApply", Type: "bool", Required: false},
+	}
+	AgentToolParameters["getConfig"] = []PluginParameter{
+		{Name: "componentType", Type: "string", Required: true},
+		{Name: "id", Type: "string", Required: false},
 	}
 
 	logger.Info("plugin_init", "plugins_count", len(Plugins))

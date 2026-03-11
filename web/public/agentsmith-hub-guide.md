@@ -219,6 +219,8 @@ elasticsearch:
     - "http://localhost:9200"
     - "https://localhost:9201"
   index: "security-events-{YYYY.MM.DD}"  # Supports time patterns
+  # Elasticsearch server version: v7, v8, v9 (optional, default: auto-detect → fallback v8)
+  # version: "v9"
   batch_size: 1000  # Batch write size
   flush_dur: "5s"   # Flush interval
   # Authentication configuration (optional)
@@ -231,6 +233,11 @@ elasticsearch:
     # Or use Bearer Token
     # token: "your-bearer-token"
 ```
+
+**Elasticsearch version selection (v7/v8/v9):**
+- If `version` is omitted, AgentSmith HUB will try to auto-detect the cluster major version from the root endpoint and choose the matching client (v7/v8/v9).
+- If detection fails (e.g., behind a proxy), it falls back to the v8 client.
+- You can set `version: "v7" | "v8" | "v9"` explicitly when you want strict control (mixed environments, compatibility constraints, etc.).
 
 **Supported Time Patterns for Index Names:**
 - `{YYYY}` - Full year (e.g., 2024)

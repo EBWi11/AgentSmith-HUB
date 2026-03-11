@@ -5,6 +5,7 @@ import MainLayout from '../views/MainLayout.vue';
 import Dashboard from '../views/Dashboard.vue';
 import ComponentDetail from '../components/ComponentDetail.vue';
 import ErrorLogs from '../views/ErrorLogs.vue';
+import AgentToolsLogs from '../views/AgentToolsLogs.vue';
 import { hubApi } from '../api/index.js';
 
 const routes = [
@@ -144,6 +145,12 @@ const routes = [
         name: 'ErrorLogs',
         component: ErrorLogs,
         meta: { requiresAuth: true, componentType: 'error-logs' }
+      },
+      {
+        path: 'agent-tools-logs',
+        name: 'AgentToolsLogs',
+        component: AgentToolsLogs,
+        meta: { requiresAuth: true, componentType: 'agent-tools-logs' }
       },
       {
         path: 'tutorial',

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/plugin"
 	"encoding/json"
 	"fmt"
@@ -44,13 +45,20 @@ func buildPluginToolDefinitions(toolsConfig interface{}) []ToolDefinition {
 			continue
 		}
 
-		params := buildParametersSchema(p.Parameters)
+		params := p.Parameters
+		if agentParams := plugin.AgentToolParameters[name]; len(agentParams) > 0 {
+			params = agentParams
+		}
+		desc := fmt.Sprintf("Plugin: %s", name)
+		if d := local_plugin.LocalPluginDesc[name]; d != "" {
+			desc = d
+		}
 		defs = append(defs, ToolDefinition{
 			Type: "function",
 			Function: FunctionDef{
 				Name:        "tool_" + name,
-				Description: fmt.Sprintf("Plugin: %s", name),
-				Parameters:  params,
+				Description: desc,
+				Parameters:  buildParametersSchema(params),
 			},
 		})
 	}
@@ -105,9 +113,14 @@ func executePlugin(name string, args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("plugin not found: %s", name)
 	}
 
+	paramList := p.Parameters
+	if agentParams := plugin.AgentToolParameters[name]; len(agentParams) > 0 {
+		paramList = agentParams
+	}
+
 	// Build function args from the map in parameter order
 	var funcArgs []interface{}
-	for _, param := range p.Parameters {
+	for _, param := range paramList {
 		if val, ok := args[param.Name]; ok {
 			funcArgs = append(funcArgs, val)
 		} else {

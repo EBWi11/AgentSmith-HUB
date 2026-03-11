@@ -1,7 +1,7 @@
 <template>
   <div class="h-full flex flex-col bg-white">
     <div class="flex items-center justify-between p-4 border-b border-gray-200">
-      <h1 class="text-xl font-semibold text-gray-900">Error Logs</h1>
+      <h1 class="text-xl font-semibold text-gray-900">Agent Tools Logs</h1>
       <div class="flex items-center space-x-2">
         <button
           @click="refreshLogs"
@@ -33,17 +33,6 @@
     <!-- Filters -->
     <div class="p-4 border-b border-gray-200 bg-gray-50">
       <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <!-- Source Filter -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Source</label>
-          <select v-model="filters.source" @change="applyFilters" class="filter-select">
-            <option value="all">All Sources</option>
-            <option value="hub">Hub</option>
-            <option value="plugin">Plugin</option>
-            <option value="agent">Agent Tools</option>
-          </select>
-        </div>
-
         <!-- Node Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Node</label>
@@ -54,8 +43,6 @@
             </option>
           </select>
         </div>
-
-
 
         <!-- Time Range Filter -->
         <div>
@@ -71,20 +58,20 @@
           </select>
         </div>
 
-        <!-- Search (fill remaining columns) -->
-        <div class="lg:col-span-2">
+        <!-- Search (agent / project / args / result) -->
+        <div class="lg:col-span-3">
           <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
           <input 
             v-model="filters.keyword" 
             @input="debouncedSearch"
             type="text" 
-            placeholder="Search messages..."
+            placeholder="Search agent, project, args, or result..."
             class="filter-input w-full"
           >
         </div>
       </div>
 
-      <!-- Custom Date Range (shown when custom is selected) -->
+      <!-- Custom Date Range -->
       <div v-if="filters.timeRange === 'custom'" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
@@ -105,14 +92,12 @@
           >
         </div>
       </div>
-
-      <!-- Node statistics section removed per requirement -->
     </div>
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
       <div v-if="loading && !logs.length" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading error logs...</div>
+        <div class="text-gray-500">Loading agent tools logs...</div>
       </div>
       
       <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -120,34 +105,38 @@
       </div>
       
       <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
-        No error logs found
+        No agent tools logs found
       </div>
       
       <div v-else class="space-y-2 p-4">
         <div
           v-for="(log, index) in logs"
-          :key="`${log.node_id}-${log.source}-${log.timestamp}-${index}`"
+          :key="`${log.node_id}-${log.timestamp}-${index}`"
           class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
         >
           <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
                @click="toggleLogDetail(index)">
             <div class="flex items-center space-x-3">
               <div class="flex items-center space-x-2">
-                <!-- Source Icon -->
-                <div class="flex items-center justify-center w-8 h-8 rounded-full" :class="getSourceClass(log.source)">
-                  <span class="text-white text-xs font-medium">
-                    {{ log.source === 'hub' ? 'H' : (log.source === 'plugin' ? 'P' : 'A') }}
-                  </span>
+                <!-- Source Icon (always Agent here) -->
+                <div class="flex items-center justify-center w-8 h-8 rounded-full bg-green-500">
+                  <span class="text-white text-xs font-medium">A</span>
                 </div>
                 
                 <!-- Log Info -->
                 <div>
-                  <h3 class="font-medium text-gray-900">{{ log.message }}</h3>
+                  <h3 class="font-medium text-gray-900">
+                    {{ extractAgentFromContext(log) }} · {{ extractToolNameFromContext(log) }}
+                  </h3>
                   <div class="flex items-center space-x-2 text-sm text-gray-500">
                     <span>{{ formatTimestamp(log.timestamp) }}</span>
                     <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       {{ log.node_id }}
                     </span>
+                    <span v-if="extractProjectFromContext(log)" class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
+                      {{ extractProjectFromContext(log) }}
+                    </span>
+                    <span v-if="log.error" class="text-red-600 truncate max-w-xs" :title="log.error">{{ log.error }}</span>
                   </div>
                 </div>
               </div>
@@ -168,47 +157,39 @@
             </div>
           </div>
           
-          <!-- Log Details (expanded) -->
+          <!-- Log Details -->
           <div v-if="expandedLogs.has(index)" class="p-4 bg-white">
-            <!-- Error Details (if any) -->
-            <div v-if="log.error" class="mb-4">
-              <h4 class="text-sm font-medium text-red-900 mb-2">Error Details</h4>
-              <div class="bg-red-50 border border-red-200 rounded-md p-3">
-                <pre class="text-sm text-red-700 whitespace-pre-wrap break-words">{{ log.error }}</pre>
-              </div>
-            </div>
-
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <!-- Basic Info -->
               <div>
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Log Details</h4>
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Call Details</h4>
                 <dl class="space-y-1 text-sm">
                   <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Source:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ log.source }}</dd>
+                    <dt class="text-gray-500">Agent:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ extractAgentFromContext(log) || '-' }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Level:</dt>
-                    <dd class="col-span-2">
-                      <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getLevelClass(log.level)">
-                        {{ log.level }}
-                      </span>
-                    </dd>
+                    <dt class="text-gray-500">Project Node:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ extractProjectFromContext(log) || '-' }}</dd>
                   </div>
-                  <div v-if="log.node_id" class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Node:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ log.node_id }}</dd>
+                  <div class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Tool:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ extractToolNameFromContext(log) || '-' }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Timestamp:</dt>
                     <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(log.timestamp) }}</dd>
                   </div>
+                  <div v-if="log.error" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Error:</dt>
+                    <dd class="col-span-2 text-red-700 font-medium whitespace-pre-wrap break-words">{{ log.error }}</dd>
+                  </div>
                 </dl>
               </div>
 
-              <!-- Context (if any) -->
-              <div v-if="log.context && log.context !== log.message">
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Context</h4>
+              <!-- Raw Context (includes args/result/duration/etc) -->
+              <div v-if="log.context">
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Raw Context</h4>
                 <div class="bg-gray-50 border border-gray-200 rounded-md p-3">
                   <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.context }}</pre>
                 </div>
@@ -252,247 +233,144 @@ import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/common'
 import { useDataCacheStore } from '../stores/dataCache'
-import axios from 'axios'
 
-// Inject global message service
 const $message = inject('$message')
+const dataCache = useDataCacheStore()
 
-// Reactive state
 const loading = ref(false)
 const error = ref(null)
 const logs = ref([])
-// Node statistics feature removed; keep placeholder for compatibility
-const nodeStats = ref({})
 const totalCount = ref(0)
-const currentPage = ref(1)
-const pageSize = ref(20)
-const availableNodes = ref([])
-const dataCache = useDataCacheStore()
-const clusterInfo = ref({})
-const expandedLogs = ref(new Set())
 
 // Filters
 const filters = reactive({
-  source: 'all',
   nodeId: 'all',
   timeRange: '1h',
-  keyword: '',
   startDate: '',
-  endDate: ''
+  endDate: '',
+  keyword: ''
 })
 
-// Computed properties
-const isClusterMode = computed(() => {
-  return availableNodes.value.length > 1
+const availableNodes = ref([])
+
+// Pagination
+const currentPage = ref(1)
+const pageSize = ref(50)
+const expandedLogs = ref(new Set())
+
+const totalPages = computed(() => {
+  return Math.max(1, Math.ceil(totalCount.value / pageSize.value))
 })
-
-// Error Logs API returns only ERROR/FATAL by default (level=error); no frontend level filter needed.
-const totalPages = computed(() => Math.ceil(totalCount.value / pageSize.value))
-
-// Helper functions
-const formatTimestamp = (timestamp) => {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diff = now - date
-  
-  if (diff < 60000) { // Less than 1 minute
-    return 'just now'
-  } else if (diff < 3600000) { // Less than 1 hour
-    return `${Math.floor(diff / 60000)} minutes ago`
-  } else if (diff < 86400000) { // Less than 1 day
-    return `${Math.floor(diff / 3600000)} hours ago`
-  } else {
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    })
-  }
-}
-
-const formatFullTimestamp = (timestamp) => {
-  return new Date(timestamp).toLocaleString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZoneName: 'short'
-  })
-}
-
-function toLocalISOString(date) {
-  // 生成本地时区的 yyyy-MM-ddTHH:mm 字符串
-  const pad = n => n < 10 ? '0' + n : n
-  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes())
-}
 
 function setDefaultTimeRange() {
-  const now = new Date()
-  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
-  
-  filters.startDate = toLocalISOString(oneHourAgo)
-  filters.endDate = toLocalISOString(now)
+  filters.timeRange = '1h'
+  filters.startDate = ''
+  filters.endDate = ''
 }
 
-function handleTimeRangeChange() {
-  if (filters.timeRange !== 'custom') {
-    const now = new Date()
-    let startTime
-    
-    switch (filters.timeRange) {
-      case '1h':
-        startTime = new Date(now.getTime() - 60 * 60 * 1000)
-        break
-      case '6h':
-        startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
-        break
-      case '12h':
-        startTime = new Date(now.getTime() - 12 * 60 * 60 * 1000)
-        break
-      case '24h':
-        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-        break
-      case '7d':
-        startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        break
-      case '30d':
-        startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        break
-      default:
-        startTime = new Date(now.getTime() - 60 * 60 * 1000)
+function getTimeRangeParams() {
+  if (filters.timeRange === 'custom' && filters.startDate && filters.endDate) {
+    return {
+      start_time: new Date(filters.startDate).toISOString(),
+      end_time: new Date(filters.endDate).toISOString()
     }
-    
-    filters.startDate = toLocalISOString(startTime)
-    filters.endDate = toLocalISOString(now)
   }
-  
-  applyFilters()
+
+  const end = new Date()
+  let start = new Date(end)
+
+  switch (filters.timeRange) {
+    case '1h':
+      start.setHours(end.getHours() - 1)
+      break
+    case '6h':
+      start.setHours(end.getHours() - 6)
+      break
+    case '12h':
+      start.setHours(end.getHours() - 12)
+      break
+    case '24h':
+      start.setDate(end.getDate() - 1)
+      break
+    case '7d':
+      start.setDate(end.getDate() - 7)
+      break
+    case '30d':
+      start.setDate(end.getDate() - 30)
+      break
+    default:
+      start.setHours(end.getHours() - 1)
+  }
+
+  return {
+    start_time: start.toISOString(),
+    end_time: end.toISOString()
+  }
 }
 
-const getTimeRangeParams = () => {
-  const params = {}
-  
-  // 用本地时间字符串拼接ISO格式，带本地时区
-  if (filters.startDate) {
-    const start = new Date(filters.startDate)
-    params.start_time = start.toISOString()
-  }
-  if (filters.endDate) {
-    const end = new Date(filters.endDate)
-    params.end_time = end.toISOString()
-  }
-  
-  return params
-}
-
-const buildApiParams = () => {
+function buildApiParams() {
   const params = {
+    source: 'agent',
+    level: 'all', // Agent Tools Logs need all levels (INFO + ERROR); Error Logs API uses level=error by default
     limit: pageSize.value,
     offset: (currentPage.value - 1) * pageSize.value
   }
 
-  if (filters.source !== 'all') params.source = filters.source
-  if (filters.nodeId !== 'all') params.node_id = filters.nodeId
-  if (filters.keyword) params.keyword = filters.keyword
+  if (filters.nodeId && filters.nodeId !== 'all') {
+    params.node_id = filters.nodeId
+  }
+
+  if (filters.keyword) {
+    params.keyword = filters.keyword
+  }
 
   Object.assign(params, getTimeRangeParams())
-
   return params
 }
 
-// API functions
-const fetchErrorLogs = async () => {
+const fetchLogs = async () => {
   loading.value = true
   error.value = null
 
   try {
     const params = buildApiParams()
-    
-    // Use unified error logs endpoint - always call /error-logs
-    // The backend will handle cluster aggregation automatically
-    const response = await hubApi.getErrorLogs(params)
-    
+    const response = await hubApi.getErrorLogs(params) // reuse unified endpoint
+
     logs.value = response.logs || []
     totalCount.value = response.total_count || 0
-    
-    // No longer extract nodes from logs - use cluster info instead
-    // This prevents the dropdown from losing options when filtering
-
   } catch (err) {
     error.value = err.message
-    
-    // Check if this is a follower node access error
-    if (err.message.includes('only available on the leader node')) {
-      error.value = 'Error logs are only available on the leader node. Please access the leader node to view error logs from all cluster nodes.'
-    }
-    
-    $message?.error?.('Failed to fetch error logs: ' + err.message)
+    $message?.error?.('Failed to fetch agent tools logs: ' + err.message)
   } finally {
     loading.value = false
   }
 }
 
-// New function to fetch available nodes from cluster info
 const fetchAvailableNodes = async () => {
   try {
     const response = await hubApi.getErrorLogNodes()
-    
-    // Convert to expected format
     availableNodes.value = response.nodes.map(nodeId => ({
       id: nodeId,
       name: nodeId
     }))
-    
   } catch (err) {
-    console.warn('Failed to fetch error log nodes:', err)
-    // Fallback: use cluster info
+    console.warn('Failed to fetch error log nodes for agent tools logs:', err)
     try {
       const clusterInfo = await dataCache.fetchClusterInfo()
-      
-      // Extract nodes from cluster info
       const nodes = new Set()
-      
-      // Add current node (leader or follower)
-      if (clusterInfo.self_id) {
-        nodes.add(clusterInfo.self_id)
-      }
-      
-      // Add all other nodes from cluster status
+      if (clusterInfo.self_id) nodes.add(clusterInfo.self_id)
       if (clusterInfo.nodes && Array.isArray(clusterInfo.nodes)) {
-        clusterInfo.nodes.forEach(node => {
-          if (node.id) {
-            nodes.add(node.id)
-          }
-        })
+        clusterInfo.nodes.forEach(node => node.id && nodes.add(node.id))
       }
-      
-      // Convert to expected format
-      availableNodes.value = Array.from(nodes).map(nodeId => ({
-        id: nodeId,
-        name: nodeId
-      }))
-      
-    } catch (err2) {
-      console.warn('Failed to fetch cluster info as fallback:', err2)
-      // Final fallback: if cluster info fails, ensure current node is available
-      if (clusterInfo.value.self_id) {
-        availableNodes.value = [{ id: clusterInfo.value.self_id, name: clusterInfo.value.self_id }]
-      }
-    }
+      availableNodes.value = Array.from(nodes).map(id => ({ id, name: id }))
+    } catch {}
   }
 }
 
 const applyFilters = async () => {
   currentPage.value = 1
   expandedLogs.value.clear()
-  await fetchErrorLogs()
+  await fetchLogs()
 }
 
 const debouncedSearch = debounce(() => {
@@ -500,13 +378,7 @@ const debouncedSearch = debounce(() => {
 }, 500)
 
 const refreshLogs = async () => {
-  await fetchErrorLogs()
-}
-
-// Add function to refresh both logs and nodes
-const refreshAll = async () => {
-  await fetchAvailableNodes()
-  await fetchErrorLogs()
+  await fetchLogs()
 }
 
 function toggleLogDetail(index) {
@@ -520,45 +392,45 @@ function toggleLogDetail(index) {
 function previousPage() {
   if (currentPage.value > 1) {
     currentPage.value--
-    fetchErrorLogs()
+    fetchLogs()
   }
 }
 
 function nextPage() {
   if (currentPage.value < totalPages.value) {
     currentPage.value++
-    fetchErrorLogs()
+    fetchLogs()
   }
 }
 
-function getSourceClass(source) {
-  const classes = {
-    'hub': 'bg-blue-500',
-    'plugin': 'bg-purple-500',
-    'agent': 'bg-green-500'
-  }
-  return classes[source] || 'bg-gray-500'
+function formatTimestamp(ts) {
+  if (!ts) return ''
+  return new Date(ts).toLocaleString()
+}
+
+function formatFullTimestamp(ts) {
+  if (!ts) return ''
+  return new Date(ts).toISOString()
 }
 
 function getLevelClass(level) {
   const classes = {
     'ERROR': 'bg-red-100 text-red-800',
-    'FATAL': 'bg-red-100 text-red-800'
+    'FATAL': 'bg-red-100 text-red-800',
   }
   return classes[level] || 'bg-gray-100 text-gray-800'
 }
 
-const exportLogs = () => {
+function exportLogs() {
   if (logs.value.length === 0) return
 
   const csvContent = [
-    ['Timestamp', 'Source', 'Level', 'Node', 'Message', 'Error', 'Context'].join(','),
+    ['Timestamp', 'Node', 'Level', 'Message', 'Error', 'Context'].join(','),
     ...logs.value.map(log => [
       log.timestamp,
-      log.source,
-      log.level,
       log.node_id || '',
-      `"${log.message.replace(/"/g, '""')}"`,
+      log.level,
+      `"${(log.message || '').replace(/"/g, '""')}"`,
       `"${(log.error || '').replace(/"/g, '""')}"`,
       `"${(log.context || '').replace(/"/g, '""')}"`
     ].join(','))
@@ -568,21 +440,59 @@ const exportLogs = () => {
   const link = document.createElement('a')
   const url = URL.createObjectURL(blob)
   link.setAttribute('href', url)
-  link.setAttribute('download', `error-logs-${new Date().toISOString().slice(0, 19)}.csv`)
+  link.setAttribute('download', `agent-tools-logs-${new Date().toISOString().slice(0, 19)}.csv`)
   link.style.visibility = 'hidden'
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
 }
 
-// Lifecycle
+// Helpers to extract agent / project / tool from context JSON string (Details)
+function safeParseContext(log) {
+  if (!log.context) return {}
+  try {
+    return JSON.parse(log.context)
+  } catch {
+    return {}
+  }
+}
+
+function extractAgentFromContext(log) {
+  const ctx = safeParseContext(log)
+  return ctx.agent || ''
+}
+
+function extractProjectFromContext(log) {
+  const ctx = safeParseContext(log)
+  return ctx.project_node_sequence || ''
+}
+
+function extractToolNameFromContext(log) {
+  const ctx = safeParseContext(log)
+  if (ctx.kind === 'plugin') {
+    return ctx.plugin || ''
+  }
+  if (ctx.kind === 'skill') {
+    if (ctx.skill && ctx.function) return `${ctx.skill}.${ctx.function}`
+    return ctx.skill || ctx.function || ''
+  }
+  return ''
+}
+
+function handleTimeRangeChange() {
+  if (filters.timeRange !== 'custom') {
+    filters.startDate = ''
+    filters.endDate = ''
+    applyFilters()
+  }
+}
+
 onMounted(async () => {
   setDefaultTimeRange()
   try {
-    clusterInfo.value = await dataCache.fetchClusterInfo()
+    await fetchAvailableNodes()
   } catch {}
-  await fetchAvailableNodes()
-  await fetchErrorLogs()
+  await fetchLogs()
 })
 </script>
 
@@ -606,4 +516,5 @@ onMounted(async () => {
 .btn-sm {
   @apply px-2 py-1 text-xs;
 }
-</style> 
+</style>
+
