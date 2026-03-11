@@ -45,8 +45,11 @@ system_prompt: |
   Rule ID format: whitelist_<alert_id>_<short_reason>
   Example: whitelist_I001_cicd_deployer
 
+  Add a short XML comment at the start of the rule (after <rule ...>) indicating the whitelist source so humans can trace it later, e.g. alert id, rule id, or one-line reason. Example: <!-- source: alert_id I001, auto-whitelist by agent -->
+
   Rule XML skeleton (DETECTION context, place into the EXCLUDE ruleset):
     <rule id="whitelist_XXXXX" name="Whitelist: <one-line reason>">
+      <!-- source: <alert_id or rule_id or one-line origin, let LLM decide> -->
       <check type="EQU" field="FIELD1">VALUE1</check>
       <check type="REGEX" field="FIELD2">VALUE2</check>
     </rule>

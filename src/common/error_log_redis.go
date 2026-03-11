@@ -122,8 +122,9 @@ func GetErrorLogsFromRedis(nodeID string, limit int, offset int) ([]ErrorLogEntr
 	return allEntries, nil
 }
 
-// GetErrorLogsFromRedisWithFilter retrieves error logs with server-side filtering
-func GetErrorLogsFromRedisWithFilter(nodeID string, source string, startTime, endTime time.Time, keyword string, limit int, offset int) ([]ErrorLogEntry, int, error) {
+// GetErrorLogsFromRedisWithFilter retrieves error logs with server-side filtering.
+// levelFilter: "error" = only ERROR/FATAL (default for Error Logs); "all" = all levels (for Agent Tools Logs).
+func GetErrorLogsFromRedisWithFilter(nodeID string, source string, levelFilter string, startTime, endTime time.Time, keyword string, limit int, offset int) ([]ErrorLogEntry, int, error) {
 	if rdb == nil {
 		return nil, 0, fmt.Errorf("Redis client not initialized")
 	}
@@ -193,6 +194,14 @@ func GetErrorLogsFromRedisWithFilter(nodeID string, source string, startTime, en
 		// Source filter
 		if source != "" && source != "all" && source != entry.Source {
 			continue
+		}
+
+		// Level filter: "error" means only ERROR/FATAL (Error Logs API). "all" means no filter (Agent Tools Logs).
+		if strings.TrimSpace(strings.ToLower(levelFilter)) != "all" {
+			level := strings.ToUpper(strings.TrimSpace(entry.Level))
+			if level != "ERROR" && level != "FATAL" {
+				continue
+			}
 		}
 
 		// Time range filter

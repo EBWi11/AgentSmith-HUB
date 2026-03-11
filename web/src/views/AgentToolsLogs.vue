@@ -311,6 +311,7 @@ function getTimeRangeParams() {
 function buildApiParams() {
   const params = {
     source: 'agent',
+    level: 'all', // Agent Tools Logs need all levels (INFO + ERROR); Error Logs API uses level=error by default
     limit: pageSize.value,
     offset: (currentPage.value - 1) * pageSize.value
   }

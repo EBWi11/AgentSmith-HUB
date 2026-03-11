@@ -27,13 +27,14 @@ type ErrorLogEntry struct {
 
 // ErrorLogFilter represents filter parameters for error logs
 type ErrorLogFilter struct {
-	Source    string    `json:"source"`     // "hub", "plugin", or "all"
-	NodeID    string    `json:"node_id"`    // specific node or "all"
-	StartTime time.Time `json:"start_time"` // start time filter
-	EndTime   time.Time `json:"end_time"`   // end time filter
-	Keyword   string    `json:"keyword"`    // keyword search
-	Limit     int       `json:"limit"`      // limit number of results
-	Offset    int       `json:"offset"`     // pagination offset
+	Source      string    `json:"source"`      // "hub", "plugin", "agent", or "all"
+	LevelFilter string    `json:"level"`       // "error" = only ERROR/FATAL (default); "all" = all levels
+	NodeID      string    `json:"node_id"`     // specific node or "all"
+	StartTime   time.Time `json:"start_time"`  // start time filter
+	EndTime     time.Time `json:"end_time"`     // end time filter
+	Keyword     string    `json:"keyword"`     // keyword search
+	Limit       int       `json:"limit"`       // limit number of results
+	Offset      int       `json:"offset"`      // pagination offset
 }
 
 // ErrorLogResponse represents the response for error log queries
@@ -64,6 +65,7 @@ func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
 	logs, totalCount, err := common.GetErrorLogsFromRedisWithFilter(
 		filter.NodeID,
 		filter.Source,
+		filter.LevelFilter,
 		filter.StartTime,
 		filter.EndTime,
 		filter.Keyword,
@@ -116,6 +118,11 @@ func getErrorLogs(c echo.Context) error {
 	filter.Source = c.QueryParam("source")
 	filter.NodeID = c.QueryParam("node_id")
 	filter.Keyword = c.QueryParam("keyword")
+	// level: "error" = only ERROR/FATAL (default for Error Logs); "all" = all levels (for Agent Tools Logs)
+	filter.LevelFilter = c.QueryParam("level")
+	if filter.LevelFilter == "" {
+		filter.LevelFilter = "error"
+	}
 
 	// Parse time filters
 	if startTime := c.QueryParam("start_time"); startTime != "" {
