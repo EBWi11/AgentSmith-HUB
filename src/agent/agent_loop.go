@@ -127,12 +127,27 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 	}
 
 	for dsPNS, dsCh := range a.DownStream {
-		select {
-		case *dsCh <- result:
-		default:
-			logger.Error("Agent downstream channel full, dropping message",
-				"agent", a.Id, "downstream", dsPNS)
+		if dsCh == nil {
+			continue
 		}
+
+		func(pns string, ch *chan map[string]interface{}, msg map[string]interface{}) {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Agent downstream send failed (possibly closed channel)",
+						"agent", a.Id,
+						"downstream", pns,
+						"panic", r)
+				}
+			}()
+
+			select {
+			case *ch <- msg:
+			default:
+				logger.Error("Agent downstream channel full, dropping message",
+					"agent", a.Id, "downstream", pns)
+			}
+		}(dsPNS, dsCh, result)
 	}
 }
 
