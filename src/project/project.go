@@ -1162,7 +1162,7 @@ func (p *Project) Stop(lock bool) error {
 	})
 
 	// Overall timeout for the entire stop process
-	overallTimeout := time.After(2 * time.Minute)
+	overallTimeout := time.After(6 * time.Minute)
 	stopCompleted := make(chan error, 1)
 
 	go func() {

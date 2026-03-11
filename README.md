@@ -4,9 +4,9 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0%20with%20Commons%20Clause-blue)](./LICENSE)
 
 
-**A high-performance security data pipeline platform with a built-in real-time rules engine and LLM-powered agents.**
+**A high-performance security data pipeline with a real-time rules engine and deeply integrated LLM agents — built for modern SOC and detection engineering teams.**
 
-Process, enrich, detect, and respond — all in one place, with simple XML-based rules and AI-powered analysis.
+Process, enrich, detect, and respond at scale — with simple XML-based rules, CEP, rich plugins, and AI-powered analysis wired directly into the stream.
 
 ![Dashboard](docs/png/Dashboard.png)
 
@@ -14,77 +14,72 @@ Process, enrich, detect, and respond — all in one place, with simple XML-based
 
 ## Why AgentSmith-HUB?
 
-If you work in security operations, you probably deal with massive volumes of raw logs and alerts every day. You need to normalize, enrich, correlate, and route them — and ideally detect threats in real time. AgentSmith-HUB is built to handle all of this in a single platform:
+If you work in security operations, you probably deal with massive volumes of raw logs and alerts every day. You need to normalize, enrich, correlate, and route them — and ideally detect threats in real time, not in batch jobs. AgentSmith-HUB is built to handle all of this in a single, opinionated platform:
 
-- **No coding required** — Write detection and processing logic in simple, readable XML rules
-- **Blazing fast** — 3.90M messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md))
-- **All-in-one pipeline** — Input, detection, enrichment, transformation, and output in a unified flow
-- **CEP built-in** — Detect ordered event sequences, absence patterns, and multi-source correlations over time
-- **Scale horizontally** — Built-in cluster mode with leader/follower architecture
-- **LLM Agents** — Embed AI-powered agents in the pipeline for alert triage, enrichment, and autonomous rule authoring
-- **Skills system** — Modular knowledge and tool capabilities for agents via progressive disclosure
-- **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, and more
-- **Modern Web UI** — Visual rule editing, project orchestration, real-time testing, and log search
+- **High-signal detections, not dashboards** — Design real-time detections and data transformations with simple, readable XML rules instead of ad‑hoc scripts
+- **Blazing fast at scale** — 3.90M messages/sec on just 2 vCPUs ([benchmark](docs/performance-testing-report.md)); built to sit directly in front of your SIEM / lake
+- **All-in-one pipeline** — Input, normalization, enrichment, correlation, and output in one flow; no more glue scripts between Kafka, ES, ClickHouse, and “rule engines”
+- **First-class CEP** — Detect ordered event sequences, absence patterns, and multi-source correlations over time with `<sequence>`, `<threshold>`, `<iterator>`, and `<checklist>`
+- **LLM agents in the stream** — Drop LLM-powered agents into the same pipeline for alert triage, enrichment, rule authoring, and auto-whitelisting
+- **Skills system** — Attach knowledge bases and operational tools to agents via Skills, with progressive disclosure so prompts stay small and fast
+- **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, time/window helpers, LLM calls, and more
+- **Production features out of the box** — Cluster mode, health checks, daily stats, sample data, Push Changes / review workflow, and a modern Web UI for rule and project orchestration
+
+### Who is this for?
+
+- **SOC / CERT / CSIRT teams** that want an opinionated place to run detections, triage alerts, and reduce false positives without building their own engine from scratch.
+- **Detection engineers / threat hunters** who care about CEP, thresholds, and precise control over when an alert fires (and when it must not).
+- **Security platform / data teams** who already own Kafka / ES / ClickHouse and want a thin, fast, open platform to orchestrate security data flows and LLM-powered analysis.
 
 ## How It Works
 
 AgentSmith-HUB uses a straightforward pipeline model:
 
 ```
-INPUT (Kafka / SLS / ...) → RULESET (detect & transform) → OUTPUT (Kafka / ES / ClickHouse / SLS / ...)
-                                    ↕
-                              AGENT (LLM-powered)
+INPUT (Kafka / SLS / ...) → RULESET / AGENT → RULESET / AGENT → OUTPUT (Kafka / ES / ClickHouse / SLS / ...)
 ```
 
-Rulesets and agents can be freely chained within a **Project**, giving you full control over data flow:
+Rulesets and agents can be freely chained within a **Project**, giving you full control over data flow and allowing you to mix “hard” rules with “soft” LLM judgement in the same stream:
 
 ![ExampleProject](docs/png/ExampleProject.png)
 
-### Rules Engine Syntax
+### Core Components at a Glance
 
-The rules engine uses seven intuitive XML elements:
+- **INPUT**: Connects to streaming sources like **Kafka**, Aliyun **SLS**, and cloud-managed Kafka variants; supports Grok parsing and JSON so you normalize once and reuse everywhere.
+- **RULESET**: XML-based real-time rules engine with checks, checklists, thresholds (count / SUM / CLASSIFY), CEP sequences, iterators, and data append/modify/del — all executed strictly in the order you write them.
+- **AGENT**: LLM-powered node that runs in the same pipeline as rulesets; for each event it can call an LLM (with tools and skills) to score, enrich, or auto-generate rules/whitelists, then forward the enriched event downstream.
+- **OUTPUT**: Sends processed data to **Kafka**, **Elasticsearch** (v7/v8/v9), **ClickHouse**, or simple print, with batching, time-based flush, TLS/auth, and idempotent Kafka producers for safe delivery.
+- **SKILL**: Reusable capability module for agents — knowledge skills provide on‑demand reference content, builtin skills expose Go-implemented tools like `hub_ruleset_editor` for ruleset CRUD.
+- **PLUGIN**: Extensible function system powering checks, enrichment, and actions: GeoIP, URL parsing, encoding, time window helpers, threat intelligence lookups, single-shot LLM calls, and more — all composable directly in rules.
 
-| Element | Purpose | Example |
-|---------|---------|---------|
-| `<check>` | Detection — regex, string match, numeric comparison, plugin | `<check type="REGEX" field="src_ip">^10\\..*</check>` |
-| `<checklist>` | Logical combination of checks (AND / OR / NOT) | `<checklist condition="a and (b or c)">` |
-| `<threshold>` | Frequency-based detection with time windows | Detect brute-force: 5 failures in 60s |
-| `<sequence>` | CEP — detect ordered event patterns across time | `login -> !mfa` (login without MFA) |
-| `<append>` | Enrich or modify data fields | `<append type="PLUGIN" field="geo">geoMatch(src_ip)</append>` |
-| `<del>` | Remove fields from data | `<del>sensitive_field</del>` |
-| `<plugin>` | Call external APIs or custom logic | Threat intel lookup, enrichment, etc. |
+### Web UI & API Highlights
 
-Rules execute **in the order you write them**, so you can freely combine detection and transformation:
+- **Visual rule and project editing**: Rich browser UI for editing rulesets with syntax help, validation, and GIF-level feedback; drag-style project orchestration to define `INPUT → RULESET / AGENT → OUTPUT` flows.
+- **One-click testing everywhere**: Built-in test runners for **Output**, **Ruleset**, **Plugin**, **Agent**, and **Project** components (including sample data capture), so you can validate changes before they hit real outputs.
+- **Operations, errors, and cluster view**: Dedicated views for error logs, operations history (project start/stop/restart, config changes, agent tool calls), and basic cluster status so you can see what is running where.
+- **Safe change management**: All edits go through temporary configs, diff & review, and then **Push Changes** to apply — the platform automatically figures out affected projects and restarts them safely.
+- **HTTP API for automation**: JSON APIs mirror the UI capabilities (component CRUD, project lifecycle, testing), so you can integrate AgentSmith-HUB into CI/CD, internal portals, or automation scripts.
+
+### Rules Engine in 60 Seconds
+
+At the heart of AgentSmith-HUB is a streaming rules engine designed for security detections:
+
+- **Checks & checklists**: Match on strings, numbers, regex, and plugins; combine conditions with AND/OR/NOT using logical expressions.
+- **Thresholds & windows**: Detect frequency, sums, or distinct counts over sliding time windows (e.g. brute-force, spray, exfil).
+- **CEP sequences**: Express ordered multi-event patterns and absence (e.g. `login -> !mfa`, `recon -> exploit -> exfil`) with `<sequence>`.
+- **Data shaping**: Enrich, modify, or delete fields in place, and call plugins to pull in external context or compute derived fields.
+
+A minimal example that enriches with threat intel and then detects on the enriched field:
 
 ```xml
-<rule id="enrich_and_detect">
-    <!-- First, enrich with threat intelligence -->
+<rule id="enrich_and_detect" name="Enrich with TI then alert">
     <append type="PLUGIN" field="threat_info">threatbook(src_ip)</append>
-    <!-- Then, detect based on enriched data -->
     <check type="EQU" field="threat_info.severity">high</check>
-    <!-- Finally, add metadata -->
     <append field="alert_level">critical</append>
 </rule>
 ```
 
-Detect **event sequences** across time with CEP:
-
-```xml
-<rule id="login_no_mfa" name="Login without MFA">
-    <sequence within="2m" group_by="user_id">
-        <event id="login">
-            <check type="EQU" field="event_type">login</check>
-        </event>
-        <event id="mfa">
-            <check type="EQU" field="event_type">mfa_verify</check>
-        </event>
-        <condition>login -> !mfa</condition>
-    </sequence>
-</rule>
-```
-
-![ExampleRule01](docs/png/ExampleRule01.png)
-![ExampleRule02](docs/png/ExampleRule02.png)
+For the full syntax (all operations, modes, and best practices), see the [Complete Guide](docs/agentsmith-hub-guide.md).
 
 ### LLM Agents & Skills
 
@@ -267,10 +262,6 @@ More built-in rulesets for additional data sources are on the roadmap. Contribut
    sudo nginx -s reload
    ```
 7. Open `http://your-host` in your browser (port 80)
-
-### Kubernetes
-
-K8s deployment manifests are available in the [`k8s/`](./k8s) directory.
 
 ## Documentation
 
