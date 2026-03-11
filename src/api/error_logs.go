@@ -88,10 +88,16 @@ func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
 			Line:        log.Line,
 		}
 
-		// Convert details to context string if available (avoid re-marshaling)
-		if len(log.Details) > 0 {
-			// Use the already marshaled details from Redis to avoid re-serialization
-			if contextBytes, err := json.Marshal(log.Details); err == nil {
+		// Build context JSON from details; include error message so Raw Context shows it
+		contextObj := make(map[string]interface{})
+		for k, v := range log.Details {
+			contextObj[k] = v
+		}
+		if log.Error != "" {
+			contextObj["error"] = log.Error
+		}
+		if len(contextObj) > 0 {
+			if contextBytes, err := json.Marshal(contextObj); err == nil {
 				apiLog.Context = string(contextBytes)
 			}
 		}

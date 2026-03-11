@@ -323,6 +323,9 @@ func testAgent(c echo.Context) error {
 		})
 	}
 
+	// Use 5-minute timeout for agent test so slow LLM/tool calls can complete.
+	tempAgent.Config.Timeout = "5m"
+
 	// Run one message through the agent and capture tool-call trace for the UI.
 	result, toolCallTrace := tempAgent.ProcessMessageWithTrace(req.Data)
 

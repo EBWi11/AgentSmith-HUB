@@ -136,6 +136,7 @@
                     <span v-if="extractProjectFromContext(log)" class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
                       {{ extractProjectFromContext(log) }}
                     </span>
+                    <span v-if="log.error" class="text-red-600 truncate max-w-xs" :title="log.error">{{ log.error }}</span>
                   </div>
                 </div>
               </div>
@@ -178,6 +179,10 @@
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Timestamp:</dt>
                     <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(log.timestamp) }}</dd>
+                  </div>
+                  <div v-if="log.error" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Error:</dt>
+                    <dd class="col-span-2 text-red-700 font-medium whitespace-pre-wrap break-words">{{ log.error }}</dd>
                   </div>
                 </dl>
               </div>
