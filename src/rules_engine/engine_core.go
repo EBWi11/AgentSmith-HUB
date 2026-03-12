@@ -253,22 +253,36 @@ func (r *Ruleset) Start() error {
 		}(upID, upCh)
 	}
 
-	// Start absence scanner goroutine if any rule has sequences with absence stages
-	if r.hasAbsenceSequences && r.seqStateManager != nil {
-		r.wg.Add(1)
-		go r.absenceScannerLoop()
-	}
+	r.startAbsenceScannerIfNeeded()
 
 	r.SetStatus(common.StatusRunning, nil)
 	return nil
 }
 
+func (r *Ruleset) startAbsenceScannerIfNeeded() {
+	r.runtimeMu.RLock()
+	shouldStart := r.hasAbsenceSequences && r.seqStateManager != nil
+	r.runtimeMu.RUnlock()
+
+	if !shouldStart {
+		return
+	}
+	if !r.absenceScannerRunning.CompareAndSwap(false, true) {
+		return
+	}
+
+	r.wg.Add(1)
+	go r.absenceScannerLoop()
+}
+
 // absenceScannerLoop periodically checks for expired absence sequences and triggers alerts.
 func (r *Ruleset) absenceScannerLoop() {
 	defer r.wg.Done()
+	defer r.absenceScannerRunning.Store(false)
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
 			logger.Error("Panic in absence scanner, restarting", "ruleset", r.RulesetID, "panic", panicErr)
+			r.absenceScannerRunning.Store(false)
 			// Check if we're shutting down before restarting
 			select {
 			case <-r.stopChan:
@@ -276,8 +290,7 @@ func (r *Ruleset) absenceScannerLoop() {
 			default:
 			}
 			time.Sleep(2 * time.Second)
-			r.wg.Add(1)
-			go r.absenceScannerLoop()
+			r.startAbsenceScannerIfNeeded()
 		}
 	}()
 
@@ -296,6 +309,13 @@ func (r *Ruleset) absenceScannerLoop() {
 
 // scanAbsenceTimeouts checks for expired absence sequences and triggers them.
 func (r *Ruleset) scanAbsenceTimeouts() {
+	r.runtimeMu.RLock()
+	defer r.runtimeMu.RUnlock()
+
+	if !r.hasAbsenceSequences || r.seqStateManager == nil {
+		return
+	}
+
 	nowMs := time.Now().UnixMilli()
 	expiredKeys := r.seqStateManager.GetExpiredAbsenceKeys(nowMs)
 
@@ -607,6 +627,9 @@ func (r *Ruleset) Stop() error {
 
 // EngineCheck executes all rules in the ruleset on the provided data using the new flexible syntax.
 func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interface{} {
+	r.runtimeMu.RLock()
+	defer r.runtimeMu.RUnlock()
+
 	// Pre-allocate result slice with better capacity estimation
 	var initialCap int
 	if r.IsDetection {
@@ -937,7 +960,7 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 	// Use strings.Builder pool for better performance
 	sb := stringBuilderPool.Get().(*strings.Builder)
 	sb.Reset()
-	sb.WriteString(threshold.GroupByID)
+	sb.WriteString(r.ruleRuntimeNamespace(rule.ID))
 
 	for k, v := range threshold.GroupByList {
 		tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
@@ -1081,7 +1104,7 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 			"sequenceOpID", operationID)
 		return false, nil
 	}
-	stateKey := BuildStateKey(seq.GroupByID, correlateValues)
+	stateKey := BuildStateKey(r.ruleRuntimeNamespace(rule.ID), correlateValues)
 
 	// Lock the state key to prevent concurrent modification from multiple upstream goroutines.
 	// This protects the entire read-modify-write cycle on SequenceState.

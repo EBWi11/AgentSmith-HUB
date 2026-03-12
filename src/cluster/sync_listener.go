@@ -524,9 +524,9 @@ func (sl *SyncListener) clearAllLocalComponents() {
 
 		// Force stop regardless of current status
 		if err := proj.Stop(true); err != nil {
-		logger.Error("Failed to stop project during cleanup, will force delete anyway",
-			"project", proj.Id,
-			"error", err)
+			logger.Error("Failed to stop project during cleanup, will force delete anyway",
+				"project", proj.Id,
+				"error", err)
 			failedCount++
 		} else {
 			stoppedCount++
@@ -634,6 +634,9 @@ func (sl *SyncListener) createComponentInstance(componentType, componentName, co
 			return fmt.Errorf("failed to create ruleset instance %s: %w", componentName, err)
 		}
 		project.SetRuleset(componentName, rs)
+		if err := project.HotReloadRulesetInstances(componentName, rs); err != nil {
+			return fmt.Errorf("failed to hot reload follower ruleset instances %s: %w", componentName, err)
+		}
 
 	case "project":
 		// For projects, we create the project instance

@@ -176,8 +176,13 @@ type Ruleset struct {
 	// Mutex for protecting cache operations
 	mu sync.RWMutex
 
+	// runtimeMu protects hot-reloadable execution state while keeping channels/goroutines alive.
+	runtimeMu sync.RWMutex
+
 	RawConfig string
 	sampler   *common.Sampler
+	// ConfigVersion isolates runtime state across hot reloads.
+	ConfigVersion string
 
 	// Performance optimization: pre-compute test mode flag
 	isTestMode bool // true if ProjectNodeSequence starts with "TEST."
@@ -197,6 +202,8 @@ type Ruleset struct {
 
 	// Fast lookup table for absence scanner: rule ID -> rule pointer
 	ruleByID map[string]*Rule
+
+	absenceScannerRunning atomic.Bool
 
 	// OwnerProjects field removed - project usage is now calculated dynamically
 }
@@ -1917,6 +1924,7 @@ func NewRuleset(path string, raw string, id string) (*Ruleset, error) {
 	}
 	// Set RulesetID early so build-time initializers can use it (e.g. local CEP value store path).
 	ruleset.RulesetID = id
+	ruleset.ConfigVersion = buildRulesetConfigVersion(rawRuleset)
 
 	// IMPORTANT: Must call RulesetBuild to initialize all the parsed components
 	err = RulesetBuild(ruleset)
@@ -2029,6 +2037,124 @@ func (r *Ruleset) cleanup() {
 	r.DownStream = make(map[string]*chan map[string]interface{})
 }
 
+type hotReloadResources struct {
+	cache            *ristretto.Cache[string, int]
+	cacheForClassify *ristretto.Cache[string, map[string]bool]
+	sequenceCache    *ristretto.Cache[string, *SequenceState]
+	regexResultCache *RegexResultCache
+	cepValueStore    CEPValueStore
+}
+
+func (r *Ruleset) snapshotHotReloadResources() hotReloadResources {
+	return hotReloadResources{
+		cache:            r.Cache,
+		cacheForClassify: r.CacheForClassify,
+		sequenceCache:    r.SequenceCache,
+		regexResultCache: r.RegexResultCache,
+		cepValueStore:    r.cepValueStore,
+	}
+}
+
+func cleanupHotReloadResources(resources hotReloadResources) {
+	if resources.cache != nil {
+		resources.cache.Close()
+	}
+	if resources.cacheForClassify != nil {
+		resources.cacheForClassify.Close()
+	}
+	if resources.sequenceCache != nil {
+		resources.sequenceCache.Close()
+	}
+	if resources.regexResultCache != nil {
+		resources.regexResultCache.Clear()
+	}
+	if resources.cepValueStore != nil {
+		_ = resources.cepValueStore.Close()
+	}
+}
+
+func buildRulesetConfigVersion(raw []byte) string {
+	return common.XXHash64(string(raw))
+}
+
+func (r *Ruleset) ruleRuntimeNamespace(ruleID string) string {
+	base := r.RulesetID + ":" + ruleID
+	if r.ProjectNodeSequence != "" {
+		base = r.ProjectNodeSequence + ":" + base
+	}
+	if r.ConfigVersion == "" {
+		return base
+	}
+	return base + ":" + r.ConfigVersion
+}
+
+// CleanupDetachedReloadCandidate releases runtime resources for a not-yet-started ruleset instance.
+func CleanupDetachedReloadCandidate(r *Ruleset) {
+	if r == nil {
+		return
+	}
+	cleanupHotReloadResources(r.snapshotHotReloadResources())
+	r.Cache = nil
+	r.CacheForClassify = nil
+	r.SequenceCache = nil
+	r.RegexResultCache = nil
+	r.cepValueStore = nil
+}
+
+func (r *Ruleset) applyHotReloadState(newRuleset *Ruleset) {
+	r.XMLName = newRuleset.XMLName
+	r.Name = newRuleset.Name
+	r.Author = newRuleset.Author
+	r.Type = newRuleset.Type
+	r.IsDetection = newRuleset.IsDetection
+	r.Rules = newRuleset.Rules
+	r.RulesCount = newRuleset.RulesCount
+	r.Path = newRuleset.Path
+	r.RawConfig = newRuleset.RawConfig
+	r.ConfigVersion = newRuleset.ConfigVersion
+	r.Cache = newRuleset.Cache
+	r.CacheForClassify = newRuleset.CacheForClassify
+	r.SequenceCache = newRuleset.SequenceCache
+	r.RegexResultCache = newRuleset.RegexResultCache
+	r.seqStateManager = newRuleset.seqStateManager
+	r.cepValueStore = newRuleset.cepValueStore
+	r.hasAbsenceSequences = newRuleset.hasAbsenceSequences
+	r.ruleByID = newRuleset.ruleByID
+	r.Err = nil
+}
+
+// ReloadInPlace swaps in a freshly built ruleset configuration without restarting channels/goroutines.
+// Runtime state such as threshold/CEP caches is rebuilt from scratch during reload.
+func (r *Ruleset) ReloadInPlace(newRuleset *Ruleset) error {
+	if r == nil {
+		return fmt.Errorf("ruleset is nil")
+	}
+	if newRuleset == nil {
+		return fmt.Errorf("new ruleset is nil")
+	}
+	if r.RulesetID != newRuleset.RulesetID {
+		return fmt.Errorf("ruleset id mismatch: %s != %s", r.RulesetID, newRuleset.RulesetID)
+	}
+
+	oldResources := hotReloadResources{}
+	r.runtimeMu.Lock()
+	oldResources = r.snapshotHotReloadResources()
+	r.applyHotReloadState(newRuleset)
+	r.runtimeMu.Unlock()
+
+	cleanupHotReloadResources(oldResources)
+
+	if r.Status == common.StatusRunning {
+		r.startAbsenceScannerIfNeeded()
+	}
+
+	logger.Info("Ruleset hot reloaded in place",
+		"ruleset", r.RulesetID,
+		"project_node_sequence", r.ProjectNodeSequence,
+		"rules", r.RulesCount)
+	return nil
+}
+
 // NewFromExisting creates a new Ruleset instance from an existing one with a different ProjectNodeSequence
 // This is used when multiple projects use the same ruleset component but with different data flow sequences
 func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset, error) {
@@ -2064,6 +2190,7 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		Cache:            nil,
 		CacheForClassify: nil,
 		RawConfig:        existing.RawConfig,
+		ConfigVersion:    existing.ConfigVersion,
 		// Note: Runtime fields (stopChan, antsPool, wg, etc.) are intentionally not copied
 		// as they will be initialized when the ruleset starts
 		// Metrics fields (processTotal) are also not copied as they are instance-specific
@@ -2449,7 +2576,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 
 				// Set threshold group ID - use same format as standalone threshold for consistency
-				threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+				threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 				// Initialize cache if needed for checklist thresholds
 				if threshold.LocalCache && !createLocalCache {
@@ -2642,7 +2769,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				return errors.New("threshold parse range err: " + err.Error() + ", rule id: " + rule.ID)
 			}
 
-			threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+			threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 			if !createLocalCache {
 				ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
@@ -2726,7 +2853,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 				}
 
 				// Set threshold group ID for iterator thresholds
-				threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+				threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 				// Initialize cache if needed for iterator thresholds
 				if threshold.LocalCache && !createLocalCache {
@@ -2805,7 +2932,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 						}
 						threshold.RangeInt = rangeInt
 					}
-					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+					threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 					if threshold.LocalCache && !createLocalCache {
 						var err error
@@ -2862,7 +2989,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 			seq.WithinMs = int64(withinSec) * 1000
 
 			// Set GroupByID for state key prefix
-			seq.GroupByID = ruleset.RulesetID + ":" + rule.ID
+			seq.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 			// Parse sequence-level group_by
 			if seq.GroupBy != "" {
@@ -2981,37 +3108,37 @@ func RulesetBuild(ruleset *Ruleset) error {
 							}
 							threshold.RangeInt = rangeInt
 						}
-					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+						threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
-					if threshold.LocalCache && !createLocalCache {
-						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
-							NumCounters: 1_000_000,
-							MaxCost:     1024 * 1024 * 16,
-							BufferItems: 32,
-						})
-						if err != nil {
-							return fmt.Errorf("failed to create local cache for event checklist threshold: %w", err)
+						if threshold.LocalCache && !createLocalCache {
+							ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{
+								NumCounters: 1_000_000,
+								MaxCost:     1024 * 1024 * 16,
+								BufferItems: 32,
+							})
+							if err != nil {
+								return fmt.Errorf("failed to create local cache for event checklist threshold: %w", err)
+							}
+							createLocalCache = true
 						}
-						createLocalCache = true
-					}
-					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
-						ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
-							NumCounters: 1_000_000,
-							MaxCost:     1024 * 1024 * 16,
-							BufferItems: 32,
-						})
-						if err != nil {
-							return fmt.Errorf("failed to create local classify cache for event checklist threshold: %w", err)
+						if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+							ruleset.CacheForClassify, err = ristretto.NewCache(&ristretto.Config[string, map[string]bool]{
+								NumCounters: 1_000_000,
+								MaxCost:     1024 * 1024 * 16,
+								BufferItems: 32,
+							})
+							if err != nil {
+								return fmt.Errorf("failed to create local classify cache for event checklist threshold: %w", err)
+							}
+							createLocalCacheForClassify = true
 						}
-						createLocalCacheForClassify = true
-					}
-					if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
-						if threshold.CountField != "" {
-							threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+						if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+							if threshold.CountField != "" {
+								threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+							}
 						}
 					}
 				}
-			}
 
 				// Process thresholds in the event
 				for j := range eventDef.Thresholds {
@@ -3033,7 +3160,7 @@ func RulesetBuild(ruleset *Ruleset) error {
 						}
 						threshold.RangeInt = rangeInt
 					}
-					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+					threshold.GroupByID = ruleset.ruleRuntimeNamespace(rule.ID)
 
 					if threshold.LocalCache && !createLocalCache {
 						ruleset.Cache, err = ristretto.NewCache(&ristretto.Config[string, int]{

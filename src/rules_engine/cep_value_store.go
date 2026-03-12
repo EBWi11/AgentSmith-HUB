@@ -45,6 +45,7 @@ const (
 // PebbleCEPValueStore is a local disk-backed value store for CEP snapshots.
 type PebbleCEPValueStore struct {
 	db          *pebble.DB
+	dbPath      string
 	counter     uint64
 	writeQueue  chan *pebblePutRequest
 	inflight    sync.Map // ref -> []byte (payload pending batch commit)
@@ -91,6 +92,7 @@ func NewPebbleCEPValueStore(rulesetID string) (*PebbleCEPValueStore, error) {
 
 	store := &PebbleCEPValueStore{
 		db:         db,
+		dbPath:     dbPath,
 		writeQueue: make(chan *pebblePutRequest, pebbleWriteQueueSize),
 		stopCh:     make(chan struct{}),
 	}
@@ -190,7 +192,14 @@ func (s *PebbleCEPValueStore) Close() error {
 	})
 	s.wg.Wait()
 	err := s.db.Close()
+	dbPath := s.dbPath
 	s.db = nil
+	s.dbPath = ""
+	if dbPath != "" {
+		if removeErr := os.RemoveAll(dbPath); removeErr != nil && err == nil {
+			err = removeErr
+		}
+	}
 	return err
 }
 

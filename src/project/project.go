@@ -137,7 +137,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		if err != nil {
 			// Fallback: if we can't get user intention, check actual status
 			// This handles Redis failures or other edge cases
-			logger.Warn("Failed to get user intention, using actual status as fallback", 
+			logger.Warn("Failed to get user intention, using actual status as fallback",
 				"project", projectID, "error", err, "actual_status", p.Status)
 			return p.Status == common.StatusRunning
 		}
@@ -180,18 +180,18 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// 1. Which rulesets use this plugin
 		// 2. Which projects use those rulesets
 		affectedRulesets := make(map[string]bool)
-		
+
 		// Find all rulesets that use this plugin
 		ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
 			if ruleset == nil {
 				return true
 			}
-			
+
 			// Check if ruleset uses this plugin by examining rules
 			// Plugins can be used in various rule operations (check, append, modify, plugin)
 			for _, rule := range ruleset.Rules {
 				pluginUsed := false
-				
+
 				// Check in CheckMap (check nodes)
 				for _, checkNode := range rule.CheckMap {
 					if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
@@ -199,7 +199,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						break
 					}
 				}
-				
+
 				// Check in ChecklistMap (checklist nodes)
 				if !pluginUsed {
 					for _, checklist := range rule.ChecklistMap {
@@ -214,7 +214,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in AppendsMap (append operations)
 				if !pluginUsed {
 					for _, appendOp := range rule.AppendsMap {
@@ -224,7 +224,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in ModifyMap (modify operations)
 				if !pluginUsed {
 					for _, modifyOp := range rule.ModifyMap {
@@ -234,7 +234,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in PluginMap (plugin operations)
 				if !pluginUsed {
 					for _, pluginOp := range rule.PluginMap {
@@ -244,7 +244,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				if pluginUsed {
 					affectedRulesets[rulesetID] = true
 					break // No need to check other rules in this ruleset
@@ -252,7 +252,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 			}
 			return true
 		})
-		
+
 		// Find all projects using the affected rulesets
 		for rulesetID := range affectedRulesets {
 			ForEachProject(func(projectID string, p *Project) bool {
@@ -264,12 +264,12 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 				return true
 			})
 		}
-		
-		logger.Info("Plugin change affects rulesets and projects", 
-			"plugin", componentID, 
+
+		logger.Info("Plugin change affects rulesets and projects",
+			"plugin", componentID,
 			"affected_rulesets", len(affectedRulesets),
 			"affected_projects", len(affectedProjects))
-			
+
 	case "agent":
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("AGENT", componentID) {
@@ -319,6 +319,60 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	}
 
 	return result
+}
+
+// HotReloadRulesetInstances updates all running PNS ruleset instances for a ruleset without restarting projects.
+// Runtime caches and CEP state are rebuilt from scratch during the reload.
+func HotReloadRulesetInstances(rulesetID string, template *rules_engine.Ruleset) error {
+	if template == nil {
+		return fmt.Errorf("ruleset template is nil")
+	}
+
+	type reloadTarget struct {
+		pns string
+		rs  *rules_engine.Ruleset
+	}
+
+	targets := make([]reloadTarget, 0)
+	ForEachPNSRuleset(func(pns string, rs *rules_engine.Ruleset) bool {
+		if rs != nil && rs.RulesetID == rulesetID {
+			targets = append(targets, reloadTarget{pns: pns, rs: rs})
+		}
+		return true
+	})
+
+	var failed []string
+	for _, target := range targets {
+		reloaded, err := rules_engine.NewFromExisting(template, target.pns)
+		if err != nil {
+			failed = append(failed, target.pns)
+			logger.Error("Failed to build hot reload ruleset instance",
+				"ruleset", rulesetID,
+				"project_node_sequence", target.pns,
+				"error", err)
+			continue
+		}
+
+		if err := target.rs.ReloadInPlace(reloaded); err != nil {
+			failed = append(failed, target.pns)
+			logger.Error("Failed to hot reload ruleset instance",
+				"ruleset", rulesetID,
+				"project_node_sequence", target.pns,
+				"error", err)
+			rules_engine.CleanupDetachedReloadCandidate(reloaded)
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("failed to hot reload %d running ruleset instances", len(failed))
+	}
+
+	if len(targets) > 0 {
+		logger.Info("Hot reloaded running ruleset instances",
+			"ruleset", rulesetID,
+			"instances", len(targets))
+	}
+	return nil
 }
 
 // projectCommandHandler implements cluster.ProjectCommandHandler interface
@@ -2065,10 +2119,10 @@ func (p *Project) initComponents() error {
 					}
 				}
 			} else {
-			logger.Error("Input component not found for connection",
-				"project", p.Id,
-				"from_pns", node.FromPNS,
-				"from_id", node.FromID)
+				logger.Error("Input component not found for connection",
+					"project", p.Id,
+					"from_pns", node.FromPNS,
+					"from_id", node.FromID)
 			}
 		}
 	}

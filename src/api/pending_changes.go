@@ -810,12 +810,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			verifyErr = rules_engine.Verify("", req.NewContent)
 		case "project":
 			verifyErr = project.Verify("", req.NewContent)
-	case "agent":
-		verifyErr = agent.Verify("", req.NewContent)
-	case "skill":
-		verifyErr = skill.Verify("", req.NewContent)
-	default:
-		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+		case "agent":
+			verifyErr = agent.Verify("", req.NewContent)
+		case "skill":
+			verifyErr = skill.Verify("", req.NewContent)
+		default:
+			return nil, fmt.Errorf("unsupported component type: %s", req.Type)
 		}
 
 		if verifyErr != nil {
@@ -840,12 +840,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			filePath = path.Join(configRoot, "project", req.ID+".yaml")
 		case "plugin":
 			filePath = path.Join(configRoot, "plugin", req.ID+".go")
-	case "agent":
-		filePath = path.Join(configRoot, "agent", req.ID+".yaml")
-	case "skill":
-		filePath = path.Join(configRoot, "skill", req.ID+".yaml")
-	default:
-		return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
+		case "agent":
+			filePath = path.Join(configRoot, "agent", req.ID+".yaml")
+		case "skill":
+			filePath = path.Join(configRoot, "skill", req.ID+".yaml")
+		default:
+			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
 		}
 
 		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
@@ -868,11 +868,11 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			_, tempPath = findRulesetPaths(req.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
-	case "agent":
-		tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
-	case "skill":
-		tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
-	}
+		case "agent":
+			tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
+		case "skill":
+			tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
+		}
 
 		if tempPath != "" {
 			if _, err := os.Stat(tempPath); err == nil {
@@ -944,7 +944,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		project.SetRuleset(req.ID, newRuleset)
 		project.DeleteRulesetNew(req.ID)
 
-		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
+		if err := project.HotReloadRulesetInstances(req.ID, newRuleset); err != nil {
+			return nil, fmt.Errorf("failed to hot reload running ruleset instances: %w", err)
+		}
+
+		// Rulesets support in-place hot reload, so projects do not need a restart here.
+		affectedProjects = []string{}
 
 	case "project":
 		// CRITICAL: Stop old project first to release components

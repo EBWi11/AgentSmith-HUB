@@ -1078,6 +1078,17 @@ func ForEachRuleset(fn func(id string, rs *rules_engine.Ruleset) bool) {
 	}
 }
 
+func ForEachPNSRuleset(fn func(pns string, rs *rules_engine.Ruleset) bool) {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	for pns, rs := range GlobalProject.PNSRulesets {
+		if !fn(pns, rs) {
+			break
+		}
+	}
+}
+
 // Helper function to safely access input downstream
 func SafeDeleteInputDownstream(inputID, downstreamID string) {
 	common.GlobalMu.Lock()

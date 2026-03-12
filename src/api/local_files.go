@@ -1111,6 +1111,9 @@ func loadLocalChanges(c echo.Context) error {
 
 	// Collect all affected projects for successfully loaded components
 	for _, component := range successfullyLoaded {
+		if component["type"] == "ruleset" {
+			continue
+		}
 		affectedProjects := project.GetAffectedProjects(component["type"], component["id"])
 		for _, projectID := range affectedProjects {
 			if p, ok := project.GetProject(projectID); ok {
@@ -1192,6 +1195,10 @@ func loadSingleLocalChange(c echo.Context) error {
 	RecordLocalPush(req.Type, req.ID, content, "success", "")
 
 	affectedProjects := project.GetAffectedProjects(req.Type, req.ID)
+
+	if req.Type == "ruleset" {
+		affectedProjects = []string{}
+	}
 
 	for _, projectID := range affectedProjects {
 		if p, ok := project.GetProject(projectID); ok {
