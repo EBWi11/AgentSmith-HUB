@@ -39,8 +39,8 @@ type AgentConfig struct {
 	//   - "disabled" (default): never send provider-specific reasoning params
 	//   - "enabled"           : always send reasoning params for supported models
 	//   - "auto"              : enable reasoning based on model name heuristics
-	ReasoningMode          string `yaml:"reasoning_mode"`
-	ReasoningBudgetTokens  int    `yaml:"reasoning_budget_tokens"`
+	ReasoningMode         string `yaml:"reasoning_mode"`
+	ReasoningBudgetTokens int    `yaml:"reasoning_budget_tokens"`
 
 	RawConfig string `yaml:"-"`
 	Path      string `yaml:"-"`
@@ -365,7 +365,19 @@ func (a *Agent) executeFunctionCall(call ToolCall) string {
 			"args", truncateForLog(rawArgs),
 		)
 
-		result, err := executePlugin(pluginName, args)
+		var extraArgs []interface{}
+		if pluginName == "addRule" {
+			agentContextRaw, _ := json.Marshal(common.AgentOperationContext{
+				AgentID:             a.Id,
+				AgentRunID:          common.NewOperationID(),
+				ToolName:            pluginName,
+				ToolCallID:          call.ID,
+				ProjectNodeSequence: a.ProjectNodeSequence,
+			})
+			extraArgs = append(extraArgs, string(agentContextRaw))
+		}
+
+		result, err := executePlugin(pluginName, args, extraArgs...)
 		if err != nil {
 			toolLogger.Error("Tool execution failed",
 				"agent", a.Id,

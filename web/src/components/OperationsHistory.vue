@@ -46,6 +46,7 @@
             <option value="component_delete">Component Delete</option>
             <option value="change_push">Change Push</option>
             <option value="local_push">Local Push</option>
+            <option value="revert">Revert</option>
             <option value="project_start">Project Start</option>
             <option value="project_stop">Project Stop</option>
             <option value="project_restart">Project Restart</option>
@@ -183,6 +184,9 @@
                     <span v-if="operation.details?.node_id || operation.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       {{ operation.details?.node_id || operation.node_id }}
                     </span>
+                    <span v-if="operation.reverted" class="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded font-medium">
+                      Reverted
+                    </span>
                   </div>
                 </div>
               </div>
@@ -192,6 +196,9 @@
               <!-- Status Badge -->
               <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getStatusClass(operation.status)">
                 {{ operation.status }}
+              </span>
+              <span v-if="canRevert(operation)" class="px-2 py-1 text-xs font-medium rounded-full bg-red-50 text-red-700 border border-red-200">
+                Revertible
               </span>
               
               <!-- Expand/Collapse Icon -->
@@ -247,7 +254,38 @@
                     <dt class="text-gray-500">Timestamp:</dt>
                     <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(operation.timestamp) }}</dd>
                   </div>
-
+                  <div v-if="operation.operation_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Operation ID:</dt>
+                    <dd class="col-span-2 text-gray-900 break-all">{{ operation.operation_id }}</dd>
+                  </div>
+                  <div v-if="operation.source" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Source:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.source }}</dd>
+                  </div>
+                  <div v-if="operation.agent_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Agent:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.agent_id }}</dd>
+                  </div>
+                  <div v-if="operation.project_node_sequence" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">PNS:</dt>
+                    <dd class="col-span-2 text-gray-900 break-all">{{ operation.project_node_sequence }}</dd>
+                  </div>
+                  <div v-if="operation.rule_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Rule ID:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.rule_id }}</dd>
+                  </div>
+                  <div v-if="operation.ruleset_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Ruleset ID:</dt>
+                    <dd class="col-span-2 text-gray-900">{{ operation.ruleset_id }}</dd>
+                  </div>
+                  <div v-if="operation.reverted_by_operation_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Reverted By:</dt>
+                    <dd class="col-span-2 text-gray-900 break-all">{{ operation.reverted_by_operation_id }}</dd>
+                  </div>
+                  <div v-if="operation.reverts_operation_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Reverts:</dt>
+                    <dd class="col-span-2 text-gray-900 break-all">{{ operation.reverts_operation_id }}</dd>
+                  </div>
                 </dl>
               </div>
 
@@ -258,6 +296,15 @@
                   <pre class="text-sm text-red-700 whitespace-pre-wrap">{{ operation.error }}</pre>
                 </div>
               </div>
+            </div>
+
+            <div v-if="canRevert(operation)" class="mt-4 flex justify-end">
+              <button
+                @click.stop="openRevertModal(operation)"
+                class="btn btn-danger btn-sm"
+              >
+                Revert
+              </button>
             </div>
 
             <!-- Diff View (for change operations) -->
@@ -291,6 +338,62 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showRevertModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 mx-4">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-lg font-medium text-gray-900">Revert Operation</h3>
+            <p class="text-sm text-gray-500 mt-1">
+              This will create a new revert history entry. The revert action itself cannot be reverted.
+            </p>
+          </div>
+          <button @click="closeRevertModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div v-if="selectedOperationForRevert" class="mb-4 text-sm text-gray-600 space-y-1">
+          <div><span class="font-medium text-gray-800">Type:</span> {{ getOperationTypeLabel(selectedOperationForRevert.type) }}</div>
+          <div v-if="selectedOperationForRevert.ruleset_id"><span class="font-medium text-gray-800">Ruleset:</span> {{ selectedOperationForRevert.ruleset_id }}</div>
+          <div v-if="selectedOperationForRevert.rule_id"><span class="font-medium text-gray-800">Rule:</span> {{ selectedOperationForRevert.rule_id }}</div>
+          <div v-if="selectedOperationForRevert.operation_id" class="break-all"><span class="font-medium text-gray-800">Operation ID:</span> {{ selectedOperationForRevert.operation_id }}</div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+            <textarea
+              v-model="revertForm.comment"
+              rows="3"
+              placeholder="Optional note about why this operation is being reverted"
+              class="filter-input resize-none"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Commit Message</label>
+            <input
+              v-model="revertForm.commitMessage"
+              type="text"
+              placeholder="Optional commit message"
+              class="filter-input"
+            />
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end space-x-3">
+          <button @click="closeRevertModal" class="btn btn-secondary btn-sm" :disabled="revertSubmitting">
+            Cancel
+          </button>
+          <button @click="submitRevert" class="btn btn-danger btn-sm" :disabled="revertSubmitting">
+            <span v-if="revertSubmitting" class="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-2 inline-block"></span>
+            Confirm Revert
+          </button>
         </div>
       </div>
     </div>
@@ -339,6 +442,13 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const expandedOperations = ref(new Set())
+const showRevertModal = ref(false)
+const revertSubmitting = ref(false)
+const selectedOperationForRevert = ref(null)
+const revertForm = ref({
+  comment: '',
+  commitMessage: ''
+})
 // Node statistics no longer used (feature removed)
 const nodeStats = ref({}) // kept empty for backward compatibility
 const availableNodes = ref([])
@@ -642,6 +752,55 @@ function toggleOperationDetail(operation) {
   }
 }
 
+function canRevert(operation) {
+  return Boolean(
+    operation?.operation_id &&
+    operation?.component_type === 'ruleset' &&
+    operation?.status === 'success' &&
+    operation?.revertible &&
+    !operation?.reverted &&
+    operation?.type !== 'revert' &&
+    operation?.action_type !== 'revert'
+  )
+}
+
+function openRevertModal(operation) {
+  selectedOperationForRevert.value = operation
+  revertForm.value = {
+    comment: '',
+    commitMessage: ''
+  }
+  showRevertModal.value = true
+}
+
+function closeRevertModal() {
+  if (revertSubmitting.value) return
+  showRevertModal.value = false
+  selectedOperationForRevert.value = null
+}
+
+async function submitRevert() {
+  if (!selectedOperationForRevert.value?.operation_id || revertSubmitting.value) {
+    return
+  }
+
+  revertSubmitting.value = true
+  try {
+    await hubApi.revertOperation(selectedOperationForRevert.value.operation_id, {
+      comment: revertForm.value.comment || '',
+      commit_message: revertForm.value.commitMessage || ''
+    })
+    revertSubmitting.value = false
+    $message?.success?.('Operation reverted successfully')
+    closeRevertModal()
+    fetchOperationsHistory()
+  } catch (e) {
+    $message?.error?.(e.message || 'Failed to revert operation')
+  } finally {
+    revertSubmitting.value = false
+  }
+}
+
 function previousPage() {
   if (currentPage.value > 1) {
     currentPage.value--
@@ -664,6 +823,7 @@ function getOperationTypeLabel(type) {
     'component_delete': 'Component Delete',
     'change_push': 'Change Push',
     'local_push': 'Local Push',
+    'revert': 'Revert',
     'project_start': 'Project Start',
     'project_stop': 'Project Stop',
     'project_restart': 'Project Restart',
@@ -679,6 +839,7 @@ function getOperationTypeClass(type) {
     'component_delete': 'bg-red-600',
     'change_push': 'bg-blue-500',
     'local_push': 'bg-purple-500',
+    'revert': 'bg-amber-500',
     'project_start': 'bg-green-500',
     'project_stop': 'bg-red-500',
     'project_restart': 'bg-orange-500',
@@ -694,6 +855,7 @@ function getOperationTypeIcon(type) {
     'component_delete': '<path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>',
     'change_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l2 2 4-4"/>',
     'local_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M13 13l3-3-3-3m-4 6L6 10l3-3"/>',
+    'revert': '<path d="M9 14l-4-4m0 0l4-4m-4 4h11a4 4 0 110 8h-1"/>',
     'project_start': '<path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2z"/>',
     'project_stop': '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>',
     'project_restart': '<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>',
@@ -759,7 +921,10 @@ function formatFullTimestamp(timestamp) {
 }
 
 function getOperationKey(operation) {
-  // Create a unique key for each operation using timestamp and operation details
+  if (operation.operation_id) {
+    return operation.operation_id
+  }
+  // Fallback for older records without operation_id
   return `${operation.timestamp}-${operation.type}-${operation.component_type || ''}-${operation.component_id || ''}-${operation.project_id || ''}`
 }
 </script>
@@ -779,6 +944,10 @@ function getOperationKey(operation) {
 
 .btn-secondary {
   @apply bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-gray-500;
+}
+
+.btn-danger {
+  @apply bg-white border border-red-300 text-red-700 hover:bg-red-50 focus:ring-red-500;
 }
 
 .btn-sm {

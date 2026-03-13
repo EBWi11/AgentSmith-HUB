@@ -3,7 +3,6 @@ package api
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -66,112 +65,17 @@ func getUnifiedOperationHistory(filter common.OperationHistoryFilter) ([]common.
 
 // RecordChangePush records a change push operation to Redis
 func RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg string) {
-	// Create details map with execution node information
-	details := map[string]interface{}{
-		"node_id":      common.Config.LocalIP,
-		"node_address": common.Config.LocalIP,
-		"executed_by":  common.Config.LocalIP,
-	}
-
-	record := common.OperationRecord{
-		Type:          common.OpTypeChangePush,
-		Timestamp:     time.Now(),
-		ComponentType: componentType,
-		ComponentID:   componentID,
-		OldContent:    oldContent,
-		NewContent:    newContent,
-		Diff:          diff,
-		Status:        status,
-		Error:         errorMsg,
-		Details:       details,
-	}
-
-	// Serialize record to JSON and store to Redis
-	if jsonData, err := json.Marshal(record); err == nil {
-		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-			logger.Error("Failed to record change push operation to Redis", "error", err)
-		} else {
-			// Set TTL for the entire list to 31 days
-			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
-			}
-			logger.Info("Change push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
-		}
-	} else {
-		logger.Error("Failed to marshal change push operation", "error", err)
-	}
+	common.RecordChangePush(componentType, componentID, oldContent, newContent, diff, status, errorMsg)
 }
 
 // RecordLocalPush records a local push operation to Redis
 func RecordLocalPush(componentType, componentID, content, status, errorMsg string) {
-	// Create details map with execution node information
-	details := map[string]interface{}{
-		"node_id":      common.Config.LocalIP,
-		"node_address": common.Config.LocalIP,
-		"executed_by":  common.Config.LocalIP,
-	}
-
-	record := common.OperationRecord{
-		Type:          common.OpTypeLocalPush,
-		Timestamp:     time.Now(),
-		ComponentType: componentType,
-		ComponentID:   componentID,
-		NewContent:    content,
-		Status:        status,
-		Error:         errorMsg,
-		Details:       details,
-	}
-
-	// Serialize record to JSON and store to Redis
-	if jsonData, err := json.Marshal(record); err == nil {
-		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-			logger.Error("Failed to record local push operation to Redis", "error", err)
-		} else {
-			// Set TTL for the entire list to 31 days
-			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
-			}
-			logger.Info("Local push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
-		}
-	} else {
-		logger.Error("Failed to marshal local push operation", "error", err)
-	}
+	common.RecordLocalPush(componentType, componentID, content, status, errorMsg)
 }
 
 // RecordComponentDelete records a component deletion operation to Redis
 func RecordComponentDelete(componentType, componentID, status, errorMsg string, affectedProjects []string) {
-	// Create details map with execution node information
-	details := map[string]interface{}{
-		"node_id":           common.Config.LocalIP,
-		"node_address":      common.Config.LocalIP,
-		"executed_by":       common.Config.LocalIP,
-		"affected_projects": affectedProjects,
-	}
-
-	record := common.OperationRecord{
-		Type:          common.OpTypeComponentDelete,
-		Timestamp:     time.Now(),
-		ComponentType: componentType,
-		ComponentID:   componentID,
-		Status:        status,
-		Error:         errorMsg,
-		Details:       details,
-	}
-
-	// Serialize record to JSON and store to Redis
-	if jsonData, err := json.Marshal(record); err == nil {
-		if err := common.RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-			logger.Error("Failed to record component delete operation to Redis", "error", err)
-		} else {
-			// Set TTL for the entire list to 31 days
-			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
-			}
-			logger.Info("Component delete operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
-		}
-	} else {
-		logger.Error("Failed to marshal component delete operation", "error", err)
-	}
+	common.RecordComponentDelete(componentType, componentID, status, errorMsg, affectedProjects)
 }
 
 // RecordProjectOperation records a project operation

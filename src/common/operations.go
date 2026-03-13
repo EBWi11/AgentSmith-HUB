@@ -1,6 +1,8 @@
 package common
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,49 +12,161 @@ import (
 	"AgentSmith-HUB/logger"
 )
 
+const (
+	operationsHistoryKey = "cluster:ops_history"
+	operationsRecordKey  = "cluster:ops:record:"
+	operationsStateKey   = "cluster:ops:state:"
+	operationsRevertKey  = "cluster:ops:revert_of:"
+	operationsTTLSeconds = 31 * 24 * 60 * 60
+)
+
+func NewOperationID() string {
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("op_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("op_%d_%s", time.Now().UnixNano(), hex.EncodeToString(buf[:]))
+}
+
+func applyOperationDefaults(record *OperationRecord) {
+	if record.OperationID == "" {
+		record.OperationID = NewOperationID()
+	}
+	if record.Timestamp.IsZero() {
+		record.Timestamp = time.Now()
+	}
+	if record.Details == nil {
+		record.Details = make(map[string]interface{}, 3)
+	}
+	if _, exists := record.Details["node_id"]; !exists {
+		record.Details["node_id"] = Config.LocalIP
+	}
+	if _, exists := record.Details["node_address"]; !exists {
+		record.Details["node_address"] = Config.LocalIP
+	}
+	if _, exists := record.Details["executed_by"]; !exists {
+		record.Details["executed_by"] = Config.LocalIP
+	}
+}
+
+func operationRecordKey(operationID string) string { return operationsRecordKey + operationID }
+func operationStateHashKey(operationID string) string {
+	return operationsStateKey + operationID
+}
+func operationRevertKey(operationID string) string { return operationsRevertKey + operationID }
+
+func RecordOperation(record OperationRecord) (string, error) {
+	applyOperationDefaults(&record)
+
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		return "", fmt.Errorf("marshal operation record: %w", err)
+	}
+
+	if _, err := RedisSet(operationRecordKey(record.OperationID), string(jsonData), operationsTTLSeconds); err != nil {
+		return "", fmt.Errorf("write operation record: %w", err)
+	}
+	if err := RedisHSet(operationStateHashKey(record.OperationID), "reverted", fmt.Sprintf("%t", record.Reverted)); err != nil {
+		return "", fmt.Errorf("write operation state reverted: %w", err)
+	}
+	if record.RevertedByOperationID != "" {
+		if err := RedisHSet(operationStateHashKey(record.OperationID), "reverted_by_operation_id", record.RevertedByOperationID); err != nil {
+			return "", fmt.Errorf("write operation state reverted_by_operation_id: %w", err)
+		}
+	}
+	if err := RedisHSet(operationStateHashKey(record.OperationID), "status", record.Status); err != nil {
+		return "", fmt.Errorf("write operation state status: %w", err)
+	}
+	if err := RedisHSet(operationStateHashKey(record.OperationID), "updated_at", record.Timestamp.Format(time.RFC3339Nano)); err != nil {
+		return "", fmt.Errorf("write operation state updated_at: %w", err)
+	}
+	if err := RedisExpire(operationStateHashKey(record.OperationID), operationsTTLSeconds); err != nil {
+		logger.Warn("Failed to set operation state TTL", "operation_id", record.OperationID, "error", err)
+	}
+
+	if err := RedisLPush(operationsHistoryKey, string(jsonData), 10000); err != nil {
+		return "", fmt.Errorf("append operation history: %w", err)
+	}
+	if err := RedisExpire(operationsHistoryKey, operationsTTLSeconds); err != nil {
+		logger.Warn("Failed to set operations history TTL", "error", err)
+	}
+
+	if record.RevertsOperationID != "" {
+		if _, err := RedisSet(operationRevertKey(record.RevertsOperationID), record.OperationID, operationsTTLSeconds); err != nil {
+			return "", fmt.Errorf("write operation revert relation: %w", err)
+		}
+	}
+
+	return record.OperationID, nil
+}
+
+func GetOperationRecord(operationID string) (OperationRecord, error) {
+	var record OperationRecord
+	if strings.TrimSpace(operationID) == "" {
+		return record, fmt.Errorf("operation id is required")
+	}
+
+	raw, err := RedisGet(operationRecordKey(operationID))
+	if err != nil {
+		return record, fmt.Errorf("get operation record: %w", err)
+	}
+	if raw == "" {
+		return record, fmt.Errorf("operation not found: %s", operationID)
+	}
+	if err := json.Unmarshal([]byte(raw), &record); err != nil {
+		return record, fmt.Errorf("unmarshal operation record: %w", err)
+	}
+	return applyOperationState(record), nil
+}
+
+func MarkOperationReverted(operationID, revertedByOperationID string) error {
+	if strings.TrimSpace(operationID) == "" {
+		return fmt.Errorf("operation id is required")
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "reverted", "true"); err != nil {
+		return err
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "reverted_by_operation_id", revertedByOperationID); err != nil {
+		return err
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "updated_at", time.Now().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return RedisExpire(operationStateHashKey(operationID), operationsTTLSeconds)
+}
+
+func applyOperationState(record OperationRecord) OperationRecord {
+	if record.OperationID == "" {
+		return record
+	}
+	state, err := RedisHGetAll(operationStateHashKey(record.OperationID))
+	if err != nil || len(state) == 0 {
+		return record
+	}
+	if revertedValue, exists := state["reverted"]; exists {
+		record.Reverted = strings.EqualFold(revertedValue, "true")
+	}
+	if revertedBy, exists := state["reverted_by_operation_id"]; exists && revertedBy != "" {
+		record.RevertedByOperationID = revertedBy
+	}
+	if status, exists := state["status"]; exists && status != "" {
+		record.Status = status
+	}
+	return record
+}
+
 // RecordProjectOperation records a project operation to Redis only
 func RecordProjectOperation(operationType OperationType, projectID, status, errorMsg string, details map[string]interface{}) {
-	// Ensure details map exists and contains execution node information
-	if details == nil {
-		details = make(map[string]interface{}, 3)
-	}
-
-	// Always record the actual execution node (don't override if already set)
-	if _, exists := details["node_id"]; !exists {
-		details["node_id"] = Config.LocalIP
-	}
-	if _, exists := details["node_address"]; !exists {
-		details["node_address"] = Config.LocalIP
-	}
-	if _, exists := details["executed_by"]; !exists {
-		details["executed_by"] = Config.LocalIP
-	}
-
 	record := OperationRecord{
 		Type:      operationType,
-		Timestamp: time.Now(),
 		ProjectID: projectID,
 		Status:    status,
 		Error:     errorMsg,
 		Details:   details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal operation record", "operation", operationType, "project", projectID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record project operation", "operation", operationType, "project", projectID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record project operation to Redis", "operation", operationType, "project", projectID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days (31 * 24 * 60 * 60 = 2,678,400 seconds)
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Operation recorded to Redis", "type", record.Type, "project", record.ProjectID, "status", record.Status)
@@ -86,7 +200,6 @@ func RecordClusterInstruction(operationType OperationType, instructionType, comp
 
 	record := OperationRecord{
 		Type:          operationType,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		Status:        status,
@@ -94,23 +207,9 @@ func RecordClusterInstruction(operationType OperationType, instructionType, comp
 		NewContent:    content, // Store instruction content
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal cluster instruction record", "operation", operationType, "instruction_type", instructionType, "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record cluster instruction", "operation", operationType, "instruction_type", instructionType, "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record cluster instruction to Redis", "operation", operationType, "instruction_type", instructionType, "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days (31 * 24 * 60 * 60 = 2,678,400 seconds)
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Cluster instruction recorded to Redis", "type", record.Type, "instruction_type", instructionType, "component", record.ComponentID, "status", record.Status)
@@ -127,7 +226,6 @@ func RecordComponentAdd(componentType, componentID, content, status, errorMsg st
 
 	record := OperationRecord{
 		Type:          OpTypeComponentAdd,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		NewContent:    content,
@@ -135,23 +233,9 @@ func RecordComponentAdd(componentType, componentID, content, status, errorMsg st
 		Error:         errorMsg,
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal component add record", "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record component add", "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record component add to Redis", "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component add operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -168,7 +252,6 @@ func RecordComponentUpdate(componentType, componentID, content, status, errorMsg
 
 	record := OperationRecord{
 		Type:          OpTypeComponentUpdate,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		NewContent:    content,
@@ -176,23 +259,9 @@ func RecordComponentUpdate(componentType, componentID, content, status, errorMsg
 		Error:         errorMsg,
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal component update record", "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record component update", "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record component update to Redis", "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component update operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -210,30 +279,15 @@ func RecordComponentDelete(componentType, componentID, status, errorMsg string, 
 
 	record := OperationRecord{
 		Type:          OpTypeComponentDelete,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		Status:        status,
 		Error:         errorMsg,
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal component delete record", "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record component delete", "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record component delete to Redis", "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component delete operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -250,7 +304,6 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 
 	record := OperationRecord{
 		Type:          OpTypeChangePush,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		OldContent:    oldContent,
@@ -260,23 +313,9 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 		Error:         errorMsg,
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal change push record", "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record change push", "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record change push to Redis", "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Change push operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -293,7 +332,6 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 
 	record := OperationRecord{
 		Type:          OpTypeLocalPush,
-		Timestamp:     time.Now(),
 		ComponentType: componentType,
 		ComponentID:   componentID,
 		NewContent:    content,
@@ -301,23 +339,9 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 		Error:         errorMsg,
 		Details:       details,
 	}
-
-	// Serialize record to JSON
-	jsonData, err := json.Marshal(record)
-	if err != nil {
-		logger.Error("Failed to marshal local push record", "component", componentID, "error", err)
+	if _, err := RecordOperation(record); err != nil {
+		logger.Error("Failed to record local push", "component", componentID, "error", err)
 		return
-	}
-
-	// Store to Redis list with size limit
-	if err := RedisLPush("cluster:ops_history", string(jsonData), 10000); err != nil {
-		logger.Error("Failed to record local push to Redis", "component", componentID, "error", err)
-		return
-	}
-
-	// Set TTL for the entire list to 31 days
-	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Local push operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -452,7 +476,7 @@ type OperationHistoryFilter struct {
 // GetOperationsFromRedisWithFilter retrieves operations from Redis with server-side filtering and pagination
 func GetOperationsFromRedisWithFilter(filter OperationHistoryFilter) ([]OperationRecord, int, error) {
 	// Read all operations from Redis
-	redisLines, err := RedisLRange("cluster:ops_history", 0, -1)
+	redisLines, err := RedisLRange(operationsHistoryKey, 0, -1)
 	if err != nil {
 		logger.Error("Failed to read operations from Redis", "error", err)
 		return []OperationRecord{}, 0, err
@@ -467,6 +491,7 @@ func GetOperationsFromRedisWithFilter(filter OperationHistoryFilter) ([]Operatio
 			logger.Error("Failed to unmarshal operation record", "error", err)
 			continue
 		}
+		op = applyOperationState(op)
 
 		// Apply filters
 		if !matchesOperationFilter(op, filter) {

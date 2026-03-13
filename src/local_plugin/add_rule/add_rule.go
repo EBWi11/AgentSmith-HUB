@@ -16,10 +16,12 @@ const requestTimeout = 30 * time.Second
 // Eval calls the Hub API to add a rule to a ruleset.
 //
 // Args:
-//   rulesetId   string  — target ruleset ID
-//   ruleContent string  — a single <rule>...</rule> XML element
-//   autoApply   bool    — (optional, default true) apply the change immediately;
-//                         pass false to leave the rule in pending state for human review
+//
+//	rulesetId   string  — target ruleset ID
+//	ruleContent string  — a single <rule>...</rule> XML element
+//	autoApply   bool    — (optional, default true) apply the change immediately;
+//	                      pass false to leave the rule in pending state for human review
+//	agentContext string — (optional, internal) serialized agent operation context
 //
 // Returns (responseBody, success, error).
 // On API error (e.g. verify failure), responseBody contains the details so the agent can fix and retry.
@@ -52,12 +54,23 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 		}
 	}
 
+	var agentContext string
+	if len(args) >= 4 {
+		if v, ok := args[3].(string); ok {
+			agentContext = strings.TrimSpace(v)
+		}
+	}
+
 	baseURL, token, err := resolveHubAccess()
 	if err != nil {
 		return nil, false, err
 	}
 
-	addResp, err := postJSON(baseURL+"/rulesets/"+rulesetId+"/rules", token, map[string]string{"rule_raw": ruleContent})
+	addReq := map[string]string{"rule_raw": ruleContent}
+	if agentContext != "" {
+		addReq["agent_context"] = agentContext
+	}
+	addResp, err := postJSON(baseURL+"/rulesets/"+rulesetId+"/rules", token, addReq)
 	if err != nil {
 		return addResp, false, err
 	}

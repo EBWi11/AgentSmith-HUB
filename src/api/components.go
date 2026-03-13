@@ -12,6 +12,7 @@ import (
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
 	"AgentSmith-HUB/skill"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -573,7 +574,6 @@ func getInput(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
 
-
 // getPlugins returns plugin information with configurable detail level
 // Query parameters:
 //   - detailed: "true" for full information, "false" for simple format (default: false)
@@ -1104,11 +1104,11 @@ func createComponent(componentType string, c echo.Context) error {
 			request.Raw = NewRulesetData
 		case "project":
 			request.Raw = NewProjectData
-	case "agent":
-		request.Raw = NewAgentData
-	case "skill":
-		request.Raw = NewSkillData
-	}
+		case "agent":
+			request.Raw = NewAgentData
+		case "skill":
+			request.Raw = NewSkillData
+		}
 	}
 
 	// Write file without lock (file system operations are atomic)
@@ -2610,6 +2610,14 @@ func deleteRulesetRule(c echo.Context) error {
 
 	// Update memory
 	project.SetRulesetNew(rulesetId, updatedXML)
+	_ = savePendingRulesetOperationMeta(rulesetId, common.OperationRecord{
+		ActionScope: "ruleset_rule",
+		ActionType:  "delete_rule",
+		Source:      "human",
+		RulesetID:   rulesetId,
+		RuleID:      ruleId,
+		Revertible:  false,
+	})
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":  "✅ Rule deleted successfully from temporary file",
@@ -2636,7 +2644,8 @@ func addRulesetRule(c echo.Context) error {
 	rulesetId := c.Param("id")
 
 	var request struct {
-		RuleRaw string `json:"rule_raw"`
+		RuleRaw      string `json:"rule_raw"`
+		AgentContext string `json:"agent_context"`
 	}
 
 	if err := c.Bind(&request); err != nil {
@@ -2696,10 +2705,10 @@ func addRulesetRule(c echo.Context) error {
 	// Check if the same rule (normalized content) already exists in current/pending ruleset
 	if pendingRuleDuplicate(currentRawConfig, processedRuleRaw) {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"message":  "Rule already present in current ruleset (or pending); no change made",
-			"rule_id":  ruleId,
-			"status":   "already_added",
-			"note":     "A rule with the same normalized content already exists. Apply pending changes if needed.",
+			"message": "Rule already present in current ruleset (or pending); no change made",
+			"rule_id": ruleId,
+			"status":  "already_added",
+			"note":    "A rule with the same normalized content already exists. Apply pending changes if needed.",
 		})
 	}
 
@@ -2747,6 +2756,33 @@ func addRulesetRule(c echo.Context) error {
 
 	// Update memory
 	project.SetRulesetNew(rulesetId, updatedXML)
+
+	opRecord := common.OperationRecord{
+		ActionScope: "ruleset_rule",
+		ActionType:  "add_rule",
+		Source:      "human",
+		RulesetID:   rulesetId,
+		RuleID:      ruleId,
+		Revertible:  true,
+		Details: map[string]interface{}{
+			"rule_content": processedRuleRaw,
+		},
+	}
+	if strings.TrimSpace(request.AgentContext) != "" {
+		var agentCtx common.AgentOperationContext
+		if err := json.Unmarshal([]byte(request.AgentContext), &agentCtx); err == nil {
+			opRecord.Source = "agent"
+			opRecord.AgentID = agentCtx.AgentID
+			opRecord.AgentRunID = agentCtx.AgentRunID
+			opRecord.AgentSessionID = agentCtx.AgentSessionID
+			opRecord.ToolName = agentCtx.ToolName
+			opRecord.ToolCallID = agentCtx.ToolCallID
+			opRecord.ProjectNodeSequence = agentCtx.ProjectNodeSequence
+			opRecord.SourceEventID = agentCtx.SourceEventID
+			opRecord.AgentReasonSummary = agentCtx.AgentReasonSummary
+		}
+	}
+	_ = savePendingRulesetOperationMeta(rulesetId, opRecord)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":  "✅ Rule added successfully to temporary file",
@@ -2927,6 +2963,34 @@ func simpleRuleFingerprintFromXML(ruleXML string) (string, error) {
 		return "", fmt.Errorf("expected exactly one rule, got %d", len(rs.Rules))
 	}
 	return simpleRuleFingerprintFromRule(&rs.Rules[0]), nil
+}
+
+// extractRuleFromXML returns the full <rule>...</rule> XML block for the specified rule ID.
+func extractRuleFromXML(xmlContent, ruleId string) (string, error) {
+	rulePattern := fmt.Sprintf(`<rule\s+[^>]*id\s*=\s*"%s"[^>]*>`, regexp.QuoteMeta(ruleId))
+	ruleRegex := regexp.MustCompile(rulePattern)
+
+	lines := strings.Split(xmlContent, "\n")
+	var block []string
+	inRule := false
+	depth := 0
+
+	for _, line := range lines {
+		if !inRule && ruleRegex.MatchString(line) {
+			inRule = true
+		}
+		if !inRule {
+			continue
+		}
+
+		block = append(block, line)
+		depth += strings.Count(line, "<rule") - strings.Count(line, "</rule>")
+		if depth <= 0 && strings.Contains(line, "</rule>") {
+			return strings.Join(block, "\n"), nil
+		}
+	}
+
+	return "", fmt.Errorf("rule with ID '%s' not found", ruleId)
 }
 
 // pendingRuleDuplicate 使用 rules_engine 解析后的结构来做近似"逻辑等价"判断（忽略 ConditionAST）。

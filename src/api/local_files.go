@@ -1223,7 +1223,7 @@ func loadSingleLocalChange(c echo.Context) error {
 // This bypasses the temporary file system and *New mappings
 func loadComponentDirectly(componentType, id, content string) error {
 	// Use unified reload logic with local file source
-	_, err := reloadComponentUnified(&ComponentReloadRequest{
+	_, _, err := reloadComponentUnified(&ComponentReloadRequest{
 		Type:        componentType,
 		ID:          id,
 		NewContent:  content,

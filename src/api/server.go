@@ -220,6 +220,7 @@ func ServerStart(listener string) error {
 	auth.GET("/operations-history/nodes", GetOperationsHistoryNodes)
 	auth.GET("/cluster-operations-history", GetClusterOperationsHistory)
 	auth.GET("/operations-stats", GetOperationsStats)
+	auth.POST("/operations/:id/revert", revertOperation)
 
 	// Plugin statistics endpoint - REQUIRE AUTH
 	auth.GET("/plugin-stats", GetPluginStats)

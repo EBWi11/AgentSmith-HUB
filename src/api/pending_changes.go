@@ -652,6 +652,7 @@ func CancelPendingChange(c echo.Context) error {
 		project.DeleteOutputNew(id)
 	case "ruleset":
 		project.DeleteRulesetNew(id)
+		clearPendingRulesetOperationMeta(id)
 	case "project":
 		project.DeleteProjectNew(id)
 	case "agent":
@@ -720,6 +721,7 @@ func CancelAllPendingChanges(c echo.Context) error {
 			project.DeleteOutputNew(change.ID)
 		case "ruleset":
 			project.DeleteRulesetNew(change.ID)
+			clearPendingRulesetOperationMeta(change.ID)
 		case "project":
 			project.DeleteProjectNew(change.ID)
 		case "agent":
@@ -778,22 +780,23 @@ const (
 
 // ComponentReloadRequest represents a request to reload a component
 type ComponentReloadRequest struct {
-	Type        string                `json:"type"`
-	ID          string                `json:"id"`
-	NewContent  string                `json:"new_content"`
-	OldContent  string                `json:"old_content,omitempty"`
-	Source      ComponentReloadSource `json:"source"`
-	SkipVerify  bool                  `json:"skip_verify,omitempty"`
-	WriteToFile bool                  `json:"write_to_file,omitempty"`
+	Type        string                  `json:"type"`
+	ID          string                  `json:"id"`
+	NewContent  string                  `json:"new_content"`
+	OldContent  string                  `json:"old_content,omitempty"`
+	Source      ComponentReloadSource   `json:"source"`
+	SkipVerify  bool                    `json:"skip_verify,omitempty"`
+	WriteToFile bool                    `json:"write_to_file,omitempty"`
+	Operation   *common.OperationRecord `json:"operation,omitempty"`
 }
 
 // reloadComponentUnified provides unified component reload logic for all sources
-func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
+func reloadComponentUnified(req *ComponentReloadRequest) ([]string, string, error) {
 	logger.Info("Starting unified component reload", "type", req.Type, "id", req.ID, "source", req.Source)
 
 	// Phase 1: Validation
 	if req.Type == "" || req.ID == "" {
-		return nil, fmt.Errorf("component type and ID are required")
+		return nil, "", fmt.Errorf("component type and ID are required")
 	}
 
 	// Phase 2: Verification (optional based on source)
@@ -815,12 +818,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		case "skill":
 			verifyErr = skill.Verify("", req.NewContent)
 		default:
-			return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+			return nil, "", fmt.Errorf("unsupported component type: %s", req.Type)
 		}
 
 		if verifyErr != nil {
 			logger.Error("Component verification failed", "type", req.Type, "id", req.ID, "error", verifyErr)
-			return nil, fmt.Errorf("verification failed: %w", verifyErr)
+			return nil, "", fmt.Errorf("verification failed: %w", verifyErr)
 		}
 	}
 
@@ -845,13 +848,13 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		case "skill":
 			filePath = path.Join(configRoot, "skill", req.ID+".yaml")
 		default:
-			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
+			return nil, "", fmt.Errorf("unsupported component type for file write: %s", req.Type)
 		}
 
 		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
 		if err != nil {
 			logger.Error("Failed to write component file", "type", req.Type, "id", req.ID, "error", err)
-			return nil, fmt.Errorf("failed to write %s file: %w", req.Type, err)
+			return nil, "", fmt.Errorf("failed to write %s file: %w", req.Type, err)
 		}
 
 		// Remove .new file if it exists (after successful write)
@@ -899,7 +902,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newInput, err = input.NewInput("", req.NewContent, req.ID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create input: %w", err)
+			return nil, "", fmt.Errorf("failed to create input: %w", err)
 		}
 
 		// Replace in global registry using safe accessors
@@ -918,7 +921,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newOutput, err = output.NewOutput("", req.NewContent, req.ID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create output: %w", err)
+			return nil, "", fmt.Errorf("failed to create output: %w", err)
 		}
 
 		// Replace in global registry using safe accessors
@@ -937,7 +940,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newRuleset, err = rules_engine.NewRuleset("", req.NewContent, req.ID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create ruleset: %w", err)
+			return nil, "", fmt.Errorf("failed to create ruleset: %w", err)
 		}
 
 		// Replace in global registry using safe accessors
@@ -945,7 +948,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		project.DeleteRulesetNew(req.ID)
 
 		if err := project.HotReloadRulesetInstances(req.ID, newRuleset); err != nil {
-			return nil, fmt.Errorf("failed to hot reload running ruleset instances: %w", err)
+			return nil, "", fmt.Errorf("failed to hot reload running ruleset instances: %w", err)
 		}
 
 		// Rulesets support in-place hot reload, so projects do not need a restart here.
@@ -974,7 +977,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newProject, err = project.NewProject("", req.NewContent, req.ID, false)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create project: %w", err)
+			return nil, "", fmt.Errorf("failed to create project: %w", err)
 		}
 
 		// Replace in global registry using safe accessors
@@ -1000,7 +1003,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			err = plugin.NewPlugin("", req.NewContent, req.ID, plugin.YAEGI_PLUGIN)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create plugin: %w", err)
+			return nil, "", fmt.Errorf("failed to create plugin: %w", err)
 		}
 
 		// Clear temporary version using safe accessor
@@ -1017,7 +1020,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newAgent, err = agent.NewAgent("", req.NewContent, req.ID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create agent: %w", err)
+			return nil, "", fmt.Errorf("failed to create agent: %w", err)
 		}
 
 		project.SetAgent(req.ID, newAgent)
@@ -1034,7 +1037,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			newSkill, err = skill.NewSkill("", req.NewContent, req.ID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create skill: %w", err)
+			return nil, "", fmt.Errorf("failed to create skill: %w", err)
 		}
 
 		project.SetSkill(req.ID, newSkill)
@@ -1042,7 +1045,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("skill", req.ID)
 
 	default:
-		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+		return nil, "", fmt.Errorf("unsupported component type: %s", req.Type)
 	}
 
 	// Phase 5: Update global config maps and sync to followers
@@ -1056,9 +1059,47 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 	}
 
 	// Phase 6: Record operation history
+	var operationID string
 	switch req.Source {
 	case SourceChangePush:
-		RecordChangePush(req.Type, req.ID, req.OldContent, req.NewContent, "", "success", "")
+		record := common.OperationRecord{
+			Type:          common.OpTypeChangePush,
+			ComponentType: req.Type,
+			ComponentID:   req.ID,
+			OldContent:    req.OldContent,
+			NewContent:    req.NewContent,
+			Status:        "success",
+		}
+		if req.Operation != nil {
+			record = *req.Operation
+			if record.Type == "" {
+				record.Type = common.OpTypeChangePush
+			}
+			record.ComponentType = req.Type
+			record.ComponentID = req.ID
+			record.OldContent = req.OldContent
+			record.NewContent = req.NewContent
+			record.Status = "success"
+		}
+		if req.Type == "ruleset" {
+			if record.RulesetID == "" {
+				record.RulesetID = req.ID
+			}
+			if record.ActionType == "" {
+				record.ActionType = "update_ruleset"
+				record.ActionScope = "ruleset_content"
+				record.Revertible = true
+			}
+		}
+		if record.Source == "" {
+			record.Source = "human"
+		}
+		recordID, recordErr := common.RecordOperation(record)
+		if recordErr != nil {
+			logger.Error("Failed to record change push operation", "type", req.Type, "id", req.ID, "error", recordErr)
+		} else {
+			operationID = recordID
+		}
 	case SourceLocalFile:
 		RecordLocalPush(req.Type, req.ID, req.NewContent, "success", "")
 	case SourceClusterSync:
@@ -1066,7 +1107,7 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 	}
 
 	logger.Info("Component reload completed successfully", "type", req.Type, "id", req.ID, "source", req.Source, "affected_projects", len(affectedProjects))
-	return affectedProjects, nil
+	return affectedProjects, operationID, nil
 }
 
 // updateGlobalComponentConfigMap updates the global component config map
@@ -1163,11 +1204,19 @@ func ApplySingleChange(c echo.Context) error {
 		SkipVerify:  false, // Always verify for single changes
 		WriteToFile: true,  // Always write to file for persistence
 	}
+	if req.Type == "ruleset" {
+		if opMeta, err := loadPendingRulesetOperationMeta(req.ID); err == nil && opMeta != nil {
+			reloadReq.Operation = opMeta
+		}
+	}
 
-	affectedProjects, err := reloadComponentUnified(reloadReq)
+	affectedProjects, operationID, err := reloadComponentUnified(reloadReq)
 	if err != nil {
 		logger.Error("Failed to apply single change", "type", req.Type, "id", req.ID, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to apply change: " + err.Error()})
+	}
+	if req.Type == "ruleset" {
+		clearPendingRulesetOperationMeta(req.ID)
 	}
 
 	// Track projects that will actually be restarted
@@ -1206,12 +1255,14 @@ func ApplySingleChange(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message":             "Change applied successfully, projects are restarting asynchronously",
 			"projects_to_restart": projectsToRestart,
+			"operation_id":        operationID,
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":             "Change applied successfully",
 		"projects_to_restart": []string{},
+		"operation_id":        operationID,
 	})
 }
 

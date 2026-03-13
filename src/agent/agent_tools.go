@@ -104,7 +104,7 @@ func buildParametersSchema(params []plugin.PluginParameter) map[string]interface
 	return schema
 }
 
-func executePlugin(name string, args map[string]interface{}) (string, error) {
+func executePlugin(name string, args map[string]interface{}, extraArgs ...interface{}) (string, error) {
 	plugin.PluginsMu.RLock()
 	p, exists := plugin.Plugins[name]
 	plugin.PluginsMu.RUnlock()
@@ -127,6 +127,7 @@ func executePlugin(name string, args map[string]interface{}) (string, error) {
 			funcArgs = append(funcArgs, nil)
 		}
 	}
+	funcArgs = append(funcArgs, extraArgs...)
 
 	// Try interface+bool return first, fall back to bool-only
 	if p.ReturnType == "interface{}" {

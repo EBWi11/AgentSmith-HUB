@@ -1505,6 +1505,16 @@ export const hubApi = {
     }
   },
 
+  async revertOperation(operationId, payload = {}) {
+    try {
+      const response = await api.post(`/operations/${operationId}/revert`, payload);
+      return response.data;
+    } catch (error) {
+      console.error('Error reverting operation:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to revert operation');
+    }
+  },
+
   async getPluginStats(params = {}) {
     try {
       const response = await api.get('/plugin-stats', { params });
