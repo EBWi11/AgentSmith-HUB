@@ -87,21 +87,27 @@ func expectOutput(t *testing.T, ch <-chan map[string]interface{}, shouldReceive 
 func TestRulesetConfigVersion_IsolatesRuntimeNamespaceAcrossReloads(t *testing.T) {
 	initialXML := `<root name="test" type="DETECTION">
 		<rule id="r1" name="city chicago">
-			<sequence within="5s" group_by="ip" local_cache="true">
+			<sequence within="10s" group_by="ip" local_cache="true">
 				<event id="e1">
 					<check type="EQU" field="city">Chicago</check>
 				</event>
-				<condition>e1</condition>
+				<event id="e2">
+					<check type="EQU" field="stage">done</check>
+				</event>
+				<condition>e1 -> e2</condition>
 			</sequence>
 		</rule>
 	</root>`
 	updatedXML := `<root name="test" type="DETECTION">
 		<rule id="r1" name="city houston">
-			<sequence within="5s" group_by="ip" local_cache="true">
+			<sequence within="10s" group_by="ip" local_cache="true">
 				<event id="e1">
 					<check type="EQU" field="city">Houston</check>
 				</event>
-				<condition>e1</condition>
+				<event id="e2">
+					<check type="EQU" field="stage">done</check>
+				</event>
+				<condition>e1 -> e2</condition>
 			</sequence>
 		</rule>
 	</root>`
@@ -135,11 +141,14 @@ func TestRulesetConfigVersion_IsolatesRuntimeNamespaceAcrossReloads(t *testing.T
 func TestRulesetRuntimeNamespace_IsolatesProjectInstances(t *testing.T) {
 	xml := `<root name="test" type="DETECTION">
 		<rule id="r1" name="city chicago">
-			<sequence within="5s" group_by="ip" local_cache="true">
+			<sequence within="10s" group_by="ip" local_cache="true">
 				<event id="e1">
 					<check type="EQU" field="city">Chicago</check>
 				</event>
-				<condition>e1</condition>
+				<event id="e2">
+					<check type="EQU" field="stage">done</check>
+				</event>
+				<condition>e1 -> e2</condition>
 			</sequence>
 		</rule>
 	</root>`

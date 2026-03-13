@@ -471,11 +471,13 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
+		common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
 	case "push_change":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 			return err
 		}
+		common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
 	case "start", "stop", "restart":
 		if globalProjectCmdHandler == nil {
 			return fmt.Errorf("project command handler not initialized")
