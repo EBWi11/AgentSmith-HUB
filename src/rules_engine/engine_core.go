@@ -298,6 +298,16 @@ func (r *Ruleset) absenceScannerLoop() {
 	defer ticker.Stop()
 
 	for {
+		r.runtimeMu.RLock()
+		shouldKeepRunning := r.hasAbsenceSequences && r.seqStateManager != nil
+		r.runtimeMu.RUnlock()
+		if !shouldKeepRunning {
+			logger.Info("Stopping absence scanner after ruleset hot reload",
+				"ruleset", r.RulesetID,
+				"project_node_sequence", r.ProjectNodeSequence)
+			return
+		}
+
 		select {
 		case <-r.stopChan:
 			return
