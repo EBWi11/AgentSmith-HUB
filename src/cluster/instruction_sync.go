@@ -469,7 +469,7 @@ func (im *InstructionManager) operationRequiresRestart(operation, componentType 
 	case "start", "stop", "restart":
 		return false // These are already project control operations
 	case "local_push":
-		return componentType != "ruleset"
+		return componentType != "ruleset" && componentType != "memory"
 	default:
 		return false
 	}

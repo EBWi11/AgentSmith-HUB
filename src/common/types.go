@@ -96,7 +96,6 @@ type OperationRecord struct {
 	RevertsOperationID    string                 `json:"reverts_operation_id,omitempty"`
 	RevertedByOperationID string                 `json:"reverted_by_operation_id,omitempty"`
 	RevertReason          string                 `json:"revert_reason,omitempty"`
-	CommitMessage         string                 `json:"commit_message,omitempty"`
 	Status                string                 `json:"status"`
 	Error                 string                 `json:"error,omitempty"`
 	AgentID               string                 `json:"agent_id,omitempty"`

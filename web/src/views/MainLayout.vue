@@ -18,7 +18,7 @@
       <main class="flex-1 bg-gray-50 transition-all duration-300 overflow-hidden">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'agent-tools-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
+          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'memory' && selected.type !== 'error-logs' && selected.type !== 'agent-tools-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -35,6 +35,7 @@
           @refresh-list="handleRefreshList"
         />
         <OperationsHistory v-else-if="selected && selected.type === 'operations-history'" />
+        <router-view v-else-if="selected && selected.type === 'memory'" />
         <ErrorLogs v-else-if="selected && selected.type === 'error-logs'" />
         <AgentToolsLogs v-else-if="selected && selected.type === 'agent-tools-logs'" />
         <router-view v-else-if="selected && selected.type === 'tutorial'" />
@@ -123,7 +124,7 @@ onMounted(() => {
         type: 'home',
         _timestamp: Date.now()
       }
-    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'error-logs' || meta.componentType === 'agent-tools-logs' || meta.componentType === 'tutorial') {
+    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'memory' || meta.componentType === 'error-logs' || meta.componentType === 'agent-tools-logs' || meta.componentType === 'tutorial') {
       // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID needed
       selected.value = {
         type: meta.componentType,
@@ -161,7 +162,7 @@ watch(
             _timestamp: Date.now()
           }
         }
-      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'error-logs' || componentType === 'agent-tools-logs' || componentType === 'tutorial') {
+      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'memory' || componentType === 'error-logs' || componentType === 'agent-tools-logs' || componentType === 'tutorial') {
         // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID needed
         if (!selected.value || selected.value.type !== componentType) {
           selected.value = {
@@ -193,7 +194,7 @@ watch(
       if (newVal.type === 'home') {
         // For home page, use base app path
         expectedPath = '/app'
-      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components' || newVal.type === 'operations-history' || newVal.type === 'error-logs' || newVal.type === 'agent-tools-logs') {
+      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components' || newVal.type === 'operations-history' || newVal.type === 'memory' || newVal.type === 'error-logs' || newVal.type === 'agent-tools-logs') {
         // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID in URL
         expectedPath = `/app/${newVal.type}`
       } else if (newVal.id) {
@@ -227,6 +228,8 @@ function onSelectItem(item) {
     router.push('/app/load-local-components')
   } else if (item.type === 'operations-history') {
     router.push('/app/operations-history')
+  } else if (item.type === 'memory') {
+    router.push('/app/memory')
   } else if (item.type === 'error-logs') {
     router.push('/app/error-logs')
   } else if (item.type === 'agent-tools-logs') {

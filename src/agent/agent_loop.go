@@ -3,6 +3,7 @@ package agent
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/memory"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,14 +13,14 @@ import (
 
 // ToolCallTraceStep represents one step in the agent's tool-call process (for test UI).
 type ToolCallTraceStep struct {
-	Round      int                `json:"round"`
-	Role       string             `json:"role"` // "assistant" | "tool"
-	Content    string             `json:"content,omitempty"`
+	Round      int                 `json:"round"`
+	Role       string              `json:"role"` // "assistant" | "tool"
+	Content    string              `json:"content,omitempty"`
 	ToolCalls  []ToolCallTraceItem `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
-	ToolName   string             `json:"tool_name,omitempty"`
-	Arguments  string             `json:"arguments,omitempty"`
-	Result     string             `json:"result,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
+	ToolName   string              `json:"tool_name,omitempty"`
+	Arguments  string              `json:"arguments,omitempty"`
+	Result     string              `json:"result,omitempty"`
 }
 
 // ToolCallTraceItem is one tool call in an assistant step.
@@ -176,8 +177,15 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	systemPrompt := a.Config.SystemPrompt
+	if scopedMemory, err := memory.LoadPNSMemory(a.ProjectNodeSequence); err != nil {
+		logger.Warn("Failed to load scoped memory", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "error", err)
+	} else if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
+		systemPrompt = systemPrompt + "\n\n" + memoryBlock
+	}
+
 	conversation := []Message{
-		{Role: "system", Content: a.Config.SystemPrompt},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()
@@ -242,8 +250,15 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	systemPrompt := a.Config.SystemPrompt
+	if scopedMemory, err := memory.LoadPNSMemory(a.ProjectNodeSequence); err != nil {
+		logger.Warn("Failed to load scoped memory", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "error", err)
+	} else if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
+		systemPrompt = systemPrompt + "\n\n" + memoryBlock
+	}
+
 	conversation := []Message{
-		{Role: "system", Content: a.Config.SystemPrompt},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()

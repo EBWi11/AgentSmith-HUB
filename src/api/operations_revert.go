@@ -12,8 +12,7 @@ import (
 )
 
 type revertOperationRequest struct {
-	Comment       string `json:"comment"`
-	CommitMessage string `json:"commit_message"`
+	Comment string `json:"comment"`
 }
 
 func revertOperation(c echo.Context) error {
@@ -114,7 +113,6 @@ func revertOperation(c echo.Context) error {
 		Revertible:         false,
 		RevertsOperationID: record.OperationID,
 		RevertReason:       strings.TrimSpace(req.Comment),
-		CommitMessage:      strings.TrimSpace(req.CommitMessage),
 	}
 
 	_, revertOperationID, err := reloadComponentUnified(&ComponentReloadRequest{
@@ -136,6 +134,7 @@ func revertOperation(c echo.Context) error {
 		if err := common.MarkOperationReverted(record.OperationID, revertOperationID); err != nil {
 			logger.Warn("Failed to mark operation reverted", "operation_id", record.OperationID, "revert_operation_id", revertOperationID, "error", err)
 		}
+		triggerRevertMemoryExtraction(record, revertOperationID)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

@@ -5,6 +5,7 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
+	"AgentSmith-HUB/memory"
 	"AgentSmith-HUB/output"
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
@@ -668,6 +669,11 @@ func (sl *SyncListener) createComponentInstance(componentType, componentName, co
 		}
 		project.SetAgent(componentName, a)
 
+	case "memory":
+		if err := memory.SavePNSMemoryRaw(componentName, content); err != nil {
+			return fmt.Errorf("failed to write memory scope %s: %w", componentName, err)
+		}
+
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
@@ -714,6 +720,9 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 			return fmt.Errorf("failed to delete agent %s: %w", componentName, err)
 		}
 		logger.Debug("Deleted agent instance", "name", componentName)
+
+	case "memory":
+		logger.Debug("Ignoring delete for memory scope", "name", componentName)
 
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)

@@ -141,6 +141,12 @@ const routes = [
         meta: { requiresAuth: true, componentType: 'operations-history' }
       },
       {
+        path: 'memory',
+        name: 'MemoryView',
+        component: () => import('../components/MemoryView.vue'),
+        meta: { requiresAuth: true, componentType: 'memory' }
+      },
+      {
         path: 'error-logs',
         name: 'ErrorLogs',
         component: ErrorLogs,

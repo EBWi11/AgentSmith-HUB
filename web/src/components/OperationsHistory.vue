@@ -286,6 +286,10 @@
                     <dt class="text-gray-500">Reverts:</dt>
                     <dd class="col-span-2 text-gray-900 break-all">{{ operation.reverts_operation_id }}</dd>
                   </div>
+                  <div v-if="operation.revert_reason" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Comment:</dt>
+                    <dd class="col-span-2 text-gray-900 whitespace-pre-wrap">{{ operation.revert_reason }}</dd>
+                  </div>
                 </dl>
               </div>
 
@@ -375,15 +379,6 @@
               class="filter-input resize-none"
             />
           </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Commit Message</label>
-            <input
-              v-model="revertForm.commitMessage"
-              type="text"
-              placeholder="Optional commit message"
-              class="filter-input"
-            />
-          </div>
         </div>
 
         <div class="mt-6 flex justify-end space-x-3">
@@ -446,8 +441,7 @@ const showRevertModal = ref(false)
 const revertSubmitting = ref(false)
 const selectedOperationForRevert = ref(null)
 const revertForm = ref({
-  comment: '',
-  commitMessage: ''
+  comment: ''
 })
 // Node statistics no longer used (feature removed)
 const nodeStats = ref({}) // kept empty for backward compatibility
@@ -767,8 +761,7 @@ function canRevert(operation) {
 function openRevertModal(operation) {
   selectedOperationForRevert.value = operation
   revertForm.value = {
-    comment: '',
-    commitMessage: ''
+    comment: ''
   }
   showRevertModal.value = true
 }
@@ -787,8 +780,7 @@ async function submitRevert() {
   revertSubmitting.value = true
   try {
     await hubApi.revertOperation(selectedOperationForRevert.value.operation_id, {
-      comment: revertForm.value.comment || '',
-      commit_message: revertForm.value.commitMessage || ''
+      comment: revertForm.value.comment || ''
     })
     revertSubmitting.value = false
     $message?.success?.('Operation reverted successfully')
