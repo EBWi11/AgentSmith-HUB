@@ -61,13 +61,10 @@ export function useComponentSave() {
       preventRefetch.value = true
       
       // Perform the save operation
-      let response
       if (isNewComponent) {
-        console.log('useComponentSave: Calling hubApi.saveNew', { componentType, componentId, contentLength: content.length })
-        response = await hubApi.saveNew(componentType, componentId, content)
-        console.log('useComponentSave: hubApi.saveNew response', response)
+        await hubApi.saveNew(componentType, componentId, content)
       } else {
-        response = await hubApi.saveEdit(componentType, componentId, content)
+        await hubApi.saveEdit(componentType, componentId, content)
       }
       
       // Call success callback immediately to switch to view mode
@@ -139,4 +136,4 @@ export function useComponentSave() {
     saveEdit,
     saveNew
   }
-} 
+}

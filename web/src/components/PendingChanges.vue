@@ -504,7 +504,6 @@ function startAcceleratedProjectPolling(projectIds) {
       
       // Check if we've exceeded max poll time
       if (elapsedTime > maxPollTime) {
-        console.log('Accelerated project polling timeout after', maxPollTime / 1000, 'seconds')
         return
       }
       
@@ -520,12 +519,10 @@ function startAcceleratedProjectPolling(projectIds) {
         if (project.status === 'error' || project.status === 'stopped') {
           if (!projectErrorTime[projectId]) {
             projectErrorTime[projectId] = Date.now()
-            console.log(`Project ${projectId} entered ${project.status} state, will continue polling for ${errorGracePeriod / 1000}s (backend might be restarting)`)
           }
           // Check if state has persisted beyond grace period
           const stateDuration = Date.now() - projectErrorTime[projectId]
           if (stateDuration > errorGracePeriod) {
-            console.log(`Project ${projectId} ${project.status} persisted for ${stateDuration / 1000}s, treating as stable`)
             delete projectErrorTime[projectId]
             return false // Stop polling this project
           }
@@ -533,7 +530,6 @@ function startAcceleratedProjectPolling(projectIds) {
         } else {
           // Clear timer if status changed (recovered from error/stopped)
           if (projectErrorTime[projectId]) {
-            console.log(`Project ${projectId} recovered from transient state to ${project.status}`)
             delete projectErrorTime[projectId]
           }
         }
@@ -548,8 +544,6 @@ function startAcceleratedProjectPolling(projectIds) {
       // Continue polling if projects are still transitioning
       if (stillTransitioning) {
         setTimeout(poll, pollInterval)
-      } else {
-        console.log('All projects finished transitioning, elapsed:', elapsedTime / 1000, 'seconds')
       }
     } catch (error) {
       console.error('Error during accelerated project polling:', error)

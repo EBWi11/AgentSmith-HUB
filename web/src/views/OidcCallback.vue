@@ -11,8 +11,7 @@ import { getUserManager } from '../api/oidc';
 import { hubApi } from '../api';
 export default {
   name: 'OidcCallback',
-  async created() {    
-    console.log('OIDC callback');
+  async created() {
     try {
       const user = await getUserManager().signinRedirectCallback();
       const token = user?.id_token;
@@ -29,5 +28,4 @@ export default {
   }
 };
 </script>
-
 

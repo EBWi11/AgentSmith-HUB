@@ -51,7 +51,6 @@ async function loadRuntimeConfig() {
       const loadedConfig = await response.json();
       runtimeConfig = loadedConfig || {};
       applyMergedConfig();
-      console.log('Runtime configuration loaded successfully');
       return config;
     }
   } catch (error) {
@@ -104,4 +103,4 @@ applyMergedConfig();
 // Configuration hot reload removed - use smart refresh system for config updates
 
 export { initializeConfig, loadRuntimeConfig };
-export default config; 
+export default config;

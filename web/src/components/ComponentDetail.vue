@@ -721,7 +721,6 @@ import RulesetTestModal from './RulesetTestModal.vue'
 import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
 import OutputTestModal from './OutputTestModal.vue'
-import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
 import { useComponentSave } from '../composables/useComponentSave'
@@ -859,7 +858,6 @@ const showOutputTestModal = ref(false)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
-const store = useStore()
 const router = useRouter()
 const dataCache = useDataCacheStore()
 
@@ -1289,18 +1287,7 @@ async function saveNew(content) {
   // If called directly from MonacoEditor's @save event, content will have a value
   // If called from button click, content will be undefined
   let contentToSave = content !== undefined ? content : editorValue.value
-  
-  console.log('saveNew: Initial values', {
-    content: content,
-    contentLength: content?.length,
-    editorValue: editorValue.value,
-    editorValueLength: editorValue.value?.length,
-    contentToSave: contentToSave,
-    contentToSaveLength: contentToSave?.length,
-    contentToSaveTrimmed: contentToSave?.trim(),
-    contentToSaveTrimmedLength: contentToSave?.trim()?.length
-  })
-  
+
   // Preserve the current item reference
   const currentItem = props.item
   if (!currentItem || !currentItem.id) {
@@ -1314,13 +1301,6 @@ async function saveNew(content) {
   if (!contentToSave || contentToSave.trim() === '') {
     // Get the default template for this component type
     contentToSave = getTemplateForComponent(currentItem.type, currentItem.id)
-    console.log(`Using default template for new ${currentItem.type} component:`, {
-      template: contentToSave,
-      templateLength: contentToSave?.length,
-      templateType: typeof contentToSave,
-      isNull: contentToSave === null,
-      isUndefined: contentToSave === undefined
-    })
   }
   
   // Ensure we have valid content before saving
@@ -1333,19 +1313,12 @@ async function saveNew(content) {
 
   
   // Use the new composable for save operation
-  console.log('saveNew: About to call saveNewComponent', {
-    type: currentItem.type,
-    id: currentItem.id,
-    contentLength: contentToSave.length
-  })
-  
-  const success = await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
+  await saveNewComponent(currentItem.type, currentItem.id, contentToSave, {
     validateBeforeSave,
     verifyAfterSave,
     // Don't fetch detail for new components since they're in temporary state
     fetchDetail: null,
     onSuccess: (item) => {
-      console.log('saveNew: Component created successfully', item)
       // Test cache is now cleared automatically when component cache is updated
       
       // Emit to parent component with exitToViewMode flag
@@ -1357,8 +1330,6 @@ async function saveNew(content) {
       }))
     }
   })
-  
-  console.log('saveNew: saveNewComponent result', { success })
 }
 
 function cancelEdit() {
@@ -1389,25 +1360,7 @@ function getLanguage(type) {
 }
 
 function getTemplateForComponent(type, id) {
-  // 传递包含dataCache的store对象，特别是对于项目类型
-  const storeWithDataCache = {
-    ...store,
-    $dataCache: dataCache
-  };
-  
-  console.log('getTemplateForComponent: Called with', { type, id, store: !!store, dataCache: !!dataCache })
-  
-  const template = getDefaultTemplate(type, id, storeWithDataCache);
-  
-  console.log('getTemplateForComponent: Generated template', {
-    template: template,
-    templateLength: template?.length,
-    templateType: typeof template,
-    isNull: template === null,
-    isUndefined: template === undefined
-  })
-  
-  return template;
+  return getDefaultTemplate(type, id, { $dataCache: dataCache })
 }
 
 // 发送全局项目操作事件
@@ -1961,4 +1914,4 @@ button:focus {
   z-index: 10;
 }
 
-</style> 
+</style>

@@ -2282,10 +2282,7 @@ onMounted(async () => {
   restoreFolderCollapseState()
   
   // Listen for cache clear events to refresh data immediately
-  const handleCacheCleared = (event) => {
-    const { reason } = event.detail || {};
-    console.log(`[Sidebar] Cache cleared: ${reason}, refreshing sidebar data`);
-    
+  const handleCacheCleared = () => {
     // Refresh all visible component types
     const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects'];
     componentTypes.forEach(type => {

@@ -18,7 +18,7 @@
       <main class="flex-1 bg-gray-50 transition-all duration-300 overflow-hidden">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
-          v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'memory' && selected.type !== 'error-logs' && selected.type !== 'agent-tools-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
+          v-else-if="selected && shouldRenderComponentDetail(selected.type)"
           :item="selected" 
           @cancel-edit="handleCancelEdit"
           @updated="handleUpdated"
@@ -105,11 +105,64 @@ const testProjectId = ref('')
 const route = useRoute()
 const router = useRouter()
 const dataCache = useDataCacheStore()
+const routeOnlyComponentTypes = new Set([
+  'cluster',
+  'pending-changes',
+  'load-local-components',
+  'operations-history',
+  'memory',
+  'error-logs',
+  'agent-tools-logs',
+  'tutorial'
+])
+const componentDetailExcludedTypes = new Set([
+  ...routeOnlyComponentTypes,
+  'settings'
+])
 
 // Helper: update global CSS variable for sidebar width
 function updateSidebarWidth () {
   const width = sidebarCollapsed.value ? 64 : 288 // keep in sync with Sidebar.vue
   document.documentElement.style.setProperty('--sidebar-width', width + 'px')
+}
+
+function isRouteOnlyComponentType(type) {
+  return routeOnlyComponentTypes.has(type)
+}
+
+function shouldRenderComponentDetail(type) {
+  return Boolean(type) && !componentDetailExcludedTypes.has(type)
+}
+
+function buildSelectedState(componentType, id = '') {
+  if (!componentType) {
+    return null
+  }
+  const next = {
+    type: componentType,
+    _timestamp: Date.now()
+  }
+  if (id) {
+    next.id = id
+    next.isEdit = false
+  }
+  return next
+}
+
+function buildPathForSelection(type, id = '') {
+  if (!type) {
+    return null
+  }
+  if (type === 'home') {
+    return '/app'
+  }
+  if (isRouteOnlyComponentType(type)) {
+    return `/app/${type}`
+  }
+  if (id) {
+    return `/app/${type}/${id}`
+  }
+  return null
 }
 
 // Handle route changes
@@ -119,25 +172,11 @@ onMounted(() => {
   const { params, meta } = route
   if (meta.componentType) {
     if (meta.componentType === 'home') {
-      // For home page, show dashboard
-      selected.value = {
-        type: 'home',
-        _timestamp: Date.now()
-      }
-    } else if (meta.componentType === 'cluster' || meta.componentType === 'pending-changes' || meta.componentType === 'load-local-components' || meta.componentType === 'operations-history' || meta.componentType === 'memory' || meta.componentType === 'error-logs' || meta.componentType === 'agent-tools-logs' || meta.componentType === 'tutorial') {
-      // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID needed
-      selected.value = {
-        type: meta.componentType,
-        _timestamp: Date.now()
-      }
+      selected.value = buildSelectedState('home')
+    } else if (isRouteOnlyComponentType(meta.componentType)) {
+      selected.value = buildSelectedState(meta.componentType)
     } else if (params.id) {
-      // For regular components, need ID
-      selected.value = {
-        type: meta.componentType,
-        id: params.id,
-        isEdit: false,
-        _timestamp: Date.now()
-      }
+      selected.value = buildSelectedState(meta.componentType, params.id)
     }
   }
 })
@@ -145,39 +184,23 @@ onMounted(() => {
 // Watch for route changes
 watch(
   () => [route.params, route.meta],
-  ([newParams, newMeta], [oldParams, oldMeta]) => {
+  ([newParams, newMeta]) => {
     const { id } = newParams
     const componentType = newMeta.componentType
-    const oldId = oldParams?.id
-    const oldComponentType = oldMeta?.componentType
     
     // Test cache has TTL and will expire automatically when switching components
     
     if (componentType) {
       if (componentType === 'home') {
-        // For home page, show dashboard
         if (!selected.value || selected.value.type !== componentType) {
-          selected.value = {
-            type: 'home',
-            _timestamp: Date.now()
-          }
+          selected.value = buildSelectedState('home')
         }
-      } else if (componentType === 'cluster' || componentType === 'pending-changes' || componentType === 'load-local-components' || componentType === 'operations-history' || componentType === 'memory' || componentType === 'error-logs' || componentType === 'agent-tools-logs' || componentType === 'tutorial') {
-        // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID needed
+      } else if (isRouteOnlyComponentType(componentType)) {
         if (!selected.value || selected.value.type !== componentType) {
-          selected.value = {
-            type: componentType,
-            _timestamp: Date.now()
-          }
+          selected.value = buildSelectedState(componentType)
         }
       } else if (id && (!selected.value || selected.value.id !== id || selected.value.type !== componentType)) {
-        // For regular components, need ID
-        selected.value = {
-          type: componentType,
-          id,
-          isEdit: false,
-          _timestamp: Date.now()
-        }
+        selected.value = buildSelectedState(componentType, id)
       }
     }
   }
@@ -189,19 +212,7 @@ watch(
   (newVal) => {
     if (newVal && newVal.type && !newVal.isNew) {
       const currentPath = router.currentRoute.value.path
-      let expectedPath
-      
-      if (newVal.type === 'home') {
-        // For home page, use base app path
-        expectedPath = '/app'
-      } else if (newVal.type === 'cluster' || newVal.type === 'pending-changes' || newVal.type === 'load-local-components' || newVal.type === 'operations-history' || newVal.type === 'memory' || newVal.type === 'error-logs' || newVal.type === 'agent-tools-logs') {
-        // For cluster, pending-changes, load-local-components, operations-history, error-logs, agent-tools-logs, no ID in URL
-        expectedPath = `/app/${newVal.type}`
-      } else if (newVal.id) {
-        // For regular components, include ID in URL
-        expectedPath = `/app/${newVal.type}/${newVal.id}`
-      }
-      
+      const expectedPath = buildPathForSelection(newVal.type, newVal.id)
       if (expectedPath && currentPath !== expectedPath) {
         router.push(expectedPath)
       }
@@ -217,29 +228,13 @@ watch(sidebarCollapsed, () => {
 
 // Methods
 function onSelectItem(item) {
-  // Use router navigation for better URL management
-  if (item.type === 'home') {
-    router.push('/app')
-  } else if (item.type === 'cluster') {
-    router.push('/app/cluster')
-  } else if (item.type === 'pending-changes') {
-    router.push('/app/pending-changes')
-  } else if (item.type === 'load-local-components') {
-    router.push('/app/load-local-components')
-  } else if (item.type === 'operations-history') {
-    router.push('/app/operations-history')
-  } else if (item.type === 'memory') {
-    router.push('/app/memory')
-  } else if (item.type === 'error-logs') {
-    router.push('/app/error-logs')
-  } else if (item.type === 'agent-tools-logs') {
-    router.push('/app/agent-tools-logs')
-  } else if (item.id) {
-    router.push(`/app/${item.type}/${item.id}`)
-  } else {
-    // Fallback for direct selection (e.g., new components)
-    selected.value = item
+  const targetPath = buildPathForSelection(item?.type, item?.id)
+  if (targetPath) {
+    router.push(targetPath)
+    return
   }
+  // Fallback for direct selection (e.g., new components)
+  selected.value = item
 }
 
 async function onOpenEditor(payload) {
@@ -340,7 +335,6 @@ function refreshSidebar(type) {
   }
   
   // HIGHEST PRIORITY: Clear cache and force immediate refresh
-  const dataCache = useDataCacheStore()
   dataCache.clearComponentCache(type)
   setTimeout(() => {
     dataCache.fetchComponents(type, true, true) // isPriorityRefresh = true
@@ -446,4 +440,4 @@ function handleRefreshList(type) {
 function toggleSidebarCollapse() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
-</script> 
+</script>
