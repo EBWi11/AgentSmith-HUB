@@ -74,6 +74,21 @@ func RecordOperation(record OperationRecord) (string, error) {
 			return "", fmt.Errorf("write operation state reverted_by_operation_id: %w", err)
 		}
 	}
+	if record.FeedbackComment != "" {
+		if err := RedisHSet(operationStateHashKey(record.OperationID), "feedback_comment", record.FeedbackComment); err != nil {
+			return "", fmt.Errorf("write operation state feedback_comment: %w", err)
+		}
+	}
+	if record.AnalysisStatus != "" {
+		if err := RedisHSet(operationStateHashKey(record.OperationID), "analysis_status", record.AnalysisStatus); err != nil {
+			return "", fmt.Errorf("write operation state analysis_status: %w", err)
+		}
+	}
+	if record.AnalysisError != "" {
+		if err := RedisHSet(operationStateHashKey(record.OperationID), "analysis_error", record.AnalysisError); err != nil {
+			return "", fmt.Errorf("write operation state analysis_error: %w", err)
+		}
+	}
 	if err := RedisHSet(operationStateHashKey(record.OperationID), "status", record.Status); err != nil {
 		return "", fmt.Errorf("write operation state status: %w", err)
 	}
@@ -135,6 +150,35 @@ func MarkOperationReverted(operationID, revertedByOperationID string) error {
 	return RedisExpire(operationStateHashKey(operationID), operationsTTLSeconds)
 }
 
+func SetOperationFeedbackComment(operationID, comment string) error {
+	if strings.TrimSpace(operationID) == "" {
+		return fmt.Errorf("operation id is required")
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "feedback_comment", strings.TrimSpace(comment)); err != nil {
+		return err
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "updated_at", time.Now().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return RedisExpire(operationStateHashKey(operationID), operationsTTLSeconds)
+}
+
+func SetOperationAnalysisState(operationID, status, errorMsg string) error {
+	if strings.TrimSpace(operationID) == "" {
+		return fmt.Errorf("operation id is required")
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "analysis_status", strings.TrimSpace(status)); err != nil {
+		return err
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "analysis_error", strings.TrimSpace(errorMsg)); err != nil {
+		return err
+	}
+	if err := RedisHSet(operationStateHashKey(operationID), "updated_at", time.Now().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return RedisExpire(operationStateHashKey(operationID), operationsTTLSeconds)
+}
+
 func applyOperationState(record OperationRecord) OperationRecord {
 	if record.OperationID == "" {
 		return record
@@ -148,6 +192,15 @@ func applyOperationState(record OperationRecord) OperationRecord {
 	}
 	if revertedBy, exists := state["reverted_by_operation_id"]; exists && revertedBy != "" {
 		record.RevertedByOperationID = revertedBy
+	}
+	if feedbackComment, exists := state["feedback_comment"]; exists && feedbackComment != "" {
+		record.FeedbackComment = feedbackComment
+	}
+	if analysisStatus, exists := state["analysis_status"]; exists && analysisStatus != "" {
+		record.AnalysisStatus = analysisStatus
+	}
+	if analysisError, exists := state["analysis_error"]; exists && analysisError != "" {
+		record.AnalysisError = analysisError
 	}
 	if status, exists := state["status"]; exists && status != "" {
 		record.Status = status

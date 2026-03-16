@@ -46,6 +46,7 @@
             <option value="component_delete">Component Delete</option>
             <option value="change_push">Change Push</option>
             <option value="local_push">Local Push</option>
+            <option value="operation_comment">Operation Comment</option>
             <option value="revert">Revert</option>
             <option value="project_start">Project Start</option>
             <option value="project_stop">Project Stop</option>
@@ -187,6 +188,9 @@
                     <span v-if="operation.reverted" class="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded font-medium">
                       Reverted
                     </span>
+                    <span v-if="operation.analysis_status" class="text-xs px-2 py-1 rounded font-medium" :class="getAnalysisStatusClass(operation.analysis_status)">
+                      Analysis {{ operation.analysis_status }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -286,9 +290,29 @@
                     <dt class="text-gray-500">Reverts:</dt>
                     <dd class="col-span-2 text-gray-900 break-all">{{ operation.reverts_operation_id }}</dd>
                   </div>
+                  <div v-if="operation.feedback_for_operation_id" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Feedback For:</dt>
+                    <dd class="col-span-2 text-gray-900 break-all">{{ operation.feedback_for_operation_id }}</dd>
+                  </div>
                   <div v-if="operation.revert_reason" class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Comment:</dt>
                     <dd class="col-span-2 text-gray-900 whitespace-pre-wrap">{{ operation.revert_reason }}</dd>
+                  </div>
+                  <div v-if="operation.feedback_comment" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Feedback:</dt>
+                    <dd class="col-span-2 text-gray-900 whitespace-pre-wrap">{{ operation.feedback_comment }}</dd>
+                  </div>
+                  <div v-if="operation.analysis_status" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Analysis:</dt>
+                    <dd class="col-span-2">
+                      <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getAnalysisStatusClass(operation.analysis_status)">
+                        {{ operation.analysis_status }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div v-if="operation.analysis_error" class="grid grid-cols-3 gap-1">
+                    <dt class="text-gray-500">Analysis Error:</dt>
+                    <dd class="col-span-2 text-red-700 whitespace-pre-wrap">{{ operation.analysis_error }}</dd>
                   </div>
                 </dl>
               </div>
@@ -302,8 +326,16 @@
               </div>
             </div>
 
-            <div v-if="canRevert(operation)" class="mt-4 flex justify-end">
+            <div v-if="canComment(operation) || canRevert(operation)" class="mt-4 flex justify-end gap-2">
               <button
+                v-if="canComment(operation)"
+                @click.stop="openCommentModal(operation)"
+                class="btn btn-secondary btn-sm"
+              >
+                {{ operation.feedback_comment ? 'Edit Comment' : 'Add Comment' }}
+              </button>
+              <button
+                v-if="canRevert(operation)"
                 @click.stop="openRevertModal(operation)"
                 class="btn btn-danger btn-sm"
               >
@@ -393,6 +425,51 @@
       </div>
     </div>
 
+    <div v-if="showCommentModal" class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 mx-4">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-lg font-medium text-gray-900">Comment Operation</h3>
+            <p class="text-sm text-gray-500 mt-1">
+              This comment will be saved to the operation and analyzed into scoped memory automatically.
+            </p>
+          </div>
+          <button @click="closeCommentModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div v-if="selectedOperationForComment" class="mb-4 text-sm text-gray-600 space-y-1">
+          <div><span class="font-medium text-gray-800">Type:</span> {{ getOperationTypeLabel(selectedOperationForComment.type) }}</div>
+          <div v-if="selectedOperationForComment.ruleset_id"><span class="font-medium text-gray-800">Ruleset:</span> {{ selectedOperationForComment.ruleset_id }}</div>
+          <div v-if="selectedOperationForComment.rule_id"><span class="font-medium text-gray-800">Rule:</span> {{ selectedOperationForComment.rule_id }}</div>
+          <div v-if="selectedOperationForComment.project_node_sequence" class="break-all"><span class="font-medium text-gray-800">PNS:</span> {{ selectedOperationForComment.project_node_sequence }}</div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+          <textarea
+            v-model="commentForm.comment"
+            rows="4"
+            placeholder="Describe what was wrong or what should be remembered for future rule generation"
+            class="filter-input resize-none"
+          />
+        </div>
+
+        <div class="mt-6 flex justify-end space-x-3">
+          <button @click="closeCommentModal" class="btn btn-secondary btn-sm" :disabled="commentSubmitting">
+            Cancel
+          </button>
+          <button @click="submitComment" class="btn btn-primary btn-sm" :disabled="commentSubmitting">
+            <span v-if="commentSubmitting" class="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-2 inline-block"></span>
+            Save Comment
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Pagination -->
     <div v-if="totalCount > 0" class="flex items-center justify-between p-4 border-t border-gray-200 bg-gray-50">
       <div class="text-sm text-gray-700">
@@ -440,7 +517,13 @@ const expandedOperations = ref(new Set())
 const showRevertModal = ref(false)
 const revertSubmitting = ref(false)
 const selectedOperationForRevert = ref(null)
+const showCommentModal = ref(false)
+const commentSubmitting = ref(false)
+const selectedOperationForComment = ref(null)
 const revertForm = ref({
+  comment: ''
+})
+const commentForm = ref({
   comment: ''
 })
 // Node statistics no longer used (feature removed)
@@ -758,6 +841,18 @@ function canRevert(operation) {
   )
 }
 
+function canComment(operation) {
+  return Boolean(
+    operation?.operation_id &&
+    operation?.component_type === 'ruleset' &&
+    operation?.status === 'success' &&
+    operation?.agent_id &&
+    operation?.project_node_sequence &&
+    operation?.type !== 'operation_comment' &&
+    operation?.type !== 'revert'
+  )
+}
+
 function openRevertModal(operation) {
   selectedOperationForRevert.value = operation
   revertForm.value = {
@@ -770,6 +865,20 @@ function closeRevertModal() {
   if (revertSubmitting.value) return
   showRevertModal.value = false
   selectedOperationForRevert.value = null
+}
+
+function openCommentModal(operation) {
+  selectedOperationForComment.value = operation
+  commentForm.value = {
+    comment: operation?.feedback_comment || ''
+  }
+  showCommentModal.value = true
+}
+
+function closeCommentModal() {
+  if (commentSubmitting.value) return
+  showCommentModal.value = false
+  selectedOperationForComment.value = null
 }
 
 async function submitRevert() {
@@ -790,6 +899,37 @@ async function submitRevert() {
     $message?.error?.(e.message || 'Failed to revert operation')
   } finally {
     revertSubmitting.value = false
+  }
+}
+
+async function submitComment() {
+  if (!selectedOperationForComment.value?.operation_id || commentSubmitting.value) {
+    return
+  }
+  if (!commentForm.value.comment?.trim()) {
+    $message?.error?.('Comment is required')
+    return
+  }
+
+  commentSubmitting.value = true
+  try {
+    const response = await hubApi.commentOperation(selectedOperationForComment.value.operation_id, {
+      comment: commentForm.value.comment.trim()
+    })
+    const analysisStatus = response?.analysis_status
+    if (analysisStatus === 'pending') {
+      $message?.success?.('Operation comment saved and memory analysis started')
+    } else if (analysisStatus === 'skipped') {
+      $message?.success?.('Operation comment saved; memory analysis was skipped for this operation')
+    } else {
+      $message?.success?.('Operation comment saved')
+    }
+    closeCommentModal()
+    fetchOperationsHistory()
+  } catch (e) {
+    $message?.error?.(e.message || 'Failed to save operation comment')
+  } finally {
+    commentSubmitting.value = false
   }
 }
 
@@ -815,6 +955,7 @@ function getOperationTypeLabel(type) {
     'component_delete': 'Component Delete',
     'change_push': 'Change Push',
     'local_push': 'Local Push',
+    'operation_comment': 'Operation Comment',
     'revert': 'Revert',
     'project_start': 'Project Start',
     'project_stop': 'Project Stop',
@@ -831,6 +972,7 @@ function getOperationTypeClass(type) {
     'component_delete': 'bg-red-600',
     'change_push': 'bg-blue-500',
     'local_push': 'bg-purple-500',
+    'operation_comment': 'bg-cyan-600',
     'revert': 'bg-amber-500',
     'project_start': 'bg-green-500',
     'project_stop': 'bg-red-500',
@@ -847,6 +989,7 @@ function getOperationTypeIcon(type) {
     'component_delete': '<path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>',
     'change_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l2 2 4-4"/>',
     'local_push': '<path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M13 13l3-3-3-3m-4 6L6 10l3-3"/>',
+    'operation_comment': '<path d="M8 10h8M8 14h5m-7 6l-4-4V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H8l-4 4z"/>',
     'revert': '<path d="M9 14l-4-4m0 0l4-4m-4 4h11a4 4 0 110 8h-1"/>',
     'project_start': '<path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2z"/>',
     'project_stop': '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>',
@@ -860,6 +1003,16 @@ function getStatusClass(status) {
   const classes = {
     'success': 'bg-green-100 text-green-800',
     'failed': 'bg-red-100 text-red-800'
+  }
+  return classes[status] || 'bg-gray-100 text-gray-800'
+}
+
+function getAnalysisStatusClass(status) {
+  const classes = {
+    'pending': 'bg-yellow-100 text-yellow-800',
+    'success': 'bg-green-100 text-green-800',
+    'failed': 'bg-red-100 text-red-800',
+    'skipped': 'bg-gray-100 text-gray-700'
   }
   return classes[status] || 'bg-gray-100 text-gray-800'
 }

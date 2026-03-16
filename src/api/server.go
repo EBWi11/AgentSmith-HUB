@@ -220,6 +220,7 @@ func ServerStart(listener string) error {
 	auth.GET("/operations-history/nodes", GetOperationsHistoryNodes)
 	auth.GET("/cluster-operations-history", GetClusterOperationsHistory)
 	auth.GET("/operations-stats", GetOperationsStats)
+	auth.POST("/operations/:id/comment", commentOperation)
 	auth.POST("/operations/:id/revert", revertOperation)
 	auth.GET("/memory", getMemoryList)
 	auth.GET("/memory/:pns", getMemoryDetail)

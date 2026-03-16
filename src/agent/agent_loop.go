@@ -169,6 +169,36 @@ func (a *Agent) Stop() error {
 	return nil
 }
 
+func (a *Agent) buildSystemPromptWithScopedMemory(basePrompt string) string {
+	systemPrompt := basePrompt
+
+	scopedMemory, err := memory.LoadPNSMemory(a.ProjectNodeSequence)
+	if err != nil {
+		logger.Warn("Failed to load scoped memory", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "error", err)
+		return systemPrompt
+	}
+	if scopedMemory == nil {
+		logger.Debug("No scoped memory found for agent", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "memory_loaded", false)
+		return systemPrompt
+	}
+
+	logger.Debug("Loaded scoped memory for agent",
+		"agent", a.Id,
+		"project_node_sequence", a.ProjectNodeSequence,
+		"memory_loaded", true,
+		"memory_version", scopedMemory.Version,
+		"summary_count", len(scopedMemory.Summaries),
+		"avoid_patterns_count", len(scopedMemory.AvoidPatterns),
+		"preferred_patterns_count", len(scopedMemory.PreferredPatterns),
+		"recent_reverts_count", len(scopedMemory.RecentReverts),
+	)
+
+	if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
+		systemPrompt = systemPrompt + "\n\n" + memoryBlock
+	}
+	return systemPrompt
+}
+
 func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{} {
 	timeout, err := time.ParseDuration(a.Config.Timeout)
 	if err != nil {
@@ -177,12 +207,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	systemPrompt := a.Config.SystemPrompt
-	if scopedMemory, err := memory.LoadPNSMemory(a.ProjectNodeSequence); err != nil {
-		logger.Warn("Failed to load scoped memory", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "error", err)
-	} else if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
-		systemPrompt = systemPrompt + "\n\n" + memoryBlock
-	}
+	systemPrompt := a.buildSystemPromptWithScopedMemory(a.Config.SystemPrompt)
 
 	conversation := []Message{
 		{Role: "system", Content: systemPrompt},
@@ -250,12 +275,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	systemPrompt := a.Config.SystemPrompt
-	if scopedMemory, err := memory.LoadPNSMemory(a.ProjectNodeSequence); err != nil {
-		logger.Warn("Failed to load scoped memory", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "error", err)
-	} else if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
-		systemPrompt = systemPrompt + "\n\n" + memoryBlock
-	}
+	systemPrompt := a.buildSystemPromptWithScopedMemory(a.Config.SystemPrompt)
 
 	conversation := []Message{
 		{Role: "system", Content: systemPrompt},

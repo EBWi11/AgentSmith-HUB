@@ -170,6 +170,11 @@ export const hubApi = {
     return response.data;
   },
 
+  async commentOperation(operationId, payload) {
+    const response = await api.post(`/operations/${encodeURIComponent(operationId)}/comment`, payload);
+    return response.data;
+  },
+
   setBearer(idToken) {
     localStorage.setItem('auth_bearer', idToken);
     api.defaults.headers.Authorization = `Bearer ${idToken}`;

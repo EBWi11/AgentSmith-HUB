@@ -11,13 +11,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const revertMemoryExtractorAgentID = "revert_memory_extractor"
 
 type revertMemoryPayload struct {
 	Scope             map[string]interface{} `json:"scope"`
-	Revert            map[string]interface{} `json:"revert"`
+	Feedback          map[string]interface{} `json:"feedback,omitempty"`
 	OriginalOperation map[string]interface{} `json:"original_operation"`
 	ProjectContext    map[string]interface{} `json:"project_context"`
 	AgentContext      map[string]interface{} `json:"agent_context"`
@@ -25,16 +26,51 @@ type revertMemoryPayload struct {
 }
 
 func triggerRevertMemoryExtraction(original common.OperationRecord, revertOperationID string) {
-	if strings.TrimSpace(original.AgentID) == "" || strings.TrimSpace(original.ProjectNodeSequence) == "" {
-		return
-	}
-
 	go func() {
 		if err := analyzeRevertIntoMemory(original, revertOperationID); err != nil {
+			if stateErr := common.SetOperationAnalysisState(revertOperationID, "failed", err.Error()); stateErr != nil {
+				logger.Warn("Failed to persist revert memory analysis state",
+					"operation_id", revertOperationID,
+					"error", stateErr,
+				)
+			}
 			logger.Warn("Failed to analyze revert into memory",
 				"operation_id", original.OperationID,
 				"revert_operation_id", revertOperationID,
 				"project_node_sequence", original.ProjectNodeSequence,
+				"error", err,
+			)
+			return
+		}
+		if err := common.SetOperationAnalysisState(revertOperationID, "success", ""); err != nil {
+			logger.Warn("Failed to persist revert memory analysis success state",
+				"operation_id", revertOperationID,
+				"error", err,
+			)
+		}
+	}()
+}
+
+func triggerOperationCommentMemoryExtraction(commentOperationID string, original common.OperationRecord, comment string) {
+	go func() {
+		if err := analyzeCommentIntoMemory(commentOperationID, original, comment); err != nil {
+			if stateErr := common.SetOperationAnalysisState(commentOperationID, "failed", err.Error()); stateErr != nil {
+				logger.Warn("Failed to persist comment memory analysis state",
+					"operation_id", commentOperationID,
+					"error", stateErr,
+				)
+			}
+			logger.Warn("Failed to analyze operation comment into memory",
+				"operation_id", original.OperationID,
+				"comment_operation_id", commentOperationID,
+				"project_node_sequence", original.ProjectNodeSequence,
+				"error", err,
+			)
+			return
+		}
+		if err := common.SetOperationAnalysisState(commentOperationID, "success", ""); err != nil {
+			logger.Warn("Failed to persist comment memory analysis success state",
+				"operation_id", commentOperationID,
 				"error", err,
 			)
 		}
@@ -73,20 +109,8 @@ func analyzeRevertIntoMemory(original common.OperationRecord, revertOperationID 
 		return fmt.Errorf("persist memory: %w", err)
 	}
 
-	if common.IsCurrentNodeLeader() && cluster.GlobalInstructionManager != nil {
-		cfg, err := memory.LoadPNSMemory(scope.ProjectNodeSequence)
-		if err != nil {
-			return fmt.Errorf("reload persisted memory: %w", err)
-		}
-		if cfg != nil {
-			raw, err := memory.MarshalConfig(cfg)
-			if err != nil {
-				return fmt.Errorf("marshal persisted memory: %w", err)
-			}
-			if err := cluster.GlobalInstructionManager.PublishComponentPushChange("memory", scope.ProjectNodeSequence, raw, nil); err != nil {
-				return fmt.Errorf("publish memory sync: %w", err)
-			}
-		}
+	if err := publishMemorySync(scope.ProjectNodeSequence); err != nil {
+		return err
 	}
 
 	logger.Info("Revert memory updated",
@@ -98,7 +122,61 @@ func analyzeRevertIntoMemory(original common.OperationRecord, revertOperationID 
 	return nil
 }
 
+func analyzeCommentIntoMemory(commentOperationID string, record common.OperationRecord, comment string) error {
+	payload, scope, err := buildOperationFeedbackPayload(record, map[string]interface{}{
+		"type":         "comment",
+		"operation_id": commentOperationID,
+		"comment":      strings.TrimSpace(comment),
+		"timestamp":    time.Now(),
+	})
+	if err != nil {
+		return err
+	}
+
+	result, err := extractRevertMemory(payload)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(result.Summary) == "" && len(result.AvoidPatterns) == 0 && len(result.PreferredPatterns) == 0 {
+		return fmt.Errorf("extractor returned empty memory result")
+	}
+
+	_, err = memory.AppendRevertMemory(scope, result, memory.RecentRevert{
+		OperationID:       record.OperationID,
+		RulesetID:         record.RulesetID,
+		RuleID:            record.RuleID,
+		Reason:            strings.TrimSpace(comment),
+		SourceOperationID: commentOperationID,
+		CreatedAt:         timeNow(),
+	}, commentOperationID)
+	if err != nil {
+		return fmt.Errorf("persist memory: %w", err)
+	}
+
+	if err := publishMemorySync(scope.ProjectNodeSequence); err != nil {
+		return err
+	}
+
+	logger.Info("Operation comment memory updated",
+		"operation_id", record.OperationID,
+		"comment_operation_id", commentOperationID,
+		"project_node_sequence", scope.ProjectNodeSequence,
+		"agent", scope.AgentID,
+	)
+	return nil
+}
+
 func buildRevertMemoryPayload(original, revertRecord common.OperationRecord) (map[string]interface{}, memory.Scope, error) {
+	return buildOperationFeedbackPayload(original, map[string]interface{}{
+		"type":                 "revert",
+		"operation_id":         revertRecord.OperationID,
+		"reverts_operation_id": revertRecord.RevertsOperationID,
+		"comment":              revertRecord.RevertReason,
+		"timestamp":            revertRecord.Timestamp,
+	})
+}
+
+func buildOperationFeedbackPayload(original common.OperationRecord, feedback map[string]interface{}) (map[string]interface{}, memory.Scope, error) {
 	scope := memory.Scope{
 		AgentID:             original.AgentID,
 		ProjectID:           strings.TrimSpace(original.ProjectID),
@@ -131,12 +209,7 @@ func buildRevertMemoryPayload(original, revertRecord common.OperationRecord) (ma
 			"project_node_sequence": scope.ProjectNodeSequence,
 			"input_ids":             scope.InputIDs,
 		},
-		Revert: map[string]interface{}{
-			"operation_id":         revertRecord.OperationID,
-			"reverts_operation_id": revertRecord.RevertsOperationID,
-			"reason":               revertRecord.RevertReason,
-			"timestamp":            revertRecord.Timestamp,
-		},
+		Feedback: feedback,
 		OriginalOperation: map[string]interface{}{
 			"operation_id":          original.OperationID,
 			"action_scope":          original.ActionScope,
@@ -174,12 +247,37 @@ func buildRevertMemoryPayload(original, revertRecord common.OperationRecord) (ma
 
 	return map[string]interface{}{
 		"scope":              extractorPayload.Scope,
-		"revert":             extractorPayload.Revert,
+		"feedback":           extractorPayload.Feedback,
 		"original_operation": extractorPayload.OriginalOperation,
 		"project_context":    extractorPayload.ProjectContext,
 		"agent_context":      extractorPayload.AgentContext,
 		"sample_data":        extractorPayload.SampleData,
 	}, scope, nil
+}
+
+func publishMemorySync(pns string) error {
+	if !common.IsCurrentNodeLeader() || cluster.GlobalInstructionManager == nil {
+		return nil
+	}
+	cfg, err := memory.LoadPNSMemory(pns)
+	if err != nil {
+		return fmt.Errorf("reload persisted memory: %w", err)
+	}
+	if cfg == nil {
+		return nil
+	}
+	raw, err := memory.MarshalConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal persisted memory: %w", err)
+	}
+	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("memory", pns, raw, nil); err != nil {
+		return fmt.Errorf("publish memory sync: %w", err)
+	}
+	return nil
+}
+
+func timeNow() time.Time {
+	return time.Now()
 }
 
 func extractRevertMemory(payload map[string]interface{}) (memory.ExtractorResult, error) {

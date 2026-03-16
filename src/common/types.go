@@ -51,15 +51,16 @@ type HubConfig struct {
 type OperationType string
 
 const (
-	OpTypeChangePush      OperationType = "change_push"
-	OpTypeLocalPush       OperationType = "local_push"
-	OpTypeComponentDelete OperationType = "component_delete"
-	OpTypeComponentAdd    OperationType = "component_add"    // New: for component addition
-	OpTypeComponentUpdate OperationType = "component_update" // New: for component update
-	OpTypeRevert          OperationType = "revert"
-	OpTypeProjectStart    OperationType = "project_start"
-	OpTypeProjectStop     OperationType = "project_stop"
-	OpTypeProjectRestart  OperationType = "project_restart"
+	OpTypeChangePush       OperationType = "change_push"
+	OpTypeLocalPush        OperationType = "local_push"
+	OpTypeComponentDelete  OperationType = "component_delete"
+	OpTypeComponentAdd     OperationType = "component_add"    // New: for component addition
+	OpTypeComponentUpdate  OperationType = "component_update" // New: for component update
+	OpTypeOperationComment OperationType = "operation_comment"
+	OpTypeRevert           OperationType = "revert"
+	OpTypeProjectStart     OperationType = "project_start"
+	OpTypeProjectStop      OperationType = "project_stop"
+	OpTypeProjectRestart   OperationType = "project_restart"
 	// Cluster instruction operations
 	OpTypeInstructionPublish OperationType = "instruction_publish" // Leader发布指令
 )
@@ -77,36 +78,40 @@ type AgentOperationContext struct {
 
 // OperationRecord represents a single operation record
 type OperationRecord struct {
-	Type                  OperationType          `json:"type"`
-	OperationID           string                 `json:"operation_id,omitempty"`
-	Timestamp             time.Time              `json:"timestamp"`
-	ComponentType         string                 `json:"component_type,omitempty"`
-	ComponentID           string                 `json:"component_id,omitempty"`
-	ProjectID             string                 `json:"project_id,omitempty"`
-	ActionScope           string                 `json:"action_scope,omitempty"`
-	ActionType            string                 `json:"action_type,omitempty"`
-	Source                string                 `json:"source,omitempty"`
-	RulesetID             string                 `json:"ruleset_id,omitempty"`
-	RuleID                string                 `json:"rule_id,omitempty"`
-	Diff                  string                 `json:"diff,omitempty"`
-	OldContent            string                 `json:"old_content,omitempty"`
-	NewContent            string                 `json:"new_content,omitempty"`
-	Revertible            bool                   `json:"revertible,omitempty"`
-	Reverted              bool                   `json:"reverted,omitempty"`
-	RevertsOperationID    string                 `json:"reverts_operation_id,omitempty"`
-	RevertedByOperationID string                 `json:"reverted_by_operation_id,omitempty"`
-	RevertReason          string                 `json:"revert_reason,omitempty"`
-	Status                string                 `json:"status"`
-	Error                 string                 `json:"error,omitempty"`
-	AgentID               string                 `json:"agent_id,omitempty"`
-	AgentRunID            string                 `json:"agent_run_id,omitempty"`
-	AgentSessionID        string                 `json:"agent_session_id,omitempty"`
-	ToolName              string                 `json:"tool_name,omitempty"`
-	ToolCallID            string                 `json:"tool_call_id,omitempty"`
-	ProjectNodeSequence   string                 `json:"project_node_sequence,omitempty"`
-	SourceEventID         string                 `json:"source_event_id,omitempty"`
-	AgentReasonSummary    string                 `json:"agent_reason_summary,omitempty"`
-	Details               map[string]interface{} `json:"details,omitempty"`
+	Type                   OperationType          `json:"type"`
+	OperationID            string                 `json:"operation_id,omitempty"`
+	Timestamp              time.Time              `json:"timestamp"`
+	ComponentType          string                 `json:"component_type,omitempty"`
+	ComponentID            string                 `json:"component_id,omitempty"`
+	ProjectID              string                 `json:"project_id,omitempty"`
+	ActionScope            string                 `json:"action_scope,omitempty"`
+	ActionType             string                 `json:"action_type,omitempty"`
+	Source                 string                 `json:"source,omitempty"`
+	RulesetID              string                 `json:"ruleset_id,omitempty"`
+	RuleID                 string                 `json:"rule_id,omitempty"`
+	Diff                   string                 `json:"diff,omitempty"`
+	OldContent             string                 `json:"old_content,omitempty"`
+	NewContent             string                 `json:"new_content,omitempty"`
+	Revertible             bool                   `json:"revertible,omitempty"`
+	Reverted               bool                   `json:"reverted,omitempty"`
+	RevertsOperationID     string                 `json:"reverts_operation_id,omitempty"`
+	RevertedByOperationID  string                 `json:"reverted_by_operation_id,omitempty"`
+	RevertReason           string                 `json:"revert_reason,omitempty"`
+	FeedbackComment        string                 `json:"feedback_comment,omitempty"`
+	FeedbackForOperationID string                 `json:"feedback_for_operation_id,omitempty"`
+	AnalysisStatus         string                 `json:"analysis_status,omitempty"`
+	AnalysisError          string                 `json:"analysis_error,omitempty"`
+	Status                 string                 `json:"status"`
+	Error                  string                 `json:"error,omitempty"`
+	AgentID                string                 `json:"agent_id,omitempty"`
+	AgentRunID             string                 `json:"agent_run_id,omitempty"`
+	AgentSessionID         string                 `json:"agent_session_id,omitempty"`
+	ToolName               string                 `json:"tool_name,omitempty"`
+	ToolCallID             string                 `json:"tool_call_id,omitempty"`
+	ProjectNodeSequence    string                 `json:"project_node_sequence,omitempty"`
+	SourceEventID          string                 `json:"source_event_id,omitempty"`
+	AgentReasonSummary     string                 `json:"agent_reason_summary,omitempty"`
+	Details                map[string]interface{} `json:"details,omitempty"`
 }
 
 // Project state Redis keys - IMPORTANT: Separate expected vs actual states

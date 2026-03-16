@@ -134,7 +134,14 @@ func revertOperation(c echo.Context) error {
 		if err := common.MarkOperationReverted(record.OperationID, revertOperationID); err != nil {
 			logger.Warn("Failed to mark operation reverted", "operation_id", record.OperationID, "revert_operation_id", revertOperationID, "error", err)
 		}
-		triggerRevertMemoryExtraction(record, revertOperationID)
+		if strings.TrimSpace(record.AgentID) != "" && strings.TrimSpace(record.ProjectNodeSequence) != "" {
+			if err := common.SetOperationAnalysisState(revertOperationID, "pending", ""); err != nil {
+				logger.Warn("Failed to mark revert analysis pending", "operation_id", revertOperationID, "error", err)
+			}
+			triggerRevertMemoryExtraction(record, revertOperationID)
+		} else if err := common.SetOperationAnalysisState(revertOperationID, "skipped", "operation is missing agent or project node sequence context"); err != nil {
+			logger.Warn("Failed to mark revert analysis skipped", "operation_id", revertOperationID, "error", err)
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
