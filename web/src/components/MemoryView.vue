@@ -3,7 +3,7 @@
     <div class="flex items-center justify-between p-4 border-b border-gray-200">
       <div>
         <h1 class="text-xl font-semibold text-gray-900">Memory</h1>
-        <p class="text-sm text-gray-500 mt-1">PNS-scoped agent memory generated from revert analysis.</p>
+        <p class="text-sm text-gray-500 mt-1">PNS-scoped agent memory generated from comment and revert analysis.</p>
       </div>
       <button
         @click="refresh"
@@ -55,7 +55,7 @@
             <div v-if="item.agent_id">Agent: {{ item.agent_id }}</div>
             <div v-if="item.input_ids?.length">Inputs: {{ item.input_ids.join(', ') }}</div>
             <div class="text-xs text-gray-500">
-              {{ item.summary_count }} summaries, {{ item.recent_revert_count }} reverts
+              {{ item.summary_count }} summaries, {{ item.recent_feedback_count }} feedback entries
             </div>
           </div>
         </button>
@@ -86,8 +86,8 @@
               <div class="mt-1 text-2xl font-semibold text-gray-900">{{ detail.data.avoid_patterns?.length || 0 }}</div>
             </div>
             <div class="border border-gray-200 rounded-lg p-4 bg-gray-50">
-              <div class="text-sm text-gray-500">Recent Reverts</div>
-              <div class="mt-1 text-2xl font-semibold text-gray-900">{{ detail.data.recent_reverts?.length || 0 }}</div>
+              <div class="text-sm text-gray-500">Recent Feedback</div>
+              <div class="mt-1 text-2xl font-semibold text-gray-900">{{ detail.data.recent_feedback?.length || 0 }}</div>
             </div>
           </div>
 
@@ -137,12 +137,16 @@
             </div>
           </div>
 
-          <div v-if="detail.data.recent_reverts?.length">
-            <h3 class="text-sm font-medium text-gray-900 mb-2">Recent Reverts</h3>
+          <div v-if="detail.data.recent_feedback?.length">
+            <h3 class="text-sm font-medium text-gray-900 mb-2">Recent Feedback</h3>
             <div class="space-y-2">
-              <div v-for="(item, index) in detail.data.recent_reverts" :key="index" class="border border-gray-200 rounded-lg p-4">
-                <div class="text-sm text-gray-900 break-all">Operation: {{ item.operation_id }}</div>
+              <div v-for="(item, index) in detail.data.recent_feedback" :key="index" class="border border-gray-200 rounded-lg p-4">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-sm text-gray-900 break-all">Operation: {{ item.operation_id }}</div>
+                  <span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">{{ item.feedback_type || 'feedback' }}</span>
+                </div>
                 <div v-if="item.revert_operation_id" class="text-sm text-gray-600 break-all mt-1">Revert: {{ item.revert_operation_id }}</div>
+                <div v-if="item.source_operation_id" class="text-sm text-gray-600 break-all mt-1">Feedback Event: {{ item.source_operation_id }}</div>
                 <div v-if="item.ruleset_id || item.rule_id" class="text-sm text-gray-600 mt-1">
                   {{ item.ruleset_id }} <span v-if="item.rule_id">/ {{ item.rule_id }}</span>
                 </div>

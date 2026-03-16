@@ -469,16 +469,24 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 		}
 	case "local_push":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			if instruction.ComponentType != "memory" {
+				common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			}
 			return err
 		}
-		common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		if instruction.ComponentType != "memory" {
+			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		}
 	case "push_change":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+			if instruction.ComponentType != "memory" {
+				common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+			}
 			return err
 		}
-		common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
+		if instruction.ComponentType != "memory" {
+			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "success", "")
+		}
 	case "start", "stop", "restart":
 		if globalProjectCmdHandler == nil {
 			return fmt.Errorf("project command handler not initialized")
@@ -722,7 +730,10 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		logger.Debug("Deleted agent instance", "name", componentName)
 
 	case "memory":
-		logger.Debug("Ignoring delete for memory scope", "name", componentName)
+		if err := memory.DeletePNSMemory(componentName); err != nil {
+			return fmt.Errorf("failed to delete memory scope %s: %w", componentName, err)
+		}
+		logger.Debug("Deleted memory scope", "name", componentName)
 
 	default:
 		return fmt.Errorf("unsupported component type: %s", componentType)

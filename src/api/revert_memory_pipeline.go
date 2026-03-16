@@ -96,20 +96,17 @@ func analyzeRevertIntoMemory(original common.OperationRecord, revertOperationID 
 		return fmt.Errorf("extractor returned empty memory result")
 	}
 
-	_, err = memory.AppendRevertMemory(scope, result, memory.RecentRevert{
+	err = persistScopedMemoryUpdate(scope, result, memory.RecentFeedback{
+		FeedbackType:      "revert",
 		OperationID:       original.OperationID,
 		RevertOperationID: revertOperationID,
 		RulesetID:         original.RulesetID,
 		RuleID:            original.RuleID,
 		Reason:            revertRecord.RevertReason,
-		SourceOperationID: original.OperationID,
+		SourceOperationID: revertOperationID,
 		CreatedAt:         revertRecord.Timestamp,
-	}, original.OperationID)
+	}, revertOperationID)
 	if err != nil {
-		return fmt.Errorf("persist memory: %w", err)
-	}
-
-	if err := publishMemorySync(scope.ProjectNodeSequence); err != nil {
 		return err
 	}
 
@@ -141,7 +138,8 @@ func analyzeCommentIntoMemory(commentOperationID string, record common.Operation
 		return fmt.Errorf("extractor returned empty memory result")
 	}
 
-	_, err = memory.AppendRevertMemory(scope, result, memory.RecentRevert{
+	err = persistScopedMemoryUpdate(scope, result, memory.RecentFeedback{
+		FeedbackType:      "comment",
 		OperationID:       record.OperationID,
 		RulesetID:         record.RulesetID,
 		RuleID:            record.RuleID,
@@ -150,10 +148,6 @@ func analyzeCommentIntoMemory(commentOperationID string, record common.Operation
 		CreatedAt:         timeNow(),
 	}, commentOperationID)
 	if err != nil {
-		return fmt.Errorf("persist memory: %w", err)
-	}
-
-	if err := publishMemorySync(scope.ProjectNodeSequence); err != nil {
 		return err
 	}
 
@@ -255,20 +249,45 @@ func buildOperationFeedbackPayload(original common.OperationRecord, feedback map
 	}, scope, nil
 }
 
-func publishMemorySync(pns string) error {
+func persistScopedMemoryUpdate(scope memory.Scope, result memory.ExtractorResult, feedback memory.RecentFeedback, sourceOperationID string) error {
+	existing, err := memory.LoadPNSMemory(scope.ProjectNodeSequence)
+	if err != nil {
+		return fmt.Errorf("load existing memory: %w", err)
+	}
+	previousRaw, hadPrevious, err := memory.LoadPNSMemoryRaw(scope.ProjectNodeSequence)
+	if err != nil {
+		return fmt.Errorf("load existing memory raw: %w", err)
+	}
+	updated := memory.BuildUpdatedFeedbackConfig(existing, scope, result, feedback, sourceOperationID)
+	raw, err := memory.MarshalConfig(updated)
+	if err != nil {
+		return fmt.Errorf("marshal updated memory: %w", err)
+	}
+	if err := memory.SavePNSMemoryRaw(scope.ProjectNodeSequence, raw); err != nil {
+		return fmt.Errorf("persist memory: %w", err)
+	}
+	if err := publishMemorySync(scope.ProjectNodeSequence, raw); err != nil {
+		if rollbackErr := rollbackScopedMemory(scope.ProjectNodeSequence, previousRaw, hadPrevious); rollbackErr != nil {
+			return fmt.Errorf("publish memory sync: %w (rollback failed: %v)", err, rollbackErr)
+		}
+		return fmt.Errorf("publish memory sync: %w", err)
+	}
+	return nil
+}
+
+func rollbackScopedMemory(pns, previousRaw string, hadPrevious bool) error {
+	if hadPrevious {
+		return memory.SavePNSMemoryRaw(pns, previousRaw)
+	}
+	return memory.DeletePNSMemory(pns)
+}
+
+func publishMemorySync(pns, raw string) error {
 	if !common.IsCurrentNodeLeader() || cluster.GlobalInstructionManager == nil {
 		return nil
 	}
-	cfg, err := memory.LoadPNSMemory(pns)
-	if err != nil {
-		return fmt.Errorf("reload persisted memory: %w", err)
-	}
-	if cfg == nil {
+	if strings.TrimSpace(raw) == "" {
 		return nil
-	}
-	raw, err := memory.MarshalConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal persisted memory: %w", err)
 	}
 	if err := cluster.GlobalInstructionManager.PublishComponentPushChange("memory", pns, raw, nil); err != nil {
 		return fmt.Errorf("publish memory sync: %w", err)

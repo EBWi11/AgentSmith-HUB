@@ -19,7 +19,7 @@ type memoryListItem struct {
 	UpdatedAt           string   `json:"updated_at,omitempty"`
 	Version             int      `json:"version"`
 	SummaryCount        int      `json:"summary_count"`
-	RecentRevertCount   int      `json:"recent_revert_count"`
+	RecentFeedbackCount int      `json:"recent_feedback_count"`
 	Path                string   `json:"path"`
 }
 
@@ -54,7 +54,7 @@ func getMemoryList(c echo.Context) error {
 			UpdatedAt:           cfg.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			Version:             cfg.Version,
 			SummaryCount:        len(cfg.Summaries),
-			RecentRevertCount:   len(cfg.RecentReverts),
+			RecentFeedbackCount: len(cfg.RecentFeedback),
 			Path:                filepath.Join(dir, entry.Name()),
 		})
 	}

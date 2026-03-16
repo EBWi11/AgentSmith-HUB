@@ -332,7 +332,7 @@
                 @click.stop="openCommentModal(operation)"
                 class="btn btn-secondary btn-sm"
               >
-                {{ operation.feedback_comment ? 'Edit Comment' : 'Add Comment' }}
+                {{ operation.feedback_comment ? 'Add Follow-up Comment' : 'Add Comment' }}
               </button>
               <button
                 v-if="canRevert(operation)"
@@ -429,9 +429,9 @@
       <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 mx-4">
         <div class="flex items-center justify-between mb-4">
           <div>
-            <h3 class="text-lg font-medium text-gray-900">Comment Operation</h3>
+            <h3 class="text-lg font-medium text-gray-900">Add Feedback Comment</h3>
             <p class="text-sm text-gray-500 mt-1">
-              This comment will be saved to the operation and analyzed into scoped memory automatically.
+              This comment will be saved as a new feedback event and analyzed into scoped memory automatically.
             </p>
           </div>
           <button @click="closeCommentModal" class="text-gray-400 hover:text-gray-600">

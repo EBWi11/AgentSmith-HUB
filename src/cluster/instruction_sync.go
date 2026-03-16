@@ -463,9 +463,9 @@ func (im *InstructionManager) PublishInstruction(componentName, componentType, c
 func (im *InstructionManager) operationRequiresRestart(operation, componentType string) bool {
 	switch operation {
 	case "push_change":
-		return componentType != "ruleset"
+		return componentType != "ruleset" && componentType != "memory"
 	case "add", "delete", "update":
-		return true // These operations modify components and require restart
+		return componentType != "memory" // Memory sync updates do not restart projects
 	case "start", "stop", "restart":
 		return false // These are already project control operations
 	case "local_push":

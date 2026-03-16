@@ -17,7 +17,8 @@ type Summary struct {
 	UpdatedAt         time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 }
 
-type RecentRevert struct {
+type RecentFeedback struct {
+	FeedbackType      string    `yaml:"feedback_type,omitempty" json:"feedback_type,omitempty"`
 	OperationID       string    `yaml:"operation_id,omitempty" json:"operation_id,omitempty"`
 	RevertOperationID string    `yaml:"revert_operation_id,omitempty" json:"revert_operation_id,omitempty"`
 	RulesetID         string    `yaml:"ruleset_id,omitempty" json:"ruleset_id,omitempty"`
@@ -28,14 +29,15 @@ type RecentRevert struct {
 }
 
 type Config struct {
-	Scope             Scope          `yaml:"scope" json:"scope"`
-	UpdatedAt         time.Time      `yaml:"updated_at" json:"updated_at"`
-	Version           int            `yaml:"version" json:"version"`
-	Summaries         []Summary      `yaml:"summaries,omitempty" json:"summaries,omitempty"`
-	AvoidPatterns     []string       `yaml:"avoid_patterns,omitempty" json:"avoid_patterns,omitempty"`
-	PreferredPatterns []string       `yaml:"preferred_patterns,omitempty" json:"preferred_patterns,omitempty"`
-	Signals           []string       `yaml:"signals,omitempty" json:"signals,omitempty"`
-	RecentReverts     []RecentRevert `yaml:"recent_reverts,omitempty" json:"recent_reverts,omitempty"`
+	Scope               Scope            `yaml:"scope" json:"scope"`
+	UpdatedAt           time.Time        `yaml:"updated_at" json:"updated_at"`
+	Version             int              `yaml:"version" json:"version"`
+	Summaries           []Summary        `yaml:"summaries,omitempty" json:"summaries,omitempty"`
+	AvoidPatterns       []string         `yaml:"avoid_patterns,omitempty" json:"avoid_patterns,omitempty"`
+	PreferredPatterns   []string         `yaml:"preferred_patterns,omitempty" json:"preferred_patterns,omitempty"`
+	Signals             []string         `yaml:"signals,omitempty" json:"signals,omitempty"`
+	RecentFeedback      []RecentFeedback `yaml:"recent_feedback,omitempty" json:"recent_feedback,omitempty"`
+	LegacyRecentReverts []RecentFeedback `yaml:"recent_reverts,omitempty" json:"-"`
 }
 
 type ExtractorResult struct {

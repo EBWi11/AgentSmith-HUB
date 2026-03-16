@@ -178,25 +178,53 @@ func (a *Agent) buildSystemPromptWithScopedMemory(basePrompt string) string {
 		return systemPrompt
 	}
 	if scopedMemory == nil {
-		logger.Debug("No scoped memory found for agent", "agent", a.Id, "project_node_sequence", a.ProjectNodeSequence, "memory_loaded", false)
+		a.logScopedMemoryStateIfChanged("absent", func() {
+			logger.Info("No scoped memory found for agent",
+				"agent", a.Id,
+				"project_node_sequence", a.ProjectNodeSequence,
+				"memory_loaded", false,
+			)
+		})
 		return systemPrompt
 	}
 
-	logger.Debug("Loaded scoped memory for agent",
-		"agent", a.Id,
-		"project_node_sequence", a.ProjectNodeSequence,
-		"memory_loaded", true,
-		"memory_version", scopedMemory.Version,
-		"summary_count", len(scopedMemory.Summaries),
-		"avoid_patterns_count", len(scopedMemory.AvoidPatterns),
-		"preferred_patterns_count", len(scopedMemory.PreferredPatterns),
-		"recent_reverts_count", len(scopedMemory.RecentReverts),
+	memoryState := fmt.Sprintf("v%d:s%d:a%d:p%d:g%d:f%d",
+		scopedMemory.Version,
+		len(scopedMemory.Summaries),
+		len(scopedMemory.AvoidPatterns),
+		len(scopedMemory.PreferredPatterns),
+		len(scopedMemory.Signals),
+		len(scopedMemory.RecentFeedback),
 	)
+	a.logScopedMemoryStateIfChanged(memoryState, func() {
+		logger.Info("Loaded scoped memory for agent",
+			"agent", a.Id,
+			"project_node_sequence", a.ProjectNodeSequence,
+			"memory_loaded", true,
+			"memory_version", scopedMemory.Version,
+			"summary_count", len(scopedMemory.Summaries),
+			"avoid_patterns_count", len(scopedMemory.AvoidPatterns),
+			"preferred_patterns_count", len(scopedMemory.PreferredPatterns),
+			"signals_count", len(scopedMemory.Signals),
+			"recent_feedback_count", len(scopedMemory.RecentFeedback),
+		)
+	})
 
 	if memoryBlock := memory.RenderPromptBlock(scopedMemory); memoryBlock != "" {
 		systemPrompt = systemPrompt + "\n\n" + memoryBlock
 	}
 	return systemPrompt
+}
+
+func (a *Agent) logScopedMemoryStateIfChanged(state string, logFn func()) {
+	a.memoryLogMu.Lock()
+	defer a.memoryLogMu.Unlock()
+
+	if a.lastMemoryLogState == state {
+		return
+	}
+	a.lastMemoryLogState = state
+	logFn()
 }
 
 func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{} {

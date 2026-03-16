@@ -70,6 +70,8 @@ type Agent struct {
 	RawConfig         string `json:"-"`
 
 	ProjectNodeSequence string `json:"project_node_sequence,omitempty"`
+	memoryLogMu         sync.Mutex
+	lastMemoryLogState  string
 }
 
 func NewAgent(filePath, raw, id string) (*Agent, error) {
