@@ -1,11 +1,16 @@
 <template>
-  <div class="json-viewer">
-    <pre class="json-content" v-html="highlightedJson"></pre>
+  <div class="json-viewer" @keydown.capture="handleKeydown">
+    <pre
+      ref="jsonContentRef"
+      class="json-content"
+      tabindex="0"
+      v-html="highlightedJson"
+    ></pre>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism.css'
@@ -20,6 +25,8 @@ const props = defineProps({
     default: '200px'
   }
 })
+
+const jsonContentRef = ref(null)
 
 // Format and highlight JSON using Prism
 const highlightedJson = computed(() => {
@@ -41,6 +48,25 @@ const highlightedJson = computed(() => {
   // Use Prism to highlight the JSON
   return Prism.highlight(jsonString, Prism.languages.json, 'json')
 })
+
+function handleKeydown(event) {
+  const isSelectAll = (event.metaKey || event.ctrlKey) && String(event.key).toLowerCase() === 'a'
+  if (!isSelectAll) return
+
+  // Keep Cmd/Ctrl+A scoped to current JSON block.
+  event.preventDefault()
+  event.stopPropagation()
+
+  const el = jsonContentRef.value
+  if (!el) return
+
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
 </script>
 
 <style scoped>
