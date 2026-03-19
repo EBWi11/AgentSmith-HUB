@@ -607,7 +607,7 @@ func (out *Output) Start() error {
 		upstreamCount := len(out.UpStream)
 		logger.Info("Elasticsearch output starting", "output", out.Id, "index", out.elasticsearchCfg.Index, "upstream_count", upstreamCount)
 		if upstreamCount == 0 {
-			logger.Warn("Elasticsearch output has no upstream connections; no data will be written until project connects input/ruleset/agent to this output", "output", out.Id)
+			logger.Error("Elasticsearch output has no upstream connections; no data will be written until project connects input/ruleset/agent to this output", "output", out.Id)
 		}
 
 		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
@@ -1043,7 +1043,7 @@ func (out *Output) StopForTesting() error {
 	case <-waitDone:
 		logger.Info("Test output stopped successfully", "id", out.Id)
 	case <-time.After(1 * time.Second): // Very short timeout for testing
-		logger.Warn("Timeout waiting for test output goroutines, proceeding anyway", "id", out.Id)
+		logger.Error("Timeout waiting for test output goroutines, proceeding anyway", "id", out.Id)
 	}
 
 	// Step 4: Reset atomic counter for testing cleanup

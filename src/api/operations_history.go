@@ -93,7 +93,7 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 		} else {
 			// Set TTL for the entire list to 31 days
 			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
+				logger.Error("Failed to set TTL for operations history", "error", err)
 			}
 			logger.Info("Change push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
 		}
@@ -129,7 +129,7 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 		} else {
 			// Set TTL for the entire list to 31 days
 			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
+				logger.Error("Failed to set TTL for operations history", "error", err)
 			}
 			logger.Info("Local push operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
 		}
@@ -165,7 +165,7 @@ func RecordComponentDelete(componentType, componentID, status, errorMsg string, 
 		} else {
 			// Set TTL for the entire list to 31 days
 			if err := common.RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-				logger.Warn("Failed to set TTL for operations history", "error", err)
+				logger.Error("Failed to set TTL for operations history", "error", err)
 			}
 			logger.Info("Component delete operation recorded to Redis", "type", record.Type, "component", record.ComponentType, "id", record.ComponentID)
 		}
@@ -247,7 +247,7 @@ func GetOperationsHistory(c echo.Context) error {
 // GetClusterOperationsHistory handles GET /cluster-operations-history - DEPRECATED but kept for backward compatibility
 func GetClusterOperationsHistory(c echo.Context) error {
 	// Redirect to unified endpoint - no longer restricted to leader only
-	logger.Warn("GetClusterOperationsHistory is deprecated - use GetOperationsHistory instead")
+	logger.Error("GetClusterOperationsHistory is deprecated - use GetOperationsHistory instead")
 	return GetOperationsHistory(c)
 }
 

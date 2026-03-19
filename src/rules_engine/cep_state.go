@@ -703,7 +703,7 @@ func (m *CEPStateManager) getOrCreateRedisStateAtomic(key string, withinMs int64
 	result, err := common.RedisEval(luaGetOrCreate, []string{key}, serialized, ttlSeconds)
 	if err != nil {
 		// Fallback to non-atomic get-then-set
-		logger.Warn("Lua get-or-create failed, falling back", "key", key, "error", err)
+		logger.Error("Lua get-or-create failed, falling back", "key", key, "error", err)
 		state := m.getRedisState(key)
 		if state == nil {
 			m.setRedisState(key, newState, ttlSeconds)
@@ -736,7 +736,7 @@ func (m *CEPStateManager) updateRedisStateAtomic(key string, state *SequenceStat
 	_, err = common.RedisEval(luaAtomicUpdate, []string{key}, serialized, ttlSeconds)
 	if err != nil {
 		// Fallback to regular SET
-		logger.Warn("Lua atomic update failed, falling back", "key", key, "error", err)
+		logger.Error("Lua atomic update failed, falling back", "key", key, "error", err)
 		m.setRedisState(key, state, ttlSeconds)
 	}
 }

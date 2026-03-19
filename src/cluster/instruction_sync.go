@@ -592,7 +592,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 					logger.Info("Old instructions cleaned up successfully", "cleaned_count", oldCurrentVersion)
 				} else {
 					// If we can't parse, try to clean up a reasonable range (e.g., up to maxInstructions)
-					logger.Warn("Could not parse old currentVersion, will clean up to maxInstructions",
+					logger.Error("Could not parse old currentVersion, will clean up to maxInstructions",
 						"old_version_str", oldVersionStr,
 						"max_to_clean", im.maxInstructions)
 					cleanedCount := 0

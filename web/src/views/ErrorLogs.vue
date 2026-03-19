@@ -341,36 +341,41 @@ function setDefaultTimeRange() {
   filters.endDate = toLocalISOString(now)
 }
 
+function getRelativeRangeDates() {
+  const now = new Date()
+  let startTime
+
+  switch (filters.timeRange) {
+    case '1h':
+      startTime = new Date(now.getTime() - 60 * 60 * 1000)
+      break
+    case '6h':
+      startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+      break
+    case '12h':
+      startTime = new Date(now.getTime() - 12 * 60 * 60 * 1000)
+      break
+    case '24h':
+      startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      break
+    case '7d':
+      startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      break
+    case '30d':
+      startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+      break
+    default:
+      startTime = new Date(now.getTime() - 60 * 60 * 1000)
+  }
+
+  return { startTime, endTime: now }
+}
+
 function handleTimeRangeChange() {
   if (filters.timeRange !== 'custom') {
-    const now = new Date()
-    let startTime
-    
-    switch (filters.timeRange) {
-      case '1h':
-        startTime = new Date(now.getTime() - 60 * 60 * 1000)
-        break
-      case '6h':
-        startTime = new Date(now.getTime() - 6 * 60 * 60 * 1000)
-        break
-      case '12h':
-        startTime = new Date(now.getTime() - 12 * 60 * 60 * 1000)
-        break
-      case '24h':
-        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-        break
-      case '7d':
-        startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        break
-      case '30d':
-        startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        break
-      default:
-        startTime = new Date(now.getTime() - 60 * 60 * 1000)
-    }
-    
+    const { startTime, endTime } = getRelativeRangeDates()
     filters.startDate = toLocalISOString(startTime)
-    filters.endDate = toLocalISOString(now)
+    filters.endDate = toLocalISOString(endTime)
   }
   
   applyFilters()
@@ -378,15 +383,22 @@ function handleTimeRangeChange() {
 
 const getTimeRangeParams = () => {
   const params = {}
-  
-  // 用本地时间字符串拼接ISO格式，带本地时区
+
+  // For preset ranges, always calculate relative to "now" at request time.
+  // This prevents stale windows after long page sessions or manual refreshes.
+  if (filters.timeRange !== 'custom') {
+    const { startTime, endTime } = getRelativeRangeDates()
+    params.start_time = startTime.toISOString()
+    params.end_time = endTime.toISOString()
+    return params
+  }
+
+  // For custom range, use user-selected absolute timestamps.
   if (filters.startDate) {
-    const start = new Date(filters.startDate)
-    params.start_time = start.toISOString()
+    params.start_time = new Date(filters.startDate).toISOString()
   }
   if (filters.endDate) {
-    const end = new Date(filters.endDate)
-    params.end_time = end.toISOString()
+    params.end_time = new Date(filters.endDate).toISOString()
   }
   
   return params

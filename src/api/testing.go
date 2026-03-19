@@ -230,7 +230,7 @@ func testRuleset(c echo.Context) error {
 		case <-timeout:
 			// Timeout occurred
 			timedOut = true
-			logger.Warn("Ruleset test timed out after 30 seconds")
+			logger.Error("Ruleset test timed out after 30 seconds")
 			goto done
 		}
 	}
@@ -1276,7 +1276,7 @@ func connectCheck(c echo.Context) error {
 
 			// Clean up the temporary input (stop it if it was started)
 			if stopErr := tempInput.Stop(); stopErr != nil {
-				logger.Warn("Failed to stop temporary input after connectivity test", "id", id, "error", stopErr)
+				logger.Error("Failed to stop temporary input after connectivity test", "id", id, "error", stopErr)
 			}
 		} else {
 			// Use the existing input component
@@ -1348,7 +1348,7 @@ func connectCheck(c echo.Context) error {
 
 			// Clean up the temporary output (stop it if it was started)
 			if stopErr := tempOutput.Stop(); stopErr != nil {
-				logger.Warn("Failed to stop temporary output after connectivity test", "id", id, "error", stopErr)
+				logger.Error("Failed to stop temporary output after connectivity test", "id", id, "error", stopErr)
 			}
 		} else {
 			// Use the existing output component
@@ -1698,7 +1698,7 @@ func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
 
 		// Clean up the temporary input (stop it if it was started)
 		if stopErr := tempInput.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop temporary input after connectivity test", "id", testId, "error", stopErr)
+			logger.Error("Failed to stop temporary input after connectivity test", "id", testId, "error", stopErr)
 		}
 
 		// Add metadata to indicate this was tested with custom configuration
@@ -1748,7 +1748,7 @@ func connectCheckWithConfig(c echo.Context, normalizedType, id string) error {
 
 		// Clean up the temporary output (stop it if it was started)
 		if stopErr := tempOutput.Stop(); stopErr != nil {
-			logger.Warn("Failed to stop temporary output after connectivity test", "id", testId, "error", stopErr)
+			logger.Error("Failed to stop temporary output after connectivity test", "id", testId, "error", stopErr)
 		}
 
 		// Add metadata to indicate this was tested with custom configuration

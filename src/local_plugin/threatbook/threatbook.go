@@ -245,7 +245,7 @@ func setCachedResult(queryValue, queryType string, result *ThreatBookResult) {
 func getThreatBookAPIKey() string {
 	apiKey := os.Getenv("THREATBOOK_API_KEY")
 	if apiKey == "" {
-		logger.Warn("THREATBOOK_API_KEY environment variable not set")
+		logger.Error("THREATBOOK_API_KEY environment variable not set")
 	}
 	return apiKey
 }

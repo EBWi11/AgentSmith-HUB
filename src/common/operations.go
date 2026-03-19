@@ -52,7 +52,7 @@ func RecordProjectOperation(operationType OperationType, projectID, status, erro
 
 	// Set TTL for the entire list to 31 days (31 * 24 * 60 * 60 = 2,678,400 seconds)
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Operation recorded to Redis", "type", record.Type, "project", record.ProjectID, "status", record.Status)
@@ -110,7 +110,7 @@ func RecordClusterInstruction(operationType OperationType, instructionType, comp
 
 	// Set TTL for the entire list to 31 days (31 * 24 * 60 * 60 = 2,678,400 seconds)
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Cluster instruction recorded to Redis", "type", record.Type, "instruction_type", instructionType, "component", record.ComponentID, "status", record.Status)
@@ -151,7 +151,7 @@ func RecordComponentAdd(componentType, componentID, content, status, errorMsg st
 
 	// Set TTL for the entire list to 31 days
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component add operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -192,7 +192,7 @@ func RecordComponentUpdate(componentType, componentID, content, status, errorMsg
 
 	// Set TTL for the entire list to 31 days
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component update operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -233,7 +233,7 @@ func RecordComponentDelete(componentType, componentID, status, errorMsg string, 
 
 	// Set TTL for the entire list to 31 days
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Component delete operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -276,7 +276,7 @@ func RecordChangePush(componentType, componentID, oldContent, newContent, diff, 
 
 	// Set TTL for the entire list to 31 days
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Change push operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -317,7 +317,7 @@ func RecordLocalPush(componentType, componentID, content, status, errorMsg strin
 
 	// Set TTL for the entire list to 31 days
 	if err := RedisExpire("cluster:ops_history", 31*24*60*60); err != nil {
-		logger.Warn("Failed to set TTL for operations history", "error", err)
+		logger.Error("Failed to set TTL for operations history", "error", err)
 	}
 
 	logger.Info("Local push operation recorded", "type", componentType, "component", componentID, "status", status)
@@ -422,7 +422,7 @@ func (cum *ComponentUpdateManager) CleanupStaleUpdates(maxAge time.Duration) {
 	now := time.Now()
 	for key, operation := range cum.activeUpdates {
 		if now.Sub(operation.LastUpdate) > maxAge {
-			logger.Warn("Cleaning up stale component update operation", "key", key, "age", now.Sub(operation.LastUpdate))
+			logger.Error("Cleaning up stale component update operation", "key", key, "age", now.Sub(operation.LastUpdate))
 
 			// Release lock if still held
 			if operation.Lock != nil {

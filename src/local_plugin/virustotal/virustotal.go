@@ -151,7 +151,7 @@ func setCachedResult(hash string, result *VirusTotalResult) {
 func getVirusTotalAPIKey() string {
 	apiKey := os.Getenv("VIRUSTOTAL_API_KEY")
 	if apiKey == "" {
-		logger.Warn("VIRUSTOTAL_API_KEY environment variable not set")
+		logger.Error("VIRUSTOTAL_API_KEY environment variable not set")
 	}
 	return apiKey
 }

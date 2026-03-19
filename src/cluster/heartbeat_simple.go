@@ -243,7 +243,7 @@ func (hm *HeartbeatManager) listenHeartbeats() {
 			case msg, ok := <-ch:
 				if !ok {
 					// Channel closed, need to reconnect
-					logger.Warn("Heartbeat pub/sub channel closed, reconnecting...")
+					logger.Error("Heartbeat pub/sub channel closed, reconnecting...")
 					disconnected = true
 					break
 				}

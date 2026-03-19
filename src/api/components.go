@@ -742,6 +742,8 @@ func getPlugins(c echo.Context) error {
 				// Try to determine return type for temporary plugins
 				returnType := "unknown"
 				parameters := []plugin.PluginParameter{}
+				status := "pending"
+				errorMessage := ""
 				if content != "" {
 					// Create a temporary plugin instance to get return type
 					tempPlugin := &plugin.Plugin{
@@ -750,10 +752,25 @@ func getPlugins(c echo.Context) error {
 						Type:       plugin.YAEGI_PLUGIN,
 						IsTestMode: true, // Set test mode to avoid statistics recording
 					}
-					// Try to load temporarily to get return type
-					if err := tempPlugin.YaegiLoad(); err == nil {
+					// Try to load temporarily to get return type.
+					// Never let malformed pending plugin content break the plugin list API.
+					loadErr := func() (err error) {
+						defer func() {
+							if r := recover(); r != nil {
+								err = fmt.Errorf("plugin parse panic: %v", r)
+							}
+						}()
+						return tempPlugin.YaegiLoad()
+					}()
+					if loadErr == nil {
 						returnType = tempPlugin.ReturnType
 						parameters = tempPlugin.Parameters
+					} else {
+						status = string(common.StatusError)
+						errorMessage = loadErr.Error()
+						logger.Error("Failed to parse temporary plugin while listing",
+							"plugin", name,
+							"error", loadErr)
 					}
 				}
 
@@ -767,6 +784,10 @@ func getPlugins(c echo.Context) error {
 					"parameters":       parameters, // Include parameter information
 					"used_by_rulesets": []string{}, // No rulesets use temp plugins
 					"ruleset_count":    0,
+					"status":           status,
+				}
+				if errorMessage != "" {
+					pluginData["errorMessage"] = errorMessage
 				}
 				plugins = append(plugins, pluginData)
 			}
@@ -2257,7 +2278,7 @@ func readLocalPluginSource(pluginName string) (string, error) {
 	// Get current working directory
 	wd, err := os.Getwd()
 	if err != nil {
-		logger.Warn("Failed to get working directory", "error", err)
+		logger.Error("Failed to get working directory", "error", err)
 		wd = "."
 	}
 
@@ -2593,7 +2614,7 @@ func deleteRulesetRule(c echo.Context) error {
 	if tempRuleset != nil {
 		// Use normal Stop method - even temporary rulesets should process data gracefully
 		if err := tempRuleset.Stop(); err != nil {
-			logger.Warn("Failed to stop temporary ruleset", "error", err)
+			logger.Error("Failed to stop temporary ruleset", "error", err)
 		}
 		tempRuleset = nil
 	}
@@ -2729,7 +2750,7 @@ func addRulesetRule(c echo.Context) error {
 	if tempRuleset != nil {
 		// Use normal Stop method - even temporary rulesets should process data gracefully
 		if err := tempRuleset.Stop(); err != nil {
-			logger.Warn("Failed to stop temporary ruleset", "error", err)
+			logger.Error("Failed to stop temporary ruleset", "error", err)
 		}
 		tempRuleset = nil
 	}

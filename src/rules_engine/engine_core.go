@@ -305,7 +305,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 
 		state := r.seqStateManager.GetState(key)
 		if state == nil {
-			logger.Warn("Absence scanner: state already evicted from cache",
+			logger.Error("Absence scanner: state already evicted from cache",
 				"rulesetID", r.RulesetID, "ruleID", info.RuleID, "key", key)
 			r.seqStateManager.UnlockKey(key)
 			r.seqStateManager.CleanupKeyLock(key)
@@ -1075,7 +1075,7 @@ func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]i
 
 	if correlateValues == "" && (len(seq.GroupByList) > 0 || r.hasEventGroupBy(&seq)) {
 		// group_by is configured but no values could be extracted
-		logger.Warn("Sequence group_by extraction yielded empty key",
+		logger.Error("Sequence group_by extraction yielded empty key",
 			"rulesetID", r.RulesetID,
 			"ruleID", rule.ID,
 			"sequenceOpID", operationID)

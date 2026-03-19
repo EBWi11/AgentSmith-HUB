@@ -1176,7 +1176,7 @@ func ApplySingleChange(c echo.Context) error {
 			if _, ok := project.GetProject(id); ok {
 				userWantsRunning, err := common.GetProjectUserIntention(id)
 				if err != nil {
-					logger.Warn("Failed to get user intention for project, defaulting to restart", "project_id", id, "error", err)
+					logger.Error("Failed to get user intention for project, defaulting to restart", "project_id", id, "error", err)
 					userWantsRunning = true // Default to restart on error for backward compatibility
 				}
 

@@ -821,7 +821,13 @@ func getSampleDataForRuleset(rulesetID string) (map[string]interface{}, string, 
 		return result, dataSource, nil
 	}
 
-	// If no direct data, return empty but with clear message
+	// Fallback: use project-related component samples for pending configs where direct sampler may be empty.
+	fallbackResult, fallbackSource := getRelatedProjectSamples("ruleset", rulesetID)
+	if len(fallbackResult) > 0 {
+		return fallbackResult, fallbackSource, nil
+	}
+
+	// If no direct/fallback data, return empty but with clear message
 	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for ruleset %s", rulesetID)
 }
 
@@ -841,7 +847,13 @@ func getSampleDataForInput(inputID string) (map[string]interface{}, string, erro
 		return result, dataSource, nil
 	}
 
-	// If no direct data, return empty but with clear message
+	// Fallback: use project-related component samples for pending configs where direct sampler may be empty.
+	fallbackResult, fallbackSource := getRelatedProjectSamples("input", inputID)
+	if len(fallbackResult) > 0 {
+		return fallbackResult, fallbackSource, nil
+	}
+
+	// If no direct/fallback data, return empty but with clear message
 	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for input %s", inputID)
 }
 
@@ -857,8 +869,76 @@ func getSampleDataForOutput(outputID string) (map[string]interface{}, string, er
 		return result, dataSource, nil
 	}
 
-	// If no direct data, return empty but with clear message
+	// Fallback: use project-related component samples for pending configs where direct sampler may be empty.
+	fallbackResult, fallbackSource := getRelatedProjectSamples("output", outputID)
+	if len(fallbackResult) > 0 {
+		return fallbackResult, fallbackSource, nil
+	}
+
+	// If no direct/fallback data, return empty but with clear message
 	return map[string]interface{}{}, "", fmt.Errorf("no sample data available for output %s", outputID)
+}
+
+func getRelatedProjectSamples(componentType, componentID string) (map[string]interface{}, string) {
+	projectIDs := findProjectsUsingComponent(fmt.Sprintf("%s.%s", componentType, componentID))
+	if len(projectIDs) == 0 {
+		return map[string]interface{}{}, ""
+	}
+
+	result := make(map[string]interface{})
+	sources := make([]string, 0)
+	seenSource := make(map[string]struct{})
+
+	for _, projectID := range projectIDs {
+		proj, exists := project.GetProject(projectID)
+		if !exists || proj == nil {
+			continue
+		}
+
+		for inputID := range proj.Inputs {
+			sourceName := "input." + inputID
+			if _, seen := seenSource[sourceName]; seen {
+				continue
+			}
+			samples := getSampleDataFromComponent(sourceName)
+			if len(samples) > 0 {
+				result[sourceName] = samples
+				sources = append(sources, sourceName)
+				seenSource[sourceName] = struct{}{}
+			}
+		}
+
+		for rulesetID := range proj.Rulesets {
+			sourceName := "ruleset." + rulesetID
+			if _, seen := seenSource[sourceName]; seen {
+				continue
+			}
+			samples := getSampleDataFromComponent(sourceName)
+			if len(samples) > 0 {
+				result[sourceName] = samples
+				sources = append(sources, sourceName)
+				seenSource[sourceName] = struct{}{}
+			}
+		}
+
+		for outputID := range proj.Outputs {
+			sourceName := "output." + outputID
+			if _, seen := seenSource[sourceName]; seen {
+				continue
+			}
+			samples := getSampleDataFromComponent(sourceName)
+			if len(samples) > 0 {
+				result[sourceName] = samples
+				sources = append(sources, sourceName)
+				seenSource[sourceName] = struct{}{}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return map[string]interface{}{}, ""
+	}
+	return result, fmt.Sprintf("%s.%s related project components: %s", componentType, componentID, strings.Join(sources, ", "))
 }
 
 // Get sample data for a specific project (simplified using PNS)

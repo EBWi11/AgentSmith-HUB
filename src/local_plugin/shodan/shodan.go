@@ -157,7 +157,7 @@ func setCachedResult(ip string, result *ShodanResult) {
 func getShodanAPIKey() string {
 	apiKey := os.Getenv("SHODAN_API_KEY")
 	if apiKey == "" {
-		logger.Warn("SHODAN_API_KEY environment variable not set")
+		logger.Error("SHODAN_API_KEY environment variable not set")
 	}
 	return apiKey
 }

@@ -247,7 +247,7 @@ func (in *Input) parseWithGrok(data map[string]interface{}) map[string]interface
 	// Parse with grok
 	values, err := in.grokParser.Parse(in.Config.GrokPattern, message)
 	if err != nil {
-		logger.Warn("Failed to parse message with grok", "input", in.Id, "error", err, "message", message)
+		logger.Error("Failed to parse message with grok", "input", in.Id, "error", err, "message", message)
 		return data
 	}
 

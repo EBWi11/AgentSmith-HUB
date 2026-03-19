@@ -323,7 +323,7 @@ func (dsm *DailyStatsManager) ApplyBatchUpdates(dailyStatsData []DailyStatsData)
 						"error", err)
 				} else {
 					// Retry after a short delay
-					logger.Warn("Redis write failed, retrying",
+					logger.Error("Redis write failed, retrying",
 						"component", data.ComponentID,
 						"sequence", data.ProjectNodeSequence,
 						"retry", retry+1,

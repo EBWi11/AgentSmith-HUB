@@ -457,7 +457,7 @@ func (c *KafkaConsumer) run() {
 					if err.Err.Error() == "client closed" {
 						return
 					}
-					logger.Warn("[KafkaConsumer] fetch error", "error", err.Err)
+					logger.Error("[KafkaConsumer] fetch error", "error", err.Err)
 				}
 				continue // skip errored fetches
 			}

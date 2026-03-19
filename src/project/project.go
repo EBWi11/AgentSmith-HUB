@@ -137,7 +137,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		if err != nil {
 			// Fallback: if we can't get user intention, check actual status
 			// This handles Redis failures or other edge cases
-			logger.Warn("Failed to get user intention, using actual status as fallback",
+			logger.Error("Failed to get user intention, using actual status as fallback",
 				"project", projectID, "error", err, "actual_status", p.Status)
 			return p.Status == common.StatusRunning
 		}
@@ -1250,7 +1250,7 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 		if stopErr != nil {
 			// Stop() guarantees status is Stopped even on error/timeout
 			// Log the error but continue with restart
-			logger.Warn("Stop returned error during restart, but status should be stopped", "project", p.Id, "error", stopErr)
+			logger.Error("Stop returned error during restart, but status should be stopped", "project", p.Id, "error", stopErr)
 		}
 
 		// Sleep after stop to ensure components are fully released
@@ -1460,7 +1460,7 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 				return fmt.Errorf("failed to start project after %d attempts: %w", maxRetries+1, err)
 			}
 
-			logger.Warn("Project start failed, will retry", "project", p.Id, "attempt", attempt+1, "error", err, "retry_delay", retryDelays[attempt])
+			logger.Error("Project start failed, will retry", "project", p.Id, "attempt", attempt+1, "error", err, "retry_delay", retryDelays[attempt])
 			time.Sleep(retryDelays[attempt])
 			continue
 		}
@@ -1478,7 +1478,7 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 			return err
 		}
 
-		logger.Warn("Project started but some components are not running, will retry", "project", p.Id, "attempt", attempt+1, "retry_delay", retryDelays[attempt])
+		logger.Error("Project started but some components are not running, will retry", "project", p.Id, "attempt", attempt+1, "retry_delay", retryDelays[attempt])
 
 		// Stop the project before retrying
 		_ = p.Stop(false)
@@ -1494,7 +1494,7 @@ func (p *Project) areAllComponentsRunning() bool {
 	inputs := p.GetProjectInputs()
 	for _, in := range inputs {
 		if in.Status != common.StatusRunning {
-			logger.Warn("Input component not running", "project", p.Id, "input", in.Id, "status", in.Status)
+			logger.Error("Input component not running", "project", p.Id, "input", in.Id, "status", in.Status)
 			return false
 		}
 	}
@@ -1503,7 +1503,7 @@ func (p *Project) areAllComponentsRunning() bool {
 	outputs := p.GetProjectOutputs()
 	for _, out := range outputs {
 		if out.Status != common.StatusRunning {
-			logger.Warn("Output component not running", "project", p.Id, "output", out.Id, "status", out.Status)
+			logger.Error("Output component not running", "project", p.Id, "output", out.Id, "status", out.Status)
 			return false
 		}
 	}
@@ -1512,7 +1512,7 @@ func (p *Project) areAllComponentsRunning() bool {
 	rulesets := p.GetProjectRulesets()
 	for _, rs := range rulesets {
 		if rs.Status != common.StatusRunning {
-			logger.Warn("Ruleset component not running", "project", p.Id, "ruleset", rs.RulesetID, "status", rs.Status)
+			logger.Error("Ruleset component not running", "project", p.Id, "ruleset", rs.RulesetID, "status", rs.Status)
 			return false
 		}
 	}
@@ -1520,7 +1520,7 @@ func (p *Project) areAllComponentsRunning() bool {
 	// Check agent components
 	for _, a := range p.Agents {
 		if a.Status != common.StatusRunning {
-			logger.Warn("Agent component not running", "project", p.Id, "agent", a.Id, "status", a.Status)
+			logger.Error("Agent component not running", "project", p.Id, "agent", a.Id, "status", a.Status)
 			return false
 		}
 	}

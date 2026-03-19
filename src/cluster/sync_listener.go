@@ -107,7 +107,7 @@ func (sl *SyncListener) waitForLeaderReadyIfNeeded(targetVersion string) error {
 		// Re-read leader version
 		leaderVersion, err := common.RedisGet("cluster:leader_version")
 		if err != nil {
-			logger.Warn("Failed to get leader version while waiting", "error", err)
+			logger.Error("Failed to get leader version while waiting", "error", err)
 			continue
 		}
 
@@ -120,7 +120,7 @@ func (sl *SyncListener) waitForLeaderReadyIfNeeded(targetVersion string) error {
 		}
 	}
 
-	logger.Warn("Timeout waiting for leader compaction to complete, will try sync anyway",
+	logger.Error("Timeout waiting for leader compaction to complete, will try sync anyway",
 		"node_id", sl.nodeID,
 		"max_wait_time", maxWaitTime)
 	return nil
@@ -163,7 +163,7 @@ func (sl *SyncListener) listenSyncCommands() {
 			case msg, ok := <-ch:
 				if !ok {
 					// Channel closed, need to reconnect
-					logger.Warn("Sync command pub/sub channel closed, reconnecting...")
+					logger.Error("Sync command pub/sub channel closed, reconnecting...")
 					disconnected = true
 					break
 				}

@@ -302,7 +302,7 @@ func main() {
 			// Force cleanup of critical resources
 			project.ForEachProject(func(id string, p *project.Project) bool {
 				if p.Status == common.StatusRunning || p.Status == common.StatusStarting {
-					logger.Warn("Force stopping project", "id", id)
+					logger.Error("Force stopping project", "id", id)
 					p.SetProjectStatus(common.StatusStopped, nil)
 				}
 				return true
@@ -564,7 +564,7 @@ func loadLocalProjects() {
 
 			if intentionErr != nil {
 				// Redis error occurred - log warning and default to stopped
-				logger.Warn("Could not retrieve user intention from Redis, defaulting project to stopped",
+				logger.Error("Could not retrieve user intention from Redis, defaulting project to stopped",
 					"project", p.Id,
 					"error", intentionErr)
 				p.Status = common.StatusStopped
@@ -590,7 +590,7 @@ func loadLocalProjects() {
 
 					// Failed
 					if attempt < 3 {
-						logger.Warn("Failed to start project during restore, retrying",
+						logger.Error("Failed to start project during restore, retrying",
 							"project", p.Id,
 							"attempt", attempt,
 							"error", startErr)
