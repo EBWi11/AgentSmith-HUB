@@ -142,6 +142,8 @@ func ServerStart(listener string) error {
 	auth.POST("/agents", createAgent)
 	auth.PUT("/agents/:id", updateAgent)
 	auth.DELETE("/agents/:id", deleteAgentHandler)
+	auth.POST("/agents/:id/memory-notes", updateAgentMemoryNotes)
+	auth.POST("/agents/:id/memory-notes/generate-from-log", generateAgentMemoryFromLog)
 
 	auth.GET("/skills", getSkills)
 	auth.GET("/skills/:id", getSkillDetail)
@@ -217,6 +219,7 @@ func ServerStart(listener string) error {
 
 	// Agent log endpoints - REQUIRE AUTH
 	auth.GET("/agent-logs", getAgentLogs)
+	auth.POST("/agent-logs/:agentId/:logId/comments", postAgentLogComment)
 
 	// Operations history endpoints - REQUIRE AUTH
 	auth.GET("/operations-history", GetOperationsHistory)

@@ -246,3 +246,42 @@ func shouldEnableKimiThinking(model, reasoningMode string) bool {
 	}
 	return false
 }
+
+// GenerateMemorySummary builds concise memory notes from user comments.
+// Model defaults to HubConfig.LLMModel when empty.
+func GenerateMemorySummary(model string, agentID string, existingMemory string, comments []common.AgentLogComment) (string, error) {
+	if len(comments) == 0 {
+		return "", fmt.Errorf("no comments to summarize")
+	}
+
+	commentsJSON, _ := json.Marshal(comments)
+	userInput := map[string]interface{}{
+		"agent_id":        agentID,
+		"existing_memory": existingMemory,
+		"comments":        json.RawMessage(commentsJSON),
+	}
+	userRaw, _ := json.Marshal(userInput)
+
+	messages := []Message{
+		{
+			Role: "system",
+			Content: "You are AgentSmith-HUB memory builder. Summarize user comments into 3-6 concise, durable guidance bullets for future decisions. " +
+				"Output plain text only (no JSON). Focus on reusable decision patterns, known false positives, and confidence adjustments. " +
+				"Avoid specific volatile details like exact IPs/usernames.",
+		},
+		{
+			Role:    "user",
+			Content: string(userRaw),
+		},
+	}
+
+	resp, err := callChatWithTools(model, messages, nil, 512, 0, "disabled", 0)
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimSpace(resp.Content)
+	if out == "" {
+		return "", fmt.Errorf("empty memory summary from model")
+	}
+	return out, nil
+}

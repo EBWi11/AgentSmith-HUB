@@ -42,6 +42,10 @@ type AgentConfig struct {
 	ReasoningMode          string `yaml:"reasoning_mode"`
 	ReasoningBudgetTokens  int    `yaml:"reasoning_budget_tokens"`
 
+	// MemoryNotes is a simple free-form field used to store
+	// summarized human feedback and long-term guidance for this agent.
+	MemoryNotes string `yaml:"memory_notes,omitempty"`
+
 	RawConfig string `yaml:"-"`
 	Path      string `yaml:"-"`
 }

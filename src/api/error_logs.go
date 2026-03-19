@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,17 +58,27 @@ type AgentLogAPIEntry struct {
 	Timestamp           time.Time `json:"timestamp"`
 	NodeID              string    `json:"node_id"`
 	AgentID             string    `json:"agent_id"`
+	ID                  string    `json:"id"`
 	ProjectNodeSequence string    `json:"project_node_sequence,omitempty"`
 	RawInput            string    `json:"raw_input,omitempty"`
 	RawOutput           string    `json:"raw_output,omitempty"`
 	Trace               string    `json:"trace,omitempty"`
 	Error               string    `json:"error,omitempty"`
+	Comments            []common.AgentLogComment `json:"comments,omitempty"`
 }
 
 // AgentLogAPIResponse is the response payload for /agent-logs.
 type AgentLogAPIResponse struct {
 	Logs       []AgentLogAPIEntry `json:"logs"`
 	TotalCount int                `json:"total_count"`
+}
+
+const commonAgentLogMaxFetch = 5000
+
+// AgentLogCommentRequest is the payload for creating a new comment.
+type AgentLogCommentRequest struct {
+	Comment string `json:"comment"`
+	Tag     string `json:"tag,omitempty"`
 }
 
 // NodeStat represents error statistics for a node
@@ -207,27 +218,44 @@ func getAgentLogs(c echo.Context) error {
 
 	// Pagination params (simple, list-per-agent; frontend can aggregate if needed)
 	limit := 100
+	offset := 0
 	if l := c.QueryParam("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
-
-	// For now, we only read logs for a single agent ID; if none provided, return empty.
-	if agentID == "" {
-		return c.JSON(http.StatusOK, AgentLogAPIResponse{
-			Logs:       []AgentLogAPIEntry{},
-			TotalCount: 0,
-		})
+	if o := c.QueryParam("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
 	}
 
-	key := fmt.Sprintf("%s%s", "hub:agent_logs:", agentID)
-	rawEntries, err := common.RedisLRange(key, 0, int64(limit-1))
-	if err != nil {
-		logger.Error("Failed to read agent logs from Redis", "error", err, "agent", agentID)
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "Failed to read agent logs: " + err.Error(),
-		})
+	var rawEntries []string
+	if agentID != "" {
+		key := fmt.Sprintf("%s%s", "hub:agent_logs:", agentID)
+		entries, err := common.RedisLRange(key, 0, int64(commonAgentLogMaxFetch-1))
+		if err != nil {
+			logger.Error("Failed to read agent logs from Redis", "error", err, "agent", agentID)
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "Failed to read agent logs: " + err.Error(),
+			})
+		}
+		rawEntries = entries
+	} else {
+		// aggregate from all agents when filter is not specified
+		keys, err := common.RedisKeys("hub:agent_logs:*")
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "Failed to list agent log keys: " + err.Error(),
+			})
+		}
+		for _, key := range keys {
+			entries, err := common.RedisLRange(key, 0, int64(commonAgentLogMaxFetch-1))
+			if err != nil {
+				continue
+			}
+			rawEntries = append(rawEntries, entries...)
+		}
 	}
 
 	var logs []AgentLogAPIEntry
@@ -247,23 +275,95 @@ func getAgentLogs(c echo.Context) error {
 			}
 		}
 
+		comments, _ := common.GetAgentLogComments(entry.ID, 50)
+
 		logs = append(logs, AgentLogAPIEntry{
 			Timestamp:           entry.Timestamp,
 			NodeID:              entry.NodeID,
 			AgentID:             entry.AgentID,
+			ID:                  entry.ID,
 			ProjectNodeSequence: entry.ProjectNodeSequence,
 			RawInput:            entry.RawInput,
 			RawOutput:           entry.RawOutput,
 			Trace:               entry.Trace,
 			Error:               entry.Error,
+			Comments:            comments,
 		})
+	}
+
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Timestamp.After(logs[j].Timestamp)
+	})
+	total := len(logs)
+	if offset >= total {
+		logs = []AgentLogAPIEntry{}
+	} else {
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		logs = logs[offset:end]
 	}
 
 	resp := AgentLogAPIResponse{
 		Logs:       logs,
-		TotalCount: len(logs),
+		TotalCount: total,
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// postAgentLogComment handles POST /agent-logs/:agentId/:logId/comments.
+func postAgentLogComment(c echo.Context) error {
+	agentID := c.Param("agentId")
+	logID := c.Param("logId")
+	if logID == "" || agentID == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "agentId and logId are required",
+		})
+	}
+
+	var req AgentLogCommentRequest
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Comment) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "comment is required",
+		})
+	}
+
+	found, err := common.FindAgentLogByID(agentID, logID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to validate log ownership: " + err.Error(),
+		})
+	}
+	if found == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "log_id does not belong to this agent",
+		})
+	}
+
+	author := c.Request().Header.Get("X-User")
+	if author == "" {
+		author = "anonymous"
+	}
+
+	entry := common.AgentLogComment{
+		Type:      "user_comment",
+		Author:    author,
+		Comment:   strings.TrimSpace(req.Comment),
+		Tag:       strings.TrimSpace(req.Tag),
+		CreatedAt: time.Now(),
+	}
+
+	if err := common.AppendAgentLogComment(logID, entry); err != nil {
+		logger.Error("Failed to append agent log comment", "error", err, "log_id", logID)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to write comment: " + err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"status": "ok",
+	})
 }
 
 // getErrorLogNodes handles GET /error-logs/nodes - returns all nodes that have error logs

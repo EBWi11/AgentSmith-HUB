@@ -1471,6 +1471,28 @@ export const hubApi = {
     }
   },
 
+  async addAgentLogComment(agentId, logId, payload) {
+    try {
+      const response = await api.post(`/agent-logs/${encodeURIComponent(agentId)}/${encodeURIComponent(logId)}/comments`, payload);
+      return response.data;
+    } catch (error) {
+      console.error('Error adding agent log comment:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to add agent log comment');
+    }
+  },
+
+  async generateAgentMemoryFromLog(agentId, logId) {
+    try {
+      const response = await api.post(`/agents/${encodeURIComponent(agentId)}/memory-notes/generate-from-log`, {
+        log_id: logId
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error generating agent memory from log:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to generate memory from log');
+    }
+  },
+
   async getErrorLogNodes() {
     try {
       const response = await api.get('/error-logs/nodes');

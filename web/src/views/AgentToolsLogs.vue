@@ -228,6 +228,91 @@
                 </div>
               </div>
             </div>
+
+            <!-- Comments -->
+            <div class="mt-4 border-t border-gray-200 pt-4">
+              <h4 class="text-sm font-medium text-gray-900 mb-2">Comments</h4>
+              <div v-if="(log.comments && log.comments.length)" class="space-y-2 mb-3">
+                <div
+                  v-for="(c, ci) in log.comments"
+                  :key="ci"
+                  class="text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2"
+                >
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="font-medium text-gray-800">
+                      {{ c.author || 'user' }}
+                    </span>
+                    <span class="text-xs text-gray-500">
+                      {{ formatTimestamp(c.created_at) }}
+                    </span>
+                  </div>
+                  <div class="flex items-center space-x-2 mb-1">
+                    <span
+                      v-if="c.type === 'memory_summary'"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
+                    >
+                      Memory Summary
+                    </span>
+                    <span
+                      v-if="c.tag"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                    >
+                      {{ c.tag }}
+                    </span>
+                    <span
+                      v-if="c.status"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700"
+                    >
+                      {{ c.status }}
+                    </span>
+                  </div>
+                  <p class="text-gray-800 whitespace-pre-wrap break-words">
+                    {{ c.comment }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Add comment -->
+              <div class="space-y-2">
+                <div class="grid grid-cols-1 md:grid-cols-6 gap-2">
+                  <div class="md:col-span-4">
+                    <textarea
+                      v-model="newComment.text"
+                      rows="2"
+                      class="filter-input w-full"
+                      placeholder="Add a comment about this agent decision..."
+                    ></textarea>
+                  </div>
+                  <div class="md:col-span-2 flex flex-col space-y-2">
+                    <select v-model="newComment.tag" class="filter-select">
+                      <option value="">Tag (optional)</option>
+                      <option value="fp">False Positive</option>
+                      <option value="tp">True Positive</option>
+                      <option value="improve_prompt">Improve Prompt</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <button
+                      @click.stop="submitComment(log)"
+                      :disabled="!newComment.text || submittingComment"
+                      class="btn btn-secondary btn-sm w-full"
+                    >
+                      <span v-if="submittingComment">Submitting...</span>
+                      <span v-else>Add Comment</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="flex justify-end">
+                  <button
+                    @click.stop="generateMemory(log)"
+                    :disabled="generatingMemory || !(log.comments && log.comments.length)"
+                    class="btn btn-secondary btn-sm"
+                  >
+                    <span v-if="generatingMemory">Generating...</span>
+                    <span v-else>Generate Memory & Commit</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -292,6 +377,12 @@ const availableNodes = ref([])
 const currentPage = ref(1)
 const pageSize = ref(50)
 const expandedLogs = ref(new Set())
+const newComment = reactive({
+  text: '',
+  tag: ''
+})
+const submittingComment = ref(false)
+const generatingMemory = ref(false)
 
 const totalPages = computed(() => {
   return Math.max(1, Math.ceil(totalCount.value / pageSize.value))
@@ -489,6 +580,43 @@ function exportLogs() {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+}
+
+async function submitComment(log) {
+  if (!newComment.text || submittingComment.value) return
+  submittingComment.value = true
+  try {
+    await hubApi.addAgentLogComment(log.agent_id, log.id, {
+      comment: newComment.text,
+      tag: newComment.tag || ''
+    })
+    newComment.text = ''
+    // Refresh logs to pick up new comments
+    await fetchLogs()
+    $message?.success?.('Comment added')
+  } catch (err) {
+    $message?.error?.('Failed to add comment: ' + err.message)
+  } finally {
+    submittingComment.value = false
+  }
+}
+
+async function generateMemory(log) {
+  if (generatingMemory.value) return
+  generatingMemory.value = true
+  try {
+    const resp = await hubApi.generateAgentMemoryFromLog(log.agent_id, log.id)
+    await fetchLogs()
+    if (resp?.warning) {
+      $message?.warning?.(resp.warning)
+    } else {
+      $message?.success?.('Memory generated and committed')
+    }
+  } catch (err) {
+    $message?.error?.('Failed to generate memory: ' + err.message)
+  } finally {
+    generatingMemory.value = false
+  }
 }
 
 // Helpers to extract agent / project / tool from context JSON string (Details)

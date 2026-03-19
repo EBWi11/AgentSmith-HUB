@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -111,6 +112,7 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 
 	// Persist per-message Agent log into Redis with 7-day TTL.
 	_ = common.WriteAgentLogToRedis(common.AgentLogEntry{
+		ID:                  fmt.Sprintf("%d", time.Now().UnixNano()),
 		Timestamp:           time.Now(),
 		NodeID:              common.GetNodeID(),
 		AgentID:             a.Id,
@@ -212,7 +214,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 	defer cancel()
 
 	conversation := []Message{
-		{Role: "system", Content: a.Config.SystemPrompt},
+		{Role: "system", Content: a.buildEffectiveSystemPrompt()},
 		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()
@@ -278,7 +280,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 	defer cancel()
 
 	conversation := []Message{
-		{Role: "system", Content: a.Config.SystemPrompt},
+		{Role: "system", Content: a.buildEffectiveSystemPrompt()},
 		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()
@@ -380,6 +382,17 @@ func formatMessageAsJSON(msg map[string]interface{}) string {
 		return fmt.Sprintf("%v", msg)
 	}
 	return string(data)
+}
+
+// buildEffectiveSystemPrompt appends memory_notes to the system prompt so
+// auto-generated memory can influence subsequent agent decisions.
+func (a *Agent) buildEffectiveSystemPrompt() string {
+	base := strings.TrimSpace(a.Config.SystemPrompt)
+	mem := strings.TrimSpace(a.Config.MemoryNotes)
+	if mem == "" {
+		return base
+	}
+	return base + "\n\nMemory Notes (high priority guidance):\n" + mem
 }
 
 func parseOutputMessage(content string) map[string]interface{} {
