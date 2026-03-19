@@ -7,12 +7,29 @@ import (
 
 	sls "github.com/aliyun/aliyun-log-go-sdk"
 	consumerLibrary "github.com/aliyun/aliyun-log-go-sdk/consumer"
+	gokitlog "github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 )
 
 type AliyunSLSConsumer struct {
 	LoghubConfig   consumerLibrary.LogHubConfig
 	MsgChan        chan map[string]interface{}
 	ConsumerWorker *consumerLibrary.ConsumerWorker
+}
+
+type hubLogWriter struct{}
+
+func (w *hubLogWriter) Write(p []byte) (n int, err error) {
+	msg := strings.TrimSpace(string(p))
+	if msg != "" {
+		logger.Error("[AliyunSLSConsumer SDK] " + msg)
+	}
+	return len(p), nil
+}
+
+func newSLSHubLogger() gokitlog.Logger {
+	base := gokitlog.NewLogfmtLogger(&hubLogWriter{})
+	return level.NewFilter(base, level.AllowError())
 }
 
 func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logstore, consumerGroupName, consumerName, cursorPosition string, cursorStartTime int64, query string, msgChan chan map[string]interface{}) (*AliyunSLSConsumer, error) {
@@ -32,6 +49,9 @@ func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logst
 		ConsumerName:      fmt.Sprintf("%s-%s", consumerName, Config.LocalIP),
 		CursorPosition:    cursorPosition,
 		Query:             query,
+		// Route SDK errors into HUB logger, avoid noisy stdout output.
+		Logger:                newSLSHubLogger(),
+		DisableRuntimeMetrics: true,
 	}
 
 	if cursorPosition == consumerLibrary.SPECIAL_TIMER_CURSOR {
@@ -103,6 +123,8 @@ func TestAliyunSLSConnection(endpoint, accessKeyID, accessKeySecret, project, lo
 				ConsumerGroupName: "test-connection-check",
 				ConsumerName:      "test-connection",
 				CursorPosition:    consumerLibrary.END_CURSOR,
+				Logger:            newSLSHubLogger(),
+				DisableRuntimeMetrics: true,
 			}
 
 			// Try to initialize a consumer worker for validation

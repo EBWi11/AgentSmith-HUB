@@ -1,7 +1,7 @@
 <template>
-  <div class="flex flex-col min-h-screen bg-gray-50">
+  <div class="flex flex-col h-screen overflow-hidden bg-gray-50">
     <Header />
-    <div class="flex flex-1 overflow-hidden">
+    <div class="flex flex-1 min-h-0 overflow-hidden">
       <Sidebar 
         :selected="selected" 
         :collapsed="sidebarCollapsed"
@@ -15,7 +15,7 @@
         @toggle-collapse="toggleSidebarCollapse"
         ref="sidebarRef"
       />
-      <main class="flex-1 bg-gray-50 transition-all duration-300 overflow-hidden">
+      <main class="main-scroll-region flex-1 min-h-0 bg-gray-50 transition-all duration-300 overflow-hidden overscroll-contain">
         <router-view v-if="!selected || selected.type === 'home'" />
         <ComponentDetail 
           v-else-if="selected && selected.type !== 'cluster' && selected.type !== 'pending-changes' && selected.type !== 'load-local-components' && selected.type !== 'operations-history' && selected.type !== 'error-logs' && selected.type !== 'agent-logs' && selected.type !== 'settings' && selected.type !== 'tutorial'" 
@@ -444,3 +444,12 @@ function toggleSidebarCollapse() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
 </script> 
+
+<style scoped>
+.main-scroll-region {
+  /* Keep scrollbar space stable to reduce layout jitter */
+  scrollbar-gutter: stable;
+  /* Smoother momentum scrolling on WebKit touch devices */
+  -webkit-overflow-scrolling: touch;
+}
+</style>

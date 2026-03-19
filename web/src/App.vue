@@ -37,7 +37,8 @@ html {
 
 body, #app {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background-color: #f9fafb; /* Prevent white bars when zooming / resizing */
 }
 

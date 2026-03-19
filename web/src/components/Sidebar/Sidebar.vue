@@ -1,5 +1,5 @@
 <template>
-  <aside class="h-full bg-white shadow-sm flex flex-col font-sans transition-all duration-300"
+  <aside class="h-full overflow-hidden bg-white shadow-sm flex flex-col font-sans transition-all duration-300"
          :class="props.collapsed ? 'w-16' : 'w-72'"
          :style="props.collapsed ? 'min-width: 64px' : 'min-width: 288px'"
          data-component="sidebar"
@@ -53,7 +53,7 @@
         </div>
       </div>
       <!-- Navigation -->
-      <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+      <div class="sidebar-scroll-region flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar">
         <div v-for="(section, type) in sections" :key="type" class="mb-4"
              v-show="!llmOnlySections.has(type) || llmAvailable">
         <!-- Regular sections -->
@@ -4227,6 +4227,13 @@ function getRulesetTypeInfo(item) {
 }
 
 </script>
+
+<style scoped>
+.sidebar-scroll-region {
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+</style>
 
 <style>
 /* Custom scrollbar for webkit browsers */
