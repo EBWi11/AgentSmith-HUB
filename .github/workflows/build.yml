@@ -182,7 +182,7 @@ jobs:
         ls -la *.tar.gz*
     
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: agentsmith-hub-${{ matrix.arch }}-${{ steps.version.outputs.release_name }}
         path: |
