@@ -71,8 +71,12 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 		logger.Error("Agent received nil message, skipping", "agent", a.Id)
 		return
 	}
+
+	// Snapshot original message for logging before it is mutated.
+	origJSON := formatMessageAsJSON(msg)
+
 	start := time.Now()
-	result := a.processMessage(msg)
+	result, trace := a.ProcessMessageWithTrace(msg)
 	elapsedNs := time.Since(start).Nanoseconds()
 	atomic.AddUint64(&a.processTotal, 1)
 	atomic.AddUint64(&a.processLatencyNs, uint64(elapsedNs))
@@ -85,6 +89,37 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 			agentLlm["processing_time_ms"] = float64(elapsedNs) / 1e6
 		}
 	}
+
+	// Build high-level error string (if any) for logging purposes.
+	var errStr string
+	if topLlm, ok := result["llm"].(map[string]interface{}); ok {
+		if agentLlm, ok := topLlm[a.Id].(map[string]interface{}); ok {
+			if v, ok := agentLlm["error"].(string); ok && v != "" {
+				errStr = v
+			}
+		}
+	}
+
+	// Serialize result and trace for logging.
+	outJSON := formatMessageAsJSON(result)
+	var traceJSON string
+	if len(trace) > 0 {
+		if data, err := json.Marshal(trace); err == nil {
+			traceJSON = string(data)
+		}
+	}
+
+	// Persist per-message Agent log into Redis with 7-day TTL.
+	_ = common.WriteAgentLogToRedis(common.AgentLogEntry{
+		Timestamp:           time.Now(),
+		NodeID:              common.GetNodeID(),
+		AgentID:             a.Id,
+		ProjectNodeSequence: a.ProjectNodeSequence,
+		RawInput:            truncateForLog(origJSON),
+		RawOutput:           truncateForLog(outJSON),
+		Trace:               truncateForLog(traceJSON),
+		Error:               errStr,
+	})
 
 	// Optional control tags from agent output:
 	// - _no_forward: do not send this message to any downstream components.

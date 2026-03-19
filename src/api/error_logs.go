@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -49,6 +50,24 @@ type ClusterErrorLogResponse struct {
 	Logs       []ErrorLogEntry     `json:"logs"`
 	NodeStats  map[string]NodeStat `json:"node_stats"`
 	TotalCount int                 `json:"total_count"`
+}
+
+// AgentLogAPIEntry represents one agent log entry for the frontend.
+type AgentLogAPIEntry struct {
+	Timestamp           time.Time `json:"timestamp"`
+	NodeID              string    `json:"node_id"`
+	AgentID             string    `json:"agent_id"`
+	ProjectNodeSequence string    `json:"project_node_sequence,omitempty"`
+	RawInput            string    `json:"raw_input,omitempty"`
+	RawOutput           string    `json:"raw_output,omitempty"`
+	Trace               string    `json:"trace,omitempty"`
+	Error               string    `json:"error,omitempty"`
+}
+
+// AgentLogAPIResponse is the response payload for /agent-logs.
+type AgentLogAPIResponse struct {
+	Logs       []AgentLogAPIEntry `json:"logs"`
+	TotalCount int                `json:"total_count"`
 }
 
 // NodeStat represents error statistics for a node
@@ -177,6 +196,74 @@ func getErrorLogs(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+// getAgentLogs handles GET /agent-logs - returns recent agent logs stored in Redis.
+// Supports optional filtering by node_id, agent, and project.
+func getAgentLogs(c echo.Context) error {
+	agentID := c.QueryParam("agent")
+	project := c.QueryParam("project")
+	nodeID := c.QueryParam("node_id")
+
+	// Pagination params (simple, list-per-agent; frontend can aggregate if needed)
+	limit := 100
+	if l := c.QueryParam("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	// For now, we only read logs for a single agent ID; if none provided, return empty.
+	if agentID == "" {
+		return c.JSON(http.StatusOK, AgentLogAPIResponse{
+			Logs:       []AgentLogAPIEntry{},
+			TotalCount: 0,
+		})
+	}
+
+	key := fmt.Sprintf("%s%s", "hub:agent_logs:", agentID)
+	rawEntries, err := common.RedisLRange(key, 0, int64(limit-1))
+	if err != nil {
+		logger.Error("Failed to read agent logs from Redis", "error", err, "agent", agentID)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to read agent logs: " + err.Error(),
+		})
+	}
+
+	var logs []AgentLogAPIEntry
+	for _, raw := range rawEntries {
+		var entry common.AgentLogEntry
+		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
+			continue
+		}
+		// node_id filter
+		if nodeID != "" && nodeID != "all" && entry.NodeID != nodeID {
+			continue
+		}
+		// project filter: match by prefix or exact PNS string
+		if project != "" && entry.ProjectNodeSequence != "" {
+			if !strings.Contains(entry.ProjectNodeSequence, project) {
+				continue
+			}
+		}
+
+		logs = append(logs, AgentLogAPIEntry{
+			Timestamp:           entry.Timestamp,
+			NodeID:              entry.NodeID,
+			AgentID:             entry.AgentID,
+			ProjectNodeSequence: entry.ProjectNodeSequence,
+			RawInput:            entry.RawInput,
+			RawOutput:           entry.RawOutput,
+			Trace:               entry.Trace,
+			Error:               entry.Error,
+		})
+	}
+
+	resp := AgentLogAPIResponse{
+		Logs:       logs,
+		TotalCount: len(logs),
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // getErrorLogNodes handles GET /error-logs/nodes - returns all nodes that have error logs

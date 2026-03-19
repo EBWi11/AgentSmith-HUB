@@ -1,7 +1,7 @@
 <template>
   <div class="h-full flex flex-col bg-white">
     <div class="flex items-center justify-between p-4 border-b border-gray-200">
-      <h1 class="text-xl font-semibold text-gray-900">Agent Tools Logs</h1>
+      <h1 class="text-xl font-semibold text-gray-900">Agent Logs</h1>
       <div class="flex items-center space-x-2">
         <button
           @click="refreshLogs"
@@ -32,7 +32,7 @@
 
     <!-- Filters -->
     <div class="p-4 border-b border-gray-200 bg-gray-50">
-      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <!-- Node Filter -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Node</label>
@@ -42,6 +42,30 @@
               {{ node.name || node.id }}
             </option>
           </select>
+        </div>
+
+        <!-- Project Filter -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Project</label>
+          <input
+            v-model="filters.project"
+            @input="debouncedSearch"
+            type="text"
+            placeholder="Filter by project node..."
+            class="filter-input w-full"
+          >
+        </div>
+
+        <!-- Agent Filter -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Agent</label>
+          <input
+            v-model="filters.agent"
+            @input="debouncedSearch"
+            type="text"
+            placeholder="Filter by agent..."
+            class="filter-input w-full"
+          >
         </div>
 
         <!-- Time Range Filter -->
@@ -58,14 +82,14 @@
           </select>
         </div>
 
-        <!-- Search (agent / project / args / result) -->
-        <div class="lg:col-span-3">
+        <!-- Search -->
+        <div class="lg:col-span-3 md:col-span-2">
           <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
           <input 
             v-model="filters.keyword" 
             @input="debouncedSearch"
             type="text" 
-            placeholder="Search agent, project, args, or result..."
+            placeholder="Search args, result, or error..."
             class="filter-input w-full"
           >
         </div>
@@ -97,7 +121,7 @@
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
       <div v-if="loading && !logs.length" class="flex items-center justify-center h-64">
-        <div class="text-gray-500">Loading agent tools logs...</div>
+        <div class="text-gray-500">Loading agent logs...</div>
       </div>
       
       <div v-else-if="error" class="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -105,7 +129,7 @@
       </div>
       
       <div v-else-if="!logs.length" class="flex-1 flex items-center justify-center text-gray-500">
-        No agent tools logs found
+        No agent logs found
       </div>
       
       <div v-else class="space-y-2 p-4">
@@ -126,15 +150,15 @@
                 <!-- Log Info -->
                 <div>
                   <h3 class="font-medium text-gray-900">
-                    {{ extractAgentFromContext(log) }} · {{ extractToolNameFromContext(log) }}
+                    {{ log.agent_id || extractAgentFromContext(log) || 'Unknown Agent' }}
                   </h3>
                   <div class="flex items-center space-x-2 text-sm text-gray-500">
                     <span>{{ formatTimestamp(log.timestamp) }}</span>
                     <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       {{ log.node_id }}
                     </span>
-                    <span v-if="extractProjectFromContext(log)" class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
-                      {{ extractProjectFromContext(log) }}
+                    <span v-if="log.project_node_sequence || extractProjectFromContext(log)" class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
+                      {{ log.project_node_sequence || extractProjectFromContext(log) }}
                     </span>
                     <span v-if="log.error" class="text-red-600 truncate max-w-xs" :title="log.error">{{ log.error }}</span>
                   </div>
@@ -159,22 +183,18 @@
           
           <!-- Log Details -->
           <div v-if="expandedLogs.has(index)" class="p-4 bg-white">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <!-- Basic Info -->
               <div>
                 <h4 class="text-sm font-medium text-gray-900 mb-2">Call Details</h4>
                 <dl class="space-y-1 text-sm">
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Agent:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ extractAgentFromContext(log) || '-' }}</dd>
+                    <dd class="col-span-2 text-gray-900">{{ log.agent_id || extractAgentFromContext(log) || '-' }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Project Node:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ extractProjectFromContext(log) || '-' }}</dd>
-                  </div>
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Tool:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ extractToolNameFromContext(log) || '-' }}</dd>
+                    <dd class="col-span-2 text-gray-900">{{ log.project_node_sequence || extractProjectFromContext(log) || '-' }}</dd>
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Timestamp:</dt>
@@ -187,11 +207,24 @@
                 </dl>
               </div>
 
-              <!-- Raw Context (includes args/result/duration/etc) -->
-              <div v-if="log.context">
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Raw Context</h4>
+              <!-- Raw Input -->
+              <div v-if="log.raw_input">
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Input Event</h4>
                 <div class="bg-gray-50 border border-gray-200 rounded-md p-3">
-                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.context }}</pre>
+                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.raw_input }}</pre>
+                </div>
+              </div>
+
+              <!-- Raw Output / Trace -->
+              <div>
+                <h4 class="text-sm font-medium text-gray-900 mb-2">Output & Trace</h4>
+                <div v-if="log.raw_output" class="bg-gray-50 border border-gray-200 rounded-md p-3 mb-3">
+                  <div class="text-xs font-semibold text-gray-500 mb-1">Output</div>
+                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.raw_output }}</pre>
+                </div>
+                <div v-if="log.trace" class="bg-gray-50 border border-gray-200 rounded-md p-3">
+                  <div class="text-xs font-semibold text-gray-500 mb-1">Trace</div>
+                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.trace }}</pre>
                 </div>
               </div>
             </div>
@@ -245,6 +278,8 @@ const totalCount = ref(0)
 // Filters
 const filters = reactive({
   nodeId: 'all',
+  project: '',
+  agent: '',
   timeRange: '1h',
   startDate: '',
   endDate: '',
@@ -311,7 +346,7 @@ function getTimeRangeParams() {
 function buildApiParams() {
   const params = {
     source: 'agent',
-    level: 'all', // Agent Tools Logs need all levels (INFO + ERROR); Error Logs API uses level=error by default
+    level: 'all',
     limit: pageSize.value,
     offset: (currentPage.value - 1) * pageSize.value
   }
@@ -324,6 +359,13 @@ function buildApiParams() {
     params.keyword = filters.keyword
   }
 
+  if (filters.project) {
+    params.project = filters.project
+  }
+  if (filters.agent) {
+    params.agent = filters.agent
+  }
+
   Object.assign(params, getTimeRangeParams())
   return params
 }
@@ -334,13 +376,13 @@ const fetchLogs = async () => {
 
   try {
     const params = buildApiParams()
-    const response = await hubApi.getErrorLogs(params) // reuse unified endpoint
+    const response = await hubApi.getAgentLogs(params)
 
     logs.value = response.logs || []
     totalCount.value = response.total_count || 0
   } catch (err) {
     error.value = err.message
-    $message?.error?.('Failed to fetch agent tools logs: ' + err.message)
+    $message?.error?.('Failed to fetch agent logs: ' + err.message)
   } finally {
     loading.value = false
   }
@@ -425,14 +467,16 @@ function exportLogs() {
   if (logs.value.length === 0) return
 
   const csvContent = [
-    ['Timestamp', 'Node', 'Level', 'Message', 'Error', 'Context'].join(','),
+    ['Timestamp', 'Node', 'Agent', 'ProjectNode', 'Error', 'RawInput', 'RawOutput', 'Trace'].join(','),
     ...logs.value.map(log => [
       log.timestamp,
       log.node_id || '',
-      log.level,
-      `"${(log.message || '').replace(/"/g, '""')}"`,
+      `"${(log.agent_id || '').replace(/"/g, '""')}"`,
+      `"${(log.project_node_sequence || '').replace(/"/g, '""')}"`,
       `"${(log.error || '').replace(/"/g, '""')}"`,
-      `"${(log.context || '').replace(/"/g, '""')}"`
+      `"${(log.raw_input || '').replace(/"/g, '""')}"`,
+      `"${(log.raw_output || '').replace(/"/g, '""')}"`,
+      `"${(log.trace || '').replace(/"/g, '""')}"`
     ].join(','))
   ].join('\n')
 
@@ -440,7 +484,7 @@ function exportLogs() {
   const link = document.createElement('a')
   const url = URL.createObjectURL(blob)
   link.setAttribute('href', url)
-  link.setAttribute('download', `agent-tools-logs-${new Date().toISOString().slice(0, 19)}.csv`)
+  link.setAttribute('download', `agent-logs-${new Date().toISOString().slice(0, 19)}.csv`)
   link.style.visibility = 'hidden'
   document.body.appendChild(link)
   link.click()

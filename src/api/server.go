@@ -215,6 +215,9 @@ func ServerStart(listener string) error {
 	auth.GET("/error-logs/nodes", getErrorLogNodes)
 	auth.GET("/cluster-error-logs", getClusterErrorLogs)
 
+	// Agent log endpoints - REQUIRE AUTH
+	auth.GET("/agent-logs", getAgentLogs)
+
 	// Operations history endpoints - REQUIRE AUTH
 	auth.GET("/operations-history", GetOperationsHistory)
 	auth.GET("/operations-history/nodes", GetOperationsHistoryNodes)

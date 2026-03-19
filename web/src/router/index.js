@@ -147,10 +147,10 @@ const routes = [
         meta: { requiresAuth: true, componentType: 'error-logs' }
       },
       {
-        path: 'agent-tools-logs',
+        path: 'agent-logs',
         name: 'AgentToolsLogs',
         component: AgentToolsLogs,
-        meta: { requiresAuth: true, componentType: 'agent-tools-logs' }
+        meta: { requiresAuth: true, componentType: 'agent-logs' }
       },
       {
         path: 'tutorial',

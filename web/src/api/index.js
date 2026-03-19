@@ -1460,6 +1460,17 @@ export const hubApi = {
     }
   },
 
+  // Agent logs endpoint
+  async getAgentLogs(params = {}) {
+    try {
+      const response = await api.get('/agent-logs', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching agent logs:', error);
+      throw new Error(error.response?.data?.error || error.message || 'Failed to fetch agent logs');
+    }
+  },
+
   async getErrorLogNodes() {
     try {
       const response = await api.get('/error-logs/nodes');
