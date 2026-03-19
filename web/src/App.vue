@@ -33,11 +33,12 @@ onMounted(() => {
 html {
   font-family: 'Inter', sans-serif;
   background-color: #f9fafb; /* Tailwind gray-50, align with Dashboard background */
+  height: 100%;
 }
 
 body, #app {
   margin: 0;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
   background-color: #f9fafb; /* Prevent white bars when zooming / resizing */
 }

@@ -4230,7 +4230,6 @@ function getRulesetTypeInfo(item) {
 
 <style scoped>
 .sidebar-scroll-region {
-  scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
 }
 </style>
