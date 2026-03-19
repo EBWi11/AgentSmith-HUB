@@ -205,7 +205,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: agentsmith-hub-*
           path: .
@@ -269,7 +269,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: agentsmith-hub-*
           path: .
