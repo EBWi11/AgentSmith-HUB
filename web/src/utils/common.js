@@ -66,13 +66,6 @@ export function getEditorLanguage(type) {
 }
 
 /**
- * Check if component supports connection check
- */
-export function supportsConnectCheck(type) {
-  return COMPONENT_TYPES[type]?.supportsConnectCheck || false
-}
-
-/**
  * Convert API component type (singular to plural)
  */
 export function getApiComponentType(type) {
@@ -244,23 +237,6 @@ export async function copyToClipboard(text) {
   } catch (err) {
     console.error('Failed to copy text: ', err)
     return false
-  }
-}
-
-/**
- * Debounce function
- */
-export function debounce(func, wait, immediate) {
-  let timeout
-  return function executedFunction(...args) {
-    const later = () => {
-      timeout = null
-      if (!immediate) func(...args)
-    }
-    const callNow = immediate && !timeout
-    clearTimeout(timeout)
-    timeout = setTimeout(later, wait)
-    if (callNow) func(...args)
   }
 }
 

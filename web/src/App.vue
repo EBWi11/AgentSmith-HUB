@@ -6,11 +6,9 @@
 <script setup>
 import { ref, onMounted, provide } from 'vue'
 import Toast from './components/Toast.vue'
-import { useStore } from 'vuex'
 import { useDataCacheStore } from './stores/dataCache'
 
 const toast = ref(null)
-const store = useStore()
 const dataCache = useDataCacheStore()
 
 // Provide global toast service

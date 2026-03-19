@@ -231,7 +231,7 @@
 <script setup>
 import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
-import { debounce } from '../utils/common'
+import { debounce } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
 
 const $message = inject('$message')

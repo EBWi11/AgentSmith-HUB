@@ -6,7 +6,6 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, onUnmounted, computed, nextTick } from 'vue';
-import { useStore } from 'vuex'
 import * as monaco from 'monaco-editor';
 import { hubApi } from '@/api';
 import { useDataCacheStore } from '@/stores/dataCache';
@@ -30,7 +29,6 @@ const emit = defineEmits(['update:value', 'save', 'line-change', 'test']);
 const container = ref(null);
 let editor = null;
 let diffEditor = null;
-const store = useStore();
 
 // Use unified data cache store
 const dataCache = useDataCacheStore();
