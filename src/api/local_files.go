@@ -1114,6 +1114,16 @@ func loadLocalChanges(c echo.Context) error {
 		affectedProjects := project.GetAffectedProjects(component["type"], component["id"])
 		for _, projectID := range affectedProjects {
 			if p, ok := project.GetProject(projectID); ok {
+				if component["type"] == "ruleset" {
+					err := p.HotReloadRuleset(component["id"], "local_change")
+					if err != nil {
+						logger.Error("Failed to hot reload ruleset after component change, falling back to restart", "project_id", projectID, "ruleset_id", component["id"], "error", err)
+						if restartErr := p.Restart(true, "local_change_fallback"); restartErr != nil {
+							logger.Error("Fallback restart failed after ruleset hot reload error", "project_id", projectID, "ruleset_id", component["id"], "error", restartErr)
+						}
+					}
+					continue
+				}
 				err := p.Restart(true, "local_change")
 				if err != nil {
 					logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)
@@ -1195,6 +1205,16 @@ func loadSingleLocalChange(c echo.Context) error {
 
 	for _, projectID := range affectedProjects {
 		if p, ok := project.GetProject(projectID); ok {
+			if req.Type == "ruleset" {
+				err := p.HotReloadRuleset(req.ID, "local_change")
+				if err != nil {
+					logger.Error("Failed to hot reload ruleset after component change, falling back to restart", "project_id", projectID, "ruleset_id", req.ID, "error", err)
+					if restartErr := p.Restart(true, "local_change_fallback"); restartErr != nil {
+						logger.Error("Fallback restart failed after ruleset hot reload error", "project_id", projectID, "ruleset_id", req.ID, "error", restartErr)
+					}
+				}
+				continue
+			}
 			err := p.Restart(true, "local_change")
 			if err != nil {
 				logger.Error("Failed to restart project after component change", "project_id", projectID, "error", err)

@@ -605,6 +605,14 @@ func SafeDeleteAgentDownstream(agentPNS, downstreamID string) {
 	}
 }
 
+func SafeSetAgentDownstream(agentPNS, downstreamID string, ch *chan map[string]interface{}) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+	if a, exists := GlobalProject.PNSAgents[agentPNS]; exists {
+		a.DownStream[downstreamID] = ch
+	}
+}
+
 // GetProjectAgents returns all agents used by this project, dynamically calculated from FlowNodes
 func (p *Project) GetProjectAgents() map[string]*agent.Agent {
 	agents := make(map[string]*agent.Agent)
@@ -1088,6 +1096,15 @@ func SafeDeleteInputDownstream(inputID, downstreamID string) {
 	}
 }
 
+func SafeSetInputDownstream(inputID, downstreamID string, ch *chan map[string]interface{}) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if i, exists := GlobalProject.Inputs[inputID]; exists {
+		i.DownStream[downstreamID] = ch
+	}
+}
+
 // Helper function to safely access input downstream
 func SafeDeleteRulesetDownstream(rulesetID, downstreamID string) {
 	common.GlobalMu.Lock()
@@ -1095,6 +1112,24 @@ func SafeDeleteRulesetDownstream(rulesetID, downstreamID string) {
 
 	if i, exists := GlobalProject.Rulesets[rulesetID]; exists {
 		delete(i.DownStream, downstreamID)
+	}
+}
+
+func SafeDeletePNSRulesetDownstream(rulesetPNS, downstreamID string) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if i, exists := GlobalProject.PNSRulesets[rulesetPNS]; exists {
+		delete(i.DownStream, downstreamID)
+	}
+}
+
+func SafeSetPNSRulesetDownstream(rulesetPNS, downstreamID string, ch *chan map[string]interface{}) {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	if i, exists := GlobalProject.PNSRulesets[rulesetPNS]; exists {
+		i.DownStream[downstreamID] = ch
 	}
 }
 

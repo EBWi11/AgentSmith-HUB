@@ -810,12 +810,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			verifyErr = rules_engine.Verify("", req.NewContent)
 		case "project":
 			verifyErr = project.Verify("", req.NewContent)
-	case "agent":
-		verifyErr = agent.Verify("", req.NewContent)
-	case "skill":
-		verifyErr = skill.Verify("", req.NewContent)
-	default:
-		return nil, fmt.Errorf("unsupported component type: %s", req.Type)
+		case "agent":
+			verifyErr = agent.Verify("", req.NewContent)
+		case "skill":
+			verifyErr = skill.Verify("", req.NewContent)
+		default:
+			return nil, fmt.Errorf("unsupported component type: %s", req.Type)
 		}
 
 		if verifyErr != nil {
@@ -840,12 +840,12 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			filePath = path.Join(configRoot, "project", req.ID+".yaml")
 		case "plugin":
 			filePath = path.Join(configRoot, "plugin", req.ID+".go")
-	case "agent":
-		filePath = path.Join(configRoot, "agent", req.ID+".yaml")
-	case "skill":
-		filePath = path.Join(configRoot, "skill", req.ID+".yaml")
-	default:
-		return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
+		case "agent":
+			filePath = path.Join(configRoot, "agent", req.ID+".yaml")
+		case "skill":
+			filePath = path.Join(configRoot, "skill", req.ID+".yaml")
+		default:
+			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
 		}
 
 		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
@@ -868,11 +868,11 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			_, tempPath = findRulesetPaths(req.ID)
 		case "project":
 			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
-	case "agent":
-		tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
-	case "skill":
-		tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
-	}
+		case "agent":
+			tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
+		case "skill":
+			tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
+		}
 
 		if tempPath != "" {
 			if _, err := os.Stat(tempPath); err == nil {
@@ -1186,10 +1186,20 @@ func ApplySingleChange(c echo.Context) error {
 			}
 		}
 
-		// Then restart them asynchronously
+		// Then apply runtime refresh asynchronously.
 		go func() {
 			for _, id := range projectsToRestart {
 				if p, ok := project.GetProject(id); ok {
+					if req.Type == "ruleset" {
+						err := p.HotReloadRuleset(req.ID, "change_push")
+						if err != nil {
+							logger.Error("Failed to hot reload ruleset after single change apply, falling back to project restart", "project_id", id, "ruleset_id", req.ID, "error", err)
+							if restartErr := p.Restart(true, "change_push_fallback"); restartErr != nil {
+								logger.Error("Fallback project restart failed after ruleset hot reload error", "project_id", id, "ruleset_id", req.ID, "error", restartErr)
+							}
+						}
+						continue
+					}
 					err := p.Restart(true, "change_push")
 					if err != nil {
 						logger.Error("Failed to restart project after single change apply", "project_id", id, "error", err)

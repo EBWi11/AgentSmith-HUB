@@ -137,7 +137,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		if err != nil {
 			// Fallback: if we can't get user intention, check actual status
 			// This handles Redis failures or other edge cases
-			logger.Warn("Failed to get user intention, using actual status as fallback", 
+			logger.Warn("Failed to get user intention, using actual status as fallback",
 				"project", projectID, "error", err, "actual_status", p.Status)
 			return p.Status == common.StatusRunning
 		}
@@ -180,18 +180,18 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// 1. Which rulesets use this plugin
 		// 2. Which projects use those rulesets
 		affectedRulesets := make(map[string]bool)
-		
+
 		// Find all rulesets that use this plugin
 		ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
 			if ruleset == nil {
 				return true
 			}
-			
+
 			// Check if ruleset uses this plugin by examining rules
 			// Plugins can be used in various rule operations (check, append, modify, plugin)
 			for _, rule := range ruleset.Rules {
 				pluginUsed := false
-				
+
 				// Check in CheckMap (check nodes)
 				for _, checkNode := range rule.CheckMap {
 					if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
@@ -199,7 +199,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						break
 					}
 				}
-				
+
 				// Check in ChecklistMap (checklist nodes)
 				if !pluginUsed {
 					for _, checklist := range rule.ChecklistMap {
@@ -214,7 +214,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in AppendsMap (append operations)
 				if !pluginUsed {
 					for _, appendOp := range rule.AppendsMap {
@@ -224,7 +224,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in ModifyMap (modify operations)
 				if !pluginUsed {
 					for _, modifyOp := range rule.ModifyMap {
@@ -234,7 +234,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				// Check in PluginMap (plugin operations)
 				if !pluginUsed {
 					for _, pluginOp := range rule.PluginMap {
@@ -244,7 +244,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 						}
 					}
 				}
-				
+
 				if pluginUsed {
 					affectedRulesets[rulesetID] = true
 					break // No need to check other rules in this ruleset
@@ -252,7 +252,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 			}
 			return true
 		})
-		
+
 		// Find all projects using the affected rulesets
 		for rulesetID := range affectedRulesets {
 			ForEachProject(func(projectID string, p *Project) bool {
@@ -264,12 +264,12 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 				return true
 			})
 		}
-		
-		logger.Info("Plugin change affects rulesets and projects", 
-			"plugin", componentID, 
+
+		logger.Info("Plugin change affects rulesets and projects",
+			"plugin", componentID,
 			"affected_rulesets", len(affectedRulesets),
 			"affected_projects", len(affectedProjects))
-			
+
 	case "agent":
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("AGENT", componentID) {
@@ -1268,6 +1268,181 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 	return nil
 }
 
+type rulesetInboundEdge struct {
+	fromType string
+	fromID   string
+	fromPNS  string
+	toPNS    string
+}
+
+type rulesetSwapPlan struct {
+	pns              string
+	oldRuleset       *rules_engine.Ruleset
+	newRuleset       *rules_engine.Ruleset
+	upstreamBackup   map[string]*chan map[string]interface{}
+	downstreamBackup map[string]*chan map[string]interface{}
+}
+
+func (p *Project) collectRulesetPNSByID(rulesetID string) map[string]struct{} {
+	targetPNS := make(map[string]struct{})
+	for _, node := range p.FlowNodes {
+		if node.ToType == "RULESET" && node.ToID == rulesetID && node.ToInit {
+			targetPNS[node.ToPNS] = struct{}{}
+		}
+		if node.FromType == "RULESET" && node.FromID == rulesetID && node.FromInit {
+			targetPNS[node.FromPNS] = struct{}{}
+		}
+	}
+	return targetPNS
+}
+
+func (p *Project) collectInboundEdges(targetPNS map[string]struct{}) []rulesetInboundEdge {
+	edges := make([]rulesetInboundEdge, 0)
+	for _, node := range p.FlowNodes {
+		if node.ToType != "RULESET" {
+			continue
+		}
+		if _, ok := targetPNS[node.ToPNS]; !ok {
+			continue
+		}
+		edges = append(edges, rulesetInboundEdge{
+			fromType: node.FromType,
+			fromID:   node.FromID,
+			fromPNS:  node.FromPNS,
+			toPNS:    node.ToPNS,
+		})
+	}
+	return edges
+}
+
+func (p *Project) disconnectRulesetInboundEdges(edges []rulesetInboundEdge) {
+	for _, e := range edges {
+		switch e.fromType {
+		case "INPUT":
+			SafeDeleteInputDownstream(e.fromID, e.toPNS)
+		case "RULESET":
+			SafeDeletePNSRulesetDownstream(e.fromPNS, e.toPNS)
+		case "AGENT":
+			SafeDeleteAgentDownstream(e.fromPNS, e.toPNS)
+		}
+	}
+}
+
+func (p *Project) reconnectRulesetInboundEdges(edges []rulesetInboundEdge) {
+	for _, e := range edges {
+		ch, exists := p.MsgChannels[e.toPNS]
+		if !exists || ch == nil {
+			continue
+		}
+		switch e.fromType {
+		case "INPUT":
+			SafeSetInputDownstream(e.fromID, e.toPNS, ch)
+		case "RULESET":
+			SafeSetPNSRulesetDownstream(e.fromPNS, e.toPNS, ch)
+		case "AGENT":
+			SafeSetAgentDownstream(e.fromPNS, e.toPNS, ch)
+		}
+	}
+}
+
+// HotReloadRuleset swaps all running PNS instances of a ruleset in this project without restarting the project.
+// It fully stops old ruleset instances to ensure cleanup and prevent memory leaks.
+func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err error) {
+	common.ProjectOperationMu.Lock()
+	defer common.ProjectOperationMu.Unlock()
+
+	if p.Status != common.StatusRunning {
+		return nil
+	}
+
+	template, exists := GetRuleset(rulesetID)
+	if !exists || template == nil {
+		return fmt.Errorf("ruleset template not found: %s", rulesetID)
+	}
+
+	targetPNS := p.collectRulesetPNSByID(rulesetID)
+	if len(targetPNS) == 0 {
+		return nil
+	}
+
+	swapPlans := make([]rulesetSwapPlan, 0, len(targetPNS))
+	for pns := range targetPNS {
+		oldRS, ok := GetPNSRuleset(pns)
+		if !ok || oldRS == nil {
+			return fmt.Errorf("pns ruleset not found: %s", pns)
+		}
+		newRS, newErr := rules_engine.NewFromExisting(template, pns)
+		if newErr != nil {
+			return fmt.Errorf("failed to build new ruleset instance for %s: %w", pns, newErr)
+		}
+
+		upstreamBackup := make(map[string]*chan map[string]interface{}, len(oldRS.UpStream))
+		for k, ch := range oldRS.UpStream {
+			upstreamBackup[k] = ch
+		}
+		downstreamBackup := make(map[string]*chan map[string]interface{}, len(oldRS.DownStream))
+		for k, ch := range oldRS.DownStream {
+			downstreamBackup[k] = ch
+		}
+
+		swapPlans = append(swapPlans, rulesetSwapPlan{
+			pns:              pns,
+			oldRuleset:       oldRS,
+			newRuleset:       newRS,
+			upstreamBackup:   upstreamBackup,
+			downstreamBackup: downstreamBackup,
+		})
+	}
+
+	inboundEdges := p.collectInboundEdges(targetPNS)
+	p.disconnectRulesetInboundEdges(inboundEdges)
+	activatedPNS := make(map[string]struct{}, len(swapPlans))
+
+	defer func() {
+		if err != nil {
+			// Release all newly created ruleset instances that did not successfully take over.
+			for _, plan := range swapPlans {
+				if _, activated := activatedPNS[plan.pns]; !activated && plan.newRuleset != nil {
+					plan.newRuleset.SetStatus(common.StatusError, fmt.Errorf("discarding ruleset instance after hot reload failure"))
+					_ = plan.newRuleset.Stop()
+				}
+			}
+
+			// If any step fails before the final successful reconnect, restore inbound routing.
+			p.reconnectRulesetInboundEdges(inboundEdges)
+		}
+	}()
+
+	for _, plan := range swapPlans {
+		stopErr := plan.oldRuleset.Stop()
+		if stopErr != nil {
+			err = fmt.Errorf("failed to stop old ruleset %s: %w", plan.pns, stopErr)
+			return err
+		}
+
+		// Bind channels preserved from old instance so new instance keeps the same project routing.
+		plan.newRuleset.UpStream = plan.upstreamBackup
+		plan.newRuleset.DownStream = make(map[string]*chan map[string]interface{}, len(plan.downstreamBackup))
+		for k, ch := range plan.downstreamBackup {
+			plan.newRuleset.DownStream[k] = ch
+		}
+
+		startErr := plan.newRuleset.Start()
+		if startErr != nil {
+			err = fmt.Errorf("failed to start new ruleset %s: %w", plan.pns, startErr)
+			return err
+		}
+
+		SetPNSRuleset(plan.pns, plan.newRuleset)
+		p.Rulesets[plan.pns] = plan.newRuleset
+		activatedPNS[plan.pns] = struct{}{}
+	}
+
+	p.reconnectRulesetInboundEdges(inboundEdges)
+	logger.Info("Ruleset hot reload completed", "project", p.Id, "ruleset", rulesetID, "triggered_by", triggeredBy, "instances", len(swapPlans))
+	return nil
+}
+
 // startWithRetry starts the project with retry mechanism for components that fail to reach running status
 func (p *Project) startWithRetry(recordOperation bool) error {
 	maxRetries := 3
@@ -2065,10 +2240,10 @@ func (p *Project) initComponents() error {
 					}
 				}
 			} else {
-			logger.Error("Input component not found for connection",
-				"project", p.Id,
-				"from_pns", node.FromPNS,
-				"from_id", node.FromID)
+				logger.Error("Input component not found for connection",
+					"project", p.Id,
+					"from_pns", node.FromPNS,
+					"from_id", node.FromID)
 			}
 		}
 	}

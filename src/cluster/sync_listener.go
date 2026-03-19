@@ -489,6 +489,18 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 	// The restart operation itself will be logged with the correct trigger source.
 	for _, projectName := range affectedProjects {
 		if proj, exists := project.GetProject(projectName); exists {
+			if instruction.ComponentType == "ruleset" {
+				if err := proj.HotReloadRuleset(instruction.ComponentName, source); err != nil {
+					logger.Error("Follower: ruleset hot reload failed, falling back to project restart",
+						"project", projectName,
+						"ruleset", instruction.ComponentName,
+						"error", err)
+					if restartErr := proj.Restart(true, source+"_fallback"); restartErr != nil {
+						return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", projectName, restartErr)
+					}
+				}
+				continue
+			}
 			if err := proj.Restart(true, source); err != nil {
 				// Restart already logs its own failure. We just need to bubble up the error.
 				return fmt.Errorf("failed to restart affected project %s: %w", projectName, err)
@@ -524,9 +536,9 @@ func (sl *SyncListener) clearAllLocalComponents() {
 
 		// Force stop regardless of current status
 		if err := proj.Stop(true); err != nil {
-		logger.Error("Failed to stop project during cleanup, will force delete anyway",
-			"project", proj.Id,
-			"error", err)
+			logger.Error("Failed to stop project during cleanup, will force delete anyway",
+				"project", proj.Id,
+				"error", err)
 			failedCount++
 		} else {
 			stoppedCount++
