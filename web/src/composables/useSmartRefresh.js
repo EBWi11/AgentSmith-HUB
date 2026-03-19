@@ -346,26 +346,4 @@ export function useDashboardSmartRefresh(refreshFunction, options = {}) {
   })
 }
 
-// 专门用于列表的智能刷新
-export function useListSmartRefresh(refreshFunction, options = {}) {
-  return useSmartRefresh(refreshFunction, {
-    baseInterval: 300000,   // 5分钟
-    fastInterval: 1000,     // 1秒
-    slowInterval: 300000,   // 5分钟
-    enableUserActivity: false, // 列表不需要用户活动检测
-    debug: false,
-    ...options
-  })
-}
-
-// 专门用于实时数据的智能刷新
-export function useRealtimeSmartRefresh(refreshFunction, options = {}) {
-  return useSmartRefresh(refreshFunction, {
-    baseInterval: 5000,     // 5秒
-    fastInterval: 1000,     // 1秒
-    slowInterval: 30000,    // 30秒
-    enableVisibilityDetection: true,
-    debug: false,
-    ...options
-  })
-} 
+// Note: list/realtime wrappers were removed because they were unused.
