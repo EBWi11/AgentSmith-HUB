@@ -29,14 +29,14 @@ type ErrorLogEntry struct {
 
 // ErrorLogFilter represents filter parameters for error logs
 type ErrorLogFilter struct {
-	Source      string    `json:"source"`      // "hub", "plugin", "agent", or "all"
-	LevelFilter string    `json:"level"`       // "error" = only ERROR/FATAL (default); "all" = all levels
-	NodeID      string    `json:"node_id"`     // specific node or "all"
-	StartTime   time.Time `json:"start_time"`  // start time filter
-	EndTime     time.Time `json:"end_time"`     // end time filter
-	Keyword     string    `json:"keyword"`     // keyword search
-	Limit       int       `json:"limit"`       // limit number of results
-	Offset      int       `json:"offset"`      // pagination offset
+	Source      string    `json:"source"`     // "hub", "plugin", "agent", or "all"
+	LevelFilter string    `json:"level"`      // "error" = only ERROR/FATAL (default); "all" = all levels
+	NodeID      string    `json:"node_id"`    // specific node or "all"
+	StartTime   time.Time `json:"start_time"` // start time filter
+	EndTime     time.Time `json:"end_time"`   // end time filter
+	Keyword     string    `json:"keyword"`    // keyword search
+	Limit       int       `json:"limit"`      // limit number of results
+	Offset      int       `json:"offset"`     // pagination offset
 }
 
 // ErrorLogResponse represents the response for error log queries
@@ -55,15 +55,17 @@ type ClusterErrorLogResponse struct {
 
 // AgentLogAPIEntry represents one agent log entry for the frontend.
 type AgentLogAPIEntry struct {
-	Timestamp           time.Time `json:"timestamp"`
-	NodeID              string    `json:"node_id"`
-	AgentID             string    `json:"agent_id"`
-	ID                  string    `json:"id"`
-	ProjectNodeSequence string    `json:"project_node_sequence,omitempty"`
-	RawInput            string    `json:"raw_input,omitempty"`
-	RawOutput           string    `json:"raw_output,omitempty"`
-	Trace               string    `json:"trace,omitempty"`
-	Error               string    `json:"error,omitempty"`
+	Timestamp           time.Time                `json:"timestamp"`
+	NodeID              string                   `json:"node_id"`
+	AgentID             string                   `json:"agent_id"`
+	ID                  string                   `json:"id"`
+	ProjectID           string                   `json:"project_id,omitempty"`
+	ProjectNodeSequence string                   `json:"project_node_sequence,omitempty"`
+	IsTest              bool                     `json:"is_test,omitempty"`
+	RawInput            string                   `json:"raw_input,omitempty"`
+	RawOutput           string                   `json:"raw_output,omitempty"`
+	Trace               string                   `json:"trace,omitempty"`
+	Error               string                   `json:"error,omitempty"`
 	Comments            []common.AgentLogComment `json:"comments,omitempty"`
 }
 
@@ -282,7 +284,9 @@ func getAgentLogs(c echo.Context) error {
 			NodeID:              entry.NodeID,
 			AgentID:             entry.AgentID,
 			ID:                  entry.ID,
+			ProjectID:           entry.ProjectID,
 			ProjectNodeSequence: entry.ProjectNodeSequence,
+			IsTest:              entry.IsTest,
 			RawInput:            entry.RawInput,
 			RawOutput:           entry.RawOutput,
 			Trace:               entry.Trace,

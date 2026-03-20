@@ -154,10 +154,16 @@
                     {{ log.node_id }}
                   </span>
                   <span
-                    v-if="log.project_node_sequence || extractProjectFromContext(log)"
-                    class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium break-all max-w-full"
+                    v-if="log.is_test"
+                    class="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded font-semibold uppercase tracking-wide"
                   >
-                    {{ log.project_node_sequence || extractProjectFromContext(log) }}
+                    TEST
+                  </span>
+                  <span
+                    v-if="extractProjectId(log)"
+                    class="text-xs text-indigo-700 bg-indigo-100 px-2 py-1 rounded font-medium break-all max-w-full"
+                  >
+                    Project: {{ extractProjectId(log) }}
                   </span>
                   <span
                     v-if="log.error"
@@ -743,6 +749,12 @@ function extractAgentFromContext(log) {
 function extractProjectFromContext(log) {
   const ctx = safeParseContext(log)
   return ctx.project_node_sequence || ''
+}
+
+function extractProjectId(log) {
+  if (log?.project_id) return log.project_id
+  const ctx = safeParseContext(log)
+  return ctx.project || ''
 }
 
 function extractToolNameFromContext(log) {

@@ -2108,6 +2108,7 @@ func (p *Project) initComponents() error {
 		case "AGENT":
 			a, exists := GetPNSAgent(node.FromPNS)
 			if exists {
+				a.ProjectID = p.Id
 				p.Agents[node.FromPNS] = a
 			} else {
 				originalAgent, exists := GetAgent(node.FromID)
@@ -2124,6 +2125,7 @@ func (p *Project) initComponents() error {
 					cleanup()
 					return fmt.Errorf("failed to create agent from existing: %s %w", node.FromPNS, err)
 				}
+				a.ProjectID = p.Id
 
 				SetPNSAgent(node.FromPNS, a)
 				p.Agents[node.FromPNS] = a

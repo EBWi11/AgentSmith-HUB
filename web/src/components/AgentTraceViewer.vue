@@ -4,7 +4,7 @@
       v-if="steps.length === 0"
       class="text-sm text-gray-500 py-2"
     >
-      No trace data (no tool rounds recorded for this run).
+      No trace data (e.g. timed out before any LLM call).
     </div>
 
     <template v-else>
@@ -31,7 +31,6 @@
           :key="i"
           class="trace-step rounded-lg border border-gray-200 bg-white overflow-hidden"
         >
-          <!-- Step header: always visible summary row -->
           <details class="trace-step-details" :open="defaultOpen">
             <summary
               class="cursor-pointer list-none flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm font-medium select-none
@@ -46,24 +45,111 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
               </svg>
               <span class="text-xs font-semibold text-gray-500 tabular-nums">Round {{ step.round }}</span>
+              <span v-if="formatStepTimestamp(step.at)" class="text-[10px] text-gray-500 tabular-nums">
+                {{ formatStepTimestamp(step.at) }}
+              </span>
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
-                :class="roleBadgeClass(step.role)"
+                :class="kindBadgeClass(step)"
               >
-                {{ step.role }}
+                {{ stepLabel(step) }}
               </span>
-              <span v-if="step.role === 'tool' && step.tool_name" class="text-xs text-gray-700 font-mono truncate max-w-[min(100%,28rem)]">
+              <span v-if="stepKind(step) === 'llm' && step.model" class="text-xs text-gray-600 font-mono truncate max-w-[min(100%,20rem)]">
+                {{ step.model }}
+              </span>
+              <span v-if="stepKind(step) === 'tool' && step.tool_name" class="text-xs text-gray-700 font-mono truncate max-w-[min(100%,28rem)]">
                 {{ step.tool_name }}
               </span>
-              <span v-if="step.role === 'assistant' && step.tool_calls?.length" class="text-xs text-gray-500">
+              <span v-if="stepKind(step) === 'tool' && step.tool_kind" class="text-[10px] uppercase tracking-wide text-gray-500">
+                {{ step.tool_kind }}
+              </span>
+              <span v-if="stepKind(step) === 'llm' && step.output_tool_calls?.length" class="text-xs text-gray-500">
+                {{ step.output_tool_calls.length }} tool call(s)
+              </span>
+              <span v-if="stepKind(step) === 'llm' && step.error" class="text-xs text-red-600 truncate max-w-[min(100%,24rem)]">
+                {{ step.error }}
+              </span>
+              <span v-if="stepKind(step) === 'legacy_assistant' && step.tool_calls?.length" class="text-xs text-gray-500">
                 {{ step.tool_calls.length }} tool call(s)
               </span>
             </summary>
 
-            <!-- Nested body with left indent -->
             <div class="px-3 py-3 space-y-3 border-l-4 border-gray-200 ml-3 mr-2 mb-2 bg-gray-50/80 rounded-r-md">
-              <!-- Assistant -->
-              <template v-if="step.role === 'assistant'">
+              <!-- New format: full LLM request/response -->
+              <template v-if="stepKind(step) === 'llm'">
+                <details class="trace-nested rounded border border-slate-200 bg-slate-50/50">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-slate-800 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> LLM input (excluding system prompt)
+                  </summary>
+                  <pre class="px-2 pb-2 pt-0 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[32rem] overflow-y-auto">{{ formatJsonBlock(step.input_messages) }}</pre>
+                </details>
+
+                <details v-if="hasText(step.reasoning_content)" class="trace-nested rounded border border-violet-100 bg-violet-50/40">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-violet-900 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> Reasoning / thinking
+                  </summary>
+                  <pre class="px-2 pb-2 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ step.reasoning_content }}</pre>
+                </details>
+
+                <details v-if="step.thinking_blocks" class="trace-nested rounded border border-violet-100 bg-violet-50/30">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-violet-900 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> Thinking blocks (raw)
+                  </summary>
+                  <pre class="px-2 pb-2 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ formatJsonBlock(step.thinking_blocks) }}</pre>
+                </details>
+
+                <details v-if="hasText(step.output_content)" class="trace-nested rounded border border-blue-100 bg-blue-50/40">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-blue-800 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> LLM output (assistant content)
+                  </summary>
+                  <pre class="px-2 pb-2 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ formatJsonBlock(step.output_content) }}</pre>
+                </details>
+
+                <div v-if="step.output_tool_calls && step.output_tool_calls.length" class="space-y-2">
+                  <div class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Tool calls (from model)</div>
+                  <div
+                    v-for="(tc, j) in step.output_tool_calls"
+                    :key="tc.id || j"
+                    class="ml-1 border border-gray-200 rounded-md bg-white overflow-hidden"
+                  >
+                    <details class="trace-nested-details">
+                      <summary
+                        class="cursor-pointer list-none flex items-center gap-2 px-2 py-2 text-xs font-mono text-gray-900 bg-gray-100/80 hover:bg-gray-100 [&::-webkit-details-marker]:hidden"
+                      >
+                        <svg class="trace-chevron w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span class="font-semibold text-purple-800">{{ tc.name }}</span>
+                        <span v-if="tc.id" class="text-gray-500 truncate">#{{ tc.id }}</span>
+                      </summary>
+                      <div class="px-2 py-2 border-t border-gray-100 ml-2 border-l-2 border-purple-200 pl-3">
+                        <div class="text-[10px] font-semibold text-gray-500 mb-1">Arguments</div>
+                        <pre class="text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ formatJsonBlock(tc.arguments) }}</pre>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+              </template>
+
+              <!-- New format: tool execution -->
+              <template v-else-if="stepKind(step) === 'tool'">
+                <details v-if="hasText(step.arguments)" class="trace-nested rounded border border-emerald-100 bg-emerald-50/30">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-emerald-900 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> Tool input (arguments)
+                  </summary>
+                  <pre class="px-2 pb-2 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ formatJsonBlock(step.arguments) }}</pre>
+                </details>
+                <details class="trace-nested rounded border border-green-100 bg-green-50/30">
+                  <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-green-900 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
+                    <span class="text-gray-400">▸</span> Tool output (result)
+                  </summary>
+                  <pre class="px-2 pb-2 text-xs text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ formatJsonBlock(step.result) }}</pre>
+                </details>
+                <div v-if="step.tool_call_id" class="text-[10px] text-gray-500 font-mono">tool_call_id: {{ step.tool_call_id }}</div>
+              </template>
+
+              <!-- Legacy: assistant -->
+              <template v-else-if="stepKind(step) === 'legacy_assistant'">
                 <details v-if="hasText(step.content)" class="trace-nested rounded border border-blue-100 bg-blue-50/40">
                   <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-blue-800 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
                     <span class="text-gray-400">▸</span> Assistant message
@@ -97,8 +183,8 @@
                 </div>
               </template>
 
-              <!-- Tool result -->
-              <template v-else-if="step.role === 'tool'">
+              <!-- Legacy: tool -->
+              <template v-else-if="stepKind(step) === 'legacy_tool'">
                 <details v-if="hasText(step.arguments)" class="trace-nested rounded border border-emerald-100 bg-emerald-50/30">
                   <summary class="cursor-pointer px-2 py-1.5 text-xs font-semibold text-emerald-900 list-none [&::-webkit-details-marker]:hidden flex items-center gap-1">
                     <span class="text-gray-400">▸</span> Arguments
@@ -114,7 +200,6 @@
                 <div v-if="step.tool_call_id" class="text-[10px] text-gray-500 font-mono">tool_call_id: {{ step.tool_call_id }}</div>
               </template>
 
-              <!-- Unknown role fallback: full JSON -->
               <template v-else>
                 <pre class="text-xs whitespace-pre-wrap break-words font-mono">{{ formatJsonBlock(step) }}</pre>
               </template>
@@ -138,7 +223,7 @@ const props = defineProps({
   /** Top-level steps open by default */
   defaultOpen: {
     type: Boolean,
-    default: true
+    default: false
   }
 })
 
@@ -156,14 +241,41 @@ const steps = computed(() => {
   }
 })
 
+function stepKind(step) {
+  if (!step || typeof step !== 'object') return 'unknown'
+  if (step.type === 'llm') return 'llm'
+  if (step.type === 'tool') return 'tool'
+  if (step.role === 'assistant') return 'legacy_assistant'
+  if (step.role === 'tool') return 'legacy_tool'
+  return 'unknown'
+}
+
+function stepLabel(step) {
+  const k = stepKind(step)
+  if (k === 'llm') return 'llm'
+  if (k === 'tool') return 'tool'
+  if (k === 'legacy_assistant') return 'assistant (legacy)'
+  if (k === 'legacy_tool') return 'tool (legacy)'
+  return step.role || 'step'
+}
+
+function kindBadgeClass(step) {
+  const k = stepKind(step)
+  if (k === 'llm') return 'bg-indigo-100 text-indigo-800'
+  if (k === 'tool' || k === 'legacy_tool') return 'bg-emerald-100 text-emerald-800'
+  if (k === 'legacy_assistant') return 'bg-blue-100 text-blue-800'
+  return 'bg-gray-100 text-gray-700'
+}
+
 function hasText(s) {
   return s !== null && s !== undefined && String(s).trim() !== ''
 }
 
-function roleBadgeClass(role) {
-  if (role === 'assistant') return 'bg-blue-100 text-blue-800'
-  if (role === 'tool') return 'bg-emerald-100 text-emerald-800'
-  return 'bg-gray-100 text-gray-700'
+function formatStepTimestamp(raw) {
+  if (!raw) return ''
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return String(raw)
+  return d.toLocaleString()
 }
 
 /**

@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/agent"
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
@@ -9,6 +10,7 @@ import (
 	"AgentSmith-HUB/plugin"
 	"AgentSmith-HUB/project"
 	"AgentSmith-HUB/rules_engine"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -44,8 +46,8 @@ func testRuleset(c echo.Context) error {
 
 	// Parse request body
 	var req struct {
-		Data    interface{}              `json:"data"` // Supports both object and array
-		Datas   []map[string]interface{} `json:"datas,omitempty"` // Optional batch test events for sequence testing
+		Data    interface{}              `json:"data"`              // Supports both object and array
+		Datas   []map[string]interface{} `json:"datas,omitempty"`   // Optional batch test events for sequence testing
 		Content string                   `json:"content,omitempty"` // Optional content for direct testing
 	}
 
@@ -343,6 +345,51 @@ func testAgent(c echo.Context) error {
 	if len(toolCallTrace) > 0 {
 		response["tool_calls_trace"] = toolCallTrace
 	}
+
+	// Persist test run into Agent Logs for unified observability.
+	targetAgentID := id
+	if strings.TrimSpace(targetAgentID) == "" {
+		// Content-mode tests still go into agent logs with a synthetic id.
+		targetAgentID = tempAgent.Id
+	}
+	traceJSON := ""
+	if len(toolCallTrace) > 0 {
+		if b, e := json.Marshal(toolCallTrace); e == nil {
+			traceJSON = string(b)
+		}
+	}
+	outJSON := ""
+	if result != nil {
+		if b, e := json.Marshal(result); e == nil {
+			outJSON = string(b)
+		}
+	}
+	inJSON := ""
+	if b, e := json.Marshal(req.Data); e == nil {
+		inJSON = string(b)
+	}
+	errStr := ""
+	if result != nil {
+		if topLlm, ok := result["llm"].(map[string]interface{}); ok {
+			if agentLlm, ok := topLlm[tempAgent.Id].(map[string]interface{}); ok {
+				if v, ok := agentLlm["error"].(string); ok && v != "" {
+					errStr = v
+				}
+			}
+		}
+	}
+	_ = common.WriteAgentLogToRedis(common.AgentLogEntry{
+		ID:                  fmt.Sprintf("%d", time.Now().UnixNano()),
+		Timestamp:           time.Now(),
+		NodeID:              common.GetNodeID(),
+		AgentID:             targetAgentID,
+		ProjectNodeSequence: tempAgent.ProjectNodeSequence,
+		RawInput:            inJSON,
+		RawOutput:           outJSON,
+		Trace:               traceJSON,
+		Error:               errStr,
+		IsTest:              true,
+	})
 
 	return c.JSON(http.StatusOK, response)
 }

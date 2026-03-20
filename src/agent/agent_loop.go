@@ -11,23 +11,107 @@ import (
 	"time"
 )
 
-// ToolCallTraceStep represents one step in the agent's tool-call process (for test UI).
-type ToolCallTraceStep struct {
-	Round      int                `json:"round"`
-	Role       string             `json:"role"` // "assistant" | "tool"
-	Content    string             `json:"content,omitempty"`
-	ToolCalls  []ToolCallTraceItem `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
-	ToolName   string             `json:"tool_name,omitempty"`
-	Arguments  string             `json:"arguments,omitempty"`
-	Result     string             `json:"result,omitempty"`
+// AgentTraceStep is one row in the persisted agent trace (Agent Logs / test API).
+// type "llm" = one chat completion request/response (full input messages + model output).
+// type "tool" = one executed tool with arguments and result string.
+type AgentTraceStep struct {
+	Type  string `json:"type"` // "llm" | "tool"
+	Round int    `json:"round"`
+	At    string `json:"at,omitempty"` // RFC3339Nano timestamp
+
+	// --- type == "llm" ---
+	Model            string              `json:"model,omitempty"`
+	InputMessages    []Message           `json:"input_messages,omitempty"`
+	OutputContent    string              `json:"output_content,omitempty"`
+	OutputToolCalls  []ToolCallTraceItem `json:"output_tool_calls,omitempty"`
+	ReasoningContent string              `json:"reasoning_content,omitempty"`
+	ThinkingBlocks   json.RawMessage     `json:"thinking_blocks,omitempty"`
+	Error            string              `json:"error,omitempty"`
+
+	// --- type == "tool" ---
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolKind   string `json:"tool_kind,omitempty"` // "skill" | "plugin" | "tool"
+	ToolName   string `json:"tool_name,omitempty"`
+	Arguments  string `json:"arguments,omitempty"`
+	Result     string `json:"result,omitempty"`
+
+	// Legacy (older logs): role "assistant" | "tool" without type "llm"
+	Role      string              `json:"role,omitempty"`
+	Content   string              `json:"content,omitempty"`
+	ToolCalls []ToolCallTraceItem `json:"tool_calls,omitempty"`
 }
 
-// ToolCallTraceItem is one tool call in an assistant step.
+// ToolCallTraceItem is one tool call proposed by the model (in llm output or legacy assistant step).
 type ToolCallTraceItem struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+func cloneMessagesForTrace(msgs []Message) []Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	// Keep trace concise: do not include system prompt in per-call input snapshot.
+	filtered := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "system") {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	data, err := json.Marshal(filtered)
+	if err != nil {
+		return nil
+	}
+	var out []Message
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func toolKindFromName(name string) string {
+	n := strings.TrimSpace(name)
+	switch {
+	case strings.HasPrefix(n, "skill__"):
+		return "skill"
+	case strings.HasPrefix(n, "tool_"):
+		return "plugin"
+	default:
+		return "tool"
+	}
+}
+
+func newLLMTraceStep(round int, model string, input []Message, resp *ChatResult, callErr error) AgentTraceStep {
+	step := AgentTraceStep{
+		Type:          "llm",
+		Round:         round,
+		At:            time.Now().UTC().Format(time.RFC3339Nano),
+		Model:         model,
+		InputMessages: input,
+	}
+	if callErr != nil {
+		step.Error = callErr.Error()
+		return step
+	}
+	if resp == nil {
+		return step
+	}
+	step.OutputContent = resp.Content
+	step.ReasoningContent = resp.ReasoningContent
+	step.ThinkingBlocks = resp.ThinkingBlocks
+	if len(resp.ToolCalls) > 0 {
+		step.OutputToolCalls = make([]ToolCallTraceItem, 0, len(resp.ToolCalls))
+		for _, c := range resp.ToolCalls {
+			step.OutputToolCalls = append(step.OutputToolCalls, ToolCallTraceItem{
+				ID:        c.ID,
+				Name:      c.Function.Name,
+				Arguments: c.Function.Arguments,
+			})
+		}
+	}
+	return step
 }
 
 // Start launches a goroutine for each upstream channel.
@@ -116,6 +200,7 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 		Timestamp:           time.Now(),
 		NodeID:              common.GetNodeID(),
 		AgentID:             a.Id,
+		ProjectID:           a.ProjectID,
 		ProjectNodeSequence: a.ProjectNodeSequence,
 		RawInput:            origJSON,
 		RawOutput:           outJSON,
@@ -268,10 +353,9 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 }
 
 // ProcessMessageWithTrace runs one message through the agent and returns the result
-// plus a trace of all tool-call steps (assistant tool_calls and tool results).
-// Used by the test API to show the full tool-call process in the UI.
-// If no tool calls occurred, trace is nil or empty.
-func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[string]interface{}, trace []ToolCallTraceStep) {
+// plus a full trace: every LLM call (input_messages + model output) and every tool
+// execution (arguments + result). The final JSON-only LLM round is included.
+func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[string]interface{}, trace []AgentTraceStep) {
 	timeout, err := time.ParseDuration(a.Config.Timeout)
 	if err != nil {
 		timeout = 30 * time.Second
@@ -284,46 +368,36 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 		{Role: "user", Content: formatMessageAsJSON(msg)},
 	}
 	toolDefs := a.buildAllToolDefinitions()
-	trace = make([]ToolCallTraceStep, 0)
+	trace = make([]AgentTraceStep, 0)
+	model := strings.TrimSpace(a.Config.Model)
 
 	for round := 0; round < a.Config.MaxRounds; round++ {
 		if ctx.Err() != nil {
 			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout)), trace
 		}
 
+		inputSnap := cloneMessagesForTrace(conversation)
 		resp, err := callChatWithTools(
 			a.Config.Model, conversation, toolDefs,
 			a.Config.MaxTokens, a.Config.Temperature,
 			a.Config.ReasoningMode, a.Config.ReasoningBudgetTokens, ctx,
 		)
+		trace = append(trace, newLLMTraceStep(round+1, model, inputSnap, resp, err))
 		if err != nil {
 			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent LLM call failed: %v", err)), trace
 		}
 
 		if len(resp.ToolCalls) > 0 {
-			// Record assistant step with tool_calls
-			items := make([]ToolCallTraceItem, 0, len(resp.ToolCalls))
-			for _, c := range resp.ToolCalls {
-				items = append(items, ToolCallTraceItem{
-					ID:        c.ID,
-					Name:      c.Function.Name,
-					Arguments: c.Function.Arguments,
-				})
-			}
-			trace = append(trace, ToolCallTraceStep{
-				Round:     round + 1,
-				Role:      "assistant",
-				Content:   resp.Content,
-				ToolCalls: items,
-			})
 			conversation = append(conversation, resp.AssistantMessage())
 			for _, call := range resp.ToolCalls {
 				toolResult := a.executeFunctionCall(call)
 				conversation = append(conversation, ToolResultMessage(call.ID, toolResult))
-				trace = append(trace, ToolCallTraceStep{
+				trace = append(trace, AgentTraceStep{
+					Type:       "tool",
 					Round:      round + 1,
-					Role:       "tool",
+					At:         time.Now().UTC().Format(time.RFC3339Nano),
 					ToolCallID: call.ID,
+					ToolKind:   toolKindFromName(call.Function.Name),
 					ToolName:   call.Function.Name,
 					Arguments:  call.Function.Arguments,
 					Result:     toolResult,

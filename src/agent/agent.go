@@ -76,6 +76,7 @@ type Agent struct {
 	sampler           *common.Sampler
 	RawConfig         string `json:"-"`
 
+	ProjectID           string `json:"project_id,omitempty"`
 	ProjectNodeSequence string `json:"project_node_sequence,omitempty"`
 }
 

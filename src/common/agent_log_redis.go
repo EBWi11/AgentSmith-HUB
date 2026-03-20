@@ -14,7 +14,9 @@ type AgentLogEntry struct {
 	Timestamp           time.Time `json:"timestamp"`
 	NodeID              string    `json:"node_id"`
 	AgentID             string    `json:"agent_id"`
+	ProjectID           string    `json:"project_id,omitempty"`
 	ProjectNodeSequence string    `json:"project_node_sequence,omitempty"`
+	IsTest              bool      `json:"is_test,omitempty"`
 
 	// RawInput and RawOutput are JSON-encoded snapshots of the message
 	// before and after agent processing.
@@ -169,4 +171,3 @@ func WriteAgentLogToRedis(entry AgentLogEntry) error {
 
 	return nil
 }
-
