@@ -333,7 +333,7 @@
                 <label :for="'agent-log-comment-' + index" class="block text-xs font-medium text-gray-600 mb-1.5">Feedback</label>
                 <textarea
                   :id="'agent-log-comment-' + index"
-                  v-model="newComment.text"
+                  v-model="getCommentDraft(log.id).text"
                   rows="3"
                   class="filter-input w-full resize-y min-h-[5rem] text-sm"
                   placeholder="Describe what to remember (false positive, prompt tweak, etc.). This will be saved and merged into agent memory."
@@ -342,7 +342,7 @@
                 <div class="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div class="w-full sm:max-w-xs">
                     <label :for="'agent-log-tag-' + index" class="block text-xs font-medium text-gray-600 mb-1.5">Tag</label>
-                    <select :id="'agent-log-tag-' + index" v-model="newComment.tag" class="filter-select w-full text-sm">
+                    <select :id="'agent-log-tag-' + index" v-model="getCommentDraft(log.id).tag" class="filter-select w-full text-sm">
                       <option value="fp">False Positive</option>
                       <option value="tp">True Positive</option>
                       <option value="improve_prompt">Improve Prompt</option>
@@ -353,7 +353,7 @@
                     <button
                       type="button"
                       @click.stop="submitFeedbackAndMemory(log)"
-                      :disabled="!newComment.text || submittingFeedback"
+                      :disabled="!getCommentDraft(log.id).text.trim() || submittingFeedback"
                       class="btn btn-primary btn-sm w-full sm:w-auto justify-center min-w-[10rem]"
                       title="Save your note and update agent memory in one step"
                     >
@@ -430,11 +430,16 @@ const availableNodes = ref([])
 const currentPage = ref(1)
 const pageSize = ref(50)
 const expandedLogs = ref(new Set())
-const newComment = reactive({
-  text: '',
-  tag: 'fp'
-})
+const commentDrafts = reactive({})
 const submittingFeedback = ref(false)
+
+function getCommentDraft(logId) {
+  if (!logId) return { text: '', tag: 'fp' }
+  if (!commentDrafts[logId]) {
+    commentDrafts[logId] = { text: '', tag: 'fp' }
+  }
+  return commentDrafts[logId]
+}
 
 const totalPages = computed(() => {
   return Math.max(1, Math.ceil(totalCount.value / pageSize.value))
@@ -700,16 +705,17 @@ function exportLogs() {
 }
 
 async function submitFeedbackAndMemory(log) {
-  const text = (newComment.text || '').trim()
+  const draft = getCommentDraft(log.id)
+  const text = (draft.text || '').trim()
   if (!text || submittingFeedback.value) return
   submittingFeedback.value = true
   try {
     const resp = await hubApi.generateAgentMemoryFromLog(log.agent_id, log.id, {
       comment: text,
-      tag: newComment.tag
+      tag: draft.tag
     })
-    newComment.text = ''
-    newComment.tag = 'fp'
+    draft.text = ''
+    draft.tag = 'fp'
     await fetchLogs()
     if (resp?.warning) {
       $message?.warning?.(resp.warning)

@@ -352,6 +352,15 @@ func testAgent(c echo.Context) error {
 		// Content-mode tests still go into agent logs with a synthetic id.
 		targetAgentID = tempAgent.Id
 	}
+	// For persistent logs, align llm map key with the stored AgentID.
+	if result != nil && targetAgentID != tempAgent.Id {
+		if topLlm, ok := result["llm"].(map[string]interface{}); ok {
+			if agentLlm, ok := topLlm[tempAgent.Id]; ok {
+				topLlm[targetAgentID] = agentLlm
+				delete(topLlm, tempAgent.Id)
+			}
+		}
+	}
 	traceJSON := ""
 	if len(toolCallTrace) > 0 {
 		if b, e := json.Marshal(toolCallTrace); e == nil {
@@ -371,7 +380,7 @@ func testAgent(c echo.Context) error {
 	errStr := ""
 	if result != nil {
 		if topLlm, ok := result["llm"].(map[string]interface{}); ok {
-			if agentLlm, ok := topLlm[tempAgent.Id].(map[string]interface{}); ok {
+			if agentLlm, ok := topLlm[targetAgentID].(map[string]interface{}); ok {
 				if v, ok := agentLlm["error"].(string); ok && v != "" {
 					errStr = v
 				}

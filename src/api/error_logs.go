@@ -91,6 +91,19 @@ type NodeStat struct {
 	TotalErrors  int    `json:"total_errors"`
 }
 
+func parseRFC3339Time(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
 // getUnifiedErrorLogs gets error logs from Redis for all nodes (leader only)
 func getUnifiedErrorLogs(filter ErrorLogFilter) ([]ErrorLogEntry, int, error) {
 	// Use the new common package function with server-side filtering
@@ -158,12 +171,12 @@ func getErrorLogs(c echo.Context) error {
 
 	// Parse time filters
 	if startTime := c.QueryParam("start_time"); startTime != "" {
-		if parsed, err := time.Parse(time.RFC3339, startTime); err == nil {
+		if parsed, ok := parseRFC3339Time(startTime); ok {
 			filter.StartTime = parsed
 		}
 	}
 	if endTime := c.QueryParam("end_time"); endTime != "" {
-		if parsed, err := time.Parse(time.RFC3339, endTime); err == nil {
+		if parsed, ok := parseRFC3339Time(endTime); ok {
 			filter.EndTime = parsed
 		}
 	}
@@ -217,6 +230,19 @@ func getAgentLogs(c echo.Context) error {
 	agentID := c.QueryParam("agent")
 	project := c.QueryParam("project")
 	nodeID := c.QueryParam("node_id")
+	var startTime, endTime time.Time
+
+	// Parse optional time filters (RFC3339), same contract as /error-logs.
+	if raw := c.QueryParam("start_time"); raw != "" {
+		if parsed, ok := parseRFC3339Time(raw); ok {
+			startTime = parsed
+		}
+	}
+	if raw := c.QueryParam("end_time"); raw != "" {
+		if parsed, ok := parseRFC3339Time(raw); ok {
+			endTime = parsed
+		}
+	}
 
 	// Pagination params (simple, list-per-agent; frontend can aggregate if needed)
 	limit := 100
@@ -270,9 +296,24 @@ func getAgentLogs(c echo.Context) error {
 		if nodeID != "" && nodeID != "all" && entry.NodeID != nodeID {
 			continue
 		}
+		// time range filter
+		if !startTime.IsZero() && entry.Timestamp.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && entry.Timestamp.After(endTime) {
+			continue
+		}
 		// project filter: match by prefix or exact PNS string
-		if project != "" && entry.ProjectNodeSequence != "" {
-			if !strings.Contains(entry.ProjectNodeSequence, project) {
+		if project != "" {
+			if entry.ProjectID != "" {
+				if !strings.Contains(entry.ProjectID, project) {
+					continue
+				}
+			} else if entry.ProjectNodeSequence != "" {
+				if !strings.Contains(entry.ProjectNodeSequence, project) {
+					continue
+				}
+			} else {
 				continue
 			}
 		}
