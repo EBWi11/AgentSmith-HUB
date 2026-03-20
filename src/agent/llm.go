@@ -333,12 +333,15 @@ Inputs in the user message JSON:
 - comments: human feedback for THIS review cycle (authoritative when they conflict with older material).
 - run_context (optional): snippets from this agent run (input, output, trace, error). Use only to understand what the comments refer to. Do NOT replace or ignore existing_memory based on run_context alone.
 
-Requirements:
-1) Merge existing_memory with the themes in comments: deduplicate, compress redundant lines, and keep durable guidance (patterns, FP/TP heuristics, prompt/style tweaks, confidence rules).
+	Requirements:
+1) Merge existing_memory with the themes in comments: deduplicate by *intent*, compress redundant lines, and keep durable guidance (patterns, FP/TP heuristics, prompt/style tweaks, confidence rules).
 2) If anything in existing_memory conflicts with comments, follow the comments and drop or rewrite the old line.
-3) Prefer stable rules over one-off volatile details (exact IPs, ephemeral IDs) unless the comments explicitly require them.
-4) Produce the COMPLETE new memory_notes body as plain text (no JSON, no markdown fences). Structure with short bullets or numbered items is fine. This output replaces the entire memory_notes field — do not assume it will be appended.
-5) Stay within reasonable length: compress aggressively while preserving distinct rules.`
+3) Output structure: produce at most 3 numbered items. Each item must cover a distinct decision point. If two items overlap, merge them (do not repeat similar thresholds).
+4) Default stance: treat scan/attack as NOT authorized unless explicit, verifiable evidence indicates authorization; if evidence is uncertain/insufficient, keep the NOT authorized stance.
+5) Whitelist scoping: when authorizing is justified, narrow the allowed scope to specific stable identifiers/field combinations; avoid broad catch-all exceptions.
+6) Prefer stable rules over one-off volatile details (exact IPs, ephemeral IDs) unless the comments explicitly require them.
+7) Produce the COMPLETE new memory_notes body as plain text (no JSON, no markdown fences). This output replaces the entire memory_notes field — do not assume it will be appended.
+8) Stay within reasonable length: compress aggressively while preserving distinct rules.`
 
 	messages := []Message{
 		{Role: "system", Content: system},

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -44,6 +45,19 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 		return nil, false, fmt.Errorf("ruleContent cannot be empty")
 	}
 
+	extractRuleID := func(xml string) string {
+		// Best-effort: capture <rule ... id="..."> attribute value.
+		// This is only for returning a compact success payload; backend validation is authoritative.
+		re := regexp.MustCompile(`<rule\s+[^>]*id\s*=\s*["']([^"']+)["']`)
+		m := re.FindStringSubmatch(xml)
+		if len(m) >= 2 {
+			return strings.TrimSpace(m[1])
+		}
+		return ""
+	}
+
+	ruleID := extractRuleID(ruleContent)
+
 	// autoApply defaults to true; caller can pass false to keep change in pending state.
 	autoApply := true
 	if len(args) >= 3 {
@@ -64,27 +78,31 @@ func Eval(args ...interface{}) (interface{}, bool, error) {
 
 	if !autoApply {
 		result, _ := json.Marshal(map[string]interface{}{
-			"add_result": addResp,
-			"status":     "pending",
-			"note":       "rule is staged for review; apply manually when ready",
+			"status":  "pending",
+			"rule_id": ruleID,
+			"message": "Rule staged successfully",
 		})
 		return string(result), true, nil
 	}
 
 	applyResp, err := postJSON(baseURL+"/apply-single-change", token, map[string]string{"type": "ruleset", "id": rulesetId})
 	if err != nil {
+		// apply error: keep details, but still return a compact object.
 		result, _ := json.Marshal(map[string]interface{}{
-			"add_result":    addResp,
-			"apply_warning": err.Error(),
-			"status":        "pending",
+			"status":     "pending",
+			"rule_id":    ruleID,
+			"message":    "Rule added but apply failed",
+			"apply_error": err.Error(),
+			"apply_resp": applyResp,
 		})
 		return string(result), false, err
 	}
 
+	_ = applyResp
 	result, _ := json.Marshal(map[string]interface{}{
-		"add_result":   addResp,
-		"apply_result": applyResp,
-		"status":       "applied",
+		"status":  "applied",
+		"rule_id": ruleID,
+		"message": "Rule applied successfully",
 	})
 	return string(result), true, nil
 }

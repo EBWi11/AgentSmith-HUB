@@ -166,6 +166,12 @@
                     Project: {{ extractProjectId(log) }}
                   </span>
                   <span
+                    v-if="hasLogMemoryCommitted(log)"
+                    class="text-xs text-emerald-800 bg-emerald-50 px-2 py-1 rounded font-medium break-all max-w-full ring-1 ring-emerald-100"
+                  >
+                    Memory Done
+                  </span>
+                  <span
                     v-if="log.error"
                     class="text-red-600 text-sm break-words whitespace-pre-wrap w-full"
                   >
@@ -193,7 +199,7 @@
           <!-- Log Details: Input / Output / Trace (stacked) -->
           <div v-if="expandedLogs.has(index)" class="p-4 bg-white space-y-4 min-w-0">
             <!-- Top: Input -->
-            <details class="rounded-lg border border-gray-200 overflow-hidden min-w-0 log-io-section" open>
+            <details class="rounded-lg border border-gray-200 overflow-hidden min-w-0 log-io-section">
               <summary
                 class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3
                        [&::-webkit-details-marker]:hidden"
@@ -271,19 +277,19 @@
             <!-- Bottom: Trace (collapsed by default) -->
             <details class="log-trace-shell rounded-lg border border-gray-200 overflow-hidden min-w-0">
               <summary
-                class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-2 hover:bg-gray-200/80 select-none [&::-webkit-details-marker]:hidden"
+                class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3 hover:bg-gray-200/80 select-none [&::-webkit-details-marker]:hidden"
               >
                 <div>
                   <h4 class="text-sm font-semibold text-gray-900">Trace</h4>
                   <p class="text-xs text-gray-500 mt-0.5">Each LLM / tool step; LLM input is [omitted] (see Input above)</p>
                 </div>
                 <svg
-                  class="log-trace-shell-chevron w-5 h-5 text-gray-500 shrink-0 transition-transform duration-200"
+                  class="log-trace-shell-chevron w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
                 </svg>
               </summary>
               <div class="p-4 bg-white border-t border-gray-100">
@@ -349,6 +355,13 @@
                 v-if="hasLogMemoryCommitted(log)"
                 class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900"
               >
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200"
+                  >
+                    Feedback + Memory Done
+                  </span>
+                </div>
                 Memory has been applied for this log from your feedback. Further comments are disabled.
               </div>
               <div v-else class="rounded-xl border border-gray-200 bg-gradient-to-b from-gray-50 to-white p-4 shadow-sm">

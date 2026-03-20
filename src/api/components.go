@@ -2679,7 +2679,7 @@ func addRulesetRule(c echo.Context) error {
 	}
 
 	// Validate the rule XML syntax first
-	ruleId, ruleName, err := validateAndExtractRuleId(request.RuleRaw)
+	ruleId, _, err := validateAndExtractRuleId(request.RuleRaw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"error":      err.Error(),
@@ -2711,20 +2711,19 @@ func addRulesetRule(c echo.Context) error {
 		})
 	}
 
-	// Ensure the rule contains an <append field="desc"> element with the rule's descriptive name
-	processedRuleRaw := addDescAppendToRule(request.RuleRaw, ruleName)
+	// Do not mutate the incoming rule_raw; append/augmentation must be authored by the caller.
+	processedRuleRaw := request.RuleRaw
 
 	// Check if the same rule (normalized content) already exists in current/pending ruleset
 	if pendingRuleDuplicate(currentRawConfig, processedRuleRaw) {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"message":  "Rule already present in current ruleset (or pending); no change made",
-			"rule_id":  ruleId,
-			"status":   "already_added",
-			"note":     "A rule with the same normalized content already exists. Apply pending changes if needed.",
+			"message": "Rule already present in current ruleset (or pending); no change made",
+			"rule_id": ruleId,
+			"status":  "already_added",
 		})
 	}
 
-	// Create a temporary ruleset with the new (possibly augmented) rule to do complete validation
+	// Create a temporary ruleset with the new rule to do complete validation
 	updatedXML, err := addRuleToXML(currentRawConfig, processedRuleRaw)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2770,21 +2769,10 @@ func addRulesetRule(c echo.Context) error {
 	project.SetRulesetNew(rulesetId, updatedXML)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message":  "✅ Rule added successfully to temporary file",
+		"message":  "Rule added successfully",
 		"rule_id":  ruleId,
 		"was_temp": isTemp,
 		"status":   "pending",
-		"next_steps": map[string]interface{}{
-			"1": "Check pending changes: Use 'get_pending_changes' to see all changes awaiting deployment",
-			"2": "Apply changes: Use 'apply_changes' to deploy the rule to production environment",
-			"3": "Test rule: Use 'test_ruleset' with sample data to validate rule behavior",
-		},
-		"important_note": "⚠️ This rule is currently in a temporary file and is NOT ACTIVE in production yet. You must apply changes to activate it.",
-		"helpful_commands": []string{
-			"get_pending_changes - View all changes waiting for deployment",
-			"apply_changes - Deploy all pending changes to production",
-			"test_ruleset - Test the ruleset with sample data",
-		},
 	})
 }
 
@@ -3049,40 +3037,6 @@ func addRuleToXML(xmlContent, ruleRaw string) (string, error) {
 	}
 
 	return strings.Join(result, "\n"), nil
-}
-
-// addDescAppendToRule ensures the given rule XML contains an <append field="desc"> element.
-// If missing, it appends one (static value = ruleName) right before the closing </rule> tag.
-// The function returns the possibly-modified rule XML.
-func addDescAppendToRule(ruleRaw, ruleName string) string {
-	// Quick check – already has desc append?
-	lowered := strings.ToLower(ruleRaw)
-	if strings.Contains(lowered, "field=\"desc\"") {
-		return ruleRaw // nothing to do
-	}
-
-	// Escape XML special chars in ruleName
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		"\"", "&quot;",
-		"'", "&apos;",
-	)
-	safeRuleName := replacer.Replace(ruleName)
-
-	// Construct append snippet (4-space indent by default)
-	appendSnippet := fmt.Sprintf("    <append field=\"desc\">%s</append>\n", safeRuleName)
-
-	// Insert before closing </rule>
-	closingTag := "</rule>"
-	idx := strings.LastIndex(ruleRaw, closingTag)
-	if idx == -1 {
-		// malformed? fallback to original
-		return ruleRaw
-	}
-
-	return ruleRaw[:idx] + appendSnippet + ruleRaw[idx:]
 }
 
 // GetBatchPluginParameters returns parameter information for multiple plugins
