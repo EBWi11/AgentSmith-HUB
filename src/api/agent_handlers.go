@@ -392,14 +392,6 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 	runCtx := agent.BuildMemoryRunContext(found)
 	summary, err := agent.GenerateMemorySummary("", id, sysSnap, memSnap, userComments, runCtx)
 	if err != nil {
-		_ = common.AppendAgentLogComment(logID, common.AgentLogComment{
-			Type:      "memory_summary",
-			Author:    "system",
-			Comment:   "Memory generation failed: " + err.Error(),
-			Tag:       "memory",
-			Status:    "failed",
-			CreatedAt: time.Now(),
-		})
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate memory summary: " + err.Error()})
 	}
 
@@ -441,14 +433,6 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		WriteToFile: true,
 	}
 	if _, err := reloadComponentUnified(reloadReq); err != nil {
-		_ = common.AppendAgentLogComment(logID, common.AgentLogComment{
-			Type:      "memory_summary",
-			Author:    "system",
-			Comment:   summary,
-			Tag:       "memory",
-			Status:    "failed",
-			CreatedAt: time.Now(),
-		})
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to commit generated memory: " + err.Error()})
 	}
 
