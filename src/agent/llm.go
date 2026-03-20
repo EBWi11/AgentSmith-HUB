@@ -336,7 +336,7 @@ Inputs in the user message JSON:
 	Requirements:
 1) Merge existing_memory with the themes in comments: deduplicate by *intent*, compress redundant lines, and keep durable guidance (patterns, FP/TP heuristics, prompt/style tweaks, confidence rules).
 2) If anything in existing_memory conflicts with comments, follow the comments and drop or rewrite the old line.
-3) Output structure: produce at most 3 numbered items. Each item must cover a distinct decision point. If two items overlap, merge them (do not repeat similar thresholds).
+3) Output structure: produce a concise list (bullets or numbered items). Do not repeat similar thresholds; if two items overlap, merge them. Prefer fewer, higher-signal items over verbose restatement.
 4) Default stance: treat scan/attack as NOT authorized unless explicit, verifiable evidence indicates authorization; if evidence is uncertain/insufficient, keep the NOT authorized stance.
 5) Whitelist scoping: when authorizing is justified, narrow the allowed scope to specific stable identifiers/field combinations; avoid broad catch-all exceptions.
 6) Prefer stable rules over one-off volatile details (exact IPs, ephemeral IDs) unless the comments explicitly require them.
