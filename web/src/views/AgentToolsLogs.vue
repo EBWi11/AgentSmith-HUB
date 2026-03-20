@@ -193,11 +193,24 @@
           <!-- Log Details: Input / Output / Trace (stacked) -->
           <div v-if="expandedLogs.has(index)" class="p-4 bg-white space-y-4 min-w-0">
             <!-- Top: Input -->
-            <section class="rounded-lg border border-gray-200 overflow-hidden min-w-0">
-              <div class="px-4 py-2 bg-gray-100 border-b border-gray-200">
-                <h4 class="text-sm font-semibold text-gray-900">Input</h4>
-                <p class="text-xs text-gray-500 mt-0.5">Raw event JSON (full)</p>
-              </div>
+            <details class="rounded-lg border border-gray-200 overflow-hidden min-w-0 log-io-section" open>
+              <summary
+                class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3
+                       [&::-webkit-details-marker]:hidden"
+              >
+                <div class="min-w-0">
+                  <h4 class="text-sm font-semibold text-gray-900">Input</h4>
+                  <p class="text-xs text-gray-500 mt-0.5">Raw event JSON (full inbound payload)</p>
+                  <p class="text-xs text-gray-500 mt-1 leading-relaxed">
+                    In the Trace below, LLM input is stored as <span class="font-mono bg-gray-200/80 px-1 rounded">[omitted]</span> (to avoid repeating full context).
+                    Full inbound payload is shown here.
+                  </p>
+                </div>
+                <svg class="log-io-section-chevron w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </summary>
+
               <div class="p-4 bg-white">
                 <template v-if="log.raw_input">
                   <p
@@ -219,14 +232,23 @@
                 </template>
                 <p v-else class="text-sm text-gray-500">No input payload recorded.</p>
               </div>
-            </section>
+            </details>
 
             <!-- Middle: Output (LLM only) -->
-            <section class="rounded-lg border border-gray-200 overflow-hidden min-w-0">
-              <div class="px-4 py-2 bg-gray-100 border-b border-gray-200">
-                <h4 class="text-sm font-semibold text-gray-900">Output</h4>
-                <p class="text-xs text-gray-500 mt-0.5">LLM block only (not full forwarded message)</p>
-              </div>
+            <details class="rounded-lg border border-gray-200 overflow-hidden min-w-0 log-io-section" open>
+              <summary
+                class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3
+                       [&::-webkit-details-marker]:hidden"
+              >
+                <div class="min-w-0">
+                  <h4 class="text-sm font-semibold text-gray-900">Output</h4>
+                  <p class="text-xs text-gray-500 mt-0.5">LLM block only (not full forwarded message)</p>
+                </div>
+                <svg class="log-io-section-chevron w-4 h-4 text-gray-500 shrink-0 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                </svg>
+              </summary>
+
               <div class="p-4 bg-white">
                 <template v-if="hasLlmOutput(log)">
                   <p
@@ -244,7 +266,7 @@
                 </template>
                 <p v-else class="text-sm text-gray-500">No LLM output block for this run.</p>
               </div>
-            </section>
+            </details>
 
             <!-- Bottom: Trace (collapsed by default) -->
             <details class="log-trace-shell rounded-lg border border-gray-200 overflow-hidden min-w-0">
@@ -253,7 +275,7 @@
               >
                 <div>
                   <h4 class="text-sm font-semibold text-gray-900">Trace</h4>
-                  <p class="text-xs text-gray-500 mt-0.5">Tool / assistant rounds (expand to view)</p>
+                  <p class="text-xs text-gray-500 mt-0.5">Each LLM / tool step; LLM input is [omitted] (see Input above)</p>
                 </div>
                 <svg
                   class="log-trace-shell-chevron w-5 h-5 text-gray-500 shrink-0 transition-transform duration-200"
@@ -266,7 +288,7 @@
               </summary>
               <div class="p-4 bg-white border-t border-gray-100">
                 <AgentTraceViewer v-if="log.trace" :trace="log.trace" :default-open="false" />
-                <p v-else class="text-sm text-gray-500">No trace recorded for this run.</p>
+                <p v-else class="text-sm text-gray-500">No trace for this run (e.g. timeout, no LLM call reached). See Input above.</p>
               </div>
             </details>
 
@@ -823,6 +845,11 @@ onMounted(async () => {
 
 /* Trace panel: chevron reflects open state (Tailwind 3.3 has no group-open on <details>) */
 .log-trace-shell[open] > summary .log-trace-shell-chevron {
+  transform: rotate(180deg);
+}
+
+/* Input/Output panels: chevron reflects open state */
+.log-io-section[open] > summary .log-io-section-chevron {
   transform: rotate(180deg);
 }
 </style>

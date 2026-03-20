@@ -155,6 +155,8 @@ func WriteAgentLogToRedis(entry AgentLogEntry) error {
 		return fmt.Errorf("AgentID is empty")
 	}
 
+	entry.Trace = CompactAgentLogTraceJSON(entry.Trace)
+
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent log entry: %w", err)
