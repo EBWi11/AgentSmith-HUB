@@ -341,6 +341,18 @@ func postAgentLogComment(c echo.Context) error {
 		})
 	}
 
+	locked, err := common.AgentLogMemoryCommitted(logID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "Failed to check log comment lock: " + err.Error(),
+		})
+	}
+	if locked {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error": "memory has already been applied for this log; further comments are not allowed",
+		})
+	}
+
 	author := c.Request().Header.Get("X-User")
 	if author == "" {
 		author = "anonymous"

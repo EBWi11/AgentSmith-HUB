@@ -1481,15 +1481,25 @@ export const hubApi = {
     }
   },
 
-  async generateAgentMemoryFromLog(agentId, logId) {
+  async generateAgentMemoryFromLog(agentId, logId, opts = {}) {
     try {
-      const response = await api.post(`/agents/${encodeURIComponent(agentId)}/memory-notes/generate-from-log`, {
-        log_id: logId
-      });
+      const body = { log_id: logId };
+      if (opts.comment != null && String(opts.comment).trim() !== '') {
+        body.comment = String(opts.comment).trim();
+        if (opts.tag != null && String(opts.tag).trim() !== '') {
+          body.tag = String(opts.tag).trim();
+        }
+      }
+      const response = await api.post(`/agents/${encodeURIComponent(agentId)}/memory-notes/generate-from-log`, body);
       return response.data;
     } catch (error) {
       console.error('Error generating agent memory from log:', error);
-      throw new Error(error.response?.data?.error || error.message || 'Failed to generate memory from log');
+      const msg =
+        error.response?.data?.error || error.message || 'Failed to generate memory from log';
+      const err = new Error(msg);
+      err.status = error.response?.status;
+      err.data = error.response?.data;
+      throw err;
     }
   },
 

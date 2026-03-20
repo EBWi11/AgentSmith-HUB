@@ -117,9 +117,9 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 		NodeID:              common.GetNodeID(),
 		AgentID:             a.Id,
 		ProjectNodeSequence: a.ProjectNodeSequence,
-		RawInput:            truncateForLog(origJSON),
-		RawOutput:           truncateForLog(outJSON),
-		Trace:               truncateForLog(traceJSON),
+		RawInput:            origJSON,
+		RawOutput:           outJSON,
+		Trace:               traceJSON,
 		Error:               errStr,
 	})
 

@@ -4231,6 +4231,12 @@ function getRulesetTypeInfo(item) {
 <style scoped>
 .sidebar-scroll-region {
   -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;  /* IE and old Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+
+.sidebar-scroll-region::-webkit-scrollbar {
+  display: none;             /* Chrome/Safari/Edge (Chromium) */
 }
 </style>
 

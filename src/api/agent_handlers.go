@@ -145,9 +145,12 @@ func cancelAgentUpgrade(c echo.Context) error {
 	})
 }
 
-// updateAgentMemoryNotes appends summarized memory notes to an agent config.
-// It expects a JSON body with:
-// { "notes": "...", "log_id": "...", "source_comment_ids": ["..."] }.
+// updateAgentMemoryNotes updates agent memory_notes on the leader.
+// JSON body:
+//   - notes (required): full memory body when mode=replace, or fragment to append when mode=append
+//   - mode (optional): "replace" (default, same semantics as generate-from-log) or "append" (legacy)
+//   - expected_memory_notes_revision (optional): if set, must match current revision or 409
+//   - log_id, source_comment_ids (optional): attach result to agent log comments
 func updateAgentMemoryNotes(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -157,9 +160,11 @@ func updateAgentMemoryNotes(c echo.Context) error {
 	}
 
 	var req struct {
-		Notes            string   `json:"notes"`
-		LogID            string   `json:"log_id"`
-		SourceCommentIDs []string `json:"source_comment_ids"`
+		Notes                       string   `json:"notes"`
+		LogID                       string   `json:"log_id"`
+		SourceCommentIDs            []string `json:"source_comment_ids"`
+		Mode                        string   `json:"mode"`
+		ExpectedMemoryNotesRevision *int     `json:"expected_memory_notes_revision"`
 	}
 	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Notes) == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -187,24 +192,23 @@ func updateAgentMemoryNotes(c echo.Context) error {
 		}
 	}
 
-	// Resolve agent raw config (prefer temp if exists).
-	var raw string
-	tempPath, tempExists := GetComponentPath("agent", id, true)
-	if tempExists {
-		if content, err := ReadComponent(tempPath); err == nil {
-			raw = content
-		}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = "replace"
 	}
-	if raw == "" {
-		if v, ok := project.GetAgentNew(id); ok {
-			raw = v
-		} else if a, exists := project.GetAgent(id); exists {
-			raw = a.RawConfig
-		}
+	if mode != "replace" && mode != "append" {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": `mode must be "replace" or "append"`,
+		})
 	}
-	if raw == "" {
+
+	unlock := acquireAgentMemoryWriteLock(id)
+	defer unlock()
+
+	raw, err := loadAgentYAMLForMemoryUpdates(id)
+	if err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{
-			"error": "agent not found: " + id,
+			"error": err.Error(),
 		})
 	}
 
@@ -215,12 +219,25 @@ func updateAgentMemoryNotes(c echo.Context) error {
 		})
 	}
 
-	notes := strings.TrimSpace(req.Notes)
-	if cfg.MemoryNotes != "" {
-		cfg.MemoryNotes = strings.TrimSpace(cfg.MemoryNotes) + "\n" + notes
-	} else {
-		cfg.MemoryNotes = notes
+	if req.ExpectedMemoryNotesRevision != nil && *req.ExpectedMemoryNotesRevision != cfg.MemoryNotesRevision {
+		return c.JSON(http.StatusConflict, map[string]interface{}{
+			"error":                 "expected_memory_notes_revision does not match current value",
+			"memory_notes_revision": cfg.MemoryNotesRevision,
+		})
 	}
+
+	notes := strings.TrimSpace(req.Notes)
+	switch mode {
+	case "replace":
+		cfg.MemoryNotes = notes
+	case "append":
+		if cfg.MemoryNotes != "" {
+			cfg.MemoryNotes = strings.TrimSpace(cfg.MemoryNotes) + "\n" + notes
+		} else {
+			cfg.MemoryNotes = notes
+		}
+	}
+	cfg.MemoryNotesRevision++
 
 	updated, err := yaml.Marshal(&cfg)
 	if err != nil {
@@ -231,8 +248,6 @@ func updateAgentMemoryNotes(c echo.Context) error {
 
 	updatedStr := string(updated)
 
-	// Auto-commit: write pending content to memory and apply immediately,
-	// so the change is persisted to main config and runtime is refreshed.
 	project.SetAgentNew(id, updatedStr)
 	reloadReq := &ComponentReloadRequest{
 		Type:        "agent",
@@ -260,7 +275,6 @@ func updateAgentMemoryNotes(c echo.Context) error {
 		})
 	}
 
-	// If log_id is provided, append a generated memory summary to the same Agent Log comments.
 	if strings.TrimSpace(req.LogID) != "" {
 		_ = common.AppendAgentLogComment(strings.TrimSpace(req.LogID), common.AgentLogComment{
 			Type:             "memory_summary",
@@ -274,13 +288,15 @@ func updateAgentMemoryNotes(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  "ok",
-		"message": "memory_notes appended and auto-committed",
+		"status":                "ok",
+		"message":               "memory_notes updated and auto-committed",
+		"memory_notes_revision": cfg.MemoryNotesRevision,
 	})
 }
 
-// generateAgentMemoryFromLog builds memory notes from user comments on one log,
-// then auto-commits to the target agent.
+// generateAgentMemoryFromLog merges user comments with existing memory_notes (full replace:
+// review, compress, optimize; comments win on conflict), optionally using this log's
+// input/output/trace as background, then auto-commits to the target agent.
 func generateAgentMemoryFromLog(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -291,7 +307,10 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 	}
 
 	var req struct {
-		LogID string `json:"log_id"`
+		LogID                       string `json:"log_id"`
+		Comment                     string `json:"comment"`
+		Tag                         string `json:"tag"`
+		ExpectedMemoryNotesRevision *int   `json:"expected_memory_notes_revision"`
 	}
 	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.LogID) == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "log_id is required"})
@@ -304,6 +323,30 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 	}
 	if found == nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "log_id does not belong to this agent"})
+	}
+
+	locked, err := common.AgentLogMemoryCommitted(logID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to check log lock: " + err.Error()})
+	}
+	if locked {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "memory has already been applied for this log"})
+	}
+
+	if strings.TrimSpace(req.Comment) != "" {
+		author := c.Request().Header.Get("X-User")
+		if author == "" {
+			author = "anonymous"
+		}
+		if err := common.AppendAgentLogComment(logID, common.AgentLogComment{
+			Type:      "user_comment",
+			Author:    author,
+			Comment:   strings.TrimSpace(req.Comment),
+			Tag:       strings.TrimSpace(req.Tag),
+			CreatedAt: time.Now(),
+		}); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to append comment: " + err.Error()})
+		}
 	}
 
 	comments, err := common.GetAgentLogComments(logID, 100)
@@ -322,23 +365,32 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no user comments found for this log"})
 	}
 
-	// Load current config to include existing memory in summarization context.
-	var raw string
-	if v, ok := project.GetAgentNew(id); ok {
-		raw = v
-	} else if a, exists := project.GetAgent(id); exists {
-		raw = a.RawConfig
+	// Phase 1 — snapshot memory + revision under lock (do not hold lock during LLM).
+	unlockSnap := acquireAgentMemoryWriteLock(id)
+	rawSnap, err := loadAgentYAMLForMemoryUpdates(id)
+	if err != nil {
+		unlockSnap()
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
-	if raw == "" {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": "agent not found: " + id})
-	}
-
-	var cfg agent.AgentConfig
-	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+	var cfgSnap agent.AgentConfig
+	if err := yaml.Unmarshal([]byte(rawSnap), &cfgSnap); err != nil {
+		unlockSnap()
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse agent config: " + err.Error()})
 	}
+	rev := cfgSnap.MemoryNotesRevision
+	memSnap := cfgSnap.MemoryNotes
+	sysSnap := cfgSnap.SystemPrompt
+	unlockSnap()
 
-	summary, err := agent.GenerateMemorySummary("", id, cfg.MemoryNotes, userComments)
+	if req.ExpectedMemoryNotesRevision != nil && *req.ExpectedMemoryNotesRevision != rev {
+		return c.JSON(http.StatusConflict, map[string]interface{}{
+			"error":                 "expected_memory_notes_revision does not match current value",
+			"memory_notes_revision": rev,
+		})
+	}
+
+	runCtx := agent.BuildMemoryRunContext(found)
+	summary, err := agent.GenerateMemorySummary("", id, sysSnap, memSnap, userComments, runCtx)
 	if err != nil {
 		_ = common.AppendAgentLogComment(logID, common.AgentLogComment{
 			Type:      "memory_summary",
@@ -351,14 +403,29 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate memory summary: " + err.Error()})
 	}
 
-	// Reuse update endpoint logic by appending and committing directly here.
-	cfg.MemoryNotes = strings.TrimSpace(cfg.MemoryNotes)
-	if cfg.MemoryNotes != "" {
-		cfg.MemoryNotes += "\n" + strings.TrimSpace(summary)
-	} else {
-		cfg.MemoryNotes = strings.TrimSpace(summary)
+	// Phase 2 — commit if revision unchanged; otherwise 409 (caller may retry).
+	unlockCommit := acquireAgentMemoryWriteLock(id)
+	defer unlockCommit()
+
+	rawNow, err := loadAgentYAMLForMemoryUpdates(id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	updated, err := yaml.Marshal(&cfg)
+	var cfgNow agent.AgentConfig
+	if err := yaml.Unmarshal([]byte(rawNow), &cfgNow); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse agent config: " + err.Error()})
+	}
+	if cfgNow.MemoryNotesRevision != rev {
+		return c.JSON(http.StatusConflict, map[string]interface{}{
+			"error":                 "agent memory_notes was updated concurrently; refresh and retry",
+			"memory_notes_revision": cfgNow.MemoryNotesRevision,
+		})
+	}
+
+	cfgNow.MemoryNotes = strings.TrimSpace(summary)
+	cfgNow.MemoryNotesRevision = rev + 1
+
+	updated, err := yaml.Marshal(&cfgNow)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to marshal updated agent config: " + err.Error()})
 	}
@@ -368,7 +435,7 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		Type:        "agent",
 		ID:          id,
 		NewContent:  updatedStr,
-		OldContent:  raw,
+		OldContent:  rawNow,
 		Source:      SourceChangePush,
 		SkipVerify:  false,
 		WriteToFile: true,
@@ -395,14 +462,16 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		CreatedAt:        time.Now(),
 	}); err != nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"status":  "ok",
-			"summary": summary,
-			"warning": "memory committed but failed to append summary comment",
+			"status":                "ok",
+			"summary":               summary,
+			"memory_notes_revision": cfgNow.MemoryNotesRevision,
+			"warning":               "memory committed but failed to append summary comment",
 		})
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"status":  "ok",
-		"summary": summary,
+		"status":                "ok",
+		"summary":               summary,
+		"memory_notes_revision": cfgNow.MemoryNotesRevision,
 	})
 }

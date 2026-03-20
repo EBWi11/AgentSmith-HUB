@@ -62,9 +62,9 @@ type chatRequestWithTools map[string]interface{}
 type chatResponseWithTools struct {
 	Choices []struct {
 		Message struct {
-			Role       string          `json:"role"`
-			Content    string          `json:"content"`
-			ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+			Role      string     `json:"role"`
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 			// Provider-specific reasoning fields (if returned)
 			ReasoningContent string          `json:"reasoning_content,omitempty"`
 			ThinkingBlocks   json.RawMessage `json:"thinking_blocks,omitempty"`
@@ -247,9 +247,66 @@ func shouldEnableKimiThinking(model, reasoningMode string) bool {
 	return false
 }
 
-// GenerateMemorySummary builds concise memory notes from user comments.
-// Model defaults to HubConfig.LLMModel when empty.
-func GenerateMemorySummary(model string, agentID string, existingMemory string, comments []common.AgentLogComment) (string, error) {
+const (
+	memoryRunContextMaxField   = 12000
+	memorySystemPromptMaxField = 32000
+)
+
+func truncateMemoryContextField(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) <= memoryRunContextMaxField {
+		return s
+	}
+	return s[:memoryRunContextMaxField] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(s))
+}
+
+// MemoryRunContext is optional background from one agent log run. It must not
+// override existing_memory or user comments; it only helps interpret feedback.
+type MemoryRunContext struct {
+	Error     string `json:"error,omitempty"`
+	RawInput  string `json:"raw_input,omitempty"`
+	RawOutput string `json:"raw_output,omitempty"`
+	Trace     string `json:"trace,omitempty"`
+}
+
+// BuildMemoryRunContext returns truncated run context for memory regeneration, or nil if empty.
+func BuildMemoryRunContext(entry *common.AgentLogEntry) *MemoryRunContext {
+	if entry == nil {
+		return nil
+	}
+	ctx := &MemoryRunContext{
+		Error:     truncateMemoryContextField(entry.Error),
+		RawInput:  truncateMemoryContextField(entry.RawInput),
+		RawOutput: truncateMemoryContextField(entry.RawOutput),
+		Trace:     truncateMemoryContextField(entry.Trace),
+	}
+	if ctx.Error == "" && ctx.RawInput == "" && ctx.RawOutput == "" && ctx.Trace == "" {
+		return nil
+	}
+	return ctx
+}
+
+func truncateSystemPromptForMemory(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) <= memorySystemPromptMaxField {
+		return s
+	}
+	return s[:memorySystemPromptMaxField] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(s))
+}
+
+// GenerateMemorySummary performs a full review of existing agent memory_notes together
+// with user comments on a log run, and returns the complete replacement text for
+// memory_notes (plain text, not JSON). On conflicts, newer user comments win.
+// systemPrompt is the agent's base system prompt (read-only context: what this agent does).
+// runCtx is optional background (input/output/trace) and must not be treated as
+// the only source of truth. Model defaults to HubConfig.LLMModel when empty.
+func GenerateMemorySummary(model string, agentID string, systemPrompt string, existingMemory string, comments []common.AgentLogComment, runCtx *MemoryRunContext) (string, error) {
 	if len(comments) == 0 {
 		return "", fmt.Errorf("no comments to summarize")
 	}
@@ -257,25 +314,38 @@ func GenerateMemorySummary(model string, agentID string, existingMemory string, 
 	commentsJSON, _ := json.Marshal(comments)
 	userInput := map[string]interface{}{
 		"agent_id":        agentID,
-		"existing_memory": existingMemory,
+		"existing_memory": strings.TrimSpace(existingMemory),
 		"comments":        json.RawMessage(commentsJSON),
+	}
+	if sp := truncateSystemPromptForMemory(systemPrompt); sp != "" {
+		userInput["system_prompt"] = sp
+	}
+	if runCtx != nil {
+		userInput["run_context"] = runCtx
 	}
 	userRaw, _ := json.Marshal(userInput)
 
+	system := `You are AgentSmith-HUB memory builder. Your job is a full pass over the agent's Memory Notes field (existing_memory in the JSON), not a single incremental bullet.
+
+Inputs in the user message JSON:
+- system_prompt (optional): the agent's configured base system prompt — read-only context so you know this agent's role, output shape, and domain. Do NOT copy it into memory_notes verbatim; do NOT edit or replace it; use it only to align memory bullets with what the agent is actually supposed to do.
+- existing_memory: current persisted guidance (may be empty).
+- comments: human feedback for THIS review cycle (authoritative when they conflict with older material).
+- run_context (optional): snippets from this agent run (input, output, trace, error). Use only to understand what the comments refer to. Do NOT replace or ignore existing_memory based on run_context alone.
+
+Requirements:
+1) Merge existing_memory with the themes in comments: deduplicate, compress redundant lines, and keep durable guidance (patterns, FP/TP heuristics, prompt/style tweaks, confidence rules).
+2) If anything in existing_memory conflicts with comments, follow the comments and drop or rewrite the old line.
+3) Prefer stable rules over one-off volatile details (exact IPs, ephemeral IDs) unless the comments explicitly require them.
+4) Produce the COMPLETE new memory_notes body as plain text (no JSON, no markdown fences). Structure with short bullets or numbered items is fine. This output replaces the entire memory_notes field — do not assume it will be appended.
+5) Stay within reasonable length: compress aggressively while preserving distinct rules.`
+
 	messages := []Message{
-		{
-			Role: "system",
-			Content: "You are AgentSmith-HUB memory builder. Summarize user comments into 3-6 concise, durable guidance bullets for future decisions. " +
-				"Output plain text only (no JSON). Focus on reusable decision patterns, known false positives, and confidence adjustments. " +
-				"Avoid specific volatile details like exact IPs/usernames.",
-		},
-		{
-			Role:    "user",
-			Content: string(userRaw),
-		},
+		{Role: "system", Content: system},
+		{Role: "user", Content: string(userRaw)},
 	}
 
-	resp, err := callChatWithTools(model, messages, nil, 512, 0, "disabled", 0)
+	resp, err := callChatWithTools(model, messages, nil, 4096, 0, "disabled", 0)
 	if err != nil {
 		return "", err
 	}

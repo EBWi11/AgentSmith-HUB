@@ -138,35 +138,38 @@
           :key="`${log.node_id}-${log.timestamp}-${index}`"
           class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors"
         >
-          <div class="flex items-center justify-between p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
+          <div class="flex items-start justify-between gap-3 p-3 bg-gray-50 border-b border-gray-200 cursor-pointer"
                @click="toggleLogDetail(index)">
-            <div class="flex items-center space-x-3">
-              <div class="flex items-center space-x-2">
-                <!-- Source Icon (always Agent here) -->
-                <div class="flex items-center justify-center w-8 h-8 rounded-full bg-green-500">
-                  <span class="text-white text-xs font-medium">A</span>
-                </div>
-                
-                <!-- Log Info -->
-                <div>
-                  <h3 class="font-medium text-gray-900">
-                    {{ log.agent_id || extractAgentFromContext(log) || 'Unknown Agent' }}
-                  </h3>
-                  <div class="flex items-center space-x-2 text-sm text-gray-500">
-                    <span>{{ formatTimestamp(log.timestamp) }}</span>
-                    <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
-                      {{ log.node_id }}
-                    </span>
-                    <span v-if="log.project_node_sequence || extractProjectFromContext(log)" class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium">
-                      {{ log.project_node_sequence || extractProjectFromContext(log) }}
-                    </span>
-                    <span v-if="log.error" class="text-red-600 truncate max-w-xs" :title="log.error">{{ log.error }}</span>
-                  </div>
+            <div class="flex items-start space-x-3 min-w-0 flex-1">
+              <div class="flex items-center justify-center w-8 h-8 rounded-full bg-green-500 shrink-0 mt-0.5">
+                <span class="text-white text-xs font-medium">A</span>
+              </div>
+              <div class="min-w-0 flex-1">
+                <h3 class="font-medium text-gray-900 break-words">
+                  {{ log.agent_id || extractAgentFromContext(log) || 'Unknown Agent' }}
+                </h3>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-sm text-gray-500">
+                  <span class="shrink-0">{{ formatTimestamp(log.timestamp) }}</span>
+                  <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium break-all">
+                    {{ log.node_id }}
+                  </span>
+                  <span
+                    v-if="log.project_node_sequence || extractProjectFromContext(log)"
+                    class="text-xs text-purple-700 bg-purple-100 px-2 py-1 rounded font-medium break-all max-w-full"
+                  >
+                    {{ log.project_node_sequence || extractProjectFromContext(log) }}
+                  </span>
+                  <span
+                    v-if="log.error"
+                    class="text-red-600 text-sm break-words whitespace-pre-wrap w-full"
+                  >
+                    {{ log.error }}
+                  </span>
                 </div>
               </div>
             </div>
             
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 shrink-0">
               <!-- Level Badge -->
               <span class="px-2 py-1 text-xs font-medium rounded-full" :class="getLevelClass(log.level)">
                 {{ log.level }}
@@ -181,135 +184,177 @@
             </div>
           </div>
           
-          <!-- Log Details -->
-          <div v-if="expandedLogs.has(index)" class="p-4 bg-white">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <!-- Basic Info -->
-              <div>
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Call Details</h4>
-                <dl class="space-y-1 text-sm">
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Agent:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ log.agent_id || extractAgentFromContext(log) || '-' }}</dd>
-                  </div>
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Project Node:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ log.project_node_sequence || extractProjectFromContext(log) || '-' }}</dd>
-                  </div>
-                  <div class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Timestamp:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(log.timestamp) }}</dd>
-                  </div>
-                  <div v-if="log.error" class="grid grid-cols-3 gap-1">
-                    <dt class="text-gray-500">Error:</dt>
-                    <dd class="col-span-2 text-red-700 font-medium whitespace-pre-wrap break-words">{{ log.error }}</dd>
-                  </div>
-                </dl>
+          <!-- Log Details: Input / Output / Trace (stacked) -->
+          <div v-if="expandedLogs.has(index)" class="p-4 bg-white space-y-4 min-w-0">
+            <!-- Top: Input -->
+            <section class="rounded-lg border border-gray-200 overflow-hidden min-w-0">
+              <div class="px-4 py-2 bg-gray-100 border-b border-gray-200">
+                <h4 class="text-sm font-semibold text-gray-900">Input</h4>
+                <p class="text-xs text-gray-500 mt-0.5">Raw event JSON (full)</p>
               </div>
+              <div class="p-4 bg-white">
+                <template v-if="log.raw_input">
+                  <p
+                    v-if="isTruncatedPayload(log.raw_input)"
+                    class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2"
+                  >
+                    This row contains a truncated JSON snapshot (older hub or oversized event). Upgrade / redeploy hub for larger agent log payloads, or export raw from upstream.
+                  </p>
+                  <JsonViewer
+                    v-if="parseForJsonViewer(log.raw_input) != null"
+                    :value="parseForJsonViewer(log.raw_input)"
+                    height="auto"
+                    expand-vertical
+                    class="min-w-0"
+                  />
+                  <div v-else class="bg-gray-50 border border-gray-200 rounded-md p-3 min-w-0">
+                    <pre class="text-sm text-gray-800 whitespace-pre-wrap break-words font-mono leading-relaxed">{{ log.raw_input }}</pre>
+                  </div>
+                </template>
+                <p v-else class="text-sm text-gray-500">No input payload recorded.</p>
+              </div>
+            </section>
 
-              <!-- Raw Input -->
-              <div v-if="log.raw_input">
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Input Event</h4>
-                <div class="bg-gray-50 border border-gray-200 rounded-md p-3">
-                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.raw_input }}</pre>
-                </div>
+            <!-- Middle: Output (LLM only) -->
+            <section class="rounded-lg border border-gray-200 overflow-hidden min-w-0">
+              <div class="px-4 py-2 bg-gray-100 border-b border-gray-200">
+                <h4 class="text-sm font-semibold text-gray-900">Output</h4>
+                <p class="text-xs text-gray-500 mt-0.5">LLM block only (not full forwarded message)</p>
               </div>
+              <div class="p-4 bg-white">
+                <template v-if="hasLlmOutput(log)">
+                  <p
+                    v-if="log.raw_output && isTruncatedPayload(log.raw_output)"
+                    class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2"
+                  >
+                    Raw output was truncated when stored; the LLM block below may be incomplete or missing.
+                  </p>
+                  <JsonViewer
+                    :value="extractLlmOnlyFromRawOutput(log)"
+                    height="auto"
+                    expand-vertical
+                    class="min-w-0"
+                  />
+                </template>
+                <p v-else class="text-sm text-gray-500">No LLM output block for this run.</p>
+              </div>
+            </section>
 
-              <!-- Raw Output / Trace -->
-              <div>
-                <h4 class="text-sm font-medium text-gray-900 mb-2">Output & Trace</h4>
-                <div v-if="log.raw_output" class="bg-gray-50 border border-gray-200 rounded-md p-3 mb-3">
-                  <div class="text-xs font-semibold text-gray-500 mb-1">Output</div>
-                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.raw_output }}</pre>
+            <!-- Bottom: Trace (collapsed by default) -->
+            <details class="log-trace-shell rounded-lg border border-gray-200 overflow-hidden min-w-0">
+              <summary
+                class="cursor-pointer list-none px-4 py-3 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-2 hover:bg-gray-200/80 select-none [&::-webkit-details-marker]:hidden"
+              >
+                <div>
+                  <h4 class="text-sm font-semibold text-gray-900">Trace</h4>
+                  <p class="text-xs text-gray-500 mt-0.5">Tool / assistant rounds (expand to view)</p>
                 </div>
-                <div v-if="log.trace" class="bg-gray-50 border border-gray-200 rounded-md p-3">
-                  <div class="text-xs font-semibold text-gray-500 mb-1">Trace</div>
-                  <pre class="text-sm text-gray-700 whitespace-pre-wrap break-all">{{ log.trace }}</pre>
-                </div>
+                <svg
+                  class="log-trace-shell-chevron w-5 h-5 text-gray-500 shrink-0 transition-transform duration-200"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </summary>
+              <div class="p-4 bg-white border-t border-gray-100">
+                <AgentTraceViewer v-if="log.trace" :trace="log.trace" :default-open="false" />
+                <p v-else class="text-sm text-gray-500">No trace recorded for this run.</p>
               </div>
-            </div>
+            </details>
 
             <!-- Comments -->
-            <div class="mt-4 border-t border-gray-200 pt-4">
-              <h4 class="text-sm font-medium text-gray-900 mb-2">Comments</h4>
-              <div v-if="(log.comments && log.comments.length)" class="space-y-2 mb-3">
+            <div class="mt-4 border-t border-gray-200 pt-5">
+              <div class="flex items-baseline justify-between gap-2 mb-3">
+                <h4 class="text-sm font-semibold text-gray-900">Comments</h4>
+                <span v-if="log.comments && log.comments.length" class="text-xs text-gray-500 tabular-nums">
+                  {{ log.comments.length }} total
+                </span>
+              </div>
+
+              <div v-if="(log.comments && log.comments.length)" class="space-y-3 mb-4">
                 <div
                   v-for="(c, ci) in log.comments"
                   :key="ci"
-                  class="text-sm bg-gray-50 border border-gray-200 rounded-md px-3 py-2"
+                  class="text-sm rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden"
+                  :class="c.type === 'memory_summary' ? 'border-l-4 border-l-emerald-500' : 'border-l-4 border-l-blue-500'"
                 >
-                  <div class="flex items-center justify-between mb-1">
-                    <span class="font-medium text-gray-800">
-                      {{ c.author || 'user' }}
-                    </span>
-                    <span class="text-xs text-gray-500">
-                      {{ formatTimestamp(c.created_at) }}
-                    </span>
+                  <div class="px-3 py-2.5">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <span class="font-medium text-gray-900">
+                        {{ c.author || 'user' }}
+                      </span>
+                      <span class="text-xs text-gray-500 shrink-0">
+                        {{ formatTimestamp(c.created_at) }}
+                      </span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 mb-2">
+                      <span
+                        v-if="c.type === 'memory_summary'"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"
+                      >
+                        Memory Summary
+                      </span>
+                      <span
+                        v-if="c.tag"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-800 ring-1 ring-blue-100"
+                      >
+                        {{ c.tag }}
+                      </span>
+                      <span
+                        v-if="c.status"
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-50 text-gray-700 ring-1 ring-gray-200"
+                      >
+                        {{ c.status }}
+                      </span>
+                    </div>
+                    <p class="text-gray-800 whitespace-pre-wrap break-words leading-relaxed text-[13px]">
+                      {{ c.comment }}
+                    </p>
                   </div>
-                  <div class="flex items-center space-x-2 mb-1">
-                    <span
-                      v-if="c.type === 'memory_summary'"
-                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
-                    >
-                      Memory Summary
-                    </span>
-                    <span
-                      v-if="c.tag"
-                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-                    >
-                      {{ c.tag }}
-                    </span>
-                    <span
-                      v-if="c.status"
-                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700"
-                    >
-                      {{ c.status }}
-                    </span>
-                  </div>
-                  <p class="text-gray-800 whitespace-pre-wrap break-words">
-                    {{ c.comment }}
-                  </p>
                 </div>
               </div>
 
-              <!-- Add comment -->
-              <div class="space-y-2">
-                <div class="grid grid-cols-1 md:grid-cols-6 gap-2">
-                  <div class="md:col-span-4">
-                    <textarea
-                      v-model="newComment.text"
-                      rows="2"
-                      class="filter-input w-full"
-                      placeholder="Add a comment about this agent decision..."
-                    ></textarea>
-                  </div>
-                  <div class="md:col-span-2 flex flex-col space-y-2">
-                    <select v-model="newComment.tag" class="filter-select">
-                      <option value="">Tag (optional)</option>
+              <!-- Composer (one-shot: comment + memory; locked after success) -->
+              <div
+                v-if="hasLogMemoryCommitted(log)"
+                class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900"
+              >
+                Memory has been applied for this log from your feedback. Further comments are disabled.
+              </div>
+              <div v-else class="rounded-xl border border-gray-200 bg-gradient-to-b from-gray-50 to-white p-4 shadow-sm">
+                <label :for="'agent-log-comment-' + index" class="block text-xs font-medium text-gray-600 mb-1.5">Feedback</label>
+                <textarea
+                  :id="'agent-log-comment-' + index"
+                  v-model="newComment.text"
+                  rows="3"
+                  class="filter-input w-full resize-y min-h-[5rem] text-sm"
+                  placeholder="Describe what to remember (false positive, prompt tweak, etc.). This will be saved and merged into agent memory."
+                ></textarea>
+
+                <div class="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div class="w-full sm:max-w-xs">
+                    <label :for="'agent-log-tag-' + index" class="block text-xs font-medium text-gray-600 mb-1.5">Tag</label>
+                    <select :id="'agent-log-tag-' + index" v-model="newComment.tag" class="filter-select w-full text-sm">
                       <option value="fp">False Positive</option>
                       <option value="tp">True Positive</option>
                       <option value="improve_prompt">Improve Prompt</option>
-                      <option value="other">Other</option>
                     </select>
+                  </div>
+
+                  <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:justify-end sm:pb-0.5 w-full sm:w-auto">
                     <button
-                      @click.stop="submitComment(log)"
-                      :disabled="!newComment.text || submittingComment"
-                      class="btn btn-secondary btn-sm w-full"
+                      type="button"
+                      @click.stop="submitFeedbackAndMemory(log)"
+                      :disabled="!newComment.text || submittingFeedback"
+                      class="btn btn-primary btn-sm w-full sm:w-auto justify-center min-w-[10rem]"
+                      title="Save your note and update agent memory in one step"
                     >
-                      <span v-if="submittingComment">Submitting...</span>
-                      <span v-else>Add Comment</span>
+                      <span v-if="submittingFeedback">Working…</span>
+                      <span v-else>Submit &amp; update memory</span>
                     </button>
                   </div>
-                </div>
-                <div class="flex justify-end">
-                  <button
-                    @click.stop="generateMemory(log)"
-                    :disabled="generatingMemory || !(log.comments && log.comments.length)"
-                    class="btn btn-secondary btn-sm"
-                  >
-                    <span v-if="generatingMemory">Generating...</span>
-                    <span v-else>Generate Memory & Commit</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -351,6 +396,8 @@ import { ref, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
+import AgentTraceViewer from '../components/AgentTraceViewer.vue'
+import JsonViewer from '../components/JsonViewer.vue'
 
 const $message = inject('$message')
 const dataCache = useDataCacheStore()
@@ -379,10 +426,9 @@ const pageSize = ref(50)
 const expandedLogs = ref(new Set())
 const newComment = reactive({
   text: '',
-  tag: ''
+  tag: 'fp'
 })
-const submittingComment = ref(false)
-const generatingMemory = ref(false)
+const submittingFeedback = ref(false)
 
 const totalPages = computed(() => {
   return Math.max(1, Math.ceil(totalCount.value / pageSize.value))
@@ -541,9 +587,74 @@ function formatTimestamp(ts) {
   return new Date(ts).toLocaleString()
 }
 
-function formatFullTimestamp(ts) {
-  if (!ts) return ''
-  return new Date(ts).toISOString()
+const TRUNCATED_AGENT_LOG_SUFFIX = /\.\.\. \(truncated, \d+ bytes total\)\s*$/
+
+function stripAgentLogTruncationSuffix(text) {
+  return String(text).replace(TRUNCATED_AGENT_LOG_SUFFIX, '')
+}
+
+function isTruncatedPayload(s) {
+  if (s === null || s === undefined) return false
+  return TRUNCATED_AGENT_LOG_SUFFIX.test(String(s))
+}
+
+/** Parsed value for JsonViewer, or null if not valid JSON. */
+function parseForJsonViewer(raw) {
+  if (raw === null || raw === undefined || raw === '') return null
+  if (typeof raw === 'object') return raw
+  const text = String(raw)
+  const tryParse = (t) => {
+    try {
+      return JSON.parse(t)
+    } catch {
+      return null
+    }
+  }
+  let v = tryParse(text)
+  if (v !== null) return v
+  const stripped = stripAgentLogTruncationSuffix(text)
+  if (stripped !== text) {
+    v = tryParse(stripped)
+    if (v !== null) return v
+  }
+  return null
+}
+
+/**
+ * Agent raw_output is the full forwarded message (original fields + llm block).
+ * UI should show only the LLM portion here; Trace still holds tool/LLM steps.
+ */
+function extractLlmOnlyFromRawOutput(log) {
+  const raw = log?.raw_output
+  if (raw === null || raw === undefined || raw === '') return null
+
+  let parsed
+  try {
+    parsed = typeof raw === 'object' ? raw : JSON.parse(stripAgentLogTruncationSuffix(String(raw)))
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+
+  const llm = parsed.llm
+  if (llm === null || llm === undefined) return null
+  if (typeof llm !== 'object' || Array.isArray(llm)) return llm
+
+  const agentId = log?.agent_id || extractAgentFromContext(log)
+  if (agentId && Object.prototype.hasOwnProperty.call(llm, agentId)) {
+    return llm[agentId]
+  }
+  return llm
+}
+
+function hasLlmOutput(log) {
+  const v = extractLlmOnlyFromRawOutput(log)
+  return v !== null && v !== undefined
+}
+
+function hasLogMemoryCommitted(log) {
+  const list = log?.comments || []
+  return list.some((c) => c.type === 'memory_summary' && c.status === 'committed')
 }
 
 function getLevelClass(level) {
@@ -582,40 +693,35 @@ function exportLogs() {
   document.body.removeChild(link)
 }
 
-async function submitComment(log) {
-  if (!newComment.text || submittingComment.value) return
-  submittingComment.value = true
+async function submitFeedbackAndMemory(log) {
+  const text = (newComment.text || '').trim()
+  if (!text || submittingFeedback.value) return
+  submittingFeedback.value = true
   try {
-    await hubApi.addAgentLogComment(log.agent_id, log.id, {
-      comment: newComment.text,
-      tag: newComment.tag || ''
+    const resp = await hubApi.generateAgentMemoryFromLog(log.agent_id, log.id, {
+      comment: text,
+      tag: newComment.tag
     })
     newComment.text = ''
-    // Refresh logs to pick up new comments
-    await fetchLogs()
-    $message?.success?.('Comment added')
-  } catch (err) {
-    $message?.error?.('Failed to add comment: ' + err.message)
-  } finally {
-    submittingComment.value = false
-  }
-}
-
-async function generateMemory(log) {
-  if (generatingMemory.value) return
-  generatingMemory.value = true
-  try {
-    const resp = await hubApi.generateAgentMemoryFromLog(log.agent_id, log.id)
+    newComment.tag = 'fp'
     await fetchLogs()
     if (resp?.warning) {
       $message?.warning?.(resp.warning)
     } else {
-      $message?.success?.('Memory generated and committed')
+      $message?.success?.('Feedback saved and memory updated')
     }
   } catch (err) {
-    $message?.error?.('Failed to generate memory: ' + err.message)
+    if (err?.status === 409) {
+      await fetchLogs()
+      $message?.warning?.(
+        err.message ||
+          'Agent memory was updated elsewhere. Logs refreshed — review and submit again if needed.'
+      )
+    } else {
+      $message?.error?.('Failed to submit: ' + err.message)
+    }
   } finally {
-    generatingMemory.value = false
+    submittingFeedback.value = false
   }
 }
 
@@ -685,8 +791,21 @@ onMounted(async () => {
   @apply border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-blue-500;
 }
 
+.btn-primary {
+  @apply border-transparent text-white bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600;
+}
+
+.btn-ghost {
+  @apply border-gray-200 text-gray-600 bg-white hover:bg-gray-50 hover:text-gray-900 focus:ring-gray-400 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
 .btn-sm {
-  @apply px-2 py-1 text-xs;
+  @apply px-3 py-1.5 text-xs;
+}
+
+/* Trace panel: chevron reflects open state (Tailwind 3.3 has no group-open on <details>) */
+.log-trace-shell[open] > summary .log-trace-shell-chevron {
+  transform: rotate(180deg);
 }
 </style>
 

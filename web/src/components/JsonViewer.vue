@@ -3,6 +3,7 @@
     <pre
       ref="jsonContentRef"
       class="json-content"
+      :class="{ 'json-content--expand': expandVertical }"
       tabindex="0"
       v-html="highlightedJson"
     ></pre>
@@ -23,10 +24,23 @@ const props = defineProps({
   height: {
     type: String,
     default: '200px'
+  },
+  /** When true, drop max-height so parent scroll handles long JSON (e.g. agent logs). */
+  expandVertical: {
+    type: Boolean,
+    default: false
   }
 })
 
 const jsonContentRef = ref(null)
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
 
 // Format and highlight JSON using Prism
 const highlightedJson = computed(() => {
@@ -38,8 +52,8 @@ const highlightedJson = computed(() => {
       const parsed = JSON.parse(props.value)
       jsonString = JSON.stringify(parsed, null, 2)
     } catch {
-      // If not valid JSON, just return as is
-      return props.value
+      // Not valid JSON: show escaped plain text (avoid v-html XSS)
+      return escapeHtml(props.value)
     }
   } else {
     jsonString = JSON.stringify(props.value, null, 2)
@@ -95,6 +109,11 @@ function handleKeydown(event) {
   min-height: 60px;
   max-height: 400px;
   overflow-y: auto;
+}
+
+.json-content--expand {
+  max-height: none;
+  overflow-y: visible;
 }
 
 /* Override Prism theme colors for better visibility */

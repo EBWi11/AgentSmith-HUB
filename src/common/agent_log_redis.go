@@ -17,7 +17,7 @@ type AgentLogEntry struct {
 	ProjectNodeSequence string    `json:"project_node_sequence,omitempty"`
 
 	// RawInput and RawOutput are JSON-encoded snapshots of the message
-	// before and after agent processing (may be truncated upstream).
+	// before and after agent processing.
 	RawInput  string `json:"raw_input,omitempty"`
 	RawOutput string `json:"raw_output,omitempty"`
 
@@ -99,6 +99,21 @@ func GetAgentLogComments(logID string, limit int64) ([]AgentLogComment, error) {
 		}
 	}
 	return comments, nil
+}
+
+// AgentLogMemoryCommitted reports whether this log already has a successfully
+// committed memory summary (user flow is one-shot: no further comments after).
+func AgentLogMemoryCommitted(logID string) (bool, error) {
+	comments, err := GetAgentLogComments(logID, 200)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range comments {
+		if c.Type == "memory_summary" && c.Status == "committed" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // FindAgentLogByID locates an agent log by ID from the agent's Redis list.

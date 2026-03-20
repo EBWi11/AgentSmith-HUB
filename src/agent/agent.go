@@ -39,12 +39,15 @@ type AgentConfig struct {
 	//   - "disabled" (default): never send provider-specific reasoning params
 	//   - "enabled"           : always send reasoning params for supported models
 	//   - "auto"              : enable reasoning based on model name heuristics
-	ReasoningMode          string `yaml:"reasoning_mode"`
-	ReasoningBudgetTokens  int    `yaml:"reasoning_budget_tokens"`
+	ReasoningMode         string `yaml:"reasoning_mode"`
+	ReasoningBudgetTokens int    `yaml:"reasoning_budget_tokens"`
 
 	// MemoryNotes is a simple free-form field used to store
 	// summarized human feedback and long-term guidance for this agent.
 	MemoryNotes string `yaml:"memory_notes,omitempty"`
+	// MemoryNotesRevision increments on each successful memory_notes API update
+	// (generate-from-log or POST memory-notes) for optimistic concurrency.
+	MemoryNotesRevision int `yaml:"memory_notes_revision,omitempty"`
 
 	RawConfig string `yaml:"-"`
 	Path      string `yaml:"-"`
