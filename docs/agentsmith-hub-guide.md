@@ -410,7 +410,7 @@ memory_notes:
 | `timeout` | No | Duration string. Aborts the LLM call if processing exceeds this. Default `30s`. |
 | `reasoning_mode` | No | Provider/model-specific reasoning toggle: `disabled` (default), `enabled`, or `auto`. |
 | `reasoning_budget_tokens` | No | Optional reasoning token budget for compatible providers/models. |
-| `memory_notes` | No | Durable guidance merged into the effective system prompt. Recommended format is a YAML string array; legacy multiline string is still accepted. |
+| `memory_notes` | No | Durable guidance merged into the effective system prompt. Can also be automatically updated/extended via the Memory workflow (Memory Agent). Recommended format is a YAML string array; legacy multiline string is still accepted. |
 
 #### How It Works
 
@@ -418,7 +418,7 @@ memory_notes:
 2. The agent sends the event as JSON to the LLM with `system_prompt` and (if configured) tool definitions from skills and plugins.
 3. The LLM may respond with a JSON object or invoke tools in a **ReAct loop**, up to `max_rounds`.
 4. The LLM’s JSON output is merged into the event under **`msg["llm"][agentId]`**, so multiple agents in the same flow do not overwrite each other. The framework also adds `agent` (agent id) and `processing_time_ms` (milliseconds) into that same map.
-5. If the LLM fails or times out, the original event is passed through unchanged.
+5. If the LLM fails or times out, the agent writes an error to `msg["llm"][agentId]["error"]` and sets `_no_forward: true`, so the message is NOT forwarded to downstream components.
 
 #### LLM Result Shape
 
@@ -481,6 +481,7 @@ Agents support the same test flow as rulesets: open the agent component, use the
 
 `memory_notes` is for stable, durable guidance distilled from human feedback and run history. It is not a replacement for `system_prompt`; think of it as "what this agent has learned."
 
+- Note: `memory_notes` can also be automatically updated/extended by HUB's Memory workflow (e.g. via an automatic Memory Agent) based on review/run logs (typically appended; depending on the update mode it can also be replaced).
 - Prefer concise bullets that survive across runs (FP/TP heuristics, output style constraints, escalation thresholds).
 - Avoid one-off incident details; put those in comments/tickets instead.
 - Recommended YAML format is a sequence:
@@ -1298,7 +1299,7 @@ When you need to check if a field matches multiple values, you can use multi-val
 - Use OR logic: Any extension matches is sufficient
 - Use | as separator
 
-### 4.4 CEP Sequence Detection (Complex Event Processing)
+### 4.4 CEP: Complex Event Processing (CEP)
 
 The `<sequence>` element enables detection of ordered patterns across multiple events within a time window. Unlike single-event matching, sequence detection correlates separate events by shared fields and checks temporal ordering.
 
@@ -1444,6 +1445,60 @@ The engine correlates by positional mapping: `fw_block.src_ip` corresponds to `a
 </rule>
 ```
 
+#### Example 5: Using `<checklist>` for nested logic inside stages
+
+This stage uses `<checklist>` to express OR/NOT within the same event stage (instead of just `and`-only wrapping):
+
+```xml
+<rule id="failed_admin_or_root_then_exfil" name="Failed (admin|root) login with no MFA, then exfil">
+    <sequence within="10m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <checklist condition="is_login and (failed or denied) and (admin or root) and not mfa">
+                <check id="is_login" type="EQU" field="event_type">login</check>
+                <check id="failed" type="EQU" field="result">failed</check>
+                <check id="denied" type="EQU" field="result">denied</check>
+                <check id="admin" type="EQU" field="role">admin</check>
+                <check id="root" type="EQU" field="role">root</check>
+                <!-- if this flag exists and is true, the checklist condition will be false -->
+                <check id="mfa" type="EQU" field="mfa">true</check>
+            </checklist>
+        </event>
+
+        <event id="exfil">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+
+        <condition>login -> exfil</condition>
+    </sequence>
+
+    <append field="alert_type">login_to_exfil_no_mfa</append>
+    <append field="user_from_login">_$#login.user_id</append>
+</rule>
+```
+
+#### Example 6: Absence detection and “missing stage” field availability
+
+When using absence like `login -> !mfa`, the absent stage (`mfa`) does not contribute snapshots to the emitted output.
+So `_$#mfa.*` is not available in post-sequence operations; use data from the *present* stage instead.
+
+```xml
+<rule id="login_no_mfa" name="Login without MFA verification">
+    <sequence within="2m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+
+    <append field="alert_type">missing_mfa</append>
+    <append field="user_from_login">_$#login.user_id</append>
+</rule>
+```
+
 #### Cross-Event Field References
 
 When a sequence completes, fields from earlier events can be accessed using `_$#event_id.field` syntax:
@@ -1487,6 +1542,17 @@ By default, the engine uses processing time. Specify `event_time` to use the eve
 ```
 
 Supported formats: Unix epoch (seconds/milliseconds), ISO 8601, RFC 3339.
+
+#### Runtime Observation: Sequence Completion Outputs
+
+Sequence detection keeps internal state until the `<sequence>` condition is satisfied; during that period, the ruleset does not emit an output to downstream components. When the sequence completes (including absence detection like `a -> !b`), the engine builds the final enriched payload and then executes the post-sequence operations.
+
+On completion, the emitted payload is enriched with:
+- `_sequence_events`: `map[event_id] -> raw data` for every matched stage in the sequence
+- `_sequence_condition`: the compiled condition expression (e.g. the original `a -> b` expression)
+- Cross-event references for post-operations: use `_$#event_id.field` (internally the engine keeps `#<event_id>` snapshots during execution), but internal `#<event_id>` keys are removed before output is sent downstream
+
+If the sequence completes via absence (e.g. `login -> !mfa`), post-sequence operations execute only data-modifying types (`append`, `modify`, `del`, `plugin`), so non-modifying checks won’t run there.
 
 ## 🔧 Part 5: Advanced Features Detailed Explanation
 

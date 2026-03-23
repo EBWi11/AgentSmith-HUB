@@ -409,7 +409,7 @@ memory_notes:
 | `timeout` | 否 | 时间字符串。若处理超过此时长会中止 LLM 调用。默认 `30s`。 |
 | `reasoning_mode` | 否 | 推理开关：`disabled`（默认）、`enabled`、`auto`（是否发送 provider/model 特定推理参数）。 |
 | `reasoning_budget_tokens` | 否 | 推理预算 token（仅对兼容的 provider/model 生效）。 |
-| `memory_notes` | 否 | 长期指导信息，会并入有效 system prompt。推荐 YAML 字符串数组；兼容旧版多行字符串。 |
+| `memory_notes` | 否 | 长期指导信息，会并入有效 system prompt。也可以通过 Memory 工作流（自动 Memory Agent）自动追加/更新。推荐 YAML 字符串数组；兼容旧版多行字符串。 |
 
 #### 工作原理
 
@@ -417,7 +417,7 @@ memory_notes:
 2. Agent 将事件以 JSON 形式与 `system_prompt` 及（若配置）skills/plugins 的工具定义一并发送给 LLM。
 3. LLM 可直接返回 JSON，或在 **ReAct 循环**中调用工具，最多 `max_rounds` 轮。
 4. LLM 输出的 JSON 会合并到事件的 **`msg["llm"][agentId]`** 下，因此同一流中多个 Agent 不会互相覆盖。框架还会在该映射中写入 `agent`（agent id）和 `processing_time_ms`（毫秒）。
-5. 若 LLM 失败或超时，原始事件会原样透传。
+5. 若 LLM 失败或超时，框架会把错误写入 `msg["llm"][agentId]["error"]` 并设置 `_no_forward: true`，因此该消息不会再转发给任何下游组件。
 
 #### LLM 结果结构
 
@@ -480,6 +480,7 @@ Agent 支持与 Ruleset 相同的测试流程：打开 Agent 组件，点击测�
 
 `memory_notes` 用于沉淀稳定、可复用的长期指导，不是 `system_prompt` 的替代，而是“这个 Agent 学到的经验”。
 
+- 备注：`memory_notes` 也可以通过 HUB 的 Memory 工作流（如自动 Memory Agent）基于审阅/运行日志生成并自动追加（或在替换模式下覆盖）。
 - 适合写可长期复用的规则：误报/真报判定线索、输出格式约束、置信度口径等。
 - 不建议写一次性事件细节（这类信息应放在评论或工单）。
 - 推荐使用 YAML 数组：
@@ -1291,7 +1292,7 @@ OIDC_SCOPE="openid profile email"
 - 使用 OR 逻辑：任一扩展名匹配即可；
 - 使用 | 作为分隔符。
 
-### 4.4 CEP 序列检测（复杂事件处理）
+### 4.4 CEP：复杂事件处理（CEP）
 
 `<sequence>` 元素用于在时间窗口内检测多个事件的有序模式。与单事件匹配不同，序列检测通过共享字段关联不同事件，并检查时间顺序。
 
@@ -1437,6 +1438,60 @@ OIDC_SCOPE="openid profile email"
 </rule>
 ```
 
+#### 示例 5：在 stage 中用 `<checklist>` 表达嵌套逻辑（OR/NOT）
+
+下面的 stage 使用 `<checklist>` 在同一事件阶段内表达 OR/NOT（而不是只用 `and` 做包装）：
+
+```xml
+<rule id="failed_admin_or_root_then_exfil" name="失败的（admin|root）登录且无 MFA，然后数据外泄">
+    <sequence within="10m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <checklist condition="is_login and (failed or denied) and (admin or root) and not mfa">
+                <check id="is_login" type="EQU" field="event_type">login</check>
+                <check id="failed" type="EQU" field="result">failed</check>
+                <check id="denied" type="EQU" field="result">denied</check>
+                <check id="admin" type="EQU" field="role">admin</check>
+                <check id="root" type="EQU" field="role">root</check>
+                <!-- 如果该字段存在且为 true，则 checklist 条件为 false -->
+                <check id="mfa" type="EQU" field="mfa">true</check>
+            </checklist>
+        </event>
+
+        <event id="exfil">
+            <check type="EQU" field="event_type">file_transfer</check>
+            <check type="INCL" field="direction">outbound</check>
+        </event>
+
+        <condition>login -> exfil</condition>
+    </sequence>
+
+    <append field="alert_type">login_to_exfil_no_mfa</append>
+    <append field="user_from_login">_$#login.user_id</append>
+</rule>
+```
+
+#### 示例 6：缺席检测与“缺失 stage”字段可用性
+
+当使用缺席条件如 `login -> !mfa` 时，缺席 stage（`mfa`）不会把快照写入最终输出。
+因此在序列完成后的操作中 `_$#mfa.*` 不可用；应改用“已出现 stage”里的数据。
+
+```xml
+<rule id="login_no_mfa" name="登录后未验证 MFA">
+    <sequence within="2m" group_by="user_id" local_cache="true">
+        <event id="login">
+            <check type="EQU" field="event_type">login</check>
+        </event>
+        <event id="mfa">
+            <check type="EQU" field="event_type">mfa_verify</check>
+        </event>
+        <condition>login -> !mfa</condition>
+    </sequence>
+
+    <append field="alert_type">missing_mfa</append>
+    <append field="user_from_login">_$#login.user_id</append>
+</rule>
+```
+
 #### 跨事件字段引用
 
 序列完成后，可以通过 `_$#event_id.field` 语法访问之前事件的字段：
@@ -1480,6 +1535,17 @@ OIDC_SCOPE="openid profile email"
 ```
 
 支持格式：Unix 时间戳（秒/毫秒）、ISO 8601、RFC 3339。
+
+#### 序列完成时的运行观测与输出字段
+
+序列检测会在内部维护状态，直到 `<sequence>` 条件满足为止；在此期间，规则引擎不会把输出发给下游组件。只有当序列完成时（包括 `a -> !b` 这类缺席检测），引擎才会构建最终的富化结果，然后执行序列后的操作。
+
+当序列完成时，向下游发出的 payload 会包含：
+- `_sequence_events`：`map[event_id] -> raw data`，覆盖该序列每个匹配阶段
+- `_sequence_condition`：编译后的条件表达式（例如原始 `a -> b` 表达式）
+- 序列完成后的跨事件字段引用：使用 `_$#event_id.field`（引擎在执行期间使用 `#<event_id>` 快照），但内部的 `#<event_id>` 键会在输出前被移除
+
+如果序列是通过缺席完成的（例如 `login -> !mfa`），那么序列后的操作只会执行数据修改类类型（`append`、`modify`、`del`、`plugin`），非修改类检查不会在这里运行。
 
 ## 🔧 第五部分：高级特性详解
 
