@@ -248,8 +248,17 @@ More built-in rulesets for additional data sources are on the roadmap. Contribut
 ![ErrlogOperations](docs/GIF/ErrlogOperations.gif)
 
 </td>
+<td width="50%">
+
+**Comment-to-memory learning loop**
+
+![Comment-to-memory](docs/png/Memory.png)
+
+</td>
 </tr>
 </table>
+
+
 
 ## Deployment
 

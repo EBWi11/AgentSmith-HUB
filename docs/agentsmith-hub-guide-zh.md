@@ -498,6 +498,8 @@ memory_notes:
 - **API 路径**：可通过 memory 相关接口更新/生成并自动提交组件变更。
 - **集群注意**：memory 写入与生成必须在 **leader** 节点执行，follower 会拒绝这类写操作。
 
+![Memory](png/Memory.png)
+
 #### 示例：告警审核 Agent
 
 ```yaml

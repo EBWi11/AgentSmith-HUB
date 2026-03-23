@@ -499,6 +499,8 @@ Legacy multiline string remains supported for backward compatibility, but new co
 - **API path**: memory update and generate-from-log endpoints apply changes and auto-commit them as component changes.
 - **Cluster rule**: memory write/generate actions must run on the **leader** node; follower nodes reject these write operations.
 
+![Memory](png/Memory.png)
+
 #### Example: Alert Review Agent
 
 ```yaml
