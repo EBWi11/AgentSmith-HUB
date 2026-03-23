@@ -21,6 +21,7 @@ If you work in security operations, you probably deal with massive volumes of ra
 - **All-in-one pipeline** — Input, normalization, enrichment, correlation, and output in one flow; no more glue scripts between Kafka, ES, ClickHouse, and “rule engines”
 - **First-class CEP** — Detect ordered event sequences, absence patterns, and multi-source correlations over time with `<sequence>`, `<threshold>`, `<iterator>`, and `<checklist>`
 - **LLM agents in the stream** — Drop LLM-powered agents into the same pipeline for alert triage, enrichment, rule authoring, and auto-whitelisting
+- **Comment-to-memory learning loop** — Convert reviewer comments from Agent Tools Logs into durable `memory_notes`, auto-commit updates, and continuously improve agent behavior
 - **Skills system** — Attach knowledge bases and operational tools to agents via Skills, with progressive disclosure so prompts stay small and fast
 - **Rich plugin ecosystem** — Threat intel (VirusTotal, ThreatBook, Shodan), GeoIP, encoding, regex, time/window helpers, LLM calls, and more
 - **Production features out of the box** — Cluster mode, health checks, daily stats, sample data, Push Changes / review workflow, and a modern Web UI for rule and project orchestration
@@ -83,7 +84,7 @@ For the full syntax (all operations, modes, and best practices), see the [Comple
 
 ### LLM Agents & Skills
 
-Agents are LLM-powered components that sit in the pipeline alongside rulesets. They receive event batches, call an LLM with tool-use support, and forward enriched results downstream.
+Agents are LLM-powered components that sit in the pipeline alongside rulesets. They process events independently, call an LLM with tool-use support, and forward enriched results downstream.
 
 ```yaml
 # Agent: AI-powered alert triage
@@ -93,14 +94,23 @@ system_prompt: |
 skills:
   - hub_ruleset_expert    # Knowledge skill: rules engine reference
 tools: all                # Expose all plugins as LLM tools
-batch:
-  size: 5
-  timeout: 30s
+max_rounds: 3
+timeout: 30s
+
+# Optional long-term memory (recommended as YAML sequence)
+memory_notes:
+  - Keep output JSON compact and stable.
+  - Treat routine CI scanner traffic as lower priority unless other signals exist.
 ```
 
 **Skills** provide modular capabilities to agents:
 - **Knowledge skills** — Reference docs loaded on-demand (progressive disclosure)
 - **Builtin skills** — Go-implemented tools (e.g., `hub_ruleset_editor` for reading/writing rulesets)
+
+Quick production tips:
+- Prefer `tools: []` by default and allowlist only needed plugin tools.
+- Use `tools: all` only for broad assistant agents (rule-authoring / deep triage).
+- In cluster mode, memory write/generate actions must go to the **leader** node.
 
 Use agents in your project like any other component:
 
@@ -109,6 +119,8 @@ content: |
   INPUT.kafka_alerts -> AGENT.alert_reviewer
   AGENT.alert_reviewer -> OUTPUT.enriched_alerts
 ```
+
+For full agent details (fields like `reasoning_mode`, `reasoning_budget_tokens`, `memory_notes`, and memory workflow in UI/API), see the [Complete Guide](docs/agentsmith-hub-guide.md#14-agent-syntax-description).
 
 ## Built-in Detection Rulesets
 

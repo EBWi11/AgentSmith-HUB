@@ -384,6 +384,15 @@ tools: []                          # 插件工具："all" 或名称列表；用 
 
 max_rounds: 1                      # 每条消息最大 ReAct 工具调用轮数（默认: 5）
 timeout: 30s                       # 单条消息处理超时（如 30s、1m）
+
+# 可选：支持“思考/推理”参数的模型可启用
+reasoning_mode: auto               # disabled | enabled | auto（默认: disabled）
+reasoning_budget_tokens: 2048      # 可选：推理预算 token
+
+# 可选：长期记忆，推荐使用 YAML 数组
+memory_notes:
+  - 输出 JSON 字段保持稳定、简短，避免冗余长文本。
+  - 对 CI 内网扫描流量默认降权，除非出现横向移动特征。
 ```
 
 #### 字段参考
@@ -398,6 +407,9 @@ timeout: 30s                       # 单条消息处理超时（如 30s、1m）
 | `tools` | 否 | `"all"` 暴露所有插件为工具；`[]` 或名称列表可限制。不需要工具时用 `[]` 可降低延迟。 |
 | `max_rounds` | 否 | 每条消息最大 ReAct 轮数（工具调用循环）。默认 `5`。 |
 | `timeout` | 否 | 时间字符串。若处理超过此时长会中止 LLM 调用。默认 `30s`。 |
+| `reasoning_mode` | 否 | 推理开关：`disabled`（默认）、`enabled`、`auto`（是否发送 provider/model 特定推理参数）。 |
+| `reasoning_budget_tokens` | 否 | 推理预算 token（仅对兼容的 provider/model 生效）。 |
+| `memory_notes` | 否 | 长期指导信息，会并入有效 system prompt。推荐 YAML 字符串数组；兼容旧版多行字符串。 |
 
 #### 工作原理
 
@@ -463,6 +475,28 @@ content: |
 #### 测试
 
 Agent 支持与 Ruleset 相同的测试流程：打开 Agent 组件，点击测试按钮或使用 **Cmd+D**，填写输入 JSON 后执行。测试会启动临时 Agent 并返回完整事件（原始数据 + `llm` 块），便于核对合并结果。
+
+#### Memory Notes（长期记忆）说明
+
+`memory_notes` 用于沉淀稳定、可复用的长期指导，不是 `system_prompt` 的替代，而是“这个 Agent 学到的经验”。
+
+- 适合写可长期复用的规则：误报/真报判定线索、输出格式约束、置信度口径等。
+- 不建议写一次性事件细节（这类信息应放在评论或工单）。
+- 推荐使用 YAML 数组：
+
+```yaml
+memory_notes:
+  - 对常见 CI 扫描流量默认判定为低风险，除非出现异常外联或横向移动证据。
+  - 当 llm_confidence >= 0.7 时，必须给出一句可审计证据说明。
+```
+
+为兼容历史配置，旧版多行字符串仍可读取；新配置建议统一用数组格式，便于维护和合并。
+
+#### Memory 工作流（UI / API / 集群）
+
+- **UI 路径**：`Agent Tools Logs` 支持用户评论、从日志生成记忆、提交记忆。
+- **API 路径**：可通过 memory 相关接口更新/生成并自动提交组件变更。
+- **集群注意**：memory 写入与生成必须在 **leader** 节点执行，follower 会拒绝这类写操作。
 
 #### 示例：告警审核 Agent
 
@@ -564,14 +598,25 @@ skills:
   - hub_ruleset_editor     # builtin skill: Ruleset 读写操作
 
 tools: all
-
-batch:
-  size: 1
-  timeout: 60s
-  max_rounds: 10
+max_rounds: 10
+timeout: 60s
 ```
 
 在此配置中，Agent 同时拥有知识（规则引擎参考文档）和操作能力（Ruleset CRUD）。LLM 可以通过 `get_reference` 查阅语法，列出/读取现有 Ruleset，验证 XML，以及写入变更 —— 全部在 ReAct 循环中完成。
+
+#### Skills / Tools 实操建议
+
+- 默认建议先用 `tools: []`，只按需开放必要插件，降低延迟和误调用概率。
+- 仅在通用助手型 Agent（例如规则编写 Copilot）中使用 `tools: all`。
+- 需要“会查资料 + 会执行操作”时，组合使用知识型 Skill（`content`）和内置 Skill（`builtin_ref`）。
+- 生产环境中，尽量将可写内置技能设置为只读（如 `config.read_only: true`）。
+
+#### Skills / Tools 调用排查
+
+- 工具不触发：在 `system_prompt` 明确“何时必须调用某工具”。
+- 工具调用过多：收紧提示词边界，并降低 `max_rounds`。
+- 调错插件：把 `tools` 从 `all` 改为明确白名单。
+- 集群下写操作失败：确认请求命中 leader，而不是 follower。
 
 ## 🔧 第二部分：基本操作指南
 

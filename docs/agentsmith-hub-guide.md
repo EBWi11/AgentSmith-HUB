@@ -385,6 +385,15 @@ tools: []                          # Plugin tools: "all" or list of names; use [
 
 max_rounds: 1                      # Max ReAct tool-call rounds per message (default: 5)
 timeout: 30s                       # Per-message processing timeout (e.g. 30s, 1m)
+
+# Optional reasoning params for models/providers that support "thinking" mode
+reasoning_mode: auto               # disabled | enabled | auto (default: disabled)
+reasoning_budget_tokens: 2048      # Optional reasoning token budget
+
+# Optional long-term memory notes; recommended as YAML sequence
+memory_notes:
+  - Prefer compact JSON output with stable field names.
+  - Reduce false positives for CI internal scanners.
 ```
 
 #### Field Reference
@@ -399,6 +408,9 @@ timeout: 30s                       # Per-message processing timeout (e.g. 30s, 1
 | `tools` | No | `"all"` exposes all plugins as tools; `[]` or a list of names to limit. Use `[]` when the agent does not need tools to reduce latency. |
 | `max_rounds` | No | Max ReAct rounds (tool-call loops) per message. Default `5`. |
 | `timeout` | No | Duration string. Aborts the LLM call if processing exceeds this. Default `30s`. |
+| `reasoning_mode` | No | Provider/model-specific reasoning toggle: `disabled` (default), `enabled`, or `auto`. |
+| `reasoning_budget_tokens` | No | Optional reasoning token budget for compatible providers/models. |
+| `memory_notes` | No | Durable guidance merged into the effective system prompt. Recommended format is a YAML string array; legacy multiline string is still accepted. |
 
 #### How It Works
 
@@ -464,6 +476,28 @@ content: |
 #### Testing
 
 Agents support the same test flow as rulesets: open the agent component, use the test button or **Cmd+D**, provide input JSON, and run. The test runs a temporary agent and returns the full event (original + `llm` block) so you can verify the merged result.
+
+#### Memory Notes (Long-term Guidance)
+
+`memory_notes` is for stable, durable guidance distilled from human feedback and run history. It is not a replacement for `system_prompt`; think of it as "what this agent has learned."
+
+- Prefer concise bullets that survive across runs (FP/TP heuristics, output style constraints, escalation thresholds).
+- Avoid one-off incident details; put those in comments/tickets instead.
+- Recommended YAML format is a sequence:
+
+```yaml
+memory_notes:
+  - Mark routine CI scanner traffic as likely false positive unless lateral movement indicators exist.
+  - Always include a short evidence sentence for confidence >= 0.7.
+```
+
+Legacy multiline string remains supported for backward compatibility, but new configs should use sequences for readability and safer merges.
+
+#### Memory Workflow (UI/API/Cluster)
+
+- **UI path**: `Agent Tools Logs` supports user comments and memory generation/commit workflows.
+- **API path**: memory update and generate-from-log endpoints apply changes and auto-commit them as component changes.
+- **Cluster rule**: memory write/generate actions must run on the **leader** node; follower nodes reject these write operations.
 
 #### Example: Alert Review Agent
 
@@ -565,14 +599,25 @@ skills:
   - hub_ruleset_editor     # builtin skill: read/write rulesets
 
 tools: all
-
-batch:
-  size: 1
-  timeout: 60s
-  max_rounds: 10
+max_rounds: 10
+timeout: 60s
 ```
 
 In this setup, the agent has access to both knowledge (rules engine reference docs) and action (ruleset CRUD). The LLM can look up syntax via `get_reference`, list/read existing rulesets, verify XML, and write changes — all within the ReAct loop.
+
+#### Skills & Tools Practical Guidance
+
+- Start with `tools: []` and add only the plugin tools you truly need; this reduces latency and accidental tool calls.
+- Use `tools: all` only for broad assistant agents (rule-authoring copilots, deep triage assistants).
+- Pair a **knowledge skill** (`content`) with a **builtin/action skill** (`builtin_ref`) when the agent both reasons and edits.
+- For production safety, set write-capable builtin skills to read-only where possible (for example, `config.read_only: true`).
+
+#### Troubleshooting Skills/Tools Calls
+
+- Tool not called: improve `system_prompt` with explicit "when to call tool X" conditions.
+- Tool called too often: tighten prompt constraints and lower `max_rounds`.
+- Wrong plugin chosen: restrict `tools` to a short allowlist instead of `all`.
+- Write actions rejected in cluster: verify request hits leader node, not follower.
 
 ## 🔧 Part 2: Basic Operating Instructions
 
