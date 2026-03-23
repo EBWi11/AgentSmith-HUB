@@ -35,7 +35,7 @@ func main() {
 		isLeader  = flag.Bool("leader", false, "run as cluster leader")
 		apiListen = flag.String("api_listen", "0.0.0.0:8080", "API server listen address")
 		showVer   = flag.Bool("version", false, "show version")
-		buildVers = "v0.1.8"
+		buildVers = "v0.1.9"
 	)
 	flag.Parse()
 
