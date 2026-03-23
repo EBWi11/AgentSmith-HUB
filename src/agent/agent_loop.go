@@ -462,7 +462,7 @@ func formatMessageAsJSON(msg map[string]interface{}) string {
 // auto-generated memory can influence subsequent agent decisions.
 func (a *Agent) buildEffectiveSystemPrompt() string {
 	base := strings.TrimSpace(a.Config.SystemPrompt)
-	mem := strings.TrimSpace(a.Config.MemoryNotes)
+	mem := strings.TrimSpace(a.Config.MemoryNotes.String())
 	if mem == "" {
 		return base
 	}

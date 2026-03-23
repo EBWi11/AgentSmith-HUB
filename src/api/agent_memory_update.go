@@ -9,7 +9,7 @@ import (
 // Per-agent mutex serializes memory_notes read-modify-write so concurrent API
 // calls for the same agent cannot interleave. generate-from-log uses a
 // two-phase pattern (snapshot / LLM / commit) so the lock is not held during
-// the LLM call; commit re-checks MemoryNotesRevision.
+// the LLM call; commit re-checks memory_notes content against the snapshot.
 var agentMemoryWriteLocks sync.Map // agentID -> *sync.Mutex
 
 func acquireAgentMemoryWriteLock(agentID string) func() {

@@ -42,12 +42,9 @@ type AgentConfig struct {
 	ReasoningMode         string `yaml:"reasoning_mode"`
 	ReasoningBudgetTokens int    `yaml:"reasoning_budget_tokens"`
 
-	// MemoryNotes is a simple free-form field used to store
-	// summarized human feedback and long-term guidance for this agent.
-	MemoryNotes string `yaml:"memory_notes,omitempty"`
-	// MemoryNotesRevision increments on each successful memory_notes API update
-	// (generate-from-log or POST memory-notes) for optimistic concurrency.
-	MemoryNotesRevision int `yaml:"memory_notes_revision,omitempty"`
+	// MemoryNotes stores summarized human feedback and long-term guidance.
+	// YAML: prefer a sequence of strings; legacy multi-line scalar is still supported.
+	MemoryNotes MemoryNotes `yaml:"memory_notes,omitempty" json:"memory_notes,omitempty"`
 
 	RawConfig string `yaml:"-"`
 	Path      string `yaml:"-"`

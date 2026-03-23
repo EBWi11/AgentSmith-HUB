@@ -191,74 +191,6 @@
       </div>
     </div>
 
-    <!-- Agent Overview (only when LLM is available) -->
-    <div v-if="llmAvailable && agentList.length > 0" class="bg-white rounded-lg shadow-sm p-4 relative">
-      <h3 class="text-lg font-medium text-gray-900 mb-3">Agent Overview</h3>
-      
-      <!-- Summary Stats (today) -->
-      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
-        <div class="text-center">
-          <p class="text-xs text-gray-600">Total Agents</p>
-          <p class="text-lg font-bold text-indigo-600">{{ agentStats.total }}</p>
-        </div>
-        <div class="text-center">
-          <p class="text-xs text-gray-600">Running</p>
-          <p class="text-lg font-bold text-green-600">{{ agentStats.running }}</p>
-        </div>
-        <div class="text-center">
-          <p class="text-xs text-gray-600">Stopped</p>
-          <p class="text-lg font-bold text-gray-500">{{ agentStats.stopped }}</p>
-        </div>
-        <div class="text-center">
-          <p class="text-xs text-gray-600">Today's Calls</p>
-          <p class="text-lg font-bold text-blue-600">{{ formatNumber(agentStats.dailyCallTotal) }}</p>
-        </div>
-        <div class="text-center">
-          <p class="text-xs text-gray-600">Today's Avg Latency</p>
-          <p class="text-lg font-bold text-amber-600">{{ agentStats.dailyAvgLatencyMs != null ? formatLatencyMs(agentStats.dailyAvgLatencyMs) : '-' }}</p>
-        </div>
-      </div>
-
-      <!-- Individual Agent Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        <div v-for="ag in agentList" :key="ag.id"
-             class="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
-             @click="navigateToAgent(ag.id)">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center">
-              <span class="w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0"
-                    :class="{
-                      'bg-green-500': ag.status === 'running',
-                      'bg-red-500': ag.status === 'error',
-                      'bg-gray-400': ag.status === 'stopped',
-                      'bg-blue-500 animate-pulse': ag.status === 'starting'
-                    }"></span>
-              <p class="font-medium text-gray-900 text-sm truncate">{{ ag.id }}</p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-2 text-center">
-            <div class="p-1.5 bg-indigo-50 rounded">
-              <p class="text-[10px] text-indigo-600 font-medium">Model</p>
-              <p class="text-xs font-bold text-indigo-800 truncate" :title="ag.model">{{ ag.model || '-' }}</p>
-            </div>
-            <div class="p-1.5 bg-purple-50 rounded">
-              <p class="text-[10px] text-purple-600 font-medium">Skills</p>
-              <p class="text-xs font-bold text-purple-800">{{ (ag.skills || []).length }}</p>
-            </div>
-            <div class="p-1.5 bg-blue-50 rounded">
-              <p class="text-[10px] text-blue-600 font-medium">Today's Calls</p>
-              <p class="text-xs font-bold text-blue-800">{{ formatNumber(ag.daily_call_count || 0) }}</p>
-            </div>
-            <div class="p-1.5 bg-amber-50 rounded">
-              <p class="text-[10px] text-amber-600 font-medium">Today's Avg Latency</p>
-              <p class="text-xs font-bold text-amber-800">{{ (ag.daily_call_count || 0) > 0 ? formatLatencyMs(ag.daily_avg_latency_ms) : '-' }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Third Row: Project Status Overview and Cluster Nodes -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
       <!-- Project Status Chart -->
@@ -437,6 +369,74 @@
                 <div class="bg-green-600 h-1.5 rounded-full transition-all duration-300" 
                      :style="{ width: getSuccessRate(stats.success || 0, stats.failure || 0) + '%' }"></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Overview (only when LLM is available) — below Plugin Call Overview -->
+    <div v-if="llmAvailable && agentList.length > 0" class="bg-white rounded-lg shadow-sm p-4 relative">
+      <h3 class="text-lg font-medium text-gray-900 mb-3">Agent Overview</h3>
+      
+      <!-- Summary Stats (today) -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 p-3 bg-gray-50 rounded-lg">
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Total Agents</p>
+          <p class="text-lg font-bold text-indigo-600">{{ agentStats.total }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Running</p>
+          <p class="text-lg font-bold text-green-600">{{ agentStats.running }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Stopped</p>
+          <p class="text-lg font-bold text-gray-500">{{ agentStats.stopped }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Today's Calls</p>
+          <p class="text-lg font-bold text-blue-600">{{ formatNumber(agentStats.dailyCallTotal) }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-600">Today's Avg Latency</p>
+          <p class="text-lg font-bold text-amber-600">{{ agentStats.dailyAvgLatencyMs != null ? formatLatencyMs(agentStats.dailyAvgLatencyMs) : '-' }}</p>
+        </div>
+      </div>
+
+      <!-- Individual Agent Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div v-for="ag in agentList" :key="ag.id"
+             class="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-pointer"
+             @click="navigateToAgent(ag.id)">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center">
+              <span class="w-2.5 h-2.5 rounded-full mr-2 flex-shrink-0"
+                    :class="{
+                      'bg-green-500': ag.status === 'running',
+                      'bg-red-500': ag.status === 'error',
+                      'bg-gray-400': ag.status === 'stopped',
+                      'bg-blue-500 animate-pulse': ag.status === 'starting'
+                    }"></span>
+              <p class="font-medium text-gray-900 text-sm truncate">{{ ag.id }}</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-center">
+            <div class="p-1.5 bg-indigo-50 rounded">
+              <p class="text-[10px] text-indigo-600 font-medium">Model</p>
+              <p class="text-xs font-bold text-indigo-800 truncate" :title="ag.model">{{ ag.model || '-' }}</p>
+            </div>
+            <div class="p-1.5 bg-purple-50 rounded">
+              <p class="text-[10px] text-purple-600 font-medium">Skills</p>
+              <p class="text-xs font-bold text-purple-800">{{ (ag.skills || []).length }}</p>
+            </div>
+            <div class="p-1.5 bg-blue-50 rounded">
+              <p class="text-[10px] text-blue-600 font-medium">Today's Calls</p>
+              <p class="text-xs font-bold text-blue-800">{{ formatNumber(ag.daily_call_count || 0) }}</p>
+            </div>
+            <div class="p-1.5 bg-amber-50 rounded">
+              <p class="text-[10px] text-amber-600 font-medium">Today's Avg Latency</p>
+              <p class="text-xs font-bold text-amber-800">{{ (ag.daily_call_count || 0) > 0 ? formatLatencyMs(ag.daily_avg_latency_ms) : '-' }}</p>
             </div>
           </div>
         </div>

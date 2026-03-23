@@ -63,6 +63,8 @@
             <option value="ruleset">Ruleset</option>
             <option value="plugin">Plugin</option>
             <option value="project">Project</option>
+            <option value="agent">Agent</option>
+            <option value="skill">Skill</option>
           </select>
         </div>
 
