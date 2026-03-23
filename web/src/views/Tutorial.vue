@@ -264,24 +264,42 @@ async function renderMarkdown(markdown) {
 function addHeaderIds(markdown) {
   const lines = markdown.split('\n')
   const toc = []
+  let inFencedCodeBlock = false
   
   const processedLines = lines.map((line, index) => {
+    // Skip heading parsing inside fenced code blocks (```), otherwise code lines
+    // starting with # will be incorrectly treated as document headings.
+    if (/^\s*```/.test(line)) {
+      inFencedCodeBlock = !inFencedCodeBlock
+      return line
+    }
+    if (inFencedCodeBlock) {
+      return line
+    }
+
     const match = line.match(/^(#{1,6})\s+(.+)$/)
     if (match) {
       const level = match[1].length
-      const text = match[2]
+      const rawHeading = match[2]
+      const existingAnchorMatch = rawHeading.match(/<a\s+name="([^"]+)"\s*><\/a>/i)
+      const id = existingAnchorMatch ? existingAnchorMatch[1] : `section-${index}`
+      const text = rawHeading
+        .replace(/<a\s+name="[^"]+"\s*><\/a>/gi, '')
+        .replace(/<[^>]+>/g, '')
         .replace(/[🛡️🚀🧠📋🎯🔌⚡💼❓💡📖📚📊🔧🚨🔧]/g, '')
         .trim()
       
       if (text && level <= 3) {
-        const id = `section-${index}`
         toc.push({
           id,
           level,
           text,
           line: index + 1
         })
-        return `${match[1]} <a name="${id}"></a>${match[2]}`
+        if (existingAnchorMatch) {
+          return line
+        }
+        return `${match[1]} <a name="${id}"></a>${rawHeading}`
       }
     }
     return line
