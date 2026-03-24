@@ -464,27 +464,57 @@ func (r *Ruleset) Stop() error {
 	}
 	r.SetStatus(common.StatusStopping, nil)
 
-	// Safely close stopChan if it exists and is not already closed
+	// Keep workers alive while draining channels; stop signal is sent after drain stage.
+	// If stopChan is already closed, skip drain waits because workers are already exiting.
+	stopSignalAlreadyClosed := false
 	if r.stopChan != nil {
 		select {
 		case <-r.stopChan:
-			// Already closed
+			stopSignalAlreadyClosed = true
 		default:
-			close(r.stopChan)
 		}
 	}
 
-	// Overall timeout for ruleset stop
-	overallTimeout := time.After(30 * time.Second) // Reduced from 60s to 30s
+	// Overall timeout for ruleset stop (drain stage only)
+	stopBudget := 90 * time.Second
+	stopStart := time.Now()
+	overallTimeout := time.After(stopBudget)
 	stopCompleted := make(chan struct{})
 	var stopError error
+	var stopErrorMu sync.Mutex
+	setStopError := func(err error) {
+		if err == nil {
+			return
+		}
+		stopErrorMu.Lock()
+		if stopError == nil {
+			stopError = err
+		}
+		stopErrorMu.Unlock()
+	}
+	getStopError := func() error {
+		stopErrorMu.Lock()
+		defer stopErrorMu.Unlock()
+		return stopError
+	}
+	remainingBudget := func() time.Duration {
+		elapsed := time.Since(stopStart)
+		remaining := stopBudget - elapsed
+		if remaining <= 0 {
+			return time.Millisecond
+		}
+		return remaining
+	}
 
 	go func() {
 		defer close(stopCompleted)
+		if stopSignalAlreadyClosed {
+			return
+		}
 
 		// Wait for all upstream channels to be consumed.
 		logger.Info("Waiting for upstream channels to empty", "ruleset", r.RulesetID)
-		upstreamTimeout := time.After(10 * time.Second) // 10 second timeout for upstream
+		upstreamTimeout := time.After(30 * time.Second)
 		waitCount := 0
 
 	waitUpstream:
@@ -492,7 +522,7 @@ func (r *Ruleset) Stop() error {
 			select {
 			case <-upstreamTimeout:
 				logger.Error("Timeout waiting for upstream channels, forcing shutdown", "ruleset", r.RulesetID)
-				stopError = fmt.Errorf("timeout waiting for upstream channels to drain")
+				setStopError(fmt.Errorf("timeout waiting for upstream channels to drain"))
 				break waitUpstream
 			default:
 				allEmpty := true
@@ -512,16 +542,14 @@ func (r *Ruleset) Stop() error {
 			}
 		}
 
-		downstreamTimeout := time.After(10 * time.Second) // 10 second timeout for downstream
+		downstreamTimeout := time.After(30 * time.Second)
 		waitCount = 0
 
 	waitDownstream:
 		for {
 			select {
 			case <-downstreamTimeout:
-				if stopError == nil {
-					stopError = fmt.Errorf("timeout waiting for downstream channels to drain")
-				}
+				setStopError(fmt.Errorf("timeout waiting for downstream channels to drain"))
 				break waitDownstream
 			default:
 				allEmpty := true
@@ -547,8 +575,16 @@ func (r *Ruleset) Stop() error {
 		logger.Info("Ruleset channels drained successfully", "ruleset", r.RulesetID)
 	case <-overallTimeout:
 		logger.Error("Ruleset stop timeout exceeded, forcing shutdown", "ruleset", r.RulesetID)
-		if stopError == nil {
-			stopError = fmt.Errorf("overall stop operation timeout")
+		setStopError(fmt.Errorf("overall stop operation timeout"))
+	}
+
+	// Safely close stopChan after drain wait, allowing processing workers to exit.
+	if r.stopChan != nil {
+		select {
+		case <-r.stopChan:
+			// Already closed
+		default:
+			close(r.stopChan)
 		}
 	}
 
@@ -563,25 +599,21 @@ func (r *Ruleset) Stop() error {
 	select {
 	case <-waitDone:
 		logger.Info("Ruleset stopped gracefully", "ruleset", r.RulesetID)
-	case <-time.After(10 * time.Second):
+	case <-time.After(minDuration(20*time.Second, remainingBudget())):
 		logger.Error("Timeout waiting for ruleset goroutines, forcing cleanup", "ruleset", r.RulesetID)
-		if stopError == nil {
-			stopError = fmt.Errorf("timeout waiting for goroutines to finish")
-		}
+		setStopError(fmt.Errorf("timeout waiting for goroutines to finish"))
 	}
 
 	// Wait for thread pool to finish with timeout
 	if r.antsPool != nil {
 		logger.Info("Waiting for thread pool tasks to complete", "ruleset", r.RulesetID)
-		poolWaitTimeout := time.After(15 * time.Second)
+		poolWaitTimeout := time.After(minDuration(30*time.Second, remainingBudget()))
 	poolWait:
 		for {
 			select {
 			case <-poolWaitTimeout:
 				logger.Error("Thread pool timeout, forcing cleanup", "ruleset", r.RulesetID)
-				if stopError == nil {
-					stopError = fmt.Errorf("timeout waiting for thread pool to finish")
-				}
+				setStopError(fmt.Errorf("timeout waiting for thread pool to finish"))
 				break poolWait
 			default:
 				if r.antsPool.Running() == 0 {
@@ -596,13 +628,20 @@ func (r *Ruleset) Stop() error {
 	r.cleanup()
 
 	// Set final status based on whether there were any errors during stop
-	if stopError != nil {
-		r.SetStatus(common.StatusError, fmt.Errorf("stop operation failed: %w", stopError))
-		return stopError
+	if finalStopErr := getStopError(); finalStopErr != nil {
+		r.SetStatus(common.StatusError, fmt.Errorf("stop operation failed: %w", finalStopErr))
+		return finalStopErr
 	} else {
 		r.SetStatus(common.StatusStopped, nil)
 		return nil
 	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // EngineCheck executes all rules in the ruleset on the provided data using the new flexible syntax.
