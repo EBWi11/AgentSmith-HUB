@@ -106,6 +106,9 @@ export const useDataCacheStore = defineStore('dataCache', {
       timestamp: 0,
       loading: false
     },
+    // Debounce transient local-changes spikes in badge polling.
+    // We only show local changes after 2 consecutive positive reads.
+    localChangesBadgePositiveStreak: 0,
     
     // Feature flags (e.g. LLM availability)
     features: {
@@ -1074,9 +1077,20 @@ export const useDataCacheStore = defineStore('dataCache', {
           console.warn('Failed to fetch error logs for badge:', e)
         }
 
+        // Delay-confirm local changes badge to avoid one-frame flicker right after apply/approve.
+        let confirmedLocalCount = 0
+        if (localCount > 0) {
+          this.localChangesBadgePositiveStreak += 1
+          if (this.localChangesBadgePositiveStreak >= 2) {
+            confirmedLocalCount = localCount
+          }
+        } else {
+          this.localChangesBadgePositiveStreak = 0
+        }
+
         this.settingsBadges.data = {
           'pending-changes': pendingCount,
-          'load-local-components': localCount,
+          'load-local-components': confirmedLocalCount,
           'error-logs': errorCount
         }
         this.settingsBadges.timestamp = Date.now()

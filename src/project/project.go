@@ -1150,7 +1150,8 @@ func (p *Project) Stop(lock bool) error {
 	}()
 
 	// Atomic status check and transition
-	if !p.atomicStatusTransition([]common.Status{common.StatusRunning, common.StatusError}, common.StatusStopping) {
+	// Allow stopping from starting state to recover from partial startup and avoid restart races.
+	if !p.atomicStatusTransition([]common.Status{common.StatusRunning, common.StatusError, common.StatusStarting}, common.StatusStopping) {
 		return fmt.Errorf("project is not in stoppable state, current status: %s", p.Status)
 	}
 
@@ -1207,7 +1208,7 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 	if time.Since(p.lastRestartTime) < 5*time.Second {
 		p.restartMu.Unlock()
 		logger.Info("Project restart skipped due to cooldown", "project", p.Id)
-		return nil
+		return fmt.Errorf("project restart skipped due to cooldown")
 	}
 	p.lastRestartTime = time.Now()
 	p.restartMu.Unlock()
@@ -1244,8 +1245,9 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 		}
 	}()
 
-	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu
-	if p.Status == common.StatusRunning || p.Status == common.StatusError {
+	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu.
+	// Include starting state to ensure partially started components are fully stopped before re-start.
+	if p.Status == common.StatusRunning || p.Status == common.StatusError || p.Status == common.StatusStarting {
 		stopErr := p.Stop(false)
 		if stopErr != nil {
 			// Stop() guarantees status is Stopped even on error/timeout
