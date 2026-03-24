@@ -128,57 +128,16 @@ AgentSmith-HUB ships with production-ready detection rulesets that you can deplo
 
 ### Kubernetes Audit Log Security
 
-Two rulesets covering **25 detection rules** for Kubernetes audit logs, designed with multi-condition correlation and system-controller exclusion to minimize false positives.
+Two Kubernetes audit rulesets are provided for baseline hardening and active intrusion detection.
 
-<details>
-<summary><b>k8s_audit_baseline</b> — Workload & RBAC Security Baseline (11 rules)</summary>
-
-Detects Kubernetes configurations that violate security best practices at the point of creation or modification.
-
-| Rule | Detection | Severity | MITRE ATT&CK |
-|------|-----------|----------|---------------|
-| B001–B003 | **Privileged containers** — Pod, Deployment, DaemonSet with `privileged: true` | HIGH | T1611 Privilege Escalation |
-| B004–B005 | **Host namespace sharing** — `hostNetwork` / `hostPID` / `hostIPC` breaks container isolation | HIGH | T1611 Privilege Escalation |
-| B006, B011 | **Container runtime socket mount** — `docker.sock` / `containerd.sock` enables container escape | HIGH | T1611 Privilege Escalation |
-| B007 | **Sensitive hostPath mount** — mounting `/`, `/etc`, `/proc`, `/sys`, `/root` | HIGH | T1611 Privilege Escalation |
-| B008 | **CAP_SYS_ADMIN capability** — near-equivalent to full privileged mode | HIGH | T1611 Privilege Escalation |
-| B009 | **Wildcard ClusterRole** — `resources: ["*"]` or `verbs: ["*"]` grants unrestricted access | HIGH | T1098.001 Persistence |
-| B010 | **cluster-admin binding** — any subject bound to cluster-admin = full cluster compromise | HIGH | T1098.001 Persistence |
-
-</details>
-
-<details>
-<summary><b>k8s_audit_intrusion</b> — Active Intrusion Detection (14 rules)</summary>
-
-Detects highly suspicious operations that indicate active intrusion, lateral movement, or post-exploitation activity.
-
-| Rule | Detection | Severity | MITRE ATT&CK |
-|------|-----------|----------|---------------|
-| I001 | **Exec into kube-system pod** — non-system user shell access to critical pods | HIGH | T1609 Execution |
-| I002 | **Cluster-wide secrets enumeration** — listing secrets across all namespaces | HIGH | T1552.007 Credential Access |
-| I003 | **Anonymous RBAC binding** — granting roles to `system:anonymous` | HIGH | T1098 Persistence |
-| I004 | **Admission webhook tampering** — mutating webhook can intercept all resource creation | HIGH | T1546 Persistence |
-| I005 | **External workload in kube-system** — non-system user deploying to kube-system | HIGH | T1610 Persistence |
-| I006 | **Validating webhook deletion** — disabling OPA/Gatekeeper/Kyverno policy enforcement | HIGH | T1562.001 Defense Evasion |
-| I007 | **Node proxy access** — direct kubelet API access bypassing RBAC | HIGH | T1599 Lateral Movement |
-| I008 | **User impersonation** — assuming another identity via impersonation headers | HIGH | T1134.001 Privilege Escalation |
-| I009 | **kube-system secret/configmap deletion** — disrupting cluster operations | MEDIUM | T1485 Impact |
-| I010 | **Excessive secret access** — 20+ distinct secrets read in 5 min *(threshold)* | MEDIUM | T1552.007 Credential Access |
-| I011 | **Exec shell spray** — exec into 10+ different pods in 3 min *(threshold)* | HIGH | T1609 Lateral Movement |
-| I012 | **Privileged SA token theft** — creating tokens for kube-system service accounts | HIGH | T1528 Credential Access |
-| I013 | **CronJob with reverse shell** — bash reverse shells, nc, base64 obfuscation, attack tools | HIGH | T1053.007 Execution |
-| I014 | **Attack tool / crypto-miner images** — kali, metasploit, xmrig, cobaltstrike, etc. | HIGH | T1610 Execution |
-
-</details>
-
-> **Quick start:** Import the built-in rulesets from `config/ruleset/` (`k8s_audit_baseline.xml` and `k8s_audit_intrusion.xml`), connect your K8s audit log source, and you have production-grade Kubernetes threat detection running in minutes — no tuning needed.
+> **Quick start:** Import the built-in rulesets from `config/ruleset/k8s_security/` (`k8s_audit_baseline.xml` and `k8s_audit_intrusion.xml`), connect your K8s audit log source, and you have production-grade Kubernetes threat detection running in minutes — no tuning needed.
 
 ### Built-in K8s Ruleset Files
 
 AgentSmith-HUB includes Kubernetes security rulesets out of the box. You can use them directly without writing custom XML first:
 
-- `config/ruleset/k8s_audit_baseline.xml`
-- `config/ruleset/k8s_audit_intrusion.xml`
+- `config/ruleset/k8s_security/k8s_audit_baseline.xml`
+- `config/ruleset/k8s_security/k8s_audit_intrusion.xml`
 
 Recommended onboarding flow:
 
@@ -186,6 +145,21 @@ Recommended onboarding flow:
 2. Route Kubernetes audit logs to these rulesets in your Project.
 3. Verify detections in test mode with real sample events.
 4. Tune thresholds (if needed) for your cluster's normal behavior.
+
+### Sysmon Endpoint Security (Windows)
+
+Two Sysmon rulesets are provided for medium/high-confidence endpoint detection use cases:
+
+- `config/ruleset/sysmon_security/sysmon_baseline.xml`
+- `config/ruleset/sysmon_security/sysmon_intrusion.xml`
+- `config/ruleset/sysmon_security/sysmon_exclude.xml` (strict allowlist template)
+
+Recommended onboarding flow for Sysmon:
+
+1. Ensure your input normalizes core Sysmon fields used by rulesets.
+2. Import `sysmon_baseline.xml` first and validate behavior in test mode.
+3. Import `sysmon_intrusion.xml` and tune based on your endpoint baseline.
+4. Add environment-specific allowlists with a separate EXCLUDE ruleset if needed.
 
 More built-in rulesets for additional data sources are on the roadmap. Contributions are welcome!
 

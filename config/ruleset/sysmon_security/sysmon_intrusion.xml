@@ -1,0 +1,379 @@
+<!-- ============================================================================
+     Sysmon — Intrusion Detection (High Confidence)
+     ============================================================================
+     Type:     DETECTION
+     Purpose:  Detect active intrusion and post-exploitation activity from
+               Sysmon telemetry with strong precision controls.
+     Scope:    Windows Sysmon events (1/3/10/11)
+     Notes:
+       - Threshold rules are used for medium-severity burst behaviors.
+       - Rules intentionally avoid low-confidence IOC-only patterns.
+     ============================================================================ -->
+
+<root type="DETECTION" name="sysmon_intrusion" author="AgentSmith">
+
+    <!-- ================================================================
+         S-I001 — LSASS access by uncommon process
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-I001" name="Potential credential dump via LSASS access">
+        <check type="EQU" field="event.code">10</check>
+        <check type="REGEX" field="target.process.executable">(?i)\\lsass\.exe$</check>
+        <check type="REGEX" field="process.executable">(?i)(rundll32|regsvr32|powershell|pwsh|cmd|wscript|cscript|mshta|procdump)\.exe$</check>
+        <append field="alert_id">S-I001</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Suspicious process attempted access to LSASS</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I002 — Encoded PowerShell + network beacon combo
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-I002" name="Encoded PowerShell with external network activity">
+        <check type="EQU" field="event.code">3</check>
+        <check type="REGEX" field="process.executable">(?i)(powershell|pwsh)\.exe$</check>
+        <check type="REGEX" field="process.command_line">(?i)(-enc|-encodedcommand)\s+[A-Za-z0-9+/=]{20,}</check>
+        <check type="EXCL" field="destination.ip">127.0.0.1</check>
+        <check type="EXCL" field="destination.ip">::1</check>
+        <append field="alert_id">S-I002</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Encoded PowerShell initiated non-local network connection</append>
+        <append field="mitre_tactic">Command and Control</append>
+        <append field="mitre_technique_id">T1071</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I003 — Cobalt Strike-like beacon process path
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-I003" name="Suspicious executable launched from user-writeable path">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.executable">(?i)\\(Users\\[^\\]+\\AppData\\(Local|Roaming)|ProgramData|Temp)\\.*\.(exe|dll)$</check>
+        <check type="REGEX" field="process.parent.executable">(?i)(powershell|cmd|wscript|cscript|mshta|rundll32|regsvr32)\.exe$</check>
+        <append field="alert_id">S-I003</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Script/LOLBin launched executable from user-writeable directory</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1204</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I004 — LSASS dump via rundll32 + comsvcs MiniDump
+         Severity: HIGH
+         Community-validated high-confidence credential dumping pattern.
+         ================================================================ -->
+    <rule id="S-I004" name="LSASS dump attempt via rundll32 comsvcs MiniDump">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.executable">(?i)\\rundll32\.exe$</check>
+        <check type="REGEX" field="process.command_line">(?i)comsvcs\.dll</check>
+        <check type="REGEX" field="process.command_line">(?i)(MiniDump|#24|24\s+full|full)</check>
+        <check type="REGEX" field="process.command_line">(?i)lsass(\.exe)?</check>
+        <append field="alert_id">S-I004</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Credential dump pattern: rundll32 calling comsvcs MiniDump against LSASS</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I005 — Lateral movement execution chain
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-I005" name="Potential lateral movement via remote execution tooling">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.executable">(?i)(wmic|psexec|winrs|schtasks)\.exe$</check>
+        <check type="REGEX" field="process.command_line">(?i)(\\\\[^\\]+\\|/node:|/s\s+\\\\|/create)</check>
+        <append field="alert_id">S-I005</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates potential remote execution/lateral movement</append>
+        <append field="mitre_tactic">Lateral Movement</append>
+        <append field="mitre_technique_id">T1021</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I006 — LSASS dump via procdump
+         Severity: HIGH
+         High-confidence when process target + dump mode flags are present.
+         ================================================================ -->
+    <rule id="S-I006" name="LSASS dump attempt via procdump">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.executable">(?i)\\procdump(|64)?\.exe$</check>
+        <check type="REGEX" field="process.command_line">(?i)\s-(ma|mm|mp)\s</check>
+        <check type="REGEX" field="process.command_line">(?i)lsass(\.exe)?</check>
+        <append field="alert_id">S-I006</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Credential dump pattern: procdump targeting LSASS with memory dump flags</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I007 — Ransomware-like rapid file staging in user profile
+         Severity: MEDIUM
+         ================================================================ -->
+    <rule id="S-I007" name="Rapid suspicious payload writes under user profile">
+        <check type="EQU" field="event.code">11</check>
+        <check type="REGEX" field="file.path">(?i)\\Users\\[^\\]+\\(Desktop|Documents|Downloads|AppData\\Local\\Temp)\\</check>
+        <check type="REGEX" field="file.path">(?i)\.(exe|dll|ps1|vbs|js|bat|cmd|hta)$</check>
+        <threshold group_by="host.name,process.executable" range="3m" local_cache="true">30</threshold>
+        <append field="alert_id">S-I007</append>
+        <append field="severity">medium</append>
+        <append field="category">intrusion</append>
+        <append field="description">Process created many suspicious payload files in user profile paths</append>
+        <append field="mitre_tactic">Impact</append>
+        <append field="mitre_technique_id">T1486</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I008 — Shadow copy deletion / ransomware preparation
+         Severity: HIGH
+         Very high-confidence destructive-prep pattern.
+         ================================================================ -->
+    <rule id="S-I008" name="Shadow copy deletion command detected">
+        <check type="EQU" field="event.code">1</check>
+        <checklist condition="vssadmin or wmic or ps_shadow">
+            <check id="vssadmin" type="REGEX" field="process.command_line">(?i)\bvssadmin(\.exe)?\b.*\bdelete\b.*\bshadows\b.*\b/all\b.*\b/quiet\b</check>
+            <check id="wmic" type="REGEX" field="process.command_line">(?i)\bwmic(\.exe)?\b.*\bshadowcopy\b.*\bdelete\b</check>
+            <check id="ps_shadow" type="REGEX" field="process.command_line">(?i)(Get-WmiObject|Get-CimInstance).*(Win32_ShadowCopy|Win32_Shadowcopy).*(Delete\(\)|\|\s*%|Remove-WmiObject|Remove-CimInstance)</check>
+        </checklist>
+        <append field="alert_id">S-I008</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates shadow copy deletion (common ransomware pre-encryption step)</append>
+        <append field="mitre_tactic">Impact</append>
+        <append field="mitre_technique_id">T1490</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I009 — Recovery inhibition command chain
+         Severity: HIGH
+         High-confidence anti-recovery behavior.
+         ================================================================ -->
+    <rule id="S-I009" name="Backup/recovery inhibition command detected">
+        <check type="EQU" field="event.code">1</check>
+        <checklist condition="wbadmin_del or bcdedit_recovery or bcdedit_bootstatus">
+            <check id="wbadmin_del" type="REGEX" field="process.command_line">(?i)\bwbadmin(\.exe)?\b.*\bdelete\b.*\bcatalog\b.*\b-quiet\b</check>
+            <check id="bcdedit_recovery" type="REGEX" field="process.command_line">(?i)\bbcdedit(\.exe)?\b.*\b/set\b.*\brecoveryenabled\b.*\bno\b</check>
+            <check id="bcdedit_bootstatus" type="REGEX" field="process.command_line">(?i)\bbcdedit(\.exe)?\b.*\b/set\b.*\bbootstatuspolicy\b.*\bignoreallfailures\b</check>
+        </checklist>
+        <append field="alert_id">S-I009</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates backup/recovery safeguards being disabled</append>
+        <append field="mitre_tactic">Impact</append>
+        <append field="mitre_technique_id">T1490</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I010 — Security log clearing behavior
+         Severity: HIGH
+         High-confidence defense-evasion signal.
+         ================================================================ -->
+    <rule id="S-I010" name="Security event log clearing command detected">
+        <check type="EQU" field="event.code">1</check>
+        <checklist condition="wevtutil_clear or ps_clear">
+            <check id="wevtutil_clear" type="REGEX" field="process.command_line">(?i)\bwevtutil(\.exe)?\b.*\bcl\b.*\b(Security|System|Windows PowerShell|Microsoft-Windows-Sysmon/Operational)\b</check>
+            <check id="ps_clear" type="REGEX" field="process.command_line">(?i)\b(Clear-EventLog|Remove-EventLog)\b.*\b(Security|System|Windows PowerShell)\b</check>
+        </checklist>
+        <append field="alert_id">S-I010</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates attempted clearing of high-value Windows logs</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1070.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I011 — WDigest UseLogonCredential enabled
+         Severity: HIGH
+         High-confidence credential-theft preparation behavior.
+         ================================================================ -->
+    <rule id="S-I011" name="WDigest UseLogonCredential enabled">
+        <check type="EQU" field="event.code">13</check>
+        <check type="REGEX" field="registry.path">(?i)\\Control\\SecurityProviders\\WDigest\\UseLogonCredential$</check>
+        <check type="REGEX" field="registry.value">(?i)(^1$|0x00000001|DWORD\s*\(0x1\))</check>
+        <append field="alert_id">S-I011</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Registry change enables WDigest plaintext credential material in memory</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I012 — Host firewall globally disabled
+         Severity: HIGH
+         High-confidence defense-evasion behavior.
+         ================================================================ -->
+    <rule id="S-I012" name="Windows firewall globally disabled">
+        <check type="EQU" field="event.code">1</check>
+        <checklist condition="netsh_off or ps_off">
+            <check id="netsh_off" type="REGEX" field="process.command_line">(?i)\bnetsh(\.exe)?\b.*\badvfirewall\b.*\bset\b.*\ballprofiles\b.*\bstate\b.*\boff\b</check>
+            <check id="ps_off" type="REGEX" field="process.command_line">(?i)\bSet-NetFirewallProfile\b.*\b-Profile\b\s*(Domain|Private|Public|Any|All).*\b-Enabled\b\s*(False|\$false)\b</check>
+        </checklist>
+        <append field="alert_id">S-I012</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates host firewall profile(s) disabled</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.004</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I013 — Defender real-time protection disabled
+         Severity: HIGH
+         High-confidence anti-malware tampering behavior.
+         ================================================================ -->
+    <rule id="S-I013" name="Defender real-time monitoring disabled">
+        <check type="EQU" field="event.code">1</check>
+        <checklist condition="set_mp_pref or reg_disable_rtp">
+            <check id="set_mp_pref" type="REGEX" field="process.command_line">(?i)\bSet-MpPreference\b.*\b-DisableRealtimeMonitoring\b\s*(\$true|true|1)\b</check>
+            <check id="reg_disable_rtp" type="REGEX" field="process.command_line">(?i)\breg(\.exe)?\b.*\badd\b.*\\(Microsoft\\Windows Defender\\Real-Time Protection|Microsoft\\Windows Defender\\Policy Manager)\\.*\b(DisableRealtimeMonitoring|DisableAntiSpyware)\b.*\b(/d|/data)\s*(1|0x1)\b</check>
+        </checklist>
+        <append field="alert_id">S-I013</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline indicates Microsoft Defender real-time protection disabled</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I014 — Defender broad exclusion added
+         Severity: MEDIUM
+         Broad exclusions are commonly used to blind endpoint protection.
+         ================================================================ -->
+    <rule id="S-I014" name="Defender broad exclusion path added">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)\b(Add-MpPreference|Set-MpPreference)\b.*\b-ExclusionPath\b</check>
+        <check type="REGEX" field="process.command_line">(?i)([A-Za-z]:\\$|[A-Za-z]:\\Windows\\?|[A-Za-z]:\\ProgramData\\?|[A-Za-z]:\\Users\\?|\\\\\?\\GLOBALROOT\\?)</check>
+        <append field="alert_id">S-I014</append>
+        <append field="severity">medium</append>
+        <append field="category">intrusion</append>
+        <append field="description">Commandline adds broad Defender exclusion path (potential AV bypass)</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I015 — LSASS handle access via rundll32 + comsvcs call trace
+         Severity: HIGH
+         ProcessAccess-side high-confidence companion to S-I004.
+         ================================================================ -->
+    <rule id="S-I015" name="LSASS handle access via rundll32 comsvcs call trace">
+        <check type="EQU" field="event.code">10</check>
+        <check type="REGEX" field="target.process.executable">(?i)\\lsass\.exe$</check>
+        <check type="REGEX" field="process.executable">(?i)\\rundll32\.exe$</check>
+        <checklist condition="ecs_snake or ecs_compact or raw_pascal or raw_nested">
+            <check id="ecs_snake" type="REGEX" field="process.call_trace">(?i)comsvcs(\.dll)?</check>
+            <check id="ecs_compact" type="REGEX" field="process.calltrace">(?i)comsvcs(\.dll)?</check>
+            <check id="raw_pascal" type="REGEX" field="CallTrace">(?i)comsvcs(\.dll)?</check>
+            <check id="raw_nested" type="REGEX" field="event_data.CallTrace">(?i)comsvcs(\.dll)?</check>
+        </checklist>
+        <append field="alert_id">S-I015</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">ProcessAccess indicates rundll32/comsvcs attempted handle access to LSASS</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I016 — Critical log channels disabled
+         Severity: HIGH
+         High-confidence defense-evasion behavior.
+         ================================================================ -->
+    <rule id="S-I016" name="Critical Windows log channel disabled">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)\bwevtutil(\.exe)?\b.*\bsl\b.*\b(Security|System|Windows PowerShell|Microsoft-Windows-Sysmon/Operational)\b.*\b/e:false\b</check>
+        <append field="alert_id">S-I016</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Critical event log channel disabled via wevtutil set-log</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.002</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I017 — Audit policy disabled
+         Severity: HIGH
+         High-confidence attempt to suppress Windows audit telemetry.
+         ================================================================ -->
+    <rule id="S-I017" name="Windows audit policy disabled">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)\bauditpol(\.exe)?\b.*\b/set\b</check>
+        <checklist condition="disable_success or disable_failure">
+            <check id="disable_success" type="REGEX" field="process.command_line">(?i)\b/success:disable\b</check>
+            <check id="disable_failure" type="REGEX" field="process.command_line">(?i)\b/failure:disable\b</check>
+        </checklist>
+        <append field="alert_id">S-I017</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Audit policy disabled via auditpol command</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.002</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I018 — Security service stop/disable
+         Severity: HIGH
+         High-confidence defense-evasion behavior when core services are targeted.
+         ================================================================ -->
+    <rule id="S-I018" name="Critical security service stop or disable">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)\b(sc|sc\.exe|net|net\.exe)\b</check>
+        <check type="REGEX" field="process.command_line">(?i)\b(WinDefend|WdNisSvc|Sense|Sysmon64|Sysmon)\b</check>
+        <checklist condition="stop_or_disable">
+            <check id="stop_or_disable" type="REGEX" field="process.command_line">(?i)\b(stop|delete|config)\b.*\b(disabled|disable|stop)\b|\bnet\b.*\bstop\b</check>
+        </checklist>
+        <append field="alert_id">S-I018</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Attempt to stop or disable core security telemetry/AV service</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1562.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I019 — NTDS extraction via ntdsutil IFM
+         Severity: HIGH
+         High-confidence Active Directory credential theft behavior.
+         ================================================================ -->
+    <rule id="S-I019" name="NTDS extraction using ntdsutil IFM">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)\bntdsutil(\.exe)?\b</check>
+        <check type="REGEX" field="process.command_line">(?i)\b(ac\s+i\s+ntds|activate instance ntds)\b</check>
+        <check type="REGEX" field="process.command_line">(?i)\bifm\b.*\b(create\s+full|create\s+rodc|create\s+sysvol)\b</check>
+        <append field="alert_id">S-I019</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">NTDS database extraction workflow detected via ntdsutil IFM</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003.003</append>
+    </rule>
+
+    <!-- ================================================================
+         S-I020 — Explicit credential-dumping toolkit markers
+         Severity: HIGH
+         High-confidence but narrow; catches non-obfuscated operator tooling.
+         ================================================================ -->
+    <rule id="S-I020" name="Credential dumping toolkit marker in command line">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.command_line">(?i)(sekurlsa::|lsadump::|privilege::debug|mimikatz(\.exe)?|Invoke-Mimikatz|rubeus(\.exe)?\s+(dump|triage|monitor|asktgt|ptt|s4u))</check>
+        <append field="alert_id">S-I020</append>
+        <append field="severity">high</append>
+        <append field="category">intrusion</append>
+        <append field="description">Known credential dumping toolkit marker found in process command line</append>
+        <append field="mitre_tactic">Credential Access</append>
+        <append field="mitre_technique_id">T1003</append>
+    </rule>
+
+</root>

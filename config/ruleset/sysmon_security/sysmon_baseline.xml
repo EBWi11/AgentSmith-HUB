@@ -1,0 +1,119 @@
+<!-- ============================================================================
+     Sysmon — Baseline Security Policy (Low-Noise Medium/High Severity)
+     ============================================================================
+     Type:     DETECTION
+     Purpose:  Detect high-confidence endpoint behaviors from Windows Sysmon logs
+               with strict signal controls to keep false positives low.
+     Scope:    Windows Sysmon events (primarily Event ID 1/10/11/13/22)
+     Notes:
+       - Focused on medium/high severity only.
+       - Most rules require multiple conditions (behavior + context).
+       - Rule IDs are stable for triage workflow and suppression management.
+     ============================================================================ -->
+
+<root type="DETECTION" name="sysmon_baseline" author="AgentSmith">
+
+    <!-- ================================================================
+         S-B001 — Suspicious Encoded PowerShell
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-B001" name="Suspicious encoded PowerShell execution">
+        <check type="EQU" field="event.code">1</check>
+        <check type="INCL" field="process.executable">powershell</check>
+        <checklist condition="enc and hidden and bypass">
+            <check id="enc" type="REGEX" field="process.command_line">(?i)(-enc|-encodedcommand)\s+[A-Za-z0-9+/=]{20,}</check>
+            <check id="hidden" type="REGEX" field="process.command_line">(?i)(-w|/w|--windowstyle)\s*hidden</check>
+            <check id="bypass" type="REGEX" field="process.command_line">(?i)(-ep|--executionpolicy)\s*bypass</check>
+        </checklist>
+        <append field="alert_id">S-B001</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">Encoded PowerShell with hidden window and policy bypass</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1059.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-B002 — Office/Browser spawning script engines
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-B002" name="Office or browser spawned script engine">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.parent.executable">(?i)(winword|excel|powerpnt|outlook|chrome|msedge|firefox)\.exe$</check>
+        <check type="REGEX" field="process.executable">(?i)(powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32)\.exe$</check>
+        <append field="alert_id">S-B002</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">User-facing app spawned a high-risk script/LOLBin child process</append>
+        <append field="mitre_tactic">Execution</append>
+        <append field="mitre_technique_id">T1204</append>
+    </rule>
+
+    <!-- ================================================================
+         S-B003 — Run/RunOnce persistence write
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-B003" name="Run key persistence created or modified">
+        <check type="EQU" field="event.code">13</check>
+        <check type="REGEX" field="registry.path">(?i)\\(CurrentVersion\\Run|CurrentVersion\\RunOnce)(\\|$)</check>
+        <check type="REGEX" field="process.executable">(?i)(powershell|cmd|wscript|cscript|mshta|rundll32|regsvr32)\.exe$</check>
+        <append field="alert_id">S-B003</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">High-risk process modified Run/RunOnce persistence key</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1547.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-B004 — Suspicious startup-folder artifact
+         Severity: MEDIUM
+         ================================================================ -->
+    <rule id="S-B004" name="Script or executable dropped to startup folder">
+        <check type="EQU" field="event.code">11</check>
+        <check type="REGEX" field="file.path">(?i)\\(ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup|Users\\[^\\]+\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup)\\</check>
+        <check type="REGEX" field="file.path">(?i)\.(ps1|vbs|js|hta|cmd|bat|exe|dll)$</check>
+        <append field="alert_id">S-B004</append>
+        <append field="severity">medium</append>
+        <append field="category">baseline</append>
+        <append field="description">Potential startup persistence payload dropped to Startup folder</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1547.001</append>
+    </rule>
+
+    <!-- ================================================================
+         S-B005 — Remote-script style LOLBin command
+         Severity: HIGH
+         ================================================================ -->
+    <rule id="S-B005" name="LOLBin with remote script or URL pattern">
+        <check type="EQU" field="event.code">1</check>
+        <check type="REGEX" field="process.executable">(?i)(mshta|regsvr32|rundll32)\.exe$</check>
+        <check type="REGEX" field="process.command_line">(?i)(https?://|scrobj\.dll|javascript:|vbscript:)</check>
+        <append field="alert_id">S-B005</append>
+        <append field="severity">high</append>
+        <append field="category">baseline</append>
+        <append field="description">LOLBin commandline indicates remote script execution pattern</append>
+        <append field="mitre_tactic">Defense Evasion</append>
+        <append field="mitre_technique_id">T1218</append>
+    </rule>
+
+    <!-- ================================================================
+         S-B006 — Unusual scheduler abuse chain
+         Severity: MEDIUM
+         ================================================================ -->
+    <rule id="S-B006" name="Suspicious schtasks command writing script payload">
+        <check type="EQU" field="event.code">1</check>
+        <check type="INCL" field="process.executable">schtasks.exe</check>
+        <checklist condition="create and payload">
+            <check id="create" type="REGEX" field="process.command_line">(?i)\s/create(\s|$)</check>
+            <check id="payload" type="REGEX" field="process.command_line">(?i)(powershell|wscript|cscript|mshta|rundll32|regsvr32|cmd\.exe\s+/c)</check>
+        </checklist>
+        <append field="alert_id">S-B006</append>
+        <append field="severity">medium</append>
+        <append field="category">baseline</append>
+        <append field="description">Scheduled task created with script/LOLBin execution payload</append>
+        <append field="mitre_tactic">Persistence</append>
+        <append field="mitre_technique_id">T1053.005</append>
+    </rule>
+
+</root>

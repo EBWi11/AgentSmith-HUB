@@ -1,0 +1,53 @@
+<!-- ============================================================================
+     Sysmon — Exclude Template (High-Precision Allowlist)
+     ============================================================================
+     Type:     EXCLUDE
+     Purpose:  Provide a safe allowlist template for known benign behaviors.
+               This file is intentionally strict and uses placeholder values.
+               By default, rules do NOT match until placeholders are replaced.
+     Scope:    Windows Sysmon events (1/10)
+
+     How to use:
+       1) Copy this file and keep it environment-specific.
+       2) Replace placeholder values with exact host/user/path combinations.
+       3) Never use broad wildcards for critical behaviors (especially LSASS).
+       4) Validate with test data before enabling in production.
+     ============================================================================ -->
+
+<root type="EXCLUDE" name="sysmon_exclude" author="AgentSmith">
+
+    <!-- ================================================================
+         X001 — Allow approved LSASS dump troubleshooting via procdump
+         Targeted to suppress S-I006 only for explicitly approved runbooks.
+         IMPORTANT:
+           - Keep host and user exact.
+           - Keep process path exact.
+           - Keep commandline marker exact.
+         ================================================================ -->
+    <rule id="X001" name="Approved procdump LSASS troubleshooting">
+        <check type="EQU" field="event.code">1</check>
+        <check type="EQU" field="host.name">__REPLACE_WITH_APPROVED_HOST__</check>
+        <check type="EQU" field="user.name">__REPLACE_WITH_APPROVED_USER__</check>
+        <check type="EQU" field="process.executable">__REPLACE_WITH_APPROVED_PROCDUMP_PATH__</check>
+        <check type="INCL" field="process.command_line">__REPLACE_WITH_APPROVED_RUNBOOK_MARKER__</check>
+    </rule>
+
+    <!-- ================================================================
+         X002 — Allow approved comsvcs minidump workflow
+         Targeted to suppress S-I004 only when fully approved and documented.
+         IMPORTANT:
+           - Must include exact host + user + commandline marker.
+           - Do not allow this globally.
+         ================================================================ -->
+    <rule id="X002" name="Approved rundll32 comsvcs minidump workflow">
+        <check type="EQU" field="event.code">1</check>
+        <check type="EQU" field="host.name">__REPLACE_WITH_APPROVED_HOST__</check>
+        <check type="EQU" field="user.name">__REPLACE_WITH_APPROVED_USER__</check>
+        <check type="EQU" field="process.executable">C:\Windows\System32\rundll32.exe</check>
+        <checklist condition="comsvcs and marker">
+            <check id="comsvcs" type="INCL" field="process.command_line">comsvcs.dll</check>
+            <check id="marker" type="INCL" field="process.command_line">__REPLACE_WITH_APPROVED_RUNBOOK_MARKER__</check>
+        </checklist>
+    </rule>
+
+</root>
