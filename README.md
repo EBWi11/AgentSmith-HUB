@@ -126,12 +126,6 @@ For full agent details (fields like `reasoning_mode`, `reasoning_budget_tokens`,
 
 AgentSmith-HUB ships with production-ready detection rulesets that you can deploy immediately — no rule-writing required. All rules are mapped to [MITRE ATT&CK](https://attack.mitre.org/) for seamless integration with your security workflows.
 
-### Kubernetes Audit Log Security
-
-Two Kubernetes audit rulesets are provided for baseline hardening and active intrusion detection.
-
-> **Quick start:** Import the built-in rulesets from `config/ruleset/k8s_security/` (`k8s_audit_baseline.xml` and `k8s_audit_intrusion.xml`), connect your K8s audit log source, and you have production-grade Kubernetes threat detection running in minutes — no tuning needed.
-
 ### Built-in K8s Ruleset Files
 
 AgentSmith-HUB includes Kubernetes security rulesets out of the box. You can use them directly without writing custom XML first:
