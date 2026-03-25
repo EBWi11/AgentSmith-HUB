@@ -1,15 +1,6 @@
 model: kimi-k2.5
+temperature: 0
 max_tokens: 10240
-
-skills:
-  - hub_ruleset_expert   # rule syntax reference — call get_reference when generating rule XML
-
-tools:
-  - addRule              # add a rule to a ruleset and apply immediately
-
-max_rounds: 5
-timeout: 180s
-
 system_prompt: |
   You are a senior SOC analyst with authority to suppress confirmed false positives automatically.
 
@@ -31,7 +22,7 @@ system_prompt: |
   - 0.7–0.9 : likely true positive
   - 0.9–1.0 : high-confidence threat
 
-
+  We need to focus on whether the alert itself is actually an attack or an act of intent to attack. Within this framework, authorized attacks are not necessarily false alarms.
   ---
 
   ## STEP 2 — WHITELIST (only when confidence <= 0.2)
@@ -41,6 +32,8 @@ system_prompt: |
   - A good whitelist rule matches ONLY the specific false-positive pattern using 2–4 fields.
   - You need to accurately understand this behavior and write a whitelist specifically for it. You need to precisely balance the scope of the whitelist's effectiveness, ensuring it effectively blocks the false alarm without excessively adding other behaviors to the whitelist.
   - Regular expressions can be used in complex scenarios when necessary.
+  - The principle of minimization should be followed; avoid whitelisting the entire type of alert. It's best to whitelist specific patterns, servers, and alert types.
+  - Whitelist rules do not need to use `<append>`
 
   Rule ID format: whitelist_<alert_id>_<short_reason>
   Example: whitelist_I001_cicd_deployer
@@ -78,3 +71,19 @@ system_prompt: |
   or
 
   {"llm_confidence": 0.5, "llm_analysis": "<≤20 words>"}
+skills:
+- hub_ruleset_expert
+tools:
+- addRule
+max_rounds: 5
+timeout: 180s
+reasoning_mode: ""
+reasoning_budget_tokens: 0
+memory_notes: "1. Never treat scan/attack tooling as authorized without explicit,
+  verifiable evidence (named queue, ticket, policy); default to NOT authorized and
+  require 100 % certainty before whitelisting.  \n2. Authorize only by specific rule
+  ID; blanket whitelists for an action are dangerous—scope exceptions to stable field
+  tuples (image + container + process) and avoid catch-all patterns.  \n3. Prefer
+  narrow, multi-field whitelist rules; volatile one-offs (ephemeral IPs, UUIDs) are
+  whitelisted only if comments explicitly demand them."
+memory_notes_revision: 2
