@@ -308,7 +308,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 		if ctx.Err() != nil {
 			logger.Error("Agent processing timed out, passing through original message",
 				"agent", a.Id, "timeout", a.Config.Timeout)
-			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout))
+			return a.attachLlmError(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout))
 		}
 
 		resp, err := callChatWithTools(
@@ -318,7 +318,7 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 		)
 		if err != nil {
 			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)
-			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent LLM call failed: %v", err))
+			return a.attachLlmError(msg, fmt.Sprintf("agent LLM call failed: %v", err))
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -344,12 +344,12 @@ func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{
 			return msg
 		}
 		// LLM 返回内容无法解析为有效 JSON，视为错误
-		return a.attachLlmErrorAndNoForward(msg, "agent LLM response could not be parsed as JSON")
+		return a.attachLlmError(msg, "agent LLM response could not be parsed as JSON")
 	}
 
 	logger.Error("Agent max ReAct rounds exceeded, passing through original message",
 		"agent", a.Id, "max_rounds", a.Config.MaxRounds)
-	return a.attachLlmErrorAndNoForward(msg, "agent max ReAct rounds exceeded")
+	return a.attachLlmError(msg, "agent max ReAct rounds exceeded")
 }
 
 // ProcessMessageWithTrace runs one message through the agent and returns the result
@@ -373,7 +373,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 
 	for round := 0; round < a.Config.MaxRounds; round++ {
 		if ctx.Err() != nil {
-			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout)), trace
+			return a.attachLlmError(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout)), trace
 		}
 
 		inputSnap := cloneMessagesForTrace(conversation)
@@ -384,7 +384,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 		)
 		trace = append(trace, newLLMTraceStep(round+1, model, inputSnap, resp, err))
 		if err != nil {
-			return a.attachLlmErrorAndNoForward(msg, fmt.Sprintf("agent LLM call failed: %v", err)), trace
+			return a.attachLlmError(msg, fmt.Sprintf("agent LLM call failed: %v", err)), trace
 		}
 
 		if len(resp.ToolCalls) > 0 {
@@ -419,16 +419,15 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 			msg["llm"].(map[string]interface{})[a.Id] = llmMap
 			return msg, trace
 		}
-		return a.attachLlmErrorAndNoForward(msg, "agent LLM response could not be parsed as JSON"), trace
+		return a.attachLlmError(msg, "agent LLM response could not be parsed as JSON"), trace
 	}
 
-	return a.attachLlmErrorAndNoForward(msg, "agent max ReAct rounds exceeded"), trace
+	return a.attachLlmError(msg, "agent max ReAct rounds exceeded"), trace
 }
 
-// attachLlmErrorAndNoForward annotates the message with an llm error block for this agent
-// and sets _no_forward=true so downstream components will not receive this message.
-func (a *Agent) attachLlmErrorAndNoForward(msg map[string]interface{}, errMsg string) map[string]interface{} {
-	// Ensure llm map exists
+// attachLlmError annotates the message with an llm error block for this agent.
+// The message is still forwarded to downstream components so the pipeline continues.
+func (a *Agent) attachLlmError(msg map[string]interface{}, errMsg string) map[string]interface{} {
 	llmAny, ok := msg["llm"]
 	var llm map[string]interface{}
 	if ok {
@@ -441,12 +440,10 @@ func (a *Agent) attachLlmErrorAndNoForward(msg map[string]interface{}, errMsg st
 		msg["llm"] = llm
 	}
 
-	agentLlm := map[string]interface{}{
-		"agent":       a.Id,
-		"error":       errMsg,
-		"_no_forward": true,
+	llm[a.Id] = map[string]interface{}{
+		"agent": a.Id,
+		"error": errMsg,
 	}
-	llm[a.Id] = agentLlm
 	return msg
 }
 
