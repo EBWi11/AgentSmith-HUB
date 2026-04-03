@@ -2,7 +2,6 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/EBWi11/AgentSmith-HUB)](https://github.com/EBWi11/AgentSmith-HUB/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0%20with%20Commons%20Clause-blue)](./LICENSE)
-[![Nerq Trust Score](https://nerq.ai/badge/EBWi11/AgentSmith-HUB)](https://nerq.ai/safe/EBWi11/AgentSmith-HUB)
 
 
 **A high-performance security data pipeline with a real-time rules engine and deeply integrated LLM agents — built for modern SOC and detection engineering teams.**
