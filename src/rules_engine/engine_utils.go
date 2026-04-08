@@ -40,47 +40,27 @@ func RedisFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (b
 	return res, nil
 }
 
-// LocalCacheFRQSum performs frequency sum aggregation using local cache
+// LocalCacheFRQSum performs frequency sum aggregation using local cache.
 // groupByKey: Cache key for grouping
 // sumData: Value to add to the sum
 // rangeInt: Time range in seconds
 // threshold: Threshold value to trigger
 // Returns: true if threshold is exceeded, false otherwise
 func (r *Ruleset) LocalCacheFRQSum(groupByKey string, sumData int, rangeInt int, threshold int) (bool, error) {
-	// Acquire write lock to protect cache operations
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if v, ok := r.Cache.Get(groupByKey); ok {
 		if v+sumData > threshold {
 			r.Cache.Del(groupByKey)
 			return true, nil
-		} else {
-			if tmpTtl, exist := r.Cache.GetTTL(groupByKey); exist {
-				success := r.Cache.SetWithTTL(groupByKey, v+sumData, 1, tmpTtl)
-				if success {
-					// Wait for the cache to be ready (ristretto is async)
-					r.Cache.Wait()
-				}
-			} else {
-				success := r.Cache.SetWithTTL(groupByKey, v+sumData, 1, time.Duration(rangeInt)*time.Second)
-				if success {
-					// Wait for the cache to be ready (ristretto is async)
-					r.Cache.Wait()
-				}
-			}
-			return false, nil
 		}
-	} else {
-		// Use cost=1 instead of 0, as ristretto may have special handling for cost=0
-		// Set the value and wait for async operation to complete
-		success := r.Cache.SetWithTTL(groupByKey, sumData, 1, time.Duration(rangeInt)*time.Second)
-		if success {
-			// Wait for the cache to be ready (ristretto is async)
-			r.Cache.Wait()
+		if ttl, exists := r.Cache.GetTTL(groupByKey); exists {
+			r.Cache.SetWithTTL(groupByKey, v+sumData, ttl)
+		} else {
+			r.Cache.SetWithTTL(groupByKey, v+sumData, time.Duration(rangeInt)*time.Second)
 		}
 		return false, nil
 	}
+	r.Cache.SetWithTTL(groupByKey, sumData, time.Duration(rangeInt)*time.Second)
+	return false, nil
 }
 
 // RedisFRQClassify performs frequency classification using Redis
@@ -113,53 +93,32 @@ func RedisFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold 
 }
 
 func (r *Ruleset) LocalCacheFRQClassify(tmpKey string, groupByKey string, rangeInt int, threshold int) (bool, error) {
-	// Acquire write lock to protect cache operations
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if keys, ok := r.CacheForClassify.Get(groupByKey); ok {
-		// Create a copy of the map to avoid modifying the cached map directly
-		keysCopy := make(map[string]bool)
-		for k, v := range keys {
-			keysCopy[k] = v
-		}
-
-		count := len(keysCopy) + 1
-		for key := range keysCopy {
+		// keys is already a copy (returned by Get), safe to mutate
+		count := len(keys) + 1
+		for key := range keys {
 			if _, okk := r.Cache.Get(key); !okk {
-				count = count - 1
-				delete(keysCopy, key)
+				count--
+				delete(keys, key)
 			}
 		}
 
 		if count > threshold {
-			for key := range keysCopy {
+			for key := range keys {
 				r.Cache.Del(key)
 			}
 			r.CacheForClassify.Del(groupByKey)
 			return true, nil
-		} else {
-			keysCopy[tmpKey] = true
-			r.CacheForClassify.SetWithTTL(groupByKey, keysCopy, 1, time.Duration(rangeInt*2)*time.Second)
-			success := r.Cache.SetWithTTL(tmpKey, 1, 1, time.Duration(rangeInt)*time.Second)
-			if success {
-				// Wait for the cache to be ready (ristretto is async)
-				r.Cache.Wait()
-			}
-			return false, nil
 		}
-	} else {
-		keys := map[string]bool{
-			tmpKey: true,
-		}
-		success := r.Cache.SetWithTTL(tmpKey, 1, 1, time.Duration(rangeInt)*time.Second)
-		if success {
-			// Wait for the cache to be ready (ristretto is async)
-			r.Cache.Wait()
-		}
-		r.CacheForClassify.SetWithTTL(groupByKey, keys, 1, time.Duration(rangeInt*2)*time.Second)
+		keys[tmpKey] = true
+		r.CacheForClassify.SetWithTTL(groupByKey, keys, time.Duration(rangeInt*2)*time.Second)
+		r.Cache.SetWithTTL(tmpKey, 1, time.Duration(rangeInt)*time.Second)
 		return false, nil
 	}
+	keys := map[string]bool{tmpKey: true}
+	r.Cache.SetWithTTL(tmpKey, 1, time.Duration(rangeInt)*time.Second)
+	r.CacheForClassify.SetWithTTL(groupByKey, keys, time.Duration(rangeInt*2)*time.Second)
+	return false, nil
 }
 
 // convertPluginArgument preserves all types for plugin consumption
@@ -551,9 +510,9 @@ func NEQ(data string, ruleData string) (res bool, hitData string) {
 }
 
 func NCS_EQU(data string, ruleData string) (res bool, hitData string) {
-	return strings.EqualFold(strings.ToLower(data), strings.ToLower(ruleData)), data
+	return strings.EqualFold(data, ruleData), data
 }
 
 func NCS_NEQ(data string, ruleData string) (res bool, hitData string) {
-	return !strings.EqualFold(strings.ToLower(data), strings.ToLower(ruleData)), ruleData
+	return !strings.EqualFold(data, ruleData), ruleData
 }

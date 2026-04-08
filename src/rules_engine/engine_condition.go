@@ -220,12 +220,17 @@ func (a *ReCepAST) ExprASTResult(e ExprAST, tokenVal map[string]bool) bool {
 	switch ast := e.(type) {
 	case BinaryExprAST:
 		l := a.ExprASTResult(ast.Lhs, tokenVal)
-		r := a.ExprASTResult(ast.Rhs, tokenVal)
 		switch ast.Op {
 		case "&":
-			return l && r
+			if !l {
+				return false
+			}
+			return a.ExprASTResult(ast.Rhs, tokenVal)
 		case "|":
-			return l || r
+			if l {
+				return true
+			}
+			return a.ExprASTResult(ast.Rhs, tokenVal)
 		}
 	case UnaryExprAST:
 		operand := a.ExprASTResult(ast.Operand, tokenVal)

@@ -697,7 +697,10 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 					modifiedData = mapDeepCopyWithExtraCapacity(data, 1)
 				}
 				// Keep internal sequence helper fields out of output payloads.
-				sanitizeOutputData(modifiedData)
+				// Non-sequence rules never write "#" keys, so skip the scan entirely.
+				if len(rule.SequenceMap) > 0 {
+					sanitizeOutputData(modifiedData)
+				}
 				// Add rule info
 				// Build hit rule ID efficiently using string builder pool
 				sb := stringBuilderPool.Get().(*strings.Builder)
@@ -740,10 +743,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 	ruleCachePool.Put(ruleCache)
 	ruleCache = nil
 
-	// Create a copy of the result to return, since we're using a pooled slice
-	result := make([]map[string]interface{}, len(finalRes))
-	copy(result, finalRes)
-	return result
+	return finalRes
 }
 
 // sanitizeOutputData removes internal helper fields that are only needed during rule execution.
@@ -873,26 +873,18 @@ func (r *Ruleset) executeCheckList(rule *Rule, operationID int, data map[string]
 	}
 
 	// Execute each threshold node in the checklist
-	for i, thresholdNode := range checklist.ThresholdNodes {
-		// Use threshold ID if provided, otherwise generate one
-		thresholdID := thresholdNode.ID
+	for i := range checklist.ThresholdNodes {
+		threshold := &checklist.ThresholdNodes[i]
+		thresholdID := threshold.ID
 		if thresholdID == "" {
 			thresholdID = fmt.Sprintf("threshold_%d", i)
 		}
 
-		// Create a temporary threshold map for execution
-		tempThresholdMap := map[int]Threshold{1: thresholdNode}
-		tempRule := &Rule{
-			ID:           rule.ID, // Use the original rule ID
-			ThresholdMap: tempThresholdMap,
-		}
-
-		thresholdResult := r.executeThreshold(tempRule, 1, data, ruleCache)
+		thresholdResult := r.executeThresholdNode(threshold, rule.ID, data, ruleCache)
 
 		if checklist.ConditionFlag {
 			conditionMap[thresholdID] = thresholdResult
 		} else {
-			// Simple AND logic for non-condition checklists
 			if !thresholdResult {
 				return false
 			}
@@ -1064,7 +1056,93 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 	return ruleCheckRes
 }
 
-// executeSequence executes a CEP sequence operation.
+// executeThresholdNode executes a threshold directly from a *Threshold pointer,
+// avoiding the temporary map[int]Threshold + *Rule allocation required by executeThreshold.
+// Used by executeCheckList and evaluateEventDef.
+func (r *Ruleset) executeThresholdNode(threshold *Threshold, ruleID string, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) bool {
+	sb := stringBuilderPool.Get().(*strings.Builder)
+	sb.Reset()
+	sb.WriteString(threshold.GroupByID)
+
+	for k, v := range threshold.GroupByList {
+		tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+		sb.WriteString(tmpData)
+	}
+	groupByKey := common.XXHash64(sb.String())
+	stringBuilderPool.Put(sb)
+
+	var ruleCheckRes bool
+	var err error
+
+	switch threshold.CountType {
+	case "":
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("F_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+		stringBuilderPool.Put(sb)
+
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQSum(prefixedKey, 1, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQSum(prefixedKey, 1, threshold.RangeInt, threshold.Value)
+		}
+
+	case "SUM":
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("FS_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+		stringBuilderPool.Put(sb)
+
+		sumDataStr, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
+		if !ok {
+			return false
+		}
+		sumData, err2 := strconv.Atoi(sumDataStr)
+		if err2 != nil {
+			return false
+		}
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQSum(prefixedKey, sumData, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQSum(prefixedKey, sumData, threshold.RangeInt, threshold.Value)
+		}
+
+	case "CLASSIFY":
+		sb := stringBuilderPool.Get().(*strings.Builder)
+		sb.Reset()
+		sb.WriteString("FC_")
+		sb.WriteString(groupByKey)
+		prefixedKey := sb.String()
+
+		classifyData, ok := GetCheckDataFromCache(ruleCache, threshold.CountField, data, threshold.CountFieldList)
+		if !ok {
+			stringBuilderPool.Put(sb)
+			return false
+		}
+		sb.WriteString("_")
+		sb.WriteString(common.XXHash64(classifyData))
+		tmpKey := sb.String()
+		stringBuilderPool.Put(sb)
+
+		if threshold.LocalCache {
+			ruleCheckRes, err = r.LocalCacheFRQClassify(tmpKey, prefixedKey, threshold.RangeInt, threshold.Value)
+		} else {
+			ruleCheckRes, err = RedisFRQClassify(tmpKey, prefixedKey, threshold.RangeInt, threshold.Value)
+		}
+	}
+
+	if err != nil {
+		logger.Error("Threshold check error:", err, "GroupByKey:", groupByKey, "RuleID:", ruleID, "RuleSetID:", r.RulesetID)
+		return false
+	}
+	return ruleCheckRes
+}
+
+
 // Returns (completed bool, enrichedData map) where enrichedData is non-nil when the sequence completes.
 func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, map[string]interface{}) {
 	seq, exists := rule.SequenceMap[operationID]
@@ -1405,13 +1483,7 @@ func (r *Ruleset) evaluateEventDef(eventDef *EventDef, data map[string]interface
 
 	// Evaluate thresholds
 	for i := range eventDef.Thresholds {
-		threshold := &eventDef.Thresholds[i]
-		tempThresholdMap := map[int]Threshold{1: *threshold}
-		tempRule := &Rule{
-			ID:           fmt.Sprintf("cep_%s_th%d", eventDef.ID, i),
-			ThresholdMap: tempThresholdMap,
-		}
-		if !r.executeThreshold(tempRule, 1, data, ruleCache) {
+		if !r.executeThresholdNode(&eventDef.Thresholds[i], fmt.Sprintf("cep_%s_th%d", eventDef.ID, i), data, ruleCache) {
 			return false
 		}
 	}
