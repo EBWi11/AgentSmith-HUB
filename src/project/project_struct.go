@@ -126,8 +126,14 @@ type Project struct {
 	restartMu       sync.Mutex
 
 	// Stop signal for graceful shutdown coordination
-	stopChan chan struct{} `json:"-"`
-	stopOnce sync.Once     `json:"-"`
+	stopChan  chan struct{} `json:"-"`
+	stopOnce  sync.Once    `json:"-"`
+	// cleanupMu serialises concurrent cleanup() calls that can arise when Stop()
+	// times out and returns while its background goroutine is still executing
+	// stopComponentsInternal (which also calls cleanup at the end).  The mutex
+	// turns the second call into a cheap no-op once the first has cleared all
+	// maps and channels.
+	cleanupMu sync.Mutex `json:"-"`
 }
 
 // atomicStatusTransition performs atomic status checking and transition

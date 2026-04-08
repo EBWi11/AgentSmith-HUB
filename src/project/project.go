@@ -1077,21 +1077,22 @@ func (p *Project) Start(lock bool) error {
 		}
 	}()
 
+	// Panic recovery must be deferred before parseContent so that any panic
+	// inside parseContent (or any subsequent step) is caught and the project
+	// is left in a clean error state rather than crashing the process.
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic during project start", "project", p.Id, "panic", r)
+			p.cleanup()
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
+		}
+	}()
+
 	err := p.parseContent()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("project parse error: %s", err.Error()))
 		return fmt.Errorf("project parse error: %s", err.Error())
 	}
-
-	// Add panic recovery for critical state changes
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Panic during project start", "project", p.Id, "panic", r)
-			// Ensure cleanup and proper status setting on panic
-			p.cleanup()
-			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
-		}
-	}()
 
 	// Atomic status check and transition
 	// Allow starting from stopped, error, or already running states
@@ -1214,16 +1215,18 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 	p.restartMu.Unlock()
 
 	common.ProjectOperationMu.Lock()
-	defer common.ProjectOperationMu.Unlock()
+	// locked tracks whether we still hold ProjectOperationMu so the deferred
+	// function can decide whether to unlock.  We release the lock before the
+	// post-stop sleep and before calling startWithRetry (which calls Start(true)
+	// and therefore acquires its own lock per attempt).  Holding a global mutex
+	// across multi-second sleeps and multi-retry loops would block all other
+	// project operations across the entire node.
+	locked := true
 
-	logger.Info("Restarting project", "project", p.Id)
-
-	// Defer the recording of the operation
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic during restart: %v", r)
 			logger.Error("Panic during project restart", "project", p.Id, "panic", r)
-			// Ensure cleanup and proper status setting on panic
 			_ = p.stopComponentsInternal()
 			p.SetProjectStatus(common.StatusError, err)
 		}
@@ -1243,24 +1246,35 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 			}
 			common.RecordProjectOperation(common.OpTypeProjectRestart, p.Id, status, errMsg, details)
 		}
+
+		if locked {
+			common.ProjectOperationMu.Unlock()
+		}
 	}()
 
-	// Check status - Stop() and Start() will handle their own locking via ProjectOperationMu.
+	logger.Info("Restarting project", "project", p.Id)
+
+	// Check status - Stop() is called with lock=false because we already hold the lock.
 	// Include starting state to ensure partially started components are fully stopped before re-start.
 	if p.Status == common.StatusRunning || p.Status == common.StatusError || p.Status == common.StatusStarting {
 		stopErr := p.Stop(false)
 		if stopErr != nil {
 			// Stop() guarantees status is Stopped even on error/timeout
-			// Log the error but continue with restart
 			logger.Error("Stop returned error during restart, but status should be stopped", "project", p.Id, "error", stopErr)
 		}
-
-		// Sleep after stop to ensure components are fully released
-		time.Sleep(10 * time.Second)
 	}
 
+	// Release the global lock before sleeping and before the retry loop.
+	// Start(true) inside startWithRetry acquires its own per-attempt lock, so
+	// other project operations are not blocked during the wait or retries.
+	locked = false
+	common.ProjectOperationMu.Unlock()
+
+	// Sleep after stop to ensure components are fully released
+	time.Sleep(10 * time.Second)
+
 	// Start the project again with retry mechanism
-	err = p.startWithRetry(false)
+	err = p.startWithRetry()
 	if err != nil {
 		err = fmt.Errorf("failed to start project after restart (exhausted all retries): %w", err)
 		return err
@@ -1445,16 +1459,18 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 	return nil
 }
 
-// startWithRetry starts the project with retry mechanism for components that fail to reach running status
-func (p *Project) startWithRetry(recordOperation bool) error {
+// startWithRetry starts the project with retry mechanism for components that fail to reach running status.
+// It must be called WITHOUT holding ProjectOperationMu — each attempt calls Start(true) which
+// acquires and releases its own lock.  Retry delays therefore do not block other project operations.
+func (p *Project) startWithRetry() error {
 	maxRetries := 3
 	retryDelays := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		logger.Info("Starting project", "project", p.Id, "attempt", attempt+1, "max_attempts", maxRetries+1)
 
-		// Attempt to start the project
-		err := p.Start(recordOperation)
+		// Start(true) acquires ProjectOperationMu for the duration of the attempt only.
+		err := p.Start(true)
 		if err != nil {
 			if attempt == maxRetries {
 				logger.Error("Failed to start project after all retry attempts", "project", p.Id, "final_error", err)
@@ -1463,7 +1479,7 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 			}
 
 			logger.Error("Project start failed, will retry", "project", p.Id, "attempt", attempt+1, "error", err, "retry_delay", retryDelays[attempt])
-			time.Sleep(retryDelays[attempt])
+			time.Sleep(retryDelays[attempt]) // no lock held during sleep
 			continue
 		}
 
@@ -1482,9 +1498,9 @@ func (p *Project) startWithRetry(recordOperation bool) error {
 
 		logger.Error("Project started but some components are not running, will retry", "project", p.Id, "attempt", attempt+1, "retry_delay", retryDelays[attempt])
 
-		// Stop the project before retrying
-		_ = p.Stop(false)
-		time.Sleep(retryDelays[attempt])
+		// Stop the project before retrying (Stop(true) acquires its own lock)
+		_ = p.Stop(true)
+		time.Sleep(retryDelays[attempt]) // no lock held during sleep
 	}
 
 	return fmt.Errorf("unexpected end of retry loop")
@@ -1646,6 +1662,13 @@ func (p *Project) CheckExist(t string, id string) bool {
 
 // cleanup performs aggressive cleanup when normal stop fails
 func (p *Project) cleanup() {
+	// Serialise concurrent cleanup calls: Stop() may return on timeout while
+	// its background goroutine is still inside stopComponentsInternal, which
+	// also calls cleanup at the end.  The second caller waits here, then finds
+	// all maps already empty and returns cheaply.
+	p.cleanupMu.Lock()
+	defer p.cleanupMu.Unlock()
+
 	p.cleanupInputChannel()
 	p.cleanupRulesetChannel()
 
@@ -1859,6 +1882,12 @@ func (p *Project) cleanupRulesetChannel() {
 }
 
 func (p *Project) initComponents() error {
+	// If Stop() timed out and returned early, its background goroutine may still
+	// be executing cleanup().  Wait for it to finish before we start writing new
+	// channel and component state, preventing concurrent map modification.
+	p.cleanupMu.Lock()
+	p.cleanupMu.Unlock() //nolint:staticcheck — intentional lock-then-immediate-unlock barrier
+
 	// Track which nodes need new channels created
 	nodeChannelStatus := make(map[string]bool) // key: ToPNS, value: whether channel was created
 

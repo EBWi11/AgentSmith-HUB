@@ -28,6 +28,13 @@ type SyncListener struct {
 	baseVersion      string
 	executionFlagTTL time.Duration // TTL for execution flag, default 5 minutes
 	mu               sync.RWMutex
+	// syncMu serialises concurrent SyncInstructions calls.  Previously sl.mu
+	// (a full write-lock) was held for the entire sync including Phase 2
+	// instruction execution, which blocked GetCurrentVersion (used by the
+	// heartbeat) for minutes when restarts were involved.  Now sl.mu is only
+	// held in short critical sections for reading/writing version fields, while
+	// syncMu ensures only one sync runs at a time.
+	syncMu sync.Mutex
 }
 
 var GlobalSyncListener *SyncListener
@@ -216,61 +223,69 @@ func (sl *SyncListener) handleSyncCommand(syncCmd map[string]interface{}) {
 }
 
 func (sl *SyncListener) SyncInstructions(toVersion string) error {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
+	// Serialise concurrent sync attempts.  Previously sl.mu (a full write-lock)
+	// was held for the entire function, which blocked GetCurrentVersion (used
+	// by the heartbeat goroutine) while project restarts were running inside
+	// Phase 2.  Now syncMu guards the "one sync at a time" invariant, while
+	// sl.mu is only held in brief critical sections to read/write version fields.
+	sl.syncMu.Lock()
+	defer sl.syncMu.Unlock()
 
 	// Wait if leader is in compaction mode (version 0)
 	if err := sl.waitForLeaderReadyIfNeeded(toVersion); err != nil {
 		return fmt.Errorf("failed to wait for leader ready: %w", err)
 	}
 
-	// Set execution flag to indicate this follower is reading instructions
-	if err := sl.SetFollowerExecutionFlag(sl.nodeID); err != nil {
-		logger.Error("Failed to set execution flag", "error", err)
-	}
-
 	leaderParts := strings.Split(toVersion, ".")
 	if len(leaderParts) != 2 {
-		// Clear flag before returning
-		_ = sl.ClearFollowerExecutionFlag(sl.nodeID)
 		return fmt.Errorf("invalid target version format: %s", toVersion)
 	}
 
 	endVersion, err := strconv.ParseInt(leaderParts[1], 10, 64)
 	if err != nil {
-		// Clear flag before returning
-		_ = sl.ClearFollowerExecutionFlag(sl.nodeID)
 		return fmt.Errorf("invalid target version number: %s", leaderParts[1])
 	}
 
-	// Check if session has changed (leader restart) or if this is a new follower
-	if sl.baseVersion != leaderParts[0] {
+	// PHASE 0: Detect leader session change and reset if needed.
+	// Read baseVersion under a short RLock; do the expensive clearAllLocalComponents
+	// outside any lock so the heartbeat is not blocked.
+	sl.mu.RLock()
+	baseChanged := sl.baseVersion != leaderParts[0]
+	oldVersion := sl.getCurrentVersionUnsafe()
+	sl.mu.RUnlock()
+
+	if baseChanged {
 		logger.Info("Follower needs full sync due to leader session change",
-			"from", sl.getCurrentVersionUnsafe(),
+			"from", oldVersion,
 			"to", toVersion,
 			"old_base", sl.baseVersion,
 			"new_base", leaderParts[0])
 
-		// Clear all local components and projects (never fails)
+		// clearAllLocalComponents is slow (stops projects); run without sl.mu.
 		sl.clearAllLocalComponents()
 
-		// Update baseVersion immediately after clearing to prevent repeated clearing
-		// Start from version 0, so we'll sync from version 1 to endVersion
+		sl.mu.Lock()
 		sl.baseVersion = leaderParts[0]
 		sl.currentVersion = 0
-
 		logger.Info("Follower state reset for full resync", "new_version", sl.getCurrentVersionUnsafe())
+		sl.mu.Unlock()
 	}
 
-	// PHASE 1: Read all instructions from Redis (blocking leader compaction)
+	// PHASE 1: Read all instructions from Redis (sets execution flag to block leader compaction).
+	if err := sl.SetFollowerExecutionFlag(sl.nodeID); err != nil {
+		logger.Error("Failed to set execution flag", "error", err)
+	}
+
+	sl.mu.RLock()
+	startVersion := sl.currentVersion
+	sl.mu.RUnlock()
 
 	var missingInstructions []int64
 	var instructions []Instruction
 	var compacted uint64
 	readStartTime := time.Now()
 
-	// Read all instructions in one batch
-	for version := sl.currentVersion + 1; version <= endVersion; version++ {
+	for version := startVersion + 1; version <= endVersion; version++ {
 		key := fmt.Sprintf("cluster:instruction:%d", version)
 		data, err := common.RedisGet(key)
 		if data == GetDeletedIntentionsString() {
@@ -279,11 +294,8 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		}
 
 		if err != nil {
-			// Record missing instruction
 			missingInstructions = append(missingInstructions, version)
-			logger.Error("Instruction not found in Redis",
-				"version", version,
-				"error", err)
+			logger.Error("Instruction not found in Redis", "version", version, "error", err)
 			continue
 		}
 
@@ -301,41 +313,45 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 
 	_ = time.Since(readStartTime)
 
-	// Clear execution flag immediately after reading all instructions
-	// This allows leader to proceed with compaction if needed
+	// Clear execution flag immediately — allows leader to proceed with compaction.
+	// Phase 2 execution does NOT need to block the leader.
 	if err := sl.ClearFollowerExecutionFlag(sl.nodeID); err != nil {
 		logger.Error("Failed to clear execution flag", "error", err)
 	}
 
 	logger.Info("Instructions read", "count", len(instructions), "compacted", compacted)
 
-	// Check for missing instructions - if any, trigger full resync with delay
+	// Handle missing instructions: reset and retry after a delay.
+	// The delay is outside sl.mu so the heartbeat can still report the current version.
 	if len(missingInstructions) > 0 {
-		totalInstructionsExpected := endVersion - sl.currentVersion
-		missingRatio := float64(len(missingInstructions)) / float64(totalInstructionsExpected)
+		totalExpected := endVersion - startVersion
+		missingRatio := float64(len(missingInstructions)) / float64(totalExpected)
 		logger.Error("Missing instructions detected, will reset and retry after delay",
 			"missing_count", len(missingInstructions),
-			"total_expected", totalInstructionsExpected,
+			"total_expected", totalExpected,
 			"missing_ratio", fmt.Sprintf("%.2f%%", missingRatio*100),
 			"missing_versions", missingInstructions)
 
-		// Clear all local components and start from scratch
 		sl.clearAllLocalComponents()
+		sl.mu.Lock()
 		sl.currentVersion = 0
 		sl.baseVersion = leaderParts[0]
+		sl.mu.Unlock()
 
 		logger.Info("Sleeping 10 seconds before retry due to missing instructions")
-		time.Sleep(10 * time.Second)
+		time.Sleep(10 * time.Second) // outside sl.mu — heartbeat unblocked
 
 		return fmt.Errorf("sync incomplete: %d missing instructions", len(missingInstructions))
 	}
 
-	// PHASE 2: Execute all instructions locally (not blocking leader)
+	// PHASE 2: Execute all instructions locally.
+	// No locks are held here — project restarts / hot-reloads acquire their own
+	// locks internally and may take seconds to minutes.  GetCurrentVersion() and
+	// the heartbeat remain fully responsive throughout.
 	logger.Info("Executing instructions", "count", len(instructions))
 	var processedInstructions []string
 	var failedInstructions []string
 
-	// Sort instructions by dependency order: skills -> agents -> projects (rest by version)
 	componentOrder := map[string]int{
 		"skill": 0, "plugin": 1, "input": 2, "output": 2, "ruleset": 2,
 		"agent": 3, "project": 4,
@@ -348,14 +364,12 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		return int(a.Version) - int(b.Version)
 	})
 
-	// Execute all instructions
 	for _, instruction := range instructions {
 		version := instruction.Version
 		if version == 0 {
 			continue
 		}
 
-		// Apply instruction - fail fast, no retry
 		if err := sl.applyInstruction(version); err != nil {
 			logger.Error("Failed to apply instruction",
 				"version", version,
@@ -366,40 +380,44 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 				fmt.Sprintf("v%d: %s %s %s (failed: %v)",
 					version, instruction.Operation, instruction.ComponentType, instruction.ComponentName, err))
 		} else {
-			instructionDesc := fmt.Sprintf("v%d: %s %s %s",
-				version, instruction.Operation, instruction.ComponentType, instruction.ComponentName)
-			processedInstructions = append(processedInstructions, instructionDesc)
+			processedInstructions = append(processedInstructions,
+				fmt.Sprintf("v%d: %s %s %s",
+					version, instruction.Operation, instruction.ComponentType, instruction.ComponentName))
 		}
 	}
 
-	// PHASE 3: Update version or trigger full resync
+	// PHASE 3: Update version under sl.mu (brief critical section).
 	if len(failedInstructions) == 0 {
+		sl.mu.Lock()
 		sl.currentVersion = endVersion
 		sl.baseVersion = leaderParts[0]
-		logger.Info("Follower sync completed", "version", sl.getCurrentVersionUnsafe(), "processed", len(processedInstructions), "instruction_count", len(instructions))
-	} else {
-		// If any instruction failed, clear all components and start from scratch
-		logger.Error("Phase 2 failed: Some instructions failed, will reset and retry after delay",
-			"node_id", sl.nodeID,
-			"failed_count", len(failedInstructions),
-			"current_version", sl.getCurrentVersionUnsafe(),
-			"target_version", toVersion,
-			"failed_instructions", strings.Join(failedInstructions, "; "))
-
-		// Clear all local components and projects
-		sl.clearAllLocalComponents()
-
-		// Reset to version 0 to trigger full resync on next attempt
-		sl.currentVersion = 0
-		sl.baseVersion = leaderParts[0]
-
-		logger.Info("Sleeping 10 seconds before retry due to execution failures")
-		time.Sleep(10 * time.Second)
-
-		return fmt.Errorf("sync incomplete: %d failed instructions", len(failedInstructions))
+		version := sl.getCurrentVersionUnsafe()
+		sl.mu.Unlock()
+		logger.Info("Follower sync completed", "version", version, "processed", len(processedInstructions), "instruction_count", len(instructions))
+		return nil
 	}
 
-	return nil
+	// Some instructions failed: reset and trigger full resync.
+	sl.mu.RLock()
+	curVer := sl.getCurrentVersionUnsafe()
+	sl.mu.RUnlock()
+	logger.Error("Phase 2 failed: some instructions failed, will reset and retry after delay",
+		"node_id", sl.nodeID,
+		"failed_count", len(failedInstructions),
+		"current_version", curVer,
+		"target_version", toVersion,
+		"failed_instructions", strings.Join(failedInstructions, "; "))
+
+	sl.clearAllLocalComponents()
+	sl.mu.Lock()
+	sl.currentVersion = 0
+	sl.baseVersion = leaderParts[0]
+	sl.mu.Unlock()
+
+	logger.Info("Sleeping 10 seconds before retry due to execution failures")
+	time.Sleep(10 * time.Second) // outside sl.mu — heartbeat unblocked
+
+	return fmt.Errorf("sync incomplete: %d failed instructions", len(failedInstructions))
 }
 
 // ClearFollowerExecutionFlag clears the execution flag for a follower
@@ -495,13 +513,17 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 						"project", projectName,
 						"ruleset", instruction.ComponentName,
 						"error", err)
-					if restartErr := proj.Restart(true, source+"_fallback"); restartErr != nil {
+					// recordOperation=false: followers execute instructions passively;
+					// operation history is written by the leader only.
+					if restartErr := proj.Restart(false, source+"_fallback"); restartErr != nil {
 						return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", projectName, restartErr)
 					}
 				}
 				continue
 			}
-			if err := proj.Restart(true, source); err != nil {
+			// recordOperation=false: avoid duplicate entries in operation history
+			// (the leader already recorded the triggering operation).
+			if err := proj.Restart(false, source); err != nil {
 				// Restart already logs its own failure. We just need to bubble up the error.
 				return fmt.Errorf("failed to restart affected project %s: %w", projectName, err)
 			}
@@ -699,10 +721,9 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 
 	case "project":
 		if proj, exists := project.GetProject(componentName); exists {
-			// Stop the project first if it's running
-			if proj.Status == common.StatusRunning {
-				proj.Stop(true)
-			}
+			// Stop(true) handles non-stoppable states gracefully; no need to
+			// read proj.Status without a lock before calling it.
+			_ = proj.Stop(true)
 		}
 		project.DeleteProject(componentName)
 		logger.Debug("Deleted project instance", "name", componentName)
