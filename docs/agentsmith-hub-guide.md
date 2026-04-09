@@ -2896,6 +2896,67 @@ func Eval(key string) (interface{}, bool, error) {
 - A function named `Eval` must be defined, and the package must be a plugin;
 - The function return value must strictly match the requirements.
 
+### 9.6 Example Plugin: Feishu (Lark) Urgent Alert (pushUrentAlertByLark)
+
+`config/plugin/pushUrentAlertByLark.go` is a reference plugin bundled with HUB. It pushes alert events to a Feishu (Lark) group chat as an **interactive card** and optionally triggers an **urgent phone call** outside of quiet hours.
+
+#### Features
+
+- **Interactive card message**: When `args[0]` is a `map[string]interface{}`, an interactive card (`msg_type: interactive`) is built automatically. When `args[0]` is a plain string, it falls back to a text message for backward compatibility.
+- **Card header color**: Automatically mapped from the `harm_level` field (`critical` → red, `high/medium` → orange, `low/basic` → yellow, otherwise → blue).
+- **Field priority**: Key fields (harm level, alert level, timestamp, hostname, process, command line, etc.) are shown first in a fixed order; remaining fields are appended alphabetically; `alert_detail` is always placed in its own section at the bottom.
+- **Blank value filtering**: Fields whose value is an empty string, `"-"`, `"-5"`, or `"null"` are silently skipped to keep the card clean.
+- **Phone call quiet window**: No phone call is placed when the current CST hour falls within `[phonetimeleft, phonetimeright)`. The server clock is always converted to CST (UTC+8) to avoid timezone mismatches. Outside the quiet window, two phone alerts are sent (10 seconds apart).
+- **Error capture**: Push failures and phone call failures both return detailed error messages including the Feishu API `code` and `msg` for easy debugging.
+
+#### Plugin Parameters
+
+| Position | Type | Description |
+|----------|------|-------------|
+| `args[0]` | `map[string]interface{}` or `string` | Alert data (map → interactive card, string → text message) |
+| `args[1]` | `string` | Feishu application `app_id` |
+| `args[2]` | `string` | Feishu application `app_secret` |
+| `args[3]` | `string` | Target group `chat_id` (`receive_id_type=chat_id`) |
+| `args[4]` | `int` | Quiet window start hour (inclusive, CST), e.g. `9` for 09:00 |
+| `args[5]` | `int` | Quiet window end hour (exclusive, CST), e.g. `18` for 18:00 |
+| `args[6]` | `string` | Called user's Feishu `open_id` |
+
+#### Usage in a Ruleset
+
+```xml
+<rule id="lark_urgent_alert" name="Feishu Urgent Alert">
+    <!-- Only trigger for high-severity alerts -->
+    <check type="INCL" field="harm_level" logic="OR" delimiter="|">critical|high</check>
+
+    <!-- Suppression: at most one alert per host+rule per 5 minutes -->
+    <check type="PLUGIN">suppress("5m", "lark_urgent", hostname, rule_name)</check>
+
+    <!-- Push Feishu card + phone alert (quiet window 09:00–18:00 CST) -->
+    <plugin>pushUrentAlertByLark(_$ORIDATA, "cli_xxx", "your_app_secret", "oc_xxx", 9, 18, "ou_xxx")</plugin>
+</rule>
+```
+
+#### Card Appearance
+
+```
+┌──────────────────────────────────────────┐
+│ 🚨 Sensitive file read detected      🟠  │
+├──────────────────────────────────────────┤
+│ harm_level:   medium                     │
+│ alert_level:  high                       │
+│ data_type:    PROCESS                    │
+│ timestamp:    1712650000                 │
+│ hostname:     prod-node-01               │
+│ username:     root                       │
+│ exe:          cat                        │
+│ argv:         cat /etc/shadow            │
+│ pid:          12345                      │
+│ rule_name:    sensitive_file_read        │
+├──────────────────────────────────────────┤
+│ Alert Detail                             │
+│ /etc/shadow accessed by unauthorised...  │
+└──────────────────────────────────────────┘
+```
 
 ## Summary
 

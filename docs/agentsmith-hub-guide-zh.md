@@ -2887,6 +2887,68 @@ func Eval(key string) (interface{}, bool, error) {
 - 必须定义名为`Eval`的函数，package 必须为 plugin；
 - 函数返回值必须严格匹配要求。
 
+### 9.6 示例插件：飞书紧急告警（pushUrentAlertByLark）
+
+`config/plugin/pushUrentAlertByLark.go` 是一个随 HUB 一同提供的参考插件，用于将告警事件通过**飞书互动卡片**推送到指定群组，并在工作时间之外触发**电话紧急告警**。
+
+#### 功能特性
+
+- **互动卡片消息**：当 `args[0]` 为 `map[string]interface{}` 时，自动构建富文本互动卡片（`msg_type: interactive`）；当 `args[0]` 为字符串时，回退到纯文本消息，向前兼容。
+- **卡片颜色**：根据 `harm_level` 字段自动映射 Header 颜色（`critical` → 红色，`high/medium` → 橙色，`low/basic` → 黄色，其余 → 蓝色）。
+- **字段优先级**：危害级别、告警级别、时间、主机、进程、命令行等关键字段优先展示；剩余字段按字母序追加；`alert_detail` 固定在底部独立区块。
+- **空值过滤**：值为空字符串、`"-"`、`"-5"`、`"null"` 的字段自动跳过，保持卡片整洁。
+- **电话告警静默窗口**：`phonetimeleft` 到 `phonetimeright` 时段内不发起电话告警（服务器时区固定为 CST/UTC+8，避免时区错误）；时间窗口外依次发送两次电话告警（间隔 10 秒）。
+- **错误捕获**：消息推送失败和电话告警失败均返回详细错误信息（含飞书 API 的 `code` 和 `msg`），便于定位问题。
+
+#### 插件参数
+
+| 参数位置 | 类型 | 说明 |
+|---------|------|------|
+| `args[0]` | `map[string]interface{}` 或 `string` | 告警数据（map 生成互动卡片，string 生成文本消息） |
+| `args[1]` | `string` | 飞书应用的 `app_id` |
+| `args[2]` | `string` | 飞书应用的 `app_secret` |
+| `args[3]` | `string` | 目标群组的 `chat_id`（`receive_id_type=chat_id`） |
+| `args[4]` | `int` | 电话静默窗口开始小时（含，CST），如 `9` 表示 09:00 |
+| `args[5]` | `int` | 电话静默窗口结束小时（不含，CST），如 `18` 表示 18:00 |
+| `args[6]` | `string` | 被叫用户的飞书 `open_id` |
+
+#### 在 Ruleset 中使用
+
+```xml
+<rule id="lark_urgent_alert" name="飞书紧急告警">
+    <!-- 仅对高危告警触发 -->
+    <check type="INCL" field="harm_level" logic="OR" delimiter="|">critical|high</check>
+
+    <!-- 告警抑制：同一主机同类告警 5 分钟内只推送一次 -->
+    <check type="PLUGIN">suppress("5m", "lark_urgent", hostname, rule_name)</check>
+
+    <!-- 推送飞书卡片 + 电话告警（09:00–18:00 静默，不打电话） -->
+    <plugin>pushUrentAlertByLark(_$ORIDATA, "cli_xxx", "your_app_secret", "oc_xxx", 9, 18, "ou_xxx")</plugin>
+</rule>
+```
+
+#### 卡片效果示例
+
+```
+┌──────────────────────────────────────────┐
+│ 🚨 敏感文件读取告警                  🟠  │
+├──────────────────────────────────────────┤
+│ 危害级别:   medium                       │
+│ 告警级别:   high                         │
+│ 数据类型:   PROCESS                      │
+│ 时间:       1712650000                   │
+│ 主机:       prod-node-01                 │
+│ 用户:       root                         │
+│ 进程:       cat                          │
+│ 命令行:     cat /etc/shadow              │
+│ PID:        12345                        │
+│ 规则:       sensitive_file_read          │
+├──────────────────────────────────────────┤
+│ 告警详情                                 │
+│ /etc/shadow 被非授权进程访问             │
+└──────────────────────────────────────────┘
+```
+
 ## 总结
 
 记住核心理念：**按需组合，灵活编排**。根据你的具体需求，自由组合各种操作，创建最适合的规则。
