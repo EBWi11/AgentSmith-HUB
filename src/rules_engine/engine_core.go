@@ -923,7 +923,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 		} else {
 			checkNodeValue = checkNode.Value
 		}
-		return checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache)
+		return checkNodeLogic(r, checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache)
 	case "AND":
 		for _, v := range checkNode.DelimiterFieldList {
 			if hasFromRawPrefix(v) {
@@ -933,7 +933,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 				checkNodeValue = v
 				checkNodeValueFromRaw = false
 			}
-			if !checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
+			if !checkNodeLogic(r, checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
 				return false
 			}
 		}
@@ -947,7 +947,7 @@ func (r *Ruleset) executeCheckNode(checkNode *CheckNodes, data map[string]interf
 				checkNodeValue = v
 				checkNodeValueFromRaw = false
 			}
-			if checkNodeLogic(checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
+			if checkNodeLogic(r, checkNode, data, checkNodeValue, checkNodeValueFromRaw, ruleCache, r.RegexResultCache) {
 				return true
 			}
 		}
@@ -1141,7 +1141,6 @@ func (r *Ruleset) executeThresholdNode(threshold *Threshold, ruleID string, data
 	}
 	return ruleCheckRes
 }
-
 
 // Returns (completed bool, enrichedData map) where enrichedData is non-nil when the sequence completes.
 func (r *Ruleset) executeSequence(rule *Rule, operationID int, data map[string]interface{}, ruleCache map[string]common.CheckCoreCache) (bool, map[string]interface{}) {
@@ -1862,6 +1861,7 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 			if err == nil {
 				modifiedData[appendOp.FieldName] = boolResult
 			} else {
+				r.addRuntimeError(fmt.Sprintf("Append plugin %s failed in rule %s: %v", appendOp.Plugin.Name, rule.ID, err))
 				// Log error with full context to Redis (plugin executor only logs to local file)
 				projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 				logger.PluginErrorWithContext("Check-type plugin evaluation failed in append",
@@ -1879,6 +1879,7 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 					if rmap, ok := res.(map[string]interface{}); ok {
 						res = rmap
 					} else {
+						r.addRuntimeError(fmt.Sprintf("Append plugin %s in rule %s returned non-map result for _$ORIDATA", appendOp.Plugin.Name, rule.ID))
 						projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 						logger.PluginErrorWithContext("Plugin result is not a map",
 							"plugin", appendOp.Plugin.Name,
@@ -1892,6 +1893,7 @@ func (r *Ruleset) executeAppend(rule *Rule, operationID int, copied bool, data m
 
 				modifiedData[appendOp.FieldName] = res
 			} else if err != nil {
+				r.addRuntimeError(fmt.Sprintf("Append plugin %s failed in rule %s: %v", appendOp.Plugin.Name, rule.ID, err))
 				// Log error with full context to Redis (plugin executor only logs to local file)
 				projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 				logger.PluginErrorWithContext("Interface-type plugin evaluation failed in append",
@@ -1931,6 +1933,7 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 	if modifyOp.Plugin.ReturnType == "bool" {
 		boolResult, err := modifyOp.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
+			r.addRuntimeError(fmt.Sprintf("Modify plugin %s failed in rule %s: %v", modifyOp.Plugin.Name, rule.ID, err))
 			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 			logger.PluginErrorWithContext("Check-type plugin evaluation failed in modify",
@@ -1945,6 +1948,7 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 			modifiedData[modifyOp.FieldName] = boolResult
 			return
 		} else {
+			r.addRuntimeError(fmt.Sprintf("Modify plugin %s in rule %s requires a field when return type is bool", modifyOp.Plugin.Name, rule.ID))
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 			logger.PluginErrorWithContext("Modify without field requires map result; got bool",
 				"plugin", modifyOp.Plugin.Name,
@@ -1959,6 +1963,7 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 	res, ok, err := modifyOp.Plugin.FuncEvalOther(args...)
 	if err != nil || !ok {
 		if err != nil {
+			r.addRuntimeError(fmt.Sprintf("Modify plugin %s failed in rule %s: %v", modifyOp.Plugin.Name, rule.ID, err))
 			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 			logger.PluginErrorWithContext("Interface-type plugin evaluation failed in modify",
@@ -1977,6 +1982,7 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 				modifiedData = rmap
 				return
 			} else {
+				r.addRuntimeError(fmt.Sprintf("Modify plugin %s in rule %s returned non-map result for _$ORIDATA", modifyOp.Plugin.Name, rule.ID))
 				projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 				logger.PluginErrorWithContext("Plugin result is not a map",
 					"plugin", modifyOp.Plugin.Name,
@@ -1996,6 +2002,7 @@ func (r *Ruleset) executeModify(rule *Rule, operationID int, copied bool, data m
 		modifiedData = rmap
 		return
 	} else {
+		r.addRuntimeError(fmt.Sprintf("Modify plugin %s in rule %s returned non-map result", modifyOp.Plugin.Name, rule.ID))
 		projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 		logger.PluginErrorWithContext("Modify without field expects map result to replace data",
 			"plugin", modifyOp.Plugin.Name,
@@ -2037,6 +2044,7 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 		// For check-type plugins (bool return type), use FuncEvalCheckNode
 		ok, err := pluginOp.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
+			r.addRuntimeError(fmt.Sprintf("Plugin %s failed in rule %s: %v", pluginOp.Plugin.Name, rule.ID, err))
 			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 			logger.PluginErrorWithContext("Check-type plugin evaluation failed",
@@ -2054,6 +2062,7 @@ func (r *Ruleset) executePlugin(rule *Rule, operationID int, dataCopy map[string
 		// For interface{} type plugins, use FuncEvalOther (for side effects, result is ignored)
 		_, ok, err := pluginOp.Plugin.FuncEvalOther(args...)
 		if err != nil {
+			r.addRuntimeError(fmt.Sprintf("Plugin %s failed in rule %s: %v", pluginOp.Plugin.Name, rule.ID, err))
 			// Log error with full context to Redis (plugin executor only logs to local file)
 			projectID, rulesetID := parseProjectInfoFromPNS(r.ProjectNodeSequence)
 			logger.PluginErrorWithContext("Interface-type plugin evaluation failed",
@@ -2234,7 +2243,7 @@ func (r *Ruleset) executeIteratorThreshold(threshold *Threshold, data map[string
 }
 
 // checkNodeLogic executes the check logic for a single check node.
-func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache, regexResultCache *RegexResultCache) bool {
+func checkNodeLogic(r *Ruleset, checkNode *CheckNodes, data map[string]interface{}, checkNodeValue string, checkNodeValueFromRaw bool, ruleCache map[string]common.CheckCoreCache, regexResultCache *RegexResultCache) bool {
 	var checkListFlag = false
 
 	needCheckData, exist := common.GetCheckData(data, checkNode.FieldList)
@@ -2282,6 +2291,7 @@ func checkNodeLogic(checkNode *CheckNodes, data map[string]interface{}, checkNod
 		args := GetPluginRealArgs(checkNode.PluginArgs, data, ruleCache)
 		result, err := checkNode.Plugin.FuncEvalCheckNode(args...)
 		if err != nil {
+			r.addRuntimeError(fmt.Sprintf("Check plugin %s failed in rule node %s: %v", checkNode.Plugin.Name, checkNode.ID, err))
 			return false
 		}
 

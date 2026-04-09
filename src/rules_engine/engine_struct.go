@@ -189,6 +189,10 @@ type Ruleset struct {
 	// Local value store for CEP event snapshots (enabled in local_cache mode)
 	cepValueStore CEPValueStore
 
+	// Collect runtime errors during test execution so API callers can surface them.
+	runtimeErrorsMu sync.Mutex
+	runtimeErrors   []string
+
 	// Flag: true if any rule has a sequence with absence stages (needs absence scanner)
 	hasAbsenceSequences bool
 
@@ -2159,7 +2163,36 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 // SetTestMode configures the ruleset for test mode by disabling sampling and other global state interactions
 // Note: isTestMode flag is automatically set during initialization based on ProjectNodeSequence
 func (r *Ruleset) SetTestMode() {
+	r.isTestMode = true
+	if strings.TrimSpace(r.ProjectNodeSequence) == "" {
+		r.ProjectNodeSequence = "TEST." + r.RulesetID
+	}
 	r.sampler = nil // Disable sampling for test instances
+}
+
+func (r *Ruleset) addRuntimeError(message string) {
+	if !r.isTestMode || strings.TrimSpace(message) == "" {
+		return
+	}
+
+	r.runtimeErrorsMu.Lock()
+	defer r.runtimeErrorsMu.Unlock()
+
+	for _, existing := range r.runtimeErrors {
+		if existing == message {
+			return
+		}
+	}
+	r.runtimeErrors = append(r.runtimeErrors, message)
+}
+
+func (r *Ruleset) GetRuntimeErrors() []string {
+	r.runtimeErrorsMu.Lock()
+	defer r.runtimeErrorsMu.Unlock()
+
+	result := make([]string, len(r.runtimeErrors))
+	copy(result, r.runtimeErrors)
+	return result
 }
 
 // ParseFunctionCall parses a function call of the form "functionName(arg1, arg2, ...)"
@@ -2893,23 +2926,23 @@ func RulesetBuild(ruleset *Ruleset) error {
 							}
 							threshold.RangeInt = rangeInt
 						}
-					threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
+						threshold.GroupByID = ruleset.RulesetID + ":" + rule.ID
 
-					if threshold.LocalCache && !createLocalCache {
-						ruleset.Cache = newLocalThresholdCounter()
-						createLocalCache = true
-					}
-					if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
-						ruleset.CacheForClassify = newLocalClassifyCounter()
-						createLocalCacheForClassify = true
-					}
-					if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
-						if threshold.CountField != "" {
-							threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+						if threshold.LocalCache && !createLocalCache {
+							ruleset.Cache = newLocalThresholdCounter()
+							createLocalCache = true
+						}
+						if threshold.CountType == "CLASSIFY" && !createLocalCacheForClassify {
+							ruleset.CacheForClassify = newLocalClassifyCounter()
+							createLocalCacheForClassify = true
+						}
+						if threshold.CountType == "SUM" || threshold.CountType == "CLASSIFY" {
+							if threshold.CountField != "" {
+								threshold.CountFieldList = common.StringToList(strings.TrimSpace(threshold.CountField))
+							}
 						}
 					}
 				}
-			}
 
 				// Process thresholds in the event
 				for j := range eventDef.Thresholds {

@@ -35,29 +35,47 @@
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
             
-            <div v-else-if="testError" class="bg-red-50 border-l-4 border-red-500 p-4 m-3">
-              <div class="flex">
-                <div class="flex-shrink-0">
-                  <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <div class="ml-3 flex-1">
-                  <p class="text-sm text-red-700 whitespace-pre-wrap break-all">{{ testError }}</p>
+            <div v-else class="space-y-4">
+              <div v-if="testError" class="bg-red-50 border-l-4 border-red-500 p-4 m-3">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div class="ml-3 flex-1">
+                    <p class="text-sm text-red-700 whitespace-pre-wrap break-all">{{ testError }}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            
-            <div v-else-if="testResults.length === 0" class="text-center py-8 px-3 text-gray-500">
-              <p>No results yet. Click "Run Test" to execute.</p>
-              <p v-if="testExecuted" class="mt-2 text-sm text-yellow-600">
-                No output was generated.
-              </p>
-            </div>
-            
-            <div v-else class="space-y-4">
+
+              <div v-if="runtimeErrors.length > 0" class="bg-red-50 border-l-4 border-red-500 p-4 m-3">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div class="ml-3 flex-1">
+                    <p class="text-sm font-medium text-red-700">Runtime Errors</p>
+                    <ul class="mt-2 space-y-1 text-sm text-red-700">
+                      <li v-for="(runtimeError, index) in runtimeErrors" :key="index" class="whitespace-pre-wrap break-all">
+                        {{ runtimeError }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="!testError && testResults.length === 0" class="text-center py-8 px-3 text-gray-500">
+                <p>No results yet. Click "Run Test" to execute.</p>
+                <p v-if="testExecuted" class="mt-2 text-sm text-yellow-600">
+                  No output was generated.
+                </p>
+              </div>
+
               <!-- Agent: full tool-call process (only when present) -->
-              <div v-if="isAgent && toolCallsTrace.length > 0" class="mb-4">
+              <div v-if="testResults.length > 0 && isAgent && toolCallsTrace.length > 0" class="mb-4">
                 <h5 class="text-sm font-medium text-gray-700 mb-2">Agent trace</h5>
                 <div class="border border-gray-200 rounded-lg overflow-hidden bg-white p-2">
                   <AgentTraceViewer :trace="toolCallsTrace" :default-open="false" />
@@ -132,6 +150,7 @@ const showModal = ref(false);
 const inputData = ref('');
 const testResults = ref([]);
 const toolCallsTrace = ref([]);
+const runtimeErrors = ref([]);
 const testLoading = ref(false);
 const testError = ref(null);
 const testExecuted = ref(false);
@@ -193,6 +212,7 @@ async function runTest() {
   testError.value = null;
   testResults.value = [];
   toolCallsTrace.value = [];
+  runtimeErrors.value = [];
   testExecuted.value = true;
   jsonError.value = null;
   jsonErrorLine.value = null;
@@ -236,9 +256,11 @@ async function runTest() {
     if (response.success) {
       testResults.value = response.results || [];
       toolCallsTrace.value = response.tool_calls_trace || [];
+      runtimeErrors.value = response.runtime_errors || [];
     } else {
       testError.value = response.error || 'Unknown error occurred';
       toolCallsTrace.value = [];
+      runtimeErrors.value = response.runtime_errors || [];
     }
   } catch (e) {
     testError.value = e.message || `Failed to test ${componentLabel.value.toLowerCase()}`;
@@ -317,6 +339,7 @@ async function resetState() {
   // Reset test results and errors
   testResults.value = [];
   toolCallsTrace.value = [];
+  runtimeErrors.value = [];
   testError.value = null;
   testExecuted.value = false;
   jsonError.value = null;

@@ -150,6 +150,7 @@ func testRuleset(c echo.Context) error {
 			"results": []interface{}{},
 		})
 	}
+	tempRuleset.SetTestMode()
 
 	// Create channels for testing. Ensure input buffer can hold batch events.
 	inputBufferSize := 100
@@ -239,10 +240,12 @@ func testRuleset(c echo.Context) error {
 done:
 
 	// Build response
+	runtimeErrors := tempRuleset.GetRuntimeErrors()
 	response := map[string]interface{}{
-		"success": true,
-		"results": results,
-		"timeout": timedOut,
+		"success":        true,
+		"results":        results,
+		"timeout":        timedOut,
+		"runtime_errors": runtimeErrors,
 	}
 
 	// Add isTemp field if specified
@@ -253,6 +256,9 @@ done:
 	// Add timeout warning if needed
 	if timedOut {
 		response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
+	}
+	if len(runtimeErrors) > 0 {
+		response["warning"] = "Runtime errors occurred during ruleset test. See runtime_errors for details."
 	}
 
 	return c.JSON(http.StatusOK, response)
