@@ -125,7 +125,7 @@ backend-docker:
 			-e GOARCH=arm64 \
 			-e CGO_LDFLAGS="-L/workspace/lib/linux/arm64 -lrure -Wl,-rpath,/workspace/lib/linux/arm64" \
 			-e LD_LIBRARY_PATH="/workspace/lib/linux/arm64" \
-				golang:1.26 \
+				golang:1.26.2 \
 			sh -c "apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/arm64/ && \
 				cp /workspace/lib/linux/arm64/librure.so /usr/lib/ && ldconfig && \
@@ -139,7 +139,7 @@ backend-docker:
 			-e GOARCH=amd64 \
 			-e CGO_LDFLAGS="-L/workspace/lib/linux/amd64 -lrure -Wl,-rpath,/workspace/lib/linux/amd64" \
 			-e LD_LIBRARY_PATH="/workspace/lib/linux/amd64" \
-				golang:1.26 \
+				golang:1.26.2 \
 			sh -c "apt-get update && apt-get install -y build-essential && \
 				echo 'Library files:' && ls -la /workspace/lib/linux/amd64/ && \
 				cp /workspace/lib/linux/amd64/librure.so /usr/lib/ && ldconfig && \

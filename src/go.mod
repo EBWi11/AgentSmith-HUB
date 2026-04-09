@@ -1,6 +1,6 @@
 module AgentSmith-HUB
 
-go 1.26
+go 1.26.2
 
 require (
 	github.com/BurntSushi/rure-go v0.0.0-20231211185014-8a0f52724b91
