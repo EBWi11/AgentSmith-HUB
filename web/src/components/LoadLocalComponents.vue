@@ -38,6 +38,12 @@
             <span v-if="change.verifyStatus === 'error'" class="ml-2 px-1.5 py-0.5 bg-red-100 text-red-800 text-xs rounded">Invalid</span>
           </div>
           <div class="flex items-center">
+            <button
+              @click="toggleChangeExpanded(change)"
+              class="btn btn-secondary btn-xs mr-2"
+            >
+              {{ isChangeExpanded(change) ? 'Hide Diff' : 'Show Diff' }}
+            </button>
             <button 
               v-if="change.has_local"
               @click="verifySingleChange(change)" 
@@ -56,7 +62,7 @@
           </div>
         </div>
         
-        <div class="bg-gray-100" style="padding: 0; margin: 0;">
+        <div v-if="isChangeExpanded(change)" class="bg-gray-100" style="padding: 0; margin: 0;">
           <div v-if="change.verifyError" class="p-2 bg-red-50 border border-red-200 text-red-700 text-xs" style="margin: 0 0 8px 0;">
             {{ change.verifyError }}
           </div>
@@ -121,6 +127,7 @@ const changes = ref([])
 const loading = ref(false)
 const error = ref(null)
 const verifying = ref(false)
+const expandedChanges = ref(new Set())
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -171,9 +178,6 @@ async function refreshChanges() {
       errorLine: null
     })) || []
     
-    // Wait for DOM update then refresh editor layout
-    await nextTick()
-    refreshEditorsLayout()
   } catch (e) {
     error.value = 'Failed to fetch local changes: ' + (e?.message || 'Unknown error')
   } finally {
@@ -202,6 +206,30 @@ function refreshEditorsLayout() {
       }
     })
   }, 300)
+}
+
+function getChangeKey(change) {
+  return `${change.type}:${change.id}`
+}
+
+function isChangeExpanded(change) {
+  return expandedChanges.value.has(getChangeKey(change))
+}
+
+async function toggleChangeExpanded(change) {
+  const next = new Set(expandedChanges.value)
+  const key = getChangeKey(change)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  expandedChanges.value = next
+
+  if (next.has(key)) {
+    await nextTick()
+    refreshEditorsLayout()
+  }
 }
 
 

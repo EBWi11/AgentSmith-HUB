@@ -1051,7 +1051,7 @@
         <h3 class="text-lg font-medium text-gray-900 mb-2">Delete Folder</h3>
         <p class="text-sm text-gray-600 mb-4">Are you sure you want to delete the folder <strong>{{ folderToDelete }}</strong>? The folder must be empty.</p>
         <div class="flex justify-end space-x-3">
-          <button @click="showFolderDeleteConfirm = false" class="btn btn-secondary btn-sm">Cancel</button>
+          <button @click="closeFolderDeleteConfirm" class="btn btn-secondary btn-sm">Cancel</button>
           <button @click="confirmDeleteFolder" class="btn bg-red-500 hover:bg-red-600 text-white btn-sm">Delete</button>
         </div>
       </div>
@@ -2122,7 +2122,7 @@ function startSettingsBadgePolling() {
   if (settingsBadgeInterval || document.hidden) {
     return
   }
-  settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 1000)
+  settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 15 * 1000)
 }
 
 function syncSettingsBadgePolling() {
@@ -2269,6 +2269,12 @@ function closeActiveModal() {
       break
     case 'pluginUsage':
       closePluginUsageModal()
+      break
+    case 'folder':
+      closeFolderModal()
+      break
+    case 'folderDelete':
+      closeFolderDeleteConfirm()
       break
   }
   
@@ -2706,6 +2712,7 @@ function openFolderModal(mode, oldName = '') {
   folderRenameOld.value = oldName
   folderError.value = ''
   showFolderModal.value = true
+  activeModal.value = 'folder'
   closeFolderMenu()
   nextTick(() => {
     const input = document.querySelector('.folder-modal-input')
@@ -2716,6 +2723,9 @@ function openFolderModal(mode, oldName = '') {
 function closeFolderModal() {
   showFolderModal.value = false
   folderError.value = ''
+  if (activeModal.value === 'folder') {
+    activeModal.value = null
+  }
 }
 
 async function confirmFolderAction() {
@@ -2748,14 +2758,22 @@ async function confirmFolderAction() {
 function openFolderDeleteConfirm(folderName) {
   folderToDelete.value = folderName
   showFolderDeleteConfirm.value = true
+  activeModal.value = 'folderDelete'
   closeFolderMenu()
+}
+
+function closeFolderDeleteConfirm() {
+  showFolderDeleteConfirm.value = false
+  folderToDelete.value = ''
+  if (activeModal.value === 'folderDelete') {
+    activeModal.value = null
+  }
 }
 
 async function confirmDeleteFolder() {
   try {
     await hubApi.deleteRulesetFolder(folderToDelete.value)
-    showFolderDeleteConfirm.value = false
-    folderToDelete.value = ''
+    closeFolderDeleteConfirm()
     dataCache.clearComponentCache('rulesets')
     await fetchRulesetFolders()
     await fetchItems('rulesets')

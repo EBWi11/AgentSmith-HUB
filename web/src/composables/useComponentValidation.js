@@ -16,6 +16,7 @@ export function useComponentValidation() {
   const errorLines = ref([])
   const showValidationPanel = ref(false)
   const verifyLoading = ref(false)
+  const realtimeValidationWarning = ref('')
   
   // Track dismissed error content to prevent re-showing same errors
   const dismissedErrorHash = ref(null)
@@ -39,6 +40,7 @@ export function useComponentValidation() {
     errorLines.value = []
     showValidationPanel.value = false
     dismissedErrorHash.value = null
+    realtimeValidationWarning.value = ''
   }
   
   /**
@@ -54,6 +56,7 @@ export function useComponentValidation() {
    * Process validation response and update UI state
    */
   const processValidationResponse = (response, componentType, showMessages = false) => {
+    realtimeValidationWarning.value = ''
     if (!response?.data) {
       clearValidation()
       return true
@@ -141,9 +144,12 @@ export function useComponentValidation() {
       const response = await hubApi.verifyComponent(componentType, componentId, content)
       return processValidationResponse(response, componentType, false)
     } catch (error) {
-      // Silent failure for real-time validation
-      clearValidation()
-      return true
+      const hasExistingResult =
+        validationResult.value.errors.length > 0 || validationResult.value.warnings.length > 0
+      realtimeValidationWarning.value = hasExistingResult
+        ? 'Live validation is temporarily unavailable. Showing the last known result.'
+        : 'Live validation is temporarily unavailable. Use Verify to refresh validation results.'
+      return false
     }
   }
   
@@ -162,6 +168,7 @@ export function useComponentValidation() {
     }
     
     verifyLoading.value = true
+    realtimeValidationWarning.value = ''
     
     try {
       const response = await hubApi.verifyComponent(componentType, componentId, content)
@@ -258,6 +265,7 @@ export function useComponentValidation() {
     errorLines,
     showValidationPanel,
     verifyLoading,
+    realtimeValidationWarning,
     clearValidation,
     dismissValidationPanel,
     validateRealtime,

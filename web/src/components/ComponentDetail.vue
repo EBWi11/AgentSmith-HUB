@@ -24,6 +24,10 @@
     </div>
     <!-- Default full-screen editor for other component types -->
           <MonacoEditor v-else v-model:value="editorValue" :language="props.item.type === 'rulesets' ? 'xml' : (props.item.type === 'plugins' ? 'go' : 'yaml')" :read-only="false" :error-lines="errorLines" class="flex-1" @save="saveNew" @line-change="handleLineChange" :component-id="props.item?.id" :component-type="props.item?.type" />
+    <div v-if="realtimeValidationWarning" class="mx-4 mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      {{ realtimeValidationWarning }}
+    </div>
+
     <div class="flex justify-end mt-4 px-4 space-x-2 border-t pt-4 pb-3 button-group-container">
       <!-- Test Buttons -->
       <button 
@@ -171,6 +175,10 @@
 
   <!-- Edit Mode -->
   <div v-else-if="props.item && props.item.isEdit && detail" class="h-full flex flex-col relative">
+    <div v-if="realtimeValidationWarning" class="mx-4 mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      {{ realtimeValidationWarning }}
+    </div>
+
     <!-- Floating Validation Status (for Rulesets, Projects, Plugins, Outputs, and Inputs) -->
     <div v-if="(isRuleset || isProject || isPlugin || isOutput || isInput || isAgent || isSkill) && (validationResult.errors.length > 0 || validationResult.warnings.length > 0) && showValidationPanel" 
          class="absolute top-4 right-4 z-50 max-w-lg bg-white/95 border border-gray-200/60 rounded-xl shadow-2xl backdrop-blur-md">
@@ -721,7 +729,6 @@ import RulesetTestModal from './RulesetTestModal.vue'
 import PluginTestModal from './PluginTestModal.vue'
 import ProjectTestModal from './ProjectTestModal.vue'
 import OutputTestModal from './OutputTestModal.vue'
-import { useStore } from 'vuex'
 import { useRouter } from 'vue-router'
 import { useComponentValidation } from '../composables/useComponentValidation'
 import { useComponentSave } from '../composables/useComponentSave'
@@ -744,6 +751,7 @@ const {
   errorLines,
   showValidationPanel,
   verifyLoading,
+  realtimeValidationWarning,
   clearValidation,
   dismissValidationPanel,
   validateRealtime,
@@ -859,7 +867,6 @@ const showOutputTestModal = ref(false)
 
 // Global message component
 const $message = inject('$message', window?.$toast)
-const store = useStore()
 const router = useRouter()
 const dataCache = useDataCacheStore()
 
@@ -978,21 +985,30 @@ async function fetchDetail(item, forEdit = false) {
 // Watch for changes in editor content and perform real-time validation  
 const rulesetValidationTimeout = ref(null);
 
+function clearValidationTimers() {
+  clearTimeout(rulesetValidationTimeout.value);
+  clearTimeout(projectValidationTimeout.value);
+  clearTimeout(inputValidationTimeout.value);
+  clearTimeout(outputValidationTimeout.value);
+  clearTimeout(pluginValidationTimeout.value);
+}
+
+function scheduleRealtimeValidation(timeoutRef, delay) {
+  clearTimeout(timeoutRef.value);
+  timeoutRef.value = setTimeout(async () => {
+    if (props.item?.type && props.item?.id && editorValue.value) {
+      await validateRealtime(props.item.type, props.item.id, editorValue.value);
+    }
+  }, delay);
+}
+
 // Real-time validation for all component types
 watch(editorValue, (newContent) => {
   if (props.item?.type && props.item?.id && newContent) {
     if (isRuleset.value) {
-      // Debounce ruleset validation to avoid excessive API calls
-      clearTimeout(rulesetValidationTimeout.value);
-      rulesetValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, newContent);
-      }, 800); // Wait 800ms after user stops typing for faster feedback
+      scheduleRealtimeValidation(rulesetValidationTimeout, 900);
     } else if (isProject.value) {
-      // Debounce project validation for better responsiveness
-      clearTimeout(projectValidationTimeout.value);
-      projectValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, newContent);
-      }, 1000); // Wait 1s after user stops typing
+      scheduleRealtimeValidation(projectValidationTimeout, 1500);
     }
   }
 }, { deep: true })
@@ -1008,30 +1024,15 @@ const pluginValidationTimeout = ref(null)
 // Handle line change for real-time validation (project, input, output, plugin)
 function handleLineChange(newLineNumber) {
   if (newLineNumber !== lastCursorLine.value && props.item?.type && props.item?.id && editorValue.value) {
-    if (isProject.value) {
-      // User moved to a different line in project, validate the project
-      clearTimeout(projectValidationTimeout.value);
-      projectValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, editorValue.value);
-      }, 300); // Quick validation when changing lines
-    } else if (isInput.value) {
+    if (isInput.value) {
       // User moved to a different line in input, validate the input
-      clearTimeout(inputValidationTimeout.value);
-      inputValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, editorValue.value);
-      }, 300); // Quick validation when changing lines
+      scheduleRealtimeValidation(inputValidationTimeout, 300);
     } else if (isOutput.value) {
       // User moved to a different line in output, validate the output
-      clearTimeout(outputValidationTimeout.value);
-      outputValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, editorValue.value);
-      }, 300); // Quick validation when changing lines
+      scheduleRealtimeValidation(outputValidationTimeout, 300);
     } else if (isPlugin.value) {
       // User moved to a different line in plugin, validate the plugin
-      clearTimeout(pluginValidationTimeout.value);
-      pluginValidationTimeout.value = setTimeout(async () => {
-        await validateRealtime(props.item.type, props.item.id, editorValue.value);
-      }, 300); // Quick validation when changing lines
+      scheduleRealtimeValidation(pluginValidationTimeout, 300);
     }
     
     lastCursorLine.value = newLineNumber;
@@ -1172,20 +1173,6 @@ onMounted(async () => {
   
   if (props.item?.type && props.item?.id && editorValue.value) {
     await validateRealtime(props.item.type, props.item.id, editorValue.value);
-  }
-  
-  // Set up periodic validation for projects (every 3 seconds)
-  if (isProject.value) {
-    const periodicValidation = setInterval(async () => {
-      if (props.item?.isEdit && props.item?.type && props.item?.id && editorValue.value) {
-        await validateRealtime(props.item.type, props.item.id, editorValue.value);
-      }
-    }, 3000);
-    
-    // Clean up interval on component unmount
-    onBeforeUnmount(() => {
-      clearInterval(periodicValidation);
-    });
   }
 
   // Add keyboard shortcuts
@@ -1383,13 +1370,11 @@ function getLanguage(type) {
 }
 
 function getTemplateForComponent(type, id) {
-  // 传递包含dataCache的store对象，特别是对于项目类型
   const storeWithDataCache = {
-    ...store,
     $dataCache: dataCache
   };
   
-  console.log('getTemplateForComponent: Called with', { type, id, store: !!store, dataCache: !!dataCache })
+  console.log('getTemplateForComponent: Called with', { type, id, dataCache: !!dataCache })
   
   const template = getDefaultTemplate(type, id, storeWithDataCache);
   
@@ -1598,22 +1583,7 @@ watch(() => props.item?.id, (newVal, oldVal) => {
 
 // 组件卸载时清理
 onBeforeUnmount(() => {
-  // Clear validation timeouts
-  if (rulesetValidationTimeout.value) {
-    clearTimeout(rulesetValidationTimeout.value);
-  }
-  if (projectValidationTimeout.value) {
-    clearTimeout(projectValidationTimeout.value);
-  }
-  if (inputValidationTimeout.value) {
-    clearTimeout(inputValidationTimeout.value);
-  }
-  if (outputValidationTimeout.value) {
-    clearTimeout(outputValidationTimeout.value);
-  }
-  if (pluginValidationTimeout.value) {
-    clearTimeout(pluginValidationTimeout.value);
-  }
+  clearValidationTimers()
   
   // Test cache has TTL and will expire automatically
 });

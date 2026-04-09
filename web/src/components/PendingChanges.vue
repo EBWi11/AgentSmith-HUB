@@ -36,6 +36,12 @@
             <span v-if="change.verifyStatus === 'error'" class="ml-2 px-1.5 py-0.5 bg-red-100 text-red-800 text-xs rounded">Invalid</span>
           </div>
           <div class="flex items-center">
+            <button
+              @click="toggleChangeExpanded(change)"
+              class="btn btn-secondary btn-xs mr-2"
+            >
+              {{ isChangeExpanded(change) ? 'Hide Diff' : 'Show Diff' }}
+            </button>
             <div v-if="needsRestart(change)" class="mr-3 text-xs text-amber-600 flex items-center">
               <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
@@ -67,7 +73,7 @@
           </div>
         </div>
         
-        <div class="bg-gray-100" style="padding: 0; margin: 0;">
+        <div v-if="isChangeExpanded(change)" class="bg-gray-100" style="padding: 0; margin: 0;">
           <div v-if="change.verifyError" class="p-2 bg-red-50 border border-red-200 text-red-700 text-xs" style="margin: 0 0 8px 0;">
             {{ change.verifyError }}
           </div>
@@ -129,6 +135,7 @@ const applying = ref(false)
 const verifying = ref(false)
 const cancelling = ref(false)
 const editorRefs = ref([]) // Store editor references
+const expandedChanges = ref(new Set())
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -207,10 +214,6 @@ async function refreshChanges() {
         is_new: Boolean(change.is_new)
       }))
     
-    // Wait for DOM update then refresh editor layout
-    await nextTick()
-    refreshEditorsLayout()
-    
     // Update settings badges after fetching changes
     const dataCache = useDataCacheStore()
     dataCache.fetchSettingsBadges(true)
@@ -236,6 +239,30 @@ function getVerifyStatusFromChange(change) {
       return 'error'
     default:
       return null
+  }
+}
+
+function getChangeKey(change) {
+  return `${change.type}:${change.id}`
+}
+
+function isChangeExpanded(change) {
+  return expandedChanges.value.has(getChangeKey(change))
+}
+
+async function toggleChangeExpanded(change) {
+  const next = new Set(expandedChanges.value)
+  const key = getChangeKey(change)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  expandedChanges.value = next
+
+  if (next.has(key)) {
+    await nextTick()
+    refreshEditorsLayout()
   }
 }
 

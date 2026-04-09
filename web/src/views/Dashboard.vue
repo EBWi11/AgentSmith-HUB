@@ -497,6 +497,13 @@ const lastUpdated = ref('')
 // Cluster consistency checking
 const clusterConsistencyData = ref({})
 const clusterConsistencyLoading = ref(false)
+const lastProjectComponentRefreshAt = ref(0)
+const lastClusterConsistencyRefreshAt = ref(0)
+
+const DASHBOARD_REFRESH_TTLS = {
+  projectComponents: 5 * 60 * 1000,
+  clusterConsistency: 60 * 1000
+}
 
 // Process cluster nodes similar to ClusterStatus.vue
 const clusterNodes = computed(() => {
@@ -715,8 +722,9 @@ async function loadClusterConsistencyData() {
 
   clusterConsistencyLoading.value = true;
   try {
-    const response = await hubApi.getClusterProjectStates();
+    const response = await dataCache.fetchClusterProjectStates(true);
     clusterConsistencyData.value = response || {};
+    lastClusterConsistencyRefreshAt.value = Date.now()
     
     // Update mismatch flag for projects
     projectList.value.forEach(project => {
@@ -728,6 +736,35 @@ async function loadClusterConsistencyData() {
   } finally {
     clusterConsistencyLoading.value = false;
   }
+}
+
+async function refreshProjectComponentCounts(force = false) {
+  const now = Date.now()
+  if (!force && now - lastProjectComponentRefreshAt.value < DASHBOARD_REFRESH_TTLS.projectComponents) {
+    return
+  }
+
+  const componentCountPromises = projectList.value.map(async (project) => {
+    try {
+      const componentInfo = await hubApi.getProjectComponents(project.id)
+      project.components = componentInfo.success ? (componentInfo.totalComponents || 0) : 0
+    } catch (error) {
+      console.error(`Error fetching components for project ${project.id}:`, error)
+      project.components = 0
+    }
+  })
+
+  await Promise.all(componentCountPromises)
+  lastProjectComponentRefreshAt.value = now
+}
+
+async function refreshClusterConsistencyIfNeeded(force = false) {
+  const now = Date.now()
+  if (!force && now - lastClusterConsistencyRefreshAt.value < DASHBOARD_REFRESH_TTLS.clusterConsistency) {
+    return
+  }
+
+  await loadClusterConsistencyData()
 }
 
 // Get message statistics for a specific project from aggregated cluster data
@@ -1034,19 +1071,6 @@ async function refreshStats() {
       agentList.value = results[3] || []
     }
 
-    // Fetch cluster system metrics for node display (if current node is leader)
-    if (clusterInfo.value.status === 'leader') {
-      try {
-        const clusterSystemResponse = await hubApi.getClusterSystemMetrics()
-        if (clusterSystemResponse && clusterSystemResponse.metrics) {
-          // Merge cluster system metrics into systemData for node display
-          Object.assign(systemData.value, clusterSystemResponse.metrics)
-        }
-      } catch (clusterSystemError) {
-        console.warn('Failed to fetch cluster system metrics:', clusterSystemError)
-      }
-    }
-    
     // Always fetch current node's system metrics as fallback (like ClusterStatus.vue)
     try {
       const currentMetrics = await hubApi.getCurrentSystemMetrics()
@@ -1066,28 +1090,13 @@ async function refreshStats() {
       }
     }
 
-    // Update component counts for all projects (including stopped ones)
-    // Use project configuration data instead of QPS data to get accurate component counts
-    const componentCountPromises = projectList.value.map(async (project) => {
-      try {
-        const componentInfo = await hubApi.getProjectComponents(project.id)
-        if (componentInfo.success) {
-          project.components = componentInfo.totalComponents || 0
-        } else {
-          console.warn(`Failed to get components for project ${project.id}:`, componentInfo.error)
-          project.components = 0
-        }
-      } catch (error) {
-        console.error(`Error fetching components for project ${project.id}:`, error)
-        project.components = 0
-      }
-    })
-    
-    // Wait for all component count updates to complete
-    await Promise.all(componentCountPromises)
-
-    // Also update cluster consistency data
-    await loadClusterConsistencyData()
+    const hasActiveTransitions = transitionStates.value.length > 0
+    if (!hasActiveTransitions) {
+      await Promise.all([
+        refreshProjectComponentCounts(),
+        refreshClusterConsistencyIfNeeded()
+      ])
+    }
     
     // Update last updated time
     lastUpdated.value = new Date().toLocaleTimeString()
@@ -1180,10 +1189,13 @@ async function fetchDashboardData() {
     }
 
     // Load cluster consistency data
-    await loadClusterConsistencyData()
+    await refreshClusterConsistencyIfNeeded(true)
     
     // Now refresh stats (this will also update message and system data)
     await refreshStats()
+
+    // Prime component counts once on full dashboard load.
+    await refreshProjectComponentCounts(true)
 
     // Fetch pending changes and local changes using cache
     try {
@@ -1221,9 +1233,9 @@ const transitionStates = computed(() => {
 
 // Create smart refresh instance
 const smartRefresh = useDashboardSmartRefresh(refreshStats, {
-  debug: true,
+  debug: false,
   baseInterval: 60000,    // 1 minute base interval
-  fastInterval: 500,      // 0.5 second fast interval for transition states
+  fastInterval: 2000,     // 2 second fast interval for transition states
   slowInterval: 300000    // 5 minute slow interval
 })
 
@@ -1250,13 +1262,11 @@ const debouncedForceRefresh = debounce(() => {
 }, 500)
 
 function startAutoRefresh() {
-  // Smart refresh handles all timing automatically
-  // Only need to fetch initial structural data
-  fetchDashboardData()
+  // Smart refresh lifecycle is managed by the composable.
 }
 
 function stopAutoRefresh() {
-  smartRefresh.stop()
+  // Smart refresh lifecycle is managed by the composable.
 }
 
 // Keyboard shortcuts simplified - smart refresh handles most cases
@@ -1280,7 +1290,6 @@ function handleKeyDown(event) {
 onMounted(async () => {
   await dataCache.fetchFeatures()
   fetchDashboardData()
-  startAutoRefresh()
   
   // Add keyboard event listener for manual actions
   window.addEventListener('keydown', handleKeyDown)
@@ -1290,8 +1299,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopAutoRefresh()
-  
   // Remove keyboard event listener
   window.removeEventListener('keydown', handleKeyDown)
   

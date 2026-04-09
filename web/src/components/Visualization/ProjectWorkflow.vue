@@ -142,6 +142,9 @@ const edges = ref([]);
 const messageData = ref({});
 const messageLoading = ref(false);
 const messageRefreshInterval = ref(null);
+let projectOperationHandler = null;
+let projectWorkflowCacheHandler = null;
+let projectWorkflowVisibilityHandler = null;
 
 // Component sequences data
 const componentSequences = ref({});
@@ -259,21 +262,29 @@ function handleEscKey(event) {
 onMounted(() => {
   document.addEventListener('click', onGlobalClick);
   document.addEventListener('keydown', handleEscKey);
+  projectWorkflowVisibilityHandler = () => {
+    if (document.hidden) {
+      stopMessageRefresh();
+      return;
+    }
+    startMessageRefresh(true);
+  };
+  document.addEventListener('visibilitychange', projectWorkflowVisibilityHandler);
   
   // Listen for project operation events to refresh message data
-  const handleProjectOperation = (event) => {
+  projectOperationHandler = (event) => {
     const { operation, projectId } = event.detail || {};
     if (props.projectId === projectId && (operation === 'restart' || operation === 'start' || operation === 'stop')) {
       console.log(`[ProjectWorkflow] Project operation detected: ${operation} for ${projectId}`);
       
       // Immediate refresh to clear old data
-      if (props.enableMessages && props.projectId) {
+      if (props.enableMessages && props.projectId && !document.hidden) {
         fetchMessageData();
       }
       
       // Additional delayed refresh to ensure backend updates are captured
       setTimeout(() => {
-        if (props.enableMessages && props.projectId) {
+        if (props.enableMessages && props.projectId && !document.hidden) {
           console.log(`[ProjectWorkflow] Delayed refresh after ${operation}`);
           fetchMessageData();
         }
@@ -281,45 +292,46 @@ onMounted(() => {
     }
   };
   
-  window.addEventListener('projectOperation', handleProjectOperation);
+  window.addEventListener('projectOperation', projectOperationHandler);
   
   // Listen for cache clear events to refresh data immediately
-  const handleCacheCleared = (event) => {
+  projectWorkflowCacheHandler = (event) => {
     const { reason } = event.detail || {};
     console.log(`[ProjectWorkflow] Cache cleared: ${reason}, refreshing data`);
     
-    if (props.enableMessages && props.projectId) {
+    if (props.enableMessages && props.projectId && !document.hidden) {
       fetchMessageData();
     }
   };
   
-  window.addEventListener('cacheCleared', handleCacheCleared);
+  window.addEventListener('cacheCleared', projectWorkflowCacheHandler);
   
   // Start message data refresh if enabled and projectId is provided
   if (props.enableMessages && props.projectId) {
     startMessageRefresh();
   }
   
-  // Store the handlers for cleanup
-  window._projectWorkflowOperationHandler = handleProjectOperation;
-  window._projectWorkflowCacheHandler = handleCacheCleared;
 });
 
 // Remove global click event listener on component unmount
 onUnmounted(() => {
   document.removeEventListener('click', onGlobalClick);
   document.removeEventListener('keydown', handleEscKey);
+  if (projectWorkflowVisibilityHandler) {
+    document.removeEventListener('visibilitychange', projectWorkflowVisibilityHandler);
+    projectWorkflowVisibilityHandler = null;
+  }
   
   // Remove project operation event listener
-  if (window._projectWorkflowOperationHandler) {
-    window.removeEventListener('projectOperation', window._projectWorkflowOperationHandler);
-    delete window._projectWorkflowOperationHandler;
+  if (projectOperationHandler) {
+    window.removeEventListener('projectOperation', projectOperationHandler);
+    projectOperationHandler = null;
   }
   
   // Remove cache clear event listener
-  if (window._projectWorkflowCacheHandler) {
-    window.removeEventListener('cacheCleared', window._projectWorkflowCacheHandler);
-    delete window._projectWorkflowCacheHandler;
+  if (projectWorkflowCacheHandler) {
+    window.removeEventListener('cacheCleared', projectWorkflowCacheHandler);
+    projectWorkflowCacheHandler = null;
   }
   
   // Stop message data refresh
@@ -680,6 +692,10 @@ async function fetchMessageData() {
     }));
     return;
   }
+
+  if (document.hidden) {
+    return;
+  }
   
   try {
     messageLoading.value = true;
@@ -715,14 +731,22 @@ async function fetchMessageData() {
 }
 
 // Start message data refresh interval
-function startMessageRefresh() {
-  // Initial fetch
-  fetchMessageData();
-  
-  // Set up interval for periodic refresh (every 5 seconds for faster updates)
-  messageRefreshInterval.value = setInterval(() => {
+function startMessageRefresh(triggerImmediateFetch = true) {
+  stopMessageRefresh();
+
+  if (!props.enableMessages || !props.projectId || document.hidden) {
+    return;
+  }
+
+  if (triggerImmediateFetch) {
     fetchMessageData();
-  }, 5000);
+  }
+  
+  messageRefreshInterval.value = setInterval(() => {
+    if (!document.hidden) {
+      fetchMessageData();
+    }
+  }, 10000);
 }
 
 // Stop message data refresh interval

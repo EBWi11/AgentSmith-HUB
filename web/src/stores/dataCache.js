@@ -1026,7 +1026,11 @@ export const useDataCacheStore = defineStore('dataCache', {
 
     // Fetch settings badges data
     async fetchSettingsBadges(force = false) {
-      // No caching for badges - always fetch fresh data
+      const badgeTtl = 15000
+      if (!force && this.settingsBadges.timestamp && (Date.now() - this.settingsBadges.timestamp) <= badgeTtl) {
+        return this.settingsBadges.data
+      }
+
       if (this.settingsBadges.loading) {
         return this.settingsBadges.data
       }
@@ -1034,48 +1038,35 @@ export const useDataCacheStore = defineStore('dataCache', {
       this.settingsBadges.loading = true
 
       try {
-        // Get pending changes count from API (always fresh data for badges)
-        let pendingCount = 0
-        try {
-          const pendingData = await hubApi.fetchEnhancedPendingChanges()
-          pendingCount = Array.isArray(pendingData) ? pendingData.length : 0
-        } catch (e) {
-          console.warn('Failed to fetch pending changes for badge:', e)
-          // Fallback to cache if API fails
-          if (this.pendingChanges.data && Array.isArray(this.pendingChanges.data)) {
-            pendingCount = this.pendingChanges.data.length
-          }
-        }
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
-        // Get local changes count from lightweight API (always fresh data for badges)
-        let localCount = 0
-        try {
-          localCount = await hubApi.fetchLocalChangesCount()
-        } catch (e) {
-          console.warn('Failed to fetch local changes count for badge:', e)
-          // Fallback to cache if API fails
-          if (this.localChanges.data && Array.isArray(this.localChanges.data)) {
-            localCount = this.localChanges.data.length
-          }
-        }
-
-        // Get error logs count for last hour (hub-level errors only)
-        let errorCount = 0
-        try {
-          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-          const params = {
+        const [pendingResult, localCountResult, errorCountResult] = await Promise.all([
+          this.fetchPendingChanges(force)
+            .then((pendingData) => Array.isArray(pendingData) ? pendingData.length : 0)
+            .catch((e) => {
+              console.warn('Failed to fetch pending changes for badge:', e)
+              return Array.isArray(this.pendingChanges.data) ? this.pendingChanges.data.length : 0
+            }),
+          hubApi.fetchLocalChangesCount()
+            .catch((e) => {
+              console.warn('Failed to fetch local changes count for badge:', e)
+              return Array.isArray(this.localChanges.data) ? this.localChanges.data.length : 0
+            }),
+          hubApi.getErrorLogs({
             start_time: oneHourAgo,
-            limit: '1000',
-            // Only count hub-level error logs for the badge/red dot.
-            // Agent tool INFO logs should not affect this indicator.
+            limit: '1',
             source: 'hub'
-          }
-          
-          const errorData = await hubApi.getErrorLogs(params)
-          errorCount = errorData?.total_count || 0
-        } catch (e) {
-          console.warn('Failed to fetch error logs for badge:', e)
-        }
+          })
+            .then((errorData) => errorData?.total_count || 0)
+            .catch((e) => {
+              console.warn('Failed to fetch error logs for badge:', e)
+              return 0
+            })
+        ])
+
+        const pendingCount = pendingResult
+        const localCount = Number(localCountResult) || 0
+        const errorCount = errorCountResult
 
         // Delay-confirm local changes badge to avoid one-frame flicker right after apply/approve.
         let confirmedLocalCount = 0

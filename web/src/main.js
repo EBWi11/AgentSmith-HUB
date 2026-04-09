@@ -3,7 +3,6 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router/index.js'
-import store from './store/index.js'
 import { initializeConfig } from './config/index.js'
 import { initOidc } from './api/oidc.js'
 
@@ -25,7 +24,6 @@ async function initializeApp() {
 
   app.use(pinia)
   app.use(router)
-  app.use(store)
 
   // Make router globally accessible for API interceptors
   window.router = router
@@ -49,7 +47,6 @@ initializeApp().catch(error => {
   
   app.use(pinia)
   app.use(router)
-  app.use(store)
   
   window.router = router
   
