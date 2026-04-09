@@ -3405,6 +3405,10 @@ function emitSidebarProjectOperation(operationType, projectId) {
 }
 
 // Project operations
+function projectHasTemp(item) {
+  return typeof item?.hasTemp === 'boolean' ? item.hasTemp : undefined
+}
+
 async function startProject(item) {
   // Record operation time and notify other components
   emitSidebarProjectOperation('start', item.id)
@@ -3424,7 +3428,7 @@ async function startProject(item) {
   
   try {
     // Step 2: Call API (this may take time, but UI already shows feedback)
-    await hubApi.startProject(item.id)
+    await hubApi.startProject(item.id, { hasTemp: projectHasTemp(item) })
     
     // Step 3: API succeeded, start polling for real status
     $message?.success?.('Project start command sent successfully')
@@ -3468,7 +3472,7 @@ async function stopProject(item) {
   
   try {
     // Step 2: Call API
-    await hubApi.stopProject(item.id)
+    await hubApi.stopProject(item.id, { hasTemp: projectHasTemp(item) })
     
     // Step 3: API succeeded, start polling for real status
     $message?.success?.('Project stop command sent successfully')
@@ -3512,7 +3516,7 @@ async function restartProject(item) {
   
   try {
     // Step 2: Call API
-    await hubApi.restartProject(item.id)
+    await hubApi.restartProject(item.id, { hasTemp: projectHasTemp(item) })
     
     // Step 3: API succeeded, start polling for real status
     $message?.success?.('Project restart command sent successfully')
@@ -3689,13 +3693,13 @@ async function continueProjectOperation() {
     // Step 2: Perform operations on the original project
     if (operationType === 'start') {
       // Start using original project ID
-      await hubApi.startProject(item.id)
+      await hubApi.startProject(item.id, { hasTemp: projectHasTemp(item) })
     } else if (operationType === 'stop') {
       // Stop using original project ID
-      await hubApi.stopProject(item.id)
+      await hubApi.stopProject(item.id, { hasTemp: projectHasTemp(item) })
     } else if (operationType === 'restart') {
       // Restart using original project ID
-      await hubApi.restartProject(item.id)
+      await hubApi.restartProject(item.id, { hasTemp: projectHasTemp(item) })
     }
     
     // Step 3: API succeeded, start polling for real status
@@ -4017,7 +4021,7 @@ async function loadClusterProjectStates(projectId) {
   clusterProjectStates.value = {};
   
   try {
-    const response = await hubApi.getClusterProjectStates();
+    const response = await dataCache.fetchClusterProjectStates(true);
     clusterProjectStates.value = response || {};
   } catch (error) {
     clusterProjectStatesError.value = error.message || 'Failed to fetch cluster project states';
@@ -4110,7 +4114,7 @@ async function loadClusterConsistencyData() {
 
   clusterConsistencyLoading.value = true;
   try {
-    const response = await hubApi.getClusterProjectStates();
+    const response = await dataCache.fetchClusterProjectStates(true);
     clusterConsistencyData.value = response || {};
   } catch (error) {
     console.warn('Failed to fetch cluster consistency data:', error);

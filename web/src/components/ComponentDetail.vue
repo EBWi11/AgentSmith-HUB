@@ -1389,6 +1389,16 @@ function getTemplateForComponent(type, id) {
   return template;
 }
 
+function projectHasTemp() {
+  if (typeof props.item?.hasTemp === 'boolean') {
+    return props.item.hasTemp
+  }
+  if (typeof detail.value?.isTemporary === 'boolean') {
+    return detail.value.isTemporary
+  }
+  return undefined
+}
+
 // 发送全局项目操作事件
 function emitProjectOperation(operationType) {
   const timestamp = Date.now()
@@ -1422,7 +1432,7 @@ async function startProject() {
   projectOperationLoading.value = true
   
   try {
-    await hubApi.startProject(props.item.id)
+    await hubApi.startProject(props.item.id, { hasTemp: projectHasTemp() })
     
     // 成功启动项目
     $message?.success?.('Project started successfully')
@@ -1456,7 +1466,7 @@ async function stopProject() {
   projectOperationLoading.value = true
   
   try {
-    await hubApi.stopProject(props.item.id)
+    await hubApi.stopProject(props.item.id, { hasTemp: projectHasTemp() })
     
     // 成功停止项目
     $message?.success?.('Project stopped successfully')
@@ -1490,7 +1500,7 @@ async function restartProject() {
   projectOperationLoading.value = true
   
   try {
-    await hubApi.restartProject(props.item.id)
+    await hubApi.restartProject(props.item.id, { hasTemp: projectHasTemp() })
     
     // 成功重启项目
     $message?.success?.('Project restarted successfully')
@@ -1524,7 +1534,7 @@ function continueProjectOperation() {
     // 使用原始项目进行操作
     if (projectOperationType.value === 'start') {
       // 直接调用API启动项目
-      hubApi.startProject(id)
+      hubApi.startProject(id, { hasTemp: projectHasTemp() })
         .then(() => {
           $message?.success?.('Project started successfully')
           // 不要立即修改状态，让刷新机制去更新状态确保同步
@@ -1537,7 +1547,7 @@ function continueProjectOperation() {
         })
     } else if (projectOperationType.value === 'stop') {
       // 直接调用API停止项目
-      hubApi.stopProject(id)
+      hubApi.stopProject(id, { hasTemp: projectHasTemp() })
         .then(() => {
           $message?.success?.('Project stopped successfully')
           // 不要立即修改状态，让刷新机制去更新状态确保同步
@@ -1550,7 +1560,7 @@ function continueProjectOperation() {
         })
     } else if (projectOperationType.value === 'restart') {
       // 先停止，再启动
-      hubApi.restartProject(id)
+      hubApi.restartProject(id, { hasTemp: projectHasTemp() })
         .then(() => {
           $message?.success?.('Project restarted successfully')
           // 不要立即修改状态，让刷新机制去更新状态确保同步

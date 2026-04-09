@@ -115,17 +115,12 @@
 import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
-import { useApiOperations } from '../composables/useApi'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
-import { debounce, throttle } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
 // Cache management integrated into DataCache
 
 // Define emits
 const emit = defineEmits(['refresh-list'])
-
-// Use composables
-const { loading: apiLoading, error: apiError } = useApiOperations()
 
 // State
 const changes = ref([])
@@ -134,7 +129,6 @@ const error = ref(null)
 const applying = ref(false)
 const verifying = ref(false)
 const cancelling = ref(false)
-const editorRefs = ref([]) // Store editor references
 const expandedChanges = ref(new Set())
 
 // Global message component

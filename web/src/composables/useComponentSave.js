@@ -91,7 +91,7 @@ export function useComponentSave() {
       // Post-save verification with messages (after view mode switch)
       if (verifyAfterSave) {
         const action = isNewComponent ? 'created' : 'saved'
-        await verifyAfterSave(componentType, componentId, action)
+        await verifyAfterSave(componentType, componentId, action, content)
       }
       
       // Clear all cache since component save can affect multiple data types

@@ -233,9 +233,9 @@ export function useComponentValidation() {
   /**
    * Post-save verification (with messages)
    */
-  const verifyAfterSave = async (componentType, componentId, action = 'saved') => {
+  const verifyAfterSave = async (componentType, componentId, action = 'saved', content = undefined) => {
     try {
-      const response = await hubApi.verifyComponent(componentType, componentId)
+      const response = await hubApi.verifyComponent(componentType, componentId, content)
       
       if (response.data && response.data.valid) {
         $message?.success?.(`${action.charAt(0).toUpperCase() + action.slice(1)} and verified successfully`)

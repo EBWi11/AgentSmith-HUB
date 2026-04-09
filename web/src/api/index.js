@@ -46,6 +46,125 @@ const handleApiError = (error, defaultMessage, returnEmptyArray = false) => {
   throw error;
 };
 
+const COMPONENT_ENDPOINTS = {
+  inputs: '/inputs',
+  outputs: '/outputs',
+  rulesets: '/rulesets',
+  projects: '/projects',
+  plugins: '/plugins',
+  agents: '/agents',
+  skills: '/skills'
+};
+
+const COMPONENT_GETTERS = {
+  inputs: 'getInput',
+  outputs: 'getOutput',
+  rulesets: 'getRuleset',
+  projects: 'getProject',
+  plugins: 'getPlugin',
+  agents: 'getAgent',
+  skills: 'getSkill'
+};
+
+const PROJECT_OPERATION_ENDPOINTS = {
+  start: '/start-project',
+  stop: '/stop-project',
+  restart: '/restart-project'
+};
+
+const normalizeComponentType = (type = '', target = 'plural') => {
+  const normalized = String(type || '').trim().toLowerCase();
+  if (!normalized) return normalized;
+
+  if (target === 'plural') {
+    switch (normalized) {
+      case 'input':
+        return 'inputs';
+      case 'output':
+        return 'outputs';
+      case 'ruleset':
+        return 'rulesets';
+      case 'project':
+        return 'projects';
+      case 'plugin':
+        return 'plugins';
+      case 'agent':
+        return 'agents';
+      case 'skill':
+        return 'skills';
+      default:
+        return normalized.endsWith('s') ? normalized : `${normalized}s`;
+    }
+  }
+
+  switch (normalized) {
+    case 'inputs':
+      return 'input';
+    case 'outputs':
+      return 'output';
+    case 'rulesets':
+      return 'ruleset';
+    case 'projects':
+      return 'project';
+    case 'plugins':
+      return 'plugin';
+    case 'agents':
+      return 'agent';
+    case 'skills':
+      return 'skill';
+    default:
+      return normalized.endsWith('s') ? normalized.slice(0, -1) : normalized;
+  }
+};
+
+const getComponentEndpoint = (type, id = '') => {
+  const pluralType = normalizeComponentType(type, 'plural');
+  const endpoint = COMPONENT_ENDPOINTS[pluralType];
+  if (!endpoint) {
+    throw new Error(`Unsupported component type: ${type}`);
+  }
+  return id ? `${endpoint}/${id}` : endpoint;
+};
+
+const normalizeRawContent = (raw) => {
+  return typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
+};
+
+const dispatchComponentChanged = (action, type, id) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent('componentChanged', {
+    detail: { action, type, id, timestamp: Date.now() }
+  }));
+};
+
+const buildVerifyFailure = (message) => ({
+  data: {
+    valid: false,
+    error: message
+  }
+});
+
+const buildResultError = (error, fallbackMessage, fallbackPayload = {}) => ({
+  success: false,
+  error: error.response?.data?.error || error.message || fallbackMessage,
+  ...fallbackPayload
+});
+
+const normalizeParams = (params = {}) => {
+  if (params instanceof URLSearchParams) {
+    return Object.fromEntries(params.entries());
+  }
+
+  if (typeof params === 'string') {
+    return Object.fromEntries(new URLSearchParams(params));
+  }
+
+  return params || {};
+};
+
 // Add request interceptor to add token or bearer to all requests
 api.interceptors.request.use(
   (config) => {
@@ -120,7 +239,6 @@ api.interceptors.response.use(
 /**
  * Generic function to fetch components by type
  * @param {string} type - Component type
- * @param {string} endpoint - API endpoint
  * @returns {Promise<Array>} - Array of components with temp file info
  */
 // Will be defined after hubApi is declared
@@ -160,6 +278,70 @@ export const hubApi = {
     return response.data;
   },
 
+  async getComponent(type, id) {
+    const response = await api.get(getComponentEndpoint(type, id));
+    return response.data;
+  },
+
+  async createComponent(type, id, raw, extraPayload = {}) {
+    const response = await api.post(getComponentEndpoint(type), {
+      id,
+      raw,
+      ...extraPayload
+    });
+    return response.data;
+  },
+
+  async updateComponent(type, id, raw) {
+    const response = await api.put(getComponentEndpoint(type, id), {
+      raw: normalizeRawContent(raw)
+    });
+    return response.data;
+  },
+
+  async deleteAndDispatch(type, id) {
+    const response = await this.deleteComponent(type, id);
+    dispatchComponentChanged('deleted', normalizeComponentType(type, 'plural'), id);
+    return response;
+  },
+
+  async getComponentRaw(type, id) {
+    const getterName = COMPONENT_GETTERS[normalizeComponentType(type, 'plural')];
+    if (!getterName || typeof this[getterName] !== 'function') {
+      throw new Error(`Unsupported component type: ${type}`);
+    }
+    return this[getterName](id);
+  },
+
+  async resolveTempState(type, id, options = {}) {
+    if (typeof options?.hasTemp === 'boolean') {
+      return options.hasTemp;
+    }
+
+    const tempInfo = await this.checkTemporaryFile(type, id);
+    return tempInfo.hasTemp === true;
+  },
+
+  async runProjectOperation(operation, id, options = {}) {
+    const endpoint = PROJECT_OPERATION_ENDPOINTS[operation];
+    if (!endpoint) {
+      throw new Error(`Unsupported project operation: ${operation}`);
+    }
+
+    const hasTemp = await this.resolveTempState('projects', id, options);
+    if (hasTemp) {
+      try {
+        await this.applySingleChange('projects', id);
+      } catch (applyError) {
+        console.error(`Failed to apply changes for project ${id} before ${operation}:`, applyError);
+        throw new Error(`Failed to apply changes before ${operation}: ${applyError.message}`);
+      }
+    }
+
+    const response = await api.post(endpoint, { project_id: id });
+    return response.data;
+  },
+
   setBearer(idToken) {
     localStorage.setItem('auth_bearer', idToken);
     api.defaults.headers.Authorization = `Bearer ${idToken}`;
@@ -182,7 +364,7 @@ export const hubApi = {
         case 'projects':
         case 'agents':
         case 'skills':
-          response = await fetchComponentsByType(type, `/${type}`);
+          response = await fetchComponentsByType(type);
           break;
         case 'cluster':
           response = await this.fetchClusterInfo();
@@ -226,18 +408,15 @@ export const hubApi = {
   // Legacy fetch methods removed - use fetchComponentsWithTempInfo instead
 
   async getInput(id) {
-    const response = await api.get(`/inputs/${id}`);
-    return response.data;
+    return this.getComponent('inputs', id);
   },
 
   async getOutput(id) {
-    const response = await api.get(`/outputs/${id}`);
-    return response.data;
+    return this.getComponent('outputs', id);
   },
 
   async getRuleset(id) {
-    const response = await api.get(`/rulesets/${id}`);
-    return response.data;
+    return this.getComponent('rulesets', id);
   },
 
   async getProject(id) {
@@ -265,18 +444,15 @@ export const hubApi = {
   },
 
   async createInput(id, raw) {
-    const response = await api.post('/inputs', { id, raw });
-    return response.data;
+    return this.createComponent('inputs', id, raw);
   },
 
   async createOutput(id, raw) {
-    const response = await api.post('/outputs', { id, raw });
-    return response.data;
+    return this.createComponent('outputs', id, raw);
   },
 
   async createRuleset(id, raw, folder = '') {
-    const response = await api.post('/rulesets', { id, raw, folder: folder || '' });
-    return response.data;
+    return this.createComponent('rulesets', id, raw, { folder: folder || '' });
   },
 
   // Ruleset folder management
@@ -310,168 +486,85 @@ export const hubApi = {
   },
 
   async createProject(id, raw) {
-    const response = await api.post('/projects', { id, raw });
-    return response.data;
+    return this.createComponent('projects', id, raw);
   },
 
   async createPlugin(id, raw) {
-    const response = await api.post('/plugins', { id, raw });
-    return response.data;
+    return this.createComponent('plugins', id, raw);
   },
 
   // Generic component deletion function
   async deleteComponent(type, id) {
-    try {
-      // Ensure type is plural for API call
-      let componentType = type;
-      if (!componentType.endsWith('s')) {
-        componentType = componentType + 's';
-      }
-      
-      const response = await api.delete(`/${componentType}/${id}`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    const response = await api.delete(getComponentEndpoint(type, id));
+    return response.data;
   },
 
   async deleteInput(id) {
-    const response = await this.deleteComponent('inputs', id);
-    // Dispatch global event for component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'deleted', type: 'inputs', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('inputs', id);
   },
 
   async deleteOutput(id) {
-    const response = await this.deleteComponent('outputs', id);
-    // Dispatch global event for component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'deleted', type: 'outputs', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('outputs', id);
   },
 
   async deleteRuleset(id) {
-    const response = await this.deleteComponent('rulesets', id);
-    // Dispatch global event for component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'deleted', type: 'rulesets', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('rulesets', id);
   },
 
   async deleteProject(id) {
-    const response = await this.deleteComponent('projects', id);
-    // Dispatch global event for component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'deleted', type: 'projects', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('projects', id);
   },
 
   async deletePlugin(id) {
-    const response = await this.deleteComponent('plugins', id);
-    // Dispatch global event for component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'deleted', type: 'plugins', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('plugins', id);
   },
 
   // Agent CRUD
   async getAgent(id) {
-    const response = await api.get(`/agents/${id}`);
-    return response.data;
+    return this.getComponent('agents', id);
   },
 
   async createAgent(id, raw) {
-    const response = await api.post('/agents', { id, raw });
-    return response.data;
+    return this.createComponent('agents', id, raw);
   },
 
   async updateAgent(id, raw) {
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/agents/${id}`, { raw: rawString });
-    return response.data;
+    return this.updateComponent('agents', id, raw);
   },
 
   async deleteAgent(id) {
-    const response = await this.deleteComponent('agents', id);
-    window.dispatchEvent(new CustomEvent('componentChanged', {
-      detail: { action: 'deleted', type: 'agents', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('agents', id);
   },
 
   // Skill CRUD
   async getSkill(id) {
-    const response = await api.get(`/skills/${id}`);
-    return response.data;
+    return this.getComponent('skills', id);
   },
 
   async createSkill(id, raw) {
-    const response = await api.post('/skills', { id, raw });
-    return response.data;
+    return this.createComponent('skills', id, raw);
   },
 
   async updateSkill(id, raw) {
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/skills/${id}`, { raw: rawString });
-    return response.data;
+    return this.updateComponent('skills', id, raw);
   },
 
   async deleteSkill(id) {
-    const response = await this.deleteComponent('skills', id);
-    window.dispatchEvent(new CustomEvent('componentChanged', {
-      detail: { action: 'deleted', type: 'skills', id, timestamp: Date.now() }
-    }));
-    return response;
+    return this.deleteAndDispatch('skills', id);
   },
 
-  async startProject(id) {
+  async startProject(id, options = {}) {
     try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('projects', id);
-      
-      // If temporary file exists, apply the changes first
-      if (tempInfo.hasTemp) {
-        try {
-          await this.applySingleChange('projects', id);
-        } catch (applyError) {
-          console.error(`Failed to apply changes for project ${id} before starting:`, applyError);
-          throw new Error(`Failed to apply changes before starting: ${applyError.message}`);
-        }
-      }
-      
-      // Start the project
-      const response = await api.post('/start-project', { project_id: id });
-      return response.data;
+      return await this.runProjectOperation('start', id, options);
     } catch (error) {
       console.error(`Error starting project ${id}:`, error);
       throw error;
     }
   },
 
-  async stopProject(id) {
+  async stopProject(id, options = {}) {
     try {
-      // Check if temporary file exists
-      const tempInfo = await this.checkTemporaryFile('projects', id);
-      
-      // If temporary file exists, apply the changes first
-      if (tempInfo.hasTemp) {
-        try {
-          await this.applySingleChange('projects', id);
-        } catch (applyError) {
-          console.error(`Failed to apply changes for project ${id} before stopping:`, applyError);
-          throw new Error(`Failed to apply changes before stopping: ${applyError.message}`);
-        }
-      }
-      
-      // Stop the project
-      const response = await api.post('/stop-project', { project_id: id });
-      return response.data;
+      return await this.runProjectOperation('stop', id, options);
     } catch (error) {
       console.error(`Error stopping project ${id}:`, error);
       throw error;
@@ -480,10 +573,7 @@ export const hubApi = {
 
   async updatePlugin(id, raw) {
     try {
-      // Ensure raw is a string
-      const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-      const response = await api.put(`/plugins/${id}`, { raw: rawString });
-      return response.data;
+      return await this.updateComponent('plugins', id, raw);
     } catch (error) {
       if (error.response && error.response.data && error.response.data.error) {
         throw new Error(error.response.data.error);
@@ -493,37 +583,19 @@ export const hubApi = {
   },
 
   async updateInput(id, raw) {
-    // Ensure raw is a string
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/inputs/${id}`, { raw: rawString });
-    return response.data;
+    return this.updateComponent('inputs', id, raw);
   },
 
   async updateOutput(id, raw) {
-    // Ensure raw is a string
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/outputs/${id}`, { raw: rawString });
-    return response.data;
+    return this.updateComponent('outputs', id, raw);
   },
 
   async updateRuleset(id, raw) {
-    // Ensure raw is a string
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/rulesets/${id}`, { raw: rawString });
-    return response.data;
+    return this.updateComponent('rulesets', id, raw);
   },
 
   async updateProject(id, raw) {
-    // Ensure raw is a string
-    const rawString = typeof raw === 'object' ? JSON.stringify(raw) : String(raw || '');
-    const response = await api.put(`/projects/${id}`, { raw: rawString });
-    return response.data;
-  },
-
-  // Get all pending changes (temporary files) - Legacy API
-  async fetchPendingChanges() {
-    const response = await api.get('/pending-changes');
-    return response.data;
+    return this.updateComponent('projects', id, raw);
   },
 
   // Get enhanced pending changes with status information
@@ -588,23 +660,9 @@ export const hubApi = {
   },
   
   // Restart a specific project
-  async restartProject(id) {
+  async restartProject(id, options = {}) {
     try {
-      // First check if the project has temporary files
-      const tempInfo = await this.checkTemporaryFile('projects', id);
-      if (tempInfo.hasTemp) {
-        // Apply the changes first
-        try {
-          await this.applySingleChange('projects', id);
-        } catch (applyError) {
-          console.error(`Failed to apply changes for project ${id} before restarting:`, applyError);
-          throw new Error(`Failed to apply changes before restarting: ${applyError.message}`);
-        }
-      }
-      
-      // Use the dedicated restart endpoint
-      const response = await api.post('/restart-project', { project_id: id });
-      return response.data;
+      return await this.runProjectOperation('restart', id, options);
     } catch (error) {
       console.error(`Error restarting project ${id}:`, error);
       throw error;
@@ -615,65 +673,21 @@ export const hubApi = {
   async verifyComponent(type, id, raw) {
     try {
       if (!type || !id) {
-        return {
-          data: {
-            valid: false,
-            error: 'Missing component type or ID'
-          }
-        };
+        return buildVerifyFailure('Missing component type or ID');
       }
       
       if (raw !== undefined) {
         const response = await api.post(`/verify/${type}/${id}`, { raw });
-        // Return the complete response data to preserve detailed error information
-        return response;
-      } else {
-        // If raw is not provided, get component and validate
-        let componentData;
-        switch (type) {
-          case 'inputs':
-            componentData = await this.getInput(id);
-            break;
-          case 'outputs':
-            componentData = await this.getOutput(id);
-            break;
-          case 'rulesets':
-            componentData = await this.getRuleset(id);
-            break;
-          case 'projects':
-            componentData = await this.getProject(id);
-            break;
-          case 'plugins':
-            componentData = await this.getPlugin(id);
-            break;
-          case 'agents':
-            componentData = await this.getAgent(id);
-            break;
-          case 'skills':
-            componentData = await this.getSkill(id);
-            break;
-          default:
-            return {
-              data: {
-                valid: false,
-                error: `Unsupported component type: ${type}`
-              }
-            };
-        }
-        
-        if (!componentData || !componentData.raw) {
-          return {
-            data: {
-              valid: false,
-              error: `Component not found or has no content: ${id}`
-            }
-          };
-        }
-        
-        const response = await api.post(`/verify/${type}/${id}`, { raw: componentData.raw });
-        // Return the complete response data to preserve detailed error information
         return response;
       }
+
+      const componentData = await this.getComponentRaw(type, id);
+      if (!componentData || !componentData.raw) {
+        return buildVerifyFailure(`Component not found or has no content: ${id}`);
+      }
+
+      const response = await api.post(`/verify/${type}/${id}`, { raw: componentData.raw });
+      return response;
     } catch (error) {
       console.error('Verification API error:', error);
       
@@ -682,86 +696,34 @@ export const hubApi = {
         return error.response;
       }
       
-      // For other errors, return a simple error structure
-      return {
-        data: {
-          valid: false,
-          error: error.message || 'Unknown verification error'
-        }
-      };
+      return buildVerifyFailure(error.message || 'Unknown verification error');
     }
   },
 
   // Add saveEdit function
   async saveEdit(type, id, raw) {
-    let response;
-    switch (type) {
-      case 'inputs':
-        response = await this.updateInput(id, raw);
-        break;
-      case 'outputs':
-        response = await this.updateOutput(id, raw);
-        break;
-      case 'rulesets':
-        response = await this.updateRuleset(id, raw);
-        break;
-      case 'projects':
-        response = await this.updateProject(id, raw);
-        break;
-      case 'plugins':
-        response = await this.updatePlugin(id, raw);
-        break;
-      case 'agents':
-        response = await this.updateAgent(id, raw);
-        break;
-      case 'skills':
-        response = await this.updateSkill(id, raw);
-        break;
-      default:
-        throw new Error('Unsupported component type');
+    const pluralType = normalizeComponentType(type, 'plural');
+    const updaterName = `update${pluralType.slice(0, -1).replace(/^\w/, c => c.toUpperCase())}`;
+    if (typeof this[updaterName] !== 'function') {
+      throw new Error('Unsupported component type');
     }
-    
-    // Dispatch global event for all component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'updated', type, id, timestamp: Date.now() }
-    }));
+
+    const response = await this[updaterName](id, raw);
+    dispatchComponentChanged('updated', type, id);
     
     return response;
   },
 
   // Add saveNew function
   async saveNew(type, id, raw) {
-    let response;
-    switch (type) {
-      case 'inputs':
-        response = await this.createInput(id, raw);
-        break;
-      case 'outputs':
-        response = await this.createOutput(id, raw);
-        break;
-      case 'rulesets':
-        response = await this.createRuleset(id, raw);
-        break;
-      case 'projects':
-        response = await this.createProject(id, raw);
-        break;
-      case 'plugins':
-        response = await this.createPlugin(id, raw);
-        break;
-      case 'agents':
-        response = await this.createAgent(id, raw);
-        break;
-      case 'skills':
-        response = await this.createSkill(id, raw);
-        break;
-      default:
-        throw new Error('Unsupported component type');
+    const pluralType = normalizeComponentType(type, 'plural');
+    const creatorName = `create${pluralType.slice(0, -1).replace(/^\w/, c => c.toUpperCase())}`;
+    if (typeof this[creatorName] !== 'function') {
+      throw new Error('Unsupported component type');
     }
-    
-    // Dispatch global event for all component changes
-    window.dispatchEvent(new CustomEvent('componentChanged', { 
-      detail: { action: 'created', type, id, timestamp: Date.now() }
-    }));
+
+    const response = await this[creatorName](id, raw);
+    dispatchComponentChanged('created', type, id);
     
     return response;
   },
@@ -787,11 +749,7 @@ export const hubApi = {
   // Add connection check function
   async connectCheck(type, id) {
     try {
-      // Normalize component type (remove trailing 's' if present)
-      let componentType = type;
-      if (componentType.endsWith('s')) {
-        componentType = componentType.slice(0, -1);
-      }
+      const componentType = normalizeComponentType(type, 'singular');
       
       // Basic validation
       if (!componentType || !id) {
@@ -810,30 +768,14 @@ export const hubApi = {
       const response = await api.get(`/connect-check/${componentType}/${id}`);
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message with details
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || `Failed to check connection for ${type} ${id}`
-        };
-      }
-      
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding'
-      };
+      return buildResultError(error, `Failed to check connection for ${type} ${id}`);
     }
   },
 
   // Add connection check function with custom configuration
   async connectCheckWithConfig(type, id, configContent) {
     try {
-      // Normalize component type (remove trailing 's' if present)
-      let componentType = type;
-      if (componentType.endsWith('s')) {
-        componentType = componentType.slice(0, -1);
-      }
+      const componentType = normalizeComponentType(type, 'singular');
       
       // Basic validation
       if (!componentType || !id || !configContent) {
@@ -854,19 +796,7 @@ export const hubApi = {
       });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message with details
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || `Failed to check connection for ${type} ${id}`
-        };
-      }
-      
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding'
-      };
+      return buildResultError(error, `Failed to check connection for ${type} ${id}`);
     }
   },
   
@@ -893,20 +823,7 @@ export const hubApi = {
       const response = await api.post(`/test-plugin/${id}`, { data: pluginData });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test plugin',
-          result: null
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        result: null
-      };
+      return buildResultError(error, 'Failed to test plugin', { result: null });
     }
   },
 
@@ -928,20 +845,7 @@ export const hubApi = {
       const response = await api.post(`/test-ruleset/${id}`, { data });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test ruleset',
-          results: []
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        results: []
-      };
+      return buildResultError(error, 'Failed to test ruleset', { results: [] });
     }
   },
 
@@ -963,20 +867,7 @@ export const hubApi = {
       const response = await api.post('/test-ruleset-content', { content, data });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test ruleset content',
-          results: []
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        results: []
-      };
+      return buildResultError(error, 'Failed to test ruleset content', { results: [] });
     }
   },
 
@@ -987,10 +878,7 @@ export const hubApi = {
       const response = await api.post(`/test-agent/${id}`, { data });
       return response.data;
     } catch (error) {
-      if (error.response && error.response.data) {
-        return { success: false, error: error.response.data.error || 'Server error', results: [] };
-      }
-      return { success: false, error: error.message || 'Network error', results: [] };
+      return buildResultError(error, 'Failed to test agent', { results: [] });
     }
   },
 
@@ -1001,10 +889,7 @@ export const hubApi = {
       const response = await api.post('/test-agent-content', { content, data });
       return response.data;
     } catch (error) {
-      if (error.response && error.response.data) {
-        return { success: false, error: error.response.data.error || 'Server error', results: [] };
-      }
-      return { success: false, error: error.message || 'Network error', results: [] };
+      return buildResultError(error, 'Failed to test agent content', { results: [] });
     }
   },
 
@@ -1024,20 +909,7 @@ export const hubApi = {
       const response = await api.post('/test-plugin-content', { content, data });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test plugin content',
-          result: null
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        result: null
-      };
+      return buildResultError(error, 'Failed to test plugin content', { result: null });
     }
   },
 
@@ -1061,20 +933,7 @@ export const hubApi = {
       const response = await api.post(`/test-project-content/${inputNode}`, { content, data });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test project content',
-          outputs: {}
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        outputs: {}
-      };
+      return buildResultError(error, 'Failed to test project content', { outputs: {} });
     }
   },
 
@@ -1094,20 +953,7 @@ export const hubApi = {
       const response = await api.post(`/test-output/${id}`, { data });
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to test output',
-          metrics: {}
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        metrics: {}
-      };
+      return buildResultError(error, 'Failed to test output', { metrics: {} });
     }
   },
 
@@ -1120,7 +966,7 @@ export const hubApi = {
       });
       return response.data;
     } catch (error) {
-      return handleApiError(error, 'Error testing project:');
+      return buildResultError(error, 'Failed to test project', { outputs: {} });
     }
   },
   
@@ -1136,20 +982,7 @@ export const hubApi = {
       const response = await api.get(`/project-inputs/${id}`);
       return response.data;
     } catch (error) {
-      // If HTTP error, return error message
-      if (error.response && error.response.data) {
-        return {
-          success: false,
-          error: error.response.data.error || 'Failed to get project inputs',
-          inputs: []
-        };
-      }
-      // If network error or other error
-      return {
-        success: false,
-        error: error.message || 'Network error or server not responding',
-        inputs: []
-      };
+      return buildResultError(error, 'Failed to get project inputs', { inputs: [] });
     }
   },
 
@@ -1212,39 +1045,11 @@ export const hubApi = {
         return { hasTemp: false };
       }
       
-      // Get component based on type
       let data;
-      let endpoint;
-      
-      switch (type) {
-        case 'inputs':
-          endpoint = `/inputs/${id}`;
-          break;
-        case 'outputs':
-          endpoint = `/outputs/${id}`;
-          break;
-        case 'rulesets':
-          endpoint = `/rulesets/${id}`;
-          break;
-        case 'projects':
-          endpoint = `/projects/${id}`;
-          break;
-        case 'plugins':
-          endpoint = `/plugins/${id}`;
-          break;
-        case 'agents':
-          endpoint = `/agents/${id}`;
-          break;
-        case 'skills':
-          endpoint = `/skills/${id}`;
-          break;
-        default:
-          return { hasTemp: false };
-      }
       
       // Retrieve component information directly from the API
       try {
-        const response = await api.get(endpoint);
+        const response = await api.get(getComponentEndpoint(type, id));
         data = response.data;
         
         // Verify that the returned data indeed belongs to the requested component type
@@ -1471,16 +1276,6 @@ export const hubApi = {
     }
   },
 
-  async addAgentLogComment(agentId, logId, payload) {
-    try {
-      const response = await api.post(`/agent-logs/${encodeURIComponent(agentId)}/${encodeURIComponent(logId)}/comments`, payload);
-      return response.data;
-    } catch (error) {
-      console.error('Error adding agent log comment:', error);
-      throw new Error(error.response?.data?.error || error.message || 'Failed to add agent log comment');
-    }
-  },
-
   async generateAgentMemoryFromLog(agentId, logId, opts = {}) {
     try {
       const body = { log_id: logId };
@@ -1529,8 +1324,9 @@ export const hubApi = {
   // Operations History API functions
   async getOperationsHistory(params = '') {
     try {
-      const url = '/operations-history' + (params ? '?' + params : '');
-      const response = await api.get(url);
+      const response = await api.get('/operations-history', {
+        params: normalizeParams(params)
+      });
       return response.data;
     } catch (error) {
       console.error('Error fetching operations history:', error);
@@ -1564,9 +1360,8 @@ export const hubApi = {
  * @param {string} endpoint - API endpoint
  * @returns {Promise<Array>} - Array of components with temp file info
  */
-fetchComponentsByType = async (type, endpoint) => {
+fetchComponentsByType = async (type) => {
   try {
-    // Fix endpoint paths to match backend API routes
     let apiEndpoint;
     switch(type) {
       case 'inputs':

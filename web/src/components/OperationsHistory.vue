@@ -327,7 +327,6 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, inject } from 'vue'
-import axios from 'axios'
 import { hubApi } from '../api'
 import { useDataCacheStore } from '../stores/dataCache'
 import MonacoEditor from './MonacoEditor.vue'
@@ -439,38 +438,38 @@ async function fetchOperationsHistory() {
   error.value = null
   
   try {
-    const params = new URLSearchParams()
+    const params = {}
     
     if (filters.value.operationType) {
-      params.append('operation_type', filters.value.operationType)
+      params.operation_type = filters.value.operationType
     }
     if (filters.value.componentType) {
-      params.append('component_type', filters.value.componentType)
+      params.component_type = filters.value.componentType
     }
     if (filters.value.status) {
-      params.append('status', filters.value.status)
+      params.status = filters.value.status
     }
     if (filters.value.keyword) {
-      params.append('keyword', filters.value.keyword)
+      params.keyword = filters.value.keyword
     }
     if (filters.value.nodeId && filters.value.nodeId !== 'all') {
-      params.append('node_id', filters.value.nodeId)
+      params.node_id = filters.value.nodeId
     }
     // Use local time string concatenated with ISO format, with local timezone
     if (filters.value.startDate) {
       const start = new Date(filters.value.startDate)
-      params.append('start_time', start.toISOString())
+      params.start_time = start.toISOString()
     }
     if (filters.value.endDate) {
       const end = new Date(filters.value.endDate)
-      params.append('end_time', end.toISOString())
+      params.end_time = end.toISOString()
     }
     
-    params.append('limit', pageSize.value.toString())
-    params.append('offset', ((currentPage.value - 1) * pageSize.value).toString())
+    params.limit = pageSize.value.toString()
+    params.offset = ((currentPage.value - 1) * pageSize.value).toString()
 
     // Use unified operations history endpoint - works for both leader and follower nodes
-    const response = await hubApi.getOperationsHistory(params.toString())
+    const response = await dataCache.fetchOperationsHistory(params)
     
     // Ensure each operation has node_id; default to self if missing
     const selfId = clusterInfo.value.self_id || 'unknown'

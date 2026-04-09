@@ -117,8 +117,10 @@ import yaml from 'js-yaml';
 import CustomNode from './CustomNode.vue';
 import JsonViewer from '../JsonViewer.vue';
 import { hubApi } from '../../api';
+import { useDataCacheStore } from '../../stores/dataCache';
 
 const router = useRouter();
+const dataCache = useDataCacheStore();
 
 const props = defineProps({
     projectContent: {
@@ -451,7 +453,7 @@ async function fetchAgentSystemPrompts() {
     const id = node.data.componentId;
     if (agentSystemPrompts.value[id] !== undefined) return;
     try {
-      const resp = await hubApi.getAgent(id);
+      const resp = await dataCache.fetchComponentDetail('agents', id);
       const raw = resp?.raw || resp;
       if (typeof raw === 'string') {
         const doc = yaml.load(raw);

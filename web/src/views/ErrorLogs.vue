@@ -252,7 +252,6 @@ import { ref, shallowRef, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
-import axios from 'axios'
 
 // Inject global message service
 const $message = inject('$message')
