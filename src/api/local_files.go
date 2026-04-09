@@ -194,6 +194,12 @@ func getLocalChangesCount(c echo.Context) error {
 			filename := d.Name()
 			id := strings.TrimSuffix(filename, ".go")
 
+			// If plugin has pending UI changes (PluginsNew), skip — it's not an
+			// external local-file change, it's a pending change initiated via the UI.
+			if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+				return nil
+			}
+
 			memoryPlugin, exists := plugin.Plugins[id]
 			if !exists {
 				count++
@@ -208,11 +214,6 @@ func getLocalChangesCount(c echo.Context) error {
 			var memoryContent string
 			if memoryPlugin.Type == plugin.YAEGI_PLUGIN {
 				memoryContent = string(memoryPlugin.Payload)
-			}
-
-			// Also check if there's content in temporary memory (PluginsNew)
-			if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
-				memoryContent = tempContent
 			}
 
 			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
@@ -532,6 +533,12 @@ func getLocalChanges(c echo.Context) error {
 			filename := d.Name()
 			id := strings.TrimSuffix(filename, ".go")
 
+			// If plugin has pending UI changes (PluginsNew), skip — it's not an
+			// external local-file change, it's a pending change initiated via the UI.
+			if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+				return nil
+			}
+
 			fileContent, err := os.ReadFile(path)
 			if err != nil {
 				return nil
@@ -541,13 +548,6 @@ func getLocalChanges(c echo.Context) error {
 			var memoryContent string
 			if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
 				memoryContent = string(memoryPlugin.Payload)
-			}
-
-			// Also check if there's content in temporary memory (PluginsNew)
-			// If plugin was loaded but not yet applied, use temporary content for comparison
-			if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
-				memoryContent = tempContent
-				exists = true // Treat as existing if it's in temporary memory
 			}
 
 			if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
@@ -976,6 +976,12 @@ func loadLocalChanges(c echo.Context) error {
 		filename := d.Name()
 		id := strings.TrimSuffix(filename, ".go")
 
+		// If plugin has pending UI changes (PluginsNew), skip — it's not an
+		// external local-file change, it's a pending change initiated via the UI.
+		if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+			return nil
+		}
+
 		fileContent, err := os.ReadFile(path)
 		if err != nil {
 			return nil
@@ -985,13 +991,6 @@ func loadLocalChanges(c echo.Context) error {
 		var memoryContent string
 		if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
 			memoryContent = string(memoryPlugin.Payload)
-		}
-
-		// Also check if there's content in temporary memory (PluginsNew)
-		// If plugin was loaded but not yet applied, use temporary content for comparison
-		if tempContent, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
-			memoryContent = tempContent
-			exists = true // Treat as existing if it's in temporary memory
 		}
 
 		if !exists || strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
