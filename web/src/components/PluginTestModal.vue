@@ -139,8 +139,8 @@ const testExecuted = ref(false);
 watch(() => props.show, (newVal) => {
   showModal.value = newVal;
   if (newVal) {
-    // Reset state when opening modal
-    resetState();
+    // Only clear results when reopening, keep args intact
+    resetResults();
     // Add ESC key listener
     document.addEventListener('keydown', handleEscKey);
   } else {
@@ -150,7 +150,7 @@ watch(() => props.show, (newVal) => {
 }, { immediate: true });
 
 watch(() => props.pluginId, (newVal) => {
-  // Reset state when plugin changes
+  // Reset everything (including args) only when switching to a different plugin
   resetState();
 });
 
@@ -167,8 +167,11 @@ function handleEscKey(event) {
 }
 
 function resetState() {
-  // Reset state when opening modal
   pluginArgs.value = [{ value: '' }];
+  resetResults();
+}
+
+function resetResults() {
   testResults.value = {};
   testError.value = null;
   testExecuted.value = false;
