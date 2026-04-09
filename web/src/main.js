@@ -4,7 +4,6 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router/index.js'
 import store from './store/index.js'
-import './monaco-loader.js'
 import { initializeConfig } from './config/index.js'
 import { initOidc } from './api/oidc.js'
 

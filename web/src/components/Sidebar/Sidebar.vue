@@ -2107,6 +2107,32 @@ const REFRESH_INTERVALS = {
 
 // Settings menu badges - computed from dataCache
 const settingsBadges = computed(() => dataCache.settingsBadges.data)
+let settingsBadgeInterval = null
+let sidebarCacheClearedHandler = null
+let sidebarVisibilityHandler = null
+
+function stopSettingsBadgePolling() {
+  if (settingsBadgeInterval) {
+    clearInterval(settingsBadgeInterval)
+    settingsBadgeInterval = null
+  }
+}
+
+function startSettingsBadgePolling() {
+  if (settingsBadgeInterval || document.hidden) {
+    return
+  }
+  settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 1000)
+}
+
+function syncSettingsBadgePolling() {
+  if (document.hidden) {
+    stopSettingsBadgePolling()
+    return
+  }
+  dataCache.fetchSettingsBadges()
+  startSettingsBadgePolling()
+}
 
 // Project status refresh functions
 function setupProjectStatusRefresh() {
@@ -2302,18 +2328,17 @@ onMounted(async () => {
     loadClusterConsistencyData();
   };
   
-  window.addEventListener('cacheCleared', handleCacheCleared)
+  sidebarCacheClearedHandler = handleCacheCleared
+  window.addEventListener('cacheCleared', sidebarCacheClearedHandler)
   
   // Listen for pending changes and local changes events to update badges
   window.addEventListener('pendingChangesApplied', handlePendingChangesApplied)
   window.addEventListener('localChangesLoaded', handleLocalChangesLoaded)
   
-  // Set periodic refresh for settings menu badges (every 5 seconds)
-  const settingsBadgeInterval = setInterval(() => dataCache.fetchSettingsBadges(), 5 * 1000)
-  window._settingsBadgeInterval = settingsBadgeInterval
-  
-  // Store event handler for cleanup
-  window._sidebarCacheHandler = handleCacheCleared
+  // Pause badge polling while the page is hidden to avoid useless requests.
+  sidebarVisibilityHandler = () => syncSettingsBadgePolling()
+  document.addEventListener('visibilitychange', sidebarVisibilityHandler)
+  startSettingsBadgePolling()
 })
 
 onBeforeUnmount(() => {
@@ -2333,16 +2358,17 @@ onBeforeUnmount(() => {
   window.removeEventListener('localChangesLoaded', handleLocalChangesLoaded)
   
   // Remove cache cleared event listener
-  if (window._sidebarCacheHandler) {
-    window.removeEventListener('cacheCleared', window._sidebarCacheHandler)
-    delete window._sidebarCacheHandler
+  if (sidebarCacheClearedHandler) {
+    window.removeEventListener('cacheCleared', sidebarCacheClearedHandler)
+    sidebarCacheClearedHandler = null
   }
   
-  // Clear settings badges refresh timer
-  if (window._settingsBadgeInterval) {
-    clearInterval(window._settingsBadgeInterval)
-    delete window._settingsBadgeInterval
+  if (sidebarVisibilityHandler) {
+    document.removeEventListener('visibilitychange', sidebarVisibilityHandler)
+    sidebarVisibilityHandler = null
   }
+
+  stopSettingsBadgePolling()
 })
 
 // Watch for search input changes

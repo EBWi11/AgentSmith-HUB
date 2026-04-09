@@ -6,7 +6,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, onUnmounted, computed, nextTick } from 'vue';
-import * as monaco from 'monaco-editor';
+import monaco from '@/monaco-loader.js';
 import { hubApi } from '@/api';
 import { useDataCacheStore } from '@/stores/dataCache';
 import eventManager from '@/utils/eventManager';

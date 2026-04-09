@@ -146,10 +146,10 @@
               </div>
               <div class="min-w-0 flex-1">
                 <h3 class="font-medium text-gray-900 break-words">
-                  {{ log.agent_id || extractAgentFromContext(log) || 'Unknown Agent' }}
+                  {{ log._displayAgentId }}
                 </h3>
                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-sm text-gray-500">
-                  <span class="shrink-0">{{ formatTimestamp(log.timestamp) }}</span>
+                  <span class="shrink-0">{{ log._formattedTimestamp }}</span>
                   <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium break-all">
                     {{ log.node_id }}
                   </span>
@@ -160,13 +160,13 @@
                     TEST
                   </span>
                   <span
-                    v-if="extractProjectId(log)"
+                    v-if="log._displayProjectId"
                     class="text-xs text-indigo-700 bg-indigo-100 px-2 py-1 rounded font-medium break-all max-w-full"
                   >
-                    Project: {{ extractProjectId(log) }}
+                    Project: {{ log._displayProjectId }}
                   </span>
                   <span
-                    v-if="hasLogMemoryCommitted(log)"
+                    v-if="log._hasMemoryCommitted"
                     class="text-xs text-emerald-800 bg-emerald-50 px-2 py-1 rounded font-medium break-all max-w-full ring-1 ring-emerald-100"
                   >
                     Memory Done
@@ -220,14 +220,14 @@
               <div class="p-4 bg-white">
                 <template v-if="log.raw_input">
                   <p
-                    v-if="isTruncatedPayload(log.raw_input)"
+                    v-if="log._isRawInputTruncated"
                     class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2"
                   >
                     This row contains a truncated JSON snapshot (older hub or oversized event). Upgrade / redeploy hub for larger agent log payloads, or export raw from upstream.
                   </p>
                   <JsonViewer
-                    v-if="parseForJsonViewer(log.raw_input) != null"
-                    :value="parseForJsonViewer(log.raw_input)"
+                    v-if="log._parsedRawInput != null"
+                    :value="log._parsedRawInput"
                     height="auto"
                     expand-vertical
                     class="min-w-0"
@@ -256,15 +256,15 @@
               </summary>
 
               <div class="p-4 bg-white">
-                <template v-if="hasLlmOutput(log)">
+                <template v-if="log._hasLlmOutput">
                   <p
-                    v-if="log.raw_output && isTruncatedPayload(log.raw_output)"
+                    v-if="log._isRawOutputTruncated"
                     class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-2"
                   >
                     Raw output was truncated when stored; the LLM block below may be incomplete or missing.
                   </p>
                   <JsonViewer
-                    :value="extractLlmOnlyFromRawOutput(log)"
+                    :value="log._llmOutput"
                     height="auto"
                     expand-vertical
                     class="min-w-0"
@@ -352,7 +352,7 @@
 
               <!-- Composer (one-shot: comment + memory; locked after success) -->
               <div
-                v-if="hasLogMemoryCommitted(log)"
+                v-if="log._hasMemoryCommitted"
                 class="rounded-xl border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-900"
               >
                 <div class="mb-2 flex flex-wrap items-center gap-2">
@@ -433,19 +433,19 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, inject, computed } from 'vue'
+import { ref, shallowRef, reactive, onMounted, inject, computed, defineAsyncComponent } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
-import AgentTraceViewer from '../components/AgentTraceViewer.vue'
-import JsonViewer from '../components/JsonViewer.vue'
+const AgentTraceViewer = defineAsyncComponent(() => import('../components/AgentTraceViewer.vue'))
+const JsonViewer = defineAsyncComponent(() => import('../components/JsonViewer.vue'))
 
 const $message = inject('$message')
 const dataCache = useDataCacheStore()
 
 const loading = ref(false)
 const error = ref(null)
-const logs = ref([])
+const logs = shallowRef([])
 const totalCount = ref(0)
 
 // Filters
@@ -561,7 +561,7 @@ const fetchLogs = async () => {
     const params = buildApiParams()
     const response = await hubApi.getAgentLogs(params)
 
-    logs.value = response.logs || []
+    logs.value = (response.logs || []).map(enrichAgentLog)
     totalCount.value = response.total_count || 0
   } catch (err) {
     error.value = err.message
@@ -808,6 +808,30 @@ function extractToolNameFromContext(log) {
     return ctx.skill || ctx.function || ''
   }
   return ''
+}
+
+function enrichAgentLog(log) {
+  const parsedContext = safeParseContext(log)
+  const displayAgentId = log.agent_id || parsedContext.agent || 'Unknown Agent'
+  const displayProjectId = log.project_id || parsedContext.project || ''
+  const parsedRawInput = parseForJsonViewer(log.raw_input)
+  const llmOutput = extractLlmOnlyFromRawOutput({
+    ...log,
+    context: Object.keys(parsedContext).length ? JSON.stringify(parsedContext) : log.context
+  })
+
+  return {
+    ...log,
+    _formattedTimestamp: formatTimestamp(log.timestamp),
+    _displayAgentId: displayAgentId,
+    _displayProjectId: displayProjectId,
+    _parsedRawInput: parsedRawInput,
+    _isRawInputTruncated: isTruncatedPayload(log.raw_input),
+    _llmOutput: llmOutput,
+    _hasLlmOutput: llmOutput !== null && llmOutput !== undefined,
+    _isRawOutputTruncated: Boolean(log.raw_output) && isTruncatedPayload(log.raw_output),
+    _hasMemoryCommitted: hasLogMemoryCommitted(log)
+  }
 }
 
 function handleTimeRangeChange() {

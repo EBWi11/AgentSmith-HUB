@@ -69,20 +69,20 @@
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, onBeforeUnmount, onMounted, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Header from '../components/Header.vue'
 import Sidebar from '../components/Sidebar/Sidebar.vue'
-import ComponentDetail from '../components/ComponentDetail.vue'
-import ClusterStatus from '../components/ClusterStatus.vue'
-import PendingChanges from '../components/PendingChanges.vue'
-import LoadLocalComponents from '../components/LoadLocalComponents.vue'
-import OperationsHistory from '../components/OperationsHistory.vue'
-import ErrorLogs from '../views/ErrorLogs.vue'
-import AgentToolsLogs from '../views/AgentToolsLogs.vue'
-import RulesetTestModal from '../components/RulesetTestModal.vue'
-import OutputTestModal from '../components/OutputTestModal.vue'
-import ProjectTestModal from '../components/ProjectTestModal.vue'
+const ComponentDetail = defineAsyncComponent(() => import('../components/ComponentDetail.vue'))
+const ClusterStatus = defineAsyncComponent(() => import('../components/ClusterStatus.vue'))
+const PendingChanges = defineAsyncComponent(() => import('../components/PendingChanges.vue'))
+const LoadLocalComponents = defineAsyncComponent(() => import('../components/LoadLocalComponents.vue'))
+const OperationsHistory = defineAsyncComponent(() => import('../components/OperationsHistory.vue'))
+const ErrorLogs = defineAsyncComponent(() => import('../views/ErrorLogs.vue'))
+const AgentToolsLogs = defineAsyncComponent(() => import('../views/AgentToolsLogs.vue'))
+const RulesetTestModal = defineAsyncComponent(() => import('../components/RulesetTestModal.vue'))
+const OutputTestModal = defineAsyncComponent(() => import('../components/OutputTestModal.vue'))
+const ProjectTestModal = defineAsyncComponent(() => import('../components/ProjectTestModal.vue'))
 // Test caches are now integrated into DataCache store
 import { useDataCacheStore } from '../stores/dataCache'
 

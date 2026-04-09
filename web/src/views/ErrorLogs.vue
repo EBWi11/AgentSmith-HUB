@@ -144,7 +144,7 @@
                 <div>
                   <h3 class="font-medium text-gray-900">{{ log.message }}</h3>
                   <div class="flex items-center space-x-2 text-sm text-gray-500">
-                    <span>{{ formatTimestamp(log.timestamp) }}</span>
+                    <span>{{ log._formattedTimestamp }}</span>
                     <span v-if="log.node_id" class="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded font-medium">
                       {{ log.node_id }}
                     </span>
@@ -201,7 +201,7 @@
                   </div>
                   <div class="grid grid-cols-3 gap-1">
                     <dt class="text-gray-500">Timestamp:</dt>
-                    <dd class="col-span-2 text-gray-900">{{ formatFullTimestamp(log.timestamp) }}</dd>
+                    <dd class="col-span-2 text-gray-900">{{ log._formattedFullTimestamp }}</dd>
                   </div>
                 </dl>
               </div>
@@ -248,7 +248,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, inject, computed } from 'vue'
+import { ref, shallowRef, reactive, onMounted, inject, computed } from 'vue'
 import { hubApi } from '@/api'
 import { debounce } from '../utils/performance'
 import { useDataCacheStore } from '../stores/dataCache'
@@ -260,7 +260,7 @@ const $message = inject('$message')
 // Reactive state
 const loading = ref(false)
 const error = ref(null)
-const logs = ref([])
+const logs = shallowRef([])
 // Node statistics feature removed; keep placeholder for compatibility
 const nodeStats = ref({})
 const totalCount = ref(0)
@@ -325,6 +325,14 @@ const formatFullTimestamp = (timestamp) => {
     hour12: false,
     timeZoneName: 'short'
   })
+}
+
+function enrichErrorLog(log) {
+  return {
+    ...log,
+    _formattedTimestamp: formatTimestamp(log.timestamp),
+    _formattedFullTimestamp: formatFullTimestamp(log.timestamp)
+  }
 }
 
 function toLocalISOString(date) {
@@ -431,7 +439,7 @@ const fetchErrorLogs = async () => {
     // The backend will handle cluster aggregation automatically
     const response = await hubApi.getErrorLogs(params)
     
-    logs.value = response.logs || []
+    logs.value = (response.logs || []).map(enrichErrorLog)
     totalCount.value = response.total_count || 0
     
     // No longer extract nodes from logs - use cluster info instead

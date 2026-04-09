@@ -1174,12 +1174,6 @@ onMounted(async () => {
     await validateRealtime(props.item.type, props.item.id, editorValue.value);
   }
   
-  // If component type is project, fetch all components list
-  if (props.item && props.item.type === 'projects') {
-    const componentTypes = ['inputs', 'outputs', 'rulesets', 'plugins', 'skills', 'agents', 'projects']
-    await Promise.all(componentTypes.map(type => dataCache.fetchComponents(type)))
-  }
-  
   // Set up periodic validation for projects (every 3 seconds)
   if (isProject.value) {
     const periodicValidation = setInterval(async () => {

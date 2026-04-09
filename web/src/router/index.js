@@ -1,11 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import Login from '../views/Login.vue';
 const OidcCallback = () => import('../views/OidcCallback.vue');
-import MainLayout from '../views/MainLayout.vue';
-import Dashboard from '../views/Dashboard.vue';
-import ComponentDetail from '../components/ComponentDetail.vue';
-import ErrorLogs from '../views/ErrorLogs.vue';
-import AgentToolsLogs from '../views/AgentToolsLogs.vue';
+const MainLayout = () => import('../views/MainLayout.vue');
+const Dashboard = () => import('../views/Dashboard.vue');
+const ComponentDetail = () => import('../components/ComponentDetail.vue');
+const ErrorLogs = () => import('../views/ErrorLogs.vue');
+const AgentToolsLogs = () => import('../views/AgentToolsLogs.vue');
 import { hubApi } from '../api/index.js';
 
 const routes = [
