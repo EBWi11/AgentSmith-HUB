@@ -717,6 +717,63 @@ The frontend loads OIDC configuration from `GET /auth/config` by default, so no 
 
 Callback route: `/oidc/callback`
 
+### 2.6 Enabling AI Features (LLM Configuration)
+
+AI features in AgentSmith-HUB — Agent components, the `llmCall` built-in plugin, and the Agent dashboard — are **disabled by default**. They are activated by setting an LLM API key in `config.yaml`.
+
+#### Configuration
+
+Add the following fields to `config.yaml`:
+
+```yaml
+# Required: API key — setting this enables all AI features
+llm_api_key: "sk-..."
+
+# Optional: API base URL for any OpenAI-compatible endpoint
+# Defaults to https://api.openai.com/v1 when not set
+llm_base_url: "https://api.openai.com/v1"
+
+# Optional: global default model used by Agent components that don't specify their own model
+llm_model: "gpt-4o-mini"
+```
+
+Environment variables override `config.yaml` values (higher priority):
+
+```bash
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+```
+
+#### Supported LLM Providers
+
+Any service that exposes an OpenAI-compatible Chat Completions endpoint (`/v1/chat/completions`) can be used:
+
+| Provider | llm_base_url |
+|----------|-------------|
+| OpenAI | `https://api.openai.com/v1` (default, can be omitted) |
+| Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deployment>` |
+| Anthropic (Claude) | `https://api.anthropic.com/v1` (requires compatibility layer) |
+| Alibaba Cloud Bailian | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| DeepSeek | `https://api.deepseek.com/v1` |
+| Local Ollama | `http://localhost:11434/v1` |
+| Other compatible proxies | Set the corresponding base URL |
+
+#### Features Unlocked After Configuration
+
+| Feature | Description |
+|---------|-------------|
+| **Agent components** | Agent type appears in the sidebar; create, edit, and test Agents |
+| **Agent dashboard** | Shows today's call count, average latency, and per-Agent breakdown |
+| **`llmCall` built-in plugin** | Call an LLM directly from a Ruleset for single-shot inference |
+| **Memory workflow** | Agent tool logs support generating and committing memory notes |
+
+#### Cluster Behavior
+
+In a multi-node deployment, LLM configuration only needs to be set on the **leader node**'s `config.yaml`. On startup, the leader writes the LLM config to Redis; follower nodes read it from Redis at startup and do not need their own local config.
+
+> **Note**: When `llm_api_key` is empty, all AI-related UI entry points (Agent sidebar, dashboard) are automatically hidden and the `llmCall` plugin is not registered. The easiest way to verify the configuration took effect is to restart HUB and check whether the Agent option appears in the sidebar.
+
 
 ## 📚 Part 3: RULESET Syntax Detailed Explanation
 

@@ -711,6 +711,64 @@ OIDC_SCOPE="openid profile email"
 
 回调路由：`/oidc/callback`
 
+### 2.6 启用 AI 功能（LLM 配置）
+
+AgentSmith-HUB 的 AI 功能（Agent 组件、`llmCall` 内置插件、Agent 仪表盘）默认**不启用**，需要在 `config.yaml` 中配置 LLM API 密钥后才能使用。
+
+#### 配置方式
+
+在 `config.yaml` 中添加以下字段：
+
+```yaml
+# 必填：API Key，配置后 AI 功能全部启用
+llm_api_key: "sk-..."
+
+# 可选：API Base URL，兼容所有 OpenAI 格式接口
+# 不填默认使用 https://api.openai.com/v1
+llm_base_url: "https://api.openai.com/v1"
+
+# 可选：全局默认模型，Agent 组件未指定 model 时使用此值
+# 不填时由各 Agent 的 model 字段独立控制
+llm_model: "gpt-4o-mini"
+```
+
+也可以通过环境变量覆盖（优先级高于 config.yaml）：
+
+```bash
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+```
+
+#### 支持的 LLM 提供商
+
+所有兼容 OpenAI Chat Completions 格式（`/v1/chat/completions`）的服务均可接入：
+
+| 提供商 | llm_base_url |
+|--------|-------------|
+| OpenAI | `https://api.openai.com/v1`（默认，可不填） |
+| Azure OpenAI | `https://<resource>.openai.azure.com/openai/deployments/<deployment>` |
+| Anthropic (Claude) | `https://api.anthropic.com/v1`（需兼容层） |
+| 阿里云百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| DeepSeek | `https://api.deepseek.com/v1` |
+| 本地 Ollama | `http://localhost:11434/v1` |
+| 其他兼容代理 | 填写对应 Base URL 即可 |
+
+#### 配置后解锁的功能
+
+| 功能 | 说明 |
+|------|------|
+| **Agent 组件** | 侧栏显示 Agent 类型，可创建、编辑、测试 Agent |
+| **Agent 仪表盘** | 展示今日调用次数、平均延迟等统计信息 |
+| **`llmCall` 内置插件** | 在 Ruleset 中可直接调用 LLM 进行单次推理 |
+| **Memory 工作流** | Agent 工具日志支持生成和提交记忆笔记 |
+
+#### 集群行为
+
+在多节点部署中，只需在 **leader 节点**的 `config.yaml` 中配置 LLM 参数。Leader 启动时会将配置写入 Redis，其余 follower 节点启动时从 Redis 读取，无需在每个节点单独配置。
+
+> **注意**：`llm_api_key` 为空时，AI 相关 UI 入口（Agent 侧栏、仪表盘）将自动隐藏，`llmCall` 插件也不会注册。确认配置生效的最简方式是重启 HUB 后在侧栏查看是否出现 Agent 选项。
+
 
 ## 📚 第三部分：RULESET 语法详解
 
