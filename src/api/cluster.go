@@ -131,9 +131,7 @@ func tokenCheck(c echo.Context) error {
 
 func leaderConfig(c echo.Context) error {
 	if err := common.RequireLeader(); err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{
-			"error": "no leader",
-		})
+		return unauthorizedError(c, "no leader")
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{
@@ -558,31 +556,27 @@ func getInstructionStats(c echo.Context) error {
 // getFollowerExecutionStatus returns the execution status of all followers
 func getFollowerExecutionStatus(c echo.Context) error {
 	if err := common.RequireLeader(); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{
-			"error": "Follower execution status is only available on leader node",
-		})
+		return forbiddenError(c, "Follower execution status is only available on leader node")
 	}
 
 	if cluster.GlobalInstructionManager == nil {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "Instruction manager not initialized",
-		})
+		return jsonError(c, http.StatusServiceUnavailable, "Instruction manager not initialized")
 	}
 
 	// Get active followers
 	activeFollowers, err := cluster.GlobalInstructionManager.GetActiveFollowers()
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("Failed to get active followers: %v", err),
-		})
+		return internalServerError(c, fmt.Sprintf("Failed to get active followers: %v", err))
 	}
 
 	// Get all known nodes from heartbeat
 	clusterStatus := cluster.GetClusterStatus()
 	allNodes := []string{}
-	if nodes, ok := clusterStatus["nodes"].(map[string]interface{}); ok {
-		for nodeID := range nodes {
-			allNodes = append(allNodes, nodeID)
+	if nodes, ok := clusterStatus["nodes"].([]map[string]interface{}); ok {
+		for _, node := range nodes {
+			if nodeID, ok := node["id"].(string); ok && nodeID != "" {
+				allNodes = append(allNodes, nodeID)
+			}
 		}
 	}
 

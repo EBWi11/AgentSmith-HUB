@@ -3,7 +3,6 @@ package common
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -451,52 +450,52 @@ type OperationHistoryFilter struct {
 
 // GetOperationsFromRedisWithFilter retrieves operations from Redis with server-side filtering and pagination
 func GetOperationsFromRedisWithFilter(filter OperationHistoryFilter) ([]OperationRecord, int, error) {
-	// Read all operations from Redis
-	redisLines, err := RedisLRange("cluster:ops_history", 0, -1)
-	if err != nil {
-		logger.Error("Failed to read operations from Redis", "error", err)
-		return []OperationRecord{}, 0, err
+	if filter.Limit <= 0 {
+		filter.Limit = 100
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
 	}
 
-	var filteredOperations []OperationRecord
+	const scanChunkSize = 256
 
-	// Parse and filter operations
-	for _, line := range redisLines {
-		var op OperationRecord
-		if err := json.Unmarshal([]byte(line), &op); err != nil {
-			logger.Error("Failed to unmarshal operation record", "error", err)
-			continue
+	collected := make([]OperationRecord, 0, filter.Limit)
+	totalCount := 0
+	scanStart := int64(0)
+
+	for {
+		redisLines, err := RedisLRange("cluster:ops_history", scanStart, scanStart+scanChunkSize-1)
+		if err != nil {
+			logger.Error("Failed to read operations from Redis", "error", err)
+			return []OperationRecord{}, 0, err
+		}
+		if len(redisLines) == 0 {
+			break
 		}
 
-		// Apply filters
-		if !matchesOperationFilter(op, filter) {
-			continue
+		for _, line := range redisLines {
+			var op OperationRecord
+			if err := json.Unmarshal([]byte(line), &op); err != nil {
+				logger.Error("Failed to unmarshal operation record", "error", err)
+				continue
+			}
+			if !matchesOperationFilter(op, filter) {
+				continue
+			}
+
+			if totalCount >= filter.Offset && len(collected) < filter.Limit {
+				collected = append(collected, op)
+			}
+			totalCount++
 		}
 
-		filteredOperations = append(filteredOperations, op)
+		if len(redisLines) < scanChunkSize {
+			break
+		}
+		scanStart += scanChunkSize
 	}
 
-	// Sort by timestamp (newest first) - use efficient sort
-	sort.Slice(filteredOperations, func(i, j int) bool {
-		return filteredOperations[i].Timestamp.After(filteredOperations[j].Timestamp)
-	})
-
-	totalCount := len(filteredOperations)
-
-	// Apply pagination
-	start := filter.Offset
-	end := start + filter.Limit
-
-	if start > totalCount {
-		start = totalCount
-	}
-	if end > totalCount {
-		end = totalCount
-	}
-
-	paginatedOperations := filteredOperations[start:end]
-
-	return paginatedOperations, totalCount, nil
+	return collected, totalCount, nil
 }
 
 // matchesOperationFilter checks if an operation record matches the filter criteria

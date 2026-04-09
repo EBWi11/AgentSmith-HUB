@@ -50,52 +50,29 @@ func ServerStart(listener string) error {
 	// Health check and token verification
 	e.GET("/ping", ping)
 	e.GET("/token-check", tokenCheck)
-	// Authentication config for frontend
-	e.GET("/auth/config", getAuthConfig)
-	// Feature flags for frontend
-	e.GET("/features", getFeatures)
+	registerSharedPublicRoutes(e)
 
 	// Statistics and metrics endpoints (public access for monitoring)
 	e.GET("/daily-messages", getDailyMessages)
 	e.GET("/system-metrics", getSystemMetrics)
-	e.GET("/system-stats", getSystemStats)
 	e.GET("/cluster-system-metrics", getClusterSystemMetrics)
-	e.GET("/cluster-system-stats", getClusterSystemStats)
 	e.GET("/cluster-status", getClusterStatus)
-	e.GET("/cluster", getCluster)
 
 	// Create authenticated group for management endpoints
-	auth := e.Group("", func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			if err := AuthenticateRequest(c); err != nil {
-				logger.Error("authentication failed", "error", err)
-				// return 401 status code
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "Authentication failed",
-				})
-			}
-			return next(c)
-		}
-	})
+	auth := e.Group("", buildAuthMiddleware(""))
 
-	// Project endpoints (use plural form for consistency) - REQUIRE AUTH
-	auth.GET("/projects", getProjects)
-	auth.GET("/projects/:id", getProject)
+	registerSharedReadRoutes(auth)
+
+	// Project write endpoints - REQUIRE AUTH
 	auth.POST("/projects", createProject)
 	auth.DELETE("/projects/:id", deleteProject)
 	auth.PUT("/projects/:id", updateProject)
 	auth.POST("/start-project", StartProject)
 	auth.POST("/stop-project", StopProject)
 	auth.POST("/restart-project", RestartProject)
-	auth.GET("/project-error/:id", getProjectError)
-	auth.GET("/project-inputs/:id", getProjectInputs)
-	auth.GET("/project-components/:id", getProjectComponents)
-	auth.GET("/project-component-sequences/:id", getProjectComponentSequences)
 	auth.GET("/cluster-project-states", getClusterProjectStates)
 
-	// Ruleset endpoints (use plural form for consistency) - REQUIRE AUTH
-	auth.GET("/rulesets", getRulesets)
-	auth.GET("/rulesets/:id", getRuleset)
+	// Ruleset write endpoints - REQUIRE AUTH
 	auth.POST("/rulesets", createRuleset)
 	auth.PUT("/rulesets/:id", updateRuleset)
 	auth.DELETE("/rulesets/:id", deleteRuleset)
@@ -111,49 +88,34 @@ func ServerStart(listener string) error {
 	auth.DELETE("/ruleset-folders/:name", deleteRulesetFolder)
 	auth.PUT("/rulesets/:id/move", moveRuleset)
 
-	// Input endpoints (use plural form for consistency) - REQUIRE AUTH
-	auth.GET("/inputs", getInputs)
-	auth.GET("/inputs/:id", getInput)
+	// Input endpoints (write) - REQUIRE AUTH
 	auth.POST("/inputs", createInput)
 	auth.PUT("/inputs/:id", updateInput)
 	auth.DELETE("/inputs/:id", deleteInput)
 
-	// Output endpoints (use plural form for consistency) - REQUIRE AUTH
-	auth.GET("/outputs", getOutputs)
-	auth.GET("/outputs/:id", getOutput)
+	// Output endpoints (write) - REQUIRE AUTH
 	auth.POST("/outputs", createOutput)
 	auth.PUT("/outputs/:id", updateOutput)
 	auth.DELETE("/outputs/:id", deleteOutput)
 
-	// Plugin endpoints (use plural form and :id for consistency) - REQUIRE AUTH
-	auth.GET("/plugins", getPlugins)
-	auth.GET("/plugins/:id", getPlugin)
+	// Plugin endpoints (write) - REQUIRE AUTH
 	auth.POST("/plugins", createPlugin)
 	auth.PUT("/plugins/:id", updatePlugin)
 	auth.DELETE("/plugins/:id", deletePlugin)
-	auth.GET("/available-plugins", getPlugins) // Use same handler with different default params
-	auth.GET("/plugin-parameters/:id", GetPluginParameters)
-	auth.GET("/plugin-parameters", GetBatchPluginParameters)
-	auth.GET("/plugins/:id/usage", getPluginUsage)
 
 	// Agent endpoints - REQUIRE AUTH
-	auth.GET("/agents", getAgents)
-	auth.GET("/agents/:id", getAgentDetail)
 	auth.POST("/agents", createAgent)
 	auth.PUT("/agents/:id", updateAgent)
 	auth.DELETE("/agents/:id", deleteAgentHandler)
 	auth.POST("/agents/:id/memory-notes", updateAgentMemoryNotes)
 	auth.POST("/agents/:id/memory-notes/generate-from-log", generateAgentMemoryFromLog)
 
-	auth.GET("/skills", getSkills)
-	auth.GET("/skills/:id", getSkillDetail)
 	auth.POST("/skills", createSkill)
 	auth.PUT("/skills/:id", updateSkill)
 	auth.DELETE("/skills/:id", deleteSkillHandler)
 
 	// Component verification and testing - REQUIRE AUTH
 	auth.POST("/verify/:type/:id", verifyComponent)
-	auth.GET("/connect-check/:type/:id", connectCheck)
 	auth.POST("/connect-check/:type/:id", connectCheck)
 	auth.POST("/test-plugin/:id", testPlugin)
 	auth.POST("/test-plugin-content", testPlugin)
@@ -172,11 +134,9 @@ func ServerStart(listener string) error {
 	auth.GET("/cluster/follower-execution-status", getFollowerExecutionStatus)
 
 	// Pending changes management (enhanced) - REQUIRE AUTH
-	auth.GET("/pending-changes", GetPendingChanges)                  // Legacy endpoint
 	auth.GET("/pending-changes/enhanced", GetEnhancedPendingChanges) // Enhanced endpoint with status info
 	auth.POST("/apply-single-change", ApplySingleChange)             // Legacy endpoint
 	auth.POST("/verify-changes", VerifyPendingChanges)               // Verify all changes
-	auth.POST("/verify-change/:type/:id", VerifySinglePendingChange) // Verify single change
 	auth.DELETE("/cancel-change/:type/:id", CancelPendingChange)     // Cancel single change
 	auth.DELETE("/cancel-all-changes", CancelAllPendingChanges)      // Cancel all changes
 
@@ -186,10 +146,7 @@ func ServerStart(listener string) error {
 	auth.DELETE("/temp-file/:type/:id", DeleteTempFile)
 
 	// Sampler endpoints - REQUIRE AUTH
-	auth.GET("/samplers/data", GetSamplerData)
 	auth.POST("/samplers/data/intelligent", GetSamplersDataIntelligent)
-	auth.GET("/ruleset-fields/:id", GetRulesetFields)
-	auth.GET("/ruleset-fields", GetBatchRulesetFields)
 
 	// Cancel upgrade routes - REQUIRE AUTH
 	auth.POST("/cancel-upgrade/rulesets/:id", cancelRulesetUpgrade)
@@ -199,12 +156,6 @@ func ServerStart(listener string) error {
 	auth.POST("/cancel-upgrade/plugins/:id", cancelPluginUpgrade)
 	auth.POST("/cancel-upgrade/agents/:id", cancelAgentUpgrade)
 	auth.POST("/cancel-upgrade/skills/:id", cancelSkillUpgrade)
-
-	// Component usage analysis - REQUIRE AUTH
-	auth.GET("/component-usage/:type/:id", GetComponentUsage)
-
-	// Component configuration search - REQUIRE AUTH
-	auth.GET("/search-components", searchComponentsConfig)
 
 	// Load local components routes - REQUIRE AUTH
 	auth.GET("/local-changes", getLocalChanges)
@@ -224,8 +175,6 @@ func ServerStart(listener string) error {
 	// Operations history endpoints - REQUIRE AUTH
 	auth.GET("/operations-history", GetOperationsHistory)
 	auth.GET("/operations-history/nodes", GetOperationsHistoryNodes)
-	auth.GET("/cluster-operations-history", GetClusterOperationsHistory)
-	auth.GET("/operations-stats", GetOperationsStats)
 
 	// Plugin statistics endpoint - REQUIRE AUTH
 	auth.GET("/plugin-stats", GetPluginStats)

@@ -120,10 +120,7 @@ func getProjects(c echo.Context) error {
 
 	// Use safe accessor to iterate over projects
 	project.ForEachProject(func(projId string, proj *project.Project) bool {
-		// Treat project temp as valid only when both in-memory temp content and .new file exist.
-		tempRaw, hasTempInMemory := project.GetProjectNew(proj.Id)
-		_, hasTempFile := GetComponentPath("project", proj.Id, true)
-		hasTemp := hasTempInMemory && hasTempFile
+		tempRaw, hasTemp := project.GetProjectNew(proj.Id)
 
 		// Get component lists
 		inputList := make([]string, 0, len(proj.Inputs))
@@ -185,8 +182,7 @@ func getProjects(c echo.Context) error {
 	// Add components that only exist in temporary files
 	allProjectsNew := project.GetAllProjectsNew()
 	for id, tempRaw := range allProjectsNew {
-		_, hasTempFile := GetComponentPath("project", id, true)
-		if !processedIDs[id] && hasTempFile {
+		if !processedIDs[id] {
 			projectData := map[string]interface{}{
 				"id":      id,
 				"status":  common.StatusStopped,
@@ -258,18 +254,7 @@ func getRulesets(c echo.Context) error {
 
 	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
-
-	// Helper function to find which projects use a ruleset
-	findProjectsUsingRuleset := func(rulesetId string) []string {
-		projects := make([]string, 0)
-		project.ForEachProject(func(projId string, proj *project.Project) bool {
-			if _, exists := proj.Rulesets[rulesetId]; exists {
-				projects = append(projects, proj.Id)
-			}
-			return true
-		})
-		return projects
-	}
+	usageIndex := buildProjectUsageIndex()
 
 	// Helper function to count rules in XML content
 	countRulesInXML := func(xmlContent string) int {
@@ -318,7 +303,7 @@ func getRulesets(c echo.Context) error {
 		}
 
 		// Get projects using this ruleset
-		usedByProjects := findProjectsUsingRuleset(r.RulesetID)
+		usedByProjects := usageIndex.rulesets[r.RulesetID]
 
 		// Count rules and extract type
 		ruleCount := countRulesInXML(rawConfig)
@@ -427,18 +412,7 @@ func getInputs(c echo.Context) error {
 
 	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
-
-	// Helper function to find which projects use an input
-	findProjectsUsingInput := func(inputId string) []string {
-		projects := make([]string, 0)
-		project.ForEachProject(func(projId string, proj *project.Project) bool {
-			if _, exists := proj.Inputs[inputId]; exists {
-				projects = append(projects, proj.Id)
-			}
-			return true
-		})
-		return projects
-	}
+	usageIndex := buildProjectUsageIndex()
 
 	// Helper function to extract input type from YAML content
 	extractInputType := func(yamlContent string) string {
@@ -470,7 +444,7 @@ func getInputs(c echo.Context) error {
 		}
 
 		// Get projects using this input
-		usedByProjects := findProjectsUsingInput(in.Id)
+		usedByProjects := usageIndex.inputs[in.Id]
 
 		// Extract input type
 		inputType := extractInputType(rawConfig)
@@ -573,7 +547,6 @@ func getInput(c echo.Context) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": "input not found"})
 }
 
-
 // getPlugins returns plugin information with configurable detail level
 // Query parameters:
 //   - detailed: "true" for full information, "false" for simple format (default: false)
@@ -595,52 +568,7 @@ func getPlugins(c echo.Context) error {
 
 	// Create a map to track processed names
 	processedNames := make(map[string]bool)
-
-	// Helper function to find which rulesets use a plugin (only if needed)
-	findRulesetsUsingPlugin := func(pluginName string) []string {
-		if !detailed || !includeUsage {
-			return []string{}
-		}
-
-		rulesets := make([]string, 0)
-		project.ForEachRuleset(func(rulesetId string, r *rules_engine.Ruleset) bool {
-			// Check if plugin is used in any rule within this ruleset
-			for _, rule := range r.Rules {
-				// Check in checklist nodes
-				for _, checklist := range rule.ChecklistMap {
-					for _, node := range checklist.CheckNodes {
-						if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
-							rulesets = append(rulesets, r.RulesetID)
-							return true // Continue to next ruleset
-						}
-					}
-				}
-				// Check in standalone check nodes
-				for _, node := range rule.CheckMap {
-					if node.Type == "PLUGIN" && strings.Contains(node.Value, pluginName+"(") {
-						rulesets = append(rulesets, r.RulesetID)
-						return true // Continue to next ruleset
-					}
-				}
-				// Check in append elements
-				for _, appendElem := range rule.AppendsMap {
-					if appendElem.Type == "PLUGIN" && strings.Contains(appendElem.Value, pluginName+"(") {
-						rulesets = append(rulesets, r.RulesetID)
-						return true // Continue to next ruleset
-					}
-				}
-				// Check in plugin elements
-				for _, pluginElem := range rule.PluginMap {
-					if strings.Contains(pluginElem.Value, pluginName+"(") {
-						rulesets = append(rulesets, r.RulesetID)
-						return true // Continue to next ruleset
-					}
-				}
-			}
-			return true // Continue to next ruleset
-		})
-		return rulesets
-	}
+	pluginUsageIndex := buildPluginUsageIndex(detailed && includeUsage)
 
 	// Helper function to extract plugin description from code
 	extractPluginDescription := func(code string) string {
@@ -699,7 +627,7 @@ func getPlugins(c echo.Context) error {
 
 		if detailed {
 			// Find rulesets using this plugin
-			usedByRulesets := findRulesetsUsingPlugin(p.Name)
+			usedByRulesets := pluginUsageIndex[p.Name]
 
 			pluginData = map[string]interface{}{
 				"id":               p.Name,            // Use id field for consistency with other components
@@ -887,18 +815,7 @@ func getOutputs(c echo.Context) error {
 
 	// Create a map to track processed IDs
 	processedIDs := make(map[string]bool)
-
-	// Helper function to find which projects use an output
-	findProjectsUsingOutput := func(outputId string) []string {
-		projects := make([]string, 0)
-		project.ForEachProject(func(projId string, proj *project.Project) bool {
-			if _, exists := proj.Outputs[outputId]; exists {
-				projects = append(projects, proj.Id)
-			}
-			return true
-		})
-		return projects
-	}
+	usageIndex := buildProjectUsageIndex()
 
 	// Use safe accessor to iterate over outputs
 	project.ForEachOutput(func(outputId string, out *output.Output) bool {
@@ -912,7 +829,7 @@ func getOutputs(c echo.Context) error {
 		}
 
 		// Get projects using this output
-		usedByProjects := findProjectsUsingOutput(out.Id)
+		usedByProjects := usageIndex.outputs[out.Id]
 
 		// Extract output type
 		outputType := string(out.Type)
@@ -1125,11 +1042,11 @@ func createComponent(componentType string, c echo.Context) error {
 			request.Raw = NewRulesetData
 		case "project":
 			request.Raw = NewProjectData
-	case "agent":
-		request.Raw = NewAgentData
-	case "skill":
-		request.Raw = NewSkillData
-	}
+		case "agent":
+			request.Raw = NewAgentData
+		case "skill":
+			request.Raw = NewSkillData
+		}
 	}
 
 	// Write file without lock (file system operations are atomic)

@@ -227,9 +227,7 @@ func GetOperationsHistory(c echo.Context) error {
 	// Get operations using the new efficient filtering function
 	operations, totalCount, err := getUnifiedOperationHistory(filter)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("Failed to retrieve operations history: %v", err),
-		})
+		return internalServerError(c, fmt.Sprintf("Failed to retrieve operations history: %v", err))
 	}
 
 	// Calculate hasMore correctly
@@ -265,9 +263,7 @@ func GetOperationsStats(c echo.Context) error {
 
 	operations, totalCount, err := getUnifiedOperationHistory(filter)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("Failed to retrieve operations stats: %v", err),
-		})
+		return internalServerError(c, fmt.Sprintf("Failed to retrieve operations stats: %v", err))
 	}
 
 	// Calculate statistics
@@ -311,9 +307,7 @@ func GetOperationsHistoryNodes(c echo.Context) error {
 	nodes, err := common.GetKnownNodes()
 	if err != nil {
 		logger.Error("Failed to get known nodes", "error", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "Failed to retrieve known nodes: " + err.Error(),
-		})
+		return internalServerError(c, "Failed to retrieve known nodes: "+err.Error())
 	}
 
 	response := map[string]interface{}{

@@ -21,284 +21,138 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+type localChangeCountOptions struct {
+	DirPath        string
+	FileSuffix     string
+	SkipFile       func(id string) bool
+	GetMemoryValue func(id string) (string, bool)
+}
+
+func countLocalChangesForDir(opts localChangeCountOptions) int {
+	count := 0
+	if _, err := os.Stat(opts.DirPath); err != nil {
+		return 0
+	}
+
+	_ = filepath.WalkDir(opts.DirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, opts.FileSuffix) {
+			return nil
+		}
+
+		filename := d.Name()
+		id := strings.TrimSuffix(filename, opts.FileSuffix)
+		if opts.SkipFile != nil && opts.SkipFile(id) {
+			return nil
+		}
+
+		memoryContent, exists := opts.GetMemoryValue(id)
+		if !exists {
+			count++
+			return nil
+		}
+
+		if info, infoErr := d.Info(); infoErr == nil && info.Size() != int64(len(memoryContent)) {
+			count++
+			return nil
+		}
+
+		fileContent, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+
+		if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
+			count++
+		}
+
+		return nil
+	})
+
+	return count
+}
+
 // getLocalChangesCount returns only the count of local changes (lightweight)
 func getLocalChangesCount(c echo.Context) error {
 	count := 0
 	configRoot := common.Config.ConfigRoot
 
-	// Check inputs
-	inputDir := filepath.Join(configRoot, "input")
-	if _, err := os.Stat(inputDir); err == nil {
-		if err := filepath.WalkDir(inputDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "input"),
+		FileSuffix: ".yaml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if memoryInput, exists := project.GetInput(id); exists {
+				return memoryInput.Config.RawConfig, true
 			}
-			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-				return nil
+			return "", false
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "output"),
+		FileSuffix: ".yaml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if memoryOutput, exists := project.GetOutput(id); exists {
+				return memoryOutput.Config.RawConfig, true
 			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".yaml")
-
-			// Check if exists in memory (lightweight check)
-			_, exists := project.GetInput(id)
-			if !exists {
-				count++
-				return nil
+			return "", false
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "ruleset"),
+		FileSuffix: ".xml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if memoryRuleset, exists := project.GetRuleset(id); exists {
+				return memoryRuleset.RawConfig, true
 			}
-
-			// For existing components, do a quick content check
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
+			return "", false
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "project"),
+		FileSuffix: ".yaml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if memoryProject, exists := project.GetProject(id); exists {
+				return memoryProject.Config.RawConfig, true
 			}
-
-			memoryInput, _ := project.GetInput(id)
-			memoryContent := memoryInput.Config.RawConfig
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	// Check outputs
-	outputDir := filepath.Join(configRoot, "output")
-	if _, err := os.Stat(outputDir); err == nil {
-		if err := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".yaml")
-
-			_, exists := project.GetOutput(id)
-			if !exists {
-				count++
-				return nil
-			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			memoryOutput, _ := project.GetOutput(id)
-			memoryContent := memoryOutput.Config.RawConfig
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	// Check rulesets
-	rulesetDir := filepath.Join(configRoot, "ruleset")
-	if _, err := os.Stat(rulesetDir); err == nil {
-		if err := filepath.WalkDir(rulesetDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".xml") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".xml")
-
-			_, exists := project.GetRuleset(id)
-			if !exists {
-				count++
-				return nil
-			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			memoryRuleset, _ := project.GetRuleset(id)
-			memoryContent := memoryRuleset.RawConfig
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	// Check projects
-	projectDir := filepath.Join(configRoot, "project")
-	if _, err := os.Stat(projectDir); err == nil {
-		if err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".yaml")
-
-			_, exists := project.GetProject(id)
-			if !exists {
-				count++
-				return nil
-			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
-			memoryProject, _ := project.GetProject(id)
-			memoryContent := memoryProject.Config.RawConfig
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	// Check plugins
-	pluginDir := filepath.Join(configRoot, "plugin")
-	if _, err := os.Stat(pluginDir); err == nil {
-		if err := filepath.WalkDir(pluginDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".go") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".go")
-
-			// If plugin has pending UI changes (PluginsNew), skip — it's not an
-			// external local-file change, it's a pending change initiated via the UI.
-			if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
-				return nil
-			}
-
+			return "", false
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "plugin"),
+		FileSuffix: ".go",
+		SkipFile: func(id string) bool {
+			_, existsInTemp := plugin.PluginsNew[id]
+			return existsInTemp
+		},
+		GetMemoryValue: func(id string) (string, bool) {
 			memoryPlugin, exists := plugin.Plugins[id]
-			if !exists {
-				count++
-				return nil
+			if !exists || memoryPlugin.Type != plugin.YAEGI_PLUGIN {
+				return "", exists
 			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
+			return string(memoryPlugin.Payload), true
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "agent"),
+		FileSuffix: ".yaml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if _, exists := project.GetAgent(id); !exists {
+				return "", false
 			}
-
-			var memoryContent string
-			if memoryPlugin.Type == plugin.YAEGI_PLUGIN {
-				memoryContent = string(memoryPlugin.Payload)
-			}
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	agentDir := filepath.Join(configRoot, "agent")
-	if _, err := os.Stat(agentDir); err == nil {
-		if err := filepath.WalkDir(agentDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".yaml")
-
-			_, exists := project.GetAgent(id)
-			if !exists {
-				count++
-				return nil
-			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
 			raw, _ := common.GetRawConfig("agent", id)
-			memoryContent := raw
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
+			return raw, true
+		},
+	})
+	count += countLocalChangesForDir(localChangeCountOptions{
+		DirPath:    filepath.Join(configRoot, "skill"),
+		FileSuffix: ".yaml",
+		GetMemoryValue: func(id string) (string, bool) {
+			if _, exists := project.GetSkill(id); !exists {
+				return "", false
 			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
-
-	skillDir := filepath.Join(configRoot, "skill")
-	if _, err := os.Stat(skillDir); err == nil {
-		if err := filepath.WalkDir(skillDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
-				return nil
-			}
-
-			filename := d.Name()
-			id := strings.TrimSuffix(filename, ".yaml")
-
-			_, exists := project.GetSkill(id)
-			if !exists {
-				count++
-				return nil
-			}
-
-			fileContent, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-
 			raw, _ := common.GetRawConfig("skill", id)
-			memoryContent := raw
-
-			if strings.TrimSpace(string(fileContent)) != strings.TrimSpace(memoryContent) {
-				count++
-			}
-
-			return nil
-		}); err != nil {
-			// Continue even if there's an error
-		}
-	}
+			return raw, true
+		},
+	})
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"count": count,

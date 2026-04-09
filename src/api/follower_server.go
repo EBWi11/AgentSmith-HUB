@@ -45,26 +45,6 @@ func ServerStartFollower(listenAddr string) error {
 	// Recovery middleware
 	e.Use(middleware.Recover())
 
-	// Authentication middleware for protected endpoints
-	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			// Allow legacy token for followers for backward compatibility
-			token := c.Request().Header.Get("token")
-			if token != "" && token == followerToken {
-				return next(c)
-			}
-			// Otherwise try OIDC Bearer if enabled
-			if common.Config.OIDCEnabled {
-				if err := AuthenticateRequest(c); err == nil {
-					return next(c)
-				}
-			}
-			return c.JSON(http.StatusUnauthorized, map[string]string{
-				"error": "Authentication required",
-			})
-		}
-	}
-
 	// Public endpoints (no authentication required)
 	e.GET("/ping", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
@@ -73,8 +53,7 @@ func ServerStartFollower(listenAddr string) error {
 		})
 	})
 
-	// Expose auth config
-	e.GET("/auth/config", getAuthConfig)
+	registerSharedPublicRoutes(e)
 
 	e.GET("/follower-status", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -85,41 +64,8 @@ func ServerStartFollower(listenAddr string) error {
 	})
 
 	// Protected endpoints (require authentication)
-	auth := e.Group("", authMiddleware)
-
-	// Read-only project endpoints
-	auth.GET("/projects", getProjects)
-	auth.GET("/projects/:id", getProject)
-	auth.GET("/project-error/:id", getProjectError)
-	auth.GET("/project-inputs/:id", getProjectInputs)
-	auth.GET("/project-components/:id", getProjectComponents)
-	auth.GET("/project-component-sequences/:id", getProjectComponentSequences)
-
-	// Read-only component endpoints
-	auth.GET("/rulesets", getRulesets)
-	auth.GET("/rulesets/:id", getRuleset)
-	auth.GET("/inputs", getInputs)
-	auth.GET("/inputs/:id", getInput)
-	auth.GET("/outputs", getOutputs)
-	auth.GET("/outputs/:id", getOutput)
-	auth.GET("/plugins", getPlugins)
-	auth.GET("/plugins/:id", getPlugin)
-	auth.GET("/available-plugins", getPlugins) // Use same handler with different default params
-
-	// Read-only testing endpoints
-	auth.GET("/connect-check/:type/:id", connectCheck)
-	auth.GET("/plugin-parameters/:id", GetPluginParameters)
-	auth.GET("/plugin-parameters", GetBatchPluginParameters)
-	auth.GET("/plugins/:id/usage", getPluginUsage)
-
-	// Read-only configuration endpoints
-	auth.GET("/samplers/data", GetSamplerData)
-	auth.GET("/ruleset-fields/:id", GetRulesetFields)
-	auth.GET("/ruleset-fields", GetBatchRulesetFields)
-
-	// Read-only analysis endpoints
-	auth.GET("/component-usage/:type/:id", GetComponentUsage)
-	auth.GET("/search-components", searchComponentsConfig)
+	auth := e.Group("", buildAuthMiddleware(followerToken))
+	registerSharedReadRoutes(auth)
 
 	// Block all write operations with helpful error messages
 	blockWriteOperation := func(c echo.Context) error {

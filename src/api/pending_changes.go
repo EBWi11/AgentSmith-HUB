@@ -183,25 +183,7 @@ func (pcm *PendingChangeManager) VerifyChange(changeType, id string) error {
 		return fmt.Errorf("change not found: %s:%s", changeType, id)
 	}
 
-	var err error
-	switch changeType {
-	case "plugin":
-		err = plugin.Verify("", change.NewContent, id)
-	case "input":
-		err = input.Verify("", change.NewContent)
-	case "output":
-		err = output.Verify("", change.NewContent)
-	case "ruleset":
-		err = rules_engine.Verify("", change.NewContent)
-	case "project":
-		err = project.Verify("", change.NewContent)
-	case "agent":
-		err = agent.Verify("", change.NewContent)
-	case "skill":
-		err = skill.Verify("", change.NewContent)
-	default:
-		err = fmt.Errorf("unsupported component type: %s", changeType)
-	}
+	err := verifyPendingChangeContent(changeType, id, change.NewContent)
 
 	if err != nil {
 		pcm.UpdateChangeStatus(changeType, id, ChangeStatusInvalid, err.Error())
@@ -230,8 +212,7 @@ type SingleChangeRequest struct {
 // GetPendingChanges returns all components with pending changes (.new files)
 // GetPendingChanges returns all pending changes (legacy format for backward compatibility)
 func GetPendingChanges(c echo.Context) error {
-	// First, sync from legacy storage to new manager
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	// Get enhanced changes
 	enhancedChanges := globalPendingChangeManager.GetAllChanges()
@@ -253,212 +234,10 @@ func GetPendingChanges(c echo.Context) error {
 
 // GetEnhancedPendingChanges returns all pending changes with enhanced status information
 func GetEnhancedPendingChanges(c echo.Context) error {
-	// Sync from legacy storage to new manager
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	changes := globalPendingChangeManager.GetAllChanges()
 	return c.JSON(http.StatusOK, changes)
-}
-
-// syncLegacyToEnhancedManager synchronizes data from legacy storage to the enhanced manager
-func syncLegacyToEnhancedManager() {
-	// Use safe accessors instead of direct locking to avoid deadlock
-	syncPluginsToEnhancedManager()
-	syncInputsToEnhancedManager()
-	syncOutputsToEnhancedManager()
-	syncRulesetsToEnhancedManager()
-	syncProjectsToEnhancedManager()
-	syncAgentsToEnhancedManager()
-	syncSkillsToEnhancedManager()
-	cleanupObsoleteChanges()
-}
-
-// syncPluginsToEnhancedManager synchronizes plugin changes using safe accessors
-func syncPluginsToEnhancedManager() {
-
-	// Get plugins data using safe accessors
-	pluginsData := plugin.GetAllPluginsNew()
-
-	// Sync plugins with pending changes
-	for name, newContent := range pluginsData {
-		var oldContent string
-		isNew := true
-
-		// Check if this is a modification to an existing plugin using safe accessor
-		oldContent = getExistingPluginContent(name)
-		if oldContent != "" {
-			isNew = false
-		}
-
-		// Always update or add to ensure current state
-		if existingChange, exists := globalPendingChangeManager.GetChange("plugin", name); exists {
-			// Update existing change with current content
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
-			}
-		} else {
-			// Add new change
-			globalPendingChangeManager.AddChange("plugin", name, newContent, oldContent, isNew)
-		}
-	}
-}
-
-// syncInputsToEnhancedManager synchronizes input changes using safe accessors
-func syncInputsToEnhancedManager() {
-	// Get inputs data safely using safe accessors
-	inputsData := project.GetAllInputsNew()
-
-	// Sync inputs with pending changes
-	for id, newContent := range inputsData {
-		var oldContent string
-		isNew := true
-
-		// Check if this is a modification to an existing input
-		if i, ok := project.GetInput(id); ok {
-			oldContent = i.Config.RawConfig
-			isNew = false
-		}
-
-		// Always update or add to ensure current state
-		if existingChange, exists := globalPendingChangeManager.GetChange("input", id); exists {
-			// Update existing change with current content
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
-			}
-		} else {
-			// Add new change
-			globalPendingChangeManager.AddChange("input", id, newContent, oldContent, isNew)
-		}
-	}
-}
-
-// syncOutputsToEnhancedManager synchronizes output changes using safe accessors
-func syncOutputsToEnhancedManager() {
-	// Get outputs data safely using safe accessors
-	outputsData := project.GetAllOutputsNew()
-
-	// Sync outputs with pending changes
-	for id, newContent := range outputsData {
-		var oldContent string
-		isNew := true
-
-		// Check if this is a modification to an existing output
-		if o, ok := project.GetOutput(id); ok {
-			oldContent = o.Config.RawConfig
-			isNew = false
-		}
-
-		// Always update or add to ensure current state
-		if existingChange, exists := globalPendingChangeManager.GetChange("output", id); exists {
-			// Update existing change with current content
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
-			}
-		} else {
-			// Add new change
-			globalPendingChangeManager.AddChange("output", id, newContent, oldContent, isNew)
-		}
-	}
-}
-
-// syncRulesetsToEnhancedManager synchronizes ruleset changes using safe accessors
-func syncRulesetsToEnhancedManager() {
-	// Get rulesets data safely using safe accessors
-	rulesetsData := project.GetAllRulesetsNew()
-
-	// Sync rulesets with pending changes
-	for id, newContent := range rulesetsData {
-		var oldContent string
-		isNew := true
-
-		// Check if this is a modification to an existing ruleset
-		if ruleset, ok := project.GetRuleset(id); ok {
-			oldContent = ruleset.RawConfig
-			isNew = false
-		}
-
-		// Always update or add to ensure current state
-		if existingChange, exists := globalPendingChangeManager.GetChange("ruleset", id); exists {
-			// Update existing change with current content
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
-			}
-		} else {
-			// Add new change
-			globalPendingChangeManager.AddChange("ruleset", id, newContent, oldContent, isNew)
-		}
-	}
-}
-
-// syncProjectsToEnhancedManager synchronizes project changes using safe accessors
-func syncProjectsToEnhancedManager() {
-	// Get projects data safely using safe accessors
-	projectsData := project.GetAllProjectsNew()
-
-	// Sync projects with pending changes
-	for id, newContent := range projectsData {
-		var oldContent string
-		isNew := true
-
-		// Check if this is a modification to an existing project
-		if proj, ok := project.GetProject(id); ok {
-			oldContent = proj.Config.RawConfig
-			isNew = false
-		}
-
-		// Always update or add to ensure current state
-		if existingChange, exists := globalPendingChangeManager.GetChange("project", id); exists {
-			// Update existing change with current content
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
-			}
-		} else {
-			// Add new change
-			globalPendingChangeManager.AddChange("project", id, newContent, oldContent, isNew)
-		}
-	}
-}
-
-func syncAgentsToEnhancedManager() {
-	agentsData := project.GetAllAgentsNew()
-	for id, newContent := range agentsData {
-		var oldContent string
-		isNew := true
-
-		if a, ok := project.GetAgent(id); ok {
-			oldContent = a.RawConfig
-			isNew = false
-		}
-
-		if existingChange, exists := globalPendingChangeManager.GetChange("agent", id); exists {
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("agent", id, newContent, oldContent, isNew)
-			}
-		} else {
-			globalPendingChangeManager.AddChange("agent", id, newContent, oldContent, isNew)
-		}
-	}
-}
-
-func syncSkillsToEnhancedManager() {
-	skillsData := project.GetAllSkillsNew()
-	for id, newContent := range skillsData {
-		var oldContent string
-		isNew := true
-
-		if s, ok := project.GetSkill(id); ok {
-			oldContent = s.RawConfig
-			isNew = false
-		}
-
-		if existingChange, exists := globalPendingChangeManager.GetChange("skill", id); exists {
-			if existingChange.NewContent != newContent || existingChange.OldContent != oldContent {
-				globalPendingChangeManager.AddChange("skill", id, newContent, oldContent, isNew)
-			}
-		} else {
-			globalPendingChangeManager.AddChange("skill", id, newContent, oldContent, isNew)
-		}
-	}
 }
 
 // Helper functions for safe access to plugin data
@@ -469,70 +248,9 @@ func getPendingPluginChange(id string) (string, bool) {
 	return content, exists
 }
 
-func getExistingPluginContent(id string) string {
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-	if pluginInstance, exists := plugin.Plugins[id]; exists {
-		return string(pluginInstance.Payload)
-	}
-	return ""
-}
-
-// cleanupObsoleteChanges removes changes that no longer exist in legacy storage
-func cleanupObsoleteChanges() {
-	// Get all existing changes
-	existingChanges := globalPendingChangeManager.GetAllChanges()
-
-	// Create a map of what should exist based on current legacy storage
-	shouldExist := make(map[string]bool)
-
-	// Check what should exist from all sources using safe accessors
-	pluginsNewData := plugin.GetAllPluginsNew()
-	for name := range pluginsNewData {
-		shouldExist[fmt.Sprintf("plugin:%s", name)] = true
-	}
-
-	for id := range project.GetAllInputsNew() {
-		shouldExist[fmt.Sprintf("input:%s", id)] = true
-	}
-
-	for id := range project.GetAllOutputsNew() {
-		shouldExist[fmt.Sprintf("output:%s", id)] = true
-	}
-
-	for id := range project.GetAllRulesetsNew() {
-		shouldExist[fmt.Sprintf("ruleset:%s", id)] = true
-	}
-
-	for id := range project.GetAllProjectsNew() {
-		shouldExist[fmt.Sprintf("project:%s", id)] = true
-	}
-
-	for id := range project.GetAllAgentsNew() {
-		shouldExist[fmt.Sprintf("agent:%s", id)] = true
-	}
-
-	for id := range project.GetAllSkillsNew() {
-		shouldExist[fmt.Sprintf("skill:%s", id)] = true
-	}
-
-	// Clean up obsolete changes that no longer exist in legacy storage
-	for _, change := range existingChanges {
-		key := fmt.Sprintf("%s:%s", change.Type, change.ID)
-		if !shouldExist[key] {
-			// This change no longer exists in legacy storage, remove it from Enhanced Manager
-			globalPendingChangeManager.RemoveChange(change.Type, change.ID)
-			logger.Info("Removed obsolete pending change from Enhanced Manager",
-				"type", change.Type,
-				"id", change.ID)
-		}
-	}
-}
-
 // VerifyPendingChanges verifies all pending changes without applying them
 func VerifyPendingChanges(c echo.Context) error {
-	// Sync from legacy storage first
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	changes := globalPendingChangeManager.GetAllChanges()
 	if len(changes) == 0 {
@@ -582,8 +300,7 @@ func VerifySinglePendingChange(c echo.Context) error {
 	changeType := c.Param("type")
 	id := c.Param("id")
 
-	// Sync from legacy storage first
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	change, exists := globalPendingChangeManager.GetChange(changeType, id)
 	if !exists {
@@ -629,8 +346,7 @@ func CancelPendingChange(c echo.Context) error {
 		})
 	}
 
-	// Sync from legacy storage first
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	change, exists := globalPendingChangeManager.GetChange(changeType, id)
 	if !exists {
@@ -692,6 +408,7 @@ func CancelPendingChange(c echo.Context) error {
 	}
 
 	logger.Info("Pending change cancelled", "type", changeType, "id", id)
+	markPendingChangesDirty()
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message": "Pending change cancelled successfully",
 		"change":  change,
@@ -700,8 +417,7 @@ func CancelPendingChange(c echo.Context) error {
 
 // CancelAllPendingChanges cancels all pending changes
 func CancelAllPendingChanges(c echo.Context) error {
-	// Sync from legacy storage first
-	syncLegacyToEnhancedManager()
+	ensurePendingChangesSynced(false)
 
 	changes := globalPendingChangeManager.GetAllChanges()
 	cancelledCount := 0
@@ -761,6 +477,7 @@ func CancelAllPendingChanges(c echo.Context) error {
 	}
 
 	logger.Info("All pending changes cancelled", "count", cancelledCount)
+	markPendingChangesDirty()
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":         "All pending changes cancelled successfully",
 		"cancelled_count": cancelledCount,
@@ -1208,12 +925,14 @@ func ApplySingleChange(c echo.Context) error {
 			}
 		}()
 
+		markPendingChangesDirty()
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"message":             "Change applied successfully, projects are restarting asynchronously",
 			"projects_to_restart": projectsToRestart,
 		})
 	}
 
+	markPendingChangesDirty()
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message":             "Change applied successfully",
 		"projects_to_restart": []string{},
@@ -1380,6 +1099,7 @@ func CreateTempFile(c echo.Context) error {
 	}
 
 	logger.Info("Temp file created successfully", "path", tempPath)
+	markPendingChangesDirty()
 	return c.JSON(http.StatusOK, map[string]string{"message": "temp file created successfully"})
 }
 
@@ -1463,6 +1183,7 @@ func DeleteTempFile(c echo.Context) error {
 	}
 
 	logger.Info("Temp file deleted successfully", "path", tempPath)
+	markPendingChangesDirty()
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "Temp file deleted successfully",
 	})
