@@ -2502,23 +2502,13 @@ function getOrganizedPlugins() {
   }
 }
 
-// Determine if a plugin should be displayed as Plugin Node (P badge) based on its usage
+// Determine if a plugin should be displayed as Plugin Node (P badge)
 function isPluginNodeType(item) {
-  // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
-  if (item.id && item.id.startsWith('pushMsgTo')) {
-    return true
-  }
-  // Normal case: check returnType
   return item.returnType === 'interface{}'
 }
 
 // Determine if a plugin should be displayed as Check Node (C badge)
 function isCheckNodeType(item) {
-  // Special case: pushMsgTo* plugins are used for plugin nodes, not check nodes
-  if (item.id && item.id.startsWith('pushMsgTo')) {
-    return false
-  }
-  // Normal case: check returnType
   return item.returnType === 'bool'
 }
 
