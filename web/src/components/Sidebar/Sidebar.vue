@@ -3107,7 +3107,8 @@ function closeTestPluginModal() {
 function openTestRuleset(item) {
   const payload = {
     type: 'rulesets', 
-    id: item.id || item.name
+    id: item.id || item.name,
+    content: item?.hasTemp ? (item.raw || '') : ''
   };
   emit('test-ruleset', payload);
   // Ensure menus are closed

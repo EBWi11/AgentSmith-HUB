@@ -375,8 +375,8 @@ function onTestRuleset(payload) {
   testRulesetId.value = payload.id;
   testComponentType.value = payload.type || 'rulesets';
 
-  // Try to get editor content if the same ruleset is currently being edited
-  testRulesetContent.value = '';
+  // Sidebar menu can pass temp content directly; editor content still wins if open.
+  testRulesetContent.value = payload.content || '';
   if (selected.value && 
       selected.value.type === 'rulesets' && 
       selected.value.id === payload.id && 
