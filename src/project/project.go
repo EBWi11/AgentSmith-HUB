@@ -1962,7 +1962,7 @@ func (p *Project) initComponents() error {
 				p.Rulesets[node.ToPNS] = rs
 
 				nodeChannelStatus[node.ToPNS] = true
-				c := make(chan map[string]interface{}, 512)
+				c := make(chan map[string]interface{}, common.PipelineRulesetBuffer)
 				p.MsgChannels[node.ToPNS] = &c
 				rs.UpStream[node.ToPNS] = &c
 			}
@@ -1994,7 +1994,7 @@ func (p *Project) initComponents() error {
 				p.Outputs[node.ToPNS] = testOutput
 
 				nodeChannelStatus[node.ToPNS] = true
-				c := make(chan map[string]interface{}, 1024)
+				c := make(chan map[string]interface{}, common.PipelineOutputBuffer)
 				p.MsgChannels[node.ToPNS] = &c
 				testOutput.UpStream[node.ToPNS] = &c
 			} else {
@@ -2029,7 +2029,7 @@ func (p *Project) initComponents() error {
 					p.Outputs[node.ToPNS] = o
 
 					nodeChannelStatus[node.ToPNS] = true
-					c := make(chan map[string]interface{}, 1024)
+					c := make(chan map[string]interface{}, common.PipelineOutputBuffer)
 					p.MsgChannels[node.ToPNS] = &c
 					o.UpStream[node.ToPNS] = &c
 				}
@@ -2059,7 +2059,7 @@ func (p *Project) initComponents() error {
 				p.Agents[node.ToPNS] = a
 
 				nodeChannelStatus[node.ToPNS] = true
-				c := make(chan map[string]interface{}, 512)
+				c := make(chan map[string]interface{}, common.PipelineAgentBuffer)
 				p.MsgChannels[node.ToPNS] = &c
 				a.UpStream[node.ToPNS] = &c
 			}

@@ -71,13 +71,13 @@ type AliyunSLSOutputConfig struct {
 
 // ClickHouseOutputConfig holds ClickHouse-specific config.
 type ClickHouseOutputConfig struct {
-	Hosts     []string                      `yaml:"hosts"`
-	Database  string                        `yaml:"database"`
-	Table     string                        `yaml:"table"`
-	BatchSize int                           `yaml:"batch_size,omitempty"`
-	FlushDur  string                        `yaml:"flush_dur,omitempty"`
-	Auth      *common.ClickHouseAuthConfig  `yaml:"auth,omitempty"`
-	TLS       *common.ClickHouseTLSConfig   `yaml:"tls,omitempty"`
+	Hosts     []string                     `yaml:"hosts"`
+	Database  string                       `yaml:"database"`
+	Table     string                       `yaml:"table"`
+	BatchSize int                          `yaml:"batch_size,omitempty"`
+	FlushDur  string                       `yaml:"flush_dur,omitempty"`
+	Auth      *common.ClickHouseAuthConfig `yaml:"auth,omitempty"`
+	TLS       *common.ClickHouseTLSConfig  `yaml:"tls,omitempty"`
 }
 
 // Output is the runtime output instance.
@@ -305,6 +305,125 @@ func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interfac
 	return enhancedMsg
 }
 
+func (out *Output) ensureStopChan() chan struct{} {
+	if out.stopChan == nil {
+		out.stopChan = make(chan struct{})
+	}
+	return out.stopChan
+}
+
+func (out *Output) processOutputMessage(msg map[string]interface{}, hasTestCollector bool, testCollectorType string) map[string]interface{} {
+	atomic.AddUint64(&out.produceTotal, 1)
+
+	if out.sampler != nil {
+		out.sampler.Sample(msg, out.ProjectNodeSequence)
+	}
+
+	enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
+
+	if hasTestCollector && out.TestCollectionChan != nil {
+		select {
+		case *out.TestCollectionChan <- enhancedMsg:
+		default:
+			logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", testCollectorType)
+		}
+	}
+
+	return enhancedMsg
+}
+
+func (out *Output) startProducerBridge(msgChan chan map[string]interface{}, producerType string, hasTestCollector bool) {
+	stopCh := out.ensureStopChan()
+	var forwarderWG sync.WaitGroup
+
+	for _, up := range out.UpStream {
+		forwarderWG.Add(1)
+		out.wg.Add(1)
+		go func(up *chan map[string]interface{}) {
+			defer out.wg.Done()
+			defer forwarderWG.Done()
+
+			for {
+				select {
+				case <-stopCh:
+					return
+				case msg, ok := <-*up:
+					if !ok {
+						return
+					}
+
+					enhancedMsg := out.processOutputMessage(msg, hasTestCollector, producerType)
+					select {
+					case <-stopCh:
+						return
+					case msgChan <- enhancedMsg:
+					}
+				}
+			}
+		}(up)
+	}
+
+	out.wg.Add(1)
+	go func() {
+		defer out.wg.Done()
+		forwarderWG.Wait()
+		close(msgChan)
+	}()
+}
+
+func (out *Output) startPrintBridge(hasTestCollector bool) {
+	stopCh := out.ensureStopChan()
+	for _, up := range out.UpStream {
+		out.wg.Add(1)
+		go func(up *chan map[string]interface{}) {
+			defer out.wg.Done()
+			for {
+				select {
+				case <-stopCh:
+					return
+				case msg, ok := <-*up:
+					if !ok {
+						return
+					}
+					enhancedMsg := out.processOutputMessage(msg, hasTestCollector, "print")
+					data, _ := json.Marshal(enhancedMsg)
+					logger.Info("[Print Output]", "data", string(data))
+				}
+			}
+		}(up)
+	}
+}
+
+func (out *Output) startTestingBridge() {
+	stopCh := out.ensureStopChan()
+	for _, up := range out.UpStream {
+		out.wg.Add(1)
+		go func(up *chan map[string]interface{}) {
+			defer out.wg.Done()
+			for {
+				select {
+				case <-stopCh:
+					logger.Debug("Testing output goroutine received stop signal", "id", out.Id)
+					return
+				case msg, ok := <-*up:
+					if !ok {
+						return
+					}
+
+					enhancedMsg := out.processOutputMessage(msg, false, "testing")
+					if out.TestCollectionChan != nil {
+						select {
+						case *out.TestCollectionChan <- enhancedMsg:
+						default:
+							logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
+						}
+					}
+				}
+			}
+		}(up)
+	}
+}
+
 // StartForTesting starts the output component in testing mode
 // In testing mode, completely ignore output type and only send data to TestCollectionChan
 func (out *Output) StartForTesting() error {
@@ -317,84 +436,7 @@ func (out *Output) StartForTesting() error {
 
 	// Initialize stop channel for testing
 	out.stopChan = make(chan struct{})
-
-	// Start single goroutine to read from UpStream and send to TestCollectionChan only
-	out.wg.Add(1)
-	go func() {
-		defer out.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("Panic in testing output goroutine", "output", out.Id, "panic", r)
-				// Don't change status here as it's handled by the caller
-			}
-		}()
-
-		// Use ticker for more predictable exit timing
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-out.stopChan:
-				logger.Debug("Testing output goroutine received stop signal", "id", out.Id)
-				return
-			case <-ticker.C:
-				// Check for stop signal before processing
-				select {
-				case <-out.stopChan:
-					logger.Debug("Testing output goroutine received stop signal before processing", "id", out.Id)
-					return
-				default:
-				}
-
-				// Non-blocking check for messages from any upstream channel
-				for _, up := range out.UpStream {
-					// Check stop signal again during loop iteration
-					select {
-					case <-out.stopChan:
-						logger.Debug("Testing output goroutine received stop signal during upstream processing", "id", out.Id)
-						return
-					default:
-					}
-
-					select {
-					case msg, ok := <-*up:
-						if !ok {
-							// Channel is closed, skip this channel
-							continue
-						}
-						atomic.AddUint64(&out.produceTotal, 1)
-
-						// Skip sampling in testing mode (handled by SetTestMode)
-						if out.sampler != nil {
-							out.sampler.Sample(msg, out.ProjectNodeSequence)
-						}
-
-						// Enhance message with ProjectNodeSequence information
-						enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-						if out.TestCollectionChan != nil {
-							select {
-							case *out.TestCollectionChan <- enhancedMsg:
-								// Message sent successfully
-							default:
-								logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
-							}
-						}
-					default:
-					}
-				}
-
-				// Final check for stop signal after processing
-				select {
-				case <-out.stopChan:
-					logger.Debug("Testing output goroutine received stop signal after processing", "id", out.Id)
-					return
-				default:
-				}
-			}
-		}
-	}()
+	out.startTestingBridge()
 
 	out.SetStatus(common.StatusRunning, nil)
 	return nil
@@ -450,7 +492,7 @@ func (out *Output) Start() error {
 			return fmt.Errorf("kafka configuration missing for output %s", out.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 1024)
+		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
 		producer, err := common.NewKafkaProducer(
 			out.kafkaCfg.Brokers,
 			out.kafkaCfg.Topic,
@@ -468,100 +510,8 @@ func (out *Output) Start() error {
 		}
 		out.kafkaProducer = producer
 
-		// Initialize stop channel for this output
 		out.stopChan = make(chan struct{})
-
-		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Kafka producer
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			defer close(msgChan) // Close msgChan when UpStream processing is done
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("Panic in kafka output goroutine", "output", out.Id, "panic", r)
-					// Don't change status here as it may conflict with stop process
-				}
-			}()
-
-			// Use ticker for more predictable exit timing
-			ticker := time.NewTicker(10 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-out.stopChan:
-					logger.Debug("Kafka output goroutine received stop signal", "id", out.Id)
-					return
-				case <-ticker.C:
-					// Check for stop signal before processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Kafka output goroutine received stop signal before processing", "id", out.Id)
-						return
-					default:
-					}
-
-					// Non-blocking check for messages from any upstream channel
-					for _, up := range out.UpStream {
-						// Check stop signal again during loop iteration
-						select {
-						case <-out.stopChan:
-							logger.Debug("Kafka output goroutine received stop signal during upstream processing", "id", out.Id)
-							return
-						default:
-						}
-
-						select {
-						case msg, ok := <-*up:
-							if !ok {
-								// Channel is closed, skip this channel
-								continue
-							}
-
-							// Always count/sample; duplication handled below
-							// Count immediately at upstream read to ensure all messages are counted
-							atomic.AddUint64(&out.produceTotal, 1)
-
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
-
-							// Enhance message with ProjectNodeSequence information before sending
-							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-							// Duplicate to TestCollectionChan if present (non-blocking)
-							if hasTestCollector {
-								select {
-								case *out.TestCollectionChan <- enhancedMsg:
-								default:
-									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "kafka")
-								}
-							}
-
-							// Send enhanced message to msgChan for Kafka producer (non-blocking during shutdown)
-							select {
-							case msgChan <- enhancedMsg:
-								// Message sent successfully
-							default:
-								// Channel is full, log warning and continue
-								logger.Error("Kafka producer channel full, dropping message", "id", out.Id)
-							}
-						default:
-							// No message available from this channel, continue to next
-						}
-					}
-
-					// Final check for stop signal after processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Kafka output goroutine received stop signal after processing", "id", out.Id)
-						return
-					default:
-					}
-				}
-			}
-		}()
+		out.startProducerBridge(msgChan, "kafka", hasTestCollector)
 
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil {
@@ -573,7 +523,7 @@ func (out *Output) Start() error {
 			return fmt.Errorf("elasticsearch configuration missing for output %s", out.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 1024)
+		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
 		batchSize := 100
 		if out.elasticsearchCfg.BatchSize > 0 {
 			batchSize = out.elasticsearchCfg.BatchSize
@@ -599,10 +549,7 @@ func (out *Output) Start() error {
 		}
 		out.elasticsearchProducer = producer
 
-		// Initialize stop channel for this output (if not already initialized)
-		if out.stopChan == nil {
-			out.stopChan = make(chan struct{})
-		}
+		out.ensureStopChan()
 
 		upstreamCount := len(out.UpStream)
 		logger.Info("Elasticsearch output starting", "output", out.Id, "index", out.elasticsearchCfg.Index, "upstream_count", upstreamCount)
@@ -610,184 +557,11 @@ func (out *Output) Start() error {
 			logger.Error("Elasticsearch output has no upstream connections; no data will be written until project connects input/ruleset/agent to this output", "output", out.Id)
 		}
 
-		// Start goroutine to read from UpStream and send enhanced messages to msgChan for Elasticsearch producer
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			defer close(msgChan) // Close msgChan when UpStream processing is done
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("Panic in elasticsearch output goroutine", "output", out.Id, "panic", r)
-					// Don't change status here as it may conflict with stop process
-				}
-			}()
-
-			// Use ticker for more predictable exit timing
-			ticker := time.NewTicker(10 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-out.stopChan:
-					logger.Debug("Elasticsearch output goroutine received stop signal", "id", out.Id)
-					return
-				case <-ticker.C:
-					// Check for stop signal before processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Elasticsearch output goroutine received stop signal before processing", "id", out.Id)
-						return
-					default:
-					}
-
-					// Non-blocking check for messages from any upstream channel
-					for _, up := range out.UpStream {
-						// Check stop signal again during loop iteration
-						select {
-						case <-out.stopChan:
-							logger.Debug("Elasticsearch output goroutine received stop signal during upstream processing", "id", out.Id)
-							return
-						default:
-						}
-
-						select {
-						case msg, ok := <-*up:
-							if !ok {
-								// Channel is closed, skip this channel
-								continue
-							}
-
-							// Always count/sample; duplication handled separately
-							// Count immediately at upstream read to ensure all messages are counted
-							atomic.AddUint64(&out.produceTotal, 1)
-
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
-
-							// Enhance message with ProjectNodeSequence information before sending
-							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-							if hasTestCollector {
-								select {
-								case *out.TestCollectionChan <- enhancedMsg:
-								default:
-									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "elasticsearch")
-								}
-							}
-
-							// Send enhanced message to msgChan for Elasticsearch producer (non-blocking during shutdown)
-							select {
-							case msgChan <- enhancedMsg:
-								// Message sent successfully
-							default:
-								// Channel is full, log warning and continue
-								logger.Error("Elasticsearch producer channel full, dropping message", "id", out.Id)
-							}
-						default:
-							// No message available from this channel, continue to next
-						}
-					}
-
-					// Final check for stop signal after processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Elasticsearch output goroutine received stop signal after processing", "id", out.Id)
-						return
-					default:
-					}
-				}
-			}
-		}()
+		out.startProducerBridge(msgChan, "elasticsearch", hasTestCollector)
 
 	case OutputTypePrint:
-		// Initialize stop channel for this output (if not already initialized)
-		if out.stopChan == nil {
-			out.stopChan = make(chan struct{})
-		}
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("Panic in print output goroutine", "output", out.Id, "panic", r)
-					// Don't change status here as it may conflict with stop process
-				}
-			}()
-
-			// Use ticker for more predictable exit timing
-			ticker := time.NewTicker(10 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-out.stopChan:
-					logger.Debug("Print output goroutine received stop signal", "id", out.Id)
-					return
-				case <-ticker.C:
-					// Check for stop signal before processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Print output goroutine received stop signal before processing", "id", out.Id)
-						return
-					default:
-					}
-
-					// Non-blocking check for messages from any upstream channel
-					for _, up := range out.UpStream {
-						// Check stop signal again during loop iteration
-						select {
-						case <-out.stopChan:
-							logger.Debug("Print output goroutine received stop signal during upstream processing", "id", out.Id)
-							return
-						default:
-						}
-
-						select {
-						case msg, ok := <-*up:
-							if !ok {
-								// Channel is closed, skip this channel
-								continue
-							}
-							// Always count/sample.
-							// Count immediately at upstream read to ensure all messages are counted
-							atomic.AddUint64(&out.produceTotal, 1)
-
-							// Sample the message
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
-
-							// Duplicate to TestCollectionChan if present
-							if hasTestCollector {
-								msgWithId := out.enhanceMessageWithProjectNodeSequence(msg)
-								select {
-								case *out.TestCollectionChan <- msgWithId:
-								default:
-									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "print")
-								}
-							}
-
-							// Enhance message with ProjectNodeSequence information for actual output
-							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-							data, _ := json.Marshal(enhancedMsg)
-							logger.Info("[Print Output]", "data", string(data))
-						default:
-							// No message available from this channel, continue to next
-						}
-					}
-
-					// Final check for stop signal after processing
-					select {
-					case <-out.stopChan:
-						logger.Debug("Print output goroutine received stop signal after processing", "id", out.Id)
-						return
-					default:
-					}
-				}
-			}
-		}()
+		out.ensureStopChan()
+		out.startPrintBridge(hasTestCollector)
 
 	case OutputTypeClickHouse:
 		if out.clickhouseProducer != nil {
@@ -799,7 +573,7 @@ func (out *Output) Start() error {
 			return fmt.Errorf("clickhouse configuration missing for output %s", out.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 1024)
+		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
 		batchSize := 1000
 		if out.clickhouseCfg.BatchSize > 0 {
 			batchSize = out.clickhouseCfg.BatchSize
@@ -826,86 +600,8 @@ func (out *Output) Start() error {
 		}
 		out.clickhouseProducer = producer
 
-		// Initialize stop channel for this output
-		if out.stopChan == nil {
-			out.stopChan = make(chan struct{})
-		}
-
-		// Start goroutine to read from UpStream and send enhanced messages to msgChan for ClickHouse producer
-		out.wg.Add(1)
-		go func() {
-			defer out.wg.Done()
-			defer close(msgChan)
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("Panic in clickhouse output goroutine", "output", out.Id, "panic", r)
-				}
-			}()
-
-			ticker := time.NewTicker(10 * time.Millisecond)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-out.stopChan:
-					logger.Debug("ClickHouse output goroutine received stop signal", "id", out.Id)
-					return
-				case <-ticker.C:
-					select {
-					case <-out.stopChan:
-						logger.Debug("ClickHouse output goroutine received stop signal before processing", "id", out.Id)
-						return
-					default:
-					}
-
-					for _, up := range out.UpStream {
-						select {
-						case <-out.stopChan:
-							logger.Debug("ClickHouse output goroutine received stop signal during upstream processing", "id", out.Id)
-							return
-						default:
-						}
-
-						select {
-						case msg, ok := <-*up:
-							if !ok {
-								continue
-							}
-
-							atomic.AddUint64(&out.produceTotal, 1)
-
-							if out.sampler != nil {
-								out.sampler.Sample(msg, out.ProjectNodeSequence)
-							}
-
-							enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
-
-							if hasTestCollector {
-								select {
-								case *out.TestCollectionChan <- enhancedMsg:
-								default:
-									logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "clickhouse")
-								}
-							}
-
-							select {
-							case msgChan <- enhancedMsg:
-							default:
-								logger.Error("ClickHouse producer channel full, dropping message", "id", out.Id)
-							}
-						default:
-						}
-					}
-
-					select {
-					case <-out.stopChan:
-						logger.Debug("ClickHouse output goroutine received stop signal after processing", "id", out.Id)
-						return
-					default:
-					}
-				}
-			}
-		}()
+		out.ensureStopChan()
+		out.startProducerBridge(msgChan, "clickhouse", hasTestCollector)
 
 	case OutputTypeAliyunSLS:
 		out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS output not implemented yet"))
@@ -939,25 +635,7 @@ func (out *Output) Stop() error {
 		logger.Error("stopChan is nil during stop", "id", out.Id)
 	}
 
-	// Step 2: Stop producers after signaling goroutines to prevent them from receiving new messages
-	logger.Info("Stopping output producers", "id", out.Id)
-	if out.kafkaProducer != nil {
-		logger.Debug("Closing kafka producer", "id", out.Id)
-		out.kafkaProducer.Close()
-		out.kafkaProducer = nil
-	}
-	if out.elasticsearchProducer != nil {
-		logger.Debug("Closing elasticsearch producer", "id", out.Id)
-		out.elasticsearchProducer.Close()
-		out.elasticsearchProducer = nil
-	}
-	if out.clickhouseProducer != nil {
-		logger.Debug("Closing clickhouse producer", "id", out.Id)
-		out.clickhouseProducer.Close()
-		out.clickhouseProducer = nil
-	}
-
-	// Step 3: Wait for goroutines to finish with timeout and force cleanup if needed
+	// Step 2: Wait for bridge goroutines to finish with timeout and force cleanup if needed
 	logger.Info("Waiting for output goroutines to finish", "id", out.Id)
 	waitDone := make(chan struct{})
 	go func() {
@@ -977,6 +655,24 @@ func (out *Output) Stop() error {
 		logger.Error("Output stop timeout details", "id", out.Id, "type", out.Type, "pending_messages", pendingCount)
 
 		stopError = fmt.Errorf("timeout waiting for goroutines to finish")
+	}
+
+	// Step 3: Close producers after bridge goroutines have stopped sending into producer channels.
+	logger.Info("Stopping output producers", "id", out.Id)
+	if out.kafkaProducer != nil {
+		logger.Debug("Closing kafka producer", "id", out.Id)
+		out.kafkaProducer.Close()
+		out.kafkaProducer = nil
+	}
+	if out.elasticsearchProducer != nil {
+		logger.Debug("Closing elasticsearch producer", "id", out.Id)
+		out.elasticsearchProducer.Close()
+		out.elasticsearchProducer = nil
+	}
+	if out.clickhouseProducer != nil {
+		logger.Debug("Closing clickhouse producer", "id", out.Id)
+		out.clickhouseProducer.Close()
+		out.clickhouseProducer = nil
 	}
 
 	// Step 4: Final cleanup to ensure all resources are properly released

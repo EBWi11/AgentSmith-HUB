@@ -354,7 +354,7 @@ func (in *Input) Start() error {
 			in.SetStatus(common.StatusError, fmt.Errorf("kafka configuration missing for input %s", in.Id))
 			return fmt.Errorf("kafka configuration missing for input %s", in.Id)
 		}
-		msgChan := make(chan map[string]interface{}, 512)
+		msgChan := make(chan map[string]interface{}, common.InputInternalMessageBuffer)
 		cons, err := common.NewKafkaConsumer(
 			in.kafkaCfg.Brokers,
 			in.kafkaCfg.Group,
@@ -403,20 +403,7 @@ func (in *Input) Start() error {
 						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
-					// Add input ID to message data
-					if msg == nil {
-						msg = make(map[string]interface{}, 2)
-					}
-					msg["_hub_input"] = in.Id
-
-					// Parse with grok if configured
-					msg = in.parseWithGrok(msg)
-
-					// Forward to downstream with blocking sends to ensure no data loss
-					// If any downstream channel is full, this will block and prevent further consumption
-					for _, ch := range in.DownStream {
-						*ch <- msg
-					}
+					in.dispatchMessage(in.prepareMessage(msg))
 				}
 			}
 		}()
@@ -431,7 +418,7 @@ func (in *Input) Start() error {
 			return fmt.Errorf("sls configuration missing for input %s", in.Id)
 		}
 
-		msgChan := make(chan map[string]interface{}, 512)
+		msgChan := make(chan map[string]interface{}, common.InputInternalMessageBuffer)
 		cons, err := common.NewAliyunSLSConsumer(
 			in.aliyunSLSCfg.Endpoint,
 			in.aliyunSLSCfg.AccessKeyID,
@@ -484,20 +471,7 @@ func (in *Input) Start() error {
 						in.sampler.Sample(msg, in.ProjectNodeSequence)
 					}
 
-					// Add input ID to message data
-					if msg == nil {
-						msg = make(map[string]interface{}, 2)
-					}
-					msg["_hub_input"] = in.Id
-
-					// Parse with grok if configured
-					msg = in.parseWithGrok(msg)
-
-					// Forward to downstream with blocking sends to ensure no data loss
-					// If any downstream channel is full, this will block and prevent further consumption
-					for _, ch := range in.DownStream {
-						*ch <- msg
-					}
+					in.dispatchMessage(in.prepareMessage(msg))
 				}
 			}
 		}()
@@ -531,22 +505,33 @@ func (in *Input) ProcessTestData(data map[string]interface{}) {
 
 	// Skip sampling in testing mode - not needed for test scenarios
 
-	// Add input ID to message data - same as production logic
-	if data == nil {
-		data = make(map[string]interface{}, 2)
-	}
-	data["_hub_input"] = in.Id
-
-	// Parse with grok if configured - same as production logic
-	data = in.parseWithGrok(data)
-
-	// Forward to downstream with blocking sends to ensure no data loss
-	// If any downstream channel is full, this will block and prevent further processing
-	for _, ch := range in.DownStream {
-		*ch <- data
-	}
+	in.dispatchMessage(in.prepareMessage(data))
 
 	logger.Debug("Test data processed through input", "input", in.Id, "downstream_count", len(in.DownStream))
+}
+
+func (in *Input) prepareMessage(msg map[string]interface{}) map[string]interface{} {
+	if msg == nil {
+		msg = make(map[string]interface{}, 2)
+	}
+	msg["_hub_input"] = in.Id
+	return in.parseWithGrok(msg)
+}
+
+func (in *Input) dispatchMessage(msg map[string]interface{}) {
+	switch len(in.DownStream) {
+	case 0:
+		return
+	case 1:
+		for _, ch := range in.DownStream {
+			*ch <- msg
+			return
+		}
+	default:
+		for _, ch := range in.DownStream {
+			*ch <- msg
+		}
+	}
 }
 
 // StopForTesting stops the input component quickly for testing purposes
@@ -643,8 +628,8 @@ func (in *Input) Stop() error {
 
 			// Check for timeout
 			if time.Since(drainStartTime) > channelDrainTimeout {
-			logger.Error("Timeout waiting for internal channel to drain, proceeding with shutdown",
-				"input", in.Id, "remaining_messages", channelLen)
+				logger.Error("Timeout waiting for internal channel to drain, proceeding with shutdown",
+					"input", in.Id, "remaining_messages", channelLen)
 				stopError = fmt.Errorf("timeout waiting for internal channel to drain")
 				break
 			}

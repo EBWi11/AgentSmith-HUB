@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"container/list"
+	"hash/fnv"
 	"sync"
 
 	regexp "github.com/BurntSushi/rure-go"
@@ -13,30 +14,63 @@ type regexCacheEntry struct {
 	regex   *regexp.Regex
 }
 
-// regexCache is a thread-safe LRU cache for compiled regular expressions.
-// All operations (hit or miss) require a write to maintain LRU order,
-// so a single sync.Mutex is used throughout — no RWMutex needed.
-type regexCache struct {
+const regexCacheShardCount = 32
+
+type regexCacheShard struct {
 	mu      sync.Mutex
 	cache   map[string]*list.Element
-	order   *list.List // front = most recently used
+	order   *list.List
 	maxSize int
 }
 
+// regexCache is a sharded thread-safe LRU cache for compiled regular expressions.
+type regexCache struct {
+	shards []regexCacheShard
+}
+
 // Global regex cache instance
-var globalRegexCache = &regexCache{
-	cache:   make(map[string]*list.Element),
-	order:   list.New(),
-	maxSize: 1000,
+var globalRegexCache = newRegexCache(1000)
+
+func newRegexCache(maxSize int) *regexCache {
+	shardCount := regexCacheShardCount
+	if maxSize > 0 && maxSize < shardCount {
+		shardCount = 1
+	}
+	rc := &regexCache{
+		shards: make([]regexCacheShard, shardCount),
+	}
+	perShardSize := maxSize / shardCount
+	if perShardSize < 16 {
+		if shardCount == 1 {
+			perShardSize = maxSize
+		} else {
+			perShardSize = 16
+		}
+	}
+	for i := range rc.shards {
+		rc.shards[i] = regexCacheShard{
+			cache:   make(map[string]*list.Element),
+			order:   list.New(),
+			maxSize: perShardSize,
+		}
+	}
+	return rc
+}
+
+func (rc *regexCache) shardFor(pattern string) *regexCacheShard {
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(pattern))
+	return &rc.shards[hasher.Sum32()%uint32(len(rc.shards))]
 }
 
 // getCompiledRegex retrieves a compiled regex from cache or compiles and caches it.
 func (rc *regexCache) getCompiledRegex(pattern string) (*regexp.Regex, error) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	shard := rc.shardFor(pattern)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
-	if elem, exists := rc.cache[pattern]; exists {
-		rc.order.MoveToFront(elem)
+	if elem, exists := shard.cache[pattern]; exists {
+		shard.order.MoveToFront(elem)
 		return elem.Value.(*regexCacheEntry).regex, nil
 	}
 
@@ -46,15 +80,15 @@ func (rc *regexCache) getCompiledRegex(pattern string) (*regexp.Regex, error) {
 	}
 
 	entry := &regexCacheEntry{pattern: pattern, regex: compiledRegex}
-	elem := rc.order.PushFront(entry)
-	rc.cache[pattern] = elem
+	elem := shard.order.PushFront(entry)
+	shard.cache[pattern] = elem
 
 	// Evict least recently used entries when over capacity
-	if rc.order.Len() > rc.maxSize {
-		oldest := rc.order.Back()
+	if shard.order.Len() > shard.maxSize {
+		oldest := shard.order.Back()
 		if oldest != nil {
-			rc.order.Remove(oldest)
-			delete(rc.cache, oldest.Value.(*regexCacheEntry).pattern)
+			shard.order.Remove(oldest)
+			delete(shard.cache, oldest.Value.(*regexCacheEntry).pattern)
 		}
 	}
 
@@ -63,17 +97,25 @@ func (rc *regexCache) getCompiledRegex(pattern string) (*regexp.Regex, error) {
 
 // getCacheStats returns current cache size for monitoring.
 func (rc *regexCache) getCacheStats() int {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	return rc.order.Len()
+	total := 0
+	for i := range rc.shards {
+		shard := &rc.shards[i]
+		shard.mu.Lock()
+		total += shard.order.Len()
+		shard.mu.Unlock()
+	}
+	return total
 }
 
 // clearCache removes all entries from the cache.
 func (rc *regexCache) clearCache() {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	rc.cache = make(map[string]*list.Element)
-	rc.order = list.New()
+	for i := range rc.shards {
+		shard := &rc.shards[i]
+		shard.mu.Lock()
+		shard.cache = make(map[string]*list.Element)
+		shard.order = list.New()
+		shard.mu.Unlock()
+	}
 }
 
 // GetCompiledRegex is the public interface to get a compiled regex with caching.

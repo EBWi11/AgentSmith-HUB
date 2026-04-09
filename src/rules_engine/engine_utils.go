@@ -135,6 +135,7 @@ func convertPluginArgument(value interface{}) interface{} {
 func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map[string]common.CheckCoreCache) []interface{} {
 	var ok bool
 	res := make([]interface{}, len(args))
+	var copiedRawData map[string]interface{}
 	for i, v := range args {
 		switch v.Type {
 		case 0:
@@ -151,7 +152,10 @@ func GetPluginRealArgs(args []*PluginArg, data map[string]interface{}, cache map
 				res[i] = convertPluginArgument(v.RealValue)
 			}
 		case 2:
-			res[i] = common.MapDeepCopy(data)
+			if copiedRawData == nil {
+				copiedRawData = common.MapDeepCopy(data)
+			}
+			res[i] = copiedRawData
 		}
 	}
 	return res
