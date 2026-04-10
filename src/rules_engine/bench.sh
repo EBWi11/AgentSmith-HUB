@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run BenchmarkRulesEngineFullCoverage with the correct librure for the current platform.
+# Run the aggregate rules-engine TPS benchmark with the correct librure.
 # Usage:
 #   ./bench.sh                          # default 10m
 #   BENCHTIME=30s ./bench.sh            # override duration via env
-#   ./bench.sh -bench='.../Parallel'    # extra go test flags forwarded verbatim
+#   BENCH='^BenchmarkRulesEngineTPS$' BENCHTIME=5m ./bench.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -37,7 +37,7 @@ echo "Platform  : $OS/$ARCH"
 echo "lib dir   : $LIB_DIR"
 
 # ── benchmark parameters (override via env) ───────────────────────────────────
-BENCH="${BENCH:-BenchmarkRulesEngine}"
+BENCH="${BENCH:-^BenchmarkRulesEngineTPS$}"
 BENCHTIME="${BENCHTIME:-10m}"
 
 echo "Benchmark : $BENCH"
