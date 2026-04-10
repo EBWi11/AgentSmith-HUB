@@ -22,10 +22,10 @@ import (
 )
 
 // buildThresholdRuleset wraps buildRulesetFromXML and registers cache cleanup.
-func buildThresholdRuleset(t *testing.T, xml string) *Ruleset {
-	t.Helper()
-	rs := buildRulesetFromXML(t, xml)
-	t.Cleanup(func() { rs.cleanup() })
+func buildThresholdRuleset(tb testing.TB, xml string) *Ruleset {
+	tb.Helper()
+	rs := buildRulesetFromXML(tb, xml)
+	tb.Cleanup(func() { rs.cleanup() })
 	return rs
 }
 

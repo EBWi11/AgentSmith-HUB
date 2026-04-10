@@ -1,0 +1,137 @@
+<root type="DETECTION" name="full_coverage">
+
+  <!-- 01 string ops: EQU NEQ INCL(OR-delim) EXCL START END -->
+  <rule id="r01_str" name="string_ops">
+    <check type="EQU"  field="channel">security</check>
+    <check type="NEQ"  field="dropped">true</check>
+    <check type="INCL" field="cmd" logic="OR" delimiter="|">bash|powershell|cmd.exe</check>
+    <check type="NI" field="referer">crawler</check>
+    <check type="START" field="path">/etc/</check>
+    <check type="END"   field="filename">.conf</check>
+  </rule>
+
+  <!-- 02 case-insensitive variants + null checks + nested field + dynamic reference -->
+  <rule id="r02_misc" name="misc_ops">
+    <check type="EQU"     field="channel">security</check>
+    <check type="NCS_EQU"  field="action">login</check>
+    <check type="NCS_INCL" field="message">alert</check>
+    <check type="NOTNULL"  field="event_id"></check>
+    <check type="ISNULL"   field="user_agent"></check>
+    <check type="EQU"     field="meta.env">production</check>
+    <check type="EQU"     field="dst">_$src</check>
+  </rule>
+
+  <!-- 03 numeric comparisons: MT (>) and LT (<) -->
+  <rule id="r03_num" name="numeric_ops">
+    <check type="EQU" field="channel">security</check>
+    <check type="MT"  field="risk_score">10</check>
+    <check type="LT"  field="risk_score">100</check>
+    <check type="MT"  field="bytes">99</check>
+    <check type="LT"  field="bytes">1048577</check>
+  </rule>
+
+  <!-- 04 REGEX -->
+  <rule id="r04_rx" name="regex_op">
+    <check type="EQU"   field="channel">security</check>
+    <check type="REGEX" field="url">^/api/v[0-9]+/</check>
+  </rule>
+
+  <!-- 05 checklist with (AND OR NOT) compound condition -->
+  <rule id="r05_cl" name="checklist_cond">
+    <check type="EQU" field="channel">security</check>
+    <checklist condition="(c1 and c2) or (c3 and not c4)">
+      <check id="c1" type="INCL"  field="cmd">bash</check>
+      <check id="c2" type="MT"    field="risk_score">5</check>
+      <check id="c3" type="START" field="path">/etc/</check>
+      <check id="c4" type="EQU"   field="dropped">true</check>
+    </checklist>
+  </rule>
+
+  <!-- 06 INCL with AND-delimiter (all tokens must appear) -->
+  <rule id="r06_and_incl" name="and_incl">
+    <check type="EQU"  field="channel">security</check>
+    <check type="INCL" field="cmd" logic="AND" delimiter=" ">bash -i</check>
+  </rule>
+
+  <!-- 07 iterator ANY: any tag == "critical" -->
+  <rule id="r07_iter_any" name="iterator_any">
+    <check type="EQU" field="channel">security</check>
+    <iterator type="ANY" field="tags" variable="t">
+      <check type="EQU" field="t">critical</check>
+    </iterator>
+  </rule>
+
+  <!-- 08 iterator ALL: every item.v > 0 -->
+  <rule id="r08_iter_all" name="iterator_all">
+    <check type="EQU" field="channel">security</check>
+    <iterator type="ALL" field="items" variable="it">
+      <check type="MT" field="it.v">0</check>
+    </iterator>
+  </rule>
+
+  <!-- 09 threshold COUNT (local_cache; ceiling high enough never to fire) -->
+  <rule id="r09_th_cnt" name="threshold_count">
+    <check type="EQU" field="channel">security</check>
+    <threshold group_by="actor" range="3600s" local_cache="true">9999999</threshold>
+  </rule>
+
+  <!-- 10 threshold SUM (local_cache) -->
+  <rule id="r10_th_sum" name="threshold_sum">
+    <check type="EQU" field="channel">security</check>
+    <threshold group_by="actor" range="3600s" local_cache="true" count_type="SUM" count_field="bytes">999999999</threshold>
+  </rule>
+
+  <!-- 11 threshold CLASSIFY (local_cache) -->
+  <rule id="r11_th_cls" name="threshold_classify">
+    <check type="EQU" field="channel">security</check>
+    <threshold group_by="actor" range="3600s" local_cache="true" count_type="CLASSIFY" count_field="port">99999</threshold>
+  </rule>
+
+  <!-- 12 append (static + dynamic _$field) + modify + del -->
+  <rule id="r12_xform" name="transforms">
+    <check type="EQU" field="channel">security</check>
+    <append field="alert_level">high</append>
+    <append field="orig_actor">_$actor</append>
+    <modify field="processed">1</modify>
+    <del>_drop_me</del>
+  </rule>
+
+  <!-- 13 plugin check (isPrivateIP) -->
+  <rule id="r13_plug_chk" name="plugin_check">
+    <check type="EQU"    field="channel">security</check>
+    <check type="PLUGIN">isPrivateIP("10.0.0.1")</check>
+  </rule>
+
+  <!-- 14 plugin modify (hashMD5 of event_id) -->
+  <rule id="r14_plug_mod" name="plugin_modify">
+    <check type="EQU" field="channel">security</check>
+    <modify type="PLUGIN" field="event_hash">hashMD5("ev-bench-001")</modify>
+  </rule>
+
+  <!-- 15 sequence / CEP: login -> access within 10m (local_cache) -->
+  <rule id="r15_seq" name="sequence_cep">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="event_type">login</check>
+      </event>
+      <event id="access">
+        <check type="EQU" field="event_type">access</check>
+      </event>
+      <condition>login -> access</condition>
+    </sequence>
+  </rule>
+
+  <!-- 16 negation + NCS-negation variants (the 8 types missing from rules 01-15) -->
+  <rule id="r16_neg" name="negation_ncs_ops">
+    <check type="EQU"      field="channel">security</check>
+    <check type="NSTART"   field="user_type">admin</check>
+    <check type="NEND"     field="extension">.exe</check>
+    <check type="NCS_NEQ"  field="outcome">success</check>
+    <check type="NCS_NI"   field="detail">alert</check>
+    <check type="NCS_START" field="method">ge</check>
+    <check type="NCS_END"   field="content_type">json</check>
+    <check type="NCS_NSTART" field="host">external</check>
+    <check type="NCS_NEND"   field="accept">xml</check>
+  </rule>
+
+</root>

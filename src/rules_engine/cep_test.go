@@ -26,18 +26,18 @@ func newTestLocalCache() *ristretto.Cache[string, *SequenceState] {
 	return cache
 }
 
-func buildTestRuleset(t *testing.T, xmlContent string) *Ruleset {
-	t.Helper()
+func buildTestRuleset(tb testing.TB, xmlContent string) *Ruleset {
+	tb.Helper()
 	ruleset, err := ParseRuleset([]byte(xmlContent))
 	if err != nil {
-		t.Fatalf("ParseRuleset failed: %v", err)
+		tb.Fatalf("ParseRuleset failed: %v", err)
 	}
 	ruleset.RulesetID = "test_ruleset"
 	ruleset.IsDetection = true
 
 	err = RulesetBuild(ruleset)
 	if err != nil {
-		t.Fatalf("RulesetBuild failed: %v", err)
+		tb.Fatalf("RulesetBuild failed: %v", err)
 	}
 
 	// Initialize state manager for local cache tests
@@ -51,7 +51,7 @@ func buildTestRuleset(t *testing.T, xmlContent string) *Ruleset {
 		ruleset.SequenceCache = cache
 	}
 
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		if ruleset != nil {
 			ruleset.cleanup()
 		}

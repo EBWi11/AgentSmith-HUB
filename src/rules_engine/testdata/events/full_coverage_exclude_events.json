@@ -1,0 +1,9 @@
+{
+  "events": [
+    {"channel": "health",   "path": "/healthz",              "risk_score": 0},
+    {"channel": "metrics",  "path": "/metrics/prometheus",   "risk_score": 0},
+    {"channel": "info",     "path": "/api/v1/status",        "risk_score": 2},
+    {"channel": "security", "path": "/api/v1/admin",         "risk_score": 50, "actor": "alice"},
+    {"channel": "security", "path": "/api/v2/data",          "risk_score": 30, "actor": "bob"}
+  ]
+}

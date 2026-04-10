@@ -5,15 +5,15 @@ import (
 )
 
 // helper to build and run a ruleset against data
-func buildRulesetFromXML(t *testing.T, xml string) *Ruleset {
-	t.Helper()
+func buildRulesetFromXML(tb testing.TB, xml string) *Ruleset {
+	tb.Helper()
 	rs, err := ParseRuleset([]byte(xml))
 	if err != nil {
-		t.Fatalf("ParseRuleset error: %v", err)
+		tb.Fatalf("ParseRuleset error: %v", err)
 	}
 	rs.RulesetID = "TEST.RS"
 	if err := RulesetBuild(rs); err != nil {
-		t.Fatalf("RulesetBuild error: %v", err)
+		tb.Fatalf("RulesetBuild error: %v", err)
 	}
 	rs.SetTestMode()
 	return rs

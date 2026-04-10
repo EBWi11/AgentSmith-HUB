@@ -1,0 +1,19 @@
+<root type="DETECTION" name="tps_composite">
+  <rule id="r1" name="gate">
+    <check type="NEQ" field="dropped">true</check>
+    <checklist condition="a and b">
+      <check id="a" type="EQU" field="channel">security</check>
+      <check id="b" type="NOTNULL" field="event_id"></check>
+    </checklist>
+    <check type="INCL" field="cmd" logic="OR" delimiter="|">powershell|bash|sh</check>
+    <check type="REGEX" field="url">^/api/v[0-9]+/</check>
+    <check type="MT" field="risk_score">10</check>
+    <check type="EQU" field="meta.env">production</check>
+    <check type="NCS_EQU" field="action">login</check>
+    <check type="START" field="object">/etc/</check>
+    <iterator type="ANY" field="tags" variable="t">
+      <check type="EQU" field="t">critical</check>
+    </iterator>
+    <threshold group_by="actor" range="3600s" local_cache="true">999999</threshold>
+  </rule>
+</root>

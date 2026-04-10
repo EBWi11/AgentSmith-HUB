@@ -1,0 +1,4 @@
+{"type":"login","user":"alice"}
+{"type":"access","user":"alice"}
+{"type":"login","user":"bob"}
+{"type":"access","user":"bob"}

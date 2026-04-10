@@ -1,0 +1,86 @@
+<root type="DETECTION" name="full_coverage_cep">
+
+  <!-- 01 three-step sequence: A -> B -> C -->
+  <rule id="c01_multi" name="three_step_seq">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="recon">
+        <check type="EQU" field="event_type">recon</check>
+      </event>
+      <event id="exploit">
+        <check type="EQU" field="event_type">exploit</check>
+      </event>
+      <event id="exfil">
+        <check type="EQU" field="event_type">exfil</check>
+      </event>
+      <condition>recon -> exploit -> exfil</condition>
+    </sequence>
+  </rule>
+
+  <!-- 02 OR at a stage: A -> (B or C) -->
+  <rule id="c02_or_stage" name="or_at_stage">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="event_type">login</check>
+      </event>
+      <event id="exec">
+        <check type="EQU" field="event_type">exec</check>
+      </event>
+      <event id="script">
+        <check type="EQU" field="event_type">script</check>
+      </event>
+      <condition>login -> (exec or script)</condition>
+    </sequence>
+  </rule>
+
+  <!-- 03 OR then next step: A -> (B or C) -> D -->
+  <rule id="c03_or_chain" name="or_then_next">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="event_type">login</check>
+      </event>
+      <event id="lateral">
+        <check type="EQU" field="event_type">lateral</check>
+      </event>
+      <event id="priv_esc">
+        <check type="EQU" field="event_type">priv_esc</check>
+      </event>
+      <event id="exfil">
+        <check type="EQU" field="event_type">exfil</check>
+      </event>
+      <condition>login -> (lateral or priv_esc) -> exfil</condition>
+    </sequence>
+  </rule>
+
+  <!-- 04 simple absence: A -> !B -->
+  <rule id="c04_absence" name="simple_absence">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="event_type">login</check>
+      </event>
+      <event id="mfa">
+        <check type="EQU" field="event_type">mfa</check>
+      </event>
+      <condition>login -> !mfa</condition>
+    </sequence>
+  </rule>
+
+  <!-- 05 absence chain: A -> !B -> C -> !D -->
+  <rule id="c05_abs_chain" name="absence_chain">
+    <sequence within="10m" group_by="actor" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="event_type">login</check>
+      </event>
+      <event id="mfa">
+        <check type="EQU" field="event_type">mfa</check>
+      </event>
+      <event id="access">
+        <check type="EQU" field="event_type">access</check>
+      </event>
+      <event id="logout">
+        <check type="EQU" field="event_type">logout</check>
+      </event>
+      <condition>login -> !mfa -> access -> !logout</condition>
+    </sequence>
+  </rule>
+
+</root>

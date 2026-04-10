@@ -1,0 +1,34 @@
+# full_coverage_cep_events.jsonl — one JSON object per line, ordered to exercise
+# all five CEP condition patterns in full_coverage_cep.xml.
+#
+# c01 (recon -> exploit -> exfil):  actors p1, p2
+# c02 (login -> (exec or script)):  actors p3, p4
+# c03 (login -> (lateral or priv_esc) -> exfil): actors p5, p6
+# c04 (login -> !mfa, absence):     actors p7, p8
+# c05 (login -> !mfa -> access -> !logout, absence chain): actors p9, p10
+#
+# Rotating through this batch exercises state-machine update paths for all
+# operators: ->, or-stage, or-chain, absence, absence-chain.
+
+{"actor": "p1", "event_type": "recon"}
+{"actor": "p1", "event_type": "exploit"}
+{"actor": "p1", "event_type": "exfil"}
+{"actor": "p2", "event_type": "recon"}
+{"actor": "p2", "event_type": "exploit"}
+{"actor": "p2", "event_type": "exfil"}
+{"actor": "p3", "event_type": "login"}
+{"actor": "p3", "event_type": "exec"}
+{"actor": "p4", "event_type": "login"}
+{"actor": "p4", "event_type": "script"}
+{"actor": "p5", "event_type": "login"}
+{"actor": "p5", "event_type": "lateral"}
+{"actor": "p5", "event_type": "exfil"}
+{"actor": "p6", "event_type": "login"}
+{"actor": "p6", "event_type": "priv_esc"}
+{"actor": "p6", "event_type": "exfil"}
+{"actor": "p7", "event_type": "login"}
+{"actor": "p8", "event_type": "login"}
+{"actor": "p9", "event_type": "login"}
+{"actor": "p9", "event_type": "access"}
+{"actor": "p10", "event_type": "login"}
+{"actor": "p10", "event_type": "access"}

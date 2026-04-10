@@ -1,0 +1,13 @@
+<root type="DETECTION" name="cep_login_access">
+  <rule id="r1" name="seq">
+    <sequence within="10m" group_by="user" local_cache="true">
+      <event id="login">
+        <check type="EQU" field="type">login</check>
+      </event>
+      <event id="access">
+        <check type="EQU" field="type">access</check>
+      </event>
+      <condition>login -> access</condition>
+    </sequence>
+  </rule>
+</root>

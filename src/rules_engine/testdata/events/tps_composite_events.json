@@ -1,0 +1,69 @@
+{
+  "events": [
+    {
+      "dropped": "false",
+      "channel": "security",
+      "event_id": "evt-0001",
+      "cmd": "powershell -enc AAA",
+      "url": "/api/v2/admin/users",
+      "risk_score": 42,
+      "meta": { "env": "production" },
+      "action": "LOGIN",
+      "object": "/etc/passwd",
+      "tags": ["info", "critical"],
+      "actor": "user-alice"
+    },
+    {
+      "dropped": "false",
+      "channel": "security",
+      "event_id": "evt-0002",
+      "cmd": "/bin/bash -c id",
+      "url": "/api/v1/ping",
+      "risk_score": 15,
+      "meta": { "env": "production" },
+      "action": "login",
+      "object": "/etc/hosts",
+      "tags": ["low", "noise"],
+      "actor": "user-bob"
+    },
+    {
+      "dropped": "false",
+      "channel": "security",
+      "event_id": "evt-0003",
+      "cmd": "sh -c whoami",
+      "url": "/api/v10/resource/99",
+      "risk_score": 88,
+      "meta": { "env": "production" },
+      "action": "Login",
+      "object": "/etc/ssl/certs/ca.pem",
+      "tags": ["audit", "critical"],
+      "actor": "user-carol"
+    },
+    {
+      "dropped": "false",
+      "channel": "security",
+      "event_id": "evt-0004",
+      "cmd": "curl http://x",
+      "url": "/api/v3/health",
+      "risk_score": 20,
+      "meta": { "env": "production" },
+      "action": "logout",
+      "object": "/var/log/syslog",
+      "tags": ["critical"],
+      "actor": "user-dave"
+    },
+    {
+      "dropped": "false",
+      "channel": "security",
+      "event_id": "evt-0005",
+      "cmd": "powershell IEX(...)",
+      "url": "/api/v1/objects",
+      "risk_score": 55,
+      "meta": { "env": "production" },
+      "action": "LOGIN",
+      "object": "/etc/crontab",
+      "tags": ["x", "y", "critical"],
+      "actor": "user-erin"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+<root type="EXCLUDE" name="full_coverage_exclude">
+
+  <!-- ex1: drop synthetic health-check pings -->
+  <rule id="ex1" name="health_check">
+    <check type="EQU" field="channel">health</check>
+  </rule>
+
+  <!-- ex2: drop Prometheus scrape requests -->
+  <rule id="ex2" name="metrics_scrape">
+    <check type="EQU"   field="channel">metrics</check>
+    <check type="START" field="path">/metrics/</check>
+  </rule>
+
+  <!-- ex3: drop low-risk informational events -->
+  <rule id="ex3" name="low_risk_info">
+    <check type="EQU" field="channel">info</check>
+    <check type="LT"  field="risk_score">5</check>
+  </rule>
+
+</root>
