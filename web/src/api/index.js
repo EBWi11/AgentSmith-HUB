@@ -1379,8 +1379,14 @@ fetchComponentsByType = async (type) => {
       case 'projects':
         apiEndpoint = '/projects';
         break;
+      case 'agents':
+        apiEndpoint = '/agents';
+        break;
+      case 'skills':
+        apiEndpoint = '/skills';
+        break;
       default:
-        apiEndpoint = endpoint;
+        throw new Error(`Unsupported component type: ${type}`);
     }
     
     const response = await api.get(apiEndpoint);
