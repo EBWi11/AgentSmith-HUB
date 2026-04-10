@@ -48,12 +48,14 @@ func getAgents(c echo.Context) error {
 		}
 
 		dailyCalls, dailyAvgMs := project.GetAggregatedAgentDailyStats(id)
-		aggregatedStatus := project.GetAggregatedAgentStatus(id)
+		localStatus := project.GetAggregatedAgentStatus(id)
+		clusterStatus := project.GetClusterAggregatedAgentStatus(id)
 		agentData := map[string]interface{}{
 			"id":                   id,
 			"hasTemp":              hasTemp,
 			"raw":                  rawConfig,
-			"status":               string(aggregatedStatus),
+			"status":               string(clusterStatus),
+			"local_status":         string(localStatus),
 			"model":                a.Config.Model,
 			"process_total":        a.GetProcessTotal(),
 			"avg_latency_ms":       a.GetAvgLatencyMs(),
@@ -114,7 +116,8 @@ func getAgentDetail(c echo.Context) error {
 		"id":      id,
 		"raw":     rawConfig,
 		"hasTemp": false,
-		"status":  string(project.GetAggregatedAgentStatus(id)),
+		"status":  string(project.GetClusterAggregatedAgentStatus(id)),
+		"local_status": string(project.GetAggregatedAgentStatus(id)),
 		"model":   a.Config.Model,
 	})
 }
@@ -245,7 +248,8 @@ func updateAgentMemoryNotes(c echo.Context) error {
 		SkipVerify:  false,
 		WriteToFile: true,
 	}
-	if _, err := reloadComponentUnified(reloadReq); err != nil {
+	affectedProjects, err := reloadComponentUnified(reloadReq)
+	if err != nil {
 		if strings.TrimSpace(req.LogID) != "" {
 			_ = common.AppendAgentLogComment(strings.TrimSpace(req.LogID), common.AgentLogComment{
 				Type:             "memory_summary",
@@ -261,6 +265,7 @@ func updateAgentMemoryNotes(c echo.Context) error {
 			"error": "failed to auto-commit memory notes: " + err.Error(),
 		})
 	}
+	refreshAffectedProjectsForComponentChange("agent", id, affectedProjects, "memory_notes", true)
 
 	if strings.TrimSpace(req.LogID) != "" {
 		_ = common.AppendAgentLogComment(strings.TrimSpace(req.LogID), common.AgentLogComment{
@@ -407,9 +412,11 @@ func generateAgentMemoryFromLog(c echo.Context) error {
 		SkipVerify:  false,
 		WriteToFile: true,
 	}
-	if _, err := reloadComponentUnified(reloadReq); err != nil {
+	affectedProjects, err := reloadComponentUnified(reloadReq)
+	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to commit generated memory: " + err.Error()})
 	}
+	refreshAffectedProjectsForComponentChange("agent", id, affectedProjects, "memory_notes", true)
 
 	if err := common.AppendAgentLogComment(logID, common.AgentLogComment{
 		Type:             "memory_summary",

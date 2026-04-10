@@ -913,6 +913,25 @@ func SafeDeletePlugin(id string) ([]string, error) {
 	return affectedProjects, nil
 }
 
+// ResetManagedPluginsForResync drops only leader-managed runtime plugins while
+// preserving built-in local plugins registered at process startup.
+func ResetManagedPluginsForResync() {
+	common.GlobalMu.Lock()
+	defer common.GlobalMu.Unlock()
+
+	for id, p := range Plugins {
+		if p == nil {
+			delete(Plugins, id)
+			continue
+		}
+		if p.Type != LOCAL_PLUGIN {
+			delete(Plugins, id)
+		}
+	}
+
+	PluginsNew = make(map[string]string)
+}
+
 // Safe accessor functions for PluginsNew map
 func SetPluginNew(id, content string) {
 	common.GlobalMu.Lock()

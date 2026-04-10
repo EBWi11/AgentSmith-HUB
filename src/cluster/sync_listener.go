@@ -37,6 +37,14 @@ type SyncListener struct {
 	syncMu sync.Mutex
 }
 
+type projectRefreshPlan struct {
+	projectName string
+	source      string
+	restart     bool
+	rulesets    map[string]struct{}
+	agents      map[string]struct{}
+}
+
 var GlobalSyncListener *SyncListener
 
 // InitSyncListener initializes the sync listener
@@ -48,6 +56,40 @@ func InitSyncListener(nodeID string) {
 		executionFlagTTL: 30, // 30 seconds TTL for execution flags (reduced from 75s for faster recovery)
 		baseVersion:      "0",
 	}
+}
+
+func instructionComponentOrder(operation, componentType string) int {
+	switch operation {
+	case "delete":
+		// Reverse the dependency order for destructive batches so referenced
+		// projects/agents disappear before their templates are removed.
+		order := map[string]int{
+			"project": 0,
+			"agent":   1,
+			"skill":   2,
+			"ruleset": 3,
+			"plugin":  4,
+			"output":  5,
+			"input":   5,
+		}
+		if v, ok := order[componentType]; ok {
+			return v
+		}
+	default:
+		order := map[string]int{
+			"skill":   0,
+			"plugin":  1,
+			"input":   2,
+			"output":  2,
+			"ruleset": 2,
+			"agent":   3,
+			"project": 4,
+		}
+		if v, ok := order[componentType]; ok {
+			return v
+		}
+	}
+	return 100
 }
 
 func (sl *SyncListener) GetCurrentVersion() string {
@@ -351,13 +393,11 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	logger.Info("Executing instructions", "count", len(instructions))
 	var processedInstructions []string
 	var failedInstructions []string
+	refreshPlans := buildProjectRefreshPlans(instructions)
 
-	componentOrder := map[string]int{
-		"skill": 0, "plugin": 1, "input": 2, "output": 2, "ruleset": 2,
-		"agent": 3, "project": 4,
-	}
 	slices.SortStableFunc(instructions, func(a, b Instruction) int {
-		oa, ob := componentOrder[a.ComponentType], componentOrder[b.ComponentType]
+		oa := instructionComponentOrder(a.Operation, a.ComponentType)
+		ob := instructionComponentOrder(b.Operation, b.ComponentType)
 		if oa != ob {
 			return oa - ob
 		}
@@ -370,7 +410,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 			continue
 		}
 
-		if err := sl.applyInstruction(version); err != nil {
+		if err := sl.applyInstruction(instruction); err != nil {
 			logger.Error("Failed to apply instruction",
 				"version", version,
 				"component", instruction.ComponentName,
@@ -383,6 +423,13 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 			processedInstructions = append(processedInstructions,
 				fmt.Sprintf("v%d: %s %s %s",
 					version, instruction.Operation, instruction.ComponentType, instruction.ComponentName))
+		}
+	}
+
+	if len(failedInstructions) == 0 {
+		if err := sl.executeProjectRefreshPlans(refreshPlans); err != nil {
+			logger.Error("Failed to execute coalesced project refreshes", "error", err)
+			failedInstructions = append(failedInstructions, err.Error())
 		}
 	}
 
@@ -436,27 +483,27 @@ func (sl *SyncListener) SetFollowerExecutionFlag(nodeID string) error {
 	return nil
 }
 
-// applyInstruction applies a single instruction
-func (sl *SyncListener) applyInstruction(version int64) error {
-	key := fmt.Sprintf("cluster:instruction:%d", version)
-	data, err := common.RedisGet(key)
-	if err != nil {
-		return fmt.Errorf("failed to get instruction %d: %w", version, err)
-	}
-
-	var instruction Instruction
-	if err := json.Unmarshal([]byte(data), &instruction); err != nil {
-		return fmt.Errorf("failed to unmarshal instruction %d: %w", version, err)
-	}
-
+func extractAffectedProjectsAndSource(instruction Instruction) ([]string, string) {
 	affectedProjects := []string{}
 	source := ""
+	if len(instruction.Dependencies) > 0 {
+		affectedProjects = append(affectedProjects, instruction.Dependencies...)
+	}
 	if instruction.Metadata != nil {
 		if projects, exists := instruction.Metadata["affected_projects"]; exists {
 			if projectList, ok := projects.([]interface{}); ok {
 				for _, p := range projectList {
 					if projectStr, ok := p.(string); ok {
-						affectedProjects = append(affectedProjects, projectStr)
+						exists := false
+						for _, existing := range affectedProjects {
+							if existing == projectStr {
+								exists = true
+								break
+							}
+						}
+						if !exists {
+							affectedProjects = append(affectedProjects, projectStr)
+						}
 					}
 				}
 			}
@@ -467,7 +514,136 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 			}
 		}
 	}
+	return affectedProjects, source
+}
 
+func shouldQueueProjectRefresh(instruction Instruction) bool {
+	switch instruction.Operation {
+	case "start", "stop", "restart":
+		return false
+	case "add", "delete":
+		return instruction.ComponentType != "project"
+	case "update", "push_change", "local_push":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildProjectRefreshPlans(instructions []Instruction) map[string]*projectRefreshPlan {
+	explicitProjectOps := make(map[string]struct{})
+	for _, instruction := range instructions {
+		if instruction.ComponentType == "project" && PROJECT_OPERATION[instruction.Operation] {
+			explicitProjectOps[instruction.ComponentName] = struct{}{}
+		}
+	}
+
+	plans := make(map[string]*projectRefreshPlan)
+	for _, instruction := range instructions {
+		if !shouldQueueProjectRefresh(instruction) {
+			continue
+		}
+
+		affectedProjects, source := extractAffectedProjectsAndSource(instruction)
+		for _, projectName := range affectedProjects {
+			if _, hasExplicitOp := explicitProjectOps[projectName]; hasExplicitOp {
+				continue
+			}
+
+			plan, exists := plans[projectName]
+			if !exists {
+				plan = &projectRefreshPlan{
+					projectName: projectName,
+					source:      source,
+					rulesets:    make(map[string]struct{}),
+					agents:      make(map[string]struct{}),
+				}
+				plans[projectName] = plan
+			}
+			if source != "" {
+				plan.source = source
+			}
+
+			if instruction.ComponentType == "ruleset" && !plan.restart {
+				plan.rulesets[instruction.ComponentName] = struct{}{}
+				continue
+			}
+			if instruction.ComponentType == "agent" && !plan.restart {
+				plan.agents[instruction.ComponentName] = struct{}{}
+				continue
+			}
+
+			plan.restart = true
+			clear(plan.rulesets)
+			clear(plan.agents)
+		}
+	}
+
+	return plans
+}
+
+func (sl *SyncListener) executeProjectRefreshPlans(plans map[string]*projectRefreshPlan) error {
+	for _, plan := range plans {
+		proj, exists := project.GetProject(plan.projectName)
+		if !exists {
+			logger.Error("Follower: Project to refresh not found", "project", plan.projectName)
+			continue
+		}
+
+		triggerSource := plan.source
+		if triggerSource == "" {
+			triggerSource = "cluster_sync"
+		}
+
+		if plan.restart || (len(plan.rulesets) == 0 && len(plan.agents) == 0) {
+			if err := proj.Restart(false, triggerSource); err != nil {
+				return fmt.Errorf("failed to restart affected project %s: %w", plan.projectName, err)
+			}
+			continue
+		}
+
+		rulesetIDs := make([]string, 0, len(plan.rulesets))
+		for rulesetID := range plan.rulesets {
+			rulesetIDs = append(rulesetIDs, rulesetID)
+		}
+		slices.Sort(rulesetIDs)
+
+		for _, rulesetID := range rulesetIDs {
+			if err := proj.HotReloadRuleset(rulesetID, triggerSource); err != nil {
+				logger.Error("Follower: ruleset hot reload failed, falling back to project restart",
+					"project", plan.projectName,
+					"ruleset", rulesetID,
+					"error", err)
+				if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
+					return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", plan.projectName, restartErr)
+				}
+				break
+			}
+		}
+
+		agentIDs := make([]string, 0, len(plan.agents))
+		for agentID := range plan.agents {
+			agentIDs = append(agentIDs, agentID)
+		}
+		slices.Sort(agentIDs)
+		for _, agentID := range agentIDs {
+			if err := proj.HotReloadAgent(agentID, triggerSource); err != nil {
+				logger.Error("Follower: agent hot reload failed, falling back to project restart",
+					"project", plan.projectName,
+					"agent", agentID,
+					"error", err)
+				if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
+					return fmt.Errorf("failed to fallback restart affected project %s after agent hot reload error: %w", plan.projectName, restartErr)
+				}
+				break
+			}
+		}
+	}
+	return nil
+}
+
+// applyInstruction applies a single instruction snapshot read during Phase 1.
+func (sl *SyncListener) applyInstruction(instruction Instruction) error {
 	switch instruction.Operation {
 	case "add":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
@@ -485,11 +661,25 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 			return err
 		}
 	case "local_push":
+		if instruction.ComponentType == "project" {
+			if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+				common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+				return err
+			}
+			break
+		}
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 	case "push_change":
+		if instruction.ComponentType == "project" {
+			if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
+				common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+				return err
+			}
+			break
+		}
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
 			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 			return err
@@ -501,35 +691,6 @@ func (sl *SyncListener) applyInstruction(version int64) error {
 		return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, instruction.Operation, true)
 	default:
 		return fmt.Errorf("unknown operation: %s", instruction.Operation)
-	}
-
-	// For operations that affect projects, trigger a restart.
-	// The restart operation itself will be logged with the correct trigger source.
-	for _, projectName := range affectedProjects {
-		if proj, exists := project.GetProject(projectName); exists {
-			if instruction.ComponentType == "ruleset" {
-				if err := proj.HotReloadRuleset(instruction.ComponentName, source); err != nil {
-					logger.Error("Follower: ruleset hot reload failed, falling back to project restart",
-						"project", projectName,
-						"ruleset", instruction.ComponentName,
-						"error", err)
-					// recordOperation=false: followers execute instructions passively;
-					// operation history is written by the leader only.
-					if restartErr := proj.Restart(false, source+"_fallback"); restartErr != nil {
-						return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", projectName, restartErr)
-					}
-				}
-				continue
-			}
-			// recordOperation=false: avoid duplicate entries in operation history
-			// (the leader already recorded the triggering operation).
-			if err := proj.Restart(false, source); err != nil {
-				// Restart already logs its own failure. We just need to bubble up the error.
-				return fmt.Errorf("failed to restart affected project %s: %w", projectName, err)
-			}
-		} else {
-			logger.Error("Follower: Project to restart not found", "project", projectName)
-		}
 	}
 
 	return nil
@@ -634,6 +795,7 @@ func (sl *SyncListener) clearAllLocalComponents() {
 
 	// Step 4: Clear all raw config maps (memory cleanup)
 	// This includes plugins, inputs, outputs, rulesets, projects
+	plugin.ResetManagedPluginsForResync()
 	common.ClearAllRawConfigsForAllTypes()
 
 	// Step 5: Give system a moment to fully release all resources
@@ -729,6 +891,9 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		logger.Debug("Deleted project instance", "name", componentName)
 
 	case "plugin":
+		if _, err := plugin.SafeDeletePlugin(componentName); err != nil {
+			return fmt.Errorf("failed to delete plugin %s: %w", componentName, err)
+		}
 		logger.Debug("Deleted plugin instance", "name", componentName)
 
 	case "skill":

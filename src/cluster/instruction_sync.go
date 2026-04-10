@@ -689,7 +689,25 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		return true
 	})
 
-	// 5. Add all projects LAST (projects depend on all above components)
+	// 5. Add all skills before agents resolve them.
+	common.ForEachRawConfig("skill", func(skillID, config string) bool {
+		if err := publishInstructionDirectly(skillID, "skill", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish skill add instruction", "skill", skillID, "error", err)
+			failedComponents = append(failedComponents, fmt.Sprintf("skill:%s", skillID))
+		}
+		return true
+	})
+
+	// 6. Add all agents before projects reference them.
+	common.ForEachRawConfig("agent", func(agentID, config string) bool {
+		if err := publishInstructionDirectly(agentID, "agent", config, "add", nil, nil); err != nil {
+			logger.Error("Failed to publish agent add instruction", "agent", agentID, "error", err)
+			failedComponents = append(failedComponents, fmt.Sprintf("agent:%s", agentID))
+		}
+		return true
+	})
+
+	// 7. Add all projects LAST (projects depend on all above components)
 	common.ForEachRawConfig("project", func(projectID, config string) bool {
 		if err := publishInstructionDirectly(projectID, "project", config, "add", nil, nil); err != nil {
 			logger.Error("Failed to publish project add instruction", "project", projectID, "error", err)
@@ -698,7 +716,7 @@ func (im *InstructionManager) InitializeLeaderInstructions() error {
 		return true
 	})
 
-	// 6. Start running projects
+	// 8. Start running projects
 
 	if userIntentions, err := common.GetAllProjectUserIntentions(); err == nil {
 		for projectID, wantRunning := range userIntentions {

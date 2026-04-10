@@ -485,48 +485,59 @@ func (c *KafkaConsumer) run() {
 // drainRemainingMessages processes any remaining messages in the Kafka client
 func (c *KafkaConsumer) drainRemainingMessages() {
 	// Set a timeout for draining
-	timeout := time.After(5 * time.Second)
+	drainDeadline := time.Now().Add(5 * time.Second)
 	drainCount := 0
 
 	for {
-		select {
-		case <-timeout:
+		if time.Now().After(drainDeadline) {
 			if drainCount > 0 {
 				logger.Info("[KafkaConsumer] Drain timeout reached", "processed_messages", drainCount)
 			}
 			return
-		default:
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			fetches := c.Client.PollFetches(ctx)
-			cancel()
+		}
 
-			if fetches.Empty() {
-				if drainCount > 0 {
-					logger.Info("[KafkaConsumer] Finished draining messages", "processed_messages", drainCount)
-				}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		fetches := c.Client.PollFetches(ctx)
+		cancel()
+
+		if fetches.Empty() {
+			if drainCount > 0 {
+				logger.Info("[KafkaConsumer] Finished draining messages", "processed_messages", drainCount)
+			}
+			return
+		}
+
+		allDelivered := true
+		fetches.EachRecord(func(rec *kgo.Record) {
+			var m map[string]interface{}
+			if err := sonic.Unmarshal(rec.Value, &m); err != nil {
+				logger.Error("[KafkaConsumer] failed to deserialize message during drain", "error", err.Error())
 				return
 			}
 
-			fetches.EachRecord(func(rec *kgo.Record) {
-				var m map[string]interface{}
-				if err := sonic.Unmarshal(rec.Value, &m); err != nil {
-					logger.Error("[KafkaConsumer] failed to deserialize message during drain", "error", err.Error())
+			for {
+				if time.Now().After(drainDeadline) {
+					logger.Error("[KafkaConsumer] drain deadline reached before message could be forwarded, skipping offset commit")
+					allDelivered = false
 					return
 				}
 
-				// Use non-blocking send during drain
 				select {
 				case c.MsgChan <- m:
 					drainCount++
-				default:
-					logger.Error("[KafkaConsumer] message channel closed during drain, dropping message")
+					return
+				case <-time.After(50 * time.Millisecond):
 				}
-			})
-
-			// Commit any remaining offsets
-			if err := c.Client.CommitUncommittedOffsets(context.Background()); err != nil {
-				logger.Error("[KafkaConsumer] failed to commit offsets during drain", "err", err.Error())
 			}
+		})
+
+		if !allDelivered {
+			return
+		}
+
+		// Commit only after every drained message has been forwarded to MsgChan.
+		if err := c.Client.CommitUncommittedOffsets(context.Background()); err != nil {
+			logger.Error("[KafkaConsumer] failed to commit offsets during drain", "err", err.Error())
 		}
 	}
 }

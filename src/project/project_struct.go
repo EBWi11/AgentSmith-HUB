@@ -9,6 +9,7 @@ import (
 	"AgentSmith-HUB/rules_engine"
 	"AgentSmith-HUB/skill"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -664,11 +665,7 @@ func ForEachAgent(fn func(id string, a *agent.Agent) bool) {
 	}
 }
 
-// GetAggregatedAgentStatus returns an aggregated runtime status for the given agent ID
-// across all PNS instances and the template agent. This is primarily used for UI display
-// (e.g., dashboard) so that an agent is shown as "running" if any of its PNS instances
-// are running in any project.
-func GetAggregatedAgentStatus(agentID string) common.Status {
+func getLocalAggregatedAgentStatus(agentID string) common.Status {
 	common.GlobalMu.RLock()
 	defer common.GlobalMu.RUnlock()
 
@@ -714,6 +711,96 @@ func GetAggregatedAgentStatus(agentID string) common.Status {
 		return templateStatus
 	}
 	return common.StatusStopped
+}
+
+func collectProjectsReferencingAgent(agentID string) []string {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	projects := make([]string, 0)
+	for projectID, proj := range GlobalProject.Projects {
+		if proj == nil {
+			continue
+		}
+		for _, node := range proj.BackUpFlowNodes {
+			if (node.FromType == "AGENT" && node.FromID == agentID) || (node.ToType == "AGENT" && node.ToID == agentID) {
+				projects = append(projects, projectID)
+				break
+			}
+		}
+	}
+	return projects
+}
+
+// GetAggregatedAgentStatus returns the local-node view aggregated across the template
+// agent and this process's PNS agent instances. It is kept for local inspection and as
+// a fallback when cluster-wide Redis state is unavailable.
+func GetAggregatedAgentStatus(agentID string) common.Status {
+	return getLocalAggregatedAgentStatus(agentID)
+}
+
+// GetClusterAggregatedAgentStatus derives an agent's cluster-wide runtime status from
+// project real-state hashes in Redis. This avoids mixing local in-memory PNS state with
+// cluster-wide traffic metrics in the UI.
+func GetClusterAggregatedAgentStatus(agentID string) common.Status {
+	projectIDs := collectProjectsReferencingAgent(agentID)
+	if len(projectIDs) == 0 {
+		return getLocalAggregatedAgentStatus(agentID)
+	}
+
+	nodeSet := make(map[string]struct{})
+	if nodeID := strings.TrimSpace(common.GetNodeID()); nodeID != "" {
+		nodeSet[nodeID] = struct{}{}
+	}
+	if nodes, err := common.GetKnownNodes(); err == nil {
+		for _, nodeID := range nodes {
+			nodeID = strings.TrimSpace(nodeID)
+			if nodeID != "" {
+				nodeSet[nodeID] = struct{}{}
+			}
+		}
+	}
+
+	hasStateData := false
+	var hasRunning, hasStarting, hasStopping, hasError bool
+	for nodeID := range nodeSet {
+		nodeStates, err := common.GetAllProjectRealStates(nodeID)
+		if err != nil {
+			continue
+		}
+		hasStateData = true
+		for _, projectID := range projectIDs {
+			switch common.Status(nodeStates[projectID]) {
+			case common.StatusRunning:
+				hasRunning = true
+			case common.StatusStarting:
+				hasStarting = true
+			case common.StatusStopping:
+				hasStopping = true
+			case common.StatusError:
+				hasError = true
+			}
+		}
+	}
+
+	// Prefer active runtime states over local template state so cluster dashboards
+	// reflect whether the agent is actually serving traffic anywhere in the cluster.
+	if hasRunning {
+		return common.StatusRunning
+	}
+	if hasStarting {
+		return common.StatusStarting
+	}
+	if hasError {
+		return common.StatusError
+	}
+	if hasStopping {
+		return common.StatusStopping
+	}
+	if hasStateData {
+		return common.StatusStopped
+	}
+	return getLocalAggregatedAgentStatus(agentID)
 }
 
 // GetAggregatedAgentDailyStats returns aggregated daily call count and average latency (ms)

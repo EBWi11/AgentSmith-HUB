@@ -262,13 +262,10 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 						"panic", r)
 				}
 			}()
-
-			select {
-			case *ch <- msg:
-			default:
-				logger.Error("Agent downstream channel full, dropping message",
-					"agent", a.Id, "downstream", pns)
-			}
+			// Block here to preserve pipeline delivery semantics. Project stop / hot
+			// reload paths drain and disconnect upstream edges before stopping
+			// components, so backpressure should propagate instead of dropping data.
+			*ch <- msg
 		}(dsPNS, dsCh, result)
 	}
 }

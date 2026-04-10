@@ -1299,6 +1299,21 @@ type rulesetSwapPlan struct {
 	downstreamBackup map[string]*chan map[string]interface{}
 }
 
+type agentInboundEdge struct {
+	fromType string
+	fromID   string
+	fromPNS  string
+	toPNS    string
+}
+
+type agentSwapPlan struct {
+	pns              string
+	oldAgent         *agent.Agent
+	newAgent         *agent.Agent
+	upstreamBackup   map[string]*chan map[string]interface{}
+	downstreamBackup map[string]*chan map[string]interface{}
+}
+
 func (p *Project) collectRulesetPNSByID(rulesetID string) map[string]struct{} {
 	targetPNS := make(map[string]struct{})
 	for _, node := range p.FlowNodes {
@@ -1358,6 +1373,108 @@ func (p *Project) reconnectRulesetInboundEdges(edges []rulesetInboundEdge) {
 		case "AGENT":
 			SafeSetAgentDownstream(e.fromPNS, e.toPNS, ch)
 		}
+	}
+}
+
+func (p *Project) collectAgentPNSByID(agentID string) map[string]struct{} {
+	targetPNS := make(map[string]struct{})
+	for _, node := range p.FlowNodes {
+		if node.ToType == "AGENT" && node.ToID == agentID && node.ToInit {
+			targetPNS[node.ToPNS] = struct{}{}
+		}
+		if node.FromType == "AGENT" && node.FromID == agentID && node.FromInit {
+			targetPNS[node.FromPNS] = struct{}{}
+		}
+	}
+	return targetPNS
+}
+
+func (p *Project) collectAgentInboundEdges(targetPNS map[string]struct{}) []agentInboundEdge {
+	edges := make([]agentInboundEdge, 0)
+	for _, node := range p.FlowNodes {
+		if node.ToType != "AGENT" {
+			continue
+		}
+		if _, ok := targetPNS[node.ToPNS]; !ok {
+			continue
+		}
+		edges = append(edges, agentInboundEdge{
+			fromType: node.FromType,
+			fromID:   node.FromID,
+			fromPNS:  node.FromPNS,
+			toPNS:    node.ToPNS,
+		})
+	}
+	return edges
+}
+
+func (p *Project) disconnectAgentInboundEdges(edges []agentInboundEdge) {
+	for _, e := range edges {
+		switch e.fromType {
+		case "INPUT":
+			SafeDeleteInputDownstream(e.fromID, e.toPNS)
+		case "RULESET":
+			SafeDeletePNSRulesetDownstream(e.fromPNS, e.toPNS)
+		case "AGENT":
+			SafeDeleteAgentDownstream(e.fromPNS, e.toPNS)
+		}
+	}
+}
+
+func (p *Project) reconnectAgentInboundEdges(edges []agentInboundEdge) {
+	for _, e := range edges {
+		ch, exists := p.MsgChannels[e.toPNS]
+		if !exists || ch == nil {
+			continue
+		}
+		switch e.fromType {
+		case "INPUT":
+			SafeSetInputDownstream(e.fromID, e.toPNS, ch)
+		case "RULESET":
+			SafeSetPNSRulesetDownstream(e.fromPNS, e.toPNS, ch)
+		case "AGENT":
+			SafeSetAgentDownstream(e.fromPNS, e.toPNS, ch)
+		}
+	}
+}
+
+func (p *Project) waitForAgentDrain(agentID string, targetPNS map[string]struct{}) {
+	checkInterval := 100 * time.Millisecond
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	logger.Info("Waiting for agent drain before hot reload", "project", p.Id, "agent", agentID, "instances", len(targetPNS))
+
+	for {
+		allDrained := true
+		pendingMessages := 0
+
+		for pns := range targetPNS {
+			oldAgent, ok := GetPNSAgent(pns)
+			if !ok || oldAgent == nil {
+				continue
+			}
+			for _, ch := range oldAgent.UpStream {
+				if ch == nil {
+					continue
+				}
+				if chLen := len(*ch); chLen > 0 {
+					pendingMessages += chLen
+					allDrained = false
+				}
+			}
+		}
+
+		if allDrained {
+			logger.Info("Agent drain completed", "project", p.Id, "agent", agentID)
+			return
+		}
+
+		logger.Debug("Waiting for agent pending messages to drain",
+			"project", p.Id,
+			"agent", agentID,
+			"pending_messages", pendingMessages)
+		<-ticker.C
 	}
 }
 
@@ -1456,6 +1573,101 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 
 	p.reconnectRulesetInboundEdges(inboundEdges)
 	logger.Info("Ruleset hot reload completed", "project", p.Id, "ruleset", rulesetID, "triggered_by", triggeredBy, "instances", len(swapPlans))
+	return nil
+}
+
+// HotReloadAgent swaps all running PNS instances of an agent in this project without restarting the project.
+func (p *Project) HotReloadAgent(agentID string, triggeredBy string) (err error) {
+	common.ProjectOperationMu.Lock()
+	defer common.ProjectOperationMu.Unlock()
+
+	if p.Status != common.StatusRunning {
+		return nil
+	}
+
+	template, exists := GetAgent(agentID)
+	if !exists || template == nil {
+		return fmt.Errorf("agent template not found: %s", agentID)
+	}
+
+	targetPNS := p.collectAgentPNSByID(agentID)
+	if len(targetPNS) == 0 {
+		return nil
+	}
+
+	swapPlans := make([]agentSwapPlan, 0, len(targetPNS))
+	for pns := range targetPNS {
+		oldAgent, ok := GetPNSAgent(pns)
+		if !ok || oldAgent == nil {
+			return fmt.Errorf("pns agent not found: %s", pns)
+		}
+		newAgent, newErr := agent.NewFromExisting(template, pns)
+		if newErr != nil {
+			return fmt.Errorf("failed to build new agent instance for %s: %w", pns, newErr)
+		}
+		newAgent.ProjectID = oldAgent.ProjectID
+
+		upstreamBackup := make(map[string]*chan map[string]interface{}, len(oldAgent.UpStream))
+		for k, ch := range oldAgent.UpStream {
+			upstreamBackup[k] = ch
+		}
+		downstreamBackup := make(map[string]*chan map[string]interface{}, len(oldAgent.DownStream))
+		for k, ch := range oldAgent.DownStream {
+			downstreamBackup[k] = ch
+		}
+
+		swapPlans = append(swapPlans, agentSwapPlan{
+			pns:              pns,
+			oldAgent:         oldAgent,
+			newAgent:         newAgent,
+			upstreamBackup:   upstreamBackup,
+			downstreamBackup: downstreamBackup,
+		})
+	}
+
+	inboundEdges := p.collectAgentInboundEdges(targetPNS)
+	p.disconnectAgentInboundEdges(inboundEdges)
+	p.waitForAgentDrain(agentID, targetPNS)
+	activatedPNS := make(map[string]struct{}, len(swapPlans))
+
+	defer func() {
+		if err != nil {
+			for _, plan := range swapPlans {
+				if _, activated := activatedPNS[plan.pns]; !activated && plan.newAgent != nil {
+					plan.newAgent.SetStatus(common.StatusError, fmt.Errorf("discarding agent instance after hot reload failure"))
+					_ = plan.newAgent.Stop()
+				}
+			}
+			p.reconnectAgentInboundEdges(inboundEdges)
+		}
+	}()
+
+	for _, plan := range swapPlans {
+		stopErr := plan.oldAgent.Stop()
+		if stopErr != nil {
+			err = fmt.Errorf("failed to stop old agent %s: %w", plan.pns, stopErr)
+			return err
+		}
+
+		plan.newAgent.UpStream = plan.upstreamBackup
+		plan.newAgent.DownStream = make(map[string]*chan map[string]interface{}, len(plan.downstreamBackup))
+		for k, ch := range plan.downstreamBackup {
+			plan.newAgent.DownStream[k] = ch
+		}
+
+		startErr := plan.newAgent.Start()
+		if startErr != nil {
+			err = fmt.Errorf("failed to start new agent %s: %w", plan.pns, startErr)
+			return err
+		}
+
+		SetPNSAgent(plan.pns, plan.newAgent)
+		p.Agents[plan.pns] = plan.newAgent
+		activatedPNS[plan.pns] = struct{}{}
+	}
+
+	p.reconnectAgentInboundEdges(inboundEdges)
+	logger.Info("Agent hot reload completed", "project", p.Id, "agent", agentID, "triggered_by", triggeredBy, "instances", len(swapPlans))
 	return nil
 }
 
