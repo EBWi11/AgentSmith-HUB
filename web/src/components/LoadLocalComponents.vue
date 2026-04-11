@@ -128,6 +128,7 @@ const loading = ref(false)
 const error = ref(null)
 const verifying = ref(false)
 const expandedChanges = ref(new Set())
+const seenChangeKeys = ref(new Set())
 
 // Global message component
 const $message = inject('$message', window?.$toast)
@@ -177,6 +178,10 @@ async function refreshChanges() {
       verifyError: null,
       errorLine: null
     })) || []
+
+    syncExpandedChanges(changes.value)
+    await nextTick()
+    refreshEditorsLayout()
     
   } catch (e) {
     error.value = 'Failed to fetch local changes: ' + (e?.message || 'Unknown error')
@@ -210,6 +215,22 @@ function refreshEditorsLayout() {
 
 function getChangeKey(change) {
   return `${change.type}:${change.id}`
+}
+
+function syncExpandedChanges(nextChanges) {
+  const nextKeys = new Set(nextChanges.map(getChangeKey))
+  const nextExpanded = new Set(
+    [...expandedChanges.value].filter(key => nextKeys.has(key))
+  )
+
+  nextKeys.forEach(key => {
+    if (!seenChangeKeys.value.has(key)) {
+      nextExpanded.add(key)
+    }
+  })
+
+  expandedChanges.value = nextExpanded
+  seenChangeKeys.value = nextKeys
 }
 
 function isChangeExpanded(change) {
