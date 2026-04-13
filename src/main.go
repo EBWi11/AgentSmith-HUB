@@ -572,39 +572,20 @@ func loadLocalProjects() {
 				// User wants project to be running, try to start it with retries
 				logger.Info("Restoring project to running state based on user intention", "id", p.Id)
 
-				var startErr error
-				for attempt := 1; attempt <= 3; attempt++ {
-					startErr = p.Start(true)
-					if startErr == nil {
-						// Success
-						logger.Info("Successfully restored project to running state",
-							"id", p.Id,
-							"attempt", attempt)
-						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
-							"triggered_by": "system_restore",
-							"node_id":      common.Config.LocalIP,
-							"attempt":      attempt,
-						})
-						break
-					}
-
-					// Failed
-					if attempt < 3 {
-						logger.Error("Failed to start project during restore, retrying",
-							"project", p.Id,
-							"attempt", attempt,
-							"error", startErr)
-						time.Sleep(time.Duration(2*(1<<uint(attempt-1))) * time.Second) // 2s, 4s
-					} else {
-						logger.Error("Failed to start project during restore after 3 attempts",
-							"project", p.Id,
-							"error", startErr)
-						common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", startErr.Error(), map[string]interface{}{
-							"triggered_by": "system_restore",
-							"node_id":      common.Config.LocalIP,
-							"attempts":     3,
-						})
-					}
+				if startErr := p.StartConverged(); startErr == nil {
+					logger.Info("Successfully restored project to running state", "id", p.Id)
+					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "success", "", map[string]interface{}{
+						"triggered_by": "system_restore",
+						"node_id":      common.Config.LocalIP,
+					})
+				} else {
+					logger.Error("Failed to start project during restore after convergence attempts",
+						"project", p.Id,
+						"error", startErr)
+					common.RecordProjectOperation(common.OpTypeProjectStart, p.Id, "failed", startErr.Error(), map[string]interface{}{
+						"triggered_by": "system_restore",
+						"node_id":      common.Config.LocalIP,
+					})
 				}
 			} else {
 				p.Status = common.StatusStopped

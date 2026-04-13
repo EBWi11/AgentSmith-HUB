@@ -242,6 +242,10 @@ func getProject(c echo.Context) error {
 		"path":              formalPath,
 		"status_changed_at": p.StatusChangedAt,
 	}
+	if p.Status == common.StatusError && p.Err != nil {
+		response["error"] = p.Err.Error()
+		response["errorMessage"] = p.Err.Error()
+	}
 	if err == nil && len(sampleData) > 0 {
 		response["sample_data"] = sampleData
 		response["data_source"] = dataSource

@@ -197,6 +197,51 @@ func (a *Agent) SetStatus(status common.Status, err error) {
 	a.StatusChangedAt = &t
 }
 
+func (a *Agent) hasRuntimeState() bool {
+	return a.stopChan != nil
+}
+
+func (a *Agent) resetToStoppedForRestart() {
+	if a.stopChan != nil {
+		select {
+		case <-a.stopChan:
+		default:
+			close(a.stopChan)
+		}
+		a.stopChan = nil
+	}
+	a.Err = nil
+	a.Status = common.StatusStopped
+}
+
+func (a *Agent) reconcileBeforeStart() error {
+	switch a.Status {
+	case common.StatusRunning:
+		if a.hasRuntimeState() {
+			return nil
+		}
+		logger.Error("Agent marked running without active runtime; resetting before start", "id", a.Id)
+		a.resetToStoppedForRestart()
+	case common.StatusStarting, common.StatusStopping, common.StatusError:
+		logger.Info("Reconciling agent runtime before start", "id", a.Id, "status", a.Status)
+		if err := a.Stop(); err != nil {
+			logger.Error("Agent stop during start reconciliation returned error; forcing cleanup",
+				"id", a.Id,
+				"error", err)
+			a.resetToStoppedForRestart()
+		}
+	case common.StatusStopped:
+		if a.hasRuntimeState() {
+			logger.Info("Agent has stale runtime state while stopped; cleaning up before start", "id", a.Id)
+			a.resetToStoppedForRestart()
+		}
+	default:
+		return fmt.Errorf("agent %s is not startable (status: %s)", a.Id, a.Status)
+	}
+
+	return nil
+}
+
 func (a *Agent) GetProcessTotal() uint64 {
 	return atomic.LoadUint64(&a.processTotal)
 }

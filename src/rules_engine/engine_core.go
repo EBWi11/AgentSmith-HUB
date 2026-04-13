@@ -113,6 +113,14 @@ func (r *Ruleset) Start() error {
 		}
 	}()
 
+	if err := r.reconcileBeforeStart(); err != nil {
+		return err
+	}
+	if r.Status == common.StatusRunning {
+		logger.Info("Ruleset already running; start request is a no-op", "ruleset", r.RulesetID)
+		return nil
+	}
+
 	// Allow restart from stopped state or from error state
 	if r.Status != common.StatusStopped && r.Status != common.StatusError {
 		return fmt.Errorf("cannot start ruleset engine, current status: %s", r.Status)
@@ -143,7 +151,9 @@ func (r *Ruleset) Start() error {
 	}
 
 	// Auto-scaling goroutine
+	r.wg.Add(1)
 	go func() {
+		defer r.wg.Done()
 		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
 		minPoolSize := getMinPoolSize()
@@ -194,7 +204,9 @@ func (r *Ruleset) Start() error {
 	}()
 
 	for upID, upCh := range r.UpStream {
+		r.wg.Add(1)
 		go func(id string, ch *chan map[string]interface{}) {
+			defer r.wg.Done()
 			defer func() {
 				if panicErr := recover(); panicErr != nil {
 					logger.Error("Panic in ruleset processing goroutine", "ruleset", r.RulesetID, "upstream", id, "panic", panicErr)
@@ -260,6 +272,44 @@ func (r *Ruleset) Start() error {
 	}
 
 	r.SetStatus(common.StatusRunning, nil)
+	return nil
+}
+
+func (r *Ruleset) hasRuntimeState() bool {
+	return r.stopChan != nil || r.antsPool != nil
+}
+
+func (r *Ruleset) resetToStoppedForRestart() {
+	r.cleanup()
+	r.Err = nil
+	r.Status = common.StatusStopped
+}
+
+func (r *Ruleset) reconcileBeforeStart() error {
+	switch r.Status {
+	case common.StatusRunning:
+		if r.hasRuntimeState() {
+			return nil
+		}
+		logger.Error("Ruleset marked running without active runtime; resetting before start", "ruleset", r.RulesetID)
+		r.resetToStoppedForRestart()
+	case common.StatusStarting, common.StatusStopping, common.StatusError:
+		logger.Info("Reconciling ruleset runtime before start", "ruleset", r.RulesetID, "status", r.Status)
+		if err := r.Stop(); err != nil {
+			logger.Error("Ruleset stop during start reconciliation returned error; forcing cleanup",
+				"ruleset", r.RulesetID,
+				"error", err)
+			r.resetToStoppedForRestart()
+		}
+	case common.StatusStopped:
+		if r.hasRuntimeState() {
+			logger.Info("Ruleset has stale runtime state while stopped; cleaning up before start", "ruleset", r.RulesetID)
+			r.resetToStoppedForRestart()
+		}
+	default:
+		return fmt.Errorf("cannot start ruleset engine, current status: %s", r.Status)
+	}
+
 	return nil
 }
 

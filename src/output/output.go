@@ -293,6 +293,44 @@ func (out *Output) cleanup() {
 	out.UpStream = make(map[string]*chan map[string]interface{})
 }
 
+func (out *Output) hasRuntimeState() bool {
+	return out.stopChan != nil || out.kafkaProducer != nil || out.elasticsearchProducer != nil || out.clickhouseProducer != nil
+}
+
+func (out *Output) resetToStoppedForRestart() {
+	out.cleanup()
+	out.Err = nil
+	out.Status = common.StatusStopped
+}
+
+func (out *Output) reconcileBeforeStart() error {
+	switch out.Status {
+	case common.StatusRunning:
+		if out.hasRuntimeState() {
+			return nil
+		}
+		logger.Error("Output marked running without active runtime; resetting before start", "output", out.Id)
+		out.resetToStoppedForRestart()
+	case common.StatusStarting, common.StatusStopping, common.StatusError:
+		logger.Info("Reconciling output runtime before start", "output", out.Id, "status", out.Status)
+		if err := out.Stop(); err != nil {
+			logger.Error("Output stop during start reconciliation returned error; forcing cleanup",
+				"output", out.Id,
+				"error", err)
+			out.resetToStoppedForRestart()
+		}
+	case common.StatusStopped:
+		if out.hasRuntimeState() {
+			logger.Info("Output has stale runtime state while stopped; cleaning up before start", "output", out.Id)
+			out.resetToStoppedForRestart()
+		}
+	default:
+		return fmt.Errorf("output %s is not startable (status: %s)", out.Id, out.Status)
+	}
+
+	return nil
+}
+
 // enhanceMessageWithProjectNodeSequence adds ProjectNodeSequence and output metadata to the message
 func (out *Output) enhanceMessageWithProjectNodeSequence(msg map[string]interface{}) map[string]interface{} {
 	// Create a deep copy of the original message to avoid concurrent map access issues
@@ -456,6 +494,14 @@ func (out *Output) Start() error {
 			out.SetStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
 		}
 	}()
+
+	if err := out.reconcileBeforeStart(); err != nil {
+		return err
+	}
+	if out.Status == common.StatusRunning {
+		logger.Info("Output already running; start request is a no-op", "output", out.Id)
+		return nil
+	}
 
 	// Allow restart from stopped state or from error state
 	if out.Status != common.StatusStopped && out.Status != common.StatusError {

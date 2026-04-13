@@ -22,6 +22,8 @@ import (
 )
 
 var GlobalProject *GlobalProjectInfo
+var projectAutoStopMu sync.Mutex
+var projectAutoStopInFlight = make(map[string]struct{})
 
 // collectAllComponentStats collects current statistics from all running components
 // Optimized for high concurrency with minimal lock time
@@ -337,7 +339,7 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 
 	switch action {
 	case "start":
-		err := proj.Start(true)
+		err := proj.StartConverged()
 		if err != nil {
 			// Record operation failure only if requested
 			if recordOperation {
@@ -393,6 +395,22 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 	}
 }
 
+func markProjectAutoStopInFlight(projectID string) bool {
+	projectAutoStopMu.Lock()
+	defer projectAutoStopMu.Unlock()
+	if _, exists := projectAutoStopInFlight[projectID]; exists {
+		return false
+	}
+	projectAutoStopInFlight[projectID] = struct{}{}
+	return true
+}
+
+func clearProjectAutoStopInFlight(projectID string) {
+	projectAutoStopMu.Lock()
+	defer projectAutoStopMu.Unlock()
+	delete(projectAutoStopInFlight, projectID)
+}
+
 // GetProjectCommandHandler returns the project command handler for registration
 func GetProjectCommandHandler() interface{} {
 	return &projectCommandHandler{}
@@ -410,7 +428,7 @@ func checkAllProjectComponentsImpl() []common.ProjectComponentError {
 		}
 
 		// Check input components
-		for _, inputComp := range proj.Inputs {
+		for _, inputComp := range proj.GetProjectInputs() {
 			if inputComp.Err != nil {
 				errors = append(errors, common.ProjectComponentError{
 					ProjectID:   projectID,
@@ -423,7 +441,7 @@ func checkAllProjectComponentsImpl() []common.ProjectComponentError {
 		}
 
 		// Check output components
-		for _, outputComp := range proj.Outputs {
+		for _, outputComp := range proj.GetProjectOutputs() {
 			if outputComp.Err != nil {
 				errors = append(errors, common.ProjectComponentError{
 					ProjectID:   projectID,
@@ -436,7 +454,7 @@ func checkAllProjectComponentsImpl() []common.ProjectComponentError {
 		}
 
 		// Check ruleset components
-		for _, rulesetComp := range proj.Rulesets {
+		for _, rulesetComp := range proj.GetProjectRulesets() {
 			if rulesetComp.Err != nil {
 				errors = append(errors, common.ProjectComponentError{
 					ProjectID:   projectID,
@@ -448,13 +466,28 @@ func checkAllProjectComponentsImpl() []common.ProjectComponentError {
 			}
 		}
 
+		// Check agent components
+		for _, agentComp := range proj.GetProjectAgents() {
+			if agentComp.Err != nil {
+				errors = append(errors, common.ProjectComponentError{
+					ProjectID:   projectID,
+					ComponentID: agentComp.Id,
+					Type:        "agent",
+					Status:      agentComp.Status,
+					Error:       agentComp.Err,
+				})
+			}
+		}
+
 		return true // Continue iteration
 	})
 
 	return errors
 }
 
-// SetProjectErrorStatus sets a project status to error with detailed error information
+// SetProjectErrorStatus force-stops a project after component failure and leaves
+// the project in error state so callers can distinguish crash recovery from a
+// user-requested stop.
 func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectComponentError) {
 	proj, exists := GetProject(projectID)
 	if !exists {
@@ -473,14 +506,31 @@ func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectCom
 		errorMsg.WriteString(fmt.Sprintf("%s %s: %v", compErr.Type, compErr.ComponentID, compErr.Error))
 	}
 
-	// Set project to error status
-	err := fmt.Errorf("%s", errorMsg.String())
-	proj.SetProjectStatus(common.StatusStopped, err)
+	componentErr := fmt.Errorf("%s", errorMsg.String())
 
-	logger.Error("Project set to error status due to component failures",
-		"project", projectID,
-		"component_count", len(componentErrors),
-		"error", err)
+	if !markProjectAutoStopInFlight(projectID) {
+		logger.Info("Project auto-stop already in progress; skipping duplicate request",
+			"project", projectID)
+		return
+	}
+
+	go func(proj *Project, errMsg error, errCount int) {
+		defer clearProjectAutoStopInFlight(projectID)
+
+		// Execute the full stop path so channels and component goroutines are cleaned
+		// up instead of only flipping the project status in memory/Redis.
+		stopErr := proj.Stop(true)
+		if stopErr != nil {
+			errMsg = fmt.Errorf("%s; project stop failed during crash recovery: %v", errMsg.Error(), stopErr)
+		}
+
+		proj.SetProjectStatus(common.StatusError, errMsg)
+
+		logger.Error("Project set to error status due to component failures",
+			"project", projectID,
+			"component_count", errCount,
+			"error", errMsg)
+	}(proj, componentErr, len(componentErrors))
 }
 
 func init() {
@@ -1088,6 +1138,22 @@ func (p *Project) Start(lock bool) error {
 		}
 	}()
 
+	if p.Status == common.StatusRunning && p.areAllComponentsRunning() {
+		logger.Info("Project already running; start request is a no-op", "project", p.Id)
+		return nil
+	}
+
+	if p.Status == common.StatusError || p.Status == common.StatusStarting || p.Status == common.StatusRunning {
+		logger.Info("Reconciling project to stopped before start",
+			"project", p.Id,
+			"current_status", p.Status)
+		if stopErr := p.Stop(false); stopErr != nil {
+			logger.Error("Project pre-start reconciliation stop returned error; continuing with restart attempt",
+				"project", p.Id,
+				"error", stopErr)
+		}
+	}
+
 	err := p.parseContent()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("project parse error: %s", err.Error()))
@@ -1095,8 +1161,8 @@ func (p *Project) Start(lock bool) error {
 	}
 
 	// Atomic status check and transition
-	// Allow starting from stopped, error, or already running states
-	if !p.atomicStatusTransition([]common.Status{common.StatusStopped, common.StatusError, common.StatusRunning}, common.StatusStarting) {
+	// Allow starting only once the project has converged to a quiescent state.
+	if !p.atomicStatusTransition([]common.Status{common.StatusStopped, common.StatusError}, common.StatusStarting) {
 		return fmt.Errorf("project is not in startable state, current status: %s", p.Status)
 	}
 
@@ -1282,6 +1348,12 @@ func (p *Project) Restart(recordOperation bool, triggeredBy string) (err error) 
 
 	logger.Info("Project restarted successfully", "project", p.Id)
 	return nil
+}
+
+// StartConverged starts the project and retries until all components reach
+// running state or the retry budget is exhausted.
+func (p *Project) StartConverged() error {
+	return p.startWithRetry()
 }
 
 type rulesetInboundEdge struct {
@@ -2613,6 +2685,18 @@ func (p *Project) runComponents() error {
 // updateProjectStatusRedis writes status to Redis hash and publishes event with error handling
 func updateProjectStatusRedis(projectID string, status common.Status, t time.Time) {
 	nodeid := common.GetNodeID()
+	if common.GetRedisClient() == nil {
+		logger.Debug("Skipping project status Redis update because Redis client is not initialized",
+			"project_id", projectID,
+			"status", status)
+		return
+	}
+	if strings.TrimSpace(nodeid) == "" {
+		logger.Debug("Skipping project status Redis update because node id is empty",
+			"project_id", projectID,
+			"status", status)
+		return
+	}
 
 	if err := common.SetProjectRealState(common.GetNodeID(), projectID, string(status)); err != nil {
 		logger.Error("Failed to update project real state in Redis", "node_id", nodeid, "project_id", projectID, "status", status, "error", err)

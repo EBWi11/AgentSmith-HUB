@@ -117,10 +117,15 @@ func newLLMTraceStep(round int, model string, input []Message, resp *ChatResult,
 // Start launches a goroutine for each upstream channel.
 // Each message is treated as an independent event.
 func (a *Agent) Start() error {
+	if err := a.reconcileBeforeStart(); err != nil {
+		return err
+	}
 	if a.Status == common.StatusRunning {
+		logger.Info("Agent already running; start request is a no-op", "id", a.Id)
 		return nil
 	}
 
+	a.Err = nil
 	a.SetStatus(common.StatusStarting, nil)
 
 	a.stopChan = make(chan struct{})
@@ -272,8 +277,11 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 
 // Stop gracefully stops the agent. Safe to call even if Start was never called.
 func (a *Agent) Stop() error {
-	if a.Status != common.StatusRunning && a.Status != common.StatusStarting {
+	if a.Status == common.StatusStopped && a.stopChan == nil {
 		return nil
+	}
+	if a.Status != common.StatusRunning && a.Status != common.StatusStarting && a.Status != common.StatusError && a.Status != common.StatusStopping {
+		logger.Debug("Stopping agent from non-running state", "id", a.Id, "status", a.Status)
 	}
 
 	a.SetStatus(common.StatusStopping, nil)

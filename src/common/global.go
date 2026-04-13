@@ -215,7 +215,7 @@ type ProjectComponentChecker func() []ProjectComponentError
 type ProjectComponentError struct {
 	ProjectID   string
 	ComponentID string
-	Type        string // "input", "output", "ruleset"
+	Type        string // "input", "output", "ruleset", "agent"
 	Status      Status
 	Error       error
 }

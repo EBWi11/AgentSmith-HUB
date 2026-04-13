@@ -310,6 +310,44 @@ func (in *Input) cleanup() {
 	// Project will call SafeDeleteInputDownstream to properly clean up connections
 }
 
+func (in *Input) hasRuntimeState() bool {
+	return in.stopChan != nil || in.kafkaConsumer != nil || in.slsConsumer != nil || in.internalMsgChan != nil
+}
+
+func (in *Input) resetToStoppedForRestart() {
+	in.cleanup()
+	in.Err = nil
+	in.Status = common.StatusStopped
+}
+
+func (in *Input) reconcileBeforeStart() error {
+	switch in.Status {
+	case common.StatusRunning:
+		if in.hasRuntimeState() {
+			return nil
+		}
+		logger.Error("Input marked running without active runtime; resetting before start", "input", in.Id)
+		in.resetToStoppedForRestart()
+	case common.StatusStarting, common.StatusStopping, common.StatusError:
+		logger.Info("Reconciling input runtime before start", "input", in.Id, "status", in.Status)
+		if err := in.Stop(); err != nil {
+			logger.Error("Input stop during start reconciliation returned error; forcing cleanup",
+				"input", in.Id,
+				"error", err)
+			in.resetToStoppedForRestart()
+		}
+	case common.StatusStopped:
+		if in.hasRuntimeState() {
+			logger.Info("Input has stale runtime state while stopped; cleaning up before start", "input", in.Id)
+			in.resetToStoppedForRestart()
+		}
+	default:
+		return fmt.Errorf("input %s is not startable (status: %s)", in.Id, in.Status)
+	}
+
+	return nil
+}
+
 // Start initializes and starts the input component based on its type
 // Returns an error if the component is already running or if initialization fails
 func (in *Input) Start() error {
@@ -322,6 +360,14 @@ func (in *Input) Start() error {
 			in.SetStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
 		}
 	}()
+
+	if err := in.reconcileBeforeStart(); err != nil {
+		return err
+	}
+	if in.Status == common.StatusRunning {
+		logger.Info("Input already running; start request is a no-op", "input", in.Id)
+		return nil
+	}
 
 	// Allow restart from stopped state or from error state
 	if in.Status != common.StatusStopped && in.Status != common.StatusError {
