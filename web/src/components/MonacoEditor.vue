@@ -444,6 +444,22 @@ function deduplicateCompletions(result, range, prefix) {
   return result || { suggestions: [], incomplete: false };
 }
 
+function normalizeComponentType(type) {
+  return (type || '').toString().trim().toLowerCase();
+}
+
+function setModelComponentType(model, type) {
+  if (model && typeof model === 'object') {
+    model.__agentsmithComponentType = normalizeComponentType(type);
+  }
+}
+
+function getModelComponentType(model) {
+  const modelType = model && typeof model === 'object' ? model.__agentsmithComponentType : '';
+  const normalized = normalizeComponentType(modelType);
+  return normalized || 'unknown';
+}
+
 // Global registration flag to prevent conflicts
 window.monacoProvidersRegistered = window.monacoProvidersRegistered || false;
 
@@ -545,7 +561,7 @@ function registerLanguageProviders() {
         
         // Get componentType from the current Vue component props
         // Use a global variable to store the current componentType
-        const componentType = window.currentMonacoComponentType || 'unknown';
+        const componentType = getModelComponentType(model);
         
         if (componentType === 'input' || componentType === 'inputs') {
           result = getInputCompletions(textUntilPosition, lineUntilPosition, range, position);
@@ -613,7 +629,7 @@ function registerLanguageProviders() {
         };
         
         // Get componentType from global variable
-        const componentType = window.currentMonacoComponentType || 'unknown';
+        const componentType = getModelComponentType(model);
         
         let result;
         if (componentType === 'ruleset' || componentType === 'rulesets' || componentType === 'unknown') {
@@ -684,9 +700,6 @@ function registerLanguageProviders() {
   // Initialize editor
 function initializeEditor() {
   if (!container.value) return;
-  
-  // Set current componentType globally for completion providers
-  window.currentMonacoComponentType = props.componentType;
   
   // Check container dimensions
   const containerRect = container.value.getBoundingClientRect();
@@ -801,6 +814,8 @@ function initializeEditor() {
     const language = getLanguage();
     const originalModel = monaco.editor.createModel(props.originalValue || '', language);
     const modifiedModel = monaco.editor.createModel(props.value || '', language);
+    setModelComponentType(originalModel, props.componentType);
+    setModelComponentType(modifiedModel, props.componentType);
     
     // No need for metadata - using content-based detection
     
@@ -846,6 +861,7 @@ function initializeEditor() {
   } else {
     // Create regular editor
     editor = monaco.editor.create(container.value, options);
+    setModelComponentType(editor.getModel(), props.componentType);
     
     // No need for metadata - using content-based detection
     
@@ -1069,12 +1085,18 @@ watch(() => [props.diffMode, props.originalValue], ([newDiffMode, newOriginalVal
 
 // Monitor componentId changes to fetch field keys for rulesets using unified cache
 watch(() => [props.componentType, props.componentId], ([newType, newId], [oldType, oldId]) => {
-  if (newType === 'ruleset' && newId && newId !== oldId) {
+  if ((newType === 'ruleset' || newType === 'rulesets') && newId && (newId !== oldId || newType !== oldType)) {
     dataCache.fetchRulesetFields(newId);
   }
-  
-  // Update global componentType for completion providers
-  window.currentMonacoComponentType = newType;
+
+  // Keep completion context bound to each Monaco model.
+  if (isEditorValid(editor)) {
+    setModelComponentType(editor.getModel(), newType);
+  }
+  if (isEditorValid(diffEditor)) {
+    setModelComponentType(diffEditor.getOriginalEditor().getModel(), newType);
+    setModelComponentType(diffEditor.getModifiedEditor().getModel(), newType);
+  }
 });
 
 // Handle window size changes

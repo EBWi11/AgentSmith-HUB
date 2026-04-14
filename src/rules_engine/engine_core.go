@@ -526,7 +526,8 @@ func (r *Ruleset) Stop() error {
 	}
 
 	// Overall timeout for ruleset stop (drain stage only)
-	stopBudget := 90 * time.Second
+	// Keep this larger than per-stage drain timeout to avoid premature cutoff.
+	stopBudget := 360 * time.Second
 	stopStart := time.Now()
 	overallTimeout := time.After(stopBudget)
 	stopCompleted := make(chan struct{})
@@ -564,7 +565,7 @@ func (r *Ruleset) Stop() error {
 
 		// Wait for all upstream channels to be consumed.
 		logger.Info("Waiting for upstream channels to empty", "ruleset", r.RulesetID)
-		upstreamTimeout := time.After(30 * time.Second)
+		upstreamTimeout := time.After(180 * time.Second)
 		waitCount := 0
 
 	waitUpstream:
@@ -592,14 +593,17 @@ func (r *Ruleset) Stop() error {
 			}
 		}
 
-		downstreamTimeout := time.After(30 * time.Second)
+		downstreamTimeout := time.After(180 * time.Second)
 		waitCount = 0
 
 	waitDownstream:
 		for {
 			select {
 			case <-downstreamTimeout:
-				setStopError(fmt.Errorf("timeout waiting for downstream channels to drain"))
+				// Downstream consumers may be restarting or temporarily detached during
+				// hot reload/restart flows. Treat drain timeout as a soft failure and
+				// continue shutdown instead of blocking control-plane recovery.
+				logger.Warn("Timeout waiting for downstream channels, forcing ruleset shutdown", "ruleset", r.RulesetID)
 				break waitDownstream
 			default:
 				allEmpty := true
