@@ -48,6 +48,7 @@ type KafkaOutputConfig struct {
 	TLS         *common.KafkaTLSConfig      `yaml:"tls,omitempty"`
 	Key         string                      `yaml:"key"`
 	Idempotent  *bool                       `yaml:"idempotent,omitempty"`
+	LingerDur   string                      `yaml:"linger_dur,omitempty"`
 }
 
 // ElasticsearchOutputConfig holds Elasticsearch-specific config.
@@ -67,6 +68,15 @@ type AliyunSLSOutputConfig struct {
 	AccessKeySecret string `yaml:"access_key_secret"`
 	Project         string `yaml:"project"`
 	Logstore        string `yaml:"logstore"`
+	Topic           string `yaml:"topic,omitempty"`
+	Source          string `yaml:"source,omitempty"`
+	ShardHash       string `yaml:"shard_hash,omitempty"`
+	TopicField      string `yaml:"topic_field,omitempty"`
+	SourceField     string `yaml:"source_field,omitempty"`
+	ShardHashField  string `yaml:"shard_hash_field,omitempty"`
+	BatchCount      int    `yaml:"batch_count,omitempty"`
+	BatchSizeBytes  int    `yaml:"batch_size_bytes,omitempty"`
+	LingerDur       string `yaml:"linger_dur,omitempty"`
 }
 
 // ClickHouseOutputConfig holds ClickHouse-specific config.
@@ -94,6 +104,7 @@ type Output struct {
 	// runtime
 	kafkaProducer         *common.KafkaProducer
 	elasticsearchProducer *common.ElasticsearchProducer
+	aliyunSLSProducer     *common.AliyunSLSProducer
 	clickhouseProducer    *common.ClickHouseProducer
 	wg                    sync.WaitGroup
 
@@ -120,6 +131,81 @@ type Output struct {
 	Config *OutputConfig
 
 	// OwnerProjects field removed - project usage is now calculated dynamically
+}
+
+const (
+	defaultKafkaLingerDur         = 20 * time.Millisecond
+	defaultElasticsearchBatchSize = 100
+	defaultElasticsearchFlushDur  = 500 * time.Millisecond
+	defaultClickHouseBatchSize    = 1000
+	defaultClickHouseFlushDur     = 1 * time.Second
+	defaultAliyunSLSBatchCount    = 4096
+	defaultAliyunSLSBatchSize     = 512 * 1024
+	defaultAliyunSLSLingerDur     = 200 * time.Millisecond
+)
+
+func parsePositiveDuration(fieldName string, raw string, fallback time.Duration) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return fallback, nil
+	}
+
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid duration: %w", fieldName, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", fieldName)
+	}
+	return d, nil
+}
+
+func parsePositiveOptionalInt(fieldName string, value int, fallback int) (int, error) {
+	if value == 0 {
+		return fallback, nil
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", fieldName)
+	}
+	return value, nil
+}
+
+func (cfg *KafkaOutputConfig) resolvedLingerDur() (time.Duration, error) {
+	return parsePositiveDuration("kafka.linger_dur", cfg.LingerDur, defaultKafkaLingerDur)
+}
+
+func (cfg *ElasticsearchOutputConfig) resolvedBatchSize() (int, error) {
+	return parsePositiveOptionalInt("elasticsearch.batch_size", cfg.BatchSize, defaultElasticsearchBatchSize)
+}
+
+func (cfg *ElasticsearchOutputConfig) resolvedFlushDur() (time.Duration, error) {
+	return parsePositiveDuration("elasticsearch.flush_dur", cfg.FlushDur, defaultElasticsearchFlushDur)
+}
+
+func (cfg *ClickHouseOutputConfig) resolvedBatchSize() (int, error) {
+	return parsePositiveOptionalInt("clickhouse.batch_size", cfg.BatchSize, defaultClickHouseBatchSize)
+}
+
+func (cfg *ClickHouseOutputConfig) resolvedFlushDur() (time.Duration, error) {
+	return parsePositiveDuration("clickhouse.flush_dur", cfg.FlushDur, defaultClickHouseFlushDur)
+}
+
+func (cfg *AliyunSLSOutputConfig) resolvedBatchCount() (int, error) {
+	return parsePositiveOptionalInt("aliyun_sls.batch_count", cfg.BatchCount, defaultAliyunSLSBatchCount)
+}
+
+func (cfg *AliyunSLSOutputConfig) resolvedBatchSizeBytes() (int, error) {
+	return parsePositiveOptionalInt("aliyun_sls.batch_size_bytes", cfg.BatchSizeBytes, defaultAliyunSLSBatchSize)
+}
+
+func (cfg *AliyunSLSOutputConfig) resolvedLingerDur() (time.Duration, error) {
+	d, err := parsePositiveDuration("aliyun_sls.linger_dur", cfg.LingerDur, defaultAliyunSLSLingerDur)
+	if err != nil {
+		return 0, err
+	}
+	if d < 100*time.Millisecond {
+		return 0, fmt.Errorf("aliyun_sls.linger_dur must be at least 100ms")
+	}
+	return d, nil
 }
 
 func Verify(path string, raw string) error {
@@ -175,6 +261,9 @@ func Verify(path string, raw string) error {
 		if cfg.Kafka.Topic == "" {
 			return fmt.Errorf("missing required field 'kafka.topic' for kafka output (line: unknown)")
 		}
+		if _, err := cfg.Kafka.resolvedLingerDur(); err != nil {
+			return err
+		}
 	case OutputTypeElasticsearch:
 		if cfg.Elasticsearch == nil {
 			return fmt.Errorf("missing required field 'elasticsearch' for elasticsearch output (line: unknown)")
@@ -185,11 +274,40 @@ func Verify(path string, raw string) error {
 		if cfg.Elasticsearch.Index == "" {
 			return fmt.Errorf("missing required field 'elasticsearch.index' for elasticsearch output (line: unknown)")
 		}
+		if _, err := cfg.Elasticsearch.resolvedBatchSize(); err != nil {
+			return err
+		}
+		if _, err := cfg.Elasticsearch.resolvedFlushDur(); err != nil {
+			return err
+		}
 	case OutputTypeAliyunSLS:
 		if cfg.AliyunSLS == nil {
 			return fmt.Errorf("missing required field 'aliyun_sls' for aliyunSLS output (line: unknown)")
 		}
-		// Add more AliyunSLS specific field validation
+		if cfg.AliyunSLS.Endpoint == "" {
+			return fmt.Errorf("missing required field 'aliyun_sls.endpoint' for aliyunSLS output (line: unknown)")
+		}
+		if cfg.AliyunSLS.AccessKeyID == "" {
+			return fmt.Errorf("missing required field 'aliyun_sls.access_key_id' for aliyunSLS output (line: unknown)")
+		}
+		if cfg.AliyunSLS.AccessKeySecret == "" {
+			return fmt.Errorf("missing required field 'aliyun_sls.access_key_secret' for aliyunSLS output (line: unknown)")
+		}
+		if cfg.AliyunSLS.Project == "" {
+			return fmt.Errorf("missing required field 'aliyun_sls.project' for aliyunSLS output (line: unknown)")
+		}
+		if cfg.AliyunSLS.Logstore == "" {
+			return fmt.Errorf("missing required field 'aliyun_sls.logstore' for aliyunSLS output (line: unknown)")
+		}
+		if _, err := cfg.AliyunSLS.resolvedBatchCount(); err != nil {
+			return err
+		}
+		if _, err := cfg.AliyunSLS.resolvedBatchSizeBytes(); err != nil {
+			return err
+		}
+		if _, err := cfg.AliyunSLS.resolvedLingerDur(); err != nil {
+			return err
+		}
 	case OutputTypeClickHouse:
 		if cfg.ClickHouse == nil {
 			return fmt.Errorf("missing required field 'clickhouse' for clickhouse output (line: unknown)")
@@ -202,6 +320,12 @@ func Verify(path string, raw string) error {
 		}
 		if cfg.ClickHouse.Table == "" {
 			return fmt.Errorf("missing required field 'clickhouse.table' for clickhouse output (line: unknown)")
+		}
+		if _, err := cfg.ClickHouse.resolvedBatchSize(); err != nil {
+			return err
+		}
+		if _, err := cfg.ClickHouse.resolvedFlushDur(); err != nil {
+			return err
 		}
 	case OutputTypePrint:
 		// Print output doesn't require external connectivity
@@ -277,6 +401,11 @@ func (out *Output) cleanup() {
 		out.elasticsearchProducer = nil
 	}
 
+	if out.aliyunSLSProducer != nil {
+		out.aliyunSLSProducer.Close()
+		out.aliyunSLSProducer = nil
+	}
+
 	if out.clickhouseProducer != nil {
 		out.clickhouseProducer.Close()
 		out.clickhouseProducer = nil
@@ -294,7 +423,7 @@ func (out *Output) cleanup() {
 }
 
 func (out *Output) hasRuntimeState() bool {
-	return out.stopChan != nil || out.kafkaProducer != nil || out.elasticsearchProducer != nil || out.clickhouseProducer != nil
+	return out.stopChan != nil || out.kafkaProducer != nil || out.elasticsearchProducer != nil || out.aliyunSLSProducer != nil || out.clickhouseProducer != nil
 }
 
 func (out *Output) resetToStoppedForRestart() {
@@ -539,6 +668,11 @@ func (out *Output) Start() error {
 		}
 
 		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
+		lingerDur, err := out.kafkaCfg.resolvedLingerDur()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
+		}
 		producer, err := common.NewKafkaProducer(
 			out.kafkaCfg.Brokers,
 			out.kafkaCfg.Topic,
@@ -547,6 +681,7 @@ func (out *Output) Start() error {
 			msgChan,
 			out.kafkaCfg.Key,
 			out.kafkaCfg.TLS,
+			lingerDur,
 			// default idempotent true if not specified
 			(out.kafkaCfg.Idempotent == nil) || (out.kafkaCfg.Idempotent != nil && *out.kafkaCfg.Idempotent),
 		)
@@ -570,15 +705,15 @@ func (out *Output) Start() error {
 		}
 
 		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
-		batchSize := 100
-		if out.elasticsearchCfg.BatchSize > 0 {
-			batchSize = out.elasticsearchCfg.BatchSize
+		batchSize, err := out.elasticsearchCfg.resolvedBatchSize()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
 		}
-		flushDur := 3 * time.Second
-		if out.elasticsearchCfg.FlushDur != "" {
-			if d, err := time.ParseDuration(out.elasticsearchCfg.FlushDur); err == nil {
-				flushDur = d
-			}
+		flushDur, err := out.elasticsearchCfg.resolvedFlushDur()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
 		}
 		producer, err := common.NewElasticsearchProducer(
 			out.elasticsearchCfg.Hosts,
@@ -620,15 +755,15 @@ func (out *Output) Start() error {
 		}
 
 		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
-		batchSize := 1000
-		if out.clickhouseCfg.BatchSize > 0 {
-			batchSize = out.clickhouseCfg.BatchSize
+		batchSize, err := out.clickhouseCfg.resolvedBatchSize()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
 		}
-		flushDur := 3 * time.Second
-		if out.clickhouseCfg.FlushDur != "" {
-			if d, err := time.ParseDuration(out.clickhouseCfg.FlushDur); err == nil {
-				flushDur = d
-			}
+		flushDur, err := out.clickhouseCfg.resolvedFlushDur()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
 		}
 		producer, err := common.NewClickHouseProducer(
 			out.clickhouseCfg.Hosts,
@@ -650,8 +785,56 @@ func (out *Output) Start() error {
 		out.startProducerBridge(msgChan, "clickhouse", hasTestCollector)
 
 	case OutputTypeAliyunSLS:
-		out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS output not implemented yet"))
-		return fmt.Errorf("aliyun SLS output not implemented yet")
+		if out.aliyunSLSProducer != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS producer already running for output %s", out.Id))
+			return fmt.Errorf("aliyun SLS producer already running for output %s", out.Id)
+		}
+		if out.aliyunSLSCfg == nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("aliyun SLS configuration missing for output %s", out.Id))
+			return fmt.Errorf("aliyun SLS configuration missing for output %s", out.Id)
+		}
+
+		msgChan := make(chan map[string]interface{}, common.PipelineOutputBuffer)
+		batchCount, err := out.aliyunSLSCfg.resolvedBatchCount()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
+		}
+		batchSizeBytes, err := out.aliyunSLSCfg.resolvedBatchSizeBytes()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
+		}
+		lingerDur, err := out.aliyunSLSCfg.resolvedLingerDur()
+		if err != nil {
+			out.SetStatus(common.StatusError, err)
+			return err
+		}
+		producer, err := common.NewAliyunSLSProducer(
+			out.aliyunSLSCfg.Endpoint,
+			out.aliyunSLSCfg.AccessKeyID,
+			out.aliyunSLSCfg.AccessKeySecret,
+			out.aliyunSLSCfg.Project,
+			out.aliyunSLSCfg.Logstore,
+			out.aliyunSLSCfg.Topic,
+			out.aliyunSLSCfg.Source,
+			out.aliyunSLSCfg.ShardHash,
+			out.aliyunSLSCfg.TopicField,
+			out.aliyunSLSCfg.SourceField,
+			out.aliyunSLSCfg.ShardHashField,
+			msgChan,
+			batchCount,
+			batchSizeBytes,
+			lingerDur,
+		)
+		if err != nil {
+			out.SetStatus(common.StatusError, fmt.Errorf("failed to create aliyun SLS producer for output %s: %v", out.Id, err))
+			return fmt.Errorf("failed to create aliyun SLS producer for output %s: %v", out.Id, err)
+		}
+		out.aliyunSLSProducer = producer
+
+		out.ensureStopChan()
+		out.startProducerBridge(msgChan, "aliyun_sls", hasTestCollector)
 	}
 
 	out.SetStatus(common.StatusRunning, nil)
@@ -714,6 +897,11 @@ func (out *Output) Stop() error {
 		logger.Debug("Closing elasticsearch producer", "id", out.Id)
 		out.elasticsearchProducer.Close()
 		out.elasticsearchProducer = nil
+	}
+	if out.aliyunSLSProducer != nil {
+		logger.Debug("Closing aliyun SLS producer", "id", out.Id)
+		out.aliyunSLSProducer.Close()
+		out.aliyunSLSProducer = nil
 	}
 	if out.clickhouseProducer != nil {
 		logger.Debug("Closing clickhouse producer", "id", out.Id)
@@ -869,14 +1057,21 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Add producer metrics if available
+		lingerDur, lingerErr := out.kafkaCfg.resolvedLingerDur()
+		if lingerErr == nil {
+			connectionInfo["linger_dur"] = lingerDur.String()
+		}
+
 		if out.kafkaProducer != nil {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"produce_total":   out.GetProduceTotal(),
 				"producer_active": true,
+				"linger_dur":      connectionInfo["linger_dur"],
 			}
 		} else {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"producer_active": false,
+				"linger_dur":      connectionInfo["linger_dur"],
 			}
 		}
 
@@ -892,10 +1087,18 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Set connection info
+		batchSize, batchErr := out.elasticsearchCfg.resolvedBatchSize()
+		flushDur, flushErr := out.elasticsearchCfg.resolvedFlushDur()
 		connectionInfo := map[string]interface{}{
 			"hosts":   out.elasticsearchCfg.Hosts,
 			"index":   out.elasticsearchCfg.Index,
 			"version": common.NormalizeElasticsearchVersionForDisplay(out.elasticsearchCfg.Version),
+		}
+		if batchErr == nil {
+			connectionInfo["batch_size"] = batchSize
+		}
+		if flushErr == nil {
+			connectionInfo["flush_dur"] = flushDur.String()
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
@@ -943,11 +1146,14 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"produce_total":   out.GetProduceTotal(),
 				"producer_active": true,
-				"batch_size":      out.elasticsearchCfg.BatchSize,
+				"batch_size":      connectionInfo["batch_size"],
+				"flush_dur":       connectionInfo["flush_dur"],
 			}
 		} else {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"producer_active": false,
+				"batch_size":      connectionInfo["batch_size"],
+				"flush_dur":       connectionInfo["flush_dur"],
 			}
 		}
 
@@ -963,10 +1169,18 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 		}
 
 		// Set connection info
+		batchSize, batchErr := out.clickhouseCfg.resolvedBatchSize()
+		flushDur, flushErr := out.clickhouseCfg.resolvedFlushDur()
 		connectionInfo := map[string]interface{}{
 			"hosts":    out.clickhouseCfg.Hosts,
 			"database": out.clickhouseCfg.Database,
 			"table":    out.clickhouseCfg.Table,
+		}
+		if batchErr == nil {
+			connectionInfo["batch_size"] = batchSize
+		}
+		if flushErr == nil {
+			connectionInfo["flush_dur"] = flushDur.String()
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
@@ -1015,11 +1229,14 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"produce_total":   out.GetProduceTotal(),
 				"producer_active": true,
-				"batch_size":      out.clickhouseCfg.BatchSize,
+				"batch_size":      connectionInfo["batch_size"],
+				"flush_dur":       connectionInfo["flush_dur"],
 			}
 		} else {
 			result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
 				"producer_active": false,
+				"batch_size":      connectionInfo["batch_size"],
+				"flush_dur":       connectionInfo["flush_dur"],
 			}
 		}
 
@@ -1054,6 +1271,24 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 			"endpoint": out.aliyunSLSCfg.Endpoint,
 			"project":  out.aliyunSLSCfg.Project,
 			"logstore": out.aliyunSLSCfg.Logstore,
+		}
+		if out.aliyunSLSCfg.Topic != "" {
+			connectionInfo["topic"] = out.aliyunSLSCfg.Topic
+		}
+		if out.aliyunSLSCfg.Source != "" {
+			connectionInfo["source"] = out.aliyunSLSCfg.Source
+		}
+		if out.aliyunSLSCfg.ShardHash != "" {
+			connectionInfo["shard_hash"] = out.aliyunSLSCfg.ShardHash
+		}
+		if batchCount, err := out.aliyunSLSCfg.resolvedBatchCount(); err == nil {
+			connectionInfo["batch_count"] = batchCount
+		}
+		if batchSizeBytes, err := out.aliyunSLSCfg.resolvedBatchSizeBytes(); err == nil {
+			connectionInfo["batch_size_bytes"] = batchSizeBytes
+		}
+		if lingerDur, err := out.aliyunSLSCfg.resolvedLingerDur(); err == nil {
+			connectionInfo["linger_dur"] = lingerDur.String()
 		}
 		result["details"].(map[string]interface{})["connection_info"] = connectionInfo
 
@@ -1114,11 +1349,12 @@ func (out *Output) CheckConnectivity() map[string]interface{} {
 			result["details"].(map[string]interface{})["project_info"] = projectInfo
 		}
 
-		// Add metrics if available (note: AliyunSLS output is not fully implemented yet)
 		result["details"].(map[string]interface{})["metrics"] = map[string]interface{}{
-			"produce_total":   out.GetProduceTotal(),
-			"producer_active": false, // AliyunSLS output producer not implemented yet
-			"note":            "AliyunSLS output producer implementation is pending",
+			"produce_total":    out.GetProduceTotal(),
+			"producer_active":  out.aliyunSLSProducer != nil,
+			"batch_count":      connectionInfo["batch_count"],
+			"batch_size_bytes": connectionInfo["batch_size_bytes"],
+			"linger_dur":       connectionInfo["linger_dur"],
 		}
 
 	default:
@@ -1193,6 +1429,10 @@ func (out *Output) GetPendingMessageCount() int {
 	case OutputTypeElasticsearch:
 		if out.elasticsearchProducer != nil && out.elasticsearchProducer.MsgChan != nil {
 			pendingCount += len(out.elasticsearchProducer.MsgChan)
+		}
+	case OutputTypeAliyunSLS:
+		if out.aliyunSLSProducer != nil && out.aliyunSLSProducer.MsgChan != nil {
+			pendingCount += len(out.aliyunSLSProducer.MsgChan)
 		}
 	case OutputTypeClickHouse:
 		if out.clickhouseProducer != nil && out.clickhouseProducer.MsgChan != nil {

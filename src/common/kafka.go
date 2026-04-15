@@ -102,14 +102,19 @@ func NewKafkaProducer(
 	msgChan chan map[string]interface{},
 	keyField string,
 	tlsCfg *KafkaTLSConfig,
+	lingerDur time.Duration,
 	idempotentEnabled bool,
 ) (*KafkaProducer, error) {
+	if lingerDur <= 0 {
+		lingerDur = 20 * time.Millisecond
+	}
+
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
 		kgo.RecordPartitioner(kgo.RoundRobinPartitioner()),
 		kgo.ProducerBatchMaxBytes(1_000_000),
-		kgo.ProducerLinger(50 * time.Millisecond),
+		kgo.ProducerLinger(lingerDur),
 	}
 
 	// Add compression if specified

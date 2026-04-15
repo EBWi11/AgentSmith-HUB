@@ -2,11 +2,15 @@ package common
 
 import (
 	"AgentSmith-HUB/logger"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	sls "github.com/aliyun/aliyun-log-go-sdk"
 	consumerLibrary "github.com/aliyun/aliyun-log-go-sdk/consumer"
+	producerLibrary "github.com/aliyun/aliyun-log-go-sdk/producer"
 	gokitlog "github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 )
@@ -17,12 +21,28 @@ type AliyunSLSConsumer struct {
 	ConsumerWorker *consumerLibrary.ConsumerWorker
 }
 
+type AliyunSLSProducer struct {
+	Producer       *producerLibrary.Producer
+	MsgChan        chan map[string]interface{}
+	Project        string
+	Logstore       string
+	Topic          string
+	Source         string
+	ShardHash      string
+	TopicField     string
+	SourceField    string
+	ShardHashField string
+	stopChan       chan struct{}
+	wg             sync.WaitGroup
+	closeOnce      sync.Once
+}
+
 type hubLogWriter struct{}
 
 func (w *hubLogWriter) Write(p []byte) (n int, err error) {
 	msg := strings.TrimSpace(string(p))
 	if msg != "" {
-		logger.Error("[AliyunSLSConsumer SDK] " + msg)
+		logger.Error("[AliyunSLS SDK] " + msg)
 	}
 	return len(p), nil
 }
@@ -30,6 +50,173 @@ func (w *hubLogWriter) Write(p []byte) (n int, err error) {
 func newSLSHubLogger() gokitlog.Logger {
 	base := gokitlog.NewLogfmtLogger(&hubLogWriter{})
 	return level.NewFilter(base, level.AllowError())
+}
+
+func NewAliyunSLSProducer(
+	endpoint, accessKeyID, accessKeySecret, project, logstore string,
+	topic, source, shardHash, topicField, sourceField, shardHashField string,
+	msgChan chan map[string]interface{},
+	batchCount int,
+	batchSizeBytes int,
+	lingerDur time.Duration,
+) (*AliyunSLSProducer, error) {
+	cfg := producerLibrary.GetDefaultProducerConfig()
+	cfg.Endpoint = endpoint
+	cfg.AccessKeyID = accessKeyID
+	cfg.AccessKeySecret = accessKeySecret
+	cfg.Logger = newSLSHubLogger()
+	cfg.DisableRuntimeMetrics = true
+
+	if batchCount > 0 {
+		cfg.MaxBatchCount = batchCount
+	}
+	if batchSizeBytes > 0 {
+		cfg.MaxBatchSize = int64(batchSizeBytes)
+	}
+	if lingerDur > 0 {
+		cfg.LingerMs = lingerDur.Milliseconds()
+	}
+
+	producer, err := producerLibrary.NewProducer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	producer.Start()
+
+	slsProducer := &AliyunSLSProducer{
+		Producer:       producer,
+		MsgChan:        msgChan,
+		Project:        project,
+		Logstore:       logstore,
+		Topic:          topic,
+		Source:         source,
+		ShardHash:      shardHash,
+		TopicField:     topicField,
+		SourceField:    sourceField,
+		ShardHashField: shardHashField,
+		stopChan:       make(chan struct{}),
+	}
+
+	slsProducer.wg.Add(1)
+	go slsProducer.run()
+	return slsProducer, nil
+}
+
+func stringifyAliyunSLSValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		if bytes, err := json.Marshal(v); err == nil {
+			trimmed := strings.TrimSpace(string(bytes))
+			if trimmed != "" && trimmed != "null" && trimmed != "\"\"" {
+				if trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+					return AnyToString(v)
+				}
+				return trimmed
+			}
+		}
+		return AnyToString(v)
+	}
+}
+
+func buildAliyunSLSFields(msg map[string]interface{}) map[string]string {
+	fields := make(map[string]string, len(msg))
+	for key, value := range msg {
+		fields[key] = stringifyAliyunSLSValue(value)
+	}
+	return fields
+}
+
+func resolveAliyunSLSRoutingValue(msg map[string]interface{}, staticValue string, fieldPath string) string {
+	if strings.TrimSpace(fieldPath) != "" {
+		if value, ok := GetCheckData(msg, StringToList(fieldPath)); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return staticValue
+}
+
+func (p *AliyunSLSProducer) sendMessage(msg map[string]interface{}) {
+	fields := buildAliyunSLSFields(msg)
+	topic := resolveAliyunSLSRoutingValue(msg, p.Topic, p.TopicField)
+	source := resolveAliyunSLSRoutingValue(msg, p.Source, p.SourceField)
+	if source == "" {
+		source = "hub"
+		if Config != nil && Config.LocalIP != "" {
+			source = Config.LocalIP
+		}
+	}
+	shardHash := resolveAliyunSLSRoutingValue(msg, p.ShardHash, p.ShardHashField)
+	logEntry := producerLibrary.GenerateLog(uint32(time.Now().Unix()), fields)
+
+	var err error
+	if shardHash != "" {
+		err = p.Producer.HashSendLog(p.Project, p.Logstore, shardHash, topic, source, logEntry)
+	} else {
+		err = p.Producer.SendLog(p.Project, p.Logstore, topic, source, logEntry)
+	}
+	if err != nil {
+		logger.Error("[AliyunSLSProducer] failed to send message", "project", p.Project, "logstore", p.Logstore, "error", err)
+	}
+}
+
+func (p *AliyunSLSProducer) drainRemainingMessages() {
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			return
+		case msg, ok := <-p.MsgChan:
+			if !ok {
+				return
+			}
+			p.sendMessage(msg)
+		default:
+			return
+		}
+	}
+}
+
+func (p *AliyunSLSProducer) run() {
+	defer p.wg.Done()
+	defer func() {
+		if err := p.Producer.Close(5000); err != nil {
+			logger.Error("[AliyunSLSProducer] failed to close producer cleanly", "project", p.Project, "logstore", p.Logstore, "error", err)
+		}
+	}()
+
+	for {
+		select {
+		case <-p.stopChan:
+			p.drainRemainingMessages()
+			return
+		case msg, ok := <-p.MsgChan:
+			if !ok {
+				return
+			}
+			p.sendMessage(msg)
+		}
+	}
+}
+
+func (p *AliyunSLSProducer) Close() {
+	p.closeOnce.Do(func() {
+		close(p.stopChan)
+		done := make(chan struct{})
+		go func() {
+			p.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			logger.Error("[AliyunSLSProducer] timeout waiting for producer shutdown", "project", p.Project, "logstore", p.Logstore)
+		}
+	})
 }
 
 func NewAliyunSLSConsumer(endpoint, accessKeyID, accessKeySecret, project, logstore, consumerGroupName, consumerName, cursorPosition string, cursorStartTime int64, query string, msgChan chan map[string]interface{}) (*AliyunSLSConsumer, error) {
@@ -115,15 +302,15 @@ func TestAliyunSLSConnection(endpoint, accessKeyID, accessKeySecret, project, lo
 			// Try to create a consumer config to test if we have consumer permissions
 			// This is a lighter operation that doesn't require project-level permissions
 			testConfig := consumerLibrary.LogHubConfig{
-				Endpoint:          endpoint,
-				AccessKeyID:       accessKeyID,
-				AccessKeySecret:   accessKeySecret,
-				Project:           project,
-				Logstore:          logstore,
-				ConsumerGroupName: "test-connection-check",
-				ConsumerName:      "test-connection",
-				CursorPosition:    consumerLibrary.END_CURSOR,
-				Logger:            newSLSHubLogger(),
+				Endpoint:              endpoint,
+				AccessKeyID:           accessKeyID,
+				AccessKeySecret:       accessKeySecret,
+				Project:               project,
+				Logstore:              logstore,
+				ConsumerGroupName:     "test-connection-check",
+				ConsumerName:          "test-connection",
+				CursorPosition:        consumerLibrary.END_CURSOR,
+				Logger:                newSLSHubLogger(),
 				DisableRuntimeMetrics: true,
 			}
 

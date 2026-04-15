@@ -1,6 +1,7 @@
 package common
 
 import (
+	"AgentSmith-HUB/logger"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -239,7 +240,7 @@ func (p *ClickHouseProducer) sendBatch(batch []map[string]interface{}) {
 	var buf bytes.Buffer
 	for _, doc := range batch {
 		if err := json.NewEncoder(&buf).Encode(doc); err != nil {
-			fmt.Printf("Failed to encode ClickHouse document: %v\n", err)
+			logger.Error("ClickHouse failed to encode document", "error", err)
 			continue
 		}
 	}
@@ -259,7 +260,7 @@ func (p *ClickHouseProducer) sendBatch(batch []map[string]interface{}) {
 		req, err := p.buildRequest(ctx, http.MethodPost, reqURL, bytes.NewReader(buf.Bytes()))
 		if err != nil {
 			cancel()
-			fmt.Printf("Failed to build ClickHouse request: %v\n", err)
+			logger.Error("ClickHouse failed to build request", "error", err)
 			return
 		}
 
@@ -268,7 +269,7 @@ func (p *ClickHouseProducer) sendBatch(batch []map[string]interface{}) {
 
 		if err != nil {
 			if i == p.maxRetries {
-				fmt.Printf("Failed to send batch to ClickHouse after %d retries: %v\n", p.maxRetries, err)
+				logger.Error("ClickHouse failed to send batch after retries", "retries", p.maxRetries, "error", err)
 				return
 			}
 			select {
@@ -284,7 +285,7 @@ func (p *ClickHouseProducer) sendBatch(batch []map[string]interface{}) {
 
 		if resp.StatusCode != http.StatusOK {
 			if i == p.maxRetries {
-				fmt.Printf("ClickHouse returned error after %d retries (status %d): %s\n", p.maxRetries, resp.StatusCode, string(body))
+				logger.Error("ClickHouse returned error after retries", "retries", p.maxRetries, "status", resp.StatusCode, "response", string(body))
 				return
 			}
 			select {
