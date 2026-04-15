@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
 func formatMapToReadableString(data map[string]interface{}) string {
@@ -51,7 +52,11 @@ func Eval(WebhookURL string, data map[string]interface{}) (bool, error) {
 		return false, err
 	}
 
-	resp, err := http.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
 	if err != nil {
 		return false, err
 	}
