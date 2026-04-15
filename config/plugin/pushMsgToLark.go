@@ -50,7 +50,8 @@ func Eval(WebhookURL string, Secret string, data map[string]interface{}) (bool, 
 	}
 
 	b, _ := json.Marshal(payload)
-	resp, err := http.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
 	if err != nil {
 		return false, err
 	}

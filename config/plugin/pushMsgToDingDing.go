@@ -54,7 +54,8 @@ func Eval(AccessToken string, Secret string, data map[string]interface{}) (bool,
 	if err != nil {
 		return false, err
 	}
-	resp, err := http.Post(getURL(AccessToken, Secret), "application/json", bytes.NewBuffer(b))
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(getURL(AccessToken, Secret), "application/json", bytes.NewBuffer(b))
 	if err != nil {
 		return false, err
 	}

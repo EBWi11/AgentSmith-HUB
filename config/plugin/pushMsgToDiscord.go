@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
 // formatMapToReadableString converts map into a formatted JSON string
@@ -34,7 +35,8 @@ func Eval(WebhookURL string, data map[string]interface{}) (bool, error) {
 	payload := map[string]string{"content": content}
 	b, _ := json.Marshal(payload)
 
-	resp, err := http.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(WebhookURL, "application/json", bytes.NewBuffer(b))
 	if err != nil {
 		return false, err
 	}

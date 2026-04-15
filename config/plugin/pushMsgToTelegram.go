@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 func formatMapToReadableString(data map[string]interface{}) string {
@@ -24,7 +25,8 @@ func Eval(BotToken string, ChatID string, data map[string]interface{}) (bool, er
 	text := url.QueryEscape(formatMapToReadableString(data))
 	apiUrl := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage?chat_id=%s&text=%s", BotToken, ChatID, text)
 
-	resp, err := http.Get(apiUrl)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(apiUrl)
 	if err != nil {
 		return false, err
 	}
