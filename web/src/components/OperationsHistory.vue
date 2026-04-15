@@ -49,6 +49,8 @@
             <option value="project_start">Project Start</option>
             <option value="project_stop">Project Stop</option>
             <option value="project_restart">Project Restart</option>
+            <option value="ruleset_hot_reload">Ruleset Hot Reload</option>
+            <option value="agent_hot_reload">Agent Hot Reload</option>
             <option value="instruction_publish">Instruction Publish</option>
           </select>
         </div>
@@ -668,6 +670,8 @@ function getOperationTypeLabel(type) {
     'project_start': 'Project Start',
     'project_stop': 'Project Stop',
     'project_restart': 'Project Restart',
+    'ruleset_hot_reload': 'Ruleset Hot Reload',
+    'agent_hot_reload': 'Agent Hot Reload',
     'instruction_publish': 'Instruction Publish'
   }
   return labels[type] || type
@@ -683,6 +687,8 @@ function getOperationTypeClass(type) {
     'project_start': 'bg-green-500',
     'project_stop': 'bg-red-500',
     'project_restart': 'bg-orange-500',
+    'ruleset_hot_reload': 'bg-cyan-500',
+    'agent_hot_reload': 'bg-teal-500',
     'instruction_publish': 'bg-indigo-500'
   }
   return classes[type] || 'bg-gray-500'
@@ -698,6 +704,8 @@ function getOperationTypeIcon(type) {
     'project_start': '<path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2z"/>',
     'project_stop': '<path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>',
     'project_restart': '<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>',
+    'ruleset_hot_reload': '<path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.97 0-9-4.03-9-9s4.03-9 9-9c3.3 0 6.19 1.78 7.75 4.43M12 7v5l3 3M21 12h-6m0 0l2-2m-2 2l2 2"/>',
+    'agent_hot_reload': '<path d="M17 20h5V9H2v11h5m10 0v-2a4 4 0 00-8 0v2m8 0H9m8-11a4 4 0 11-8 0 4 4 0 018 0z"/>',
     'instruction_publish': '<path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
   }
   return icons[type] || '<path d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'

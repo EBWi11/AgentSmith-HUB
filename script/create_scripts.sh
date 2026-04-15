@@ -8,7 +8,7 @@ set -e
 # Check if target directory is provided
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Usage: $0 <target_directory> [architecture]"
-    echo "This script creates start.sh and stop.sh in the target directory"
+    echo "This script creates start.sh, stop.sh and update.sh in the target directory"
     echo "Architecture: amd64 (default) or arm64"
     exit 1
 fi
@@ -188,6 +188,15 @@ EOF
     chmod +x "$TARGET_DIR/stop.sh"
 fi
 
+# Create update.sh
+if [ -f "$SCRIPT_DIR/update.sh" ]; then
+    print_info "Creating update.sh..."
+    cp "$SCRIPT_DIR/update.sh" "$TARGET_DIR/update.sh"
+    chmod +x "$TARGET_DIR/update.sh"
+else
+    print_warn "Source update.sh not found, skipping update.sh generation..."
+fi
+
 # Create README for deployment
 print_info "Creating deployment README..."
 cat > "$TARGET_DIR/README.md" << EOF
@@ -207,6 +216,7 @@ This package is built for **Linux $ARCHITECTURE** architecture.
 - \`config/\` - Configuration files
 - \`start.sh\` - Script to start the services (with architecture detection)
 - \`stop.sh\` - Script to stop the services
+- \`update.sh\` - Script to auto-update from latest GitHub release
 
 ## Quick Start
 
@@ -226,6 +236,10 @@ This package is built for **Linux $ARCHITECTURE** architecture.
 5. To stop the services:
    ```bash
    ./stop.sh
+   ```
+6. To update to latest release:
+   ```bash
+   ./update.sh
    ```
 
 ## Important Notes
@@ -287,4 +301,5 @@ print_info "Target architecture: $ARCHITECTURE"
 print_info "Created files:"
 print_info "  - $TARGET_DIR/start.sh (with architecture detection)"
 print_info "  - $TARGET_DIR/stop.sh"
+print_info "  - $TARGET_DIR/update.sh"
 print_info "  - $TARGET_DIR/README.md (architecture-specific)" 

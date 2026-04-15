@@ -1579,6 +1579,21 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 	if len(targetPNS) == 0 {
 		return nil
 	}
+	defer func() {
+		status := "success"
+		errMsg := ""
+		if err != nil {
+			status = "failed"
+			errMsg = err.Error()
+		}
+		details := map[string]interface{}{
+			"node_id":        common.GetNodeID(),
+			"triggered_by":   triggeredBy,
+			"ruleset_id":     rulesetID,
+			"instance_count": len(targetPNS),
+		}
+		common.RecordProjectOperation(common.OpTypeRulesetHotReload, p.Id, status, errMsg, details)
+	}()
 
 	swapPlans := make([]rulesetSwapPlan, 0, len(targetPNS))
 	for pns := range targetPNS {
@@ -1673,6 +1688,21 @@ func (p *Project) HotReloadAgent(agentID string, triggeredBy string) (err error)
 	if len(targetPNS) == 0 {
 		return nil
 	}
+	defer func() {
+		status := "success"
+		errMsg := ""
+		if err != nil {
+			status = "failed"
+			errMsg = err.Error()
+		}
+		details := map[string]interface{}{
+			"node_id":        common.GetNodeID(),
+			"triggered_by":   triggeredBy,
+			"agent_id":       agentID,
+			"instance_count": len(targetPNS),
+		}
+		common.RecordProjectOperation(common.OpTypeAgentHotReload, p.Id, status, errMsg, details)
+	}()
 
 	swapPlans := make([]agentSwapPlan, 0, len(targetPNS))
 	for pns := range targetPNS {

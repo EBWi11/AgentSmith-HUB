@@ -51,14 +51,16 @@ type HubConfig struct {
 type OperationType string
 
 const (
-	OpTypeChangePush      OperationType = "change_push"
-	OpTypeLocalPush       OperationType = "local_push"
-	OpTypeComponentDelete OperationType = "component_delete"
-	OpTypeComponentAdd    OperationType = "component_add"    // New: for component addition
-	OpTypeComponentUpdate OperationType = "component_update" // New: for component update
-	OpTypeProjectStart    OperationType = "project_start"
-	OpTypeProjectStop     OperationType = "project_stop"
-	OpTypeProjectRestart  OperationType = "project_restart"
+	OpTypeChangePush       OperationType = "change_push"
+	OpTypeLocalPush        OperationType = "local_push"
+	OpTypeComponentDelete  OperationType = "component_delete"
+	OpTypeComponentAdd     OperationType = "component_add"    // New: for component addition
+	OpTypeComponentUpdate  OperationType = "component_update" // New: for component update
+	OpTypeProjectStart     OperationType = "project_start"
+	OpTypeProjectStop      OperationType = "project_stop"
+	OpTypeProjectRestart   OperationType = "project_restart"
+	OpTypeRulesetHotReload OperationType = "ruleset_hot_reload"
+	OpTypeAgentHotReload   OperationType = "agent_hot_reload"
 	// Cluster instruction operations
 	OpTypeInstructionPublish OperationType = "instruction_publish" // Leader发布指令
 )
