@@ -8,7 +8,6 @@ import (
 	"AgentSmith-HUB/rules_engine"
 	"errors"
 	"testing"
-	"time"
 )
 
 func TestSetProjectErrorStatusStopsProjectAndLeavesErrorState(t *testing.T) {
@@ -51,14 +50,6 @@ func TestSetProjectErrorStatusStopsProjectAndLeavesErrorState(t *testing.T) {
 			Error:       errors.New("boom"),
 		},
 	})
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if proj.Status == common.StatusError {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	if proj.Status != common.StatusError {
 		t.Fatalf("expected project status %q, got %q", common.StatusError, proj.Status)

@@ -253,26 +253,7 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 		return
 	}
 
-	for dsPNS, dsCh := range a.DownStream {
-		if dsCh == nil {
-			continue
-		}
-
-		func(pns string, ch *chan map[string]interface{}, msg map[string]interface{}) {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("Agent downstream send failed (possibly closed channel)",
-						"agent", a.Id,
-						"downstream", pns,
-						"panic", r)
-				}
-			}()
-			// Block here to preserve pipeline delivery semantics. Project stop / hot
-			// reload paths drain and disconnect upstream edges before stopping
-			// components, so backpressure should propagate instead of dropping data.
-			*ch <- msg
-		}(dsPNS, dsCh, result)
-	}
+	a.forwardDownstream(result)
 }
 
 // Stop gracefully stops the agent. Safe to call even if Start was never called.

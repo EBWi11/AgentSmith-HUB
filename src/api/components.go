@@ -1190,7 +1190,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 	case "project":
 		affectedProjects, deletionErr = project.SafeDeleteProject(id)
 	case "plugin":
-		affectedProjects, deletionErr = plugin.SafeDeletePlugin(id)
+		affectedProjects, deletionErr = project.SafeDeletePluginComponent(id)
 	case "agent":
 		affectedProjects, deletionErr = project.SafeDeleteAgentComponent(id)
 	case "skill":

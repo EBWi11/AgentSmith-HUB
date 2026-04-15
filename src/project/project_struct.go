@@ -127,8 +127,8 @@ type Project struct {
 	restartMu       sync.Mutex
 
 	// Stop signal for graceful shutdown coordination
-	stopChan  chan struct{} `json:"-"`
-	stopOnce  sync.Once    `json:"-"`
+	stopChan chan struct{} `json:"-"`
+	stopOnce sync.Once     `json:"-"`
 	// cleanupMu serialises concurrent cleanup() calls that can arise when Stop()
 	// times out and returns while its background goroutine is still executing
 	// stopComponentsInternal (which also calls cleanup at the end).  The mutex
@@ -172,7 +172,10 @@ func (p *Project) GetProjectInputs() map[string]*input.Input {
 	for _, node := range p.FlowNodes {
 		if node.FromType == "INPUT" && node.FromInit {
 			var inp *input.Input
-			if p.Testing {
+			if boundInput, exists := p.Inputs[node.FromPNS]; exists {
+				inp = boundInput
+			}
+			if inp == nil && p.Testing {
 				// In testing mode, prioritize test-specific instances
 				// First try to get test instance with TEST_ prefix
 				if testInp, exists := GetInput("TEST_" + node.FromPNS); exists {
@@ -181,7 +184,7 @@ func (p *Project) GetProjectInputs() map[string]*input.Input {
 					// Fallback: check if the PNS itself is a test instance
 					inp = testInp
 				}
-			} else {
+			} else if inp == nil {
 				// Production mode: get original input component
 				if originalInp, exists := GetInput(node.FromID); exists {
 					inp = originalInp
@@ -273,14 +276,17 @@ func (p *Project) GetProjectInputsUnsafe() map[string]*input.Input {
 	for _, node := range p.FlowNodes {
 		if node.FromType == "INPUT" && node.FromInit {
 			var inp *input.Input
-			if p.Testing {
+			if boundInput, exists := p.Inputs[node.FromPNS]; exists {
+				inp = boundInput
+			}
+			if inp == nil && p.Testing {
 				// In testing mode, prioritize test-specific instances
 				if testInp, exists := GlobalProject.Inputs["TEST_"+node.FromPNS]; exists {
 					inp = testInp
 				} else if testInp, exists := GlobalProject.Inputs[node.FromPNS]; exists {
 					inp = testInp
 				}
-			} else {
+			} else if inp == nil {
 				// Production mode: get original input component
 				if originalInp, exists := GlobalProject.Inputs[node.FromID]; exists {
 					inp = originalInp
@@ -608,7 +614,7 @@ func SafeDeleteAgentDownstream(agentPNS, downstreamID string) {
 	common.GlobalMu.Lock()
 	defer common.GlobalMu.Unlock()
 	if a, exists := GlobalProject.PNSAgents[agentPNS]; exists {
-		delete(a.DownStream, downstreamID)
+		a.DeleteDownstream(downstreamID)
 	}
 }
 
@@ -616,7 +622,7 @@ func SafeSetAgentDownstream(agentPNS, downstreamID string, ch *chan map[string]i
 	common.GlobalMu.Lock()
 	defer common.GlobalMu.Unlock()
 	if a, exists := GlobalProject.PNSAgents[agentPNS]; exists {
-		a.DownStream[downstreamID] = ch
+		a.SetDownstream(downstreamID, ch)
 	}
 }
 
@@ -1185,7 +1191,7 @@ func SafeDeleteInputDownstream(inputID, downstreamID string) {
 	defer common.GlobalMu.Unlock()
 
 	if i, exists := GlobalProject.Inputs[inputID]; exists {
-		delete(i.DownStream, downstreamID)
+		i.DeleteDownstream(downstreamID)
 	}
 }
 
@@ -1194,7 +1200,7 @@ func SafeSetInputDownstream(inputID, downstreamID string, ch *chan map[string]in
 	defer common.GlobalMu.Unlock()
 
 	if i, exists := GlobalProject.Inputs[inputID]; exists {
-		i.DownStream[downstreamID] = ch
+		i.SetDownstream(downstreamID, ch)
 	}
 }
 
@@ -1204,7 +1210,7 @@ func SafeDeleteRulesetDownstream(rulesetID, downstreamID string) {
 	defer common.GlobalMu.Unlock()
 
 	if i, exists := GlobalProject.Rulesets[rulesetID]; exists {
-		delete(i.DownStream, downstreamID)
+		i.DeleteDownstream(downstreamID)
 	}
 }
 
@@ -1213,7 +1219,7 @@ func SafeDeletePNSRulesetDownstream(rulesetPNS, downstreamID string) {
 	defer common.GlobalMu.Unlock()
 
 	if i, exists := GlobalProject.PNSRulesets[rulesetPNS]; exists {
-		delete(i.DownStream, downstreamID)
+		i.DeleteDownstream(downstreamID)
 	}
 }
 
@@ -1222,7 +1228,7 @@ func SafeSetPNSRulesetDownstream(rulesetPNS, downstreamID string, ch *chan map[s
 	defer common.GlobalMu.Unlock()
 
 	if i, exists := GlobalProject.PNSRulesets[rulesetPNS]; exists {
-		i.DownStream[downstreamID] = ch
+		i.SetDownstream(downstreamID, ch)
 	}
 }
 
@@ -1393,8 +1399,7 @@ func SafeDeleteInput(id string) ([]string, error) {
 		if proj.Status != common.StatusRunning {
 			continue
 		}
-		inputs := proj.GetProjectInputsUnsafe()
-		if _, inUse := inputs[id]; inUse {
+		if proj.CheckExist("INPUT", id) {
 			common.GlobalMu.Unlock()
 			return nil, fmt.Errorf("input %s is currently in use by project %s", id, projectID)
 		}
@@ -1458,8 +1463,7 @@ func SafeDeleteOutput(id string) ([]string, error) {
 		if proj.Status != common.StatusRunning {
 			continue
 		}
-		outputs := proj.GetProjectOutputsUnsafe()
-		if _, inUse := outputs[id]; inUse {
+		if proj.CheckExist("OUTPUT", id) {
 			common.GlobalMu.Unlock()
 			return nil, fmt.Errorf("output %s is currently in use by project %s", id, projectID)
 		}

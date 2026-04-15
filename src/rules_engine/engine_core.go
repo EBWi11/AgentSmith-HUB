@@ -238,9 +238,7 @@ func (r *Ruleset) Start() error {
 						results := r.EngineCheck(data)
 						// Send results to downstream channels - blocking to ensure no data loss
 						for _, res := range results {
-							for _, downCh := range r.DownStream {
-								*downCh <- res // Blocking write to ensure data integrity
-							}
+							r.sendToDownstream(res)
 						}
 					}
 
@@ -401,9 +399,7 @@ func (r *Ruleset) scanAbsenceTimeouts() {
 				stringBuilderPool.Put(sb)
 
 				// Send to downstream
-				for _, downCh := range r.DownStream {
-					*downCh <- resultData
-				}
+				r.sendToDownstream(resultData)
 			}
 		}
 
@@ -608,7 +604,7 @@ func (r *Ruleset) Stop() error {
 			default:
 				allEmpty := true
 				totalMessages := 0
-				for _, downCh := range r.DownStream {
+				for _, downCh := range r.downstreamSnapshot() {
 					chLen := len(*downCh)
 					if chLen > 0 {
 						allEmpty = false

@@ -158,8 +158,9 @@ type Ruleset struct {
 	Rules       []Rule
 	RulesCount  int
 
-	UpStream   map[string]*chan map[string]interface{}
-	DownStream map[string]*chan map[string]interface{}
+	UpStream     map[string]*chan map[string]interface{}
+	DownStream   map[string]*chan map[string]interface{}
+	downstreamMu sync.RWMutex
 
 	stopChan chan struct{} // Control channel for Start/Stop
 	antsPool *ants.Pool    // Ants thread pool
@@ -211,6 +212,66 @@ type Checklist struct {
 	ConditionFlag  bool
 	ConditionMap   map[string]bool
 }
+
+func (r *Ruleset) downstreamSnapshot() []*chan map[string]interface{} {
+	r.downstreamMu.RLock()
+	defer r.downstreamMu.RUnlock()
+
+	if len(r.DownStream) == 0 {
+		return nil
+	}
+
+	downstreams := make([]*chan map[string]interface{}, 0, len(r.DownStream))
+	for _, ch := range r.DownStream {
+		if ch != nil {
+			downstreams = append(downstreams, ch)
+		}
+	}
+
+	return downstreams
+}
+
+func (r *Ruleset) CopyDownstream() map[string]*chan map[string]interface{} {
+	r.downstreamMu.RLock()
+	defer r.downstreamMu.RUnlock()
+
+	result := make(map[string]*chan map[string]interface{}, len(r.DownStream))
+	for id, ch := range r.DownStream {
+		result[id] = ch
+	}
+	return result
+}
+
+func (r *Ruleset) SetDownstream(downstreamID string, ch *chan map[string]interface{}) {
+	r.downstreamMu.Lock()
+	defer r.downstreamMu.Unlock()
+
+	if r.DownStream == nil {
+		r.DownStream = make(map[string]*chan map[string]interface{})
+	}
+	r.DownStream[downstreamID] = ch
+}
+
+func (r *Ruleset) DeleteDownstream(downstreamID string) {
+	r.downstreamMu.Lock()
+	defer r.downstreamMu.Unlock()
+
+	delete(r.DownStream, downstreamID)
+}
+
+func (r *Ruleset) ResetDownstream() {
+	r.downstreamMu.Lock()
+	defer r.downstreamMu.Unlock()
+
+	r.DownStream = make(map[string]*chan map[string]interface{})
+}
+
+func (r *Ruleset) sendToDownstream(msg map[string]interface{}) {
+	for _, downCh := range r.downstreamSnapshot() {
+		*downCh <- msg
+	}
+}
+
 type Iterator struct {
 	Type           string       `xml:"type,attr"` // ANY, ALL
 	Field          string       `xml:"field,attr"`
@@ -2027,7 +2088,7 @@ func (r *Ruleset) cleanup() {
 
 	// Clear component channel connections to prevent leaks
 	r.UpStream = make(map[string]*chan map[string]interface{})
-	r.DownStream = make(map[string]*chan map[string]interface{})
+	r.ResetDownstream()
 }
 
 // NewFromExisting creates a new Ruleset instance from an existing one with a different ProjectNodeSequence

@@ -863,6 +863,7 @@ func (sl *SyncListener) createComponentInstance(componentType, componentName, co
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
 
+	common.SetRawConfig(componentType, componentName, content)
 	return nil
 }
 
@@ -891,7 +892,7 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		logger.Debug("Deleted project instance", "name", componentName)
 
 	case "plugin":
-		if _, err := plugin.SafeDeletePlugin(componentName); err != nil {
+		if _, err := project.SafeDeletePluginComponent(componentName); err != nil {
 			return fmt.Errorf("failed to delete plugin %s: %w", componentName, err)
 		}
 		logger.Debug("Deleted plugin instance", "name", componentName)
@@ -912,6 +913,7 @@ func (sl *SyncListener) deleteComponentInstance(componentType, componentName str
 		return fmt.Errorf("unsupported component type: %s", componentType)
 	}
 
+	common.DeleteRawConfig(componentType, componentName)
 	return nil
 }
 

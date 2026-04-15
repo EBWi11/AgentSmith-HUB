@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,114 @@ import (
 var GlobalProject *GlobalProjectInfo
 var projectAutoStopMu sync.Mutex
 var projectAutoStopInFlight = make(map[string]struct{})
+
+func shouldRestartProjectForComponentChange(projectID string, p *Project) bool {
+	userWantsRunning, err := common.GetProjectUserIntention(projectID)
+	if err != nil {
+		logger.Error("Failed to get user intention, using actual status as fallback",
+			"project", projectID,
+			"error", err,
+			"actual_status", p.Status)
+		return p.Status == common.StatusRunning
+	}
+
+	return userWantsRunning
+}
+
+func rulesetUsesPlugin(ruleset *rules_engine.Ruleset, pluginID string) bool {
+	if ruleset == nil {
+		return false
+	}
+
+	for _, rule := range ruleset.Rules {
+		for _, checkNode := range rule.CheckMap {
+			if checkNode.Plugin != nil && checkNode.Plugin.Name == pluginID {
+				return true
+			}
+		}
+
+		for _, checklist := range rule.ChecklistMap {
+			for _, checkNode := range checklist.CheckNodes {
+				if checkNode.Plugin != nil && checkNode.Plugin.Name == pluginID {
+					return true
+				}
+			}
+		}
+
+		for _, appendOp := range rule.AppendsMap {
+			if appendOp.Plugin != nil && appendOp.Plugin.Name == pluginID {
+				return true
+			}
+		}
+
+		for _, modifyOp := range rule.ModifyMap {
+			if modifyOp.Plugin != nil && modifyOp.Plugin.Name == pluginID {
+				return true
+			}
+		}
+
+		for _, pluginOp := range rule.PluginMap {
+			if pluginOp.Plugin != nil && pluginOp.Plugin.Name == pluginID {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func getRulesetsUsingPlugin(pluginID string) []string {
+	rulesetSet := make(map[string]struct{})
+
+	ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
+		if rulesetUsesPlugin(ruleset, pluginID) {
+			rulesetSet[rulesetID] = struct{}{}
+		}
+		return true
+	})
+
+	rulesetIDs := make([]string, 0, len(rulesetSet))
+	for rulesetID := range rulesetSet {
+		rulesetIDs = append(rulesetIDs, rulesetID)
+	}
+	sort.Strings(rulesetIDs)
+
+	return rulesetIDs
+}
+
+func getProjectsUsingRulesets(rulesetIDs []string, shouldInclude func(projectID string, p *Project) bool) []string {
+	projectSet := make(map[string]struct{})
+
+	for _, rulesetID := range rulesetIDs {
+		ForEachProject(func(projectID string, p *Project) bool {
+			if p.CheckExist("RULESET", rulesetID) && shouldInclude(projectID, p) {
+				projectSet[projectID] = struct{}{}
+			}
+			return true
+		})
+	}
+
+	projectIDs := make([]string, 0, len(projectSet))
+	for projectID := range projectSet {
+		projectIDs = append(projectIDs, projectID)
+	}
+	sort.Strings(projectIDs)
+
+	return projectIDs
+}
+
+func GetRulesetsUsingPlugin(pluginID string) []string {
+	return getRulesetsUsingPlugin(pluginID)
+}
+
+func SafeDeletePluginComponent(id string) ([]string, error) {
+	referencingRulesets := GetRulesetsUsingPlugin(id)
+	if len(referencingRulesets) > 0 {
+		return nil, fmt.Errorf("plugin %s is referenced by ruleset(s): %v", id, referencingRulesets)
+	}
+
+	return plugin.SafeDeletePlugin(id)
+}
 
 // collectAllComponentStats collects current statistics from all running components
 // Optimized for high concurrency with minimal lock time
@@ -133,25 +242,12 @@ func collectAllComponentStats() []common.DailyStatsData {
 func GetAffectedProjects(componentType string, componentID string) []string {
 	affectedProjects := make(map[string]struct{})
 
-	// Helper function to check user intention with fallback to actual status
-	checkShouldRestart := func(projectID string, p *Project) bool {
-		userWantsRunning, err := common.GetProjectUserIntention(projectID)
-		if err != nil {
-			// Fallback: if we can't get user intention, check actual status
-			// This handles Redis failures or other edge cases
-			logger.Error("Failed to get user intention, using actual status as fallback",
-				"project", projectID, "error", err, "actual_status", p.Status)
-			return p.Status == common.StatusRunning
-		}
-		return userWantsRunning
-	}
-
 	switch componentType {
 	case "input":
 		// Find all projects using this input
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("INPUT", componentID) {
-				if checkShouldRestart(projectID, p) {
+				if shouldRestartProjectForComponentChange(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
@@ -161,7 +257,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this output
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("OUTPUT", componentID) {
-				if checkShouldRestart(projectID, p) {
+				if shouldRestartProjectForComponentChange(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
@@ -171,111 +267,27 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		// Find all projects using this ruleset
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("RULESET", componentID) {
-				if checkShouldRestart(projectID, p) {
+				if shouldRestartProjectForComponentChange(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
 			return true
 		})
 	case "plugin":
-		// For plugins, we need to find:
-		// 1. Which rulesets use this plugin
-		// 2. Which projects use those rulesets
-		affectedRulesets := make(map[string]bool)
-
-		// Find all rulesets that use this plugin
-		ForEachRuleset(func(rulesetID string, ruleset *rules_engine.Ruleset) bool {
-			if ruleset == nil {
-				return true
-			}
-
-			// Check if ruleset uses this plugin by examining rules
-			// Plugins can be used in various rule operations (check, append, modify, plugin)
-			for _, rule := range ruleset.Rules {
-				pluginUsed := false
-
-				// Check in CheckMap (check nodes)
-				for _, checkNode := range rule.CheckMap {
-					if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
-						pluginUsed = true
-						break
-					}
-				}
-
-				// Check in ChecklistMap (checklist nodes)
-				if !pluginUsed {
-					for _, checklist := range rule.ChecklistMap {
-						for _, checkNode := range checklist.CheckNodes {
-							if checkNode.Plugin != nil && checkNode.Plugin.Name == componentID {
-								pluginUsed = true
-								break
-							}
-						}
-						if pluginUsed {
-							break
-						}
-					}
-				}
-
-				// Check in AppendsMap (append operations)
-				if !pluginUsed {
-					for _, appendOp := range rule.AppendsMap {
-						if appendOp.Plugin != nil && appendOp.Plugin.Name == componentID {
-							pluginUsed = true
-							break
-						}
-					}
-				}
-
-				// Check in ModifyMap (modify operations)
-				if !pluginUsed {
-					for _, modifyOp := range rule.ModifyMap {
-						if modifyOp.Plugin != nil && modifyOp.Plugin.Name == componentID {
-							pluginUsed = true
-							break
-						}
-					}
-				}
-
-				// Check in PluginMap (plugin operations)
-				if !pluginUsed {
-					for _, pluginOp := range rule.PluginMap {
-						if pluginOp.Plugin != nil && pluginOp.Plugin.Name == componentID {
-							pluginUsed = true
-							break
-						}
-					}
-				}
-
-				if pluginUsed {
-					affectedRulesets[rulesetID] = true
-					break // No need to check other rules in this ruleset
-				}
-			}
-			return true
-		})
-
-		// Find all projects using the affected rulesets
-		for rulesetID := range affectedRulesets {
-			ForEachProject(func(projectID string, p *Project) bool {
-				if p.CheckExist("RULESET", rulesetID) {
-					if checkShouldRestart(projectID, p) {
-						affectedProjects[projectID] = struct{}{}
-					}
-				}
-				return true
-			})
+		rulesetIDs := getRulesetsUsingPlugin(componentID)
+		for _, projectID := range getProjectsUsingRulesets(rulesetIDs, shouldRestartProjectForComponentChange) {
+			affectedProjects[projectID] = struct{}{}
 		}
 
 		logger.Info("Plugin change affects rulesets and projects",
 			"plugin", componentID,
-			"affected_rulesets", len(affectedRulesets),
+			"affected_rulesets", len(rulesetIDs),
 			"affected_projects", len(affectedProjects))
 
 	case "agent":
 		ForEachProject(func(projectID string, p *Project) bool {
 			if p.CheckExist("AGENT", componentID) {
-				if checkShouldRestart(projectID, p) {
+				if shouldRestartProjectForComponentChange(projectID, p) {
 					affectedProjects[projectID] = struct{}{}
 				}
 			}
@@ -298,7 +310,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		for _, agentID := range affectedAgentIDs {
 			ForEachProject(func(projectID string, p *Project) bool {
 				if p.CheckExist("AGENT", agentID) {
-					if checkShouldRestart(projectID, p) {
+					if shouldRestartProjectForComponentChange(projectID, p) {
 						affectedProjects[projectID] = struct{}{}
 					}
 				}
@@ -308,7 +320,7 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 	case "project":
 		// For project changes, check if user wants this project to be running
 		if p, exists := GetProject(componentID); exists {
-			if checkShouldRestart(componentID, p) {
+			if shouldRestartProjectForComponentChange(componentID, p) {
 				affectedProjects[componentID] = struct{}{}
 			}
 		}
@@ -514,23 +526,21 @@ func SetProjectErrorStatus(projectID string, componentErrors []common.ProjectCom
 		return
 	}
 
-	go func(proj *Project, errMsg error, errCount int) {
-		defer clearProjectAutoStopInFlight(projectID)
+	defer clearProjectAutoStopInFlight(projectID)
 
-		// Execute the full stop path so channels and component goroutines are cleaned
-		// up instead of only flipping the project status in memory/Redis.
-		stopErr := proj.Stop(true)
-		if stopErr != nil {
-			errMsg = fmt.Errorf("%s; project stop failed during crash recovery: %v", errMsg.Error(), stopErr)
-		}
+	// Run the stop path inline so callers observe a fully converged error state
+	// once this function returns.
+	stopErr := proj.Stop(true)
+	if stopErr != nil {
+		componentErr = fmt.Errorf("%s; project stop failed during crash recovery: %v", componentErr.Error(), stopErr)
+	}
 
-		proj.SetProjectStatus(common.StatusError, errMsg)
+	proj.SetProjectStatus(common.StatusError, componentErr)
 
-		logger.Error("Project set to error status due to component failures",
-			"project", projectID,
-			"component_count", errCount,
-			"error", errMsg)
-	}(proj, componentErr, len(componentErrors))
+	logger.Error("Project set to error status due to component failures",
+		"project", projectID,
+		"component_count", len(componentErrors),
+		"error", componentErr)
 }
 
 func init() {
@@ -1585,10 +1595,7 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 		for k, ch := range oldRS.UpStream {
 			upstreamBackup[k] = ch
 		}
-		downstreamBackup := make(map[string]*chan map[string]interface{}, len(oldRS.DownStream))
-		for k, ch := range oldRS.DownStream {
-			downstreamBackup[k] = ch
-		}
+		downstreamBackup := oldRS.CopyDownstream()
 
 		swapPlans = append(swapPlans, rulesetSwapPlan{
 			pns:              pns,
@@ -1627,9 +1634,9 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 
 		// Bind channels preserved from old instance so new instance keeps the same project routing.
 		plan.newRuleset.UpStream = plan.upstreamBackup
-		plan.newRuleset.DownStream = make(map[string]*chan map[string]interface{}, len(plan.downstreamBackup))
+		plan.newRuleset.ResetDownstream()
 		for k, ch := range plan.downstreamBackup {
-			plan.newRuleset.DownStream[k] = ch
+			plan.newRuleset.SetDownstream(k, ch)
 		}
 
 		startErr := plan.newRuleset.Start()
@@ -1683,10 +1690,7 @@ func (p *Project) HotReloadAgent(agentID string, triggeredBy string) (err error)
 		for k, ch := range oldAgent.UpStream {
 			upstreamBackup[k] = ch
 		}
-		downstreamBackup := make(map[string]*chan map[string]interface{}, len(oldAgent.DownStream))
-		for k, ch := range oldAgent.DownStream {
-			downstreamBackup[k] = ch
-		}
+		downstreamBackup := oldAgent.CopyDownstream()
 
 		swapPlans = append(swapPlans, agentSwapPlan{
 			pns:              pns,
@@ -1722,9 +1726,9 @@ func (p *Project) HotReloadAgent(agentID string, triggeredBy string) (err error)
 		}
 
 		plan.newAgent.UpStream = plan.upstreamBackup
-		plan.newAgent.DownStream = make(map[string]*chan map[string]interface{}, len(plan.downstreamBackup))
+		plan.newAgent.ResetDownstream()
 		for k, ch := range plan.downstreamBackup {
-			plan.newAgent.DownStream[k] = ch
+			plan.newAgent.SetDownstream(k, ch)
 		}
 
 		startErr := plan.newAgent.Start()
@@ -2005,8 +2009,7 @@ func (p *Project) disconnectInputsFromDownstream() {
 		rightNodes := p.getPartner("right", id)
 
 		for _, downstreamID := range rightNodes {
-			// Use the safe deletion function to properly clean up downstream connections
-			SafeDeleteInputDownstream(in.Id, downstreamID)
+			in.DeleteDownstream(downstreamID)
 			logger.Debug("Disconnected input from downstream",
 				"project", p.Id, "input", in.Id, "downstream", downstreamID)
 		}
@@ -2024,31 +2027,23 @@ func (p *Project) stopInputComponents() []error {
 		// Input components need reference counting to determine if they should be stopped
 		// Only stop when no other projects are using this input (excluding current project)
 		if CalculateRefCount(id, p.Id) == 0 {
-			// Use safe accessor to get global input
-			globalInput, exists := GetInput(in.Id)
-
-			if exists {
-				var err error
-				if p.Testing {
-					err = globalInput.StopForTesting()
-					if err != nil {
-						logger.Error("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
-						stopErrors = append(stopErrors, fmt.Errorf("test input %s: %w", in.Id, err))
-					} else {
-						logger.Info("Stopped test input", "project", p.Id, "input", in.Id)
-					}
+			var err error
+			if p.Testing {
+				err = in.StopForTesting()
+				if err != nil {
+					logger.Error("Failed to stop test input", "project", p.Id, "input", in.Id, "error", err)
+					stopErrors = append(stopErrors, fmt.Errorf("test input %s: %w", in.Id, err))
 				} else {
-					err = globalInput.Stop()
-					if err != nil {
-						logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
-						stopErrors = append(stopErrors, fmt.Errorf("input %s: %w", in.Id, err))
-					} else {
-						logger.Info("Stopped input", "project", p.Id, "input", in.Id)
-					}
+					logger.Info("Stopped test input", "project", p.Id, "input", in.Id)
 				}
 			} else {
-				logger.Error("Global input not found during stop", "project", p.Id, "input", in.Id)
-				stopErrors = append(stopErrors, fmt.Errorf("input %s: global input not found", in.Id))
+				err = in.Stop()
+				if err != nil {
+					logger.Error("Failed to stop input", "project", p.Id, "input", in.Id, "error", err)
+					stopErrors = append(stopErrors, fmt.Errorf("input %s: %w", in.Id, err))
+				} else {
+					logger.Info("Stopped input", "project", p.Id, "input", in.Id)
+				}
 			}
 		} else {
 			logger.Debug("Input still in use by other projects, not stopping",
@@ -2152,7 +2147,7 @@ func (p *Project) cleanupRulesetChannel() {
 		if node.FromType == "RULESET" {
 			if CalculateRefCount(node.FromPNS, p.Id) > 0 {
 				if r, exist := GetRuleset(node.FromPNS); exist {
-					delete(r.DownStream, node.ToPNS)
+					r.DeleteDownstream(node.ToPNS)
 				}
 			}
 		}
@@ -2460,25 +2455,25 @@ func (p *Project) initComponents() error {
 				// Always try to establish connection regardless of channel creation status
 				// This ensures shared PNS components get properly connected
 				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
-					fromRs.DownStream[node.ToPNS] = toChannel
+					fromRs.SetDownstream(node.ToPNS, toChannel)
 				} else {
 					// If no local channel, try to find existing channel in shared PNS component
 					if node.ToType == "OUTPUT" {
 						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
 							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
-								fromRs.DownStream[node.ToPNS] = sharedChannel
+								fromRs.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					} else if node.ToType == "RULESET" {
 						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
 							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
-								fromRs.DownStream[node.ToPNS] = sharedChannel
+								fromRs.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					} else if node.ToType == "AGENT" {
 						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
 							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
-								fromRs.DownStream[node.ToPNS] = sharedChannel
+								fromRs.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					}
@@ -2487,24 +2482,24 @@ func (p *Project) initComponents() error {
 		case "AGENT":
 			if fromAgent, exists := p.Agents[node.FromPNS]; exists {
 				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
-					fromAgent.DownStream[node.ToPNS] = toChannel
+					fromAgent.SetDownstream(node.ToPNS, toChannel)
 				} else {
 					if node.ToType == "OUTPUT" {
 						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
 							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
-								fromAgent.DownStream[node.ToPNS] = sharedChannel
+								fromAgent.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					} else if node.ToType == "RULESET" {
 						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
 							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
-								fromAgent.DownStream[node.ToPNS] = sharedChannel
+								fromAgent.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					} else if node.ToType == "AGENT" {
 						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
 							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
-								fromAgent.DownStream[node.ToPNS] = sharedChannel
+								fromAgent.SetDownstream(node.ToPNS, sharedChannel)
 							}
 						}
 					}
@@ -2513,7 +2508,7 @@ func (p *Project) initComponents() error {
 		case "INPUT":
 			if fromInput, exists := p.Inputs[node.FromPNS]; exists {
 				if toChannel, channelExists := p.MsgChannels[node.ToPNS]; channelExists {
-					fromInput.DownStream[node.ToPNS] = toChannel
+					fromInput.SetDownstream(node.ToPNS, toChannel)
 					logger.Info("Input downstream connection established",
 						"project", p.Id,
 						"input", fromInput.Id,
@@ -2524,7 +2519,7 @@ func (p *Project) initComponents() error {
 					if node.ToType == "OUTPUT" {
 						if sharedOutput, exists := GetPNSOutput(node.ToPNS); exists {
 							if sharedChannel, exists := sharedOutput.UpStream[node.ToPNS]; exists {
-								fromInput.DownStream[node.ToPNS] = sharedChannel
+								fromInput.SetDownstream(node.ToPNS, sharedChannel)
 								logger.Info("Input downstream connection established to shared output",
 									"project", p.Id,
 									"input", fromInput.Id,
@@ -2535,7 +2530,7 @@ func (p *Project) initComponents() error {
 					} else if node.ToType == "RULESET" {
 						if sharedRuleset, exists := GetPNSRuleset(node.ToPNS); exists {
 							if sharedChannel, exists := sharedRuleset.UpStream[node.ToPNS]; exists {
-								fromInput.DownStream[node.ToPNS] = sharedChannel
+								fromInput.SetDownstream(node.ToPNS, sharedChannel)
 								logger.Info("Input downstream connection established to shared ruleset",
 									"project", p.Id,
 									"input", fromInput.Id,
@@ -2546,7 +2541,7 @@ func (p *Project) initComponents() error {
 					} else if node.ToType == "AGENT" {
 						if sharedAgent, exists := GetPNSAgent(node.ToPNS); exists {
 							if sharedChannel, exists := sharedAgent.UpStream[node.ToPNS]; exists {
-								fromInput.DownStream[node.ToPNS] = sharedChannel
+								fromInput.SetDownstream(node.ToPNS, sharedChannel)
 								logger.Info("Input downstream connection established to shared agent",
 									"project", p.Id,
 									"input", fromInput.Id,

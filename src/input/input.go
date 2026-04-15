@@ -72,6 +72,7 @@ type Input struct {
 	ProjectNodeSequence string
 	Type                InputType
 	DownStream          map[string]*chan map[string]interface{}
+	downstreamMu        sync.RWMutex
 
 	// runtime
 	kafkaConsumer *common.KafkaConsumer
@@ -553,7 +554,7 @@ func (in *Input) ProcessTestData(data map[string]interface{}) {
 
 	in.dispatchMessage(in.prepareMessage(data))
 
-	logger.Debug("Test data processed through input", "input", in.Id, "downstream_count", len(in.DownStream))
+	logger.Debug("Test data processed through input", "input", in.Id, "downstream_count", in.DownstreamCount())
 }
 
 func (in *Input) prepareMessage(msg map[string]interface{}) map[string]interface{} {
@@ -565,19 +566,70 @@ func (in *Input) prepareMessage(msg map[string]interface{}) map[string]interface
 }
 
 func (in *Input) dispatchMessage(msg map[string]interface{}) {
-	switch len(in.DownStream) {
+	downstreams := in.downstreamSnapshot()
+
+	switch len(downstreams) {
 	case 0:
 		return
 	case 1:
-		for _, ch := range in.DownStream {
+		for _, ch := range downstreams {
 			*ch <- msg
 			return
 		}
 	default:
-		for _, ch := range in.DownStream {
+		for _, ch := range downstreams {
 			*ch <- msg
 		}
 	}
+}
+
+func (in *Input) downstreamSnapshot() []*chan map[string]interface{} {
+	in.downstreamMu.RLock()
+	defer in.downstreamMu.RUnlock()
+
+	if len(in.DownStream) == 0 {
+		return nil
+	}
+
+	downstreams := make([]*chan map[string]interface{}, 0, len(in.DownStream))
+	for _, ch := range in.DownStream {
+		if ch != nil {
+			downstreams = append(downstreams, ch)
+		}
+	}
+
+	return downstreams
+}
+
+func (in *Input) DownstreamCount() int {
+	in.downstreamMu.RLock()
+	defer in.downstreamMu.RUnlock()
+
+	return len(in.DownStream)
+}
+
+func (in *Input) SetDownstream(downstreamID string, ch *chan map[string]interface{}) {
+	in.downstreamMu.Lock()
+	defer in.downstreamMu.Unlock()
+
+	if in.DownStream == nil {
+		in.DownStream = make(map[string]*chan map[string]interface{})
+	}
+	in.DownStream[downstreamID] = ch
+}
+
+func (in *Input) DeleteDownstream(downstreamID string) {
+	in.downstreamMu.Lock()
+	defer in.downstreamMu.Unlock()
+
+	delete(in.DownStream, downstreamID)
+}
+
+func (in *Input) ResetDownstream() {
+	in.downstreamMu.Lock()
+	defer in.downstreamMu.Unlock()
+
+	in.DownStream = make(map[string]*chan map[string]interface{})
 }
 
 // StopForTesting stops the input component quickly for testing purposes
@@ -592,7 +644,7 @@ func (in *Input) StopForTesting() error {
 
 	// Note: DownStream connections are managed by Project in production
 	// For testing, we can clear them since test inputs are isolated
-	in.DownStream = make(map[string]*chan map[string]interface{})
+	in.ResetDownstream()
 
 	// Reset counters for testing cleanup
 	in.ResetConsumeTotal()

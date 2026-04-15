@@ -664,43 +664,47 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		affectedProjects = project.GetAffectedProjects("ruleset", req.ID)
 
 	case "project":
-		// CRITICAL: Stop old project first to release components
-		// Without this, new project's Start() will fail with "component is not stopped"
-		oldProject, oldExists := project.GetProject(req.ID)
-		if oldExists && (oldProject.Status == common.StatusRunning || oldProject.Status == common.StatusError) {
-			logger.Info("Stopping old project before reload to release components", "project", req.ID)
-			stopErr := oldProject.Stop(false)
-			if stopErr != nil {
-				logger.Error("Failed to stop old project, continuing anyway", "project", req.ID, "error", stopErr)
+		// Serialize the project stop/swap path with other lifecycle operations so
+		// start/restart commands cannot race the config replacement.
+		var createErr error
+		common.ProjectOperationMu.Lock()
+		func() {
+			defer common.ProjectOperationMu.Unlock()
+
+			oldProject, oldExists := project.GetProject(req.ID)
+			if oldExists && (oldProject.Status == common.StatusRunning || oldProject.Status == common.StatusError || oldProject.Status == common.StatusStarting) {
+				logger.Info("Stopping old project before reload to release components", "project", req.ID)
+				stopErr := oldProject.Stop(false)
+				if stopErr != nil {
+					logger.Error("Failed to stop old project, continuing anyway", "project", req.ID, "error", stopErr)
+				}
 			}
-			// Sleep to ensure components fully stopped
-			time.Sleep(2 * time.Second)
-		}
 
-		// Create new component instance
-		var newProject *project.Project
-		var err error
-		if req.WriteToFile && filePath != "" {
-			newProject, err = project.NewProject(filePath, "", req.ID, false)
-		} else {
-			newProject, err = project.NewProject("", req.NewContent, req.ID, false)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to create project: %w", err)
-		}
+			var newProject *project.Project
+			var err error
+			if req.WriteToFile && filePath != "" {
+				newProject, err = project.NewProject(filePath, "", req.ID, false)
+			} else {
+				newProject, err = project.NewProject("", req.NewContent, req.ID, false)
+			}
+			if err != nil {
+				createErr = fmt.Errorf("failed to create project: %w", err)
+				return
+			}
 
-		// Replace in global registry using safe accessors
-		project.SetProject(req.ID, newProject)
-		project.DeleteProjectNew(req.ID)
+			project.SetProject(req.ID, newProject)
+			project.DeleteProjectNew(req.ID)
 
-		// Only restart project if it's a modification (OldContent exists)
-		// For new projects (OldContent empty), user needs to manually start
-		if req.OldContent != "" && strings.TrimSpace(req.OldContent) != "" {
-			affectedProjects = []string{req.ID}
-			logger.Info("Project modified, will restart automatically", "project", req.ID)
-		} else {
-			affectedProjects = []string{}
-			logger.Info("New project created, manual start required", "project", req.ID)
+			if req.OldContent != "" && strings.TrimSpace(req.OldContent) != "" {
+				affectedProjects = []string{req.ID}
+				logger.Info("Project modified, will restart automatically", "project", req.ID)
+			} else {
+				affectedProjects = []string{}
+				logger.Info("New project created, manual start required", "project", req.ID)
+			}
+		}()
+		if createErr != nil {
+			return nil, createErr
 		}
 
 	case "plugin":

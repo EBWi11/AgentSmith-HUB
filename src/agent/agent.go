@@ -58,8 +58,9 @@ type Agent struct {
 	Config          *AgentConfig  `json:"config"`
 	Path            string        `json:"path"`
 
-	UpStream   map[string]*chan map[string]interface{} `json:"-"`
-	DownStream map[string]*chan map[string]interface{} `json:"-"`
+	UpStream     map[string]*chan map[string]interface{} `json:"-"`
+	DownStream   map[string]*chan map[string]interface{} `json:"-"`
+	downstreamMu sync.RWMutex
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -195,6 +196,83 @@ func (a *Agent) SetStatus(status common.Status, err error) {
 	a.Status = status
 	t := time.Now()
 	a.StatusChangedAt = &t
+}
+
+type downstreamTarget struct {
+	id string
+	ch *chan map[string]interface{}
+}
+
+func (a *Agent) downstreamSnapshot() []downstreamTarget {
+	a.downstreamMu.RLock()
+	defer a.downstreamMu.RUnlock()
+
+	if len(a.DownStream) == 0 {
+		return nil
+	}
+
+	targets := make([]downstreamTarget, 0, len(a.DownStream))
+	for id, ch := range a.DownStream {
+		if ch != nil {
+			targets = append(targets, downstreamTarget{id: id, ch: ch})
+		}
+	}
+
+	return targets
+}
+
+func (a *Agent) CopyDownstream() map[string]*chan map[string]interface{} {
+	a.downstreamMu.RLock()
+	defer a.downstreamMu.RUnlock()
+
+	result := make(map[string]*chan map[string]interface{}, len(a.DownStream))
+	for id, ch := range a.DownStream {
+		result[id] = ch
+	}
+	return result
+}
+
+func (a *Agent) SetDownstream(downstreamID string, ch *chan map[string]interface{}) {
+	a.downstreamMu.Lock()
+	defer a.downstreamMu.Unlock()
+
+	if a.DownStream == nil {
+		a.DownStream = make(map[string]*chan map[string]interface{})
+	}
+	a.DownStream[downstreamID] = ch
+}
+
+func (a *Agent) DeleteDownstream(downstreamID string) {
+	a.downstreamMu.Lock()
+	defer a.downstreamMu.Unlock()
+
+	delete(a.DownStream, downstreamID)
+}
+
+func (a *Agent) ResetDownstream() {
+	a.downstreamMu.Lock()
+	defer a.downstreamMu.Unlock()
+
+	a.DownStream = make(map[string]*chan map[string]interface{})
+}
+
+func (a *Agent) forwardDownstream(msg map[string]interface{}) {
+	for _, target := range a.downstreamSnapshot() {
+		func(pns string, ch *chan map[string]interface{}, msg map[string]interface{}) {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Agent downstream send failed (possibly closed channel)",
+						"agent", a.Id,
+						"downstream", pns,
+						"panic", r)
+				}
+			}()
+			// Block here to preserve pipeline delivery semantics. Project stop / hot
+			// reload paths drain and disconnect upstream edges before stopping
+			// components, so backpressure should propagate instead of dropping data.
+			*ch <- msg
+		}(target.id, target.ch, msg)
+	}
 }
 
 func (a *Agent) hasRuntimeState() bool {
