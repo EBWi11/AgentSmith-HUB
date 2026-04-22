@@ -157,7 +157,7 @@ func Verify(path string, raw string, name string) error {
 		return err
 	}
 
-	p := &Plugin{Path: path, Payload: content}
+	p := &Plugin{Name: name, Path: path, Payload: content, Type: YAEGI_PLUGIN}
 	err = p.yaegiLoad()
 	// Cleanup yaegi interpreter created during verification to prevent memory leaks
 	// Verify creates temporary Plugin objects that should not persist
@@ -223,9 +223,37 @@ func NewTestPlugin(path string, raw string, name string, pluginType int) (*Plugi
 	return p, nil
 }
 
-func (p *Plugin) yaegiLoad() error {
+func (p *Plugin) pluginIdentifier() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if p.Path != "" {
+		return p.Path
+	}
+	return "<inline plugin>"
+}
+
+func (p *Plugin) resetLoadState() {
+	p.yaegiIntp = nil
+	p.f = reflect.Value{}
+	p.Parameters = nil
+	p.ReturnType = ""
+}
+
+func (p *Plugin) recoverLoadPanic(err *error) {
+	if r := recover(); r != nil {
+		p.resetLoadState()
+		pluginID := p.pluginIdentifier()
+		logger.PluginError("plugin yaegi load panicked", "plugin", pluginID, "panic", r)
+		*err = fmt.Errorf("plugin yaegi load panicked for %s: %v", pluginID, r)
+	}
+}
+
+func (p *Plugin) yaegiLoad() (err error) {
+	defer p.recoverLoadPanic(&err)
+
 	p.yaegiIntp = interp.New(interp.Options{})
-	err := p.yaegiIntp.Use(stdlib.Symbols)
+	err = p.yaegiIntp.Use(stdlib.Symbols)
 
 	if err != nil {
 		return err
