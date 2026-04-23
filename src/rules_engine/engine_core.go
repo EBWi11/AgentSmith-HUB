@@ -1014,15 +1014,29 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 		return true
 	}
 
-	// Isolate by ruleset ID and rule ID
-	// Use strings.Builder pool for better performance
+	// Build a deterministic group-by key in configured field order.
+	// If any group_by field is missing/empty, skip threshold counting for this event.
 	sb := stringBuilderPool.Get().(*strings.Builder)
 	sb.Reset()
 	sb.WriteString(threshold.GroupByID)
-
-	for k, v := range threshold.GroupByList {
-		tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+	sb.WriteString("|")
+	groupByFields := strings.Split(strings.TrimSpace(threshold.group_by), ",")
+	for i := range groupByFields {
+		field := strings.TrimSpace(groupByFields[i])
+		if field == "" {
+			continue
+		}
+		fieldPath, ok := threshold.GroupByList[field]
+		if !ok || len(fieldPath) == 0 {
+			fieldPath = common.StringToList(field)
+		}
+		tmpData, exists := GetCheckDataFromCache(ruleCache, field, data, fieldPath)
+		if !exists || strings.TrimSpace(tmpData) == "" {
+			stringBuilderPool.Put(sb)
+			return false
+		}
 		sb.WriteString(tmpData)
+		sb.WriteString("|")
 	}
 	groupByKey := common.XXHash64(sb.String())
 	stringBuilderPool.Put(sb)
@@ -1113,10 +1127,24 @@ func (r *Ruleset) executeThresholdNode(threshold *Threshold, ruleID string, data
 	sb := stringBuilderPool.Get().(*strings.Builder)
 	sb.Reset()
 	sb.WriteString(threshold.GroupByID)
-
-	for k, v := range threshold.GroupByList {
-		tmpData, _ := GetCheckDataFromCache(ruleCache, k, data, v)
+	sb.WriteString("|")
+	groupByFields := strings.Split(strings.TrimSpace(threshold.group_by), ",")
+	for i := range groupByFields {
+		field := strings.TrimSpace(groupByFields[i])
+		if field == "" {
+			continue
+		}
+		fieldPath, ok := threshold.GroupByList[field]
+		if !ok || len(fieldPath) == 0 {
+			fieldPath = common.StringToList(field)
+		}
+		tmpData, exists := GetCheckDataFromCache(ruleCache, field, data, fieldPath)
+		if !exists || strings.TrimSpace(tmpData) == "" {
+			stringBuilderPool.Put(sb)
+			return false
+		}
 		sb.WriteString(tmpData)
+		sb.WriteString("|")
 	}
 	groupByKey := common.XXHash64(sb.String())
 	stringBuilderPool.Put(sb)

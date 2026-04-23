@@ -1,0 +1,19 @@
+<root type="DETECTION" name="gitlab_search_sensitive_intrusion" author="codex">
+    <rule id="gitlab_search_sensitive_keywords" name="Detect sensitive keyword probing in GitLab search">
+        <!-- Fast pre-filters for GitLab search endpoint -->
+        <check type="INCL" field="request_uri">/search</check>
+        <check type="INCL" field="request_uri">search=</check>
+        <check type="EQU" field="request_method">GET</check>
+        <check type="NOTNULL" field="remote_addr"></check>
+        <check type="NOTNULL" field="http_user_agent"></check>
+
+        <!-- Match suspicious keyword probing in the search query -->
+        <check type="REGEX" field="request_uri"><![CDATA[(?i)(?:\?|&)search=[^&]*(?:password|passwd|pwd|secret|token|access[_-]?key|api[_-]?key|private[_-]?key|id[_-]?rsa|authorization|cookie|session|credentials?|\.env|kubeconfig|ssh|gitlab[_-]?token|root)]]></check>
+        <threshold group_by="remote_addr,http_user_agent" range="5m" local_cache="true">3</threshold>
+
+        <append field="threat_type">gitlab_sensitive_search_probe</append>
+        <append field="severity">medium</append>
+        <append field="attack_tactic">Discovery</append>
+        <append field="mitre_attack_id">T1087</append>
+    </rule>
+</root>

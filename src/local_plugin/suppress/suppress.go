@@ -2,6 +2,7 @@ package suppress
 
 import (
 	"AgentSmith-HUB/common"
+	"encoding/json"
 	"fmt"
 	"strconv"
 )
@@ -46,7 +47,7 @@ func Eval(args ...interface{}) (bool, error) {
 
 	redisKey := "suppress"
 	for _, arg := range args[1:] {
-		redisKey += fmt.Sprintf(":%v", arg)
+		redisKey += ":" + stableKeyPart(arg)
 	}
 
 	ok, err := common.RedisSetNX(redisKey, 1, winSec)
@@ -55,4 +56,27 @@ func Eval(args ...interface{}) (bool, error) {
 	}
 	// ok==true means first time within window → return true; else false
 	return ok, nil
+}
+
+func stableKeyPart(v interface{}) string {
+	if v == nil {
+		return "null"
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprintf("%v", val)
+	default:
+		// Keep map/slice/object key construction deterministic.
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	}
 }

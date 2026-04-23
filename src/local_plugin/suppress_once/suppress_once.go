@@ -2,6 +2,7 @@ package suppress_once
 
 import (
 	"AgentSmith-HUB/common"
+	"encoding/json"
 	"fmt"
 	"strconv"
 )
@@ -18,7 +19,7 @@ func Eval(args ...interface{}) (bool, error) {
 	if len(args) < 2 {
 		return false, fmt.Errorf("suppressOnce requires at least 2 arguments: key and window(sec), optionally ruleid")
 	}
-	keyStr := fmt.Sprintf("%v", args[0])
+	keyStr := stableKeyPart(args[0])
 
 	// parse window seconds
 	var winSec int
@@ -32,7 +33,10 @@ func Eval(args ...interface{}) (bool, error) {
 	case string:
 		i, err := strconv.Atoi(v)
 		if err != nil {
-			return false, fmt.Errorf("invalid window seconds: %v", v)
+			i, err = common.ParseDurationToSecondsInt(v)
+			if err != nil {
+				return false, fmt.Errorf("invalid window seconds: %v", v)
+			}
 		}
 		winSec = i
 	default:
@@ -45,7 +49,7 @@ func Eval(args ...interface{}) (bool, error) {
 	// Optional ruleid parameter for rule isolation
 	var redisKey string
 	if len(args) >= 3 {
-		ruleid := fmt.Sprintf("%v", args[2])
+		ruleid := stableKeyPart(args[2])
 		redisKey = "suppress_once:" + ruleid + ":" + keyStr
 	} else {
 		// Backward compatibility: no ruleid specified
@@ -58,4 +62,26 @@ func Eval(args ...interface{}) (bool, error) {
 	}
 	// ok==true means first time within window → return true; else false
 	return ok, nil
+}
+
+func stableKeyPart(v interface{}) string {
+	if v == nil {
+		return "null"
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprintf("%v", val)
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return fmt.Sprintf("%v", v)
+	}
 }
