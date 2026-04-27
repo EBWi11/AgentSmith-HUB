@@ -132,14 +132,14 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 
 	// Check if leader kicked us out and requires full resync
 	resyncFlagKey := fmt.Sprintf("cluster:resync_required:%s", hm.nodeID)
-	if resyncFlag, err := common.RedisGet(resyncFlagKey); err == nil && resyncFlag != "" {
+	if resyncFlag, err := clusterRedisGet(resyncFlagKey); err == nil && resyncFlag != "" {
 		logger.Error("Follower was kicked out by leader, resetting for full resync",
 			"reason", resyncFlag,
 			"node_id", hm.nodeID)
 
 		// Clear the resync flag first (with defer to ensure it's always cleared)
 		defer func() {
-			if err := common.RedisDel(resyncFlagKey); err != nil {
+			if err := clusterRedisDel(resyncFlagKey); err != nil {
 				logger.Error("Failed to clear resync flag", "error", err)
 			}
 		}()
@@ -194,7 +194,7 @@ func (hm *HeartbeatManager) sendHeartbeat() {
 	}
 
 	// Send heartbeat to Redis
-	if err := common.RedisPublish("cluster:heartbeat", string(data)); err != nil {
+	if err := clusterRedisPublish("cluster:heartbeat", string(data)); err != nil {
 		logger.Error("Failed to send heartbeat", "error", err)
 	}
 }
@@ -309,7 +309,7 @@ func (hm *HeartbeatManager) trackNodeInRedis(nodeID string) {
 	timestamp := time.Now().Unix()
 
 	// Store node info with 48 hours TTL (48 * 60 * 60 = 172800 seconds)
-	if _, err := common.RedisSet(key, timestamp, 172800); err != nil {
+	if _, err := clusterRedisSet(key, timestamp, 172800); err != nil {
 		logger.Error("Failed to track node in Redis", "node_id", nodeID, "error", err)
 	}
 }
@@ -336,7 +336,7 @@ func (hm *HeartbeatManager) checkVersionSync(heartbeat HeartbeatData) {
 		}
 
 		if data, err := json.Marshal(syncCmd); err == nil {
-			if err := common.RedisPublish("cluster:sync_command", string(data)); err != nil {
+			if err := clusterRedisPublish("cluster:sync_command", string(data)); err != nil {
 				logger.Error("Failed to send sync command", "node", heartbeat.NodeID, "error", err)
 			}
 		}

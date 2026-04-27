@@ -667,11 +667,13 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		// Serialize the project stop/swap path with other lifecycle operations so
 		// start/restart commands cannot race the config replacement.
 		var createErr error
+		var shouldRestart bool
 		common.ProjectOperationMu.Lock()
 		func() {
 			defer common.ProjectOperationMu.Unlock()
 
 			oldProject, oldExists := project.GetProject(req.ID)
+			wasRunning := oldExists && (oldProject.Status == common.StatusRunning || oldProject.Status == common.StatusError || oldProject.Status == common.StatusStarting)
 			if oldExists && (oldProject.Status == common.StatusRunning || oldProject.Status == common.StatusError || oldProject.Status == common.StatusStarting) {
 				logger.Info("Stopping old project before reload to release components", "project", req.ID)
 				stopErr := oldProject.Stop(false)
@@ -696,8 +698,23 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			project.DeleteProjectNew(req.ID)
 
 			if req.OldContent != "" && strings.TrimSpace(req.OldContent) != "" {
-				affectedProjects = []string{req.ID}
-				logger.Info("Project modified, will restart automatically", "project", req.ID)
+				userWantsRunning, intentionErr := common.GetProjectUserIntention(req.ID)
+				if intentionErr != nil {
+					logger.Error("Failed to get project user intention during reload, falling back to previous runtime state",
+						"project", req.ID,
+						"error", intentionErr,
+						"was_running", wasRunning)
+					shouldRestart = wasRunning
+				} else {
+					shouldRestart = userWantsRunning
+				}
+				if shouldRestart {
+					affectedProjects = []string{req.ID}
+					logger.Info("Project modified, will restart automatically", "project", req.ID)
+				} else {
+					affectedProjects = []string{}
+					logger.Info("Project modified, keeping project stopped to match user intention", "project", req.ID)
+				}
 			} else {
 				affectedProjects = []string{}
 				logger.Info("New project created, manual start required", "project", req.ID)

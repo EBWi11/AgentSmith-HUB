@@ -3,6 +3,7 @@ package cluster
 import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
+	"os"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 )
 
 var leaderLockerKey = "cluster:leader:lock"
+var leaderLockLossExit = os.Exit
 
 type LeaderLocker struct {
 	lock *redsync.Mutex
@@ -43,13 +45,20 @@ func (l *LeaderLocker) startRefreshLoop() {
 		select {
 		case <-ticker.C:
 			if err := l.refreshLock(); err != nil {
-				logger.Error("Failed to refresh leader locker", "error", err)
+				l.handleLockLoss(err)
+				return
 			}
 			logger.Debug("Leader locker refreshed", "lock_value", l.lock.Value())
 		case <-l.done:
 			return
 		}
 	}
+}
+
+func (l *LeaderLocker) handleLockLoss(err error) {
+	common.DemoteCurrentNode()
+	logger.Error("Leader lock lost, exiting to preserve cluster consistency", "error", err)
+	leaderLockLossExit(1)
 }
 
 func (l *LeaderLocker) refreshLock() error {

@@ -25,6 +25,22 @@ import (
 var GlobalProject *GlobalProjectInfo
 var projectAutoStopMu sync.Mutex
 var projectAutoStopInFlight = make(map[string]struct{})
+var storeProjectConfigForClusterSync = common.StoreProjectConfig
+
+// SetProjectConfigStoreForTest overrides project config persistence for tests
+// that need project materialization without a real Redis backend.
+func SetProjectConfigStoreForTest(store func(projectID string, config string) error) func() {
+	previous := storeProjectConfigForClusterSync
+	if store == nil {
+		storeProjectConfigForClusterSync = common.StoreProjectConfig
+	} else {
+		storeProjectConfigForClusterSync = store
+	}
+
+	return func() {
+		storeProjectConfigForClusterSync = previous
+	}
+}
 
 func shouldRestartProjectForComponentChange(projectID string, p *Project) bool {
 	userWantsRunning, err := common.GetProjectUserIntention(projectID)
@@ -720,7 +736,7 @@ func NewProject(path string, raw string, id string, test bool) (*Project, error)
 		common.SetRawConfig("project", p.Id, p.Config.RawConfig)
 
 		// Store project config in Redis for cluster-wide access
-		if err := common.StoreProjectConfig(p.Id, p.Config.RawConfig); err != nil {
+		if err := storeProjectConfigForClusterSync(p.Id, p.Config.RawConfig); err != nil {
 			logger.Error("Failed to store project config in Redis", "project", p.Id, "error", err)
 		}
 

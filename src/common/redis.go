@@ -108,6 +108,7 @@ var redisFailureHandler *RedisFailureHandler
 
 var ctx = context.Background()
 var rdb *redis.Client
+var projectIntentionsHGetAll = RedisHGetAll
 
 // RedisMetrics holds Redis server metrics
 type RedisMetrics struct {
@@ -638,16 +639,31 @@ func GetProjectUserIntention(projectID string) (bool, error) {
 // Returns map of projectID -> bool (true=running, false=stopped)
 func GetAllProjectUserIntentions() (map[string]bool, error) {
 	key := ProjectLegacyStateKeyPrefix
-	values, err := RedisHGetAll(key)
-	if err != nil {
-		return make(map[string]bool), nil
+	var (
+		values  map[string]string
+		lastErr error
+	)
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		values, lastErr = projectIntentionsHGetAll(key)
+		if lastErr == nil {
+			result := make(map[string]bool)
+			for projectID, state := range values {
+				result[projectID] = (state == "running")
+			}
+			return result, nil
+		}
+
+		if attempt < 3 {
+			fmt.Printf("[WARN] Failed to get all project user intentions from Redis, retrying: attempt=%d, error=%v\n",
+				attempt, lastErr)
+			time.Sleep(time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond)
+		} else {
+			fmt.Printf("[ERROR] Failed to get all project user intentions from Redis after 3 attempts: error=%v\n", lastErr)
+		}
 	}
 
-	result := make(map[string]bool)
-	for projectID, state := range values {
-		result[projectID] = (state == "running")
-	}
-	return result, nil
+	return make(map[string]bool), fmt.Errorf("redis error after 3 attempts: %w", lastErr)
 }
 
 // SetProjectRealState sets the actual runtime state for a project on a specific node

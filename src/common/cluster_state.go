@@ -27,7 +27,22 @@ func SetClusterState(isLeader bool, nodeID string) {
 
 	if isLeader {
 		globalClusterState.leaderID = nodeID
+	} else {
+		globalClusterState.leaderID = ""
 	}
+}
+
+// SetNodeLeadership keeps the new and legacy leader state in sync.
+func SetNodeLeadership(isLeader bool, nodeID string) {
+	SetClusterState(isLeader, nodeID)
+	SetLeaderState(isLeader, nodeID)
+}
+
+// DemoteCurrentNode clears local leader state for fail-stop scenarios.
+func DemoteCurrentNode() {
+	nodeID := GetNodeID()
+	SetClusterState(false, nodeID)
+	SetLeaderState(false, nodeID)
 }
 
 // IsCurrentNodeLeader returns whether current node is the leader
@@ -55,8 +70,8 @@ func RequireLeader() error {
 const (
 	// LeaderNodeIDRedisKey is the Redis key where the leader writes its node ID (IP) on startup,
 	// so followers and plugins can discover the leader API address.
-	LeaderNodeIDRedisKey    = "cluster:leader:node_id"
-	defaultLeaderAPIPort    = "8080"
+	LeaderNodeIDRedisKey = "cluster:leader:node_id"
+	defaultLeaderAPIPort = "8080"
 )
 
 // GetLeaderAPIBaseURL returns the base URL for the leader's API (e.g. http://<leader_ip>:8080).

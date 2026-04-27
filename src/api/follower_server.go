@@ -4,13 +4,53 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 var followerToken string // Store token read at startup
+
+const (
+	followerTokenReadMaxAttempts = 30
+	followerTokenRetryInterval   = time.Second
+)
+
+var readFollowerToken = ReadTokenFromRedis
+var sleepBeforeFollowerTokenRetry = time.Sleep
+
+func waitForFollowerToken(maxAttempts int, retryInterval time.Duration) (string, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		token, err := readFollowerToken()
+		if err == nil && token != "" {
+			return token, nil
+		}
+
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = errors.New("empty token returned from Redis")
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		logger.Info("Follower token not available yet, retrying",
+			"attempt", attempt,
+			"max_attempts", maxAttempts,
+			"retry_interval", retryInterval.String(),
+			"error", lastErr)
+		sleepBeforeFollowerTokenRetry(retryInterval)
+	}
+
+	return "", fmt.Errorf("failed to read follower token from Redis after %d attempts: %w", maxAttempts, lastErr)
+}
 
 // ServerStartFollower starts the follower API server with read-only endpoints
 func ServerStartFollower(listenAddr string) error {
@@ -19,11 +59,12 @@ func ServerStartFollower(listenAddr string) error {
 		return nil
 	}
 
-	// Read token from Redis once at startup
 	var err error
-	followerToken, err = ReadTokenFromRedis()
+	followerToken, err = waitForFollowerToken(followerTokenReadMaxAttempts, followerTokenRetryInterval)
 	if err != nil {
-		logger.Error("Failed to read token from Redis, follower server will not start", "error", err)
+		logger.Error("Failed to read token from Redis, follower server will not start",
+			"attempts", followerTokenReadMaxAttempts,
+			"error", err)
 		return err
 	}
 

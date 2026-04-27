@@ -12,12 +12,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// ProjectStatusSyncRequest represents a project status sync request to followers
-type ProjectStatusSyncRequest struct {
-	ProjectID string `json:"project_id"`
-	Action    string `json:"action"` // "start", "stop", "restart"
-}
-
 // syncProjectOperationToFollowers syncs a successful local project operation to follower nodes.
 func syncProjectOperationToFollowers(projectID, action string) error {
 	// This function is now handled by the instruction system

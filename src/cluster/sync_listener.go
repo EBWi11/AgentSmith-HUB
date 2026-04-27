@@ -45,7 +45,14 @@ type projectRefreshPlan struct {
 	agents      map[string]struct{}
 }
 
+type deferredProjectCommand struct {
+	projectName string
+	operation   string
+	version     int64
+}
+
 var GlobalSyncListener *SyncListener
+var syncRetryDelay = 10 * time.Second
 
 // InitSyncListener initializes the sync listener
 func InitSyncListener(nodeID string) {
@@ -154,7 +161,7 @@ func (sl *SyncListener) waitForLeaderReadyIfNeeded(targetVersion string) error {
 		time.Sleep(checkInterval)
 
 		// Re-read leader version
-		leaderVersion, err := common.RedisGet("cluster:leader_version")
+		leaderVersion, err := clusterRedisGet("cluster:leader_version")
 		if err != nil {
 			logger.Error("Failed to get leader version while waiting", "error", err)
 			continue
@@ -329,7 +336,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 
 	for version := startVersion + 1; version <= endVersion; version++ {
 		key := fmt.Sprintf("cluster:instruction:%d", version)
-		data, err := common.RedisGet(key)
+		data, err := clusterRedisGet(key)
 		if data == GetDeletedIntentionsString() {
 			compacted++
 			continue
@@ -381,7 +388,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 		sl.mu.Unlock()
 
 		logger.Info("Sleeping 10 seconds before retry due to missing instructions")
-		time.Sleep(10 * time.Second) // outside sl.mu — heartbeat unblocked
+		time.Sleep(syncRetryDelay) // outside sl.mu — heartbeat unblocked
 
 		return fmt.Errorf("sync incomplete: %d missing instructions", len(missingInstructions))
 	}
@@ -394,6 +401,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	var processedInstructions []string
 	var failedInstructions []string
 	refreshPlans := buildProjectRefreshPlans(instructions)
+	deferredProjectCommands := buildDeferredProjectCommands(instructions)
 
 	slices.SortStableFunc(instructions, func(a, b Instruction) int {
 		oa := instructionComponentOrder(a.Operation, a.ComponentType)
@@ -407,6 +415,9 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	for _, instruction := range instructions {
 		version := instruction.Version
 		if version == 0 {
+			continue
+		}
+		if instruction.ComponentType == "project" && PROJECT_OPERATION[instruction.Operation] {
 			continue
 		}
 
@@ -429,6 +440,13 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	if len(failedInstructions) == 0 {
 		if err := sl.executeProjectRefreshPlans(refreshPlans); err != nil {
 			logger.Error("Failed to execute coalesced project refreshes", "error", err)
+			failedInstructions = append(failedInstructions, err.Error())
+		}
+	}
+
+	if len(failedInstructions) == 0 {
+		if err := sl.executeDeferredProjectCommands(deferredProjectCommands); err != nil {
+			logger.Error("Failed to execute deferred project commands", "error", err)
 			failedInstructions = append(failedInstructions, err.Error())
 		}
 	}
@@ -462,7 +480,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	sl.mu.Unlock()
 
 	logger.Info("Sleeping 10 seconds before retry due to execution failures")
-	time.Sleep(10 * time.Second) // outside sl.mu — heartbeat unblocked
+	time.Sleep(syncRetryDelay) // outside sl.mu — heartbeat unblocked
 
 	return fmt.Errorf("sync incomplete: %d failed instructions", len(failedInstructions))
 }
@@ -470,13 +488,13 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 // ClearFollowerExecutionFlag clears the execution flag for a follower
 func (sl *SyncListener) ClearFollowerExecutionFlag(nodeID string) error {
 	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	return common.RedisDel(key)
+	return clusterRedisDel(key)
 }
 
 // SetFollowerExecutionFlag sets/refreshes a flag indicating follower is executing instructions
 func (sl *SyncListener) SetFollowerExecutionFlag(nodeID string) error {
 	key := fmt.Sprintf("cluster:execution_flag:%s", nodeID)
-	_, err := common.RedisSet(key, "executing", int(sl.executionFlagTTL))
+	_, err := clusterRedisSet(key, "executing", int(sl.executionFlagTTL))
 	if err != nil {
 		return fmt.Errorf("failed to set execution flag: %w", err)
 	}
@@ -582,6 +600,57 @@ func buildProjectRefreshPlans(instructions []Instruction) map[string]*projectRef
 	return plans
 }
 
+func buildDeferredProjectCommands(instructions []Instruction) []deferredProjectCommand {
+	latestDeleteVersion := make(map[string]int64)
+	latestCommandByProject := make(map[string]deferredProjectCommand)
+
+	for _, instruction := range instructions {
+		if instruction.ComponentType != "project" {
+			continue
+		}
+
+		if instruction.Operation == "delete" {
+			if instruction.Version > latestDeleteVersion[instruction.ComponentName] {
+				latestDeleteVersion[instruction.ComponentName] = instruction.Version
+			}
+			continue
+		}
+
+		if !PROJECT_OPERATION[instruction.Operation] {
+			continue
+		}
+
+		current, exists := latestCommandByProject[instruction.ComponentName]
+		if !exists || instruction.Version > current.version {
+			latestCommandByProject[instruction.ComponentName] = deferredProjectCommand{
+				projectName: instruction.ComponentName,
+				operation:   instruction.Operation,
+				version:     instruction.Version,
+			}
+		}
+	}
+
+	commands := make([]deferredProjectCommand, 0, len(latestCommandByProject))
+	for _, command := range latestCommandByProject {
+		if deleteVersion := latestDeleteVersion[command.projectName]; deleteVersion > command.version {
+			continue
+		}
+		commands = append(commands, command)
+	}
+
+	slices.SortStableFunc(commands, func(a, b deferredProjectCommand) int {
+		if a.version == b.version {
+			return strings.Compare(a.projectName, b.projectName)
+		}
+		if a.version < b.version {
+			return -1
+		}
+		return 1
+	})
+
+	return commands
+}
+
 func (sl *SyncListener) executeProjectRefreshPlans(plans map[string]*projectRefreshPlan) error {
 	for _, plan := range plans {
 		proj, exists := project.GetProject(plan.projectName)
@@ -642,53 +711,68 @@ func (sl *SyncListener) executeProjectRefreshPlans(plans map[string]*projectRefr
 	return nil
 }
 
+func (sl *SyncListener) executeDeferredProjectCommands(commands []deferredProjectCommand) error {
+	if globalProjectCmdHandler == nil {
+		return fmt.Errorf("project command handler not initialized")
+	}
+
+	for _, command := range commands {
+		if _, exists := project.GetProject(command.projectName); !exists {
+			return fmt.Errorf("deferred project command v%d %s %s references missing project",
+				command.version, command.operation, command.projectName)
+		}
+
+		if err := globalProjectCmdHandler.ExecuteCommandWithOptions(command.projectName, command.operation, true); err != nil {
+			return fmt.Errorf("failed to execute deferred project command v%d %s %s: %w",
+				command.version, command.operation, command.projectName, err)
+		}
+	}
+
+	return nil
+}
+
 // applyInstruction applies a single instruction snapshot read during Phase 1.
 func (sl *SyncListener) applyInstruction(instruction Instruction) error {
 	switch instruction.Operation {
 	case "add":
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			clusterRecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
-		common.RecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
+		clusterRecordComponentAdd(instruction.ComponentType, instruction.ComponentName, instruction.Content, "success", "")
 	case "delete":
 		if err := sl.deleteComponentInstance(instruction.ComponentType, instruction.ComponentName); err != nil {
 			return err
 		}
 	case "update":
 		if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			clusterRecordComponentUpdate(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 	case "local_push":
 		if instruction.ComponentType == "project" {
 			if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-				common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+				clusterRecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 				return err
 			}
 			break
 		}
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
+			clusterRecordLocalPush(instruction.ComponentType, instruction.ComponentName, instruction.Content, "failed", err.Error())
 			return err
 		}
 	case "push_change":
 		if instruction.ComponentType == "project" {
 			if err := sl.updateComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-				common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+				clusterRecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 				return err
 			}
 			break
 		}
 		if err := sl.createComponentInstance(instruction.ComponentType, instruction.ComponentName, instruction.Content); err != nil {
-			common.RecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
+			clusterRecordChangePush(instruction.ComponentType, instruction.ComponentName, "", instruction.Content, "", "failed", err.Error())
 			return err
 		}
-	case "start", "stop", "restart":
-		if globalProjectCmdHandler == nil {
-			return fmt.Errorf("project command handler not initialized")
-		}
-		return globalProjectCmdHandler.ExecuteCommandWithOptions(instruction.ComponentName, instruction.Operation, true)
 	default:
 		return fmt.Errorf("unknown operation: %s", instruction.Operation)
 	}

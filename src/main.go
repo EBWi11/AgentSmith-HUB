@@ -156,11 +156,8 @@ func main() {
 	// Initialize new cluster system
 	cluster.InitCluster(ip, *isLeader)
 
-	// IMPORTANT: Set centralized cluster state
-	common.SetClusterState(*isLeader, ip)
-
-	// IMPORTANT: Also set the legacy global IsLeader variable for component compatibility
-	common.SetLeaderState(*isLeader, ip)
+	// Keep the new and legacy leader flags aligned for component compatibility.
+	common.SetNodeLeadership(*isLeader, ip)
 
 	// Register project command handler with cluster package
 	cluster.SetProjectCommandHandler(project.GetProjectCommandHandler().(cluster.ProjectCommandHandler))
@@ -178,6 +175,9 @@ func main() {
 
 	// Start pprof server if enabled
 	startPprofServer()
+
+	apiRole := "leader"
+	startAPIServer := api.ServerStart
 
 	if *isLeader {
 		// Leader mode
@@ -217,16 +217,12 @@ func main() {
 
 		common.InitClusterSystemManager()
 		_ = cluster.GlobalClusterManager.Start()
-
-		go api.ServerStart(*apiListen) // start Echo API on specified address
-		logger.Info("Leader API server starting", "address", *apiListen)
 	} else {
+		apiRole = "follower"
+		startAPIServer = api.ServerStartFollower
+
 		// Token will be read by follower API server at startup
 		cluster.GlobalClusterManager.Start()
-
-		// Start follower API server (read-only endpoints)
-		go api.ServerStartFollower(*apiListen) // start follower API server
-		logger.Info("Follower API server starting", "address", *apiListen)
 	}
 
 	// ========== Graceful shutdown handling ==========
@@ -313,7 +309,11 @@ func main() {
 		os.Exit(0)
 	}()
 
-	select {}
+	logger.Info("Starting API server", "role", apiRole, "address", *apiListen)
+	if err := startAPIServer(*apiListen); err != nil {
+		logger.Error("API server exited with error", "role", apiRole, "address", *apiListen, "error", err)
+		os.Exit(1)
+	}
 }
 
 func traverseComponents(dir, suffix string) []string {
