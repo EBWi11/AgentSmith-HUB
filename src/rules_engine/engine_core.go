@@ -4,6 +4,7 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/logger"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -761,7 +762,7 @@ func (r *Ruleset) EngineCheck(data map[string]interface{}) []map[string]interfac
 				addHitRuleID(modifiedData, sb.String())
 				stringBuilderPool.Put(sb)
 				if len(rule.HitFields) > 0 {
-					modifiedData[HitFieldsFieldName] = rule.HitFields
+					modifiedData[HitFieldsFieldName] = append([]string(nil), rule.HitFields...)
 				}
 				// Add to final result
 				finalRes = append(finalRes, modifiedData)
@@ -1020,12 +1021,9 @@ func (r *Ruleset) executeThreshold(rule *Rule, operationID int, data map[string]
 	sb.Reset()
 	sb.WriteString(threshold.GroupByID)
 	sb.WriteString("|")
-	groupByFields := strings.Split(strings.TrimSpace(threshold.group_by), ",")
+	groupByFields := orderedThresholdGroupByFields(&threshold)
 	for i := range groupByFields {
-		field := strings.TrimSpace(groupByFields[i])
-		if field == "" {
-			continue
-		}
+		field := groupByFields[i]
 		fieldPath, ok := threshold.GroupByList[field]
 		if !ok || len(fieldPath) == 0 {
 			fieldPath = common.StringToList(field)
@@ -1128,12 +1126,9 @@ func (r *Ruleset) executeThresholdNode(threshold *Threshold, ruleID string, data
 	sb.Reset()
 	sb.WriteString(threshold.GroupByID)
 	sb.WriteString("|")
-	groupByFields := strings.Split(strings.TrimSpace(threshold.group_by), ",")
+	groupByFields := orderedThresholdGroupByFields(threshold)
 	for i := range groupByFields {
-		field := strings.TrimSpace(groupByFields[i])
-		if field == "" {
-			continue
-		}
+		field := groupByFields[i]
 		fieldPath, ok := threshold.GroupByList[field]
 		if !ok || len(fieldPath) == 0 {
 			fieldPath = common.StringToList(field)
@@ -2289,7 +2284,7 @@ func (r *Ruleset) executeIteratorThreshold(threshold *Threshold, data map[string
 
 	// Get group by data
 	groupByKey := ""
-	for groupByField := range threshold.GroupByList {
+	for _, groupByField := range orderedThresholdGroupByFields(threshold) {
 		fieldData, exist := common.GetCheckData(data, threshold.GroupByList[groupByField])
 		if exist {
 			groupByKey += fmt.Sprintf("%v", fieldData) + "_"
@@ -2318,6 +2313,38 @@ func (r *Ruleset) executeIteratorThreshold(threshold *Threshold, data map[string
 
 	// Simple threshold check - in practice, this would accumulate over time/iterations
 	return countValue >= threshold.Value
+}
+
+func orderedThresholdGroupByFields(threshold *Threshold) []string {
+	if threshold == nil {
+		return nil
+	}
+
+	if threshold.group_by != "" {
+		parts := strings.Split(threshold.group_by, ",")
+		fields := make([]string, 0, len(parts))
+		for _, field := range parts {
+			field = strings.TrimSpace(field)
+			if field != "" {
+				fields = append(fields, field)
+			}
+		}
+		return fields
+	}
+
+	if len(threshold.GroupByList) == 0 {
+		return nil
+	}
+
+	fields := make([]string, 0, len(threshold.GroupByList))
+	for field := range threshold.GroupByList {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			fields = append(fields, field)
+		}
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 // checkNodeLogic executes the check logic for a single check node.
@@ -2455,12 +2482,14 @@ func addHitRuleID(data map[string]interface{}, ruleID string) {
 // injection at runtime.
 func collectHitFields(rule *Rule) []string {
 	seen := make(map[string]struct{}, 8)
+	fields := make([]string, 0, 8)
 	add := func(field string) {
 		if field == "" {
 			return
 		}
 		if _, ok := seen[field]; !ok {
 			seen[field] = struct{}{}
+			fields = append(fields, field)
 		}
 	}
 
@@ -2472,79 +2501,92 @@ func collectHitFields(rule *Rule) []string {
 
 	addFromThresholds := func(thresholds []Threshold) {
 		for i := range thresholds {
-			if thresholds[i].group_by != "" {
-				for _, f := range strings.Split(thresholds[i].group_by, ",") {
-					add(strings.TrimSpace(f))
-				}
+			for _, f := range orderedThresholdGroupByFields(&thresholds[i]) {
+				add(f)
 			}
 			add(thresholds[i].CountField)
 		}
 	}
 
-	addFromChecklists := func(checklists map[int]Checklist) {
-		for _, cl := range checklists {
-			addFromCheckNodes(cl.CheckNodes)
-			addFromThresholds(cl.ThresholdNodes)
-		}
+	addFromChecklist := func(cl Checklist) {
+		addFromCheckNodes(cl.CheckNodes)
+		addFromThresholds(cl.ThresholdNodes)
 	}
 
-	// Standalone checks
-	for _, cn := range rule.CheckMap {
-		add(cn.Field)
-	}
-
-	// Checklists
-	addFromChecklists(rule.ChecklistMap)
-
-	// Thresholds
-	for _, th := range rule.ThresholdMap {
-		if th.group_by != "" {
-			for _, f := range strings.Split(th.group_by, ",") {
-				add(strings.TrimSpace(f))
-			}
-		}
-		add(th.CountField)
-	}
-
-	// Iterators
-	for _, iter := range rule.IteratorMap {
+	addFromIterator := func(iter Iterator) {
 		add(iter.Field)
 		addFromCheckNodes(iter.CheckNodes)
 		addFromThresholds(iter.ThresholdNodes)
 		for _, cl := range iter.Checklists {
-			addFromCheckNodes(cl.CheckNodes)
-			addFromThresholds(cl.ThresholdNodes)
+			addFromChecklist(cl)
 		}
 	}
 
-	// Sequences
-	for _, seq := range rule.SequenceMap {
-		if seq.GroupBy != "" {
-			for _, f := range strings.Split(seq.GroupBy, ",") {
-				add(strings.TrimSpace(f))
-			}
+	addFromSequence := func(seq Sequence) {
+		for _, f := range seq.GroupByList {
+			add(f)
 		}
-		for _, ev := range seq.Events {
-			if ev.GroupBy != "" {
-				for _, f := range strings.Split(ev.GroupBy, ",") {
-					add(strings.TrimSpace(f))
-				}
+		for _, eventID := range seq.EventOrder {
+			ev := seq.Events[eventID]
+			if ev == nil {
+				continue
+			}
+			for _, f := range ev.GroupByList {
+				add(f)
 			}
 			addFromCheckNodes(ev.CheckNodes)
 			addFromThresholds(ev.Thresholds)
 			for _, cl := range ev.Checklists {
-				addFromCheckNodes(cl.CheckNodes)
-				addFromThresholds(cl.ThresholdNodes)
+				addFromChecklist(cl)
 			}
+		}
+	}
+
+	if rule.Queue != nil {
+		for _, op := range *rule.Queue {
+			switch op.Type {
+			case T_CheckList:
+				if cl, ok := rule.ChecklistMap[op.ID]; ok {
+					addFromChecklist(cl)
+				}
+			case T_Check:
+				if cn, ok := rule.CheckMap[op.ID]; ok {
+					add(cn.Field)
+				}
+			case T_Threshold:
+				if th, ok := rule.ThresholdMap[op.ID]; ok {
+					addFromThresholds([]Threshold{th})
+				}
+			case T_Iterator:
+				if iter, ok := rule.IteratorMap[op.ID]; ok {
+					addFromIterator(iter)
+				}
+			case T_Sequence:
+				if seq, ok := rule.SequenceMap[op.ID]; ok {
+					addFromSequence(seq)
+				}
+			}
+		}
+	} else {
+		for _, cn := range rule.CheckMap {
+			add(cn.Field)
+		}
+		for _, cl := range rule.ChecklistMap {
+			addFromChecklist(cl)
+		}
+		for _, th := range rule.ThresholdMap {
+			addFromThresholds([]Threshold{th})
+		}
+		for _, iter := range rule.IteratorMap {
+			addFromIterator(iter)
+		}
+		for _, seq := range rule.SequenceMap {
+			addFromSequence(seq)
 		}
 	}
 
 	if len(seen) == 0 {
 		return nil
-	}
-	fields := make([]string, 0, len(seen))
-	for f := range seen {
-		fields = append(fields, f)
 	}
 	return fields
 }

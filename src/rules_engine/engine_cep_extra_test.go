@@ -2,6 +2,7 @@ package rules_engine
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestStateManager_RemoveFromWheelSlot_ViaUntrack(t *testing.T) {
 	m := newTestStateManager()
 	key := "test_absence_key"
 	info := absenceKeyInfo{
-		ExpiresAt: time.Now().Add(10*time.Second).UnixMilli(),
+		ExpiresAt: time.Now().Add(10 * time.Second).UnixMilli(),
 		RuleID:    "r1",
 		SeqID:     1,
 	}
@@ -391,6 +392,88 @@ func TestExecuteIteratorThreshold_SumCountType(t *testing.T) {
 	result := rs.executeIteratorThreshold(threshold, data, nil)
 	if !result {
 		t.Error("expected true when SUM count(10) >= Value(5)")
+	}
+}
+
+func TestExecuteIteratorThreshold_GroupByOrderDeterministicWithoutRawConfig(t *testing.T) {
+	rs := buildRulesetFromXML(t, `
+<root type="DETECTION" name="iter-thresh-order">
+  <rule id="r1" name="r1">
+    <check type="EQU" field="x">1</check>
+  </rule>
+</root>`)
+
+	threshold := &Threshold{
+		GroupByList: map[string][]string{
+			"b": {"b"},
+			"a": {"a"},
+		},
+		Value: 3,
+	}
+	data := map[string]interface{}{"a": "first", "b": "second"}
+
+	groupByOrders := make(map[string]struct{}, 16)
+	for i := 0; i < 20; i++ {
+		groupByKey := ""
+		for _, field := range orderedThresholdGroupByFields(threshold) {
+			fieldData, exist := common.GetCheckData(data, threshold.GroupByList[field])
+			if exist {
+				groupByKey += fieldData + "_"
+			}
+		}
+		groupByOrders[groupByKey] = struct{}{}
+		if rs.executeIteratorThreshold(threshold, data, nil) {
+			t.Fatal("expected false when countValue(1) < threshold.Value(3)")
+		}
+	}
+
+	if len(groupByOrders) != 1 {
+		t.Fatalf("expected stable group_by key order, got %v", groupByOrders)
+	}
+	if _, ok := groupByOrders["first_second_"]; !ok {
+		t.Fatalf("expected deterministic group_by key %q, got %v", "first_second_", groupByOrders)
+	}
+}
+
+func TestEngineCheck_HitFieldsFollowDeclarationOrder(t *testing.T) {
+	rs := buildRulesetFromXML(t, `
+<root type="DETECTION" name="hit-fields-order">
+  <rule id="r1" name="r1">
+    <check field="first" type="EQU">yes</check>
+    <threshold group_by="host,user" range="10s" local_cache="true">1</threshold>
+    <iterator type="ANY" field="items" variable="it">
+      <check field="it.third" type="EQU">go</check>
+    </iterator>
+  </rule>
+</root>`)
+	t.Cleanup(func() { rs.cleanup() })
+
+	data := map[string]interface{}{
+		"first": "yes",
+		"host":  "server-1",
+		"user":  "alice",
+		"items": []interface{}{
+			map[string]interface{}{"third": "go"},
+		},
+	}
+
+	if warmup := rs.EngineCheck(data); len(warmup) != 0 {
+		t.Fatalf("expected 0 results on warmup call, got %d", len(warmup))
+	}
+
+	out := rs.EngineCheck(data)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(out))
+	}
+
+	got, ok := out[0][HitFieldsFieldName].([]string)
+	if !ok {
+		t.Fatalf("expected %s to be []string, got %T", HitFieldsFieldName, out[0][HitFieldsFieldName])
+	}
+
+	want := []string{"first", "host", "user", "items", "it.third"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected hit fields %v, got %v", want, got)
 	}
 }
 
