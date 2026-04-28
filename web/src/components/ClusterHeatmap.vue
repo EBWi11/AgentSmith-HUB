@@ -38,9 +38,32 @@
           getNodeClass(node),
           node.isLeader ? 'leader-square' : 'follower-square'
         ]"
-        :title="getNodeTooltip(node)"
-        @click="copyIP(node.address)"
+        role="button"
+        tabindex="0"
+        :aria-label="`Copy IP ${getNodeIP(node)}`"
+        @mouseenter="showNodeTooltip(node, $event)"
+        @mousemove="moveNodeTooltip($event)"
+        @mouseleave="hideNodeTooltip"
+        @focus="showNodeTooltip(node, $event)"
+        @blur="hideNodeTooltip"
+        @click="copyIP(getNodeIP(node))"
+        @keydown.enter.prevent="copyIP(getNodeIP(node))"
+        @keydown.space.prevent="copyIP(getNodeIP(node))"
       ></div>
+    </div>
+
+    <!-- Immediate Tooltip -->
+    <div
+      v-if="hoveredNode"
+      class="node-tooltip"
+      :style="{
+        left: `${tooltipPosition.x}px`,
+        top: `${tooltipPosition.y}px`
+      }"
+    >
+      <div v-for="line in getNodeTooltipLines(hoveredNode)" :key="line" class="tooltip-line">
+        {{ line }}
+      </div>
     </div>
 
     <!-- Empty State -->
@@ -54,14 +77,17 @@
     <!-- Toast Notification -->
     <div 
       v-if="showToast" 
-      class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-all duration-300"
-      :class="{ 'opacity-0': !showToast }"
+      class="fixed bottom-4 right-4 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-all duration-300"
+      :class="[
+        toastIsError ? 'bg-red-500' : 'bg-green-500',
+        { 'opacity-0': !showToast }
+      ]"
     >
       <div class="flex items-center space-x-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
-        <span>IP copied to clipboard!</span>
+        <span>{{ toastMessage }}</span>
       </div>
     </div>
   </div>
@@ -82,6 +108,10 @@ const props = defineProps({
 })
 
 const showToast = ref(false)
+const toastMessage = ref('IP copied to clipboard!')
+const toastIsError = ref(false)
+const hoveredNode = ref(null)
+const tooltipPosition = ref({ x: 0, y: 0 })
 
 // Computed properties
 const leaderNode = computed(() => {
@@ -97,7 +127,7 @@ const allNodes = computed(() => {
   return [...props.nodes].sort((a, b) => {
     if (a.isLeader && !b.isLeader) return -1
     if (!a.isLeader && b.isLeader) return 1
-    return a.address.localeCompare(b.address)
+    return getNodeIP(a).localeCompare(getNodeIP(b))
   })
 })
 
@@ -139,8 +169,12 @@ function getNodeClass(node) {
   }
 }
 
-function getNodeTooltip(node) {
-  const ip = node.address
+function getNodeIP(node) {
+  return node.address || node.id || ''
+}
+
+function getNodeTooltipLines(node) {
+  const ip = getNodeIP(node) || 'unknown'
   const version = node.version || 'unknown'
   const role = node.isLeader ? 'Leader' : 'Follower'
   const status = getVersionStatus(node)
@@ -158,22 +192,94 @@ function getNodeTooltip(node) {
       break
   }
   
-  return `${role}\nIP: ${ip}\nVersion: ${version}\n${statusText}\n\nClick to copy IP`
+  return [role, `IP: ${ip}`, `Version: ${version}`, statusText, 'Click to copy IP']
 }
 
+function setTooltipPosition(event) {
+  if ('clientX' in event && 'clientY' in event) {
+    tooltipPosition.value = {
+      x: event.clientX + 12,
+      y: event.clientY + 12
+    }
+    return
+  }
 
+  const rect = event.currentTarget?.getBoundingClientRect()
+  if (rect) {
+    tooltipPosition.value = {
+      x: rect.left + rect.width + 8,
+      y: rect.top + rect.height + 8
+    }
+  }
+}
 
+function showNodeTooltip(node, event) {
+  hoveredNode.value = node
+  setTooltipPosition(event)
+}
 
+function moveNodeTooltip(event) {
+  setTooltipPosition(event)
+}
+
+function hideNodeTooltip() {
+  hoveredNode.value = null
+}
+
+function showCopyToast(message, isError = false) {
+  toastMessage.value = message
+  toastIsError.value = isError
+  showToast.value = true
+  setTimeout(() => {
+    showToast.value = false
+    if (!isError) {
+      toastMessage.value = 'IP copied to clipboard!'
+    }
+    toastIsError.value = false
+  }, 2000)
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    return document.execCommand('copy')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
 
 async function copyIP(ip) {
+  if (!ip) {
+    showCopyToast('No IP available to copy', true)
+    return
+  }
+
   try {
-    await navigator.clipboard.writeText(ip)
-    showToast.value = true
-    setTimeout(() => {
-      showToast.value = false
-    }, 2000)
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(ip)
+    } else if (!copyTextFallback(ip)) {
+      throw new Error('Fallback copy command failed')
+    }
+    showCopyToast('IP copied to clipboard!')
   } catch (err) {
+    try {
+      if (copyTextFallback(ip)) {
+        showCopyToast('IP copied to clipboard!')
+        return
+      }
+    } catch (fallbackErr) {
+      console.error('Failed to copy IP:', fallbackErr)
+    }
     console.error('Failed to copy IP:', err)
+    showCopyToast('Failed to copy IP', true)
   }
 }
 </script>
@@ -196,6 +302,31 @@ async function copyIP(ip) {
   @apply hover:scale-125 hover:shadow-sm;
   @apply border border-gray-200;
   @apply rounded-sm;
+}
+
+.contribution-square:focus-visible {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+}
+
+.node-tooltip {
+  @apply fixed z-50 px-3 py-2 rounded-md bg-gray-900 text-white text-xs shadow-lg;
+  pointer-events: none;
+  min-width: 180px;
+  max-width: 280px;
+  white-space: nowrap;
+  transform: translateY(-4px);
+}
+
+.tooltip-line {
+  line-height: 1.35;
+}
+
+.tooltip-line:first-child {
+  @apply font-semibold;
+}
+
+.tooltip-line:last-child {
+  @apply mt-1 text-gray-300;
 }
 
 .leader-square {
@@ -254,4 +385,4 @@ async function copyIP(ip) {
 .fixed {
   animation: slideIn 0.3s ease-out;
 }
-</style> 
+</style>
