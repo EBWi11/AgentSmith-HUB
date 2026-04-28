@@ -662,10 +662,20 @@ func (p *Project) GetProjectAgentsUnsafe() map[string]*agent.Agent {
 }
 
 func ForEachAgent(fn func(id string, a *agent.Agent) bool) {
+	type agentEntry struct {
+		id string
+		a  *agent.Agent
+	}
+	entries := make([]agentEntry, 0)
+
 	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
 	for id, a := range GlobalProject.Agents {
-		if !fn(id, a) {
+		entries = append(entries, agentEntry{id: id, a: a})
+	}
+	common.GlobalMu.RUnlock()
+
+	for _, entry := range entries {
+		if !fn(entry.id, entry.a) {
 			break
 		}
 	}
@@ -955,10 +965,20 @@ func GetAllSkillsNew() map[string]string {
 }
 
 func ForEachSkill(fn func(id string, s *skill.Skill) bool) {
+	type skillEntry struct {
+		id string
+		s  *skill.Skill
+	}
+	entries := make([]skillEntry, 0)
+
 	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
 	for id, s := range GlobalProject.Skills {
-		if !fn(id, s) {
+		entries = append(entries, skillEntry{id: id, s: s})
+	}
+	common.GlobalMu.RUnlock()
+
+	for _, entry := range entries {
+		if !fn(entry.id, entry.s) {
 			break
 		}
 	}

@@ -127,10 +127,15 @@ func NewFromExisting(existing *Agent, pns string) (*Agent, error) {
 		return nil, err
 	}
 
+	cfg, err := cloneAgentConfig(existing.Config)
+	if err != nil {
+		return nil, fmt.Errorf("clone agent config: %w", err)
+	}
+
 	a := &Agent{
 		Id:                  existing.Id,
 		Status:              common.StatusStopped,
-		Config:              existing.Config,
+		Config:              cfg,
 		Path:                existing.Path,
 		UpStream:            make(map[string]*chan map[string]interface{}),
 		DownStream:          make(map[string]*chan map[string]interface{}),
@@ -146,6 +151,26 @@ func NewFromExisting(existing *Agent, pns string) (*Agent, error) {
 	a.toolDefs = buildPluginToolDefinitions(a.Config.Tools)
 
 	return a, nil
+}
+
+func cloneAgentConfig(cfg *AgentConfig) (*AgentConfig, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("agent config is nil")
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	var cloned AgentConfig
+	if err := yaml.Unmarshal(data, &cloned); err != nil {
+		return nil, err
+	}
+	cloned.RawConfig = cfg.RawConfig
+	cloned.Path = cfg.Path
+	applyDefaults(&cloned)
+	return &cloned, nil
 }
 
 // ParseSkillIDsFromRaw parses agent raw YAML and returns the skill ID list (for reference checks).

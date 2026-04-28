@@ -277,65 +277,8 @@ func (a *Agent) Stop() error {
 }
 
 func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{} {
-	timeout, err := time.ParseDuration(a.Config.Timeout)
-	if err != nil {
-		timeout = 30 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	conversation := []Message{
-		{Role: "system", Content: a.buildEffectiveSystemPrompt()},
-		{Role: "user", Content: formatMessageAsJSON(msg)},
-	}
-	toolDefs := a.buildAllToolDefinitions()
-
-	for round := 0; round < a.Config.MaxRounds; round++ {
-		if ctx.Err() != nil {
-			logger.Error("Agent processing timed out, passing through original message",
-				"agent", a.Id, "timeout", a.Config.Timeout)
-			return a.attachLlmError(msg, fmt.Sprintf("agent timeout after %s", a.Config.Timeout))
-		}
-
-		resp, err := callChatWithTools(
-			a.Config.Model, conversation, toolDefs,
-			a.Config.MaxTokens, a.Config.Temperature,
-			a.Config.ReasoningMode, a.Config.ReasoningBudgetTokens, ctx,
-		)
-		if err != nil {
-			logger.Error("Agent LLM call failed", "agent", a.Id, "round", round, "error", err)
-			return a.attachLlmError(msg, fmt.Sprintf("agent LLM call failed: %v", err))
-		}
-
-		if len(resp.ToolCalls) > 0 {
-			conversation = append(conversation, resp.AssistantMessage())
-			for _, call := range resp.ToolCalls {
-				result := a.executeFunctionCall(call)
-				conversation = append(conversation, ToolResultMessage(call.ID, result))
-			}
-			continue
-		}
-
-		output := parseOutputMessage(resp.Content)
-		if output != nil {
-			llmMap := make(map[string]interface{}, len(output)+2)
-			for k, v := range output {
-				llmMap[k] = v
-			}
-			llmMap["agent"] = a.Id
-			if msg["llm"] == nil {
-				msg["llm"] = make(map[string]interface{})
-			}
-			msg["llm"].(map[string]interface{})[a.Id] = llmMap
-			return msg
-		}
-		// LLM 返回内容无法解析为有效 JSON，视为错误
-		return a.attachLlmError(msg, "agent LLM response could not be parsed as JSON")
-	}
-
-	logger.Error("Agent max ReAct rounds exceeded, passing through original message",
-		"agent", a.Id, "max_rounds", a.Config.MaxRounds)
-	return a.attachLlmError(msg, "agent max ReAct rounds exceeded")
+	result, _ := a.ProcessMessageWithTrace(msg)
+	return result
 }
 
 // ProcessMessageWithTrace runs one message through the agent and returns the result
@@ -394,16 +337,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 
 		output := parseOutputMessage(resp.Content)
 		if output != nil {
-			llmMap := make(map[string]interface{}, len(output)+2)
-			for k, v := range output {
-				llmMap[k] = v
-			}
-			llmMap["agent"] = a.Id
-			if msg["llm"] == nil {
-				msg["llm"] = make(map[string]interface{})
-			}
-			msg["llm"].(map[string]interface{})[a.Id] = llmMap
-			return msg, trace
+			return a.attachLlmOutput(msg, output), trace
 		}
 		return a.attachLlmError(msg, "agent LLM response could not be parsed as JSON"), trace
 	}
@@ -411,21 +345,39 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 	return a.attachLlmError(msg, "agent max ReAct rounds exceeded"), trace
 }
 
+func ensureLlmMap(msg map[string]interface{}) map[string]interface{} {
+	if msg == nil {
+		return nil
+	}
+	if existing, ok := msg["llm"].(map[string]interface{}); ok {
+		return existing
+	}
+	llm := make(map[string]interface{})
+	msg["llm"] = llm
+	return llm
+}
+
+func (a *Agent) attachLlmOutput(msg map[string]interface{}, output map[string]interface{}) map[string]interface{} {
+	if msg == nil {
+		msg = make(map[string]interface{})
+	}
+	llmMap := make(map[string]interface{}, len(output)+2)
+	for k, v := range output {
+		llmMap[k] = v
+	}
+	llmMap["agent"] = a.Id
+	ensureLlmMap(msg)[a.Id] = llmMap
+	return msg
+}
+
 // attachLlmError annotates the message with an llm error block for this agent.
 // The message is still forwarded to downstream components so the pipeline continues.
 func (a *Agent) attachLlmError(msg map[string]interface{}, errMsg string) map[string]interface{} {
-	llmAny, ok := msg["llm"]
-	var llm map[string]interface{}
-	if ok {
-		if m, ok2 := llmAny.(map[string]interface{}); ok2 {
-			llm = m
-		}
-	}
-	if llm == nil {
-		llm = make(map[string]interface{})
-		msg["llm"] = llm
+	if msg == nil {
+		msg = make(map[string]interface{})
 	}
 
+	llm := ensureLlmMap(msg)
 	llm[a.Id] = map[string]interface{}{
 		"agent": a.Id,
 		"error": errMsg,

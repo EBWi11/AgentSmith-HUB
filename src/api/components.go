@@ -26,7 +26,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/labstack/echo/v4"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // File extension constants and file operation functions are defined in file_operations.go

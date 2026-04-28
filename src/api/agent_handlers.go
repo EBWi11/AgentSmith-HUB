@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 const NewAgentData = `model: gpt-4o-mini
@@ -113,12 +113,12 @@ func getAgentDetail(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"id":      id,
-		"raw":     rawConfig,
-		"hasTemp": false,
-		"status":  string(project.GetClusterAggregatedAgentStatus(id)),
+		"id":           id,
+		"raw":          rawConfig,
+		"hasTemp":      false,
+		"status":       string(project.GetClusterAggregatedAgentStatus(id)),
 		"local_status": string(project.GetAggregatedAgentStatus(id)),
-		"model":   a.Config.Model,
+		"model":        a.Config.Model,
 	})
 }
 
