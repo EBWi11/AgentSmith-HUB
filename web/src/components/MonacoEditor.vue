@@ -30,6 +30,108 @@ const container = ref(null);
 let editor = null;
 let diffEditor = null;
 
+// ---------------------------------------------------------------------------
+// Global Cmd+F / Ctrl+F interception
+// ---------------------------------------------------------------------------
+// Monaco virtualizes content rendering, so the browser's native find can't
+// match text outside the visible viewport. We intercept Cmd+F at the window
+// level and forward it to the most relevant Monaco editor's built-in find
+// widget, which searches the full text model (not the DOM).
+//
+// We use a window-level singleton so multiple MonacoEditor instances share
+// one listener and one "last interacted" tracker.
+const FIND_REGISTRY = (window.__monacoFindRegistry__ ||= {
+  editors: new Set(),
+  lastInteracted: null,
+  listenerAttached: false,
+});
+
+const isRealFormFieldOutsideMonaco = (el) => {
+  if (!el) return false;
+  // Inputs INSIDE Monaco (e.g. its own find box) should not block us.
+  if (el.closest && el.closest('.monaco-editor')) return false;
+  const tag = (el.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+  if (el.isContentEditable) return true;
+  return false;
+};
+
+const isEditorVisible = (ed) => {
+  try {
+    const dom = ed && ed.getDomNode && ed.getDomNode();
+    if (!dom || !dom.isConnected) return false;
+    const rect = dom.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  } catch {
+    return false;
+  }
+};
+
+const pickFindTarget = () => {
+  const last = FIND_REGISTRY.lastInteracted;
+  if (last && FIND_REGISTRY.editors.has(last) && isEditorVisible(last)) {
+    return last;
+  }
+  // Fallback: pick the topmost visible editor (highest z-index / latest in set).
+  let fallback = null;
+  for (const ed of FIND_REGISTRY.editors) {
+    if (isEditorVisible(ed)) fallback = ed;
+  }
+  return fallback;
+};
+
+const handleGlobalFindShortcut = (e) => {
+  const isFindKey =
+    (e.metaKey || e.ctrlKey) &&
+    !e.shiftKey &&
+    !e.altKey &&
+    (e.key === 'f' || e.key === 'F');
+  if (!isFindKey) return;
+  // Let users keep using browser/native search inside real form inputs.
+  if (isRealFormFieldOutsideMonaco(document.activeElement)) return;
+  const target = pickFindTarget();
+  if (!target) return;
+  try {
+    target.focus();
+    const findAction = target.getAction && target.getAction('actions.find');
+    if (!findAction) {
+      // Find contribution not loaded; let the browser's native search run.
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    findAction.run();
+  } catch {
+    // Swallow: if the editor was disposed mid-flight, just no-op.
+  }
+};
+
+const ensureGlobalFindListener = () => {
+  if (FIND_REGISTRY.listenerAttached) return;
+  window.addEventListener('keydown', handleGlobalFindShortcut, true);
+  FIND_REGISTRY.listenerAttached = true;
+};
+
+const registerEditorForFind = (ed) => {
+  if (!ed) return;
+  FIND_REGISTRY.editors.add(ed);
+  try {
+    ed.onDidFocusEditorText(() => { FIND_REGISTRY.lastInteracted = ed; });
+    ed.onDidFocusEditorWidget(() => { FIND_REGISTRY.lastInteracted = ed; });
+  } catch {
+    // Ignore if these hooks are unavailable.
+  }
+  ensureGlobalFindListener();
+};
+
+const unregisterEditorForFind = (ed) => {
+  if (!ed) return;
+  FIND_REGISTRY.editors.delete(ed);
+  if (FIND_REGISTRY.lastInteracted === ed) {
+    FIND_REGISTRY.lastInteracted = null;
+  }
+};
+
 // Use unified data cache store
 const dataCache = useDataCacheStore();
 
@@ -826,6 +928,12 @@ function initializeEditor() {
     
     // Get the modified editor instance
     editor = diffEditor.getModifiedEditor();
+    registerEditorForFind(editor);
+    try {
+      registerEditorForFind(diffEditor.getOriginalEditor());
+    } catch {
+      // ignore
+    }
     
     // Ensure editor layout is correct
     setTimeout(() => {
@@ -861,6 +969,7 @@ function initializeEditor() {
   } else {
     // Create regular editor
     editor = monaco.editor.create(container.value, options);
+    registerEditorForFind(editor);
     setModelComponentType(editor.getModel(), props.componentType);
     
     // No need for metadata - using content-based detection
@@ -1126,6 +1235,7 @@ onBeforeUnmount(() => {
 function disposeEditors() {
   try {
     if (isEditorValid(editor)) {
+      unregisterEditorForFind(editor);
       editor.dispose();
     }
   } catch (error) {
@@ -1137,6 +1247,12 @@ function disposeEditors() {
   
   try {
     if (isEditorValid(diffEditor)) {
+      try {
+        unregisterEditorForFind(diffEditor.getOriginalEditor());
+        unregisterEditorForFind(diffEditor.getModifiedEditor());
+      } catch {
+        // ignore
+      }
       diffEditor.dispose();
     }
   } catch (error) {
