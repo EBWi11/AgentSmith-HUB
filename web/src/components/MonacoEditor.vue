@@ -29,6 +29,7 @@ const emit = defineEmits(['update:value', 'save', 'line-change', 'test']);
 const container = ref(null);
 let editor = null;
 let diffEditor = null;
+let pasteCleanup = null;
 
 // ---------------------------------------------------------------------------
 // Global Cmd+F / Ctrl+F interception
@@ -987,6 +988,8 @@ function initializeEditor() {
     }
   }
   
+  installPlainTextPasteHandler(editor);
+
   // Add save shortcut (Cmd+S on Mac, Ctrl+S on Windows/Linux)
   try {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
@@ -1073,6 +1076,61 @@ function getLanguage() {
     default:
       return 'json';
   }
+}
+
+function getInsertionEndSelection(selection, text) {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  const endLineNumber = selection.startLineNumber + lines.length - 1;
+  const endColumn = lines.length === 1
+    ? selection.startColumn + lines[0].length
+    : lines[lines.length - 1].length + 1;
+
+  return new monaco.Selection(endLineNumber, endColumn, endLineNumber, endColumn);
+}
+
+function installPlainTextPasteHandler(editorInstance) {
+  if (!isEditorValid(editorInstance) || props.readOnly) return;
+
+  if (pasteCleanup) {
+    pasteCleanup();
+    pasteCleanup = null;
+  }
+
+  const domNode = editorInstance.getDomNode && editorInstance.getDomNode();
+  if (!domNode) return;
+
+  const handlePaste = (event) => {
+    if (!isEditorValid(editorInstance) || props.readOnly) return;
+
+    const clipboardText = event.clipboardData?.getData('text/plain');
+    if (clipboardText === undefined || clipboardText === '') return;
+
+    const selections = editorInstance.getSelections?.() || [editorInstance.getSelection()];
+    const validSelections = selections.filter(Boolean);
+    if (validSelections.length === 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const edits = validSelections.map((selection) => ({
+      range: selection,
+      text: clipboardText,
+      forceMoveMarkers: true,
+    }));
+    const cursorState = validSelections.map((selection) => (
+      getInsertionEndSelection(selection, clipboardText)
+    ));
+
+    editorInstance.pushUndoStop();
+    editorInstance.executeEdits('plain-text-paste', edits, cursorState);
+    editorInstance.pushUndoStop();
+  };
+
+  domNode.addEventListener('paste', handlePaste, true);
+  pasteCleanup = () => {
+    domNode.removeEventListener('paste', handlePaste, true);
+  };
 }
 
 
@@ -1162,6 +1220,14 @@ watch(() => props.readOnly, (newReadOnly) => {
   if (isEditorValid(editor)) {
     try {
       editor.updateOptions({ readOnly: newReadOnly });
+      if (newReadOnly) {
+        if (pasteCleanup) {
+          pasteCleanup();
+          pasteCleanup = null;
+        }
+      } else {
+        installPlainTextPasteHandler(editor);
+      }
     } catch (error) {
       console.warn('Failed to update editor options:', error);
     }
@@ -1233,6 +1299,11 @@ onBeforeUnmount(() => {
 
 // Clean up editor instance
 function disposeEditors() {
+  if (pasteCleanup) {
+    pasteCleanup();
+    pasteCleanup = null;
+  }
+
   try {
     if (isEditorValid(editor)) {
       unregisterEditorForFind(editor);
