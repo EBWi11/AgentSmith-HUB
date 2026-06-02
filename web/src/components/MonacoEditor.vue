@@ -57,6 +57,14 @@ const isRealFormFieldOutsideMonaco = (el) => {
   return false;
 };
 
+const isInsideMonacoFindWidget = (el) => {
+  return Boolean(el && el.closest && el.closest('.find-widget'));
+};
+
+const isMonacoEditorInputArea = (el) => {
+  return Boolean(el && el.classList && el.classList.contains('inputarea'));
+};
+
 const isEditorVisible = (ed) => {
   try {
     const dom = ed && ed.getDomNode && ed.getDomNode();
@@ -1171,6 +1179,9 @@ function installPlainTextPasteHandler(editorInstance) {
 
   const handlePaste = (event) => {
     if (!isEditorValid(editorInstance) || props.readOnly) return;
+
+    const target = event.target;
+    if (isInsideMonacoFindWidget(target) || !isMonacoEditorInputArea(target)) return;
 
     const clipboardText = event.clipboardData?.getData('text/plain');
     if (clipboardText === undefined || clipboardText === '') return;
