@@ -419,6 +419,14 @@ function setupMonacoTheme() {
       { token: 'keyword.go', foreground: 'cf222e', fontStyle: 'bold' },
       { token: 'type.go', foreground: '8250df', fontStyle: 'bold' },
       { token: 'function.go', foreground: '6639ba' },
+
+      // XML language tokens
+      { token: 'xml.tag', foreground: 'e36209', fontStyle: 'bold' },
+      { token: 'xml.attribute.name', foreground: '0969da', fontStyle: 'bold' },
+      { token: 'xml.attribute.value', foreground: '22863a' },
+      { token: 'xml.delimiter', foreground: '6f42c1' },
+      { token: 'xml.comment', foreground: '57606a', fontStyle: 'italic' },
+      { token: 'xml.cdata', foreground: '8250df' },
     ],
     colors: {
       // Editor background - clean modern white with subtle warmth
@@ -635,7 +643,71 @@ function registerLanguageProviders() {
     },
   });
 
-  
+  monaco.languages.setMonarchTokensProvider('xml', {
+    defaultToken: '',
+    ignoreCase: false,
+
+    tokenizer: {
+      root: [
+        [/<!--/, 'xml.comment', '@comment'],
+        [/<!\[CDATA\[/, 'xml.cdata', '@cdata'],
+        [/<\?/, 'xml.delimiter', '@processingInstruction'],
+        [/<!/, 'xml.delimiter', '@doctype'],
+        [/<\/?/, 'xml.delimiter', '@tag'],
+        [/[^<]+/, ''],
+      ],
+
+      tag: [
+        [/[a-zA-Z_][\w:.-]*/, 'xml.tag', '@tagContent'],
+        [/\s+/, ''],
+        [/\/?>/, 'xml.delimiter', '@pop'],
+      ],
+
+      tagContent: [
+        [/[a-zA-Z_][\w:.-]*(?=\s*=)/, 'xml.attribute.name'],
+        [/=/, 'xml.delimiter'],
+        [/"/, 'xml.attribute.value', '@doubleQuotedAttribute'],
+        [/'/, 'xml.attribute.value', '@singleQuotedAttribute'],
+        [/\s+/, ''],
+        [/\/?>/, 'xml.delimiter', '@pop'],
+        [/[a-zA-Z_][\w:.-]*/, 'xml.attribute.name'],
+      ],
+
+      doubleQuotedAttribute: [
+        [/[^"]+/, 'xml.attribute.value'],
+        [/"/, 'xml.attribute.value', '@pop'],
+      ],
+
+      singleQuotedAttribute: [
+        [/[^']+/, 'xml.attribute.value'],
+        [/'/, 'xml.attribute.value', '@pop'],
+      ],
+
+      comment: [
+        [/[^-]+/, 'xml.comment'],
+        [/-->/, 'xml.comment', '@pop'],
+        [/-/, 'xml.comment'],
+      ],
+
+      cdata: [
+        [/[^\]]+/, 'xml.cdata'],
+        [/\]\]>/, 'xml.cdata', '@pop'],
+        [/\]/, 'xml.cdata'],
+      ],
+
+      processingInstruction: [
+        [/\?>/, 'xml.delimiter', '@pop'],
+        [/[^?]+/, 'xml.attribute.value'],
+        [/\?/, 'xml.attribute.value'],
+      ],
+
+      doctype: [
+        [/>/, 'xml.delimiter', '@pop'],
+        [/[^>]+/, 'xml.attribute.value'],
+      ],
+    },
+  });
+
 
 
   // YAML language suggestions - for Input/Output/Project components
@@ -791,9 +863,6 @@ function registerLanguageProviders() {
     triggerCharacters: ['.', '(', ' ', '\n', '\t']
   });
   
-  // Use Monaco's built-in XML language with custom styling
-  // Don't override the XML tokenizer, just rely on Monaco's default XML parsing
-
   // Mark providers as registered globally
   window.monacoProvidersRegistered = true;
   
