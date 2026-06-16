@@ -72,6 +72,33 @@ var Plugins = make(map[string]*Plugin)
 var PluginsNew = make(map[string]string)
 var PluginsMu sync.RWMutex
 
+const (
+	pluginRedisImportPath  = "AgentSmith-HUB/pluginapi/redis"
+	pluginRedisPackagePath = pluginRedisImportPath + "/redis"
+)
+
+var (
+	pluginRedisGet              = common.RedisGet
+	pluginRedisSet              = common.RedisSet
+	pluginRedisSetNX            = common.RedisSetNX
+	pluginRedisIncrBy           = common.RedisIncrby
+	pluginRedisDel              = common.RedisDel
+	pluginRedisExpire           = common.RedisExpire
+	pluginRedisHSet             = common.RedisHSet
+	pluginRedisHGet             = common.RedisHGet
+	pluginRedisHGetAll          = common.RedisHGetAll
+	pluginRedisHDel             = common.RedisHDel
+	pluginRedisLPush            = common.RedisLPush
+	pluginRedisLRange           = common.RedisLRange
+	pluginRedisSAdd             = common.RedisSAdd
+	pluginRedisSRem             = common.RedisSRem
+	pluginRedisSMembers         = common.RedisSMembers
+	pluginRedisZAdd             = common.RedisZAdd
+	pluginRedisZRevRange        = common.RedisZRevRange
+	pluginRedisZRemRangeByRank  = common.RedisZRemRangeByRank
+	pluginRedisZRemRangeByScore = common.RedisZRemRangeByScore
+)
+
 // AgentToolParameters overrides Parameters for plugins used by the agent when the
 // plugin has variadic Eval(args ...interface{}) so the LLM gets named args (e.g. rulesetId, ruleContent).
 var AgentToolParameters = make(map[string][]PluginParameter)
@@ -259,6 +286,11 @@ func (p *Plugin) yaegiLoad() (err error) {
 		return err
 	}
 
+	err = p.yaegiIntp.Use(p.redisSymbols())
+	if err != nil {
+		return err
+	}
+
 	_, err = p.yaegiIntp.Eval(string(p.Payload))
 	if err != nil {
 		return err
@@ -281,6 +313,163 @@ func (p *Plugin) yaegiLoad() (err error) {
 	p.parsePluginParameters()
 
 	return nil
+}
+
+func (p *Plugin) redisSymbols() interp.Exports {
+	return interp.Exports{
+		pluginRedisPackagePath: {
+			"Get": reflect.ValueOf(func(key string) (string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return "", err
+				}
+				return pluginRedisGet(scopedKey)
+			}),
+			"Set": reflect.ValueOf(func(key string, value interface{}, expiration int) (string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return "", err
+				}
+				return pluginRedisSet(scopedKey, value, expiration)
+			}),
+			"SetNX": reflect.ValueOf(func(key string, value interface{}, expiration int) (bool, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return false, err
+				}
+				return pluginRedisSetNX(scopedKey, value, expiration)
+			}),
+			"Incr": reflect.ValueOf(func(key string) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisIncrBy(scopedKey, 1)
+			}),
+			"IncrBy": reflect.ValueOf(func(key string, value int64) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisIncrBy(scopedKey, value)
+			}),
+			"Del": reflect.ValueOf(func(key string) error {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return err
+				}
+				return pluginRedisDel(scopedKey)
+			}),
+			"Expire": reflect.ValueOf(func(key string, expiration int) error {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return err
+				}
+				return pluginRedisExpire(scopedKey, expiration)
+			}),
+			"HSet": reflect.ValueOf(func(key string, field string, value interface{}) error {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return err
+				}
+				return pluginRedisHSet(scopedKey, field, value)
+			}),
+			"HGet": reflect.ValueOf(func(key string, field string) (string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return "", err
+				}
+				return pluginRedisHGet(scopedKey, field)
+			}),
+			"HGetAll": reflect.ValueOf(func(key string) (map[string]string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return nil, err
+				}
+				return pluginRedisHGetAll(scopedKey)
+			}),
+			"HDel": reflect.ValueOf(func(key string, field string) error {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return err
+				}
+				return pluginRedisHDel(scopedKey, field)
+			}),
+			"LPush": reflect.ValueOf(func(key string, value interface{}, maxLen int64) error {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return err
+				}
+				return pluginRedisLPush(scopedKey, value, maxLen)
+			}),
+			"LRange": reflect.ValueOf(func(key string, start int64, stop int64) ([]string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return nil, err
+				}
+				return pluginRedisLRange(scopedKey, start, stop)
+			}),
+			"SAdd": reflect.ValueOf(func(key string, member interface{}) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisSAdd(scopedKey, member)
+			}),
+			"SRem": reflect.ValueOf(func(key string, member interface{}) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisSRem(scopedKey, member)
+			}),
+			"SMembers": reflect.ValueOf(func(key string) ([]string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return nil, err
+				}
+				return pluginRedisSMembers(scopedKey)
+			}),
+			"ZAdd": reflect.ValueOf(func(key string, score float64, member interface{}) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisZAdd(scopedKey, score, member)
+			}),
+			"ZRevRange": reflect.ValueOf(func(key string, start int64, stop int64) ([]string, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return nil, err
+				}
+				return pluginRedisZRevRange(scopedKey, start, stop)
+			}),
+			"ZRemRangeByRank": reflect.ValueOf(func(key string, start int64, stop int64) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisZRemRangeByRank(scopedKey, start, stop)
+			}),
+			"ZRemRangeByScore": reflect.ValueOf(func(key string, min string, max string) (int64, error) {
+				scopedKey, err := p.scopedRedisKey(key)
+				if err != nil {
+					return 0, err
+				}
+				return pluginRedisZRemRangeByScore(scopedKey, min, max)
+			}),
+		},
+	}
+}
+
+func (p *Plugin) scopedRedisKey(key string) (string, error) {
+	if p.Name == "" {
+		return "", fmt.Errorf("plugin redis key namespace requires plugin name")
+	}
+	if key == "" {
+		return "", fmt.Errorf("plugin redis key cannot be empty")
+	}
+	return "plugin:" + p.Name + ":" + key, nil
 }
 
 // validateFunctionSignature checks if the plugin Eval function has the correct signature
@@ -684,10 +873,13 @@ func validatePluginCode(source string) error {
 		return fmt.Errorf("plugin must contain an 'Eval' function")
 	}
 
-	// 3. Check imports - only allow Go standard library
+	// 3. Check imports - only allow Go standard library plus approved plugin APIs
 	for _, importSpec := range file.Imports {
 		if importSpec.Path != nil {
 			importPath := strings.Trim(importSpec.Path.Value, `"`)
+			if importPath == pluginRedisImportPath {
+				continue
+			}
 			if !isStandardLibraryPackage(importPath) {
 				return fmt.Errorf("plugin can only import Go standard library packages, found external package: %s", importPath)
 			}

@@ -2098,125 +2098,26 @@ func NewFromExisting(existing *Ruleset, newProjectNodeSequence string) (*Ruleset
 		return nil, fmt.Errorf("existing ruleset is nil")
 	}
 
-	// Verify the existing configuration before creating new instance
-	err := Verify(existing.Path, existing.RawConfig)
+	rawConfig := existing.RawConfig
+	if rawConfig == "" && existing.Path != "" {
+		content, readErr := common.ReadContentFromPathOrRaw(existing.Path, "")
+		if readErr != nil {
+			return nil, fmt.Errorf("ruleset rebuild error for existing config: %s %w", existing.RulesetID, readErr)
+		}
+		rawConfig = string(content)
+	}
+
+	newRuleset, err := NewRuleset("", rawConfig, existing.RulesetID)
 	if err != nil {
-		return nil, fmt.Errorf("ruleset verify error for existing config: %s %w", existing.RulesetID, err)
+		return nil, fmt.Errorf("ruleset rebuild error for existing config: %s %w", existing.RulesetID, err)
 	}
 
-	// Create a new Ruleset instance with the same configuration but different ProjectNodeSequence
-	newRuleset := &Ruleset{
-		Path:                existing.Path,
-		XMLName:             existing.XMLName,
-		Name:                existing.Name,
-		Author:              existing.Author,
-		RulesetID:           existing.RulesetID,
-		ProjectNodeSequence: newProjectNodeSequence, // Set the new sequence
-		Type:                existing.Type,
-		IsDetection:         existing.IsDetection,
-		Rules:               existing.Rules,       // Share the same rules
-		RulesCount:          existing.RulesCount,  // Copy the rules count
-		Status:              common.StatusStopped, // Initialize status to stopped
-		UpStream:            make(map[string]*chan map[string]interface{}),
-		DownStream:          make(map[string]*chan map[string]interface{}),
-		// Performance optimization: pre-compute test mode flag
-		isTestMode: strings.HasPrefix(newProjectNodeSequence, "TEST."),
-		// Note: Cache and CacheForClassify are NOT shared to avoid concurrent access issues
-		// They will be created when needed during RulesetBuild if threshold operations exist
-		Cache:            nil,
-		CacheForClassify: nil,
-		RawConfig:        existing.RawConfig,
-		// Note: Runtime fields (stopChan, antsPool, wg, etc.) are intentionally not copied
-		// as they will be initialized when the ruleset starts
-		// Metrics fields (processTotal) are also not copied as they are instance-specific
-		// RulesByFilter field has been removed in the new flexible syntax design
-	}
-
-	// Only create sampler on leader node for performance
-	if common.IsLeader {
-		newRuleset.sampler = common.GetSampler("ruleset." + existing.RulesetID)
-	}
-
-	// Check if any rules have threshold operations that require cache initialization
-	var needsCache bool
-	var needsClassifyCache bool
-
-	for _, rule := range newRuleset.Rules {
-		if len(rule.ThresholdMap) > 0 {
-			needsCache = true
-			// Check if any threshold uses CLASSIFY mode
-			for _, threshold := range rule.ThresholdMap {
-				if threshold.CountType == "CLASSIFY" {
-					needsClassifyCache = true
-					break
-				}
-			}
-		}
-		if needsCache && needsClassifyCache {
-			break
-		}
-	}
-
-	// Initialize caches if needed
-	if needsCache {
-		newRuleset.Cache = newLocalThresholdCounter()
-	}
-
-	if needsClassifyCache {
-		newRuleset.CacheForClassify = newLocalClassifyCounter()
-	}
-
-	// Initialize regex result cache
-	newRuleset.RegexResultCache = NewRegexResultCache(1000) // Default capacity: 1000 entries
-
-	// Initialize CEP state manager if any rule has sequences
-	hasSequences := false
-	seqUseLocal := -1 // -1=unset, 0=false, 1=true
-	for _, rule := range newRuleset.Rules {
-		for _, seq := range rule.SequenceMap {
-			hasSequences = true
-			localVal := 0
-			if seq.LocalCache {
-				localVal = 1
-			}
-			if seqUseLocal == -1 {
-				seqUseLocal = localVal
-			}
-		}
-	}
-	if hasSequences {
-		useLocalCache := seqUseLocal == 1
-		if useLocalCache && newRuleset.SequenceCache == nil {
-			var err error
-			newRuleset.SequenceCache, err = ristretto.NewCache(&ristretto.Config[string, *SequenceState]{
-				NumCounters: 1_000_000,
-				MaxCost:     1024 * 1024 * 32, // 32MB
-				BufferItems: 64,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to create sequence local cache: %w", err)
-			}
-		}
-		newRuleset.seqStateManager = NewCEPStateManager(useLocalCache, newRuleset.SequenceCache)
-		if useLocalCache {
-			var err error
-			newRuleset.cepValueStore, err = NewPebbleCEPValueStore(newRuleset.RulesetID)
-			if err != nil {
-				if newRuleset.SequenceCache != nil {
-					newRuleset.SequenceCache.Close()
-					newRuleset.SequenceCache = nil
-				}
-				return nil, fmt.Errorf("failed to initialize local CEP value store: %w", err)
-			}
-		}
-	}
-
-	// Copy absence sequence flag and build rule lookup map
-	newRuleset.hasAbsenceSequences = existing.hasAbsenceSequences
-	newRuleset.ruleByID = make(map[string]*Rule, len(newRuleset.Rules))
-	for i := range newRuleset.Rules {
-		newRuleset.ruleByID[newRuleset.Rules[i].ID] = &newRuleset.Rules[i]
-	}
+	newRuleset.Path = existing.Path
+	newRuleset.ProjectNodeSequence = newProjectNodeSequence
+	newRuleset.Status = common.StatusStopped
+	newRuleset.UpStream = make(map[string]*chan map[string]interface{})
+	newRuleset.DownStream = make(map[string]*chan map[string]interface{})
+	newRuleset.isTestMode = strings.HasPrefix(newProjectNodeSequence, "TEST.")
 
 	return newRuleset, nil
 }

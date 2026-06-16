@@ -2940,12 +2940,84 @@ func Eval(key string) (interface{}, bool, error) {
 }
 ```
 
-### 9.5 插件限制
+### 9.5 Yaegi 插件 Hub Redis API
+
+Yaegi 自定义插件可以通过受控 API 使用 HUB 已初始化的 Redis 连接。插件不能直接 import `AgentSmith-HUB/common` 或第三方 Redis 客户端；如需 Redis，请使用下面的内置 import：
+
+```go
+import hubredis "AgentSmith-HUB/pluginapi/redis"
+```
+
+所有 Redis key 都会自动加上插件命名空间前缀：
+
+```text
+plugin:<插件名>:<key>
+```
+
+例如插件 `riskCache` 调用 `hubredis.Set("user:alice", "high", 3600)`，实际写入的 Redis key 是 `plugin:riskCache:user:alice`。插件传入空 key 会返回错误。
+
+#### 可用函数
+
+| 函数 | 说明 |
+|------|------|
+| `Get(key string) (string, error)` | 读取字符串值 |
+| `Set(key string, value interface{}, expiration int) (string, error)` | 写入字符串值，`expiration` 单位为秒，`0` 表示不过期 |
+| `SetNX(key string, value interface{}, expiration int) (bool, error)` | key 不存在时写入，常用于去重、抑制、轻量锁 |
+| `Incr(key string) (int64, error)` | 将计数器加 1 |
+| `IncrBy(key string, value int64) (int64, error)` | 将计数器增加指定值 |
+| `Del(key string) error` | 删除 key |
+| `Expire(key string, expiration int) error` | 设置过期时间，单位为秒 |
+| `HSet(key, field string, value interface{}) error` | 写入 Hash 字段 |
+| `HGet(key, field string) (string, error)` | 读取 Hash 字段 |
+| `HGetAll(key string) (map[string]string, error)` | 读取整个 Hash |
+| `HDel(key, field string) error` | 删除 Hash 字段 |
+| `LPush(key string, value interface{}, maxLen int64) error` | 写入 List 头部；`maxLen > 0` 时自动保留指定长度 |
+| `LRange(key string, start, stop int64) ([]string, error)` | 读取 List 范围 |
+| `SAdd(key string, member interface{}) (int64, error)` | 添加 Set 成员 |
+| `SRem(key string, member interface{}) (int64, error)` | 删除 Set 成员 |
+| `SMembers(key string) ([]string, error)` | 读取全部 Set 成员 |
+| `ZAdd(key string, score float64, member interface{}) (int64, error)` | 添加 Sorted Set 成员 |
+| `ZRevRange(key string, start, stop int64) ([]string, error)` | 按 score 倒序读取 Sorted Set |
+| `ZRemRangeByRank(key string, start, stop int64) (int64, error)` | 按排名范围删除 Sorted Set 成员 |
+| `ZRemRangeByScore(key string, min, max string) (int64, error)` | 按 score 范围删除 Sorted Set 成员 |
+
+#### 示例：跨节点去重
+
+```go
+package plugin
+
+import (
+    "fmt"
+    hubredis "AgentSmith-HUB/pluginapi/redis"
+)
+
+func Eval(args ...interface{}) (bool, error) {
+    if len(args) < 2 {
+        return false, fmt.Errorf("requires key and ttl seconds")
+    }
+
+    key := fmt.Sprintf("%v", args[0])
+    ttl, ok := args[1].(int)
+    if !ok {
+        return false, fmt.Errorf("ttl must be int seconds")
+    }
+
+    // true 表示第一次出现；false 表示 TTL 窗口内已出现过
+    return hubredis.SetNX(key, 1, ttl)
+}
+```
+
+#### 边界
+
+为了避免自定义插件扫描或修改 HUB 全局状态，`Keys`、`Eval`、Pub/Sub、Pipeline 和底层 Redis client 不对 Yaegi 插件开放。如果确实需要新的 Redis 操作，应优先在 `hubredis` 中增加受命名空间保护的窄函数。
+
+### 9.6 插件限制
 - 只能使用Go标准库，不能使用第三方包；
+- 允许额外 import `AgentSmith-HUB/pluginapi/redis` 使用受控 Redis API；
 - 必须定义名为`Eval`的函数，package 必须为 plugin；
 - 函数返回值必须严格匹配要求。
 
-### 9.6 示例插件：飞书紧急告警（pushUrentAlertByLark）
+### 9.7 示例插件：飞书紧急告警（pushUrentAlertByLark）
 
 `config/plugin/pushUrentAlertByLark.go` 是一个随 HUB 一同提供的参考插件，用于将告警事件通过**飞书互动卡片**推送到指定群组，并在工作时间之外触发**电话紧急告警**。
 
