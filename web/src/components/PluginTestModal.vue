@@ -26,7 +26,7 @@
                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <div class="text-xs text-gray-500 mt-1">
-                  String, number, or boolean value
+                  String, number, boolean, JSON object, or JSON array
                 </div>
               </div>
               <button 
@@ -195,12 +195,16 @@ function removePluginArg(index) {
   }
 }
 
-// Format result for display
-function formatResult(result) {
-  if (typeof result === 'object') {
-    return JSON.stringify(result, null, 2);
+function parsePluginArgValue(rawValue) {
+  const value = rawValue.trim();
+  if (value === '') return null;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']'))) {
+    return JSON.parse(value);
   }
-  return String(result);
+  if (!isNaN(value)) return Number(value);
+  return value;
 }
 
 async function runTest() {
@@ -211,14 +215,7 @@ async function runTest() {
   
   try {
     // Process parameter values, try to convert to appropriate types
-    const args = pluginArgs.value.map(arg => {
-      const value = arg.value.trim();
-      if (value === '') return null;
-      if (value === 'true') return true;
-      if (value === 'false') return false;
-      if (!isNaN(value)) return Number(value);
-      return value;
-    });
+    const args = pluginArgs.value.map(arg => parsePluginArgValue(arg.value));
 
     // Convert args array to map format expected by backend
     const argsMap = {};
@@ -256,4 +253,4 @@ async function runTest() {
 
 <style scoped>
 /* Any component-specific styles can go here */
-</style> 
+</style>

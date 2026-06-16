@@ -48,6 +48,39 @@ func rulesetErrorResponse(isContentMode bool, success bool, errorMsg string) map
 	}
 }
 
+func buildPluginTestArgs(data map[string]interface{}) ([]interface{}, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	maxIndex := -1
+	indexes := make(map[int]struct{}, len(data))
+	for key := range data {
+		index, err := strconv.Atoi(key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid argument index %q", key)
+		}
+		if index < 0 {
+			return nil, fmt.Errorf("argument index must be non-negative: %d", index)
+		}
+		indexes[index] = struct{}{}
+		if index > maxIndex {
+			maxIndex = index
+		}
+	}
+
+	if maxIndex+1 != len(indexes) {
+		return nil, fmt.Errorf("argument indexes must be contiguous starting at 0")
+	}
+
+	args := make([]interface{}, maxIndex+1)
+	for key, value := range data {
+		index, _ := strconv.Atoi(key)
+		args[index] = value
+	}
+	return args, nil
+}
+
 func testRuleset(c echo.Context) error {
 	id := c.Param("id") // May be empty for /test-ruleset-content endpoint
 
@@ -70,11 +103,19 @@ func testRuleset(c echo.Context) error {
 	case map[string]interface{}:
 		testEvents = append(testEvents, v)
 	case []interface{}:
-		for _, item := range v {
+		for index, item := range v {
 			if m, ok := item.(map[string]interface{}); ok {
 				testEvents = append(testEvents, m)
+			} else {
+				isContentMode := req.Content != ""
+				return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, fmt.Sprintf("data[%d] must be an object", index)))
 			}
 		}
+	case nil:
+		// handled below
+	default:
+		isContentMode := req.Content != ""
+		return c.JSON(http.StatusBadRequest, rulesetErrorResponse(isContentMode, false, "`data` must be an object or array of objects"))
 	}
 
 	if len(req.Datas) > 0 {
@@ -439,7 +480,6 @@ func testPlugin(c echo.Context) error {
 	}
 
 	var pluginToTest *plugin.Plugin
-	var isTemporary bool
 	var tempPluginId string
 
 	// If content is provided directly, use it (for /test-plugin-content endpoint)
@@ -456,16 +496,17 @@ func testPlugin(c echo.Context) error {
 		}
 
 		pluginToTest = tempPlugin
-		isTemporary = true
 
 		// No cleanup needed since plugin was never added to global registry
 	} else if id != "" {
 		// Original logic to find plugin by ID (for /test-plugin/:id endpoint)
 		// Check if plugin exists in memory
+		plugin.PluginsMu.RLock()
 		p, existsInMemory := plugin.Plugins[id]
+		plugin.PluginsMu.RUnlock()
 
 		// Check if plugin exists in temporary files
-		tempContent, existsInTemp := plugin.PluginsNew[id]
+		tempContent, existsInTemp := plugin.GetAllPluginsNew()[id]
 
 		if !existsInMemory && !existsInTemp {
 			return c.JSON(http.StatusOK, map[string]interface{}{
@@ -489,11 +530,24 @@ func testPlugin(c echo.Context) error {
 			}
 
 			pluginToTest = tempPlugin
-			isTemporary = true
 		} else if existsInMemory {
-			// Use existing plugin only if no temporary version exists
-			pluginToTest = p
-			isTemporary = false
+			if p.Type == plugin.YAEGI_PLUGIN {
+				// Test through an isolated Yaegi instance so manual tests do not
+				// mutate live interpreter state, Redis namespace, or invocation stats.
+				tempPluginName := id + "_test_saved"
+				tempPlugin, err := plugin.NewTestPlugin("", string(p.Payload), tempPluginName, plugin.YAEGI_PLUGIN)
+				if err != nil {
+					return c.JSON(http.StatusOK, map[string]interface{}{
+						"success": false,
+						"error":   fmt.Sprintf("Plugin compilation failed: %v", err),
+						"result":  nil,
+					})
+				}
+				pluginToTest = tempPlugin
+			} else {
+				// Local plugins are stateless functions and are not recorded here.
+				pluginToTest = p
+			}
 		}
 	} else {
 		// Neither content nor id provided
@@ -505,17 +559,13 @@ func testPlugin(c echo.Context) error {
 	}
 
 	// Process parameter values, try to convert to appropriate types
-	args := make([]interface{}, len(req.Data))
-	for key, value := range req.Data {
-		intKey, err := strconv.Atoi(key)
-		if err != nil {
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"success": false,
-				"error":   "Invalid key: " + key,
-				"result":  nil,
-			})
-		}
-		args[intKey] = value
+	args, err := buildPluginTestArgs(req.Data)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"result":  nil,
+		})
 	}
 
 	// Determine plugin type and execute
@@ -552,19 +602,6 @@ func testPlugin(c echo.Context) error {
 			})
 		}
 	case plugin.YAEGI_PLUGIN:
-		// For Yaegi plugins, we need to determine the return type
-		if isTemporary {
-			// For temporary plugins, we need to load them first since they're not in the global registry
-			err := pluginToTest.YaegiLoad()
-			if err != nil {
-				return c.JSON(http.StatusOK, map[string]interface{}{
-					"success": false,
-					"error":   fmt.Sprintf("Failed to load temporary plugin: %v", err),
-					"result":  nil,
-				})
-			}
-		}
-
 		// Execute plugin based on return type
 		if pluginToTest.ReturnType == "bool" {
 			// For check-type plugins (bool return type), use FuncEvalCheckNode
@@ -618,7 +655,8 @@ func testOutput(c echo.Context) error {
 
 	// Parse request body
 	var req struct {
-		Data map[string]interface{} `json:"data"`
+		Data    map[string]interface{} `json:"data"`
+		Content string                 `json:"content,omitempty"`
 	}
 
 	if err := c.Bind(&req); err != nil {
@@ -642,51 +680,67 @@ func testOutput(c echo.Context) error {
 	var outputContent string
 	var isTemp bool
 
-	// Check if there's a temporary file first
-	tempPath, tempExists := GetComponentPath("output", id, true)
-	if tempExists {
-		content, err := ReadComponent(tempPath)
-		if err == nil {
-			outputContent = content
-			isTemp = true
+	if req.Content != "" {
+		outputContent = req.Content
+		isTemp = true
+	} else if id != "" {
+		// Check if there's a temporary file first
+		tempPath, tempExists := GetComponentPath("output", id, true)
+		if tempExists {
+			content, err := ReadComponent(tempPath)
+			if err == nil {
+				outputContent = content
+				isTemp = true
+			}
 		}
-	}
 
-	// If no temp file, check formal file
-	if outputContent == "" {
+		// If no temp file, check formal file
 		formalPath, formalExists := GetComponentPath("output", id, false)
-		if !formalExists {
-			// Check if output exists in memory
-			out, exists := project.GetOutput(id)
-			if !exists {
-				// Check if output exists in new outputs
-				content, ok := project.GetOutputNew(id)
-				if !ok {
-					return c.JSON(http.StatusNotFound, map[string]interface{}{
+		if outputContent == "" {
+			if !formalExists {
+				// Check if output exists in memory
+				out, exists := project.GetOutput(id)
+				if !exists {
+					// Check if output exists in new outputs
+					content, ok := project.GetOutputNew(id)
+					if !ok {
+						return c.JSON(http.StatusNotFound, map[string]interface{}{
+							"success": false,
+							"error":   "Output not found: " + id,
+							"result":  nil,
+						})
+					}
+					outputContent = content
+					isTemp = true
+				} else {
+					outputContent = out.Config.RawConfig
+				}
+			} else {
+				content, err := ReadComponent(formalPath)
+				if err != nil {
+					return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 						"success": false,
-						"error":   "Output not found: " + id,
+						"error":   "Failed to read output: " + err.Error(),
 						"result":  nil,
 					})
 				}
 				outputContent = content
-			} else {
-				outputContent = out.Config.RawConfig
 			}
-		} else {
-			content, err := ReadComponent(formalPath)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]interface{}{
-					"success": false,
-					"error":   "Failed to read output: " + err.Error(),
-					"result":  nil,
-				})
-			}
-			outputContent = content
 		}
+	} else {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"success": false,
+			"error":   "Either output ID or content must be provided",
+			"result":  nil,
+		})
 	}
 
 	// Create a temporary output for testing
-	tempOutput, err := output.NewOutput("", outputContent, "temp_test_"+id)
+	testOutputID := id
+	if strings.TrimSpace(testOutputID) == "" {
+		testOutputID = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	tempOutput, err := output.NewOutput("", outputContent, "temp_test_"+testOutputID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"success": false,
@@ -694,6 +748,7 @@ func testOutput(c echo.Context) error {
 			"result":  nil,
 		})
 	}
+	tempOutput.SetTestMode()
 
 	// Create channels for testing
 	inputCh := make(chan map[string]interface{}, 100)

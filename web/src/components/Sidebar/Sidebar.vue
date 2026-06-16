@@ -1222,7 +1222,7 @@
                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
                 <div class="text-xs text-gray-500 mt-1">
-                  String, number, or boolean value
+                  String, number, boolean, JSON object, or JSON array
                 </div>
               </div>
               <button 
@@ -3129,7 +3129,8 @@ function openTestAgent(item) {
 function openTestOutput(item) {
   const payload = {
     type: 'outputs', 
-    id: item.id || item.name
+    id: item.id || item.name,
+    content: item?.hasTemp ? (item.raw || '') : ''
   };
   emit('test-output', payload);
   // Ensure menus are closed
@@ -3258,6 +3259,18 @@ function removePluginArg(index) {
   }
 }
 
+function parsePluginArgValue(rawValue) {
+  const value = rawValue.trim()
+  if (value === '') return null
+  if (value === 'true') return true
+  if (value === 'false') return false
+  if ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']'))) {
+    return JSON.parse(value)
+  }
+  if (!isNaN(value)) return Number(value)
+  return value
+}
+
 // Test plugin
 async function testPlugin() {
   testPluginLoading.value = true
@@ -3267,14 +3280,7 @@ async function testPlugin() {
   
   try {
     // Process parameter values, try to convert to appropriate types
-    const args = testPluginArgs.value.map(arg => {
-      const value = arg.value.trim()
-      if (value === '') return null
-      if (value === 'true') return true
-      if (value === 'false') return false
-      if (!isNaN(value)) return Number(value)
-      return value
-    })
+    const args = testPluginArgs.value.map(arg => parsePluginArgValue(arg.value))
     
     const result = await hubApi.testPlugin(testPluginName.value, args)
     testPluginResult.value = result
@@ -4319,4 +4325,4 @@ function getRulesetTypeInfo(item) {
     opacity: .5;
   }
 }
-</style> 
+</style>

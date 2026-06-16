@@ -690,6 +690,7 @@
     v-if="props.item && props.item.type === 'outputs'"
     :show="showOutputTestModal"
     :outputId="props.item?.id"
+    :outputContent="props.item?.isEdit ? editorValue : null"
     @close="showOutputTestModal = false"
   />
 
@@ -1935,4 +1936,4 @@ button:focus {
   z-index: 10;
 }
 
-</style> 
+</style>

@@ -56,6 +56,7 @@
     <OutputTestModal 
       :show="showTestOutputModal"
       :outputId="testOutputId"
+      :outputContent="testOutputContent"
       @close="closeTestOutputModal"
     />
     
@@ -97,6 +98,7 @@ const testRulesetContent = ref('')
 const testComponentType = ref('rulesets')
 const showTestOutputModal = ref(false)
 const testOutputId = ref('')
+const testOutputContent = ref('')
 const showTestProjectModal = ref(false)
 const testProjectId = ref('')
 
@@ -403,6 +405,16 @@ function closeTestRulesetModal() {
 // Open the output test modal
 function onTestOutput(payload) {
   testOutputId.value = payload.id;
+  testOutputContent.value = payload.content || '';
+  if (selected.value &&
+      selected.value.type === 'outputs' &&
+      selected.value.id === payload.id &&
+      componentDetailRef.value) {
+    const editorContent = componentDetailRef.value.getEditorContent?.();
+    if (editorContent !== undefined) {
+      testOutputContent.value = editorContent;
+    }
+  }
   showTestOutputModal.value = true;
 
   // 添加ESC键监听

@@ -117,7 +117,8 @@ import { useDataCacheStore } from '../stores/dataCache';
 // Props
 const props = defineProps({
   show: Boolean,
-  outputId: String
+  outputId: String,
+  outputContent: String
 });
 
 // Emits
@@ -288,7 +289,9 @@ async function runTest() {
       // Process array of JSON objects
       for (let i = 0; i < data.length; i++) {
         try {
-          const response = await hubApi.testOutput(props.outputId, data[i]);
+          const response = props.outputContent && props.outputContent.trim() !== ''
+            ? await hubApi.testOutputContent(props.outputContent, data[i])
+            : await hubApi.testOutput(props.outputId, data[i]);
           if (response.success) {
             allResults.push(response);
             totalMessages += response.metrics?.produceTotal || 0;
@@ -315,7 +318,9 @@ async function runTest() {
       };
     } else {
       // Process single JSON object (existing logic)
-      const response = await hubApi.testOutput(props.outputId, data);
+      const response = props.outputContent && props.outputContent.trim() !== ''
+        ? await hubApi.testOutputContent(props.outputContent, data)
+        : await hubApi.testOutput(props.outputId, data);
       
       if (response.success) {
         testResults.value = response;
@@ -360,4 +365,4 @@ function extractErrorLine(errorMessage, sourceContent = '') {
 
 <style scoped>
 /* Any component-specific styles can go here */
-</style> 
+</style>

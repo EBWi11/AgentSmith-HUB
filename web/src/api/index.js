@@ -965,6 +965,23 @@ export const hubApi = {
     }
   },
 
+  async testOutputContent(content, data) {
+    try {
+      if (!content) {
+        throw new Error('Output content is required');
+      }
+
+      if (!data || typeof data !== 'object') {
+        throw new Error('Test data must be an object');
+      }
+
+      const response = await api.post('/test-output-content', { content, data });
+      return response.data;
+    } catch (error) {
+      return buildResultError(error, 'Failed to test output content', { metrics: {} });
+    }
+  },
+
   // Test project component
   async testProject(id, inputNode, data) {
     try {
@@ -1433,4 +1450,4 @@ fetchComponentsByType = async (type) => {
   } catch (error) {
     return handleApiError(error, `Error fetching ${type}:`, true);
   }
-}; 
+};

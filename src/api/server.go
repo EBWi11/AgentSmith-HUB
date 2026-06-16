@@ -124,6 +124,7 @@ func ServerStart(listener string) error {
 	auth.POST("/test-agent/:id", testAgent)
 	auth.POST("/test-agent-content", testAgent)
 	auth.POST("/test-output/:id", testOutput)
+	auth.POST("/test-output-content", testOutput)
 	auth.POST("/test-project/:id", testProject)
 	auth.POST("/test-project-content/:inputNode", testProject)
 
