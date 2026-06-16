@@ -1,8 +1,10 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { copyFileSync, existsSync, mkdirSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'fs'
 import { join } from 'path'
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 // Function to copy docs to public directory
 function copyDocsToPublic() {
@@ -37,7 +39,6 @@ function copyDocsToPublic() {
     }
     
     // Copy all PNG files
-    const { readdirSync } = require('fs')
     const pngFiles = readdirSync(pngSrcDir).filter(file => file.endsWith('.png'))
     pngFiles.forEach(file => {
       const srcPath = join(pngSrcDir, file)
@@ -99,4 +100,4 @@ export default defineConfig({
       }
     }
   }
-}) 
+})

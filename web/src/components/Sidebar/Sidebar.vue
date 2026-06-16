@@ -2374,6 +2374,11 @@ onBeforeUnmount(() => {
     sidebarVisibilityHandler = null
   }
 
+  if (clickTimeout) {
+    clearTimeout(clickTimeout)
+    clickTimeout = null
+  }
+
   stopSettingsBadgePolling()
 })
 
@@ -3565,11 +3570,19 @@ async function pollProjectStatusUntilStable(projectId, expectedTransitionState) 
   let errorFirstSeen = null
 
   const poll = async () => {
+    if (!activeProjectPollers.has(projectId)) {
+      return
+    }
+
     attempts++
 
     try {
       // Force refresh to bypass cache each time
       const response = await dataCache.fetchComponents('projects', true)
+      if (!activeProjectPollers.has(projectId)) {
+        return
+      }
+
       if (Array.isArray(response)) {
         const project = response.find(p => p.id === projectId)
         if (project) {

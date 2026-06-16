@@ -737,6 +737,7 @@ function exportLogs() {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 async function submitFeedbackAndMemory(log) {
@@ -890,4 +891,3 @@ onMounted(async () => {
   transform: rotate(180deg);
 }
 </style>
-

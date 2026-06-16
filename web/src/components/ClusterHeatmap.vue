@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   nodes: {
@@ -112,6 +112,7 @@ const toastMessage = ref('IP copied to clipboard!')
 const toastIsError = ref(false)
 const hoveredNode = ref(null)
 const tooltipPosition = ref({ x: 0, y: 0 })
+let toastHideTimer = null
 
 // Computed properties
 const leaderNode = computed(() => {
@@ -227,17 +228,30 @@ function hideNodeTooltip() {
 }
 
 function showCopyToast(message, isError = false) {
+  if (toastHideTimer) {
+    clearTimeout(toastHideTimer)
+    toastHideTimer = null
+  }
+
   toastMessage.value = message
   toastIsError.value = isError
   showToast.value = true
-  setTimeout(() => {
+  toastHideTimer = setTimeout(() => {
     showToast.value = false
     if (!isError) {
       toastMessage.value = 'IP copied to clipboard!'
     }
     toastIsError.value = false
+    toastHideTimer = null
   }, 2000)
 }
+
+onBeforeUnmount(() => {
+  if (toastHideTimer) {
+    clearTimeout(toastHideTimer)
+    toastHideTimer = null
+  }
+})
 
 function copyTextFallback(text) {
   const textarea = document.createElement('textarea')

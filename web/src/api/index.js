@@ -161,6 +161,13 @@ const projectTestRequestConfig = () => ({
   )
 });
 
+const agentTestRequestConfig = () => ({
+  timeout: Math.max(
+    Number(api.defaults.timeout) || 0,
+    310000
+  )
+});
+
 const normalizeParams = (params = {}) => {
   if (params instanceof URLSearchParams) {
     return Object.fromEntries(params.entries());
@@ -879,11 +886,15 @@ export const hubApi = {
     }
   },
 
-  async testAgent(id, data) {
+  async testAgent(id, data, content = undefined) {
     try {
       if (!id) throw new Error('Agent ID is required');
       if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
-      const response = await api.post(`/test-agent/${id}`, { data });
+      const payload = { data };
+      if (content !== undefined && String(content).trim() !== '') {
+        payload.content = content;
+      }
+      const response = await api.post(`/test-agent/${id}`, payload, agentTestRequestConfig());
       return response.data;
     } catch (error) {
       return buildResultError(error, 'Failed to test agent', { results: [] });
@@ -894,7 +905,7 @@ export const hubApi = {
     try {
       if (!content) throw new Error('Agent content is required');
       if (!data || typeof data !== 'object') throw new Error('Test data must be an object');
-      const response = await api.post('/test-agent-content', { content, data });
+      const response = await api.post('/test-agent-content', { content, data }, agentTestRequestConfig());
       return response.data;
     } catch (error) {
       return buildResultError(error, 'Failed to test agent content', { results: [] });

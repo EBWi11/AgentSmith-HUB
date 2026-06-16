@@ -7,6 +7,9 @@ class EventManager {
   constructor() {
     this.listeners = new Map() // eventType -> Set<callback>
     this.initialized = false
+    this.boundHandleComponentChanged = this.handleComponentChanged.bind(this)
+    this.boundHandlePendingChangesApplied = this.handlePendingChangesApplied.bind(this)
+    this.boundHandleLocalChangesLoaded = this.handleLocalChangesLoaded.bind(this)
   }
 
   /**
@@ -16,9 +19,9 @@ class EventManager {
     if (this.initialized) return
     
     // Listen for component change events
-    window.addEventListener('componentChanged', this.handleComponentChanged.bind(this))
-    window.addEventListener('pendingChangesApplied', this.handlePendingChangesApplied.bind(this))
-    window.addEventListener('localChangesLoaded', this.handleLocalChangesLoaded.bind(this))
+    window.addEventListener('componentChanged', this.boundHandleComponentChanged)
+    window.addEventListener('pendingChangesApplied', this.boundHandlePendingChangesApplied)
+    window.addEventListener('localChangesLoaded', this.boundHandleLocalChangesLoaded)
     
     this.initialized = true
     // console.log('[EventManager] Global event listeners initialized')
@@ -119,9 +122,9 @@ class EventManager {
    */
   destroy() {
     if (this.initialized) {
-      window.removeEventListener('componentChanged', this.handleComponentChanged.bind(this))
-      window.removeEventListener('pendingChangesApplied', this.handlePendingChangesApplied.bind(this))
-      window.removeEventListener('localChangesLoaded', this.handleLocalChangesLoaded.bind(this))
+      window.removeEventListener('componentChanged', this.boundHandleComponentChanged)
+      window.removeEventListener('pendingChangesApplied', this.boundHandlePendingChangesApplied)
+      window.removeEventListener('localChangesLoaded', this.boundHandleLocalChangesLoaded)
       
       this.listeners.clear()
       this.initialized = false
@@ -133,4 +136,4 @@ class EventManager {
 // Create global singleton
 const eventManager = new EventManager()
 
-export default eventManager 
+export default eventManager

@@ -147,6 +147,7 @@ const messageRefreshInterval = ref(null);
 let projectOperationHandler = null;
 let projectWorkflowCacheHandler = null;
 let projectWorkflowVisibilityHandler = null;
+const delayedRefreshTimers = new Set();
 
 // Component sequences data
 const componentSequences = ref({});
@@ -285,12 +286,14 @@ onMounted(() => {
       }
       
       // Additional delayed refresh to ensure backend updates are captured
-      setTimeout(() => {
+      const delayedRefreshTimer = setTimeout(() => {
+        delayedRefreshTimers.delete(delayedRefreshTimer);
         if (props.enableMessages && props.projectId && !document.hidden) {
           console.log(`[ProjectWorkflow] Delayed refresh after ${operation}`);
           fetchMessageData();
         }
       }, 3000); // Increased delay to ensure backend processing completes
+      delayedRefreshTimers.add(delayedRefreshTimer);
     }
   };
   
@@ -338,6 +341,9 @@ onUnmounted(() => {
   
   // Stop message data refresh
   stopMessageRefresh();
+
+  delayedRefreshTimers.forEach(timer => clearTimeout(timer));
+  delayedRefreshTimers.clear();
 });
 
 // View sample data
@@ -831,4 +837,4 @@ function stopMessageRefresh() {
   word-break: break-word;
   overflow-y: auto;
 }
-</style> 
+</style>

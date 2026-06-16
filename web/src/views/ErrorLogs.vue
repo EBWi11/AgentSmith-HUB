@@ -592,6 +592,7 @@ const exportLogs = () => {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 // Lifecycle
@@ -625,4 +626,4 @@ onMounted(async () => {
 .btn-sm {
   @apply px-2 py-1 text-xs;
 }
-</style> 
+</style>

@@ -112,7 +112,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, inject, nextTick } from 'vue'
 import { hubApi } from '../api'
 import MonacoEditor from './MonacoEditor.vue'
 import { getEditorLanguage, getComponentTypeLabel, getApiComponentType, extractLineNumber, needsRestart } from '../utils/common'
@@ -137,6 +137,8 @@ const $message = inject('$message', window?.$toast)
 
 // Data cache store
 const dataCache = useDataCacheStore()
+const acceleratedPollingTimers = new Set()
+let isUnmounted = false
 
 // Computed properties
 const sortedChanges = computed(() => {
@@ -167,10 +169,16 @@ const sortedChanges = computed(() => {
 
 // Lifecycle hooks
 onMounted(() => {
+  isUnmounted = false
   refreshChanges()
   // Force refresh settings badges to ensure accurate count
   const dataCache = useDataCacheStore()
   dataCache.fetchSettingsBadges(true)
+})
+
+onBeforeUnmount(() => {
+  isUnmounted = true
+  stopAcceleratedProjectPolling()
 })
 
 // Methods
@@ -539,8 +547,18 @@ function startAcceleratedProjectPolling(projectIds) {
   const errorGracePeriod = 60000 // Continue polling for 60s (backend can take up to ~50s: 2s stop + 4 retries with delays)
   const startTime = Date.now()
   const projectErrorTime = {} // Track when each project first enters error state
+
+  const schedulePoll = () => {
+    const timer = setTimeout(() => {
+      acceleratedPollingTimers.delete(timer)
+      poll()
+    }, pollInterval)
+    acceleratedPollingTimers.add(timer)
+  }
   
   const poll = async () => {
+    if (isUnmounted) return
+
     try {
       const elapsedTime = Date.now() - startTime
       
@@ -552,6 +570,8 @@ function startAcceleratedProjectPolling(projectIds) {
       
       // Fetch latest project data
       const projects = await dataCache.fetchComponents('projects', true)
+
+      if (isUnmounted) return
       
       // Check if any projects are still in transition or transient error/stopped
       const stillTransitioning = projectIds.some(projectId => {
@@ -589,21 +609,26 @@ function startAcceleratedProjectPolling(projectIds) {
       
       // Continue polling if projects are still transitioning
       if (stillTransitioning) {
-        setTimeout(poll, pollInterval)
+        schedulePoll()
       } else {
         console.log('All projects finished transitioning, elapsed:', elapsedTime / 1000, 'seconds')
       }
     } catch (error) {
       console.error('Error during accelerated project polling:', error)
       // Continue polling on fetch error, but only if we haven't exceeded max time
-      if (Date.now() - startTime < maxPollTime) {
-        setTimeout(poll, pollInterval)
+      if (!isUnmounted && Date.now() - startTime < maxPollTime) {
+        schedulePoll()
       }
     }
   }
   
   // Start polling immediately
   poll()
+}
+
+function stopAcceleratedProjectPolling() {
+  acceleratedPollingTimers.forEach(timer => clearTimeout(timer))
+  acceleratedPollingTimers.clear()
 }
 
 // Cancel all pending changes

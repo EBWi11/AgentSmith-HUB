@@ -241,7 +241,9 @@ async function runTest() {
     let response;
     if (isAgent.value) {
       if (props.rulesetContent !== undefined && props.rulesetContent.trim() !== '') {
-        response = await hubApi.testAgentContent(props.rulesetContent, data);
+        response = props.rulesetId
+          ? await hubApi.testAgent(props.rulesetId, data, props.rulesetContent)
+          : await hubApi.testAgentContent(props.rulesetContent, data);
       } else {
         response = await hubApi.testAgent(props.rulesetId, data);
       }
@@ -349,4 +351,4 @@ async function resetState() {
 
 <style scoped>
 /* Any component-specific styles can go here */
-</style> 
+</style>

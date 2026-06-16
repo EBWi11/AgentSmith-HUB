@@ -151,6 +151,12 @@ const showOutline = ref(false)
 const documentContainer = ref(null)
 const isFullscreen = ref(false)
 const currentLanguage = ref('en') // Default to English
+let scrollObserver = null
+let observeAnchorsTimer = null
+
+function handleFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement
+}
 
 // 计算outline sidebar宽度（响应式）
 const outlineSidebarWidth = computed(() => {
@@ -317,9 +323,11 @@ function generateTableOfContents(markdown) {
 // 设置滚动监听
 function setupScrollListener() {
   if (!documentContainer.value) return
+
+  cleanupScrollListener()
   
   const container = documentContainer.value
-  const observer = new IntersectionObserver(
+  scrollObserver = new IntersectionObserver(
     (entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
@@ -337,10 +345,23 @@ function setupScrollListener() {
   )
   
   // 观察所有标题锚点
-  setTimeout(() => {
+  observeAnchorsTimer = setTimeout(() => {
     const anchors = container.querySelectorAll('a[name]')
-    anchors.forEach(anchor => observer.observe(anchor))
+    anchors.forEach(anchor => scrollObserver?.observe(anchor))
+    observeAnchorsTimer = null
   }, 200)
+}
+
+function cleanupScrollListener() {
+  if (observeAnchorsTimer) {
+    clearTimeout(observeAnchorsTimer)
+    observeAnchorsTimer = null
+  }
+
+  if (scrollObserver) {
+    scrollObserver.disconnect()
+    scrollObserver = null
+  }
 }
 
 // 滚动到指定元素
@@ -399,14 +420,13 @@ onMounted(() => {
   loadTutorialContent()
   
   // 监听全屏变化
-  document.addEventListener('fullscreenchange', () => {
-    isFullscreen.value = !!document.fullscreenElement
-  })
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
 })
 
 // 组件卸载时清理
 onBeforeUnmount(() => {
-  // 清理工作已在组件挂载时处理
+  cleanupScrollListener()
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
 })
 </script>
 
@@ -945,4 +965,4 @@ onBeforeUnmount(() => {
     padding: 20px 16px 24px 20px;
   }
 }
-</style> 
+</style>
