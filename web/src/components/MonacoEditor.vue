@@ -579,6 +579,388 @@ function getModelComponentType(model) {
   return normalized || 'unknown';
 }
 
+function isPluginGoModel(model) {
+  const componentType = getModelComponentType(model);
+  return componentType === 'plugin' || componentType === 'plugins';
+}
+
+const goPluginImportSuggestions = [
+  {
+    label: 'hubredis "AgentSmith-HUB/pluginapi/redis"',
+    insertText: 'hubredis "AgentSmith-HUB/pluginapi/redis"',
+    documentation: 'Hub Redis API for Yaegi plugins'
+  },
+  { label: '"bytes"', insertText: '"bytes"', documentation: 'Go standard library bytes package' },
+  { label: '"crypto/sha256"', insertText: '"crypto/sha256"', documentation: 'Go standard library SHA-256 package' },
+  { label: '"encoding/base64"', insertText: '"encoding/base64"', documentation: 'Go standard library Base64 package' },
+  { label: '"encoding/hex"', insertText: '"encoding/hex"', documentation: 'Go standard library hex package' },
+  { label: '"encoding/json"', insertText: '"encoding/json"', documentation: 'Go standard library JSON package' },
+  { label: '"errors"', insertText: '"errors"', documentation: 'Go standard library errors package' },
+  { label: '"fmt"', insertText: '"fmt"', documentation: 'Go standard library fmt package' },
+  { label: '"math"', insertText: '"math"', documentation: 'Go standard library math package' },
+  { label: '"net/url"', insertText: '"net/url"', documentation: 'Go standard library URL package' },
+  { label: '"regexp"', insertText: '"regexp"', documentation: 'Go standard library regexp package' },
+  { label: '"sort"', insertText: '"sort"', documentation: 'Go standard library sort package' },
+  { label: '"strings"', insertText: '"strings"', documentation: 'Go standard library strings package' },
+  { label: '"strconv"', insertText: '"strconv"', documentation: 'Go standard library strconv package' },
+  { label: '"time"', insertText: '"time"', documentation: 'Go standard library time package' }
+];
+
+const goPluginRedisMembers = [
+  { name: 'Get', insertText: 'Get(${1:key})', documentation: 'Get(key string) (string, error)' },
+  { name: 'Set', insertText: 'Set(${1:key}, ${2:value}, ${3:0})', documentation: 'Set(key string, value interface{}, expiration int) (string, error)' },
+  { name: 'SetNX', insertText: 'SetNX(${1:key}, ${2:value}, ${3:300})', documentation: 'SetNX(key string, value interface{}, expiration int) (bool, error)' },
+  { name: 'Incr', insertText: 'Incr(${1:key})', documentation: 'Incr(key string) (int64, error)' },
+  { name: 'IncrBy', insertText: 'IncrBy(${1:key}, ${2:1})', documentation: 'IncrBy(key string, value int64) (int64, error)' },
+  { name: 'Del', insertText: 'Del(${1:key})', documentation: 'Del(key string) error' },
+  { name: 'Expire', insertText: 'Expire(${1:key}, ${2:300})', documentation: 'Expire(key string, expiration int) error' },
+  { name: 'HSet', insertText: 'HSet(${1:key}, ${2:field}, ${3:value})', documentation: 'HSet(key, field string, value interface{}) error' },
+  { name: 'HGet', insertText: 'HGet(${1:key}, ${2:field})', documentation: 'HGet(key, field string) (string, error)' },
+  { name: 'HGetAll', insertText: 'HGetAll(${1:key})', documentation: 'HGetAll(key string) (map[string]string, error)' },
+  { name: 'HDel', insertText: 'HDel(${1:key}, ${2:field})', documentation: 'HDel(key, field string) error' },
+  { name: 'LPush', insertText: 'LPush(${1:key}, ${2:value}, ${3:100})', documentation: 'LPush(key string, value interface{}, maxLen int64) error' },
+  { name: 'LRange', insertText: 'LRange(${1:key}, ${2:0}, ${3:-1})', documentation: 'LRange(key string, start, stop int64) ([]string, error)' },
+  { name: 'SAdd', insertText: 'SAdd(${1:key}, ${2:member})', documentation: 'SAdd(key string, member interface{}) (int64, error)' },
+  { name: 'SRem', insertText: 'SRem(${1:key}, ${2:member})', documentation: 'SRem(key string, member interface{}) (int64, error)' },
+  { name: 'SMembers', insertText: 'SMembers(${1:key})', documentation: 'SMembers(key string) ([]string, error)' },
+  { name: 'ZAdd', insertText: 'ZAdd(${1:key}, ${2:1.0}, ${3:member})', documentation: 'ZAdd(key string, score float64, member interface{}) (int64, error)' },
+  { name: 'ZRevRange', insertText: 'ZRevRange(${1:key}, ${2:0}, ${3:-1})', documentation: 'ZRevRange(key string, start, stop int64) ([]string, error)' },
+  { name: 'ZRemRangeByRank', insertText: 'ZRemRangeByRank(${1:key}, ${2:0}, ${3:-1})', documentation: 'ZRemRangeByRank(key string, start, stop int64) (int64, error)' },
+  { name: 'ZRemRangeByScore', insertText: 'ZRemRangeByScore(${1:key}, ${2:"-inf"}, ${3:"+inf"})', documentation: 'ZRemRangeByScore(key string, min, max string) (int64, error)' }
+];
+
+const goStdPackageMembers = {
+  base64: [
+    { name: 'StdEncoding.EncodeToString', insertText: 'StdEncoding.EncodeToString([]byte(${1:value}))', documentation: 'base64.StdEncoding.EncodeToString(src []byte) string' },
+    { name: 'StdEncoding.DecodeString', insertText: 'StdEncoding.DecodeString(${1:value})', documentation: 'base64.StdEncoding.DecodeString(s string) ([]byte, error)' }
+  ],
+  bytes: [
+    { name: 'Contains', insertText: 'Contains(${1:b}, ${2:subslice})', documentation: 'bytes.Contains(b, subslice []byte) bool' },
+    { name: 'Equal', insertText: 'Equal(${1:a}, ${2:b})', documentation: 'bytes.Equal(a, b []byte) bool' },
+    { name: 'NewBufferString', insertText: 'NewBufferString(${1:value})', documentation: 'bytes.NewBufferString(s string) *bytes.Buffer' }
+  ],
+  errors: [
+    { name: 'New', insertText: 'New(${1:message})', documentation: 'errors.New(text string) error' },
+    { name: 'Is', insertText: 'Is(${1:err}, ${2:target})', documentation: 'errors.Is(err, target error) bool' }
+  ],
+  fmt: [
+    { name: 'Sprintf', insertText: 'Sprintf(${1:format}, ${2:args})', documentation: 'fmt.Sprintf(format string, a ...any) string' },
+    { name: 'Errorf', insertText: 'Errorf(${1:format}, ${2:args})', documentation: 'fmt.Errorf(format string, a ...any) error' },
+    { name: 'Sprint', insertText: 'Sprint(${1:args})', documentation: 'fmt.Sprint(a ...any) string' },
+    { name: 'Println', insertText: 'Println(${1:args})', documentation: 'fmt.Println(a ...any) (n int, err error)' }
+  ],
+  hex: [
+    { name: 'EncodeToString', insertText: 'EncodeToString(${1:src})', documentation: 'hex.EncodeToString(src []byte) string' },
+    { name: 'DecodeString', insertText: 'DecodeString(${1:value})', documentation: 'hex.DecodeString(s string) ([]byte, error)' }
+  ],
+  json: [
+    { name: 'Marshal', insertText: 'Marshal(${1:value})', documentation: 'json.Marshal(v any) ([]byte, error)' },
+    { name: 'Unmarshal', insertText: 'Unmarshal(${1:data}, &${2:value})', documentation: 'json.Unmarshal(data []byte, v any) error' },
+    { name: 'NewDecoder', insertText: 'NewDecoder(${1:reader})', documentation: 'json.NewDecoder(r io.Reader) *json.Decoder' }
+  ],
+  math: [
+    { name: 'Max', insertText: 'Max(${1:x}, ${2:y})', documentation: 'math.Max(x, y float64) float64' },
+    { name: 'Min', insertText: 'Min(${1:x}, ${2:y})', documentation: 'math.Min(x, y float64) float64' },
+    { name: 'Round', insertText: 'Round(${1:x})', documentation: 'math.Round(x float64) float64' }
+  ],
+  regexp: [
+    { name: 'MustCompile', insertText: 'MustCompile(${1:pattern})', documentation: 'regexp.MustCompile(str string) *regexp.Regexp' },
+    { name: 'MatchString', insertText: 'MatchString(${1:pattern}, ${2:value})', documentation: 'regexp.MatchString(pattern, s string) (matched bool, err error)' }
+  ],
+  sha256: [
+    { name: 'Sum256', insertText: 'Sum256([]byte(${1:value}))', documentation: 'sha256.Sum256(data []byte) [32]byte' }
+  ],
+  sort: [
+    { name: 'Strings', insertText: 'Strings(${1:values})', documentation: 'sort.Strings(x []string)' },
+    { name: 'Ints', insertText: 'Ints(${1:values})', documentation: 'sort.Ints(x []int)' },
+    { name: 'Slice', insertText: 'Slice(${1:slice}, func(i, j int) bool {\n\t${2:return false}\n})', documentation: 'sort.Slice(x any, less func(i, j int) bool)' }
+  ],
+  strconv: [
+    { name: 'Atoi', insertText: 'Atoi(${1:value})', documentation: 'strconv.Atoi(s string) (int, error)' },
+    { name: 'Itoa', insertText: 'Itoa(${1:value})', documentation: 'strconv.Itoa(i int) string' },
+    { name: 'ParseInt', insertText: 'ParseInt(${1:value}, ${2:10}, ${3:64})', documentation: 'strconv.ParseInt(s string, base int, bitSize int) (int64, error)' },
+    { name: 'FormatInt', insertText: 'FormatInt(${1:value}, ${2:10})', documentation: 'strconv.FormatInt(i int64, base int) string' },
+    { name: 'ParseBool', insertText: 'ParseBool(${1:value})', documentation: 'strconv.ParseBool(str string) (bool, error)' },
+    { name: 'ParseFloat', insertText: 'ParseFloat(${1:value}, ${2:64})', documentation: 'strconv.ParseFloat(s string, bitSize int) (float64, error)' }
+  ],
+  strings: [
+    { name: 'Contains', insertText: 'Contains(${1:s}, ${2:substr})', documentation: 'strings.Contains(s, substr string) bool' },
+    { name: 'HasPrefix', insertText: 'HasPrefix(${1:s}, ${2:prefix})', documentation: 'strings.HasPrefix(s, prefix string) bool' },
+    { name: 'HasSuffix', insertText: 'HasSuffix(${1:s}, ${2:suffix})', documentation: 'strings.HasSuffix(s, suffix string) bool' },
+    { name: 'ToLower', insertText: 'ToLower(${1:s})', documentation: 'strings.ToLower(s string) string' },
+    { name: 'ToUpper', insertText: 'ToUpper(${1:s})', documentation: 'strings.ToUpper(s string) string' },
+    { name: 'TrimSpace', insertText: 'TrimSpace(${1:s})', documentation: 'strings.TrimSpace(s string) string' },
+    { name: 'Split', insertText: 'Split(${1:s}, ${2:sep})', documentation: 'strings.Split(s, sep string) []string' },
+    { name: 'Join', insertText: 'Join(${1:elems}, ${2:sep})', documentation: 'strings.Join(elems []string, sep string) string' },
+    { name: 'ReplaceAll', insertText: 'ReplaceAll(${1:s}, ${2:old}, ${3:new})', documentation: 'strings.ReplaceAll(s, old, new string) string' }
+  ],
+  time: [
+    { name: 'Now', insertText: 'Now()', documentation: 'time.Now() Time' },
+    { name: 'Since', insertText: 'Since(${1:t})', documentation: 'time.Since(t Time) Duration' },
+    { name: 'Unix', insertText: 'Unix(${1:sec}, ${2:nsec})', documentation: 'time.Unix(sec, nsec int64) Time' },
+    { name: 'Parse', insertText: 'Parse(${1:layout}, ${2:value})', documentation: 'time.Parse(layout, value string) (Time, error)' }
+  ],
+  url: [
+    { name: 'Parse', insertText: 'Parse(${1:rawURL})', documentation: 'url.Parse(rawURL string) (*url.URL, error)' },
+    { name: 'QueryEscape', insertText: 'QueryEscape(${1:value})', documentation: 'url.QueryEscape(s string) string' },
+    { name: 'QueryUnescape', insertText: 'QueryUnescape(${1:value})', documentation: 'url.QueryUnescape(s string) (string, error)' }
+  ]
+};
+
+const goStatementSnippets = [
+  { label: 'if', insertText: 'if ${1:condition} {\n\t${2}\n}', documentation: 'Go if statement' },
+  { label: 'if err != nil', insertText: 'if err != nil {\n\t${1:return false, err}\n}', documentation: 'Common Go error check' },
+  { label: 'for range', insertText: 'for ${1:_, item} := range ${2:items} {\n\t${3}\n}', documentation: 'Go range loop' },
+  { label: 'switch', insertText: 'switch ${1:value} {\ncase ${2:condition}:\n\t${3}\ndefault:\n\t${4}\n}', documentation: 'Go switch statement' },
+  { label: 'var', insertText: 'var ${1:name} ${2:type}', documentation: 'Go variable declaration' },
+  { label: 'const', insertText: 'const ${1:name} = ${2:value}', documentation: 'Go constant declaration' },
+  { label: 'map[string]interface{}', insertText: 'map[string]interface{}', documentation: 'Common Go map type' },
+  { label: '[]string', insertText: '[]string{${1}}', documentation: 'String slice literal' }
+];
+
+const goKeywordSuggestions = [
+  'break', 'case', 'chan', 'const', 'continue', 'default', 'defer', 'else',
+  'fallthrough', 'for', 'func', 'go', 'goto', 'if', 'import', 'interface',
+  'map', 'package', 'range', 'return', 'select', 'struct', 'switch', 'type', 'var'
+];
+
+const goBuiltinSuggestions = [
+  { label: 'append', insertText: 'append(${1:slice}, ${2:value})', documentation: 'append(slice, elems...)' },
+  { label: 'cap', insertText: 'cap(${1:value})', documentation: 'cap(v)' },
+  { label: 'copy', insertText: 'copy(${1:dst}, ${2:src})', documentation: 'copy(dst, src)' },
+  { label: 'delete', insertText: 'delete(${1:m}, ${2:key})', documentation: 'delete(m, key)' },
+  { label: 'len', insertText: 'len(${1:value})', documentation: 'len(v)' },
+  { label: 'make', insertText: 'make(${1:type}, ${2:size})', documentation: 'make(t, size)' },
+  { label: 'new', insertText: 'new(${1:type})', documentation: 'new(T)' },
+  { label: 'panic', insertText: 'panic(${1:value})', documentation: 'panic(v)' },
+  { label: 'recover', insertText: 'recover()', documentation: 'recover()' },
+  { label: 'bool', insertText: 'bool', documentation: 'Go bool type' },
+  { label: 'byte', insertText: 'byte', documentation: 'alias for uint8' },
+  { label: 'error', insertText: 'error', documentation: 'Go error interface' },
+  { label: 'float64', insertText: 'float64', documentation: 'Go float64 type' },
+  { label: 'int', insertText: 'int', documentation: 'Go int type' },
+  { label: 'int64', insertText: 'int64', documentation: 'Go int64 type' },
+  { label: 'string', insertText: 'string', documentation: 'Go string type' },
+  { label: 'true', insertText: 'true', documentation: 'Go boolean literal' },
+  { label: 'false', insertText: 'false', documentation: 'Go boolean literal' },
+  { label: 'nil', insertText: 'nil', documentation: 'Go nil literal' }
+];
+
+function getGoImportStringRange(lineUntilPosition, position) {
+  const quoteIndex = Math.max(lineUntilPosition.lastIndexOf('"'), lineUntilPosition.lastIndexOf('`'));
+  if (quoteIndex === -1) {
+    return null;
+  }
+  const beforeQuote = lineUntilPosition.slice(0, quoteIndex);
+  const aliasMatch = beforeQuote.match(/(?:^|\s)([A-Za-z_][\w]*)\s*$/);
+  const aliasName = aliasMatch ? aliasMatch[1] : '';
+  const startIndex = aliasName && aliasName !== 'import'
+    ? beforeQuote.lastIndexOf(aliasName)
+    : quoteIndex;
+  return {
+    startLineNumber: position.lineNumber,
+    endLineNumber: position.lineNumber,
+    startColumn: startIndex + 1,
+    endColumn: position.column
+  };
+}
+
+function isInGoImportString(textUntilPosition, lineUntilPosition) {
+  if (/^\s*import\s+(?:[A-Za-z_][\w]*\s+)?["`][^"`]*$/.test(lineUntilPosition)) {
+    return true;
+  }
+
+  const lastImportBlock = textUntilPosition.lastIndexOf('import (');
+  const lastCloseParen = textUntilPosition.lastIndexOf(')');
+  return lastImportBlock > lastCloseParen && /["`][^"`]*$/.test(lineUntilPosition);
+}
+
+function getCompletionKind(kindName, fallback = 'Text') {
+  return monaco.languages.CompletionItemKind[kindName] || monaco.languages.CompletionItemKind[fallback];
+}
+
+function getGoMemberCompletions(packageName, members, memberPrefix, position, snippetRule, sortGroup) {
+  const memberRange = {
+    startLineNumber: position.lineNumber,
+    endLineNumber: position.lineNumber,
+    startColumn: position.column - memberPrefix.length,
+    endColumn: position.column
+  };
+
+  return {
+    suggestions: members.map((item, index) => ({
+      label: `${packageName}.${item.name}`,
+      filterText: item.filterText || item.name,
+      kind: getCompletionKind(item.kind || 'Function', 'Function'),
+      documentation: item.documentation,
+      insertText: item.insertText,
+      insertTextRules: snippetRule,
+      range: memberRange,
+      sortText: `${sortGroup}_${String(index).padStart(2, '0')}`
+    })),
+    incomplete: false
+  };
+}
+
+function getGoGenericSuggestionContext(lineUntilPosition, range) {
+  const beforeWord = lineUntilPosition.slice(0, range.startColumn - 1);
+  const wordPrefix = lineUntilPosition.slice(range.startColumn - 1);
+
+  if (wordPrefix && !/^[A-Za-z_][\w]*$/.test(wordPrefix)) {
+    return { allowed: false, hasPrefix: false, lineStart: false };
+  }
+
+  const lineStart = beforeWord.trim() === '';
+  if (lineStart) {
+    return { allowed: true, hasPrefix: Boolean(wordPrefix), lineStart };
+  }
+
+  if (!wordPrefix) {
+    return { allowed: false, hasPrefix: false, lineStart: false };
+  }
+
+  return {
+    allowed: /(?:^|[\s({[,:=+\-*/%!&|^<>])$/.test(beforeWord),
+    hasPrefix: true,
+    lineStart: false
+  };
+}
+
+function getGoGenericSuggestions(range, snippetRule, context) {
+  const suggestions = [];
+
+  if (context.lineStart) {
+    suggestions.push(...goStatementSnippets.map((item, index) => ({
+      label: item.label,
+      kind: getCompletionKind('Snippet', 'Text'),
+      documentation: item.documentation,
+      insertText: item.insertText,
+      insertTextRules: snippetRule,
+      range,
+      sortText: `1_snippet_${String(index).padStart(2, '0')}`
+    })));
+  }
+
+  if (context.hasPrefix) {
+    suggestions.push(
+      ...goKeywordSuggestions.map((keyword, index) => ({
+        label: keyword,
+        kind: getCompletionKind('Keyword', 'Text'),
+        insertText: keyword,
+        range,
+        sortText: `2_keyword_${String(index).padStart(2, '0')}`
+      })),
+      ...goBuiltinSuggestions.map((item, index) => ({
+        label: item.label,
+        kind: getCompletionKind('Function', 'Text'),
+        documentation: item.documentation,
+        insertText: item.insertText,
+        insertTextRules: /[$]/.test(item.insertText) ? snippetRule : undefined,
+        range,
+        sortText: `3_builtin_${String(index).padStart(2, '0')}`
+      }))
+    );
+  }
+
+  return suggestions;
+}
+
+function getGoPluginCompletions(model, textUntilPosition, lineUntilPosition, range, position) {
+  if (!isPluginGoModel(model)) {
+    return { suggestions: [], incomplete: false };
+  }
+
+  const suggestions = [];
+  const snippetRule = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+
+  if (isInGoImportString(textUntilPosition, lineUntilPosition)) {
+    const importRange = getGoImportStringRange(lineUntilPosition, position) || range;
+    return {
+      suggestions: goPluginImportSuggestions.map((item, index) => ({
+        label: item.label,
+        kind: monaco.languages.CompletionItemKind.Module,
+        documentation: item.documentation,
+        insertText: item.insertText,
+        range: importRange,
+        sortText: `0_import_${String(index).padStart(2, '0')}`
+      })),
+      incomplete: false
+    };
+  }
+
+  const packageMemberMatch = lineUntilPosition.match(/\b([A-Za-z_][\w]*)\.([A-Za-z0-9_]*)$/);
+  if (packageMemberMatch) {
+    const packageName = packageMemberMatch[1];
+    const memberPrefix = packageMemberMatch[2] || '';
+    if (packageName === 'hubredis') {
+      return getGoMemberCompletions(packageName, goPluginRedisMembers, memberPrefix, position, snippetRule, '0_redis');
+    }
+
+    const stdMembers = goStdPackageMembers[packageName];
+    if (stdMembers) {
+      return getGoMemberCompletions(packageName, stdMembers, memberPrefix, position, snippetRule, '0_std');
+    }
+  }
+
+  const genericContext = getGoGenericSuggestionContext(lineUntilPosition, range);
+  if (!genericContext.allowed) {
+    return { suggestions: [], incomplete: false };
+  }
+
+  suggestions.push(...getGoGenericSuggestions(range, snippetRule, genericContext));
+  if (genericContext.lineStart) {
+    suggestions.push(
+      {
+        label: 'package plugin',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Yaegi plugin package declaration',
+        insertText: 'package plugin\n',
+        insertTextRules: snippetRule,
+        range,
+        sortText: '0_package'
+      },
+      {
+        label: 'import hubredis',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Import Hub Redis API for Yaegi plugins',
+        insertText: 'import hubredis "AgentSmith-HUB/pluginapi/redis"',
+        insertTextRules: snippetRule,
+        range,
+        sortText: '1_import_hubredis'
+      },
+      {
+        label: 'Eval bool',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Plugin Eval signature for check nodes',
+        insertText: 'func Eval(${1:args ...interface{\\}}) (bool, error) {\n\t${2:return false, nil}\n}',
+        insertTextRules: snippetRule,
+        range,
+        sortText: '2_eval_bool'
+      },
+      {
+        label: 'Eval interface',
+        kind: monaco.languages.CompletionItemKind.Snippet,
+        documentation: 'Plugin Eval signature for append/modify/plugin nodes',
+        insertText: 'func Eval(${1:args ...interface{\\}}) (interface{}, bool, error) {\n\t${2:return nil, false, nil}\n}',
+        insertTextRules: snippetRule,
+        range,
+        sortText: '3_eval_interface'
+      },
+      {
+        label: 'hubredis.SetNX',
+        kind: monaco.languages.CompletionItemKind.Function,
+        documentation: 'Scoped Redis SetNX call',
+        insertText: 'hubredis.SetNX(${1:key}, ${2:1}, ${3:300})',
+        insertTextRules: snippetRule,
+        range,
+        sortText: '4_hubredis_setnx'
+      }
+    );
+  }
+
+  return { suggestions, incomplete: false };
+}
+
 // Global registration flag to prevent conflicts
 window.monacoProvidersRegistered = window.monacoProvidersRegistered || false;
 
@@ -860,15 +1242,14 @@ function registerLanguageProviders() {
           endColumn: word.endColumn
         };
         
-        // Disable Go autocomplete for plugins - keep it simple
-        return { suggestions: [], incomplete: false };
+        return getGoPluginCompletions(model, textUntilPosition, lineUntilPosition, range, position);
       } catch (error) {
         console.error('Go completion error:', error);
         return { suggestions: [], incomplete: false };
       }
     },
     
-    triggerCharacters: ['.', '(', ' ', '\n', '\t']
+    triggerCharacters: ['.', '"', '(', ' ', '\n', '\t']
   });
   
   // Mark providers as registered globally
