@@ -1,9 +1,13 @@
 package project
 
 import (
+	"AgentSmith-HUB/agent"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
+	"AgentSmith-HUB/output"
+	"AgentSmith-HUB/rules_engine"
 	"testing"
+	"time"
 )
 
 func TestProjectInputStopUsesBoundRuntimeInstance(t *testing.T) {
@@ -87,5 +91,32 @@ func TestProjectInputStopUsesBoundRuntimeInstance(t *testing.T) {
 	}
 	if newInput.DownstreamCount() != 1 {
 		t.Fatalf("expected new global input to remain running, got %d downstream entries", newInput.DownstreamCount())
+	}
+}
+
+func TestProjectStopForTestingDoesNotDrainLikeProduction(t *testing.T) {
+	msgChan := make(chan map[string]interface{}, 1)
+	msgChan <- map[string]interface{}{"message": "pending"}
+
+	proj := &Project{
+		Id:          "test-stop-project",
+		Status:      common.StatusRunning,
+		Testing:     true,
+		Inputs:      make(map[string]*input.Input),
+		Outputs:     make(map[string]*output.Output),
+		Rulesets:    make(map[string]*rules_engine.Ruleset),
+		Agents:      make(map[string]*agent.Agent),
+		MsgChannels: map[string]*chan map[string]interface{}{"pending": &msgChan},
+	}
+
+	start := time.Now()
+	if err := proj.StopForTesting(200 * time.Millisecond); err != nil {
+		t.Fatalf("expected test project stop to succeed, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("expected test project stop to be bounded, took %s", elapsed)
+	}
+	if proj.Status != common.StatusStopped {
+		t.Fatalf("expected project status stopped, got %s", proj.Status)
 	}
 }

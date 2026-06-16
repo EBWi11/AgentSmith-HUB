@@ -258,6 +258,10 @@ func (a *Agent) processAndForward(msg map[string]interface{}) {
 
 // Stop gracefully stops the agent. Safe to call even if Start was never called.
 func (a *Agent) Stop() error {
+	return a.StopWithTimeout(0)
+}
+
+func (a *Agent) StopWithTimeout(timeout time.Duration) error {
 	if a.Status == common.StatusStopped && a.stopChan == nil {
 		return nil
 	}
@@ -270,10 +274,61 @@ func (a *Agent) Stop() error {
 		close(a.stopChan)
 		a.stopChan = nil
 	}
-	a.wg.Wait()
+
+	a.cancelActiveProcesses()
+	waitDone := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(waitDone)
+	}()
+
+	if timeout <= 0 {
+		<-waitDone
+	} else {
+		select {
+		case <-waitDone:
+		case <-time.After(timeout):
+			err := fmt.Errorf("timeout waiting for agent goroutines to finish")
+			a.SetStatus(common.StatusError, err)
+			return err
+		}
+	}
+
 	a.SetStatus(common.StatusStopped, nil)
 	logger.Info("Agent stopped", "id", a.Id)
 	return nil
+}
+
+func (a *Agent) trackActiveProcess(cancel context.CancelFunc) func() {
+	id := atomic.AddUint64(&a.activeSeq, 1)
+	atomic.AddInt64(&a.runningTasks, 1)
+
+	a.activeMu.Lock()
+	if a.activeCancels == nil {
+		a.activeCancels = make(map[uint64]func())
+	}
+	a.activeCancels[id] = cancel
+	a.activeMu.Unlock()
+
+	return func() {
+		a.activeMu.Lock()
+		delete(a.activeCancels, id)
+		a.activeMu.Unlock()
+		atomic.AddInt64(&a.runningTasks, -1)
+	}
+}
+
+func (a *Agent) cancelActiveProcesses() {
+	a.activeMu.Lock()
+	cancels := make([]func(), 0, len(a.activeCancels))
+	for _, cancel := range a.activeCancels {
+		cancels = append(cancels, cancel)
+	}
+	a.activeMu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
+	}
 }
 
 func (a *Agent) processMessage(msg map[string]interface{}) map[string]interface{} {
@@ -291,6 +346,8 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	untrack := a.trackActiveProcess(cancel)
+	defer untrack()
 
 	conversation := []Message{
 		{Role: "system", Content: a.buildEffectiveSystemPrompt()},

@@ -7,7 +7,8 @@
 const defaultConfig = {
   // API Configuration
   apiBaseUrl: '/api',
-  apiTimeout: 30000 // 30 seconds
+  apiTimeout: 30000, // 30 seconds
+  projectTestTimeout: 120000 // 120 seconds
 };
 
 // Environment-based configuration (build-time)
@@ -17,7 +18,8 @@ const envConfig = {
               (import.meta.env.DEV 
                 ? 'http://10.20.103.140/api'
                 : '/api'),
-  apiTimeout: import.meta.env.VITE_API_TIMEOUT ? parseInt(import.meta.env.VITE_API_TIMEOUT) : 30000
+  apiTimeout: import.meta.env.VITE_API_TIMEOUT ? parseInt(import.meta.env.VITE_API_TIMEOUT) : 30000,
+  projectTestTimeout: import.meta.env.VITE_PROJECT_TEST_TIMEOUT ? parseInt(import.meta.env.VITE_PROJECT_TEST_TIMEOUT) : 120000
 };
 
 // Runtime configuration (loaded from external file)

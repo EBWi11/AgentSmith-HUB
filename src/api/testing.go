@@ -22,6 +22,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	projectTestProcessingTimeout = 90 * time.Second
+	projectTestCleanupTimeout    = 5 * time.Second
+	projectTestPollInterval      = 100 * time.Millisecond
+	projectTestQuietPeriod       = 300 * time.Millisecond
+)
+
 // Helper function to return appropriate error format for ruleset APIs
 func rulesetErrorResponse(isContentMode bool, success bool, errorMsg string) map[string]interface{} {
 	if isContentMode {
@@ -784,6 +791,134 @@ func projectErrorResponse(isContentMode bool, httpStatus int, success bool, erro
 	}
 }
 
+func setupProjectTestOutputChannels(tempProject *project.Project, testProjectId string) map[string]chan map[string]interface{} {
+	outputChannels := make(map[string]chan map[string]interface{})
+	for pns, outputComp := range tempProject.Outputs {
+		testChan := make(chan map[string]interface{}, 100)
+		outputChannels[outputComp.Id] = testChan
+		outputComp.SetTestCollectionChan(&testChan)
+		logger.Info("Set test collection channel for output", "output", outputComp.Id, "pns", pns, "project", testProjectId)
+	}
+	return outputChannels
+}
+
+func clearProjectTestOutputChannels(tempProject *project.Project) {
+	for _, outputComp := range tempProject.Outputs {
+		outputComp.SetTestCollectionChan(nil)
+	}
+}
+
+func initProjectTestOutputResults(outputChannels map[string]chan map[string]interface{}) map[string][]map[string]interface{} {
+	outputResults := make(map[string][]map[string]interface{}, len(outputChannels))
+	for outputId := range outputChannels {
+		outputResults[outputId] = []map[string]interface{}{}
+	}
+	return outputResults
+}
+
+func drainProjectTestOutputChannels(outputChannels map[string]chan map[string]interface{}, outputResults map[string][]map[string]interface{}) int {
+	drained := 0
+	for outputId, outputChan := range outputChannels {
+		for {
+			select {
+			case msg, ok := <-outputChan:
+				if !ok {
+					return drained
+				}
+				outputResults[outputId] = append(outputResults[outputId], msg)
+				drained++
+				logger.Info("Collected message from output", "outputId", outputId, "message_count", len(outputResults[outputId]))
+			default:
+				goto nextOutput
+			}
+		}
+	nextOutput:
+	}
+	return drained
+}
+
+func projectTestHasPendingWork(tempProject *project.Project) bool {
+	for pns, ch := range tempProject.MsgChannels {
+		if ch == nil {
+			continue
+		}
+		if pending := len(*ch); pending > 0 {
+			logger.Debug("Project test still has queued messages", "project", tempProject.Id, "pns", pns, "pending_messages", pending)
+			return true
+		}
+	}
+
+	for _, rs := range tempProject.Rulesets {
+		if running := rs.GetRunningTaskCount(); running > 0 {
+			logger.Debug("Project test still has running ruleset tasks", "project", tempProject.Id, "ruleset", rs.RulesetID, "running_tasks", running)
+			return true
+		}
+	}
+
+	for _, a := range tempProject.Agents {
+		if running := a.GetRunningTaskCount(); running > 0 {
+			logger.Debug("Project test still has running agent tasks", "project", tempProject.Id, "agent", a.Id, "running_tasks", running)
+			return true
+		}
+	}
+
+	return false
+}
+
+func collectProjectTestOutputs(tempProject *project.Project, outputChannels map[string]chan map[string]interface{}, outputResults map[string][]map[string]interface{}, timeout time.Duration) bool {
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+
+	ticker := time.NewTicker(projectTestPollInterval)
+	defer ticker.Stop()
+
+	var quietSince time.Time
+
+	for {
+		drained := drainProjectTestOutputChannels(outputChannels, outputResults)
+		pending := projectTestHasPendingWork(tempProject)
+		if drained > 0 || pending {
+			quietSince = time.Time{}
+		} else if quietSince.IsZero() {
+			quietSince = time.Now()
+		} else if time.Since(quietSince) >= projectTestQuietPeriod {
+			drainProjectTestOutputChannels(outputChannels, outputResults)
+			if !projectTestHasPendingWork(tempProject) {
+				return false
+			}
+			quietSince = time.Time{}
+		}
+
+		select {
+		case <-timeoutTimer.C:
+			drainProjectTestOutputChannels(outputChannels, outputResults)
+			return true
+		case <-ticker.C:
+		}
+	}
+}
+
+func projectTestTimeoutWarning(timeout time.Duration) string {
+	return fmt.Sprintf("Test timed out after %s. Results may be incomplete.", timeout)
+}
+
+func normalizeProjectTestInputNode(raw string, requirePrefix bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("input node is required")
+	}
+
+	nodeParts := strings.Split(raw, ".")
+	if len(nodeParts) == 1 && !requirePrefix {
+		return nodeParts[0], nil
+	}
+	if len(nodeParts) == 2 && strings.ToLower(nodeParts[0]) == "input" && strings.TrimSpace(nodeParts[1]) != "" {
+		return strings.TrimSpace(nodeParts[1]), nil
+	}
+
+	return "", fmt.Errorf("invalid input node format. Expected 'input.name'")
+}
+
 func testProject(c echo.Context) error {
 	// Smart parameter detection: check both URL parameter positions
 	id := c.Param("id")                      // For /test-project/:id
@@ -815,18 +950,22 @@ func testProject(c echo.Context) error {
 
 	if inputNodeFromURL != "" && req.Content != "" {
 		// /test-project-content/:inputNode mode
-		inputNodeName = inputNodeFromURL
+		normalizedInputNode, err := normalizeProjectTestInputNode(inputNodeFromURL, false)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, projectErrorResponse(true, http.StatusBadRequest, false, err.Error()))
+		}
+		inputNodeName = normalizedInputNode
 		projectContent = req.Content
 		isTemp = true
 		isContentMode = true
 	} else if id != "" && req.InputNode != "" {
 		// /test-project/:id mode
 		// Parse input node
-		nodeParts := strings.Split(req.InputNode, ".")
-		if len(nodeParts) != 2 || strings.ToLower(nodeParts[0]) != "input" {
-			return c.JSON(http.StatusBadRequest, projectErrorResponse(false, http.StatusBadRequest, false, "Invalid input node format. Expected 'input.name'"))
+		normalizedInputNode, err := normalizeProjectTestInputNode(req.InputNode, true)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, projectErrorResponse(false, http.StatusBadRequest, false, err.Error()))
 		}
-		inputNodeName = nodeParts[1]
+		inputNodeName = normalizedInputNode
 		isContentMode = false
 
 		// Find project content by ID
@@ -893,23 +1032,6 @@ func testProject(c echo.Context) error {
 		})
 	}
 
-	// Ensure cleanup on exit - test projects are isolated so just stop and clean up directly
-	defer func() {
-		// First, clear TestCollectionChan references to prevent access to closed channels
-		for _, outputComp := range tempProject.Outputs {
-			if outputComp.TestCollectionChan != nil {
-				outputComp.TestCollectionChan = nil
-			}
-		}
-
-		// Stop the project (this will handle component cleanup)
-		if stopErr := tempProject.Stop(true); stopErr != nil {
-			logger.Error("Failed to stop test project", "error", stopErr)
-		}
-
-		logger.Info("Test project cleanup completed", "project", testProjectId)
-	}()
-
 	// Find the input node in flow nodes and check if it exists
 	var inputPNS string
 	var inputExists bool
@@ -929,8 +1051,30 @@ func testProject(c echo.Context) error {
 		})
 	}
 
+	// Create collection channels after test components are initialized but
+	// before their goroutines start, so output collectors are visible from
+	// the first message without racing late injection.
+	outputChannels := make(map[string]chan map[string]interface{})
+	defer func() {
+		clearProjectTestOutputChannels(tempProject)
+
+		if stopErr := tempProject.StopForTesting(projectTestCleanupTimeout); stopErr != nil {
+			logger.Error("Failed to stop test project", "project", testProjectId, "error", stopErr)
+		}
+
+		for outputId, testChan := range outputChannels {
+			close(testChan)
+			logger.Debug("Closed test channel for output", "outputId", outputId, "project", testProjectId)
+		}
+
+		logger.Info("Test project cleanup completed", "project", testProjectId)
+	}()
+
 	// Start the project to initialize PNS components
-	err = tempProject.Start(true)
+	err = tempProject.StartForTesting(func(initializedProject *project.Project) error {
+		outputChannels = setupProjectTestOutputChannels(initializedProject, testProjectId)
+		return nil
+	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
@@ -938,31 +1082,6 @@ func testProject(c echo.Context) error {
 			"result":  nil,
 		})
 	}
-
-	// Create collection channels for outputs in testing mode
-	outputChannels := make(map[string]chan map[string]interface{})
-	outputIdToPNS := make(map[string]string) // Map output ID to PNS for lookup
-	for pns, outputComp := range tempProject.Outputs {
-		testChan := make(chan map[string]interface{}, 100)
-		outputChannels[outputComp.Id] = testChan // Use output ID as key instead of PNS
-		outputIdToPNS[outputComp.Id] = pns
-
-		// Set TestCollectionChan to collect output data without sending to external systems
-		outputComp.TestCollectionChan = &testChan
-		logger.Info("Set test collection channel for output", "output", outputComp.Id, "pns", pns, "project", testProjectId)
-	}
-
-	// Ensure output channels are properly closed on function exit
-	defer func() {
-		// Close all output test channels to prevent leaks
-		for outputId, testChan := range outputChannels {
-			select {
-			default:
-				close(testChan)
-				logger.Debug("Closed test channel for output", "outputId", outputId, "project", testProjectId)
-			}
-		}
-	}()
 
 	// Find the test input component and inject test data through it
 	var testInput *input.Input
@@ -995,114 +1114,14 @@ func testProject(c echo.Context) error {
 	testInput.ProcessTestData(req.Data)
 
 	// Wait for processing with timeout (strategy depends on call mode)
-	var timedOut bool
-	outputResults := make(map[string][]map[string]interface{})
-
-	// Initialize output results
-	for outputId := range outputChannels {
-		outputResults[outputId] = []map[string]interface{}{}
-	}
-
-	if isContentMode {
-		// Simple strategy for content mode (like original testProjectContent)
-		time.Sleep(500 * time.Millisecond)
-
-		// Collect results from output channels with timeout
-		collectTimeout := time.After(1000 * time.Millisecond)
-		for outputId, testChan := range outputChannels {
-			// Collect messages from this output channel
-			for {
-				select {
-				case result, ok := <-testChan:
-					if !ok {
-						// Channel is closed
-						goto nextOutputContent
-					}
-					outputResults[outputId] = append(outputResults[outputId], result)
-				case <-collectTimeout:
-					// Timeout reached
-					goto nextOutputContent
-				case <-time.After(100 * time.Millisecond):
-					// No more messages after 100ms, assume we're done with this output
-					goto nextOutputContent
-				}
-			}
-		nextOutputContent:
-		}
-		timedOut = false
-	} else {
-		// Complex strategy for ID mode (original testProject logic)
-		timeout := time.After(30 * time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				// Collect any available results
-				for outputId, outputChan := range outputChannels {
-					for {
-						select {
-						case msg := <-outputChan:
-							outputResults[outputId] = append(outputResults[outputId], msg)
-							logger.Info("Collected message from output", "outputId", outputId, "message_count", len(outputResults[outputId]))
-						default:
-							goto nextOutputID
-						}
-					}
-				nextOutputID:
-				}
-
-				// Check if all channels are empty and no running tasks
-				allChannelsEmpty := true
-				allTasksComplete := true
-
-				for pns := range tempProject.MsgChannels {
-					if len(*tempProject.MsgChannels[pns]) > 0 {
-						allChannelsEmpty = false
-						break
-					}
-				}
-
-				for _, rs := range tempProject.Rulesets {
-					if rs.GetRunningTaskCount() > 0 {
-						allTasksComplete = false
-						break
-					}
-				}
-
-				if allChannelsEmpty && allTasksComplete {
-					// When project has agents, allow time for last agent output to reach outputs
-					if len(tempProject.Agents) > 0 {
-						time.Sleep(2 * time.Second)
-						for outputId, outputChan := range outputChannels {
-							for {
-								select {
-								case msg := <-outputChan:
-									outputResults[outputId] = append(outputResults[outputId], msg)
-								default:
-									goto nextOutput
-								}
-							}
-						nextOutput:
-						}
-					}
-					timedOut = false
-					goto done
-				}
-
-			case <-timeout:
-				timedOut = true
-				goto done
-			}
-		}
-	}
-done:
+	outputResults := initProjectTestOutputResults(outputChannels)
+	timedOut := collectProjectTestOutputs(tempProject, outputChannels, outputResults, projectTestProcessingTimeout)
 
 	// Return the results with appropriate format based on call mode
 	response := map[string]interface{}{
 		"success": true,
 		"outputs": outputResults,
+		"timeout": timedOut,
 	}
 
 	// Add fields based on call mode
@@ -1113,11 +1132,10 @@ done:
 		// /test-project format: full response with legacy fields
 		response["isTemp"] = isTemp
 		response["inputNode"] = req.InputNode
-		response["timeout"] = timedOut
+	}
 
-		if timedOut {
-			response["warning"] = "Test timed out after 30 seconds. Results may be incomplete."
-		}
+	if timedOut {
+		response["warning"] = projectTestTimeoutWarning(projectTestProcessingTimeout)
 	}
 
 	return c.JSON(http.StatusOK, response)

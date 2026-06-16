@@ -1143,6 +1143,17 @@ func (p *Project) validateComponent(componentType, componentID string, lineNum i
 
 // Start starts the project and all its components
 func (p *Project) Start(lock bool) error {
+	return p.startWithHook(lock, nil)
+}
+
+func (p *Project) StartForTesting(beforeRun func(*Project) error) error {
+	if !p.Testing {
+		return p.Start(true)
+	}
+	return p.startWithHook(true, beforeRun)
+}
+
+func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) error {
 	if lock {
 		common.ProjectOperationMu.Lock()
 	}
@@ -1173,7 +1184,13 @@ func (p *Project) Start(lock bool) error {
 		logger.Info("Reconciling project to stopped before start",
 			"project", p.Id,
 			"current_status", p.Status)
-		if stopErr := p.Stop(false); stopErr != nil {
+		var stopErr error
+		if p.Testing {
+			stopErr = p.StopForTesting(5 * time.Second)
+		} else {
+			stopErr = p.Stop(false)
+		}
+		if stopErr != nil {
 			logger.Error("Project pre-start reconciliation stop returned error; continuing with restart attempt",
 				"project", p.Id,
 				"error", stopErr)
@@ -1199,15 +1216,35 @@ func (p *Project) Start(lock bool) error {
 	err = p.initComponents()
 	if err != nil {
 		// Stop all components that may have been partially initialized
-		_ = p.stopComponentsInternal()
+		if p.Testing {
+			_ = p.StopForTesting(5 * time.Second)
+		} else {
+			_ = p.stopComponentsInternal()
+		}
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to initialize components: %w", err))
 		return fmt.Errorf("failed to initialize project components: %w", err)
+	}
+
+	if beforeRun != nil {
+		if err = beforeRun(p); err != nil {
+			if p.Testing {
+				_ = p.StopForTesting(5 * time.Second)
+			} else {
+				_ = p.stopComponentsInternal()
+			}
+			p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to prepare project before run: %w", err))
+			return fmt.Errorf("failed to prepare project before run: %w", err)
+		}
 	}
 
 	err = p.runComponents()
 	if err != nil {
 		// Stop all components that were initialized and may have been started
-		_ = p.stopComponentsInternal()
+		if p.Testing {
+			_ = p.StopForTesting(5 * time.Second)
+		} else {
+			_ = p.stopComponentsInternal()
+		}
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("failed to run components: %w", err))
 		return fmt.Errorf("failed to run project components: %w", err)
 	}
@@ -1896,6 +1933,90 @@ func (p *Project) getPartner(t string, pns string) []string {
 
 func (p *Project) stopComponentsInternal() error {
 	return p.stopComponentsInternalWithTimeout(45 * time.Second) // Leave 75 seconds for overall timeout margin
+}
+
+func (p *Project) StopForTesting(timeout time.Duration) error {
+	if !p.Testing {
+		return p.Stop(true)
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	if p.Status != common.StatusStopped {
+		p.SetProjectStatus(common.StatusStopping, nil)
+	}
+	p.stopOnce.Do(func() {
+		if p.stopChan != nil {
+			close(p.stopChan)
+		}
+	})
+
+	stopCompleted := make(chan error, 1)
+	go func() {
+		stopCompleted <- p.stopComponentsForTesting(timeout)
+	}()
+
+	select {
+	case err := <-stopCompleted:
+		if err != nil {
+			p.SetProjectStatus(common.StatusError, err)
+			return err
+		}
+		p.SetProjectStatus(common.StatusStopped, nil)
+		return nil
+	case <-time.After(timeout):
+		err := fmt.Errorf("test project stop timed out after %s", timeout)
+		logger.Error("Test project stop timed out, forcing cleanup", "project", p.Id, "timeout", timeout)
+		p.cleanup()
+		p.SetProjectStatus(common.StatusError, err)
+		return err
+	}
+}
+
+func (p *Project) stopComponentsForTesting(timeout time.Duration) error {
+	var stopErrors []error
+
+	p.disconnectInputsFromDownstream()
+
+	for _, in := range p.GetProjectInputs() {
+		if err := in.StopForTesting(); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("input %s: %w", in.Id, err))
+		}
+	}
+
+	for id, rs := range p.GetProjectRulesets() {
+		DeletePNSRuleset(id)
+		if err := rs.StopForTesting(timeout); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("ruleset %s: %w", rs.RulesetID, err))
+		}
+	}
+
+	for id, a := range p.GetProjectAgents() {
+		DeletePNSAgent(id)
+		if err := a.StopWithTimeout(timeout); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("agent %s: %w", a.Id, err))
+		}
+	}
+
+	for id, out := range p.GetProjectOutputs() {
+		DeletePNSOutput(id)
+		if err := out.StopForTesting(); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("output %s: %w", out.Id, err))
+		}
+	}
+
+	p.cleanup()
+
+	if len(stopErrors) == 0 {
+		return nil
+	}
+
+	errorMessages := make([]string, 0, len(stopErrors))
+	for _, err := range stopErrors {
+		errorMessages = append(errorMessages, err.Error())
+	}
+	return fmt.Errorf("failed to stop some test components: %s", strings.Join(errorMessages, "; "))
 }
 
 func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.Duration) error {
@@ -2638,11 +2759,19 @@ func (p *Project) runComponents() error {
 		}
 
 		for _, rs := range startedRulesets {
-			_ = rs.Stop()
+			if p.Testing {
+				_ = rs.StopForTesting(5 * time.Second)
+			} else {
+				_ = rs.Stop()
+			}
 		}
 
 		for _, a := range startedAgents {
-			_ = a.Stop()
+			if p.Testing {
+				_ = a.StopWithTimeout(5 * time.Second)
+			} else {
+				_ = a.Stop()
+			}
 		}
 
 		for _, out := range startedOutputs {

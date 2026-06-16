@@ -205,7 +205,10 @@ func (p *Project) GetProjectOutputs() map[string]*output.Output {
 	for _, node := range p.FlowNodes {
 		if node.ToType == "OUTPUT" && node.ToInit {
 			var out *output.Output
-			if p.Testing {
+			if boundOutput, exists := p.Outputs[node.ToPNS]; exists {
+				out = boundOutput
+			}
+			if out == nil && p.Testing {
 				// In testing mode, prioritize test-specific instances
 				// First try to get test instance from PNS (testing outputs are stored with their PNS)
 				if testOut, exists := GetPNSOutput(node.ToPNS); exists {
@@ -214,7 +217,7 @@ func (p *Project) GetProjectOutputs() map[string]*output.Output {
 					// Fallback: check for TEST_ prefixed output
 					out = testOut
 				}
-			} else {
+			} else if out == nil {
 				// Production mode: get from PNS first, then original
 				if pnsOut, exists := GetPNSOutput(node.ToPNS); exists {
 					out = pnsOut
@@ -307,14 +310,17 @@ func (p *Project) GetProjectOutputsUnsafe() map[string]*output.Output {
 	for _, node := range p.FlowNodes {
 		if node.ToType == "OUTPUT" && node.ToInit {
 			var out *output.Output
-			if p.Testing {
+			if boundOutput, exists := p.Outputs[node.ToPNS]; exists {
+				out = boundOutput
+			}
+			if out == nil && p.Testing {
 				// In testing mode, prioritize test-specific instances
 				if testOut, exists := GlobalProject.PNSOutputs[node.ToPNS]; exists {
 					out = testOut
 				} else if testOut, exists := GlobalProject.Outputs["TEST_"+node.ToPNS]; exists {
 					out = testOut
 				}
-			} else {
+			} else if out == nil {
 				// Production mode: get from PNS first, then original
 				if pnsOut, exists := GlobalProject.PNSOutputs[node.ToPNS]; exists {
 					out = pnsOut

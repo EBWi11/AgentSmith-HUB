@@ -1,5 +1,5 @@
 {
   "apiBaseUrl": "http://localhost:8080",
-  "apiTimeout": 30000
+  "apiTimeout": 30000,
+  "projectTestTimeout": 120000
 }
-

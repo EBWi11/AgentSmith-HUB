@@ -69,6 +69,10 @@ type Agent struct {
 	toolDefs         []ToolDefinition
 	processTotal     uint64
 	processLatencyNs uint64 // cumulative nanoseconds for processed messages (for avg latency)
+	runningTasks     int64
+	activeSeq        uint64
+	activeMu         sync.Mutex
+	activeCancels    map[uint64]func()
 	// lastReportedTotal is used for incremental statistics collection (QPS / MSG/D)
 	lastReportedTotal uint64
 	sampler           *common.Sampler
@@ -357,6 +361,10 @@ func (a *Agent) GetAvgLatencyMs() float64 {
 	}
 	ns := atomic.LoadUint64(&a.processLatencyNs)
 	return float64(ns) / float64(total) / 1e6
+}
+
+func (a *Agent) GetRunningTaskCount() int64 {
+	return atomic.LoadInt64(&a.runningTasks)
 }
 
 // GetIncrementAndUpdate returns the increment in processed messages since last call

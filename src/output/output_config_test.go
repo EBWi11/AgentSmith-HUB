@@ -81,6 +81,41 @@ func TestOutputTimingDefaults(t *testing.T) {
 	})
 }
 
+func TestOutputTestCollectionChannelIsSafe(t *testing.T) {
+	out := &Output{
+		Id:                  "test-output",
+		ProjectNodeSequence: "INPUT.demo.OUTPUT.test",
+		Type:                OutputTypePrint,
+	}
+
+	testChan := make(chan map[string]interface{}, 1)
+	out.SetTestCollectionChan(&testChan)
+	out.processOutputMessage(map[string]interface{}{"message": "hello"}, true, "unit-test")
+
+	select {
+	case got := <-testChan:
+		if got["message"] != "hello" {
+			t.Fatalf("expected collected message payload, got %#v", got)
+		}
+		if got["_hub_project_node_sequence"] != out.ProjectNodeSequence {
+			t.Fatalf("expected project node sequence to be attached, got %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected output message to be collected")
+	}
+
+	out.SetTestCollectionChan(nil)
+	out.processOutputMessage(map[string]interface{}{"message": "ignored"}, true, "unit-test")
+	select {
+	case got := <-testChan:
+		t.Fatalf("expected no message after clearing test channel, got %#v", got)
+	default:
+	}
+
+	close(testChan)
+	out.sendToTestCollection(&testChan, map[string]interface{}{"message": "closed"}, "unit-test")
+}
+
 func TestVerifyRejectsInvalidOutputTuning(t *testing.T) {
 	tests := []struct {
 		name    string

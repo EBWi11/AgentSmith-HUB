@@ -153,6 +153,14 @@ const buildResultError = (error, fallbackMessage, fallbackPayload = {}) => ({
   ...fallbackPayload
 });
 
+const projectTestRequestConfig = () => ({
+  timeout: Math.max(
+    Number(config.projectTestTimeout) || 0,
+    Number(api.defaults.timeout) || 0,
+    120000
+  )
+});
+
 const normalizeParams = (params = {}) => {
   if (params instanceof URLSearchParams) {
     return Object.fromEntries(params.entries());
@@ -930,7 +938,7 @@ export const hubApi = {
       }
       
       // Use API instance to send request
-      const response = await api.post(`/test-project-content/${inputNode}`, { content, data });
+      const response = await api.post(`/test-project-content/${inputNode}`, { content, data }, projectTestRequestConfig());
       return response.data;
     } catch (error) {
       return buildResultError(error, 'Failed to test project content', { outputs: {} });
@@ -963,7 +971,7 @@ export const hubApi = {
       const response = await api.post(`/test-project/${id}`, {
         input_node: inputNode,
         data: data
-      });
+      }, projectTestRequestConfig());
       return response.data;
     } catch (error) {
       return buildResultError(error, 'Failed to test project', { outputs: {} });

@@ -20,6 +20,7 @@ Create a `/config.json` file in the deployed web root directory, allowing config
 {
   "apiBaseUrl": "https://api.example.com:8080",
   "apiTimeout": 60000,
+  "projectTestTimeout": 120000,
   "enableDebugMode": false,
   "enableClusterMode": true,
   "theme": "light",
@@ -49,6 +50,7 @@ Set configuration through environment variables during build:
 # Set environment variables during build
 VITE_API_BASE_URL=https://api.example.com:8080 \
 VITE_API_TIMEOUT=60000 \
+VITE_PROJECT_TEST_TIMEOUT=120000 \
 VITE_DEBUG_MODE=false \
 npm run build
 ```
@@ -58,6 +60,7 @@ Or create a `.env` file:
 ```env
 VITE_API_BASE_URL=https://api.example.com:8080
 VITE_API_TIMEOUT=60000
+VITE_PROJECT_TEST_TIMEOUT=120000
 VITE_DEBUG_MODE=false
 VITE_CLUSTER_MODE=true
 VITE_THEME=light
@@ -77,6 +80,7 @@ If no other configuration is provided, the system will use built-in default conf
 {
   apiBaseUrl: 'http://localhost:8080',
   apiTimeout: 30000,
+  projectTestTimeout: 120000,
   enableDebugMode: false,
   enableClusterMode: true,
   theme: 'light',
@@ -92,6 +96,7 @@ If no other configuration is provided, the system will use built-in default conf
   - Development default: `http://localhost:8080`
   - Production default: `${window.location.protocol}//${window.location.hostname}:8080`
 - `apiTimeout`: API request timeout (milliseconds)
+- `projectTestTimeout`: Project test request timeout (milliseconds)
 
 ### Feature Flags
 

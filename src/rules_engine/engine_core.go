@@ -688,6 +688,57 @@ func (r *Ruleset) Stop() error {
 	}
 }
 
+func (r *Ruleset) StopForTesting(timeout time.Duration) error {
+	if r.Status == common.StatusStopped && r.stopChan == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+
+	r.SetStatus(common.StatusStopping, nil)
+	if r.stopChan != nil {
+		select {
+		case <-r.stopChan:
+		default:
+			close(r.stopChan)
+		}
+	}
+
+	waitDone := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(waitDone)
+	}()
+
+	var stopErr error
+	select {
+	case <-waitDone:
+	case <-time.After(timeout):
+		stopErr = fmt.Errorf("timeout waiting for test ruleset goroutines to finish")
+		logger.Error("Timeout waiting for test ruleset goroutines, forcing cleanup", "ruleset", r.RulesetID)
+	}
+
+	if r.antsPool != nil {
+		deadline := time.Now().Add(timeout)
+		for r.antsPool.Running() > 0 && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if r.antsPool.Running() > 0 && stopErr == nil {
+			stopErr = fmt.Errorf("timeout waiting for test ruleset tasks to finish")
+			logger.Error("Timeout waiting for test ruleset tasks, forcing cleanup", "ruleset", r.RulesetID)
+		}
+	}
+
+	r.cleanup()
+	if stopErr != nil {
+		r.SetStatus(common.StatusError, stopErr)
+		return stopErr
+	}
+	r.SetStatus(common.StatusStopped, nil)
+	return nil
+}
+
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a

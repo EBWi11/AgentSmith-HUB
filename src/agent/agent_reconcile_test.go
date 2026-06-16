@@ -2,7 +2,9 @@ package agent
 
 import (
 	"AgentSmith-HUB/common"
+	"context"
 	"testing"
+	"time"
 )
 
 func TestAgentStartReconcilesErrorRuntime(t *testing.T) {
@@ -25,5 +27,27 @@ func TestAgentStartReconcilesErrorRuntime(t *testing.T) {
 	}
 	if a.stopChan == nil {
 		t.Fatal("expected agent stop channel to be reinitialized")
+	}
+}
+
+func TestAgentActiveProcessTrackingAndCancel(t *testing.T) {
+	a := &Agent{Id: "agent-active-test"}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	untrack := a.trackActiveProcess(cancel)
+	if got := a.GetRunningTaskCount(); got != 1 {
+		t.Fatalf("expected one running task, got %d", got)
+	}
+
+	a.cancelActiveProcesses()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected active process context to be cancelled")
+	}
+
+	untrack()
+	if got := a.GetRunningTaskCount(); got != 0 {
+		t.Fatalf("expected no running tasks, got %d", got)
 	}
 }

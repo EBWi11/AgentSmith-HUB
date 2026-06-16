@@ -125,6 +125,7 @@ type Output struct {
 	stopChan chan struct{}
 
 	// for testing
+	testCollectionMu   sync.RWMutex
 	TestCollectionChan *chan map[string]interface{}
 
 	// raw config
@@ -416,7 +417,7 @@ func (out *Output) cleanup() {
 	atomic.StoreUint64(&out.lastReportedTotal, 0)
 
 	// Clear test collection channel
-	out.TestCollectionChan = nil
+	out.SetTestCollectionChan(nil)
 
 	// Clear component channel connections to prevent leaks
 	out.UpStream = make(map[string]*chan map[string]interface{})
@@ -479,6 +480,35 @@ func (out *Output) ensureStopChan() chan struct{} {
 	return out.stopChan
 }
 
+func (out *Output) SetTestCollectionChan(ch *chan map[string]interface{}) {
+	out.testCollectionMu.Lock()
+	defer out.testCollectionMu.Unlock()
+	out.TestCollectionChan = ch
+}
+
+func (out *Output) getTestCollectionChan() *chan map[string]interface{} {
+	out.testCollectionMu.RLock()
+	defer out.testCollectionMu.RUnlock()
+	return out.TestCollectionChan
+}
+
+func (out *Output) sendToTestCollection(ch *chan map[string]interface{}, msg map[string]interface{}, testCollectorType string) {
+	if ch == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Test collection channel send failed", "id", out.Id, "type", testCollectorType, "panic", r)
+		}
+	}()
+
+	select {
+	case *ch <- msg:
+	default:
+		logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", testCollectorType)
+	}
+}
+
 func (out *Output) processOutputMessage(msg map[string]interface{}, hasTestCollector bool, testCollectorType string) map[string]interface{} {
 	atomic.AddUint64(&out.produceTotal, 1)
 
@@ -488,12 +518,9 @@ func (out *Output) processOutputMessage(msg map[string]interface{}, hasTestColle
 
 	enhancedMsg := out.enhanceMessageWithProjectNodeSequence(msg)
 
-	if hasTestCollector && out.TestCollectionChan != nil {
-		select {
-		case *out.TestCollectionChan <- enhancedMsg:
-		default:
-			logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", testCollectorType)
-		}
+	testCollectionChan := out.getTestCollectionChan()
+	if hasTestCollector && testCollectionChan != nil {
+		out.sendToTestCollection(testCollectionChan, enhancedMsg, testCollectorType)
 	}
 
 	return enhancedMsg
@@ -578,12 +605,9 @@ func (out *Output) startTestingBridge() {
 					}
 
 					enhancedMsg := out.processOutputMessage(msg, false, "testing")
-					if out.TestCollectionChan != nil {
-						select {
-						case *out.TestCollectionChan <- enhancedMsg:
-						default:
-							logger.Error("Test collection channel full, dropping message", "id", out.Id, "type", "testing")
-						}
+					testCollectionChan := out.getTestCollectionChan()
+					if testCollectionChan != nil {
+						out.sendToTestCollection(testCollectionChan, enhancedMsg, "testing")
 					}
 				}
 			}
@@ -652,7 +676,7 @@ func (out *Output) Start() error {
 	}
 
 	// Determine if we need to duplicate data for testing
-	hasTestCollector := out.TestCollectionChan != nil
+	hasTestCollector := out.getTestCollectionChan() != nil
 
 	effectiveType := out.Type
 
@@ -960,7 +984,7 @@ func (out *Output) StopForTesting() error {
 	}
 
 	// Step 2: Clear test collection channel
-	out.TestCollectionChan = nil
+	out.SetTestCollectionChan(nil)
 
 	// Step 3: Wait for goroutines with very short timeout
 	waitDone := make(chan struct{})
