@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 // buildThresholdRuleset wraps buildRulesetFromXML and registers cache cleanup.
@@ -27,6 +28,44 @@ func buildThresholdRuleset(tb testing.TB, xml string) *Ruleset {
 	rs := buildRulesetFromXML(tb, xml)
 	tb.Cleanup(func() { rs.cleanup() })
 	return rs
+}
+
+func TestLocalThresholdCounter_SweepsExpiredEntriesOnWrite(t *testing.T) {
+	counter := newLocalThresholdCounter()
+	defer counter.Close()
+
+	counter.SetWithTTL("expired-1", 1, 10*time.Millisecond)
+	counter.SetWithTTL("expired-2", 2, 10*time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+	counter.SetWithTTL("active", 3, time.Minute)
+
+	counter.mu.RLock()
+	defer counter.mu.RUnlock()
+	if len(counter.entries) != 1 {
+		t.Fatalf("expected only active entry after write-time sweep, got %d entries", len(counter.entries))
+	}
+	if _, ok := counter.entries["active"]; !ok {
+		t.Fatal("expected active entry to remain after write-time sweep")
+	}
+}
+
+func TestLocalClassifyCounter_SweepsExpiredEntriesOnWrite(t *testing.T) {
+	counter := newLocalClassifyCounter()
+	defer counter.Close()
+
+	counter.SetWithTTL("expired-1", map[string]bool{"a": true}, 10*time.Millisecond)
+	counter.SetWithTTL("expired-2", map[string]bool{"b": true}, 10*time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+	counter.SetWithTTL("active", map[string]bool{"c": true}, time.Minute)
+
+	counter.mu.RLock()
+	defer counter.mu.RUnlock()
+	if len(counter.entries) != 1 {
+		t.Fatalf("expected only active entry after write-time sweep, got %d entries", len(counter.entries))
+	}
+	if _, ok := counter.entries["active"]; !ok {
+		t.Fatal("expected active entry to remain after write-time sweep")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +238,7 @@ func TestThreshold_SUM_AccumulatesAcrossEvents(t *testing.T) {
 		return map[string]interface{}{"uid": "u1", "bytes": fmt.Sprintf("%d", b)}
 	}
 
-	rs.EngineCheck(mk(40)) // seeds 40
+	rs.EngineCheck(mk(40))                            // seeds 40
 	if out := rs.EngineCheck(mk(40)); len(out) != 0 { // 40+40=80 ≤ 100
 		t.Fatalf("2nd event (sum=80): should not fire, got %d", len(out))
 	}

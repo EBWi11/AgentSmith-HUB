@@ -863,6 +863,25 @@ func TestCEPStateManager_LocalCache_Delete(t *testing.T) {
 	}
 }
 
+func TestCEPStateManager_KeyLocksReleasedAfterUnlock(t *testing.T) {
+	cache := newTestLocalCache()
+	defer cache.Close()
+	mgr := NewCEPStateManager(true, cache)
+
+	mgr.LockKey("transient_key")
+	mgr.UnlockKey("transient_key")
+	mgr.CleanupKeyLock("transient_key")
+
+	count := 0
+	mgr.keyLocks.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	if count != 0 {
+		t.Fatalf("expected key lock entry to be released, got %d", count)
+	}
+}
+
 func TestCEPStateManager_LocalCache_GetOrCreate(t *testing.T) {
 	cache := newTestLocalCache()
 	defer cache.Close()

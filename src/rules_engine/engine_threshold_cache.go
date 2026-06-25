@@ -13,8 +13,9 @@ import (
 // Each method is protected by its own fine-grained mutex, so different keys can
 // be operated on concurrently without contention on the ruleset-level r.mu lock.
 type localThresholdCounter struct {
-	mu      sync.RWMutex
-	entries map[string]counterEntry
+	mu         sync.RWMutex
+	entries    map[string]counterEntry
+	nextExpiry time.Time
 }
 
 type counterEntry struct {
@@ -28,20 +29,43 @@ func newLocalThresholdCounter() *localThresholdCounter {
 	}
 }
 
+func (c *localThresholdCounter) rememberNextExpiryLocked(expiresAt time.Time) {
+	if c.nextExpiry.IsZero() || expiresAt.Before(c.nextExpiry) {
+		c.nextExpiry = expiresAt
+	}
+}
+
+func (c *localThresholdCounter) sweepExpiredLocked(now time.Time) {
+	if c.nextExpiry.IsZero() || now.Before(c.nextExpiry) {
+		return
+	}
+
+	c.nextExpiry = time.Time{}
+	for key, entry := range c.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(c.entries, key)
+			continue
+		}
+		c.rememberNextExpiryLocked(entry.expiresAt)
+	}
+}
+
 // Get returns the current value and whether the key exists and has not expired.
 func (c *localThresholdCounter) Get(key string) (int, bool) {
+	now := time.Now()
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	if !ok {
 		c.mu.RUnlock()
 		return 0, false
 	}
-	if time.Now().After(entry.expiresAt) {
+	if !now.Before(entry.expiresAt) {
 		c.mu.RUnlock()
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		c.sweepExpiredLocked(now)
 		entry, ok = c.entries[key]
-		if !ok || time.Now().After(entry.expiresAt) {
+		if !ok || !now.Before(entry.expiresAt) {
 			delete(c.entries, key)
 			return 0, false
 		}
@@ -53,22 +77,24 @@ func (c *localThresholdCounter) Get(key string) (int, bool) {
 
 // GetTTL returns the remaining TTL for an existing non-expired key.
 func (c *localThresholdCounter) GetTTL(key string) (time.Duration, bool) {
+	now := time.Now()
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	if !ok {
 		c.mu.RUnlock()
 		return 0, false
 	}
-	remaining := time.Until(entry.expiresAt)
+	remaining := entry.expiresAt.Sub(now)
 	if remaining <= 0 {
 		c.mu.RUnlock()
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		c.sweepExpiredLocked(now)
 		entry, ok = c.entries[key]
 		if !ok {
 			return 0, false
 		}
-		remaining = time.Until(entry.expiresAt)
+		remaining = entry.expiresAt.Sub(now)
 		if remaining <= 0 {
 			delete(c.entries, key)
 			return 0, false
@@ -81,9 +107,13 @@ func (c *localThresholdCounter) GetTTL(key string) (time.Duration, bool) {
 
 // SetWithTTL stores value with the given TTL, overwriting any existing entry.
 func (c *localThresholdCounter) SetWithTTL(key string, value int, ttl time.Duration) {
+	now := time.Now()
+	expiresAt := now.Add(ttl)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = counterEntry{value: value, expiresAt: time.Now().Add(ttl)}
+	c.sweepExpiredLocked(now)
+	c.entries[key] = counterEntry{value: value, expiresAt: expiresAt}
+	c.rememberNextExpiryLocked(expiresAt)
 }
 
 // Del removes a key from the counter map.
@@ -98,6 +128,7 @@ func (c *localThresholdCounter) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = make(map[string]counterEntry)
+	c.nextExpiry = time.Time{}
 }
 
 // ---
@@ -106,8 +137,9 @@ func (c *localThresholdCounter) Close() {
 // It replaces ristretto.Cache[string, map[string]bool] for CLASSIFY threshold
 // operations, with the same guarantees as localThresholdCounter.
 type localClassifyCounter struct {
-	mu      sync.RWMutex
-	entries map[string]classifyEntry
+	mu         sync.RWMutex
+	entries    map[string]classifyEntry
+	nextExpiry time.Time
 }
 
 type classifyEntry struct {
@@ -121,21 +153,44 @@ func newLocalClassifyCounter() *localClassifyCounter {
 	}
 }
 
+func (c *localClassifyCounter) rememberNextExpiryLocked(expiresAt time.Time) {
+	if c.nextExpiry.IsZero() || expiresAt.Before(c.nextExpiry) {
+		c.nextExpiry = expiresAt
+	}
+}
+
+func (c *localClassifyCounter) sweepExpiredLocked(now time.Time) {
+	if c.nextExpiry.IsZero() || now.Before(c.nextExpiry) {
+		return
+	}
+
+	c.nextExpiry = time.Time{}
+	for key, entry := range c.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(c.entries, key)
+			continue
+		}
+		c.rememberNextExpiryLocked(entry.expiresAt)
+	}
+}
+
 // Get returns a copy of the key set and whether the entry exists and has not expired.
 // A copy is returned to allow the caller to mutate it safely.
 func (c *localClassifyCounter) Get(key string) (map[string]bool, bool) {
+	now := time.Now()
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	if !ok {
 		c.mu.RUnlock()
 		return nil, false
 	}
-	if time.Now().After(entry.expiresAt) {
+	if !now.Before(entry.expiresAt) {
 		c.mu.RUnlock()
 		c.mu.Lock()
 		defer c.mu.Unlock()
+		c.sweepExpiredLocked(now)
 		entry, ok = c.entries[key]
-		if !ok || time.Now().After(entry.expiresAt) {
+		if !ok || !now.Before(entry.expiresAt) {
 			delete(c.entries, key)
 			return nil, false
 		}
@@ -155,9 +210,13 @@ func (c *localClassifyCounter) Get(key string) (map[string]bool, bool) {
 
 // SetWithTTL stores a key set with the given TTL, overwriting any existing entry.
 func (c *localClassifyCounter) SetWithTTL(key string, keys map[string]bool, ttl time.Duration) {
+	now := time.Now()
+	expiresAt := now.Add(ttl)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = classifyEntry{keys: keys, expiresAt: time.Now().Add(ttl)}
+	c.sweepExpiredLocked(now)
+	c.entries[key] = classifyEntry{keys: keys, expiresAt: expiresAt}
+	c.rememberNextExpiryLocked(expiresAt)
 }
 
 // Del removes a key from the classify map.
@@ -172,4 +231,5 @@ func (c *localClassifyCounter) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = make(map[string]classifyEntry)
+	c.nextExpiry = time.Time{}
 }
