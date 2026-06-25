@@ -137,7 +137,8 @@ type CEPStateManager struct {
 	// Multiple goroutines (from different upstreams) may process events for the
 	// same correlation key simultaneously. Without per-key locking, concurrent
 	// AddMatch calls would cause map data races.
-	keyLocks sync.Map // map[string]*sync.Mutex
+	keyLocks   sync.Map // map[string]*refCountedKeyLock
+	keyLocksMu sync.Mutex
 
 	// For absence scanning: track keys that have absence stages (local cache mode)
 	absenceKeys   map[string]absenceKeyInfo
@@ -166,6 +167,11 @@ type absenceSlotItem struct {
 	Info absenceKeyInfo
 }
 
+type refCountedKeyLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
 // NewCEPStateManager creates a new state manager.
 func NewCEPStateManager(useLocalCache bool, cache *ristretto.Cache[string, *SequenceState]) *CEPStateManager {
 	m := &CEPStateManager{
@@ -189,22 +195,44 @@ func BuildStateKey(groupByID string, correlateValues string) string {
 // LockKey acquires a per-key mutex, ensuring exclusive access to a SequenceState.
 // Must be paired with UnlockKey. Used to protect the entire read-modify-write cycle.
 func (m *CEPStateManager) LockKey(key string) {
-	actual, _ := m.keyLocks.LoadOrStore(key, &sync.Mutex{})
-	actual.(*sync.Mutex).Lock()
+	m.keyLocksMu.Lock()
+	actual, ok := m.keyLocks.Load(key)
+	var keyLock *refCountedKeyLock
+	if ok {
+		keyLock = actual.(*refCountedKeyLock)
+	} else {
+		keyLock = &refCountedKeyLock{}
+		m.keyLocks.Store(key, keyLock)
+	}
+	keyLock.refs++
+	m.keyLocksMu.Unlock()
+
+	keyLock.mu.Lock()
 }
 
 // UnlockKey releases the per-key mutex.
 func (m *CEPStateManager) UnlockKey(key string) {
-	if actual, ok := m.keyLocks.Load(key); ok {
-		actual.(*sync.Mutex).Unlock()
+	m.keyLocksMu.Lock()
+	actual, ok := m.keyLocks.Load(key)
+	if !ok {
+		m.keyLocksMu.Unlock()
+		return
 	}
+
+	keyLock := actual.(*refCountedKeyLock)
+	if keyLock.refs > 0 {
+		keyLock.refs--
+	}
+	keyLock.mu.Unlock()
+	if keyLock.refs == 0 {
+		m.keyLocks.Delete(key)
+	}
+	m.keyLocksMu.Unlock()
 }
 
-// CleanupKeyLock removes a key lock entry after the state is deleted.
-// NOTE: intentionally kept as no-op to avoid lock replacement races:
-// deleting a lock while another goroutine still holds it can cause a later
-// goroutine to recreate a new mutex for the same key, breaking exclusion and
-// leading to unlock panics. We prefer correctness/stability here.
+// CleanupKeyLock is kept for callers that explicitly clean up after deleting a
+// state. Lock entries are now released automatically by UnlockKey once the last
+// holder or waiter leaves, avoiding lock replacement races.
 func (m *CEPStateManager) CleanupKeyLock(key string) {
 	_ = key
 }
