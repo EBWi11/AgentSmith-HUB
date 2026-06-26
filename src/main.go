@@ -747,7 +747,18 @@ func loadHubConfig(root string) error {
 		}
 	}
 
-	// Set config root
+	// Set LLM environment override
+	if v := os.Getenv("LLM_API_KEY"); v != "" {
+		common.Config.LLMApiKey = v
+	}
+	if v := os.Getenv("LLM_BASE_URL"); v != "" {
+		common.Config.LLMBaseURL = v
+	}
+	if v := os.Getenv("LLM_MODEL"); v != "" {
+		common.Config.LLMModel = v
+	}
+
+	//Set config root
 	common.Config.ConfigRoot = root
 
 	// Validate Redis configuration
