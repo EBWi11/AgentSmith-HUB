@@ -375,6 +375,7 @@ AGENT is an LLM-powered processing component in the data pipeline. Each message 
 model: gpt-4o-mini                # LLM model name (OpenAI-compatible)
 temperature: 0.1                   # Sampling temperature
 max_tokens: 256                    # Max tokens per LLM response (keep small if output is only a few fields)
+token_limit_param: max_tokens      # max_tokens | max_completion_tokens | auto (default: max_tokens)
 
 system_prompt: |                   # System prompt sent to the LLM
   You are a security analyst. Output ONLY a JSON object with your analysis fields (e.g. llm_confidence, llm_analysis).
@@ -403,6 +404,7 @@ memory_notes:
 | `model` | No | LLM model identifier. Default depends on your LLM provider config. |
 | `temperature` | No | Sampling temperature. Default `0.3`. |
 | `max_tokens` | No | Maximum tokens in LLM **output**. Default `4096`. |
+| `token_limit_param` | No | Which chat-completions field carries `max_tokens`: `max_tokens` (default, classic OpenAI-compatible APIs), `max_completion_tokens` (OpenAI o-series / gpt-5 / gpt-4.1, etc.), or `auto` (model-name heuristics). |
 | `system_prompt` | **Yes** | System instruction for the LLM. Prefer prompts that ask for a small JSON (e.g. 2–3 fields) so the agent merges into the event without re-emitting the whole payload. |
 | `skills` | No | List of skill IDs. Skills provide tools/knowledge to the agent. |
 | `tools` | No | `"all"` exposes all plugins as tools; `[]` or a list of names to limit. Use `[]` when the agent does not need tools to reduce latency. |

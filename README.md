@@ -120,7 +120,7 @@ content: |
   AGENT.alert_reviewer -> OUTPUT.enriched_alerts
 ```
 
-For full agent details (fields like `reasoning_mode`, `reasoning_budget_tokens`, `memory_notes`, and memory workflow in UI/API), see the [Complete Guide](docs/agentsmith-hub-guide.md#14-agent-syntax-description).
+For full agent details (fields like `token_limit_param`, `reasoning_mode`, `reasoning_budget_tokens`, `memory_notes`, and memory workflow in UI/API), see the [Complete Guide](docs/agentsmith-hub-guide.md#14-agent-syntax-description).
 
 ## Built-in Detection Rulesets
 

@@ -375,6 +375,7 @@ AGENT 是数据管道中基于 LLM 的处理组件。**每条消息独立处理*
 model: gpt-4o-mini                # LLM 模型名称（OpenAI 兼容）
 temperature: 0.1                   # 采样温度
 max_tokens: 256                    # 单次 LLM 输出最大 token 数（若只输出少量字段可设小）
+token_limit_param: max_tokens      # max_tokens | max_completion_tokens | auto（默认: max_tokens）
 
 system_prompt: |                   # 发送给 LLM 的系统提示词
   你是安全分析员。仅输出分析字段的 JSON（如 llm_confidence、llm_analysis），这些字段会自动合并回原始事件。
@@ -402,6 +403,7 @@ memory_notes:
 | `model` | 否 | LLM 模型标识。默认取决于 LLM 提供商配置。 |
 | `temperature` | 否 | 采样温度。默认 `0.3`。 |
 | `max_tokens` | 否 | LLM **输出**最大 token 数。默认 `4096`。 |
+| `token_limit_param` | 否 | `max_tokens` 写入 chat-completions 请求时使用的字段名：`max_tokens`（默认，经典 OpenAI 兼容 API）、`max_completion_tokens`（OpenAI o 系列 / gpt-5 / gpt-4.1 等）、或 `auto`（按模型名启发式推断）。 |
 | `system_prompt` | **是** | 发给 LLM 的系统指令。建议让 LLM 只输出少量 JSON 字段，由框架合并到事件中。 |
 | `skills` | 否 | Skill ID 列表，为 Agent 提供工具和知识。 |
 | `tools` | 否 | `"all"` 暴露所有插件为工具；`[]` 或名称列表可限制。不需要工具时用 `[]` 可降低延迟。 |

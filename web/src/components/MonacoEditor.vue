@@ -3851,6 +3851,9 @@ function getAgentCompletions(fullText, lineText, range, position) {
       { key: 'tools', doc: 'Plugin tools: "all" or list of plugin names', snippet: 'tools: all' },
       { key: 'max_rounds', doc: 'Max ReAct loop rounds per message (default: 5)', snippet: 'max_rounds: 5' },
       { key: 'timeout', doc: 'Per-message processing timeout (default: 30s)', snippet: 'timeout: 30s' },
+      { key: 'reasoning_mode', doc: 'Reasoning toggle: disabled | enabled | auto', snippet: 'reasoning_mode: disabled' },
+      { key: 'reasoning_budget_tokens', doc: 'Optional reasoning token budget', snippet: 'reasoning_budget_tokens: 2048' },
+      { key: 'memory_notes', doc: 'Long-term guidance merged into system prompt', snippet: 'memory_notes:\n  - ' },
     ];
 
     agentKeys.forEach(({ key, doc, snippet }) => {
@@ -3875,6 +3878,40 @@ function getAgentCompletions(fullText, lineText, range, position) {
       documentation: 'Use all available plugins as tools',
       insertText: 'all',
       range
+    });
+  }
+
+  // token_limit_param value completion
+  if (/^\s*token_limit_param:\s*/.test(lineText)) {
+    [
+      { value: 'max_tokens', doc: 'Classic OpenAI-compatible APIs (default)' },
+      { value: 'max_completion_tokens', doc: 'OpenAI o-series / gpt-5 / gpt-4.1, etc.' },
+      { value: 'auto', doc: 'Pick from model name heuristics' },
+    ].forEach(({ value, doc }) => {
+      suggestions.push({
+        label: value,
+        kind: monaco.languages.CompletionItemKind.EnumMember,
+        documentation: doc,
+        insertText: value,
+        range
+      });
+    });
+  }
+
+  // reasoning_mode value completion
+  if (/^\s*reasoning_mode:\s*/.test(lineText)) {
+    [
+      { value: 'disabled', doc: 'Never send provider-specific reasoning params (default)' },
+      { value: 'enabled', doc: 'Always send reasoning params for supported models' },
+      { value: 'auto', doc: 'Enable based on model name heuristics' },
+    ].forEach(({ value, doc }) => {
+      suggestions.push({
+        label: value,
+        kind: monaco.languages.CompletionItemKind.EnumMember,
+        documentation: doc,
+        insertText: value,
+        range
+      });
     });
   }
 
