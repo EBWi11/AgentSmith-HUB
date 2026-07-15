@@ -28,11 +28,17 @@ type AgentConfig struct {
 	Model        string      `yaml:"model"`
 	Temperature  float64     `yaml:"temperature"`
 	MaxTokens    int         `yaml:"max_tokens"`
-	SystemPrompt string      `yaml:"system_prompt"`
-	Skills       []string    `yaml:"skills"`
-	Tools        interface{} `yaml:"tools"` // "all" or []string
-	MaxRounds    int         `yaml:"max_rounds"`
-	Timeout      string      `yaml:"timeout"`
+	// TokenLimitParam selects which chat-completions field carries MaxTokens.
+	// YAML: token_limit_param
+	//   - "max_tokens" (default)      : classic OpenAI-compatible APIs
+	//   - "max_completion_tokens"     : OpenAI o-series / gpt-5 / gpt-4.1, etc.
+	//   - "auto"                      : pick from model name heuristics
+	TokenLimitParam string `yaml:"token_limit_param"`
+	SystemPrompt    string `yaml:"system_prompt"`
+	Skills          []string    `yaml:"skills"`
+	Tools           interface{} `yaml:"tools"` // "all" or []string
+	MaxRounds       int         `yaml:"max_rounds"`
+	Timeout         string      `yaml:"timeout"`
 
 	// Reasoning / thinking configuration for models that support it (e.g. kimi-k2.5).
 	// reasoning_mode:
@@ -431,6 +437,16 @@ func applyDefaults(cfg *AgentConfig) {
 	}
 	if strings.TrimSpace(cfg.Timeout) == "" {
 		cfg.Timeout = "60s"
+	}
+
+	cfg.TokenLimitParam = strings.ToLower(strings.TrimSpace(cfg.TokenLimitParam))
+	switch cfg.TokenLimitParam {
+	case "", "max_tokens", "max_completion_tokens", "auto":
+		if cfg.TokenLimitParam == "" {
+			cfg.TokenLimitParam = "max_tokens"
+		}
+	default:
+		cfg.TokenLimitParam = "max_tokens"
 	}
 
 	// Normalize reasoning mode; default to "disabled" for safety if empty.

@@ -18,12 +18,9 @@ const (
 	requestTimeout   = 60 * time.Second
 )
 
-// chatRequest is OpenAI-compatible chat completions request body
-type chatRequest struct {
-	Model     string    `json:"model"`
-	Messages  []message `json:"messages"`
-	MaxTokens int       `json:"max_tokens,omitempty"`
-}
+// chatRequest is OpenAI-compatible chat completions request body.
+// Built as a map so we can switch between max_tokens and max_completion_tokens.
+type chatRequest map[string]interface{}
 
 type message struct {
 	Role    string `json:"role"`
@@ -76,9 +73,12 @@ func callLLM(systemPrompt, userMessage, model string, maxTokens int) (string, er
 	}
 
 	body := chatRequest{
-		Model:     model,
-		Messages:  messages,
-		MaxTokens: maxTokens,
+		"model":    model,
+		"messages": messages,
+	}
+	if maxTokens > 0 {
+		// Plugin has no agent YAML; use model-name heuristics (same as token_limit_param: auto).
+		body[tokenLimitFieldForModel(model)] = maxTokens
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -117,6 +117,22 @@ func callLLM(systemPrompt, userMessage, model string, maxTokens int) (string, er
 		return "", fmt.Errorf("LLM API returned no choices")
 	}
 	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+}
+
+// tokenLimitFieldForModel mirrors agent token_limit_param: auto heuristics.
+func tokenLimitFieldForModel(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	switch {
+	case strings.HasPrefix(m, "o1"), strings.HasPrefix(m, "o3"), strings.HasPrefix(m, "o4"):
+		return "max_completion_tokens"
+	case strings.HasPrefix(m, "gpt-5"), strings.HasPrefix(m, "gpt-4.1"):
+		return "max_completion_tokens"
+	default:
+		return "max_tokens"
+	}
 }
 
 // Eval performs a single LLM call with system prompt as parameter.

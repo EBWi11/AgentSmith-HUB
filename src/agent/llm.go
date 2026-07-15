@@ -107,12 +107,13 @@ func ToolResultMessage(toolCallID, content string) Message {
 }
 
 // callChatWithTools performs a single tool-aware LLM call.
+// tokenLimitParam: "max_tokens" | "max_completion_tokens" | "auto" (see resolveTokenLimitField).
 // reasoningMode:
 //   - "disabled": never send provider-specific reasoning params
 //   - "enabled" : always send reasoning params for supported models
 //   - "auto"    : enable reasoning based on model name heuristics
 func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
-	maxTokens int, temperature float64, reasoningMode string, reasoningBudgetTokens int, ctx ...context.Context) (*ChatResult, error) {
+	maxTokens int, temperature float64, tokenLimitParam string, reasoningMode string, reasoningBudgetTokens int, ctx ...context.Context) (*ChatResult, error) {
 
 	if common.Config == nil || strings.TrimSpace(common.Config.LLMApiKey) == "" {
 		return nil, fmt.Errorf("LLM API key not configured")
@@ -140,7 +141,7 @@ func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
 		"messages": messages,
 	}
 	if maxTokens > 0 {
-		reqBody["max_tokens"] = maxTokens
+		reqBody[resolveTokenLimitField(model, tokenLimitParam)] = maxTokens
 	}
 	if temperature > 0 {
 		// Only send temperature when explicitly configured; leaving it out
@@ -222,6 +223,35 @@ func callChatWithTools(model string, messages []Message, tools []ToolDefinition,
 		ReasoningContent: choice.Message.ReasoningContent,
 		ThinkingBlocks:   choice.Message.ThinkingBlocks,
 	}, nil
+}
+
+// resolveTokenLimitField picks the chat-completions field that carries the token limit.
+// Prefer explicit agent YAML (token_limit_param); "auto" falls back to model-name heuristics.
+func resolveTokenLimitField(model, param string) string {
+	switch strings.ToLower(strings.TrimSpace(param)) {
+	case "max_completion_tokens":
+		return "max_completion_tokens"
+	case "auto":
+		return tokenLimitFieldForModel(model)
+	default:
+		return "max_tokens"
+	}
+}
+
+// tokenLimitFieldForModel is used only when token_limit_param is "auto".
+func tokenLimitFieldForModel(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	switch {
+	case strings.HasPrefix(m, "o1"), strings.HasPrefix(m, "o3"), strings.HasPrefix(m, "o4"):
+		return "max_completion_tokens"
+	case strings.HasPrefix(m, "gpt-5"), strings.HasPrefix(m, "gpt-4.1"):
+		return "max_completion_tokens"
+	default:
+		return "max_tokens"
+	}
 }
 
 // shouldEnableKimiThinking determines whether to attach Kimi-style "thinking" params.
@@ -348,7 +378,7 @@ Inputs in the user message JSON:
 		{Role: "user", Content: string(userRaw)},
 	}
 
-	resp, err := callChatWithTools(model, messages, nil, 4096, 0, "disabled", 0)
+	resp, err := callChatWithTools(model, messages, nil, 4096, 0, "auto", "disabled", 0)
 	if err != nil {
 		return "", err
 	}

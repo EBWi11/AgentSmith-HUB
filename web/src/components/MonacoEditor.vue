@@ -3845,6 +3845,7 @@ function getAgentCompletions(fullText, lineText, range, position) {
       { key: 'model', doc: 'LLM model name (e.g. gpt-4o-mini)', snippet: 'model: ' },
       { key: 'temperature', doc: 'LLM temperature (0-1)', snippet: 'temperature: 0.3' },
       { key: 'max_tokens', doc: 'Max tokens per LLM response', snippet: 'max_tokens: 4096' },
+      { key: 'token_limit_param', doc: 'API field for max_tokens: max_tokens | max_completion_tokens | auto', snippet: 'token_limit_param: max_tokens' },
       { key: 'system_prompt', doc: 'System prompt for the agent', snippet: 'system_prompt: |\n  ' },
       { key: 'skills', doc: 'List of skill component IDs', snippet: 'skills:\n  - ' },
       { key: 'tools', doc: 'Plugin tools: "all" or list of plugin names', snippet: 'tools: all' },

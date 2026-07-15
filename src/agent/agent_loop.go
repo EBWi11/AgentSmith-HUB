@@ -365,7 +365,7 @@ func (a *Agent) ProcessMessageWithTrace(msg map[string]interface{}) (result map[
 		inputSnap := cloneMessagesForTrace(conversation)
 		resp, err := callChatWithTools(
 			a.Config.Model, conversation, toolDefs,
-			a.Config.MaxTokens, a.Config.Temperature,
+			a.Config.MaxTokens, a.Config.Temperature, a.Config.TokenLimitParam,
 			a.Config.ReasoningMode, a.Config.ReasoningBudgetTokens, ctx,
 		)
 		trace = append(trace, newLLMTraceStep(round+1, model, inputSnap, resp, err))
