@@ -142,12 +142,75 @@ func GetRulesetsUsingPlugin(pluginID string) []string {
 }
 
 func SafeDeletePluginComponent(id string) ([]string, error) {
+	return SafeDeletePluginComponentWithCommit(id, nil)
+}
+
+func SafeDeletePluginComponentWithCommit(id string, commit func() error) ([]string, error) {
 	referencingRulesets := GetRulesetsUsingPlugin(id)
 	if len(referencingRulesets) > 0 {
 		return nil, fmt.Errorf("plugin %s is referenced by ruleset(s): %v", id, referencingRulesets)
 	}
 
-	return plugin.SafeDeletePlugin(id)
+	affectedProjects := getProjectsUsingAgents(getAgentsUsingPlugin(id, true), shouldRestartProjectForComponentChange)
+	if _, err := plugin.SafeDeletePluginWithCommit(id, commit); err != nil {
+		return nil, err
+	}
+	return affectedProjects, nil
+}
+
+func agentUsesPlugin(a *agent.Agent, pluginID string, includeAll bool) bool {
+	if a == nil || a.Config == nil {
+		return false
+	}
+
+	switch tools := a.Config.Tools.(type) {
+	case string:
+		return includeAll && tools == "all"
+	case []string:
+		for _, name := range tools {
+			if name == pluginID {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, value := range tools {
+			if name, ok := value.(string); ok && name == pluginID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func getAgentsUsingPlugin(pluginID string, includeAll bool) []string {
+	var agentIDs []string
+	ForEachAgent(func(agentID string, a *agent.Agent) bool {
+		if agentUsesPlugin(a, pluginID, includeAll) {
+			agentIDs = append(agentIDs, agentID)
+		}
+		return true
+	})
+	sort.Strings(agentIDs)
+	return agentIDs
+}
+
+func getProjectsUsingAgents(agentIDs []string, shouldInclude func(projectID string, p *Project) bool) []string {
+	projectSet := make(map[string]struct{})
+	for _, agentID := range agentIDs {
+		ForEachProject(func(projectID string, p *Project) bool {
+			if p.CheckExist("AGENT", agentID) && shouldInclude(projectID, p) {
+				projectSet[projectID] = struct{}{}
+			}
+			return true
+		})
+	}
+
+	projectIDs := make([]string, 0, len(projectSet))
+	for projectID := range projectSet {
+		projectIDs = append(projectIDs, projectID)
+	}
+	sort.Strings(projectIDs)
+	return projectIDs
 }
 
 // collectAllComponentStats collects current statistics from all running components
@@ -225,7 +288,7 @@ func collectAllComponentStats() []common.DailyStatsData {
 
 	// Collect plugin statistics (plugins are global, no project lock needed)
 	// Only collect if there are running projects or if increments are greater than 0
-	for pluginName, p := range plugin.Plugins {
+	for pluginName, p := range plugin.GetAllPlugins() {
 		// Plugin success statistics - use increment method
 		successIncrement := p.GetSuccessIncrementAndUpdate()
 		if successIncrement > 0 {
@@ -294,10 +357,15 @@ func GetAffectedProjects(componentType string, componentID string) []string {
 		for _, projectID := range getProjectsUsingRulesets(rulesetIDs, shouldRestartProjectForComponentChange) {
 			affectedProjects[projectID] = struct{}{}
 		}
+		agentIDs := getAgentsUsingPlugin(componentID, true)
+		for _, projectID := range getProjectsUsingAgents(agentIDs, shouldRestartProjectForComponentChange) {
+			affectedProjects[projectID] = struct{}{}
+		}
 
-		logger.Info("Plugin change affects rulesets and projects",
+		logger.Info("Plugin change affects rulesets, agents and projects",
 			"plugin", componentID,
 			"affected_rulesets", len(rulesetIDs),
+			"affected_agents", len(agentIDs),
 			"affected_projects", len(affectedProjects))
 
 	case "agent":

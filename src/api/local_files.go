@@ -2,6 +2,7 @@ package api
 
 import (
 	"AgentSmith-HUB/agent"
+	"AgentSmith-HUB/cluster"
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/output"
@@ -119,11 +120,11 @@ func getLocalChangesCount(c echo.Context) error {
 		DirPath:    filepath.Join(configRoot, "plugin"),
 		FileSuffix: ".go",
 		SkipFile: func(id string) bool {
-			_, existsInTemp := plugin.PluginsNew[id]
+			_, existsInTemp := plugin.GetPluginNew(id)
 			return existsInTemp
 		},
 		GetMemoryValue: func(id string) (string, bool) {
-			memoryPlugin, exists := plugin.Plugins[id]
+			memoryPlugin, exists := plugin.GetPlugin(id)
 			if !exists || memoryPlugin.Type != plugin.YAEGI_PLUGIN {
 				return "", exists
 			}
@@ -388,7 +389,7 @@ func getLocalChanges(c echo.Context) error {
 
 			// If plugin has pending UI changes (PluginsNew), skip — it's not an
 			// external local-file change, it's a pending change initiated via the UI.
-			if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+			if _, existsInTemp := plugin.GetPluginNew(id); existsInTemp {
 				return nil
 			}
 
@@ -397,7 +398,7 @@ func getLocalChanges(c echo.Context) error {
 				return nil
 			}
 
-			memoryPlugin, exists := plugin.Plugins[id]
+			memoryPlugin, exists := plugin.GetPlugin(id)
 			var memoryContent string
 			if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
 				memoryContent = string(memoryPlugin.Payload)
@@ -619,7 +620,7 @@ func getLocalChanges(c echo.Context) error {
 	})
 
 	// Check for deleted plugins
-	for id, pluginInstance := range plugin.Plugins {
+	for id, pluginInstance := range plugin.GetAllPlugins() {
 		// Only check yaegi plugins (skip local/built-in plugins)
 		if pluginInstance.Type != plugin.YAEGI_PLUGIN {
 			continue
@@ -831,7 +832,7 @@ func loadLocalChanges(c echo.Context) error {
 
 		// If plugin has pending UI changes (PluginsNew), skip — it's not an
 		// external local-file change, it's a pending change initiated via the UI.
-		if _, existsInTemp := plugin.PluginsNew[id]; existsInTemp {
+		if _, existsInTemp := plugin.GetPluginNew(id); existsInTemp {
 			return nil
 		}
 
@@ -840,7 +841,7 @@ func loadLocalChanges(c echo.Context) error {
 			return nil
 		}
 
-		memoryPlugin, exists := plugin.Plugins[id]
+		memoryPlugin, exists := plugin.GetPlugin(id)
 		var memoryContent string
 		if exists && memoryPlugin.Type == plugin.YAEGI_PLUGIN {
 			memoryContent = string(memoryPlugin.Payload)
@@ -856,6 +857,21 @@ func loadLocalChanges(c echo.Context) error {
 		}
 		return nil
 	})
+	for id, memoryPlugin := range plugin.GetAllPlugins() {
+		if memoryPlugin == nil || memoryPlugin.Type != plugin.YAEGI_PLUGIN {
+			continue
+		}
+		if _, pending := plugin.GetPluginNew(id); pending {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(pluginDir, id+".go")); os.IsNotExist(err) {
+			changes = append(changes, map[string]interface{}{
+				"type":    "plugin",
+				"id":      id,
+				"deleted": true,
+			})
+		}
+	}
 
 	agentDir := filepath.Join(configRoot, "agent")
 	filepath.WalkDir(agentDir, func(path string, d fs.DirEntry, err error) error {
@@ -928,13 +944,30 @@ func loadLocalChanges(c echo.Context) error {
 	for _, change := range changes {
 		componentType := change["type"].(string)
 		id := change["id"].(string)
-		content := change["file_content"].(string)
+		content, _ := change["file_content"].(string)
+		deleted, _ := change["deleted"].(bool)
 
 		success := true
 		message := "loaded successfully"
 
 		// Load directly into official component storage
-		err := loadComponentDirectly(componentType, id, content)
+		var affectedProjects []string
+		var err error
+		if deleted && componentType == "plugin" {
+			deletedPlugin, _ := plugin.GetPlugin(id)
+			affectedProjects, err = project.SafeDeletePluginComponent(id)
+			if err == nil && common.IsCurrentNodeLeader() {
+				err = cluster.GlobalInstructionManager.PublishComponentDelete(componentType, id, affectedProjects)
+				if err != nil && deletedPlugin != nil {
+					if restoreErr := plugin.RestorePluginAfterFailedDelete(deletedPlugin, nil); restoreErr != nil {
+						err = fmt.Errorf("%w; failed to restore local plugin: %v", err, restoreErr)
+					}
+				}
+			}
+			message = "deleted plugin unloaded successfully"
+		} else {
+			err = loadComponentDirectly(componentType, id, content)
+		}
 		if err != nil {
 			success = false
 			message = "failed to load component: " + err.Error()
@@ -945,7 +978,9 @@ func loadLocalChanges(c echo.Context) error {
 			RecordLocalPush(componentType, id, content, "success", "")
 
 			// Track successfully loaded components for project restart
-			if componentType != "project" {
+			if deleted {
+				refreshAffectedProjectsForComponentChange(componentType, id, affectedProjects, "local_delete", true)
+			} else if componentType != "project" {
 				successfullyLoaded = append(successfullyLoaded, map[string]string{
 					"type": componentType,
 					"id":   id,
@@ -1014,6 +1049,30 @@ func loadSingleLocalChange(c echo.Context) error {
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		if req.Type == "plugin" {
+			if deletedPlugin, exists := plugin.GetPlugin(req.ID); exists {
+				affectedProjects, deleteErr := project.SafeDeletePluginComponent(req.ID)
+				if deleteErr != nil {
+					return c.JSON(http.StatusConflict, map[string]string{"error": deleteErr.Error()})
+				}
+				if common.IsCurrentNodeLeader() {
+					if publishErr := cluster.GlobalInstructionManager.PublishComponentDelete(req.Type, req.ID, affectedProjects); publishErr != nil {
+						if restoreErr := plugin.RestorePluginAfterFailedDelete(deletedPlugin, nil); restoreErr != nil {
+							publishErr = fmt.Errorf("%w; failed to restore local plugin: %v", publishErr, restoreErr)
+						}
+						return c.JSON(http.StatusInternalServerError, map[string]string{"error": publishErr.Error()})
+					}
+				}
+				RecordLocalPush(req.Type, req.ID, "", "success", "")
+				refreshAffectedProjectsForComponentChange(req.Type, req.ID, affectedProjects, "local_delete", true)
+				return c.JSON(http.StatusOK, map[string]interface{}{
+					"success": true,
+					"message": "deleted plugin unloaded successfully",
+					"type":    req.Type,
+					"id":      req.ID,
+				})
+			}
+		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
 	}
 

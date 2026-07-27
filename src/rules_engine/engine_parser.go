@@ -310,12 +310,12 @@ func ParseRuleset(rawRuleset []byte) (*Ruleset, error) {
 					currentChecklist = nil
 				}
 
-		case "rule":
-			if currentRule != nil {
-				currentRule.HitFields = collectHitFields(currentRule)
-				ruleset.Rules = append(ruleset.Rules, *currentRule)
-				currentRule = nil
-			}
+			case "rule":
+				if currentRule != nil {
+					currentRule.HitFields = collectHitFields(currentRule)
+					ruleset.Rules = append(ruleset.Rules, *currentRule)
+					currentRule = nil
+				}
 			}
 		}
 	}
@@ -748,8 +748,9 @@ func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine i
 					}
 
 					// Check if plugin exists
-					if _, ok := plugin.Plugins[pluginName]; !ok {
-						if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					pluginInstance, ok := plugin.GetPlugin(pluginName)
+					if !ok {
+						if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 							return checkNode, fmt.Errorf("cannot reference temporary plugin '%s' at line %d, please save it first", pluginName, elementLine)
 						}
 						return checkNode, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
@@ -757,7 +758,7 @@ func parseCheckNode(element xml.StartElement, decoder *XMLDecoder, elementLine i
 
 					// Store parsed plugin info with negation flag
 					// Use the original plugin instance to ensure statistics are recorded correctly
-					checkNode.Plugin = plugin.Plugins[pluginName]
+					checkNode.Plugin = pluginInstance
 					// Store negation flag separately since we can't modify the original plugin
 					checkNode.IsNegated = isNegated
 					checkNode.PluginArgs = args
@@ -917,15 +918,16 @@ func parseAppend(element xml.StartElement, decoder *XMLDecoder, elementLine int)
 					}
 
 					// Check if plugin exists
-					if _, ok := plugin.Plugins[pluginName]; !ok {
-						if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					pluginInstance, ok := plugin.GetPlugin(pluginName)
+					if !ok {
+						if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 							return appendElem, fmt.Errorf("cannot reference temporary plugin '%s' at line %d, please save it first", pluginName, elementLine)
 						}
 						return appendElem, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
 					}
 
 					// Store parsed plugin info
-					appendElem.Plugin = plugin.Plugins[pluginName]
+					appendElem.Plugin = pluginInstance
 					appendElem.PluginArgs = args
 				}
 
@@ -974,13 +976,14 @@ func parseModify(element xml.StartElement, decoder *XMLDecoder, elementLine int)
 					if err != nil {
 						return modifyElem, fmt.Errorf("invalid plugin call syntax at line %d: %v", elementLine, err)
 					}
-					if _, ok := plugin.Plugins[pluginName]; !ok {
-						if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					pluginInstance, ok := plugin.GetPlugin(pluginName)
+					if !ok {
+						if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 							return modifyElem, fmt.Errorf("cannot reference temporary plugin '%s' at line %d, please save it first", pluginName, elementLine)
 						}
 						return modifyElem, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
 					}
-					modifyElem.Plugin = plugin.Plugins[pluginName]
+					modifyElem.Plugin = pluginInstance
 					modifyElem.PluginArgs = args
 				} else {
 					// Literal mode: field must not be empty
@@ -1022,15 +1025,16 @@ func parsePlugin(element xml.StartElement, decoder *XMLDecoder, elementLine int)
 				}
 
 				// Check if plugin exists
-				if _, ok := plugin.Plugins[pluginName]; !ok {
-					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+				pluginInstance, ok := plugin.GetPlugin(pluginName)
+				if !ok {
+					if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 						return pluginElem, fmt.Errorf("cannot reference temporary plugin '%s' at line %d, please save it first", pluginName, elementLine)
 					}
 					return pluginElem, fmt.Errorf("plugin not found: %s at line %d", pluginName, elementLine)
 				}
 
 				// Store parsed plugin info
-				pluginElem.Plugin = plugin.Plugins[pluginName]
+				pluginElem.Plugin = pluginInstance
 				pluginElem.PluginArgs = args
 
 				return pluginElem, nil

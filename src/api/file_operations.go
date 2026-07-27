@@ -108,6 +108,34 @@ func WriteComponentFile(filePath string, content string) error {
 	return nil
 }
 
+func writeFileAtomically(filePath string, content []byte, mode os.FileMode) (err error) {
+	tempFile, err := os.CreateTemp(filepath.Dir(filePath), "."+filepath.Base(filePath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err = tempFile.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err = tempFile.Write(content); err != nil {
+		return err
+	}
+	if err = tempFile.Sync(); err != nil {
+		return err
+	}
+	if err = tempFile.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, filePath)
+}
+
 // updateInMemoryCache extracts component type and ID from file path and updates the memory cache
 func updateInMemoryCache(filePath string, content string) {
 	componentType, id := extractComponentInfo(filePath)

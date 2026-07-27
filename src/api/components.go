@@ -596,7 +596,9 @@ func getPlugins(c echo.Context) error {
 		return "Plugin function"
 	}
 
-	for _, p := range plugin.Plugins {
+	loadedPlugins := plugin.GetAllPlugins()
+	pendingPlugins := plugin.GetAllPluginsNew()
+	for _, p := range loadedPlugins {
 		// Filter by plugin type if specified
 		var currentPluginType string
 		if p.Type == plugin.LOCAL_PLUGIN {
@@ -613,7 +615,7 @@ func getPlugins(c echo.Context) error {
 		}
 
 		// Check if there is a temporary file
-		tempRaw, hasTemp := plugin.PluginsNew[p.Name]
+		tempRaw, hasTemp := pendingPlugins[p.Name]
 
 		// Skip temporary plugins if not requested
 		if !includeTemp && hasTemp {
@@ -669,7 +671,7 @@ func getPlugins(c echo.Context) error {
 
 	// Add plugins that only exist in temporary files (only if including temp and detailed)
 	if includeTemp && detailed {
-		for name, content := range plugin.PluginsNew {
+		for name, content := range pendingPlugins {
 			if !processedNames[name] {
 				// Try to determine return type for temporary plugins
 				returnType := "unknown"
@@ -677,32 +679,17 @@ func getPlugins(c echo.Context) error {
 				status := "pending"
 				errorMessage := ""
 				if content != "" {
-					// Create a temporary plugin instance to get return type
-					tempPlugin := &plugin.Plugin{
-						Name:       name,
-						Payload:    []byte(content),
-						Type:       plugin.YAEGI_PLUGIN,
-						IsTestMode: true, // Set test mode to avoid statistics recording
-					}
-					// Try to load temporarily to get return type.
-					// Never let malformed pending plugin content break the plugin list API.
-					loadErr := func() (err error) {
-						defer func() {
-							if r := recover(); r != nil {
-								err = fmt.Errorf("plugin parse panic: %v", r)
-							}
-						}()
-						return tempPlugin.YaegiLoad()
-					}()
-					if loadErr == nil {
-						returnType = tempPlugin.ReturnType
-						parameters = tempPlugin.Parameters
+					// Inspect pending source without executing package variables or init.
+					inspectedParameters, inspectedReturnType, inspectErr := plugin.Inspect("", content, name)
+					if inspectErr == nil {
+						returnType = inspectedReturnType
+						parameters = inspectedParameters
 					} else {
 						status = string(common.StatusError)
-						errorMessage = loadErr.Error()
+						errorMessage = inspectErr.Error()
 						logger.Error("Failed to parse temporary plugin while listing",
 							"plugin", name,
-							"error", loadErr)
+							"error", inspectErr)
 					}
 				}
 
@@ -738,7 +725,7 @@ func getPlugin(c echo.Context) error {
 	}
 
 	// First check if there is a temporary file
-	p_raw, ok := plugin.PluginsNew[id]
+	p_raw, ok := plugin.GetPluginNew(id)
 	if ok {
 		tempPath, _ := GetComponentPath("plugin", id, true)
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -751,7 +738,7 @@ func getPlugin(c echo.Context) error {
 	}
 
 	// If no temporary file, check formal file
-	if p, ok := plugin.Plugins[id]; ok {
+	if p, ok := plugin.GetPlugin(id); ok {
 		var pluginType string
 		var rawContent string
 
@@ -957,6 +944,11 @@ func createComponent(componentType string, c echo.Context) error {
 	// Normalize ID by trimming spaces
 	request.ID = strings.TrimSpace(request.ID)
 	request.Folder = strings.TrimSpace(request.Folder)
+	if componentType == "plugin" {
+		if plugin.IsBuiltinName(request.ID) {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "built-in plugin names are reserved"})
+		}
+	}
 
 	if componentType == "ruleset" && request.Folder != "" && !isValidRulesetFolderName(request.Folder) {
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -1126,6 +1118,11 @@ func createPlugin(c echo.Context) error {
 
 func deleteComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
+	if componentType == "plugin" {
+		if plugin.IsBuiltinName(id) {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "built-in plugins cannot be deleted"})
+		}
+	}
 
 	var componentPath string
 	var tempPath string
@@ -1169,6 +1166,13 @@ func deleteComponent(componentType string, c echo.Context) error {
 	_, tempErr := os.Stat(tempPath)
 	formalExists := formalErr == nil
 	tempExists := tempErr == nil
+	var deletedPlugin *plugin.Plugin
+	var deletedPluginPending string
+	var deletedPluginHadPending bool
+	if componentType == "plugin" {
+		deletedPlugin, _ = plugin.GetPlugin(id)
+		deletedPluginPending, deletedPluginHadPending = plugin.GetPluginNew(id)
+	}
 
 	if !formalExists && !tempExists {
 		return c.JSON(http.StatusNotFound, map[string]string{
@@ -1190,7 +1194,14 @@ func deleteComponent(componentType string, c echo.Context) error {
 	case "project":
 		affectedProjects, deletionErr = project.SafeDeleteProject(id)
 	case "plugin":
-		affectedProjects, deletionErr = project.SafeDeletePluginComponent(id)
+		affectedProjects, deletionErr = project.SafeDeletePluginComponentWithCommit(id, func() error {
+			if formalExists {
+				if err := os.Remove(componentPath); err != nil {
+					return fmt.Errorf("failed to delete plugin file: %w", err)
+				}
+			}
+			return nil
+		})
 	case "agent":
 		affectedProjects, deletionErr = project.SafeDeleteAgentComponent(id)
 	case "skill":
@@ -1221,7 +1232,7 @@ func deleteComponent(componentType string, c echo.Context) error {
 		}
 
 		// Delete formal file if exists
-		if formalExists {
+		if formalExists && componentType != "plugin" {
 			if err := os.Remove(componentPath); err != nil {
 				logger.Error("failed to delete component file", "path", componentPath, "error", err)
 			}
@@ -1243,6 +1254,35 @@ func deleteComponent(componentType string, c echo.Context) error {
 			// For other components, publish deletion instruction with affected projects
 			if err := cluster.GlobalInstructionManager.PublishComponentDelete(componentType, id, affectedProjects); err != nil {
 				logger.Error("Failed to publish component deletion instruction", "type", componentType, "id", id, "error", err)
+				if componentType == "plugin" {
+					var rollbackErrors []string
+					if deletedPlugin != nil {
+						restoreErr := plugin.RestorePluginAfterFailedDelete(deletedPlugin, func() error {
+							if formalExists {
+								return writeFileAtomically(componentPath, deletedPlugin.Payload, 0644)
+							}
+							return nil
+						})
+						if restoreErr != nil {
+							rollbackErrors = append(rollbackErrors, restoreErr.Error())
+						}
+					}
+					if deletedPluginHadPending {
+						if restoreErr := writeFileAtomically(tempPath, []byte(deletedPluginPending), 0644); restoreErr != nil {
+							rollbackErrors = append(rollbackErrors, restoreErr.Error())
+						} else {
+							plugin.SetPluginNew(id, deletedPluginPending)
+						}
+					}
+					RecordComponentDelete(componentType, id, "failed", err.Error(), affectedProjects)
+					errorMessage := fmt.Sprintf("cluster publish failed; local plugin deletion was rolled back: %v", err)
+					if len(rollbackErrors) > 0 {
+						errorMessage = fmt.Sprintf("cluster publish failed and rollback was incomplete: %v (%s)", err, strings.Join(rollbackErrors, "; "))
+					}
+					return c.JSON(http.StatusInternalServerError, map[string]string{
+						"error": errorMessage,
+					})
+				}
 			}
 
 			// Restart affected projects
@@ -1312,6 +1352,11 @@ func updateProject(c echo.Context) error {
 
 func updateComponent(componentType string, c echo.Context) error {
 	id := c.Param("id")
+	if componentType == "plugin" {
+		if p, exists := plugin.GetPlugin(id); exists && p.Type == plugin.LOCAL_PLUGIN {
+			return c.JSON(http.StatusConflict, map[string]string{"error": "built-in plugins cannot be updated"})
+		}
+	}
 	var req struct {
 		Raw string `json:"raw"`
 	}
@@ -1331,9 +1376,9 @@ func updateComponent(componentType string, c echo.Context) error {
 	switch componentType {
 	case "plugin":
 		// Check if plugin exists in memory
-		if p, ok := plugin.Plugins[id]; ok {
+		if p, ok := plugin.GetPlugin(id); ok {
 			originalContent = string(p.Payload)
-		} else if p_raw, ok := plugin.PluginsNew[id]; ok {
+		} else if p_raw, ok := plugin.GetPluginNew(id); ok {
 			originalContent = p_raw
 		} else {
 			// Fall back to file system check
@@ -2152,7 +2197,7 @@ func GetPluginParameters(c echo.Context) error {
 	}
 
 	// Check if plugin exists in memory
-	if p, exists := plugin.Plugins[id]; exists {
+	if p, exists := plugin.GetPlugin(id); exists {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"success":    true,
 			"plugin":     id,
@@ -2162,17 +2207,8 @@ func GetPluginParameters(c echo.Context) error {
 	}
 
 	// Check if plugin exists in temporary files
-	if tempContent, exists := plugin.PluginsNew[id]; exists {
-		// Create a temporary plugin instance to parse parameters
-		tempPlugin := &plugin.Plugin{
-			Name:       id,
-			Payload:    []byte(tempContent),
-			Type:       plugin.YAEGI_PLUGIN,
-			IsTestMode: true, // Set test mode to avoid statistics recording
-		}
-
-		// Try to load the temporary plugin to get parameters
-		err := tempPlugin.YaegiLoad()
+	if tempContent, exists := plugin.GetPluginNew(id); exists {
+		parameters, returnType, err := plugin.Inspect("", tempContent, id)
 		if err != nil {
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"success": false,
@@ -2183,8 +2219,8 @@ func GetPluginParameters(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"success":    true,
 			"plugin":     id,
-			"parameters": tempPlugin.Parameters,
-			"returnType": tempPlugin.ReturnType,
+			"parameters": parameters,
+			"returnType": returnType,
 		})
 	}
 
@@ -2382,7 +2418,7 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 		case "project":
 			componentMap = project.GetAllProjectsNew()
 		case "plugin":
-			componentMap = plugin.PluginsNew
+			componentMap = plugin.GetAllPluginsNew()
 		case "agent":
 			componentMap = project.GetAllAgentsNew()
 		case "skill":
@@ -2413,7 +2449,7 @@ func searchInComponentType(componentType, query string, isTemporary bool) []Sear
 				return true
 			})
 		case "plugin":
-			for _, comp := range plugin.Plugins {
+			for _, comp := range plugin.GetAllPlugins() {
 				if comp.Type == plugin.YAEGI_PLUGIN {
 					componentMap[comp.Name] = string(comp.Payload)
 				} else if comp.Type == plugin.LOCAL_PLUGIN {
@@ -2968,7 +3004,7 @@ func GetBatchPluginParameters(c echo.Context) error {
 		result := make(map[string]interface{})
 
 		// Get parameters from loaded plugins only (no temporary plugins)
-		for id, p := range plugin.Plugins {
+		for id, p := range plugin.GetAllPlugins() {
 			result[id] = map[string]interface{}{
 				"parameters": p.Parameters,
 				"returnType": p.ReturnType,
@@ -2989,7 +3025,7 @@ func GetBatchPluginParameters(c echo.Context) error {
 		}
 
 		// Check if plugin exists in memory (loaded plugins only)
-		if p, exists := plugin.Plugins[id]; exists {
+		if p, exists := plugin.GetPlugin(id); exists {
 			result[id] = map[string]interface{}{
 				"parameters": p.Parameters,
 				"returnType": p.ReturnType,

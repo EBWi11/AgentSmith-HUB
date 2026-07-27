@@ -1352,11 +1352,11 @@ func validateAppend(appendElem *Append, xmlContent, ruleID string, ruleIndex, ap
 
 			// Check if plugin exists
 			var pluginInstance *plugin.Plugin
-			if p, ok := plugin.Plugins[pluginName]; ok {
+			if p, ok := plugin.GetPlugin(pluginName); ok {
 				pluginInstance = p
 			} else {
 				// Check if it's a temporary component
-				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+				if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 					result.IsValid = false
 					result.Errors = append(result.Errors, ValidationError{
 						Line:    appendLine,
@@ -1451,10 +1451,10 @@ func validateModify(modifyElem *Modify, xmlContent, ruleID string, ruleIndex, mo
 
 	// Check if plugin exists
 	var pluginInstance *plugin.Plugin
-	if p, ok := plugin.Plugins[pluginName]; ok {
+	if p, ok := plugin.GetPlugin(pluginName); ok {
 		pluginInstance = p
 	} else {
-		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+		if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 			result.IsValid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Line:    modifyLine,
@@ -1513,11 +1513,11 @@ func validatePlugin(pluginElem *Plugin, xmlContent, ruleID string, ruleIndex, pl
 
 		// Check if plugin exists (using fully qualified names to avoid conflict with parameter name)
 		var pluginInstance *plugin.Plugin
-		if p, ok := plugin.Plugins[pluginName]; ok {
+		if p, ok := plugin.GetPlugin(pluginName); ok {
 			pluginInstance = p
 		} else {
 			// Check if it's a temporary component
-			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+			if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 				result.IsValid = false
 				result.Errors = append(result.Errors, ValidationError{
 					Line:    pluginLine,
@@ -1572,11 +1572,11 @@ func validateCheckNodePluginCall(pluginCall string, line int, ruleID string, res
 
 	// Check if plugin exists
 	var pluginInstance *plugin.Plugin
-	if p, ok := plugin.Plugins[pluginName]; ok {
+	if p, ok := plugin.GetPlugin(pluginName); ok {
 		pluginInstance = p
 	} else {
 		// Check if it's a temporary component
-		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+		if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 			result.IsValid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Line:    line,
@@ -1626,11 +1626,11 @@ func validatePluginCall(pluginCall string, line int, ruleID string, result *Vali
 
 	// Check if plugin exists
 	var pluginInstance *plugin.Plugin
-	if p, ok := plugin.Plugins[pluginName]; ok {
+	if p, ok := plugin.GetPlugin(pluginName); ok {
 		pluginInstance = p
 	} else {
 		// Check if it's a temporary component
-		if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+		if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 			result.IsValid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Line:    line,
@@ -2476,11 +2476,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 					return err
 				}
 
-				if p, ok := plugin.Plugins[pluginName]; ok {
+				if p, ok := plugin.GetPlugin(pluginName); ok {
 					appendNode.Plugin = p
 				} else {
 					// Check if it's a temporary component, temporary components should not be referenced
-					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 					}
 					return errors.New("not found this plugin: " + pluginName)
@@ -2505,11 +2505,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 				return err
 			}
 
-			if p, ok := plugin.Plugins[pluginName]; ok {
+			if p, ok := plugin.GetPlugin(pluginName); ok {
 				pluginNode.Plugin = p
 			} else {
 				// Check if it's a temporary component, temporary components should not be referenced
-				if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+				if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 					return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 				}
 				return errors.New("not found this plugin: " + pluginName)
@@ -2545,11 +2545,11 @@ func RulesetBuild(ruleset *Ruleset) error {
 					return err
 				}
 
-				if p, ok := plugin.Plugins[pluginName]; ok {
+				if p, ok := plugin.GetPlugin(pluginName); ok {
 					modifyNode.Plugin = p
 				} else {
 					// Check if it's a temporary component, temporary components should not be referenced
-					if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+					if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 						return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first")
 					}
 					return errors.New("not found this plugin: " + pluginName)
@@ -3039,14 +3039,14 @@ func processCheckNode(node *CheckNodes, checklist *Checklist, ruleID string) err
 			return err
 		}
 
-		if p, ok := plugin.Plugins[pluginName]; ok {
+		if p, ok := plugin.GetPlugin(pluginName); ok {
 			// Use the original plugin instance to ensure statistics are recorded correctly
 			node.Plugin = p
 			// Store negation flag separately since we can't modify the original plugin
 			node.IsNegated = isNegated
 		} else {
 			// Check if it's a temporary component, temporary components should not be referenced
-			if _, tempExists := plugin.PluginsNew[pluginName]; tempExists {
+			if _, tempExists := plugin.GetPluginNew(pluginName); tempExists {
 				return errors.New("cannot reference temporary plugin '" + pluginName + "', please save it first (rule id: " + ruleID + ")")
 			}
 			return errors.New("not found this plugin: " + pluginName + " rule id: " + ruleID)

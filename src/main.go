@@ -354,22 +354,17 @@ func loadLocalComponents() {
 			if content, readErr := os.ReadFile(f); readErr == nil {
 				errorPlugin.Payload = content
 			}
-			// Add to global plugin map with mutex protection
-			common.GlobalMu.Lock()
-			plugin.Plugins[name] = errorPlugin
-			common.GlobalMu.Unlock()
+			plugin.SetPluginErrorIfAbsent(name, errorPlugin)
 		}
 	}
 	// Load plugin .new files
 	for _, f := range traverseComponents(path.Join(root, "plugin"), ".go.new") {
-		common.GlobalMu.Lock()
 		name := strings.TrimSuffix(common.GetFileNameWithoutExt(f), ".go")
 		if content, err := os.ReadFile(f); err != nil {
 			logger.Error("Failed to load new plugin", "file", f, "error", err)
 		} else {
-			plugin.PluginsNew[name] = string(content)
+			plugin.SetPluginNew(name, string(content))
 		}
-		common.GlobalMu.Unlock()
 	}
 
 	// inputs

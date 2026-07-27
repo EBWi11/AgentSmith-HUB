@@ -34,10 +34,7 @@ func buildPluginToolDefinitions(toolsConfig interface{}) []ToolDefinition {
 		return defs
 	}
 
-	plugin.PluginsMu.RLock()
-	defer plugin.PluginsMu.RUnlock()
-
-	for name, p := range plugin.Plugins {
+	for name, p := range plugin.GetAllPlugins() {
 		if !useAll && (allowList == nil || !allowList[name]) {
 			continue
 		}
@@ -105,9 +102,7 @@ func buildParametersSchema(params []plugin.PluginParameter) map[string]interface
 }
 
 func executePlugin(name string, args map[string]interface{}) (string, error) {
-	plugin.PluginsMu.RLock()
-	p, exists := plugin.Plugins[name]
-	plugin.PluginsMu.RUnlock()
+	p, exists := plugin.GetPlugin(name)
 
 	if !exists {
 		return "", fmt.Errorf("plugin not found: %s", name)

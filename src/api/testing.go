@@ -501,9 +501,7 @@ func testPlugin(c echo.Context) error {
 	} else if id != "" {
 		// Original logic to find plugin by ID (for /test-plugin/:id endpoint)
 		// Check if plugin exists in memory
-		plugin.PluginsMu.RLock()
-		p, existsInMemory := plugin.Plugins[id]
-		plugin.PluginsMu.RUnlock()
+		p, existsInMemory := plugin.GetPlugin(id)
 
 		// Check if plugin exists in temporary files
 		tempContent, existsInTemp := plugin.GetAllPluginsNew()[id]

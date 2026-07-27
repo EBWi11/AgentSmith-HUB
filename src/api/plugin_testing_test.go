@@ -1,6 +1,7 @@
 package api
 
 import (
+	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/plugin"
 	"bytes"
 	"encoding/json"
@@ -107,6 +108,9 @@ func Eval() (bool, error) {
 	if err != nil {
 		t.Fatalf("read baseline marker: %v", err)
 	}
+	if got := string(baselineContent); got != "x" {
+		t.Fatalf("expected NewTestPlugin to initialize exactly once, got marker %q", got)
+	}
 
 	marker := filepath.Join(t.TempDir(), "handler-load-count.txt")
 	resp := callTestPluginHandler(t, "", map[string]interface{}{
@@ -123,6 +127,133 @@ func Eval() (bool, error) {
 	}
 	if got, want := string(content), string(baselineContent); got != want {
 		t.Fatalf("expected handler load side effects to match one NewTestPlugin load, got %q want %q", got, want)
+	}
+}
+
+func TestProductionPluginReloadInitializesOnce(t *testing.T) {
+	const id = "api_plugin_reload_init_once"
+	marker := filepath.Join(t.TempDir(), "production-reload-init-count.txt")
+	raw := fmt.Sprintf(`package plugin
+
+import "os"
+
+func init() {
+	f, err := os.OpenFile(%q, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err == nil {
+		_, _ = f.WriteString("x")
+		_ = f.Close()
+	}
+}
+
+func Eval() (bool, error) {
+	return true, nil
+}`, marker)
+
+	plugin.PluginsMu.Lock()
+	previous, existed := plugin.Plugins[id]
+	delete(plugin.Plugins, id)
+	plugin.PluginsMu.Unlock()
+	t.Cleanup(func() {
+		plugin.PluginsMu.Lock()
+		defer plugin.PluginsMu.Unlock()
+		if existed {
+			plugin.Plugins[id] = previous
+		} else {
+			delete(plugin.Plugins, id)
+		}
+	})
+
+	if _, err := reloadComponentUnified(&ComponentReloadRequest{
+		Type:        "plugin",
+		ID:          id,
+		NewContent:  raw,
+		Source:      SourceClusterSync,
+		SkipVerify:  false,
+		WriteToFile: false,
+	}); err != nil {
+		t.Fatalf("reload production plugin: %v", err)
+	}
+
+	content, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read production reload marker: %v", err)
+	}
+	if got := string(content); got != "x" {
+		t.Fatalf("expected production reload to initialize exactly once, got marker %q", got)
+	}
+}
+
+func TestPluginReloadFailurePreservesActiveInstanceAndFile(t *testing.T) {
+	const id = "api_plugin_transaction"
+	oldRaw := `package plugin
+
+func Eval() (bool, error) {
+	return true, nil
+}`
+	badRaw := `package plugin
+
+func init() {
+	panic("init failed")
+}
+
+func Eval() (bool, error) {
+	return false, nil
+}`
+
+	configRoot := t.TempDir()
+	pluginDir := filepath.Join(configRoot, "plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatalf("create plugin directory: %v", err)
+	}
+	formalPath := filepath.Join(pluginDir, id+".go")
+	if err := os.WriteFile(formalPath, []byte(oldRaw), 0644); err != nil {
+		t.Fatalf("write old plugin: %v", err)
+	}
+
+	previousConfig := common.Config
+	common.Config = &common.HubConfig{ConfigRoot: configRoot}
+	t.Cleanup(func() { common.Config = previousConfig })
+
+	plugin.PluginsMu.Lock()
+	previous, existed := plugin.Plugins[id]
+	delete(plugin.Plugins, id)
+	plugin.PluginsMu.Unlock()
+	t.Cleanup(func() {
+		plugin.PluginsMu.Lock()
+		defer plugin.PluginsMu.Unlock()
+		if existed {
+			plugin.Plugins[id] = previous
+		} else {
+			delete(plugin.Plugins, id)
+		}
+	})
+
+	if err := plugin.NewPlugin(formalPath, "", id, plugin.YAEGI_PLUGIN); err != nil {
+		t.Fatalf("load old plugin: %v", err)
+	}
+	activeBefore, _ := plugin.GetPlugin(id)
+
+	if _, err := reloadComponentUnified(&ComponentReloadRequest{
+		Type:        "plugin",
+		ID:          id,
+		NewContent:  badRaw,
+		Source:      SourceClusterSync,
+		SkipVerify:  false,
+		WriteToFile: true,
+	}); err == nil {
+		t.Fatal("expected plugin reload to fail")
+	}
+
+	activeAfter, _ := plugin.GetPlugin(id)
+	if activeAfter != activeBefore {
+		t.Fatal("failed reload replaced the active plugin instance")
+	}
+	onDisk, err := os.ReadFile(formalPath)
+	if err != nil {
+		t.Fatalf("read formal plugin: %v", err)
+	}
+	if string(onDisk) != oldRaw {
+		t.Fatalf("failed reload changed formal plugin file: %q", string(onDisk))
 	}
 }
 

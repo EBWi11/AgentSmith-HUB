@@ -242,10 +242,7 @@ func GetEnhancedPendingChanges(c echo.Context) error {
 
 // Helper functions for safe access to plugin data
 func getPendingPluginChange(id string) (string, bool) {
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-	content, exists := plugin.PluginsNew[id]
-	return content, exists
+	return plugin.GetPluginNew(id)
 }
 
 // VerifyPendingChanges verifies all pending changes without applying them
@@ -565,39 +562,41 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 			return nil, fmt.Errorf("unsupported component type for file write: %s", req.Type)
 		}
 
-		err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
-		if err != nil {
-			logger.Error("Failed to write component file", "type", req.Type, "id", req.ID, "error", err)
-			return nil, fmt.Errorf("failed to write %s file: %w", req.Type, err)
-		}
+		// Plugins are persisted by InstallPlugin only after their initializer
+		// succeeds, so a bad candidate cannot replace the last good file.
+		if req.Type != "plugin" {
+			err := os.WriteFile(filePath, []byte(req.NewContent), 0644)
+			if err != nil {
+				logger.Error("Failed to write component file", "type", req.Type, "id", req.ID, "error", err)
+				return nil, fmt.Errorf("failed to write %s file: %w", req.Type, err)
+			}
 
-		// Remove .new file if it exists (after successful write)
-		var tempPath string
-		switch req.Type {
-		case "plugin":
-			tempPath = path.Join(configRoot, "plugin", req.ID+".go.new")
-		case "input":
-			tempPath = path.Join(configRoot, "input", req.ID+".yaml.new")
-		case "output":
-			tempPath = path.Join(configRoot, "output", req.ID+".yaml.new")
-		case "ruleset":
-			// Use folder-aware path resolution for rulesets
-			_, tempPath = findRulesetPaths(req.ID)
-		case "project":
-			tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
-		case "agent":
-			tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
-		case "skill":
-			tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
-		}
+			// Remove .new file if it exists (after successful write)
+			var tempPath string
+			switch req.Type {
+			case "input":
+				tempPath = path.Join(configRoot, "input", req.ID+".yaml.new")
+			case "output":
+				tempPath = path.Join(configRoot, "output", req.ID+".yaml.new")
+			case "ruleset":
+				// Use folder-aware path resolution for rulesets
+				_, tempPath = findRulesetPaths(req.ID)
+			case "project":
+				tempPath = path.Join(configRoot, "project", req.ID+".yaml.new")
+			case "agent":
+				tempPath = path.Join(configRoot, "agent", req.ID+".yaml.new")
+			case "skill":
+				tempPath = path.Join(configRoot, "skill", req.ID+".yaml.new")
+			}
 
-		if tempPath != "" {
-			if _, err := os.Stat(tempPath); err == nil {
-				err = os.Remove(tempPath)
-				if err != nil {
-					logger.Error("Failed to remove temp file after successful apply", "path", tempPath, "error", err)
-				} else {
-					logger.Info("Temp file removed after successful apply", "path", tempPath)
+			if tempPath != "" {
+				if _, err := os.Stat(tempPath); err == nil {
+					err = os.Remove(tempPath)
+					if err != nil {
+						logger.Error("Failed to remove temp file after successful apply", "path", tempPath, "error", err)
+					} else {
+						logger.Info("Temp file removed after successful apply", "path", tempPath)
+					}
 				}
 			}
 		}
@@ -725,19 +724,19 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		}
 
 	case "plugin":
-		// Create new component instance
-		var err error
+		var commit func() error
 		if req.WriteToFile && filePath != "" {
-			err = plugin.NewPlugin(filePath, "", req.ID, plugin.YAEGI_PLUGIN)
-		} else {
-			err = plugin.NewPlugin("", req.NewContent, req.ID, plugin.YAEGI_PLUGIN)
+			commit = func() error {
+				if err := writeFileAtomically(filePath, []byte(req.NewContent), 0644); err != nil {
+					return fmt.Errorf("failed to write plugin file: %w", err)
+				}
+				return nil
+			}
 		}
+		err := plugin.InstallPlugin(filePath, req.NewContent, req.ID, plugin.YAEGI_PLUGIN, commit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create plugin: %w", err)
 		}
-
-		// Clear temporary version using safe accessor
-		plugin.DeletePluginNew(req.ID)
 
 		affectedProjects = project.GetAffectedProjects("plugin", req.ID)
 
@@ -785,7 +784,22 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		// Sync to followers using instruction system
 		if err := cluster.GlobalInstructionManager.PublishComponentPushChange(req.Type, req.ID, req.NewContent, affectedProjects); err != nil {
 			logger.Error("Failed to publish component push change instruction", "type", req.Type, "id", req.ID, "error", err)
+			if req.Type == "plugin" {
+				return nil, fmt.Errorf("failed to publish plugin change: %w", err)
+			}
 		}
+	}
+
+	// Keep plugin pending state until both the local swap and cluster publish
+	// complete. A retry reuses the active identical instance without re-running init.
+	if req.Type == "plugin" {
+		if req.WriteToFile {
+			tempPath := path.Join(common.Config.ConfigRoot, "plugin", req.ID+".go.new")
+			if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to remove applied plugin temp file: %w", err)
+			}
+		}
+		plugin.DeletePluginNew(req.ID)
 	}
 
 	// Phase 6: Record operation history

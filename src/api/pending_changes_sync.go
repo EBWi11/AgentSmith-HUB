@@ -2,7 +2,6 @@ package api
 
 import (
 	"AgentSmith-HUB/agent"
-	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/input"
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/output"
@@ -205,9 +204,7 @@ func syncSkillsToEnhancedManager() {
 }
 
 func getExistingPluginContent(id string) string {
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
-	if pluginInstance, exists := plugin.Plugins[id]; exists {
+	if pluginInstance, exists := plugin.GetPlugin(id); exists {
 		return string(pluginInstance.Payload)
 	}
 	return ""

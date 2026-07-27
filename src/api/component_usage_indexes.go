@@ -128,7 +128,7 @@ func extractPluginNamesFromValue(value string, knownPlugins map[string]struct{})
 
 func getKnownPluginNames() map[string]struct{} {
 	names := make(map[string]struct{})
-	for name := range plugin.Plugins {
+	for name := range plugin.GetAllPlugins() {
 		names[name] = struct{}{}
 	}
 	for name := range plugin.GetAllPluginsNew() {

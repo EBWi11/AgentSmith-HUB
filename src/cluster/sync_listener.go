@@ -99,6 +99,22 @@ func instructionComponentOrder(operation, componentType string) int {
 	return 100
 }
 
+func sortInstructionsForExecution(instructions []Instruction) {
+	slices.SortStableFunc(instructions, func(a, b Instruction) int {
+		// Dependency ordering must not reverse the lifecycle history of the
+		// same component (for example delete followed by add).
+		if a.ComponentType == b.ComponentType && a.ComponentName == b.ComponentName {
+			return int(a.Version) - int(b.Version)
+		}
+		oa := instructionComponentOrder(a.Operation, a.ComponentType)
+		ob := instructionComponentOrder(b.Operation, b.ComponentType)
+		if oa != ob {
+			return oa - ob
+		}
+		return int(a.Version) - int(b.Version)
+	})
+}
+
 func (sl *SyncListener) GetCurrentVersion() string {
 	sl.mu.RLock()
 	defer sl.mu.RUnlock()
@@ -403,14 +419,7 @@ func (sl *SyncListener) SyncInstructions(toVersion string) error {
 	refreshPlans := buildProjectRefreshPlans(instructions)
 	deferredProjectCommands := buildDeferredProjectCommands(instructions)
 
-	slices.SortStableFunc(instructions, func(a, b Instruction) int {
-		oa := instructionComponentOrder(a.Operation, a.ComponentType)
-		ob := instructionComponentOrder(b.Operation, b.ComponentType)
-		if oa != ob {
-			return oa - ob
-		}
-		return int(a.Version) - int(b.Version)
-	})
+	sortInstructionsForExecution(instructions)
 
 	for _, instruction := range instructions {
 		version := instruction.Version

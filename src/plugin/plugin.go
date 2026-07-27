@@ -4,11 +4,12 @@ import (
 	"AgentSmith-HUB/common"
 	"AgentSmith-HUB/local_plugin"
 	"AgentSmith-HUB/logger"
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
-	"os"
 	"reflect"
 	regexpgo "regexp"
 	"strings"
@@ -71,6 +72,7 @@ type PluginParameter struct {
 var Plugins = make(map[string]*Plugin)
 var PluginsNew = make(map[string]string)
 var PluginsMu sync.RWMutex
+var pluginLifecycleMu sync.Mutex
 
 const (
 	pluginRedisImportPath  = "AgentSmith-HUB/pluginapi/redis"
@@ -172,49 +174,92 @@ func RegisterLLMCallIfConfigured() {
 }
 
 func Verify(path string, raw string, name string) error {
-	// Use common file reading function
-	content, err := common.ReadContentFromPathOrRaw(path, raw)
-	if err != nil {
-		return fmt.Errorf("failed to read plugin configuration: %w", err)
+	var content []byte
+	var err error
+	if raw != "" || path == "" {
+		content = []byte(raw)
+	} else {
+		content, err = common.ReadContentFromPathOrRaw(path, "")
+		if err != nil {
+			return fmt.Errorf("failed to read plugin configuration: %w", err)
+		}
 	}
 
-	// Validate plugin code requirements
-	err = validatePluginCode(string(content))
-	if err != nil {
+	if _, err = inspectPluginCode(string(content)); err != nil {
 		return err
 	}
 
 	p := &Plugin{Name: name, Path: path, Payload: content, Type: YAEGI_PLUGIN}
-	err = p.yaegiLoad()
-	// Cleanup yaegi interpreter created during verification to prevent memory leaks
-	// Verify creates temporary Plugin objects that should not persist
-	if p.yaegiIntp != nil {
-		p.yaegiIntp = nil
+	return p.yaegiCompile()
+}
+
+// Inspect validates a plugin without executing package initializers and returns
+// the metadata needed by read-only API endpoints.
+func Inspect(path string, raw string, name string) ([]PluginParameter, string, error) {
+	content, err := common.ReadContentFromPathOrRaw(path, raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read plugin configuration: %w", err)
 	}
-	p = nil
-	return err
+
+	info, err := inspectPluginCode(string(content))
+	if err != nil {
+		return nil, "", err
+	}
+
+	p := &Plugin{Name: name, Path: path, Payload: content, Type: YAEGI_PLUGIN}
+	if err := p.yaegiCompile(); err != nil {
+		return nil, "", err
+	}
+
+	return info.Parameters, info.ReturnType, nil
 }
 
 func NewPlugin(path string, raw string, name string, pluginType int) error {
-	var err error
-	var content []byte
+	return InstallPlugin(path, raw, name, pluginType, nil)
+}
 
-	err = Verify(path, raw, name)
-	if err != nil {
-		return fmt.Errorf("plugin verify err %s %s", name, err.Error())
+// InstallPlugin serializes plugin lifecycle changes. The optional commit callback
+// runs after the candidate has initialized successfully and before it becomes
+// visible in the registry.
+func InstallPlugin(path string, raw string, name string, pluginType int, commit func() error) error {
+	var content []byte
+	var err error
+	if raw != "" || path == "" {
+		content = []byte(raw)
+	} else {
+		content, err = common.ReadContentFromPathOrRaw(path, "")
+		if err != nil {
+			return fmt.Errorf("failed to read plugin configuration: %w", err)
+		}
 	}
 
-	if path != "" {
-		content, _ = os.ReadFile(path)
-	} else {
-		content = []byte(raw)
+	pluginLifecycleMu.Lock()
+	defer pluginLifecycleMu.Unlock()
+
+	PluginsMu.RLock()
+	current, exists := Plugins[name]
+	PluginsMu.RUnlock()
+	if exists && current != nil && current.Type == LOCAL_PLUGIN && pluginType != LOCAL_PLUGIN {
+		return fmt.Errorf("plugin name %q is reserved by a built-in plugin", name)
+	}
+
+	// Cluster retries and duplicate deliveries must not execute package init
+	// again when the same plugin version is already active.
+	if exists && current != nil && current.Type == pluginType && current.Err == nil && bytes.Equal(current.Payload, content) {
+		if commit != nil {
+			return commit()
+		}
+		return nil
 	}
 
 	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name}
-
-	err = p.yaegiLoad()
-	if err != nil {
+	if err := p.yaegiLoad(); err != nil {
 		return fmt.Errorf("plugin yaegi load err %s: %w", name, err)
+	}
+	if commit != nil {
+		if err := commit(); err != nil {
+			return err
+		}
 	}
 
 	PluginsMu.Lock()
@@ -225,27 +270,15 @@ func NewPlugin(path string, raw string, name string, pluginType int) error {
 
 // NewTestPlugin creates a plugin for testing without adding it to the global registry
 func NewTestPlugin(path string, raw string, name string, pluginType int) (*Plugin, error) {
-	var err error
-	var content []byte
-
-	err = Verify(path, raw, name)
+	content, err := common.ReadContentFromPathOrRaw(path, raw)
 	if err != nil {
-		return nil, fmt.Errorf("plugin verify err %s %s", name, err.Error())
-	}
-
-	if path != "" {
-		content, _ = os.ReadFile(path)
-	} else {
-		content = []byte(raw)
+		return nil, fmt.Errorf("failed to read plugin configuration: %w", err)
 	}
 
 	p := &Plugin{Path: path, Payload: content, Type: pluginType, Name: name, IsTestMode: true}
-
-	err = p.yaegiLoad()
-	if err != nil {
+	if err := p.yaegiLoad(); err != nil {
 		return nil, fmt.Errorf("plugin yaegi load err %s: %w", name, err)
 	}
-
 	// For test plugins, do NOT add to global registry
 	return p, nil
 }
@@ -276,17 +309,43 @@ func (p *Plugin) recoverLoadPanic(err *error) {
 	}
 }
 
-func (p *Plugin) yaegiLoad() (err error) {
+func (p *Plugin) newInterpreter() (*interp.Interpreter, error) {
+	i := interp.New(interp.Options{})
+	if err := i.Use(stdlib.Symbols); err != nil {
+		return nil, err
+	}
+	if err := i.Use(p.redisSymbols()); err != nil {
+		return nil, err
+	}
+	return i, nil
+}
+
+// yaegiCompile validates that Yaegi can compile the plugin without executing
+// package variables or init functions.
+func (p *Plugin) yaegiCompile() (err error) {
 	defer p.recoverLoadPanic(&err)
 
-	p.yaegiIntp = interp.New(interp.Options{})
-	err = p.yaegiIntp.Use(stdlib.Symbols)
-
+	i, err := p.newInterpreter()
 	if err != nil {
 		return err
 	}
+	_, err = i.Compile(string(p.Payload))
+	return err
+}
 
-	err = p.yaegiIntp.Use(p.redisSymbols())
+func (p *Plugin) yaegiLoad() (err error) {
+	defer p.recoverLoadPanic(&err)
+	defer func() {
+		if err != nil {
+			p.resetLoadState()
+		}
+	}()
+
+	if _, err := inspectPluginCode(string(p.Payload)); err != nil {
+		return err
+	}
+
+	p.yaegiIntp, err = p.newInterpreter()
 	if err != nil {
 		return err
 	}
@@ -313,6 +372,173 @@ func (p *Plugin) yaegiLoad() (err error) {
 	p.parsePluginParameters()
 
 	return nil
+}
+
+func IsBuiltinName(name string) bool {
+	if name == "llmCall" {
+		return true
+	}
+	if _, ok := local_plugin.LocalPluginBoolRes[name]; ok {
+		return true
+	}
+	_, ok := local_plugin.LocalPluginInterfaceAndBoolRes[name]
+	return ok
+}
+
+type pluginSourceInfo struct {
+	Parameters []PluginParameter
+	ReturnType string
+}
+
+func inspectPluginCode(source string) (*pluginSourceInfo, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", source, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse plugin code: %w", err)
+	}
+
+	if file.Name == nil || file.Name.Name != "plugin" {
+		return nil, fmt.Errorf("plugin package must be 'plugin', found: %s", getPackageName(file))
+	}
+
+	for _, importSpec := range file.Imports {
+		if importSpec.Path == nil {
+			continue
+		}
+		importPath := strings.Trim(importSpec.Path.Value, `"`)
+		if importPath == pluginRedisImportPath {
+			continue
+		}
+		if !isStandardLibraryPackage(importPath) {
+			return nil, fmt.Errorf("plugin can only import Go standard library packages, found external package: %s", importPath)
+		}
+	}
+
+	var evalFunc *ast.FuncDecl
+	for _, decl := range file.Decls {
+		funcDecl, ok := decl.(*ast.FuncDecl)
+		if ok && funcDecl.Recv == nil && funcDecl.Name.Name == "Eval" {
+			evalFunc = funcDecl
+			break
+		}
+	}
+	if evalFunc == nil {
+		return nil, fmt.Errorf("plugin must contain an 'Eval' function")
+	}
+
+	return inspectEvalSignature(fset, evalFunc)
+}
+
+func inspectEvalSignature(fset *token.FileSet, evalFunc *ast.FuncDecl) (*pluginSourceInfo, error) {
+	resultTypes := flattenFieldTypes(evalFunc.Type.Results)
+	if len(resultTypes) != 2 && len(resultTypes) != 3 {
+		return nil, fmt.Errorf(
+			"plugin Eval function must return 2 values (bool, error) or 3 values (interface{}, bool, error), but returns %d values",
+			len(resultTypes),
+		)
+	}
+
+	if len(resultTypes) == 2 {
+		if isDefinitelyWrongBuiltin(resultTypes[0], "bool") {
+			return nil, fmt.Errorf("plugin Eval function with 2 return values must have first return value as bool")
+		}
+		if isDefinitelyWrongBuiltin(resultTypes[1], "error") {
+			return nil, fmt.Errorf("plugin Eval function second return value must be error")
+		}
+	} else {
+		if isDefinitelyWrongBuiltin(resultTypes[1], "bool") {
+			return nil, fmt.Errorf("plugin Eval function with 3 return values must have second return value as bool")
+		}
+		if isDefinitelyWrongBuiltin(resultTypes[2], "error") {
+			return nil, fmt.Errorf("plugin Eval function third return value must be error")
+		}
+	}
+
+	returnType := "interface{}"
+	if len(resultTypes) == 2 {
+		returnType = "bool"
+	}
+
+	return &pluginSourceInfo{
+		Parameters: inspectParameters(fset, evalFunc.Type.Params),
+		ReturnType: returnType,
+	}, nil
+}
+
+func flattenFieldTypes(fields *ast.FieldList) []ast.Expr {
+	if fields == nil {
+		return nil
+	}
+
+	var result []ast.Expr
+	for _, field := range fields.List {
+		count := len(field.Names)
+		if count == 0 {
+			count = 1
+		}
+		for i := 0; i < count; i++ {
+			result = append(result, field.Type)
+		}
+	}
+	return result
+}
+
+func isDefinitelyWrongBuiltin(expr ast.Expr, expected string) bool {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return false
+	}
+
+	builtins := map[string]bool{
+		"any": true, "bool": true, "byte": true, "complex64": true, "complex128": true,
+		"error": true, "float32": true, "float64": true, "int": true, "int8": true,
+		"int16": true, "int32": true, "int64": true, "rune": true, "string": true,
+		"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+		"uintptr": true,
+	}
+	return builtins[ident.Name] && ident.Name != expected
+}
+
+func inspectParameters(fset *token.FileSet, fields *ast.FieldList) []PluginParameter {
+	if fields == nil {
+		return []PluginParameter{}
+	}
+
+	parameters := make([]PluginParameter, 0, len(fields.List))
+	argIndex := 1
+	for _, field := range fields.List {
+		typeName := formatASTType(fset, field.Type)
+		_, variadic := field.Type.(*ast.Ellipsis)
+		required := !variadic
+
+		if len(field.Names) == 0 {
+			parameters = append(parameters, PluginParameter{
+				Name:     fmt.Sprintf("arg%d", argIndex),
+				Type:     typeName,
+				Required: required,
+			})
+			argIndex++
+			continue
+		}
+
+		for _, name := range field.Names {
+			parameters = append(parameters, PluginParameter{
+				Name:     name.Name,
+				Type:     typeName,
+				Required: required,
+			})
+			argIndex++
+		}
+	}
+	return parameters
+}
+
+func formatASTType(fset *token.FileSet, expr ast.Expr) string {
+	var buf bytes.Buffer
+	if err := format.Node(&buf, fset, expr); err != nil {
+		return "interface{}"
+	}
+	return buf.String()
 }
 
 func (p *Plugin) redisSymbols() interp.Exports {
@@ -840,55 +1066,6 @@ func (p *Plugin) FuncEvalOther(funcArgs ...interface{}) (interface{}, bool, erro
 	return nil, false, fmt.Errorf("unknown plugin type")
 }
 
-// YaegiLoad is a public wrapper for yaegiLoad to allow external access
-func (p *Plugin) YaegiLoad() error {
-	return p.yaegiLoad()
-}
-
-// validatePluginCode validates that the plugin code meets the requirements
-func validatePluginCode(source string) error {
-	// Parse the Go source code
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", source, parser.ParseComments)
-	if err != nil {
-		return fmt.Errorf("failed to parse plugin code: %w", err)
-	}
-
-	// 1. Check package declaration
-	if file.Name == nil || file.Name.Name != "plugin" {
-		return fmt.Errorf("plugin package must be 'plugin', found: %s", getPackageName(file))
-	}
-
-	// 2. Check for Eval function
-	hasEvalFunc := false
-	for _, decl := range file.Decls {
-		if funcDecl, ok := decl.(*ast.FuncDecl); ok {
-			if funcDecl.Name.Name == "Eval" {
-				hasEvalFunc = true
-				break
-			}
-		}
-	}
-	if !hasEvalFunc {
-		return fmt.Errorf("plugin must contain an 'Eval' function")
-	}
-
-	// 3. Check imports - only allow Go standard library plus approved plugin APIs
-	for _, importSpec := range file.Imports {
-		if importSpec.Path != nil {
-			importPath := strings.Trim(importSpec.Path.Value, `"`)
-			if importPath == pluginRedisImportPath {
-				continue
-			}
-			if !isStandardLibraryPackage(importPath) {
-				return fmt.Errorf("plugin can only import Go standard library packages, found external package: %s", importPath)
-			}
-		}
-	}
-
-	return nil
-}
-
 // getPackageName safely extracts the package name
 func getPackageName(file *ast.File) string {
 	if file.Name == nil {
@@ -1092,23 +1269,47 @@ func (p *Plugin) ResetAllStats() {
 	p.ResetFailureTotal()
 }
 
-// SafeDeletePlugin safely deletes a plugin with all necessary validations and locking
+// SafeDeletePlugin safely deletes a plugin with all necessary validations and locking.
 func SafeDeletePlugin(id string) ([]string, error) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
+	return SafeDeletePluginWithCommit(id, nil)
+}
+
+// SafeDeletePluginWithCommit performs persistence work before removing the
+// runtime instance, while holding the lifecycle lock against concurrent installs.
+func SafeDeletePluginWithCommit(id string, commit func() error) ([]string, error) {
+	pluginLifecycleMu.Lock()
+	defer pluginLifecycleMu.Unlock()
 
 	// Check if component exists
-	_, componentExists := Plugins[id]
+	PluginsMu.RLock()
+	pluginInstance, componentExists := Plugins[id]
+	_, tempExists := PluginsNew[id]
+	PluginsMu.RUnlock()
 	if !componentExists {
 		// Check if only exists in temporary storage
-		_, tempExists := PluginsNew[id]
 		if !tempExists {
 			return nil, fmt.Errorf("plugin not found: %s", id)
 		}
+		if commit != nil {
+			if err := commit(); err != nil {
+				return nil, err
+			}
+		}
 		// Only exists in temp, just remove from temp
+		PluginsMu.Lock()
 		delete(PluginsNew, id)
-		common.DeleteRawConfigUnsafe("plugin", id)
+		PluginsMu.Unlock()
+		common.DeleteRawConfig("plugin", id)
 		return []string{}, nil
+	}
+	if pluginInstance == nil || pluginInstance.Type == LOCAL_PLUGIN {
+		return nil, fmt.Errorf("built-in plugin %s cannot be deleted", id)
+	}
+
+	if commit != nil {
+		if err := commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	// Check if used by any ruleset (plugins are used in rulesets)
@@ -1120,24 +1321,59 @@ func SafeDeletePlugin(id string) ([]string, error) {
 	// Instead, we'll just return an empty list and let the caller handle restarts
 
 	// Reset statistics before deleting plugin
-	if pluginInstance, exists := Plugins[id]; exists {
-		pluginInstance.ResetAllStats()
-		logger.Debug("Reset plugin statistics during deletion", "plugin", id)
-	}
+	pluginInstance.ResetAllStats()
+	logger.Debug("Reset plugin statistics during deletion", "plugin", id)
 
 	// Remove from global mappings
+	PluginsMu.Lock()
 	delete(Plugins, id)
 	delete(PluginsNew, id)
-	common.DeleteRawConfigUnsafe("plugin", id)
+	PluginsMu.Unlock()
+	common.DeleteRawConfig("plugin", id)
 
 	return affectedProjects, nil
+}
+
+// RestorePluginAfterFailedDelete restores the exact previous instance without
+// executing its initializer again. It is only for rolling back a failed
+// persistence/publication step immediately after SafeDeletePlugin.
+func RestorePluginAfterFailedDelete(p *Plugin, commit func() error) error {
+	if p == nil {
+		return fmt.Errorf("cannot restore nil plugin")
+	}
+	if p.Type == LOCAL_PLUGIN {
+		return fmt.Errorf("built-in plugins do not use delete rollback")
+	}
+
+	pluginLifecycleMu.Lock()
+	defer pluginLifecycleMu.Unlock()
+
+	PluginsMu.RLock()
+	_, exists := Plugins[p.Name]
+	PluginsMu.RUnlock()
+	if exists {
+		return fmt.Errorf("plugin %s was replaced while delete was being published", p.Name)
+	}
+	if commit != nil {
+		if err := commit(); err != nil {
+			return err
+		}
+	}
+
+	PluginsMu.Lock()
+	Plugins[p.Name] = p
+	PluginsMu.Unlock()
+	common.SetRawConfig("plugin", p.Name, string(p.Payload))
+	return nil
 }
 
 // ResetManagedPluginsForResync drops only leader-managed runtime plugins while
 // preserving built-in local plugins registered at process startup.
 func ResetManagedPluginsForResync() {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
+	pluginLifecycleMu.Lock()
+	defer pluginLifecycleMu.Unlock()
+	PluginsMu.Lock()
+	defer PluginsMu.Unlock()
 
 	for id, p := range Plugins {
 		if p == nil {
@@ -1154,24 +1390,61 @@ func ResetManagedPluginsForResync() {
 
 // Safe accessor functions for PluginsNew map
 func SetPluginNew(id, content string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
+	PluginsMu.Lock()
+	defer PluginsMu.Unlock()
 	PluginsNew[id] = content
 }
 
 func DeletePluginNew(id string) {
-	common.GlobalMu.Lock()
-	defer common.GlobalMu.Unlock()
+	PluginsMu.Lock()
+	defer PluginsMu.Unlock()
 	delete(PluginsNew, id)
 }
 
 func GetAllPluginsNew() map[string]string {
-	common.GlobalMu.RLock()
-	defer common.GlobalMu.RUnlock()
+	PluginsMu.RLock()
+	defer PluginsMu.RUnlock()
 
 	result := make(map[string]string)
 	for id, content := range PluginsNew {
 		result[id] = content
 	}
 	return result
+}
+
+func GetPlugin(id string) (*Plugin, bool) {
+	PluginsMu.RLock()
+	defer PluginsMu.RUnlock()
+	p, ok := Plugins[id]
+	return p, ok
+}
+
+func GetPluginNew(id string) (string, bool) {
+	PluginsMu.RLock()
+	defer PluginsMu.RUnlock()
+	content, ok := PluginsNew[id]
+	return content, ok
+}
+
+func GetAllPlugins() map[string]*Plugin {
+	PluginsMu.RLock()
+	defer PluginsMu.RUnlock()
+
+	result := make(map[string]*Plugin, len(Plugins))
+	for id, p := range Plugins {
+		result[id] = p
+	}
+	return result
+}
+
+// SetPluginErrorIfAbsent records startup load failures without replacing a
+// successfully registered built-in or managed plugin.
+func SetPluginErrorIfAbsent(id string, p *Plugin) bool {
+	PluginsMu.Lock()
+	defer PluginsMu.Unlock()
+	if _, exists := Plugins[id]; exists {
+		return false
+	}
+	Plugins[id] = p
+	return true
 }
