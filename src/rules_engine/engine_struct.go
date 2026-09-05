@@ -315,7 +315,7 @@ type PluginArg struct {
 // It supports grouping by fields, time-based ranges, and different counting methods.
 type Threshold struct {
 	ID             string              `xml:"id,attr"`       // ID for referencing in checklist conditions
-	group_by       string              `xml:"group_by,attr"` // Field to group by
+	group_by       string              // Field to group by; populated by the custom parser
 	GroupByList    map[string][]string // Parsed group by fields
 	Range          string              `xml:"range,attr"` // Time range for aggregation
 	RangeInt       int                 // Parsed range in seconds

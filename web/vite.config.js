@@ -89,15 +89,5 @@ export default defineConfig({
       'monaco-editor/esm/vs/language/json/json.worker',
       'monaco-editor/esm/vs/editor/editor.worker'
     ]
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          jsonWorker: ['monaco-editor/esm/vs/language/json/json.worker'],
-          editorWorker: ['monaco-editor/esm/vs/editor/editor.worker'],
-        }
-      }
-    }
   }
 })

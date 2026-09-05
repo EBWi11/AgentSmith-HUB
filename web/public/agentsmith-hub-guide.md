@@ -2950,12 +2950,84 @@ func Eval(key string) (interface{}, bool, error) {
 }
 ```
 
-### 9.5 Plugin Limitations
+### 9.5 Hub Redis API for Yaegi Plugins
+
+Yaegi custom plugins can use the Hub-initialized Redis connection through a controlled API. Plugins cannot import `AgentSmith-HUB/common` or third-party Redis clients directly. When Redis state is needed, import:
+
+```go
+import hubredis "AgentSmith-HUB/pluginapi/redis"
+```
+
+Every Redis key is automatically scoped with the plugin namespace:
+
+```text
+plugin:<pluginName>:<key>
+```
+
+For example, if plugin `riskCache` calls `hubredis.Set("user:alice", "high", 3600)`, the actual Redis key is `plugin:riskCache:user:alice`. Empty keys return an error.
+
+#### Available Functions
+
+| Function | Description |
+|----------|-------------|
+| `Get(key string) (string, error)` | Read a string value |
+| `Set(key string, value interface{}, expiration int) (string, error)` | Write a value; `expiration` is seconds, `0` means no expiration |
+| `SetNX(key string, value interface{}, expiration int) (bool, error)` | Write only when the key does not exist; useful for dedupe, suppression, and lightweight locks |
+| `Incr(key string) (int64, error)` | Increment a counter by 1 |
+| `IncrBy(key string, value int64) (int64, error)` | Increment a counter by the specified value |
+| `Del(key string) error` | Delete a key |
+| `Expire(key string, expiration int) error` | Set key expiration in seconds |
+| `HSet(key, field string, value interface{}) error` | Write a Hash field |
+| `HGet(key, field string) (string, error)` | Read a Hash field |
+| `HGetAll(key string) (map[string]string, error)` | Read a full Hash |
+| `HDel(key, field string) error` | Delete a Hash field |
+| `LPush(key string, value interface{}, maxLen int64) error` | Push to the head of a List; when `maxLen > 0`, trim to that length |
+| `LRange(key string, start, stop int64) ([]string, error)` | Read a List range |
+| `SAdd(key string, member interface{}) (int64, error)` | Add a Set member |
+| `SRem(key string, member interface{}) (int64, error)` | Remove a Set member |
+| `SMembers(key string) ([]string, error)` | Read all Set members |
+| `ZAdd(key string, score float64, member interface{}) (int64, error)` | Add a Sorted Set member |
+| `ZRevRange(key string, start, stop int64) ([]string, error)` | Read a Sorted Set by descending score |
+| `ZRemRangeByRank(key string, start, stop int64) (int64, error)` | Remove Sorted Set members by rank range |
+| `ZRemRangeByScore(key string, min, max string) (int64, error)` | Remove Sorted Set members by score range |
+
+#### Example: Cross-node Dedupe
+
+```go
+package plugin
+
+import (
+    "fmt"
+    hubredis "AgentSmith-HUB/pluginapi/redis"
+)
+
+func Eval(args ...interface{}) (bool, error) {
+    if len(args) < 2 {
+        return false, fmt.Errorf("requires key and ttl seconds")
+    }
+
+    key := fmt.Sprintf("%v", args[0])
+    ttl, ok := args[1].(int)
+    if !ok {
+        return false, fmt.Errorf("ttl must be int seconds")
+    }
+
+    // true means first occurrence; false means it already appeared within the TTL window.
+    return hubredis.SetNX(key, 1, ttl)
+}
+```
+
+#### Boundaries
+
+To prevent custom plugins from scanning or modifying global Hub state, `Keys`, `Eval`, Pub/Sub, Pipeline, and the raw Redis client are not exposed to Yaegi plugins. If a new Redis operation is needed, prefer adding a narrow namespace-protected function to `hubredis`.
+
+### 9.6 Plugin Limitations
 - Only the Go standard library can be used, no third-party packages;
+- `AgentSmith-HUB/pluginapi/redis` is also allowed for the controlled Redis API;
 - A function named `Eval` must be defined, and the package must be a plugin;
 - The function return value must strictly match the requirements.
 
-### 9.6 Example Plugin: Feishu (Lark) Urgent Alert (pushUrentAlertByLark)
+### 9.7 Example Plugin: Feishu (Lark) Urgent Alert (pushUrentAlertByLark)
 
 `config/plugin/pushUrentAlertByLark.go` is a reference plugin bundled with HUB. It pushes alert events to a Feishu (Lark) group chat as an **interactive card** and optionally triggers an **urgent phone call** outside of quiet hours.
 

@@ -1,7 +1,7 @@
 # AgentSmith-HUB Dockerfile
 # Unified image for both leader and follower modes
 
-FROM alpine:3.19
+FROM alpine:3.24.1
 
 # Install runtime dependencies
 RUN apk add --no-cache \
