@@ -2227,4 +2227,6 @@ func buildPNSDirect(flowNodes []project.FlowNode) {
 		flowNodes[i].FromPNS = fromSequence
 		flowNodes[i].ToPNS = toSequence
 	}
+
+	project.CanonicalizeFlowNodePNS(flowNodes)
 }

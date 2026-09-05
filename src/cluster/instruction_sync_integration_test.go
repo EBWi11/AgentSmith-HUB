@@ -254,6 +254,50 @@ func TestSyncInstructionsResetsFollowerOnMissingInstruction(t *testing.T) {
 	}
 }
 
+func TestSyncInstructionsDoesNotAdvanceVersionWhenDeferredProjectCommandFails(t *testing.T) {
+	store := newFakeClusterRedis()
+	store.install(t)
+	resetProjectStateForTest()
+
+	oldHandler := globalProjectCmdHandler
+	oldSyncRetryDelay := syncRetryDelay
+	defer func() {
+		globalProjectCmdHandler = oldHandler
+		syncRetryDelay = oldSyncRetryDelay
+		resetProjectStateForTest()
+		common.SetNodeLeadership(false, "")
+	}()
+
+	common.SetNodeLeadership(false, "follower-test")
+	globalProjectCmdHandler = &fakeProjectCommandHandler{}
+	syncRetryDelay = 0
+
+	instruction := `{"version":1,"component_name":"missing-project","component_type":"project","operation":"stop","timestamp":1}`
+	if _, err := store.set("cluster:instruction:1", instruction, 0); err != nil {
+		t.Fatalf("failed to seed project stop instruction: %v", err)
+	}
+
+	sl := &SyncListener{
+		nodeID:           "follower-test",
+		currentVersion:   0,
+		baseVersion:      "sess",
+		executionFlagTTL: 1,
+	}
+	err := sl.SyncInstructions("sess.1")
+	if err == nil || !strings.Contains(err.Error(), "failed instructions") {
+		t.Fatalf("expected deferred project command failure, got %v", err)
+	}
+	if sl.currentVersion != 0 {
+		t.Fatalf("expected follower version to remain at zero, got %d", sl.currentVersion)
+	}
+	if got := sl.GetCurrentVersion(); got != "sess.0" {
+		t.Fatalf("expected follower version sess.0 after failed execution, got %s", got)
+	}
+	if _, err := store.get("cluster:execution_flag:follower-test"); err == nil {
+		t.Fatal("expected execution flag to be cleared after failed execution")
+	}
+}
+
 func TestFollowerHeartbeatConsumesResyncFlagAndResetsForFullSync(t *testing.T) {
 	store := newFakeClusterRedis()
 	store.install(t)

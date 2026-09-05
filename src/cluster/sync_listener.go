@@ -51,6 +51,12 @@ type deferredProjectCommand struct {
 	version     int64
 }
 
+type projectRuntimeRefresher interface {
+	Restart(recordOperation bool, triggeredBy string) error
+	HotReloadRuleset(rulesetID string, triggeredBy string) error
+	HotReloadAgent(agentID string, triggeredBy string) error
+}
+
 var GlobalSyncListener *SyncListener
 var syncRetryDelay = 10 * time.Second
 
@@ -661,60 +667,74 @@ func buildDeferredProjectCommands(instructions []Instruction) []deferredProjectC
 }
 
 func (sl *SyncListener) executeProjectRefreshPlans(plans map[string]*projectRefreshPlan) error {
-	for _, plan := range plans {
+	projectNames := make([]string, 0, len(plans))
+	for projectName := range plans {
+		projectNames = append(projectNames, projectName)
+	}
+	slices.Sort(projectNames)
+
+	for _, projectName := range projectNames {
+		plan := plans[projectName]
 		proj, exists := project.GetProject(plan.projectName)
 		if !exists {
 			logger.Error("Follower: Project to refresh not found", "project", plan.projectName)
 			continue
 		}
-
-		triggerSource := plan.source
-		if triggerSource == "" {
-			triggerSource = "cluster_sync"
+		if err := executeProjectRefreshPlan(plan, proj); err != nil {
+			return err
 		}
+	}
+	return nil
+}
 
-		if plan.restart || (len(plan.rulesets) == 0 && len(plan.agents) == 0) {
-			if err := proj.Restart(false, triggerSource); err != nil {
-				return fmt.Errorf("failed to restart affected project %s: %w", plan.projectName, err)
+func executeProjectRefreshPlan(plan *projectRefreshPlan, proj projectRuntimeRefresher) error {
+	triggerSource := plan.source
+	if triggerSource == "" {
+		triggerSource = "cluster_sync"
+	}
+
+	if plan.restart || (len(plan.rulesets) == 0 && len(plan.agents) == 0) {
+		if err := proj.Restart(false, triggerSource); err != nil {
+			return fmt.Errorf("failed to restart affected project %s: %w", plan.projectName, err)
+		}
+		return nil
+	}
+
+	rulesetIDs := make([]string, 0, len(plan.rulesets))
+	for rulesetID := range plan.rulesets {
+		rulesetIDs = append(rulesetIDs, rulesetID)
+	}
+	slices.Sort(rulesetIDs)
+
+	for _, rulesetID := range rulesetIDs {
+		if err := proj.HotReloadRuleset(rulesetID, triggerSource); err != nil {
+			logger.Error("Follower: ruleset hot reload failed, falling back to project restart",
+				"project", plan.projectName,
+				"ruleset", rulesetID,
+				"error", err)
+			if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
+				return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", plan.projectName, restartErr)
 			}
-			continue
+			// A full restart loaded every updated component in this plan.
+			return nil
 		}
+	}
 
-		rulesetIDs := make([]string, 0, len(plan.rulesets))
-		for rulesetID := range plan.rulesets {
-			rulesetIDs = append(rulesetIDs, rulesetID)
-		}
-		slices.Sort(rulesetIDs)
-
-		for _, rulesetID := range rulesetIDs {
-			if err := proj.HotReloadRuleset(rulesetID, triggerSource); err != nil {
-				logger.Error("Follower: ruleset hot reload failed, falling back to project restart",
-					"project", plan.projectName,
-					"ruleset", rulesetID,
-					"error", err)
-				if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
-					return fmt.Errorf("failed to fallback restart affected project %s after ruleset hot reload error: %w", plan.projectName, restartErr)
-				}
-				break
+	agentIDs := make([]string, 0, len(plan.agents))
+	for agentID := range plan.agents {
+		agentIDs = append(agentIDs, agentID)
+	}
+	slices.Sort(agentIDs)
+	for _, agentID := range agentIDs {
+		if err := proj.HotReloadAgent(agentID, triggerSource); err != nil {
+			logger.Error("Follower: agent hot reload failed, falling back to project restart",
+				"project", plan.projectName,
+				"agent", agentID,
+				"error", err)
+			if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
+				return fmt.Errorf("failed to fallback restart affected project %s after agent hot reload error: %w", plan.projectName, restartErr)
 			}
-		}
-
-		agentIDs := make([]string, 0, len(plan.agents))
-		for agentID := range plan.agents {
-			agentIDs = append(agentIDs, agentID)
-		}
-		slices.Sort(agentIDs)
-		for _, agentID := range agentIDs {
-			if err := proj.HotReloadAgent(agentID, triggerSource); err != nil {
-				logger.Error("Follower: agent hot reload failed, falling back to project restart",
-					"project", plan.projectName,
-					"agent", agentID,
-					"error", err)
-				if restartErr := proj.Restart(false, triggerSource+"_fallback"); restartErr != nil {
-					return fmt.Errorf("failed to fallback restart affected project %s after agent hot reload error: %w", plan.projectName, restartErr)
-				}
-				break
-			}
+			return nil
 		}
 	}
 	return nil

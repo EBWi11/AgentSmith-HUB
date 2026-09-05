@@ -459,6 +459,14 @@ func (h *projectCommandHandler) ExecuteCommandWithOptions(projectID, action stri
 	case "stop":
 		err := proj.Stop(true)
 		if err != nil {
+			// Cluster commands are convergence requests and may be replayed or
+			// follow a project config replacement that already stopped the old
+			// runtime. Treat an already-converged stopped state as success.
+			if proj.Status == common.StatusStopped {
+				logger.Info("Project already stopped; cluster stop command converged",
+					"project_id", projectID)
+				return nil
+			}
 			// Record operation failure only if requested
 			if recordOperation {
 				common.RecordProjectOperation(common.OpTypeProjectStop, projectID, "failed", err.Error(), map[string]interface{}{
@@ -1059,6 +1067,29 @@ func (p *Project) getPNS() {
 			p.FlowNodes[i].ToPNS = toSequence
 		}
 	}
+
+	CanonicalizeFlowNodePNS(p.FlowNodes)
+}
+
+// CanonicalizeFlowNodePNS makes every occurrence of a logical graph node use
+// the same PNS. This is shared by runtime parsing and direct API flow analysis.
+func CanonicalizeFlowNodePNS(flowNodes []FlowNode) {
+	nodePNS := make(map[string]string)
+	for i := range flowNodes {
+		fromKey := getNodeFromKey(flowNodes[i])
+		if canonicalPNS, exists := nodePNS[fromKey]; exists {
+			flowNodes[i].FromPNS = canonicalPNS
+		} else {
+			nodePNS[fromKey] = flowNodes[i].FromPNS
+		}
+
+		toKey := getNodeToKey(flowNodes[i])
+		if canonicalPNS, exists := nodePNS[toKey]; exists {
+			flowNodes[i].ToPNS = canonicalPNS
+		} else {
+			nodePNS[toKey] = flowNodes[i].ToPNS
+		}
+	}
 }
 
 // parseNode splits "TYPE.name" into ("TYPE", "name")
@@ -1221,7 +1252,7 @@ func (p *Project) StartForTesting(beforeRun func(*Project) error) error {
 	return p.startWithHook(true, beforeRun)
 }
 
-func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) error {
+func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) (err error) {
 	if lock {
 		common.ProjectOperationMu.Lock()
 	}
@@ -1239,7 +1270,8 @@ func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) error
 		if r := recover(); r != nil {
 			logger.Error("Panic during project start", "project", p.Id, "panic", r)
 			p.cleanup()
-			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during start: %v", r))
+			err = fmt.Errorf("panic during start: %v", r)
+			p.SetProjectStatus(common.StatusError, err)
 		}
 	}()
 
@@ -1265,7 +1297,7 @@ func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) error
 		}
 	}
 
-	err := p.parseContent()
+	err = p.parseContent()
 	if err != nil {
 		p.SetProjectStatus(common.StatusError, fmt.Errorf("project parse error: %s", err.Error()))
 		return fmt.Errorf("project parse error: %s", err.Error())
@@ -1325,7 +1357,7 @@ func (p *Project) startWithHook(lock bool, beforeRun func(*Project) error) error
 }
 
 // Stop stops the project and all its components in proper order
-func (p *Project) Stop(lock bool) error {
+func (p *Project) Stop(lock bool) (err error) {
 	// Use dedicated project operation lock to serialize all project lifecycle operations
 	if lock {
 		common.ProjectOperationMu.Lock()
@@ -1343,7 +1375,8 @@ func (p *Project) Stop(lock bool) error {
 			logger.Error("Panic during project stop", "project", p.Id, "panic", r)
 			// Ensure cleanup and proper status setting on panic
 			p.cleanup()
-			p.SetProjectStatus(common.StatusError, fmt.Errorf("panic during stop: %v", r))
+			err = fmt.Errorf("panic during stop: %v", r)
+			p.SetProjectStatus(common.StatusError, err)
 		}
 	}()
 
@@ -1530,6 +1563,15 @@ func (p *Project) collectRulesetPNSByID(rulesetID string) map[string]struct{} {
 	return targetPNS
 }
 
+func (p *Project) hasSharedPNS(targetPNS map[string]struct{}) bool {
+	for pns := range targetPNS {
+		if CalculateRefCount(pns, p.Id) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Project) collectInboundEdges(targetPNS map[string]struct{}) []rulesetInboundEdge {
 	edges := make([]rulesetInboundEdge, 0)
 	for _, node := range p.FlowNodes {
@@ -1700,6 +1742,9 @@ func (p *Project) HotReloadRuleset(rulesetID string, triggeredBy string) (err er
 	if len(targetPNS) == 0 {
 		return nil
 	}
+	if p.hasSharedPNS(targetPNS) {
+		return fmt.Errorf("ruleset %s uses a PNS shared by another project; full restart required", rulesetID)
+	}
 	defer func() {
 		status := "success"
 		errMsg := ""
@@ -1808,6 +1853,9 @@ func (p *Project) HotReloadAgent(agentID string, triggeredBy string) (err error)
 	targetPNS := p.collectAgentPNSByID(agentID)
 	if len(targetPNS) == 0 {
 		return nil
+	}
+	if p.hasSharedPNS(targetPNS) {
+		return fmt.Errorf("agent %s uses a PNS shared by another project; full restart required", agentID)
 	}
 	defer func() {
 		status := "success"
@@ -2108,8 +2156,8 @@ func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.D
 	rulesets := p.GetProjectRulesets()
 	logger.Info("Step 4: Stopping rulesets", "project", p.Id, "count", len(rulesets))
 	for id, rs := range rulesets {
-		DeletePNSRuleset(id)
 		if CalculateRefCount(id, p.Id) == 0 {
+			DeletePNSRuleset(id)
 			stopErr := rs.Stop()
 			if stopErr != nil {
 				logger.Error("Failed to stop ruleset", "project", p.Id, "ruleset", rs.RulesetID, "error", stopErr)
@@ -2123,8 +2171,8 @@ func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.D
 	agentComponents := p.GetProjectAgents()
 	logger.Info("Step 4b: Stopping agents", "project", p.Id, "count", len(agentComponents))
 	for id, a := range agentComponents {
-		DeletePNSAgent(id)
 		if CalculateRefCount(id, p.Id) == 0 {
+			DeletePNSAgent(id)
 			stopErr := a.Stop()
 			if stopErr != nil {
 				logger.Error("Failed to stop agent", "project", p.Id, "agent", a.Id, "error", stopErr)
@@ -2138,8 +2186,8 @@ func (p *Project) stopComponentsInternalWithTimeout(dataProcessingTimeout time.D
 	outputs := p.GetProjectOutputs()
 	logger.Info("Step 5: Stopping outputs", "project", p.Id, "count", len(outputs))
 	for id, out := range outputs {
-		DeletePNSOutput(id)
 		if CalculateRefCount(id, p.Id) == 0 {
+			DeletePNSOutput(id)
 			var stopErr error
 			if p.Testing {
 				stopErr = out.StopForTesting()
@@ -2197,6 +2245,12 @@ func (p *Project) cleanup() {
 
 	for pns, ch := range p.MsgChannels {
 		if ch != nil {
+			if CalculateRefCount(pns, p.Id) > 0 {
+				logger.Debug("Keeping shared project channel open",
+					"project", p.Id,
+					"pns", pns)
+				continue
+			}
 			// Safely close channel, ignore if already closed
 			func(channel *chan map[string]interface{}, channelName string) {
 				defer func() {
@@ -2244,6 +2298,13 @@ func (p *Project) disconnectInputsFromDownstream() {
 		rightNodes := p.getPartner("right", id)
 
 		for _, downstreamID := range rightNodes {
+			if CalculateEdgeRefCount(id, downstreamID, p.Id) > 0 {
+				logger.Debug("Keeping input route used by another project",
+					"project", p.Id,
+					"input", in.Id,
+					"downstream", downstreamID)
+				continue
+			}
 			in.DeleteDownstream(downstreamID)
 			logger.Debug("Disconnected input from downstream",
 				"project", p.Id, "input", in.Id, "downstream", downstreamID)
@@ -2368,8 +2429,11 @@ func (p *Project) cleanupInputChannel() {
 	for id, in := range inputs {
 		rightNodes := p.getPartner("right", id)
 
-		for _, id2 := range rightNodes {
-			SafeDeleteInputDownstream(in.Id, id2)
+		for _, downstreamID := range rightNodes {
+			if CalculateEdgeRefCount(id, downstreamID, p.Id) > 0 {
+				continue
+			}
+			in.DeleteDownstream(downstreamID)
 		}
 	}
 	logger.Debug("Input channel cleanup completed", "project", p.Id)
@@ -2380,15 +2444,17 @@ func (p *Project) cleanupRulesetChannel() {
 		node := &p.FlowNodes[i]
 
 		if node.FromType == "RULESET" {
-			if CalculateRefCount(node.FromPNS, p.Id) > 0 {
-				if r, exist := GetRuleset(node.FromPNS); exist {
+			if CalculateRefCount(node.FromPNS, p.Id) > 0 &&
+				CalculateEdgeRefCount(node.FromPNS, node.ToPNS, p.Id) == 0 {
+				if r, exist := GetPNSRuleset(node.FromPNS); exist {
 					r.DeleteDownstream(node.ToPNS)
 				}
 			}
 		}
 
 		if node.FromType == "AGENT" {
-			if CalculateRefCount(node.FromPNS, p.Id) > 0 {
+			if CalculateRefCount(node.FromPNS, p.Id) > 0 &&
+				CalculateEdgeRefCount(node.FromPNS, node.ToPNS, p.Id) == 0 {
 				SafeDeleteAgentDownstream(node.FromPNS, node.ToPNS)
 			}
 		}

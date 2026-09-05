@@ -90,6 +90,27 @@ func GetRefCount(id string) int {
 	return CalculateRefCount(id)
 }
 
+// CalculateEdgeRefCount returns the number of other running projects that use
+// the same directed PNS edge.
+func CalculateEdgeRefCount(fromPNS, toPNS, excludeProjectID string) int {
+	common.GlobalMu.RLock()
+	defer common.GlobalMu.RUnlock()
+
+	count := 0
+	for projectID, proj := range GlobalProject.Projects {
+		if projectID == excludeProjectID || proj == nil || proj.Status != common.StatusRunning {
+			continue
+		}
+		for _, node := range proj.FlowNodes {
+			if node.FromPNS == fromPNS && node.ToPNS == toPNS {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
 // ProjectConfig holds the configuration for a project
 type ProjectConfig struct {
 	Id        string
@@ -864,7 +885,7 @@ func SafeDeleteAgentComponent(id string) ([]string, error) {
 		if proj == nil {
 			continue
 		}
-		for _, node := range proj.FlowNodes {
+		for _, node := range proj.BackUpFlowNodes {
 			if (node.FromType == "AGENT" && node.FromID == id) || (node.ToType == "AGENT" && node.ToID == id) {
 				referringProjects = append(referringProjects, projectID)
 				break
@@ -1354,16 +1375,12 @@ func SafeDeleteRuleset(id string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	// Check if used by any project - use unsafe accessors to avoid deadlock
+	// Block deletion while any saved project still references this component.
+	// CheckExist uses BackUpFlowNodes, so stopped projects remain protected.
 	for projectID, proj := range GlobalProject.Projects {
-		// Skip projects that are not running
-		if proj.Status != common.StatusRunning {
-			continue
-		}
-		rulesets := proj.GetProjectRulesetsUnsafe()
-		if _, inUse := rulesets[id]; inUse {
+		if proj.CheckExist("RULESET", id) {
 			common.GlobalMu.Unlock()
-			return nil, fmt.Errorf("ruleset %s is currently in use by project %s", id, projectID)
+			return nil, fmt.Errorf("ruleset %s is referenced by project %s", id, projectID)
 		}
 	}
 
@@ -1419,15 +1436,11 @@ func SafeDeleteInput(id string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	// Check if used by any project - use unsafe accessors to avoid deadlock
+	// Block deletion while any saved project still references this component.
 	for projectID, proj := range GlobalProject.Projects {
-		// Skip projects that are not running
-		if proj.Status != common.StatusRunning {
-			continue
-		}
 		if proj.CheckExist("INPUT", id) {
 			common.GlobalMu.Unlock()
-			return nil, fmt.Errorf("input %s is currently in use by project %s", id, projectID)
+			return nil, fmt.Errorf("input %s is referenced by project %s", id, projectID)
 		}
 	}
 
@@ -1483,15 +1496,11 @@ func SafeDeleteOutput(id string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	// Check if used by any project - use unsafe accessors to avoid deadlock
+	// Block deletion while any saved project still references this component.
 	for projectID, proj := range GlobalProject.Projects {
-		// Skip projects that are not running
-		if proj.Status != common.StatusRunning {
-			continue
-		}
 		if proj.CheckExist("OUTPUT", id) {
 			common.GlobalMu.Unlock()
-			return nil, fmt.Errorf("output %s is currently in use by project %s", id, projectID)
+			return nil, fmt.Errorf("output %s is referenced by project %s", id, projectID)
 		}
 	}
 

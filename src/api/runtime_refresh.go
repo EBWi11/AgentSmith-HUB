@@ -3,10 +3,14 @@ package api
 import (
 	"AgentSmith-HUB/logger"
 	"AgentSmith-HUB/project"
+	"sort"
 )
 
 func refreshAffectedProjectsForComponentChange(componentType, componentID string, affectedProjects []string, source string, recordOperation bool) {
-	for _, projectID := range affectedProjects {
+	projectIDs := append([]string(nil), affectedProjects...)
+	sort.Strings(projectIDs)
+
+	for _, projectID := range projectIDs {
 		p, ok := project.GetProject(projectID)
 		if !ok {
 			continue
