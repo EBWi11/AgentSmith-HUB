@@ -1,5 +1,6 @@
 <template>
-  <div class="monaco-editor-wrapper">
+  <!-- Exclude Monaco (including native EditContext) from Vue Flow's global shortcuts. -->
+  <div class="monaco-editor-wrapper nokey">
     <div ref="container" class="monaco-editor-container"></div>
   </div>
 </template>
