@@ -655,6 +655,11 @@ func reloadComponentUnified(req *ComponentReloadRequest) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create ruleset: %w", err)
 		}
+		if newRuleset.Path == "" {
+			// Loading local content must retain its folder for future updates
+			// and local-file deletion checks.
+			newRuleset.Path, _ = findRulesetPaths(req.ID)
+		}
 
 		// Replace in global registry using safe accessors
 		project.SetRuleset(req.ID, newRuleset)

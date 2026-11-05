@@ -273,6 +273,7 @@ func getLocalChanges(c echo.Context) error {
 
 	// Check rulesets
 	rulesetDir := filepath.Join(configRoot, "ruleset")
+	rulesetFilePaths := make(map[string]string)
 	if _, err := os.Stat(rulesetDir); err == nil {
 		if err := filepath.WalkDir(rulesetDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -284,6 +285,7 @@ func getLocalChanges(c echo.Context) error {
 
 			filename := d.Name()
 			id := strings.TrimSuffix(filename, ".xml")
+			rulesetFilePaths[id] = path
 
 			fileContent, err := os.ReadFile(path)
 			if err != nil {
@@ -577,8 +579,12 @@ func getLocalChanges(c echo.Context) error {
 
 	// Check for deleted rulesets
 	project.ForEachRuleset(func(id string, ruleset *rules_engine.Ruleset) bool {
-		// Use the stored path for the ruleset (folder-aware)
-		rulesetPath := ruleset.Path
+		// A content-based reload may have lost Path. Prefer the actual file
+		// found above so rulesets in subfolders are not reported as deleted.
+		rulesetPath := rulesetFilePaths[id]
+		if rulesetPath == "" {
+			rulesetPath = ruleset.Path
+		}
 		if rulesetPath == "" {
 			rulesetPath = filepath.Join(configRoot, "ruleset", id+".xml")
 		}
