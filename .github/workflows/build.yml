@@ -13,7 +13,8 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04's amd64 startup objects can require x86-64-v3, even with GOAMD64=v1.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: write
@@ -85,6 +86,7 @@ jobs:
         else
           export GOOS=linux
           export GOARCH=amd64
+          export GOAMD64=v1
           LIB_PATH="$(pwd)/../lib/linux/amd64"
         fi
         
@@ -115,6 +117,19 @@ jobs:
           ls -la ../build/${BINARY_NAME}-${{ matrix.arch }}
         else
           echo "✗ Build failed"
+          exit 1
+        fi
+
+    - name: Verify AMD64 CPU compatibility
+      if: matrix.arch == 'amd64'
+      run: |
+        go version -m "build/${BINARY_NAME}-amd64"
+        # Check the linked ELF requirements as well as the Go compiler target.
+        # CGO startup objects can raise the ISA baseline independently of GOAMD64.
+        NOTES=$(LC_ALL=C readelf -n "build/${BINARY_NAME}-amd64" lib/linux/amd64/librure.so)
+        printf '%s\n' "$NOTES"
+        if grep -Eq 'x86 ISA needed:.*x86-64-v[2-4]' <<< "$NOTES"; then
+          echo "ERROR: AMD64 release requires more than the x86-64 baseline CPU ISA"
           exit 1
         fi
     
